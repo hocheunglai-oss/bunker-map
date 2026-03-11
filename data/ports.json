@@ -1,0 +1,81 @@
+[
+  {
+    "id": "singapore",
+    "name": "Singapore",
+    "region": "SEA",
+    "lat": 1.264,
+    "lng": 103.84,
+    "prices": {
+      "HSFO": { "min": 430, "max": 435 },
+      "VLSFO": { "min": 506, "max": 511 },
+      "MGO": { "min": 698, "max": 708 }
+    },
+    "updatedAt": "2026-02-25"
+  },
+  {
+    "id": "hongkong",
+    "name": "Hong Kong",
+    "region": "China South",
+    "lat": 22.308,
+    "lng": 114.225,
+    "prices": {
+      "HSFO": { "min": 487, "max": 492 },
+      "VLSFO": { "min": 515, "max": 520 },
+      "MGO": { "min": 720, "max": 725 }
+    },
+    "updatedAt": "2026-02-25"
+  },
+  {
+  "id": "zhoushan",
+  "name": "Zhoushan",
+  "region": "China East",
+  "lat": 29.94,
+  "lng": 122.18,
+  "prices": {
+    "HSFO": { "min": 458, "max": 463 },
+    "VLSFO": { "min": 523, "max": 528 },
+    "MGO": { "min": 720, "max": 725 }
+  },
+  "updatedAt": "2026-02-25"
+},
+{
+  "id": "shanghai",
+  "name": "Shanghai",
+  "region": "China East",
+  "lat": 31.23,
+  "lng": 121.49,
+  "prices": {
+    "HSFO": { "min": 460, "max": 465 },
+    "VLSFO": { "min": 525, "max": 530 },
+    "MGO": { "min": 725, "max": 730 }
+  },
+  "updatedAt": "2026-02-25"
+},
+{
+  "id": "busan",
+  "name": "Busan",
+  "region": "South Korea",
+  "lat": 35.10,
+  "lng": 129.04,
+  "prices": {
+    "HSFO": { "min": 530, "max": 535 },
+    "VLSFO": { "min": 710, "max": 715 },
+    "MGO": { "min": 710, "max": 715 }
+  },
+  "updatedAt": "2026-02-25"
+},
+{
+  "id": "tokyobay",
+  "name": "Tokyo Bay",
+  "region": "Japan",
+  "lat": 35.45,
+  "lng": 139.80,
+  "prices": {
+    "HSFO": { "min": 485, "max": 490 },
+    "VLSFO": { "min": 540, "max": 545 },
+    "MGO": { "min": 750, "max": 755 }
+  },
+  "updatedAt": "2026-02-25"
+}
+  
+]
