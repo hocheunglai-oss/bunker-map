@@ -40,16 +40,14 @@ export default function MapView() {
     }
   }
 
-  const filteredPorts = ports.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const icon = new L.Icon({
-    iconUrl:
-      "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-  })
+{filteredPorts
+  .filter((port) => port.lat !== null && port.lng !== null)
+  .map((port) => (
+    <Marker
+      key={port.id}
+      position={[port.lat as number, port.lng as number]}
+      icon={icon}
+    >
 
   return (
     <div style={{ height: "100vh", width: "100%" }}>
