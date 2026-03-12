@@ -2,52 +2,66 @@
 
 import { useEffect, useState } from "react"
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet"
-import L, { LatLngExpression } from "leaflet"
+import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import { supabase } from "@/lib/supabase"
 
 interface Port {
   id: number
   name: string
-  lat: number
-  lng: number
+  lat: number | null
+  lng: number | null
   vlsfo?: number | null
   hsfo?: number | null
   mgo?: number | null
 }
 
 export default function MapView() {
+
   const [ports, setPorts] = useState<Port[]>([])
   const [search, setSearch] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const position: LatLngExpression = [25, 121]
+  const center: [number, number] = [25, 121]
 
   useEffect(() => {
-    fetchPorts()
+    loadPorts()
   }, [])
 
-  async function fetchPorts() {
-    const { data, error } = await supabase.from("ports").select("*")
+  async function loadPorts() {
+
+    const { data, error } = await supabase
+      .from("ports")
+      .select("*")
 
     if (error) {
-      console.error(error)
+      console.error("Supabase error:", error)
       return
     }
 
-    if (data) {
-      setPorts(data)
+    if (!data) {
+      setPorts([])
+      return
     }
+
+    // Filter ports with valid coordinates
+    const safePorts = data.filter(
+      (p: Port) => p.lat !== null && p.lng !== null
+    )
+
+    setPorts(safePorts)
   }
 
-{filteredPorts
-  .filter((port) => port.lat !== null && port.lng !== null)
-  .map((port) => (
-    <Marker
-      key={port.id}
-      position={[port.lat as number, port.lng as number]}
-      icon={icon}
-    >
+  const filteredPorts = ports.filter((p) =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const markerIcon = new L.Icon({
+    iconUrl:
+      "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+  })
 
   return (
     <div style={{ height: "100vh", width: "100%" }}>
@@ -63,51 +77,47 @@ export default function MapView() {
           background: "#032855",
           color: "white",
           transition: "left 0.3s",
-          zIndex: 1500,
+          zIndex: 2000,
           padding: 20,
         }}
       >
         <div
+          style={{ fontSize: 24, cursor: "pointer", marginBottom: 30 }}
           onClick={() => setSidebarOpen(false)}
-          style={{
-            fontSize: 24,
-            cursor: "pointer",
-            marginBottom: 30,
-          }}
         >
           ✕
         </div>
 
-        <h2 style={{ marginBottom: 20 }}>Market Reports</h2>
+        <h2>Market Reports</h2>
 
         <a
           href="/reports/taiwan"
           style={{
             display: "block",
-            padding: "10px 0",
+            marginTop: 20,
             color: "white",
             textDecoration: "none",
-            borderBottom: "1px solid rgba(255,255,255,0.2)",
+            fontSize: 16,
           }}
         >
           Taiwan Market Report
         </a>
       </div>
 
-      {/* HAMBURGER */}
+      {/* HAMBURGER MENU */}
       <div
         onClick={() => setSidebarOpen(true)}
         style={{
           position: "absolute",
           top: 20,
           left: 20,
-          zIndex: 1200,
+          zIndex: 1500,
           fontSize: 26,
           cursor: "pointer",
           background: "white",
-          padding: "4px 10px",
+          padding: "6px 12px",
           borderRadius: 6,
-          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
         }}
       >
         ☰
@@ -119,14 +129,12 @@ export default function MapView() {
           position: "absolute",
           top: 15,
           left: 70,
-          zIndex: 1200,
+          zIndex: 1500,
         }}
       >
         <img
           src="/logo.png"
-          style={{
-            width: 150,
-          }}
+          style={{ width: 150 }}
         />
       </div>
 
@@ -136,7 +144,7 @@ export default function MapView() {
           position: "absolute",
           top: 70,
           left: 20,
-          zIndex: 1200,
+          zIndex: 1500,
         }}
       >
         <input
@@ -156,19 +164,20 @@ export default function MapView() {
 
       {/* MAP */}
       <MapContainer
-        center={position}
+        center={center}
         zoom={5}
         style={{ height: "100%", width: "100%" }}
       >
         <TileLayer
+          attribution='© OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
         {filteredPorts.map((port) => (
           <Marker
             key={port.id}
-            position={[port.lat, port.lng]}
-            icon={icon}
+            position={[port.lat as number, port.lng as number]}
+            icon={markerIcon}
           >
             <Popup>
               <strong>{port.name}</strong>
@@ -181,6 +190,7 @@ export default function MapView() {
             </Popup>
           </Marker>
         ))}
+
       </MapContainer>
     </div>
   )
