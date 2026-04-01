@@ -364,7 +364,7 @@ export default function MapView() {
   </span>
 
   <a
-    href="https://wa.me/YOURNUMBER"
+    href="https://wa.me/85266885575"
     target="_blank"
     rel="noopener noreferrer"
     style={{
