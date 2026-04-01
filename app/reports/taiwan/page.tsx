@@ -15,110 +15,174 @@ const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
 export default function TaiwanReport() {
   const [rows, setRows] = useState<PriceRow[]>([])
   const [remark, setRemark] = useState("")
-  const todayDate = new Date().toLocaleDateString("en-GB")
+  const [reportDate, setReportDate] = useState("")
 
   useEffect(() => {
-    async function load() {
-      // Fetch ports
-      const { data: ports } = await supabase
-        .from("ports")
-        .select("*")
-        .in("name", portsWanted)
+  async function load() {
 
-      if (!ports) return
+    // fetch ports
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", portsWanted)
 
-      // Fetch history
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
+    if (!portsData) return
+    const ports = portsData
 
-      const { data: history } = await supabase
-        .from("price_history")
-        .select("*")
-        .order("recorded_at", { ascending: false })
+    // fetch history
+    const { data: historyData } = await supabase
+      .from("price_history")
+      .select("*")
+      .order("recorded_at", { ascending: false })
 
-      function getLast(portId: number) {
-        return (
-          history?.find(
-            (h: any) =>
-              h.port_id === portId && new Date(h.recorded_at) < todayStart
-          ) ?? null
-        )
-      }
+    if (!historyData || historyData.length === 0) return
+    const history = historyData
 
-      function calc(formula: string, fuel: "hsfo" | "vlsfo" | "mgo") {
-        if (!ports) return null
-        const parts = formula.split(" ")
-        if (parts.length !== 3) return null
-        const refName = parts[0].toLowerCase()
-        const operator = parts[1]
-        const value = Number(parts[2])
+    // REPORT DATE = latest save
+    const latest = history[0]
+    const reportTime = new Date(latest.recorded_at)
 
-        const ref = ports.find((p: any) => p.name?.toLowerCase() === refName)
-        if (!ref) return null
-        const base = Number(ref[fuel])
-        if (isNaN(base)) return null
-        if (operator === "+") return base + value
-        if (operator === "-") return base - value
-        return null
-      }
+    const formatted =
+      String(reportTime.getDate()).padStart(2, "0") +
+      " " +
+      reportTime.toLocaleString("en-GB", { month: "short" }) +
+      " " +
+      reportTime.getFullYear()
 
-      const result: PriceRow[] = ports.map((p: any) => {
-        let hsfo = p.hsfo
-        let vlsfo = p.vlsfo
-        let mgo = p.mgo
+    setReportDate(formatted)
 
-        if (!vlsfo && p.vlsfo_formula) vlsfo = calc(p.vlsfo_formula, "vlsfo")
-        if (!mgo && p.mgo_formula) mgo = calc(p.mgo_formula, "mgo")
-        if (!hsfo && p.hsfo_formula) hsfo = calc(p.hsfo_formula, "hsfo")
+    // helper
+function getToday(portId: number) {
+  const portHistory = history.filter((h: any) => h.port_id === portId)
+  return portHistory[0] ?? null
+}
 
-        let historyPort = p
-        if (p.vlsfo_formula) {
-          const ref = p.vlsfo_formula.split(" ")[0]
-          const refPort = ports.find((x: any) => x.name.toLowerCase() === ref.toLowerCase())
-          if (refPort) historyPort = refPort
-        }
+function getLast(portId: number) {
+  const portHistory = history.filter((h: any) => h.port_id === portId)
+  return portHistory[1] ?? null
+}
 
-        const last = getLast(historyPort.id)
+    function calc(formula: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+      const parts = formula.split(" ")
+      if (parts.length !== 3) return null
 
-        const hsfoToday = p.name === "Kaohsiung" ? hsfo : null
-        const hsfoLast = p.name === "Kaohsiung" ? last?.hsfo ?? null : null
-        const vlsfoLast = last?.vlsfo ?? null
-        const mgoLast = last?.mgo ?? null
+      const refName = parts[0].toLowerCase()
+      const operator = parts[1]
+      const value = Number(parts[2])
 
-        return {
-          port: p.name,
-          hsfo: {
-            today: hsfoToday,
-            last: hsfoLast,
-            change: hsfoToday != null && hsfoLast != null ? hsfoToday - hsfoLast : null,
-          },
-          vlsfo: {
-            today: vlsfo,
-            last: vlsfoLast,
-            change: vlsfo != null && vlsfoLast != null ? vlsfo - vlsfoLast : null,
-          },
-          mgo: {
-            today: mgo,
-            last: mgoLast,
-            change: mgo != null && mgoLast != null ? mgo - mgoLast : null,
-          },
-        }
-      })
+      const ref = ports.find((p: any) => p.name.toLowerCase() === refName)
+      if (!ref) return null
 
-      const portOrder = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
-      setRows(result.sort((a, b) => portOrder.indexOf(a.port) - portOrder.indexOf(b.port)))
+      const base = Number(ref[fuel])
+      if (isNaN(base)) return null
 
-      // Load remark
-      const { data: remarkData } = await supabase
-        .from("remarks")
-        .select("*")
-        .limit(1)
-        .single()
-      if (remarkData) setRemark(remarkData.content)
+      if (operator === "+") return base + value
+      if (operator === "-") return base - value
+
+      return null
     }
 
-    load()
-  }, [])
+    const result: PriceRow[] = ports.map((p: any) => {
+
+      const today = getToday(p.id)
+      const last = getLast(p.id)
+
+      let hsfo = p.hsfo
+      let vlsfo = p.vlsfo
+      let mgo = p.mgo
+
+      if (!vlsfo && p.vlsfo_formula) vlsfo = calc(p.vlsfo_formula, "vlsfo")
+      if (!mgo && p.mgo_formula) mgo = calc(p.mgo_formula, "mgo")
+      if (!hsfo && p.hsfo_formula) hsfo = calc(p.hsfo_formula, "hsfo")
+
+      const hsfoToday = p.name === "Kaohsiung" ? today?.hsfo ?? hsfo : null
+      const hsfoLast = p.name === "Kaohsiung" ? last?.hsfo ?? null : null
+
+let vlsfoToday = today?.vlsfo ?? vlsfo
+let vlsfoLast = last?.vlsfo ?? null
+
+let mgoToday = today?.mgo ?? mgo
+let mgoLast = last?.mgo ?? null
+
+// calculate LAST using formula if needed
+if (p.vlsfo_formula && vlsfoLast == null) {
+  const parts = p.vlsfo_formula.split(" ")
+  const ref = ports.find((x:any)=>x.name.toLowerCase()===parts[0].toLowerCase())
+  if(ref){
+    const refLast = getLast(ref.id)
+    const base = refLast?.vlsfo
+    const value = Number(parts[2])
+    if(base!=null){
+      vlsfoLast = parts[1]==="+" ? base+value : base-value
+    }
+  }
+}
+
+if (p.mgo_formula && mgoLast == null) {
+  const parts = p.mgo_formula.split(" ")
+  const ref = ports.find((x:any)=>x.name.toLowerCase()===parts[0].toLowerCase())
+  if(ref){
+    const refLast = getLast(ref.id)
+    const base = refLast?.mgo
+    const value = Number(parts[2])
+    if(base!=null){
+      mgoLast = parts[1]==="+" ? base+value : base-value
+    }
+  }
+}
+
+      return {
+        port: p.name,
+
+        hsfo: {
+          today: hsfoToday,
+          last: hsfoLast,
+          change:
+            hsfoToday != null && hsfoLast != null
+              ? hsfoToday - hsfoLast
+              : null,
+        },
+
+        vlsfo: {
+          today: vlsfoToday,
+          last: vlsfoLast,
+          change:
+            vlsfoToday != null && vlsfoLast != null
+              ? vlsfoToday - vlsfoLast
+              : null,
+        },
+
+        mgo: {
+          today: mgoToday,
+          last: mgoLast,
+          change:
+            mgoToday != null && mgoLast != null
+              ? mgoToday - mgoLast
+              : null,
+        },
+      }
+    })
+
+    const portOrder = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
+
+    setRows(
+      result.sort(
+        (a, b) => portOrder.indexOf(a.port) - portOrder.indexOf(b.port)
+      )
+    )
+
+    // load remarks
+    const { data: remarkData } = await supabase
+      .from("remarks")
+      .select("*")
+      .limit(1)
+      .single()
+
+    if (remarkData) setRemark(remarkData.content)
+  }
+
+  load()
+}, [])
 
   function color(c: number | null) {
     if (c == null) return "white"
@@ -175,7 +239,7 @@ export default function TaiwanReport() {
           marginBottom: "30px",
         }}
       >
-        Date: {todayDate}
+Date: {reportDate}
       </p>
 
       {/* BACK BUTTON */}

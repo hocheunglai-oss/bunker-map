@@ -3,10 +3,16 @@
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 
+type SavedPortsState = Record<string, boolean>
+
 export default function AdminPage(){
 
 const [ports,setPorts] = useState<any[]>([])
 const [loading,setLoading] = useState(false)
+const [showCoords,setShowCoords] = useState(false)
+
+/* NEW */
+const [savedPorts,setSavedPorts] = useState<SavedPortsState>({})
 
 const today = new Date().toDateString()
 
@@ -49,6 +55,25 @@ prev.map(p =>
 p.id===id ? {...p,[field]:value} : p
 )
 )
+
+/* mark row as unsaved */
+setSavedPorts(prev => ({
+...prev,
+[id]: false
+}))
+
+}
+
+/* SAVE DIVIDER */
+
+const saveDivider = async (port:any) => {
+
+await supabase
+.from("ports")
+.update({
+name: port.name
+})
+.eq("id", port.id)
 
 }
 
@@ -96,6 +121,13 @@ p.id===port.id
 : p
 )
 )
+
+/* mark saved */
+
+setSavedPorts(prev => ({
+...prev,
+[port.id]: true
+}))
 
 setLoading(false)
 
@@ -226,12 +258,9 @@ borderRadius:"4px",
 marginRight:"10px",
 cursor:"pointer"
 }}
-
 >
-
-* Add Port
-
-  </button>
+Add Port
+</button>
 
 <button
 onClick={addDivider}
@@ -241,14 +270,26 @@ color:"white",
 padding:"8px 16px",
 border:"none",
 borderRadius:"4px",
+cursor:"pointer",
+marginRight:"10px"
+}}
+>
+Add Section Divider
+</button>
+
+<button
+onClick={()=>setShowCoords(!showCoords)}
+style={{
+background:"#0b3d6d",
+color:"white",
+padding:"8px 16px",
+border:"none",
+borderRadius:"4px",
 cursor:"pointer"
 }}
-
 >
-
-* Add Section Divider
-
-  </button>
+{showCoords ? "Hide Coordinates" : "Show Coordinates"}
+</button>
 
 </div>
 
@@ -267,8 +308,10 @@ color:"white"
 <th style={th}>↕</th>
 <th style={th}>Status</th>
 <th style={th}>Port</th>
-<th style={th}>Lat</th>
-<th style={th}>Lng</th>
+
+{showCoords && <th style={th}>Lat</th>}
+{showCoords && <th style={th}>Lng</th>}
+
 <th style={th}>HSFO</th>
 <th style={th}>VLSFO</th>
 <th style={th}>MGO</th>
@@ -284,8 +327,6 @@ color:"white"
 
 {ports.map((port,i)=>{
 
-/* DIVIDER */
-
 if(port.type==="divider"){
 
 return(
@@ -299,11 +340,12 @@ onDragOver={e=>e.preventDefault()}
 
 <td style={td}>↕</td>
 
-<td style={td} colSpan={7}>
+<td style={td} colSpan={showCoords ? 9 : 7}>
 
 <input
 value={port.name}
 onChange={e=>updateValue(port.id,"name",e.target.value)}
+onBlur={()=>saveDivider(port)}
 style={{
 width:"100%",
 fontWeight:"bold",
@@ -313,10 +355,7 @@ fontSize:"16px"
 
 </td>
 
-<td style={td}></td>
-
 <td style={td}>
-
 <button
 onClick={()=>deletePort(port.id,port.name)}
 style={{
@@ -325,11 +364,9 @@ color:"white",
 padding:"6px 12px",
 border:"none"
 }}
-
 >
-
-Delete </button>
-
+Delete
+</button>
 </td>
 
 </tr>
@@ -356,116 +393,100 @@ onDragOver={e=>e.preventDefault()}
 </td>
 
 <td style={td}>
-
 <input
 value={port.name ?? ""}
 onChange={e=>updateValue(port.id,"name",e.target.value)}
 />
-
 </td>
 
+{showCoords && (
 <td style={td}>
-
 <input
 value={port.lat ?? ""}
 onChange={e=>updateValue(port.id,"lat",e.target.value)}
 style={{width:"90px"}}
 />
-
 </td>
+)}
 
+{showCoords && (
 <td style={td}>
-
 <input
 value={port.lng ?? ""}
 onChange={e=>updateValue(port.id,"lng",e.target.value)}
 style={{width:"90px"}}
 />
-
 </td>
+)}
 
 <td style={td}>
-
 <input
 placeholder="price"
 value={port.hsfo ?? ""}
 onChange={e=>updateValue(port.id,"hsfo",e.target.value)}
 style={{width:"60px"}}
 />
-
 <input
 placeholder="formula"
 value={port.hsfo_formula ?? ""}
 onChange={e=>updateValue(port.id,"hsfo_formula",e.target.value)}
 style={{width:"100px",marginLeft:"6px"}}
 />
-
 </td>
 
 <td style={td}>
-
 <input
 placeholder="price"
 value={port.vlsfo ?? ""}
 onChange={e=>updateValue(port.id,"vlsfo",e.target.value)}
 style={{width:"60px"}}
 />
-
 <input
 placeholder="formula"
 value={port.vlsfo_formula ?? ""}
 onChange={e=>updateValue(port.id,"vlsfo_formula",e.target.value)}
 style={{width:"100px",marginLeft:"6px"}}
 />
-
 </td>
 
 <td style={td}>
-
 <input
 placeholder="price"
 value={port.mgo ?? ""}
 onChange={e=>updateValue(port.id,"mgo",e.target.value)}
 style={{width:"60px"}}
 />
-
 <input
 placeholder="formula"
 value={port.mgo_formula ?? ""}
 onChange={e=>updateValue(port.id,"mgo_formula",e.target.value)}
 style={{width:"100px",marginLeft:"6px"}}
 />
-
 </td>
 
 <td style={td}>
-
 {port.updated_at
 ? new Date(port.updated_at).toLocaleDateString("en-GB")
 : "-"}
-
 </td>
 
 <td style={td}>
-
 <button
 onClick={()=>savePort(port)}
 disabled={loading}
 style={{
-background:"#1fa97a",
+background: savedPorts[port.id] ? "#6c757d" : "#1fa97a",
 color:"white",
 padding:"6px 12px",
-border:"none"
+border:"none",
+cursor:"pointer"
 }}
-
 >
-
-Save </button>
-
+{savedPorts[port.id] ? "Saved" : "Save"}
+</button>
 </td>
 
 <td style={td}>
-
 <button
 onClick={()=>deletePort(port.id,port.name)}
 style={{
@@ -474,11 +495,9 @@ color:"white",
 padding:"6px 12px",
 border:"none"
 }}
-
 >
-
-Delete </button>
-
+Delete
+</button>
 </td>
 
 </tr>

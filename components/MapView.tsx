@@ -337,6 +337,50 @@ export default function MapView() {
 
       </div>
 
+{/* CONTACT BAR */}
+
+{/* CONTACT BAR */}
+
+<div
+  style={{
+    position: "absolute",
+    bottom: "15px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 1000,
+    display: "flex",
+    alignItems: "center",
+    background: "rgba(255,255,255,0.95)",
+    padding: "8px 16px",
+    borderRadius: "30px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+    fontSize: "14px",
+    color: "black"
+  }}
+>
+
+  <span style={{ marginRight: "12px", color: "black" }}>
+    If you didn't find the information you were looking for, please contact us
+  </span>
+
+  <a
+    href="https://wa.me/YOURNUMBER"
+    target="_blank"
+    rel="noopener noreferrer"
+    style={{
+      background: "#25D366",
+      color: "white",
+      padding: "6px 14px",
+      borderRadius: "20px",
+      textDecoration: "none",
+      fontWeight: 500
+    }}
+  >
+    WhatsApp
+  </a>
+
+</div>
+
       <MapContainer
         center={center}
         zoom={3}
