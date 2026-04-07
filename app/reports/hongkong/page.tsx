@@ -1,16 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
-import {
-  buildTaiwanReportRows,
-  formatReportDate,
-  type TaiwanReportRow,
-} from "@/lib/taiwanReport"
+import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
+import { formatReportDate } from "@/lib/taiwanReport"
 
-const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
+const portsWanted = ["Hong Kong"]
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -42,29 +39,32 @@ const sectionTitleStyle: React.CSSProperties = {
   fontWeight: 500,
 }
 
-function color(change: number | null) {
-  if (change == null) return "#f5fbff"
-  if (change > 0) return "#60d394"
-  if (change < 0) return "#ff7b72"
-  return "#f5fbff"
+function shortDate(value: string | null) {
+  if (!value) return "-"
+  const [day, month, year] = formatReportDate(value).split(" ")
+  const monthNumber =
+    {
+      Jan: "01",
+      Feb: "02",
+      Mar: "03",
+      Apr: "04",
+      May: "05",
+      Jun: "06",
+      Jul: "07",
+      Aug: "08",
+      Sep: "09",
+      Oct: "10",
+      Nov: "11",
+      Dec: "12",
+    }[month] || month
+
+  return `${day}/${monthNumber}/${year}`
 }
 
-function fmt(change: number | null) {
-  if (change == null) return "-"
-  if (change > 0) return `+${change}`
-  return String(change)
-}
-
-function arrow(change: number | null) {
-  if (change == null || change === 0) return ""
-  return change > 0 ? " ▲" : " ▼"
-}
-
-export default function TaiwanReport() {
+export default function HongKongReport() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [isPreview, setIsPreview] = useState(false)
-  const [rows, setRows] = useState<TaiwanReportRow[]>([])
-  const [remark, setRemark] = useState("")
+  const [rows, setRows] = useState<HongKongReportRow[]>([])
   const [reportDate, setReportDate] = useState("")
   const [publishing, setPublishing] = useState(false)
 
@@ -93,29 +93,19 @@ export default function TaiwanReport() {
         if (!historyData || historyData.length === 0) return
 
         setReportDate(formatReportDate(historyData[0].recorded_at))
-        setRows(buildTaiwanReportRows(portsData, historyData, portsWanted))
-
-        const { data: remarkData } = await supabase
-          .from("remarks")
-          .select("*")
-          .eq("id", 1)
-          .maybeSingle()
-
-        if (remarkData) setRemark(remarkData.content)
+        setRows(buildHongKongReportRows(portsData, historyData, portsWanted))
         return
       }
 
       const snapshot = await loadReportSnapshot<{
         reportDate: string
-        rows: TaiwanReportRow[]
-        remark: string
-      }>("taiwan")
+        rows: HongKongReportRow[]
+      }>("hongkong")
 
       if (!snapshot) return
 
       setReportDate(snapshot.reportDate)
       setRows(snapshot.rows)
-      setRemark(snapshot.remark)
     }
 
     if (isPreview && adminLoading) return
@@ -126,13 +116,7 @@ export default function TaiwanReport() {
 
   async function handlePublish() {
     setPublishing(true)
-
-    await saveReportSnapshot("taiwan", {
-      reportDate,
-      rows,
-      remark,
-    })
-
+    await saveReportSnapshot("hongkong", { reportDate, rows })
     setPublishing(false)
   }
 
@@ -178,7 +162,7 @@ export default function TaiwanReport() {
                 textAlign: "center",
               }}
             >
-              <h1 style={sectionTitleStyle}>TAIWAN MARKET REPORT</h1>
+              <h1 style={sectionTitleStyle}>HONG KONG MARKET REPORT</h1>
             </div>
 
             <div
@@ -232,138 +216,145 @@ export default function TaiwanReport() {
             <table
               style={{
                 width: "100%",
-                minWidth: "860px",
+                minWidth: "680px",
                 borderCollapse: "collapse",
                 fontSize: "15px",
               }}
             >
               <thead>
-                <tr
-                  style={{
-                    background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)",
-                  }}
-                >
+                <tr style={{ background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)", color: "#f5fbff" }}>
                   <th
-                    rowSpan={2}
+                    colSpan={2}
                     style={{
-                      padding: "18px 16px",
-                      fontSize: "18px",
+                      padding: "10px 16px",
                       borderRight: "1px solid rgba(255,255,255,0.14)",
                     }}
                   >
-                    Port
                   </th>
-                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)" }}>
-                    HSFO
-                  </th>
-                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)" }}>
-                    VLSFO
-                  </th>
-                  <th colSpan={3}>LSMGO</th>
-                </tr>
-                <tr
-                  style={{
-                    background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)",
-                  }}
-                >
-                  {["Today", "Last", "Change", "Today", "Last", "Change", "Today", "Last", "Change"].map(
-                    (label, index) => (
-                      <th
-                        key={label + index}
-                        style={{
-                          padding: "12px 10px",
-                          borderRight:
-                            index === 2 || index === 5
-                              ? "1px solid rgba(255,255,255,0.14)"
-                              : undefined,
-                        }}
-                      >
-                        {label}
-                      </th>
-                    )
-                  )}
+                  {["HSFO", "VLSFO", "MGO $0.05%"].map((label, index) => (
+                    <th
+                      key={label}
+                      style={{
+                        padding: "10px 12px",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        borderRight: index < 2 ? "1px solid rgba(255,255,255,0.14)" : undefined,
+                      }}
+                    >
+                      {label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, index) => (
-                  <tr
-                    key={row.port}
-                    style={{
-                      textAlign: "center",
-                      background:
-                        index % 2 === 0
-                          ? "rgba(8, 46, 88, 0.86)"
-                          : "rgba(7, 37, 70, 0.86)",
-                    }}
-                  >
-                    <td
+                  <Fragment key={row.port}>
+                    <tr
                       style={{
-                        padding: "16px 14px",
-                        fontWeight: 700,
-                        fontSize: "16px",
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
-                        borderRight: "1px solid rgba(255,255,255,0.08)",
+                        textAlign: "center",
+                        background: "rgba(22, 86, 148, 0.98)",
+                        color: "#edf7ff",
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
                       }}
                     >
-                      {row.port}
-                    </td>
-
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.hsfo.today ?? "-"}
-                    </td>
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.hsfo.last ?? "-"}
-                    </td>
-                    <td
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          textAlign: "left",
+                          whiteSpace: "nowrap",
+                          fontWeight: 800,
+                          color: "#ffffff",
+                          borderRight: "1px solid rgba(255,255,255,0.16)",
+                          background: "rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        NEW
+                      </td>
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          borderRight: "1px solid rgba(255,255,255,0.12)",
+                          whiteSpace: "nowrap",
+                          fontWeight: 700,
+                          color: "#ffffff",
+                          background: "rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        {shortDate(row.todayDate)}
+                      </td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.hsfo.today ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.vlsfo.today ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.mgo.today ?? "-"}</td>
+                    </tr>
+                    <tr
                       style={{
-                        padding: "16px 10px",
-                        fontWeight: 700,
-                        color: color(row.hsfo.change),
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
-                        borderRight: "1px solid rgba(255,255,255,0.08)",
+                        textAlign: "center",
+                        background: "rgba(12, 58, 106, 0.9)",
+                        color: "#edf7ff",
                       }}
                     >
-                      {fmt(row.hsfo.change)}
-                      {arrow(row.hsfo.change)}
-                    </td>
-
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.vlsfo.today ?? "-"}
-                    </td>
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.vlsfo.last ?? "-"}
-                    </td>
-                    <td
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          textAlign: "left",
+                          whiteSpace: "nowrap",
+                          borderRight: "1px solid rgba(255,255,255,0.12)",
+                          fontSize: "14px",
+                        }}
+                      >
+                        LAST RECORD
+                      </td>
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          borderRight: "1px solid rgba(255,255,255,0.12)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {shortDate(row.last1Date)}
+                      </td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.hsfo.last1 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.vlsfo.last1 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{row.mgo.last1 ?? "-"}</td>
+                    </tr>
+                    <tr
                       style={{
-                        padding: "16px 10px",
-                        fontWeight: 700,
-                        color: color(row.vlsfo.change),
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
-                        borderRight: "1px solid rgba(255,255,255,0.08)",
+                        textAlign: "center",
+                        background:
+                          index % 2 === 0
+                            ? "rgba(8, 46, 88, 0.86)"
+                            : "rgba(7, 37, 70, 0.86)",
+                        color: "#edf7ff",
                       }}
                     >
-                      {fmt(row.vlsfo.change)}
-                      {arrow(row.vlsfo.change)}
-                    </td>
-
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.mgo.today ?? "-"}
-                    </td>
-                    <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.mgo.last ?? "-"}
-                    </td>
-                    <td
-                      style={{
-                        padding: "16px 10px",
-                        fontWeight: 700,
-                        color: color(row.mgo.change),
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
-                      }}
-                    >
-                      {fmt(row.mgo.change)}
-                      {arrow(row.mgo.change)}
-                    </td>
-                  </tr>
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          textAlign: "left",
+                          whiteSpace: "nowrap",
+                          borderRight: "1px solid rgba(255,255,255,0.12)",
+                        }}
+                      />
+                      <td
+                        style={{
+                          padding: "14px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          borderRight: "1px solid rgba(255,255,255,0.12)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {shortDate(row.last2Date)}
+                      </td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.hsfo.last2 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.vlsfo.last2 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{row.mgo.last2 ?? "-"}</td>
+                    </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -393,63 +384,6 @@ export default function TaiwanReport() {
           </a>
         </div>
 
-        {remark && (
-          <div style={{ ...cardStyle, padding: "14px 16px", marginBottom: "20px" }}>
-            <div
-              style={{
-                fontSize: "10px",
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-                color: "#8dcfff",
-                marginBottom: "6px",
-              }}
-            >
-              Remarks
-            </div>
-            <div style={{ display: "grid", gap: "6px" }}>
-              {remark
-                .split(/\n+/)
-                .map((item) => item.trim())
-                .filter(Boolean)
-                .map((item, index) => (
-                  <div
-                    key={`${item}-${index}`}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "8px",
-                      padding: "8px 10px",
-                      borderRadius: "12px",
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      color: "#e8f4ff",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "20px",
-                        height: "20px",
-                        flexShrink: 0,
-                        borderRadius: "999px",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "rgba(141, 207, 255, 0.14)",
-                        color: "#dff3ff",
-                        fontSize: "10px",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {index + 1}
-                    </span>
-                    <span style={{ lineHeight: 1.5 }}>{item}</span>
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
         <div
           style={{
             ...cardStyle,
@@ -463,7 +397,7 @@ export default function TaiwanReport() {
         >
           <div style={{ flex: "1 1 320px" }}>
             <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: "6px" }}>
-              Need more Taiwan bunker information?
+              Need more Hong Kong bunker information?
             </div>
             <div style={{ color: "#d7e9ff", lineHeight: 1.6, fontSize: "15px" }}>
               Contact us directly on WhatsApp for further details.

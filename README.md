@@ -6,8 +6,8 @@ A Next.js app for viewing bunker fuel prices on a map, managing port prices, and
 
 - `/` - bunker map homepage
 - `/reports/taiwan` - Taiwan posted price report
-- `/admin-9f3kL2bunker/pricesetter` - admin page for updating port prices
-- `/admin-9f3kL2bunker/taiwan-remarks` - admin page for Taiwan report remarks
+- `/admin/pricesetter` - admin page for updating port prices
+- `/admin/taiwanremarks` - admin page for Taiwan report remarks
 
 ## Local Development
 
