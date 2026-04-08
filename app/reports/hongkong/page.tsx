@@ -153,8 +153,9 @@ export default function HongKongReport() {
             style={{
               display: "flex",
               flexWrap: "wrap",
+              flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
-              justifyContent: "space-between",
+              justifyContent: isMobile ? "center" : "space-between",
               gap: "18px",
             }}
           >
@@ -308,7 +309,7 @@ export default function HongKongReport() {
                     }}
                   >
                   </th>
-                  {["HSFO", "VLSFO", "MGO $0.05%"].map((label, index) => (
+                  {["HSFO", "VLSFO", "MGO S0.05%"].map((label, index) => (
                     <th
                       key={label}
                       style={{

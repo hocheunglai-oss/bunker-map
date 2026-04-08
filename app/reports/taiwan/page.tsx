@@ -168,8 +168,9 @@ export default function TaiwanReport() {
             style={{
               display: "flex",
               flexWrap: "wrap",
+              flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
-              justifyContent: "space-between",
+              justifyContent: isMobile ? "center" : "space-between",
               gap: "18px",
             }}
           >

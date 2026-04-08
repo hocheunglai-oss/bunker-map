@@ -224,8 +224,9 @@ export default function CompactReport() {
             style={{
               display: "flex",
               flexWrap: "wrap",
+              flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
-              justifyContent: "space-between",
+              justifyContent: isMobile ? "center" : "space-between",
               gap: "18px",
             }}
           >
@@ -421,7 +422,9 @@ export default function CompactReport() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "minmax(180px, 1fr) 100px 100px 100px",
+                          gridTemplateColumns: isMobile
+                            ? "minmax(110px, 1fr) 68px 68px 68px"
+                            : "minmax(180px, 1fr) 100px 100px 100px",
                           background: "rgba(255,255,255,0.05)",
                           borderTop: "1px solid rgba(255,255,255,0.08)",
                         }}
@@ -430,8 +433,8 @@ export default function CompactReport() {
                           <div
                             key={label}
                             style={{
-                              padding: "10px 14px",
-                              fontSize: "12px",
+                              padding: isMobile ? "8px 10px" : "10px 14px",
+                              fontSize: isMobile ? "10px" : "12px",
                               fontWeight: 700,
                               color: "#cfe9ff",
                               textAlign: index === 0 ? "left" : "center",
@@ -449,7 +452,9 @@ export default function CompactReport() {
                           key={`${section.title}-${row.port}`}
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "minmax(180px, 1fr) 100px 100px 100px",
+                            gridTemplateColumns: isMobile
+                              ? "minmax(110px, 1fr) 68px 68px 68px"
+                              : "minmax(180px, 1fr) 100px 100px 100px",
                             background:
                               index % 2 === 0
                                 ? "rgba(8, 46, 88, 0.86)"

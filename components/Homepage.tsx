@@ -265,6 +265,7 @@ export default function Homepage() {
   const [search, setSearch] = useState("")
   const [results, setResults] = useState<Port[]>([])
   const [selectedIndex, setSelectedIndex] = useState(-1)
+  const [selectedPortId, setSelectedPortId] = useState<number | null>(null)
   const [reportsOpen, setReportsOpen] = useState(false)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
 
@@ -361,6 +362,7 @@ export default function Homepage() {
   function selectPort(port: Port, options?: { clearSearch?: boolean }) {
     zoomToPort(port)
     openPortPopup(port)
+    setSelectedPortId(port.id)
     if (options?.clearSearch) {
       setSearch("")
     } else {
@@ -481,56 +483,58 @@ export default function Homepage() {
         </MapContainer>
       </div>
 
-      <div
-        style={{
-          position: "absolute",
-          right: panelInset,
-          top: isMobile ? "auto" : panelInset,
-          bottom: isMobile ? 78 : "auto",
-          zIndex: 1000,
-          width: isMobile ? "min(360px, calc(100% - 24px))" : "min(330px, calc(100% - 36px))",
-          borderRadius: "22px",
-          padding: isMobile ? "14px 16px" : "16px 18px",
-          display: "grid",
-          gap: "14px",
-          ...glassPanelStyle,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: "12px",
-              textTransform: "uppercase",
-              letterSpacing: "0.2em",
-              color: "#8fd7ff",
-              marginBottom: "10px",
-              fontWeight: 800,
-            }}
-          >
-            Oil Market
-          </div>
-          <div
-            style={{
-              borderRadius: "16px",
-              border: "1px solid rgba(255,255,255,0.1)",
-              background: "rgba(255,255,255,0.04)",
-              overflow: "hidden",
-              minHeight: "210px",
-            }}
-          >
-            <OilWidget />
+      {!isMobile && (
+        <div
+          style={{
+            position: "absolute",
+            right: panelInset,
+            top: panelInset,
+            zIndex: 1000,
+            width: "min(330px, calc(100% - 36px))",
+            borderRadius: "22px",
+            padding: "16px 18px",
+            display: "grid",
+            gap: "14px",
+            ...glassPanelStyle,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: "12px",
+                textTransform: "uppercase",
+                letterSpacing: "0.2em",
+                color: "#8fd7ff",
+                marginBottom: "10px",
+                fontWeight: 800,
+              }}
+            >
+              Oil Market
+            </div>
+            <div
+              style={{
+                borderRadius: "16px",
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.04)",
+                overflow: "hidden",
+                minHeight: "210px",
+              }}
+            >
+              <OilWidget />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div
         style={{
           position: "absolute",
           top: panelInset,
-          left: panelInset,
+          left: isMobile ? 0 : panelInset,
+          right: isMobile ? 0 : "auto",
           zIndex: 1000,
-          width: isMobile ? "min(360px, calc(100% - 24px))" : "min(360px, calc(100% - 36px))",
-          borderRadius: "26px",
+          width: isMobile ? "auto" : "min(360px, calc(100% - 36px))",
+          borderRadius: isMobile ? "0 0 24px 24px" : "26px",
           padding: isMobile ? "14px" : "18px",
           ...glassPanelStyle,
         }}
@@ -550,7 +554,10 @@ export default function Homepage() {
             type="text"
             placeholder="Search by port name"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value)
+              setSelectedPortId(null)
+            }}
             onKeyDown={handleKeyDown}
             style={{
               width: "100%",
@@ -605,7 +612,7 @@ export default function Homepage() {
           )}
         </div>
 
-        {!search && (
+        {!search && selectedPortId == null && (
           <div style={{ display: "grid", gap: "8px" }}>
             <div
               style={{
