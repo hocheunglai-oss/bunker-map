@@ -115,32 +115,43 @@ export default function CompactReport() {
   const [reportDate, setReportDate] = useState("")
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [publishing, setPublishing] = useState(false)
+  const [published, setPublished] = useState(false)
 
   useEffect(() => {
     setIsPreview(new URLSearchParams(window.location.search).get("preview") === "1")
   }, [])
 
+  async function loadLiveCompactData() {
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", includedPorts)
+
+    if (!portsData) return null
+
+    const nextSections = buildChinaReportSections(portsData, reportSections)
+
+    const latestUpdated = portsData
+      .map((port) => port.updated_at)
+      .filter(Boolean)
+      .sort()
+      .at(-1)
+
+    const nextReportDate = latestUpdated ? formatReportDate(latestUpdated) : ""
+
+    return {
+      reportDate: nextReportDate,
+      sections: nextSections,
+    }
+  }
+
   useEffect(() => {
     async function load() {
       if (isPreview) {
-        const { data: portsData } = await supabase
-          .from("ports")
-          .select("*")
-          .in("name", includedPorts)
-
-        if (!portsData) return
-
-        setSections(buildChinaReportSections(portsData, reportSections))
-
-        const latestUpdated = portsData
-          .map((port) => port.updated_at)
-          .filter(Boolean)
-          .sort()
-          .at(-1)
-
-        if (latestUpdated) {
-          setReportDate(formatReportDate(latestUpdated))
-        }
+        const liveData = await loadLiveCompactData()
+        if (!liveData) return
+        setSections(liveData.sections)
+        setReportDate(liveData.reportDate)
         return
       }
 
@@ -163,12 +174,19 @@ export default function CompactReport() {
 
   async function handlePublish() {
     setPublishing(true)
-    await saveReportSnapshot("compact", { reportDate, sections })
-    setPublishing(false)
-  }
+    const liveData = await loadLiveCompactData()
 
-  if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
+    if (liveData) {
+      setSections(liveData.sections)
+      setReportDate(liveData.reportDate)
+      await saveReportSnapshot("compact", liveData)
+    } else {
+      await saveReportSnapshot("compact", { reportDate, sections })
+    }
+
+    setPublishing(false)
+    setPublished(true)
+  }
 
   const totalRows = useMemo(
     () => sections.reduce((sum, section) => sum + section.rows.length, 0),
@@ -192,6 +210,9 @@ export default function CompactReport() {
     const previewSet = new Set(preview)
     return section.rows.filter((row) => previewSet.has(row.port))
   }
+
+  if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
+  if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
 
   return (
     <div style={pageStyle}>
@@ -238,45 +259,100 @@ export default function CompactReport() {
             <div
               style={{
                 flex: "0 0 auto",
-                display: "flex",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                gap: "10px",
+                display: "grid",
+                gap: "8px",
+                justifyItems: "end",
               }}
             >
-              {isPreview && (
-                <button
-                  onClick={handlePublish}
-                  disabled={publishing || totalRows === 0}
+              {isPreview ? (
+                <>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button
+                      onClick={handlePublish}
+                      disabled={publishing || totalRows === 0 || published}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "999px",
+                        border: published ? "1px solid rgba(255,255,255,0.12)" : "none",
+                        background: published
+                          ? "rgba(255,255,255,0.08)"
+                          : "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
+                        color: "#fff",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        cursor: published ? "default" : "pointer",
+                      }}
+                    >
+                      {publishing ? "Publishing..." : published ? "Published" : "Publish"}
+                    </button>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "8px 12px",
+                        borderRadius: "999px",
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        color: "#d7e9ff",
+                        fontSize: "14px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Report Date: {reportDate || "-"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <a
+                      href="/reports/compact"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "999px",
+                        border: "none",
+                        background: "#c53939",
+                        color: "#fff",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        textDecoration: "none",
+                      }}
+                    >
+                      Check
+                    </a>
+                    <a
+                      href="/admin"
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "999px",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        background: "rgba(255,255,255,0.08)",
+                        color: "#fff",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        textDecoration: "none",
+                      }}
+                    >
+                      Back To Admin
+                    </a>
+                  </div>
+                </>
+              ) : (
+                <span
                   style={{
+                    display: "inline-flex",
+                    alignItems: "center",
                     padding: "8px 12px",
                     borderRadius: "999px",
-                    border: "none",
-                    background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                    color: "#fff",
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "#d7e9ff",
                     fontSize: "14px",
-                    fontWeight: 700,
-                    cursor: "pointer",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {publishing ? "Publishing..." : "Publish"}
-                </button>
+                  Report Date: {reportDate || "-"}
+                </span>
               )}
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "8px 12px",
-                  borderRadius: "999px",
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#d7e9ff",
-                  fontSize: "14px",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Report Date: {reportDate || "-"}
-              </span>
             </div>
           </div>
         </div>

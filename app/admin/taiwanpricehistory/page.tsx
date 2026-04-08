@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
+import { saveReportSnapshot } from "@/lib/reportSnapshots"
 
 type HistoryRow = {
   id: number
@@ -60,6 +62,43 @@ export default function TaiwanPriceHistoryPage() {
   const [formHsfo, setFormHsfo] = useState("")
   const [formVlsfo, setFormVlsfo] = useState("")
   const [formMgo, setFormMgo] = useState("")
+  const [publishing, setPublishing] = useState(false)
+  const [published, setPublished] = useState(false)
+
+  async function buildTaiwanSnapshot(): Promise<{
+    reportDate: string
+    rows: TaiwanReportRow[]
+    remark: string
+  } | null> {
+    const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", portsWanted)
+
+    if (!portsData) return null
+
+    const portIds = portsData.map((port) => port.id)
+    const { data: historyData } = await supabase
+      .from("price_history")
+      .select("*")
+      .in("port_id", portIds)
+      .order("recorded_at", { ascending: false })
+
+    if (!historyData || historyData.length === 0) return null
+
+    const { data: remarkData } = await supabase
+      .from("remarks")
+      .select("*")
+      .eq("id", 1)
+      .maybeSingle()
+
+    return {
+      reportDate: formatReportDate(historyData[0].recorded_at),
+      rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
+      remark: remarkData?.content || "",
+    }
+  }
 
   async function syncPortFromLatestHistory(currentPortId: number) {
     const { data: latestHistory } = await supabase
@@ -199,9 +238,65 @@ export default function TaiwanPriceHistoryPage() {
       setFormVlsfo("")
       setFormMgo("")
       await syncPortFromLatestHistory(portId)
+      setPublished(false)
     }
 
     setSaving(false)
+  }
+
+  async function addAsLatestRecord() {
+    if (!portId) return
+
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date())
+
+    const firstConfirm = window.confirm(`Add today's price as the latest record for ${today}?`)
+    if (!firstConfirm) return
+
+    setSaving(true)
+
+    const recordedAt = `${today}T12:00:00+08:00`
+    const { data: inserted } = await supabase
+      .from("price_history")
+      .insert({
+        port_id: portId,
+        hsfo: formHsfo ? Number(formHsfo) : null,
+        vlsfo: formVlsfo ? Number(formVlsfo) : null,
+        mgo: formMgo ? Number(formMgo) : null,
+        recorded_at: recordedAt,
+      })
+      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
+      .single()
+
+    if (inserted) {
+      setRows((prev) =>
+        [...prev, inserted].sort(
+          (a, b) =>
+            new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
+        )
+      )
+      setFormHsfo("")
+      setFormVlsfo("")
+      setFormMgo("")
+      await syncPortFromLatestHistory(portId)
+      setPublished(false)
+    }
+
+    setSaving(false)
+  }
+
+  async function handlePublish() {
+    setPublishing(true)
+    const snapshot = await buildTaiwanSnapshot()
+    if (snapshot) {
+      await saveReportSnapshot("taiwan", snapshot)
+      setPublished(true)
+    }
+    setPublishing(false)
   }
 
   return (
@@ -261,21 +356,58 @@ export default function TaiwanPriceHistoryPage() {
             Taiwan Price History
           </h1>
 
-          <a
-            href="/admin"
-            style={{
-              padding: "10px 16px",
-              border: "1px solid rgba(255,255,255,0.14)",
-              borderRadius: "12px",
-              background: "rgba(255,255,255,0.08)",
-              color: "#edf7ff",
-              textDecoration: "none",
-              fontSize: "14px",
-              fontWeight: 700,
-            }}
-          >
-            Back To Admin Home
-          </a>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <a
+              href="/admin"
+              style={{
+                padding: "10px 16px",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: "12px",
+                background: "rgba(255,255,255,0.08)",
+                color: "#edf7ff",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: 700,
+              }}
+            >
+              Back To Admin Home
+            </a>
+
+            <a
+              href="/reports/taiwan"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                padding: "10px 16px",
+                border: "none",
+                borderRadius: "12px",
+                background: "#c53939",
+                color: "#edf7ff",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: 700,
+              }}
+            >
+              Check
+            </a>
+
+            <button
+              onClick={handlePublish}
+              disabled={publishing}
+              style={{
+                padding: "10px 16px",
+                borderRadius: "12px",
+                border: published ? "1px solid rgba(255,255,255,0.14)" : "none",
+                background: published ? "rgba(255,255,255,0.08)" : "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
+                color: "#edf7ff",
+                fontSize: "14px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {publishing ? "Publishing..." : published ? "Published" : "Publish"}
+            </button>
+          </div>
         </div>
 
         <div
@@ -482,6 +614,24 @@ export default function TaiwanPriceHistoryPage() {
               }}
             >
               {saving ? "Saving..." : "Add Missing Record"}
+            </button>
+
+            <button
+              onClick={addAsLatestRecord}
+              disabled={saving}
+              style={{
+                background: saving ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.08)",
+                color: "white",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: "12px",
+                padding: "10px 16px",
+                cursor: saving ? "wait" : "pointer",
+                fontSize: "13px",
+                height: "42px",
+                fontWeight: 700,
+              }}
+            >
+              {saving ? "Saving..." : "Add As Latest"}
             </button>
           </div>
         </div>

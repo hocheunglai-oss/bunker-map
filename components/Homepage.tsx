@@ -141,6 +141,66 @@ function ZoomControls() {
   )
 }
 
+function OilWidget() {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    container.innerHTML = ""
+
+    const widgetHost = document.createElement("div")
+    widgetHost.className = "tradingview-widget-container__widget"
+    widgetHost.style.height = "210px"
+    widgetHost.style.width = "100%"
+
+    const script = document.createElement("script")
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
+    script.type = "text/javascript"
+    script.async = true
+    script.innerHTML = JSON.stringify({
+      colorTheme: "dark",
+      dateRange: "1D",
+      showChart: true,
+      locale: "en",
+      width: "100%",
+      height: 210,
+      largeChartUrl: "",
+      isTransparent: true,
+      showSymbolLogo: false,
+      showFloatingTooltip: false,
+      plotLineColorGrowing: "rgba(41, 98, 255, 1)",
+      plotLineColorFalling: "rgba(41, 98, 255, 1)",
+      gridLineColor: "rgba(255, 255, 255, 0.06)",
+      scaleFontColor: "rgba(237, 247, 255, 0.8)",
+      belowLineFillColorGrowing: "rgba(30, 144, 255, 0.18)",
+      belowLineFillColorFalling: "rgba(30, 144, 255, 0.12)",
+      belowLineFillColorGrowingBottom: "rgba(30, 144, 255, 0.01)",
+      belowLineFillColorFallingBottom: "rgba(30, 144, 255, 0.01)",
+      symbolActiveColor: "rgba(143, 215, 255, 0.18)",
+      tabs: [
+        {
+          title: "Energy",
+          symbols: [
+            { s: "TVC:UKOIL", d: "Brent" },
+            { s: "TVC:USOIL", d: "WTI / Nymex" },
+          ],
+        },
+      ],
+    })
+
+    container.appendChild(widgetHost)
+    container.appendChild(script)
+
+    return () => {
+      container.innerHTML = ""
+    }
+  }, [])
+
+  return <div ref={containerRef} style={{ width: "100%", minHeight: "210px" }} />
+}
+
 function IconButton({
   label,
   title,
@@ -204,7 +264,6 @@ export default function Homepage() {
   const [results, setResults] = useState<Port[]>([])
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const [reportsOpen, setReportsOpen] = useState(false)
-  const [featuredIndex, setFeaturedIndex] = useState(0)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
 
   const mapRef = useRef<L.Map | null>(null)
@@ -261,24 +320,14 @@ export default function Homepage() {
     setSelectedIndex(-1)
   }, [search, ports])
 
-  const featuredPortNames = ["Hong Kong", "Singapore", "Busan", "Zhoushan", "Port Klang"]
-  const featuredPorts = useMemo(
-    () => featuredPortNames.map((name) => ports.find((port) => port.name === name)).filter(Boolean) as Port[],
+  const keyPortNames = ["Hong Kong", "Singapore", "Zhoushan", "Busan", "Kaohsiung"]
+  const keyPorts = useMemo(
+    () =>
+      keyPortNames
+        .map((name) => ports.find((port) => port.name === name))
+        .filter((port): port is Port => port != null),
     [ports]
   )
-  const activeFeaturedPort = featuredPorts.length > 0
-    ? featuredPorts[featuredIndex % featuredPorts.length]
-    : null
-
-  useEffect(() => {
-    if (featuredPorts.length <= 1) return
-
-    const intervalId = window.setInterval(() => {
-      setFeaturedIndex((prev) => (prev + 1) % featuredPorts.length)
-    }, 10000)
-
-    return () => window.clearInterval(intervalId)
-  }, [featuredPorts.length])
 
   function zoomToPort(port: Port) {
     if (!mapRef.current || port.lat == null || port.lng == null) return
@@ -432,6 +481,47 @@ export default function Homepage() {
       <div
         style={{
           position: "absolute",
+          right: 18,
+          top: 18,
+          zIndex: 1000,
+          width: "min(330px, calc(100% - 36px))",
+          borderRadius: "22px",
+          padding: "16px 18px",
+          display: "grid",
+          gap: "14px",
+          ...glassPanelStyle,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "12px",
+              textTransform: "uppercase",
+              letterSpacing: "0.2em",
+              color: "#8fd7ff",
+              marginBottom: "10px",
+              fontWeight: 800,
+            }}
+          >
+            Oil Market
+          </div>
+          <div
+            style={{
+              borderRadius: "16px",
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.04)",
+              overflow: "hidden",
+              minHeight: "210px",
+            }}
+          >
+            <OilWidget />
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
           top: 18,
           left: 18,
           zIndex: 1000,
@@ -511,94 +601,60 @@ export default function Homepage() {
           )}
         </div>
 
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          right: 18,
-          top: 18,
-          zIndex: 1000,
-          width: "min(300px, calc(100% - 36px))",
-          borderRadius: "22px",
-          padding: "16px 18px",
-          ...glassPanelStyle,
-        }}
-      >
-        <div
-          style={{
-            fontSize: "12px",
-            textTransform: "uppercase",
-            letterSpacing: "0.2em",
-            color: "#8fd7ff",
-            marginBottom: "10px",
-            fontWeight: 800,
-          }}
-        >
-          Featured Ports
-        </div>
-        <div style={{ display: "grid", gap: "10px" }}>
-          {activeFeaturedPort && (
+        {!search && (
+          <div style={{ display: "grid", gap: "8px" }}>
             <div
-              key={activeFeaturedPort.id}
               style={{
-                padding: "14px 16px",
-                borderRadius: "18px",
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.06)",
-                color: "#edf7ff",
+                fontSize: "12px",
+                textTransform: "uppercase",
+                letterSpacing: "0.2em",
+                color: "#8fd7ff",
+                marginBottom: "2px",
+                fontWeight: 800,
               }}
             >
-              <div
+              Key Port Snapshot
+            </div>
+            {keyPorts.map((port) => (
+              <button
+                key={port.id}
+                onClick={() => selectPort(port, { clearSearch: true })}
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr",
-                  gap: "12px",
+                  width: "100%",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: "14px",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "#edf7ff",
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
               >
                 <div
                   style={{
-                    fontWeight: 700,
-                    fontSize: "20px",
-                    lineHeight: 1.1,
-                  }}
-                >
-                  {activeFeaturedPort.name}
-                </div>
-                <div
-                  style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                    gap: "10px",
+                    gridTemplateColumns: "1.2fr repeat(3, minmax(0, 1fr))",
+                    gap: "8px",
+                    alignItems: "center",
                   }}
                 >
+                  <div style={{ fontWeight: 700, fontSize: "14px" }}>{port.name}</div>
                   {[
-                    { label: "HSFO", value: activeFeaturedPort.hsfo },
-                    { label: "VLSFO", value: activeFeaturedPort.vlsfo },
-                    { label: "MGO", value: activeFeaturedPort.mgo },
+                    { label: "HSFO", value: port.hsfo },
+                    { label: "VLSFO", value: port.vlsfo },
+                    { label: "MGO", value: port.mgo },
                   ].map((item) => (
-                    <div
-                      key={item.label}
-                      style={{
-                        padding: "10px 8px",
-                        borderRadius: "12px",
-                        background: "rgba(255,255,255,0.08)",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "10px", color: "#abd8ff", marginBottom: "4px" }}>
-                        {item.label}
-                      </div>
-                      <div style={{ fontSize: "15px", fontWeight: 700 }}>
-                        {item.value ?? "-"}
-                      </div>
+                    <div key={item.label} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "10px", color: "#abd8ff" }}>{item.label}</div>
+                      <div style={{ fontSize: "13px", fontWeight: 700 }}>{item.value ?? "-"}</div>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          )}
-        </div>
+              </button>
+            ))}
+          </div>
+        )}
+
       </div>
 
       <div
