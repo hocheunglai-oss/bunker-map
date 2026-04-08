@@ -4,29 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
+import { hasFormulaForAnyFuel, parseSimpleFormula } from "@/lib/portPricing"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
 
-type ViewMode = "price" | "formula"
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
-
-function parseSimpleFormula(formula: string | null | undefined) {
-  if (!formula) return null
-
-  const parts = formula.trim().split(/\s+/)
-  if (parts.length !== 3) return null
-
-  const refName = parts[0].toLowerCase()
-  const operator = parts[1]
-  const amount = Number(parts[2])
-
-  if ((operator !== "+" && operator !== "-") || Number.isNaN(amount)) {
-    return null
-  }
-
-  return { refName, operator, amount }
-}
 
 export default function AdminPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
@@ -35,7 +18,6 @@ export default function AdminPage() {
   const [showCoords, setShowCoords] = useState(false)
   const [savedPorts, setSavedPorts] = useState<SavedPortsState>({})
   const [savingPorts, setSavingPorts] = useState<SavingPortsState>({})
-  const [viewMode, setViewMode] = useState<ViewMode>("price")
   const [selectedPortGroup, setSelectedPortGroup] = useState<PortGroupMode>("All")
   const [selectedTab, setSelectedTab] = useState("All")
 
@@ -271,6 +253,10 @@ export default function AdminPage() {
     return new Date(date).toDateString() === today
   }
 
+  function isFormulaStylePort(port: any) {
+    return hasFormulaForAnyFuel(port) || String(port.name).toLowerCase() === "zhanjiang"
+  }
+
   const visiblePorts = useMemo(() => {
     const activeTab = priceSetterTabs.find((tab) => tab.label === selectedTab)
     const allowedPorts =
@@ -289,11 +275,16 @@ export default function AdminPage() {
 
       if (selectedPortGroup === "All") return true
 
+      const hasFormula = isFormulaStylePort(port)
       const hasPrice = [port.hsfo, port.vlsfo, port.mgo].some(
         (value) => value !== null && value !== undefined && String(value).trim() !== ""
       )
 
-      return selectedPortGroup === "Primary Ports" ? hasPrice : !hasPrice
+      if (selectedPortGroup === "Primary Ports") {
+        return hasPrice && !hasFormula
+      }
+
+      return hasFormula || !hasPrice
     })
   }, [ports, selectedPortGroup, selectedTab])
 
@@ -388,7 +379,7 @@ export default function AdminPage() {
             style={{
               display: "flex",
               flexWrap: "wrap",
-              justifyContent: "space-between",
+              justifyContent: "flex-start",
               alignItems: "center",
               gap: "12px",
             }}
@@ -408,26 +399,6 @@ export default function AdminPage() {
                   }}
                 >
                   {group}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", gap: "8px" }}>
-              {(["price", "formula"] as ViewMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  style={{
-                    ...tabButtonStyle,
-                    background:
-                      viewMode === mode ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.06)",
-                    borderColor:
-                      viewMode === mode ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.08)",
-                    color: viewMode === mode ? "#edf7ff" : "#b9d6ed",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {mode}
                 </button>
               ))}
             </div>
@@ -524,6 +495,7 @@ export default function AdminPage() {
                 const updated = isUpdatedToday(port.updated_at)
                 const isSaving = Boolean(savingPorts[port.id])
                 const isSaved = Boolean(savedPorts[port.id])
+                const isFormulaPort = isFormulaStylePort(port)
 
                 return (
                   <tr
@@ -570,18 +542,18 @@ export default function AdminPage() {
                     ].map((field) => (
                       <td key={field.priceField} style={td}>
                         <input
-                          placeholder={viewMode}
-                          value={port[viewMode === "price" ? field.priceField : field.formulaField] ?? ""}
+                          placeholder={isFormulaPort ? "formula" : "price"}
+                          value={port[isFormulaPort ? field.formulaField : field.priceField] ?? ""}
                           onChange={(event) =>
                             updateValue(
                               port.id,
-                              viewMode === "price" ? field.priceField : field.formulaField,
+                              isFormulaPort ? field.formulaField : field.priceField,
                               event.target.value
                             )
                           }
                           style={{
                             ...compactInputStyle,
-                            width: viewMode === "price" ? "64px" : "130px",
+                            width: isFormulaPort ? "130px" : "64px",
                           }}
                         />
                       </td>

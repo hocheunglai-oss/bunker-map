@@ -1,4 +1,9 @@
-export type FuelKey = "hsfo" | "vlsfo" | "mgo"
+import {
+  applyFormula,
+  parseSimpleFormula,
+  type FuelKey,
+  type FormulaCapablePort,
+} from "@/lib/portPricing"
 
 export type FuelSnapshot = {
   today: number | null
@@ -13,15 +18,8 @@ export type TaiwanReportRow = {
   mgo: FuelSnapshot
 }
 
-type PortRecord = {
+type PortRecord = FormulaCapablePort & {
   id: number
-  name: string
-  hsfo: number | null
-  vlsfo: number | null
-  mgo: number | null
-  hsfo_formula?: string | null
-  vlsfo_formula?: string | null
-  mgo_formula?: string | null
 }
 
 type PriceHistoryRecord = {
@@ -40,41 +38,35 @@ function buildFuelSnapshot(today: number | null, last: number | null): FuelSnaps
   }
 }
 
-function parseSimpleFormula(formula: string) {
-  const parts = formula.trim().split(/\s+/)
-
-  if (parts.length !== 3) return null
-
-  const refName = parts[0].toLowerCase()
-  const operator = parts[1]
-  const amount = Number(parts[2])
-
-  if ((operator !== "+" && operator !== "-") || Number.isNaN(amount)) {
-    return null
-  }
-
-  return { refName, operator, amount }
-}
-
-function applyFormula(base: number | null, formula: string | null | undefined): number | null {
-  if (base == null || !formula) return null
-
-  const parsed = parseSimpleFormula(formula)
-  if (!parsed) return null
-
-  return parsed.operator === "+" ? base + parsed.amount : base - parsed.amount
-}
-
 function resolveValue(
   port: PortRecord,
   portsByName: Map<string, PortRecord>,
   historyByPortId: Map<number, PriceHistoryRecord[]>,
   fuel: FuelKey,
-  version: "today" | "last"
+  version: "today" | "last",
+  seen = new Set<string>()
 ): number | null {
+  const seenKey = `${port.name.toLowerCase()}-${fuel}-${version}`
+  if (seen.has(seenKey)) return null
+  seen.add(seenKey)
+
   const portHistory = historyByPortId.get(port.id) ?? []
   const currentEntry = portHistory[0] ?? null
   const previousEntry = portHistory[1] ?? null
+
+  const formula = port[`${fuel}_formula` as const]
+
+  if (formula?.trim()) {
+    const parsed = parseSimpleFormula(formula)
+    if (!parsed) return null
+
+    const refPort = portsByName.get(parsed.refName)
+    if (!refPort) return null
+
+    const refBase = resolveValue(refPort, portsByName, historyByPortId, fuel, version, seen)
+
+    return applyFormula(refBase, formula)
+  }
 
   const directCurrent = currentEntry?.[fuel] ?? null
   if (version === "today" && directCurrent != null) return directCurrent
@@ -82,26 +74,7 @@ function resolveValue(
   const directPrevious = previousEntry?.[fuel] ?? null
   if (version === "last" && directPrevious != null) return directPrevious
 
-  const directPortValue = port[fuel]
-  const formula = port[`${fuel}_formula` as const]
-
-  if (formula) {
-    const parsed = parseSimpleFormula(formula)
-    if (!parsed) return null
-
-    const refPort = portsByName.get(parsed.refName)
-    if (!refPort) return null
-
-    const refBase = resolveValue(refPort, portsByName, historyByPortId, fuel, version)
-
-    return applyFormula(refBase, formula)
-  }
-
-  if (version === "today") {
-    return directPortValue ?? null
-  }
-
-  return null
+  return version === "today" ? port[fuel] ?? null : null
 }
 
 export function formatReportDate(recordedAt: string): string {

@@ -112,7 +112,7 @@ function formatValue(value: number | null) {
 export default function CompactReport() {
   const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState(false)
+  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [sections, setSections] = useState<ChinaReportSection[]>([])
   const [reportDate, setReportDate] = useState("")
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
@@ -147,13 +147,18 @@ export default function CompactReport() {
     }
   }
 
+  async function refreshPreviewData() {
+    const liveData = await loadLiveCompactData()
+    if (!liveData) return
+
+    setSections(liveData.sections)
+    setReportDate(liveData.reportDate)
+  }
+
   useEffect(() => {
     async function load() {
       if (isPreview) {
-        const liveData = await loadLiveCompactData()
-        if (!liveData) return
-        setSections(liveData.sections)
-        setReportDate(liveData.reportDate)
+        await refreshPreviewData()
         return
       }
 
@@ -168,11 +173,32 @@ export default function CompactReport() {
       setSections(snapshot.sections)
     }
 
+    if (isPreview == null) return
     if (isPreview && adminLoading) return
     if (isPreview && !authenticated) return
 
     load()
   }, [isPreview, adminLoading, authenticated])
+
+  useEffect(() => {
+    if (isPreview !== true || !authenticated) return
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        refreshPreviewData()
+      }
+    }
+
+    const interval = window.setInterval(refreshIfVisible, 15000)
+    window.addEventListener("focus", refreshIfVisible)
+    document.addEventListener("visibilitychange", refreshIfVisible)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener("focus", refreshIfVisible)
+      document.removeEventListener("visibilitychange", refreshIfVisible)
+    }
+  }, [isPreview, authenticated])
 
   async function handlePublish() {
     setPublishing(true)
@@ -213,6 +239,7 @@ export default function CompactReport() {
     return section.rows.filter((row) => previewSet.has(row.port))
   }
 
+  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
 
@@ -227,15 +254,15 @@ export default function CompactReport() {
               flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
               justifyContent: isMobile ? "center" : "space-between",
-              gap: "18px",
+              gap: isMobile ? "10px" : "18px",
             }}
           >
             <div
               style={{
-                width: "100%",
+                width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "220px",
                 textAlign: "center",
-                padding: "8px 0",
+                padding: isMobile ? "0" : "8px 0",
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
@@ -250,7 +277,7 @@ export default function CompactReport() {
 
             <div
               style={{
-                flex: "1 1 320px",
+                flex: isMobile ? "0 1 auto" : "1 1 320px",
                 display: "flex",
                 justifyContent: "center",
                 textAlign: "center",

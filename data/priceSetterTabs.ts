@@ -75,6 +75,7 @@ export const priceSetterTabs = [
       "Ningbo",
       "Shanghai",
       "Changshu",
+      "Jiangyin",
       "Jiang Yin",
       "Nanjing",
       "Nantong",

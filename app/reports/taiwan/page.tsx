@@ -64,7 +64,7 @@ function arrow(change: number | null) {
 export default function TaiwanReport() {
   const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState(false)
+  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [rows, setRows] = useState<TaiwanReportRow[]>([])
   const [remark, setRemark] = useState("")
   const [reportDate, setReportDate] = useState("")
@@ -130,6 +130,7 @@ export default function TaiwanReport() {
       setRemark(snapshot.remark)
     }
 
+    if (isPreview == null) return
     if (isPreview && adminLoading) return
     if (isPreview && !authenticated) return
 
@@ -157,6 +158,7 @@ export default function TaiwanReport() {
     setPublished(true)
   }
 
+  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
 
@@ -171,15 +173,15 @@ export default function TaiwanReport() {
               flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
               justifyContent: isMobile ? "center" : "space-between",
-              gap: "18px",
+              gap: isMobile ? "10px" : "18px",
             }}
           >
             <div
               style={{
-                width: "100%",
+                width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "240px",
                 textAlign: "center",
-                padding: "8px 0",
+                padding: isMobile ? "0" : "8px 0",
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
@@ -194,7 +196,7 @@ export default function TaiwanReport() {
 
             <div
               style={{
-                flex: "1 1 320px",
+                flex: isMobile ? "0 1 auto" : "1 1 320px",
                 display: "flex",
                 justifyContent: "center",
                 textAlign: "center",

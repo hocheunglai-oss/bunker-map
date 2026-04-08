@@ -65,7 +65,7 @@ function shortDate(value: string | null) {
 export default function HongKongReport() {
   const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState(false)
+  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [rows, setRows] = useState<HongKongReportRow[]>([])
   const [reportDate, setReportDate] = useState("")
   const [publishing, setPublishing] = useState(false)
@@ -120,6 +120,7 @@ export default function HongKongReport() {
       setRows(snapshot.rows)
     }
 
+    if (isPreview == null) return
     if (isPreview && adminLoading) return
     if (isPreview && !authenticated) return
 
@@ -142,6 +143,7 @@ export default function HongKongReport() {
     setPublished(true)
   }
 
+  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
   if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
 
@@ -156,15 +158,15 @@ export default function HongKongReport() {
               flexDirection: isMobile ? "column" : "row",
               alignItems: "center",
               justifyContent: isMobile ? "center" : "space-between",
-              gap: "18px",
+              gap: isMobile ? "10px" : "18px",
             }}
           >
             <div
               style={{
-                width: "100%",
+                width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "240px",
                 textAlign: "center",
-                padding: "8px 0",
+                padding: isMobile ? "0" : "8px 0",
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
@@ -179,7 +181,7 @@ export default function HongKongReport() {
 
             <div
               style={{
-                flex: "1 1 320px",
+                flex: isMobile ? "0 1 auto" : "1 1 320px",
                 display: "flex",
                 justifyContent: "center",
                 textAlign: "center",

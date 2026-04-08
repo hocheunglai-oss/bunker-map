@@ -8,6 +8,7 @@ import L from "leaflet"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { resolvePortFuelValue } from "@/lib/portPricing"
 
 type Port = {
   id: number
@@ -153,7 +154,7 @@ function OilWidget() {
 
     const widgetHost = document.createElement("div")
     widgetHost.className = "tradingview-widget-container__widget"
-    widgetHost.style.height = "210px"
+    widgetHost.style.height = "300px"
     widgetHost.style.width = "100%"
 
     const script = document.createElement("script")
@@ -166,7 +167,7 @@ function OilWidget() {
       showChart: true,
       locale: "en",
       width: "100%",
-      height: 210,
+      height: 300,
       largeChartUrl: "",
       isTransparent: true,
       showSymbolLogo: false,
@@ -199,7 +200,7 @@ function OilWidget() {
     }
   }, [])
 
-  return <div ref={containerRef} style={{ width: "100%", minHeight: "210px" }} />
+  return <div ref={containerRef} style={{ width: "100%", minHeight: "300px" }} />
 }
 
 function IconButton({
@@ -278,30 +279,16 @@ export default function Homepage() {
       const { data } = await supabase.from("ports").select("*")
       if (!data) return
 
-      const processed = data.map((port: Port) => {
-        const calc = (formula: string, fuel: "hsfo" | "vlsfo" | "mgo") => {
-          const parts = formula.split(" ")
-          if (parts.length !== 3) return null
+      const portsByName = new Map(
+        data.map((port: Port) => [port.name.toLowerCase(), port] as const)
+      )
 
-          const refName = parts[0].toLowerCase()
-          const operator = parts[1]
-          const value = Number(parts[2])
-          const ref = data.find((item: Port) => item.name.toLowerCase() === refName)
-
-          if (!ref || ref[fuel] == null) return null
-          if (operator === "+") return ref[fuel]! + value
-          if (operator === "-") return ref[fuel]! - value
-
-          return null
-        }
-
-        return {
-          ...port,
-          hsfo: port.hsfo ?? (port.hsfo_formula ? calc(port.hsfo_formula, "hsfo") : null),
-          vlsfo: port.vlsfo ?? (port.vlsfo_formula ? calc(port.vlsfo_formula, "vlsfo") : null),
-          mgo: port.mgo ?? (port.mgo_formula ? calc(port.mgo_formula, "mgo") : null),
-        }
-      })
+      const processed = data.map((port: Port) => ({
+        ...port,
+        hsfo: resolvePortFuelValue(port, portsByName, "hsfo"),
+        vlsfo: resolvePortFuelValue(port, portsByName, "vlsfo"),
+        mgo: resolvePortFuelValue(port, portsByName, "mgo"),
+      }))
 
       setPorts(processed)
     }
@@ -517,7 +504,7 @@ export default function Homepage() {
                 border: "1px solid rgba(255,255,255,0.1)",
                 background: "rgba(255,255,255,0.04)",
                 overflow: "hidden",
-                minHeight: "210px",
+                minHeight: "300px",
               }}
             >
               <OilWidget />
@@ -644,7 +631,7 @@ export default function Homepage() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: isMobile ? "1fr" : "1.2fr repeat(3, minmax(0, 1fr))",
+                      gridTemplateColumns: isMobile ? "1fr" : "120px 1fr",
                       gap: isMobile ? "6px" : "8px",
                       alignItems: "center",
                     }}
@@ -663,7 +650,7 @@ export default function Homepage() {
                         { label: "MGO", value: port.mgo },
                       ].map((item) => (
                         <div key={item.label} style={{ textAlign: "center" }}>
-                          <div style={{ fontSize: "10px", color: "#abd8ff" }}>{item.label}</div>
+                          <div style={{ fontSize: "10px", color: "#abd8ff", marginBottom: "2px" }}>{item.label}</div>
                           <div style={{ fontSize: "13px", fontWeight: 700 }}>{item.value ?? "-"}</div>
                         </div>
                       ))}
