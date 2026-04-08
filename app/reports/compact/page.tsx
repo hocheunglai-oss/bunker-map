@@ -6,6 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
 import { buildChinaReportSections, type ChinaReportSection } from "@/lib/chinaReport"
 import { formatReportDate } from "@/lib/taiwanReport"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 const reportSections = [
   { title: "HONG KONG / SINGAPORE", ports: ["Hong Kong", "Singapore"] },
@@ -109,6 +110,7 @@ function formatValue(value: number | null) {
 }
 
 export default function CompactReport() {
+  const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [isPreview, setIsPreview] = useState(false)
   const [sections, setSections] = useState<ChinaReportSection[]>([])
@@ -217,7 +219,7 @@ export default function CompactReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
           <div
             style={{
               display: "flex",
@@ -230,7 +232,7 @@ export default function CompactReport() {
             <div
               style={{
                 width: "100%",
-                maxWidth: "220px",
+                maxWidth: isMobile ? "180px" : "220px",
                 textAlign: "center",
                 padding: "8px 0",
                 display: "flex",
@@ -241,7 +243,7 @@ export default function CompactReport() {
               <img
                 src="/logo-trans.png"
                 alt="Bunker map logo"
-                style={{ width: "100%", height: "auto", maxWidth: "210px", opacity: 0.96 }}
+                style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "210px", opacity: 0.96 }}
               />
             </div>
 
@@ -258,15 +260,15 @@ export default function CompactReport() {
 
             <div
               style={{
-                flex: "0 0 auto",
+                flex: isMobile ? "1 1 100%" : "0 0 auto",
                 display: "grid",
                 gap: "8px",
-                justifyItems: "end",
+                justifyItems: isMobile ? "stretch" : "end",
               }}
             >
               {isPreview ? (
                 <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <button
                       onClick={handlePublish}
                       disabled={publishing || totalRows === 0 || published}
@@ -301,7 +303,7 @@ export default function CompactReport() {
                       Report Date: {reportDate || "-"}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <a
                       href="/reports/compact"
                       target="_blank"
@@ -365,7 +367,7 @@ export default function CompactReport() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
               gap: "18px",
               marginBottom: "24px",
             }}

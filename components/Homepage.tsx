@@ -7,6 +7,7 @@ import "@maptiler/sdk/dist/maptiler-sdk.css"
 import L from "leaflet"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 type Port = {
   id: number
@@ -259,6 +260,7 @@ function IconButton({
 }
 
 export default function Homepage() {
+  const isMobile = useIsMobile()
   const [ports, setPorts] = useState<Port[]>([])
   const [search, setSearch] = useState("")
   const [results, setResults] = useState<Port[]>([])
@@ -391,6 +393,7 @@ export default function Homepage() {
   }
 
   const center: [number, number] = [22.3193, 114.1694]
+  const panelInset = isMobile ? 12 : 18
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative", overflow: "hidden" }}>
@@ -481,12 +484,13 @@ export default function Homepage() {
       <div
         style={{
           position: "absolute",
-          right: 18,
-          top: 18,
+          right: panelInset,
+          top: isMobile ? "auto" : panelInset,
+          bottom: isMobile ? 78 : "auto",
           zIndex: 1000,
-          width: "min(330px, calc(100% - 36px))",
+          width: isMobile ? "min(360px, calc(100% - 24px))" : "min(330px, calc(100% - 36px))",
           borderRadius: "22px",
-          padding: "16px 18px",
+          padding: isMobile ? "14px 16px" : "16px 18px",
           display: "grid",
           gap: "14px",
           ...glassPanelStyle,
@@ -522,26 +526,26 @@ export default function Homepage() {
       <div
         style={{
           position: "absolute",
-          top: 18,
-          left: 18,
+          top: panelInset,
+          left: panelInset,
           zIndex: 1000,
-          width: "min(360px, calc(100% - 36px))",
+          width: isMobile ? "min(360px, calc(100% - 24px))" : "min(360px, calc(100% - 36px))",
           borderRadius: "26px",
-          padding: "18px",
+          padding: isMobile ? "14px" : "18px",
           ...glassPanelStyle,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: isMobile ? "12px" : "18px" }}>
           <div style={{ width: "100%", display: "flex", justifyContent: "center" }}>
             <img
               src="/logo-trans.png"
               alt="Bunker Map"
-              style={{ height: "88px", width: "auto" }}
+              style={{ height: isMobile ? "64px" : "88px", width: "auto" }}
             />
           </div>
         </div>
 
-        <div style={{ position: "relative", marginBottom: "14px" }}>
+        <div style={{ position: "relative", marginBottom: isMobile ? "10px" : "14px" }}>
           <input
             type="text"
             placeholder="Search by port name"
@@ -550,7 +554,7 @@ export default function Homepage() {
             onKeyDown={handleKeyDown}
             style={{
               width: "100%",
-              padding: "14px 16px",
+              padding: isMobile ? "12px 14px" : "14px 16px",
               borderRadius: "18px",
               border: "1px solid rgba(255,255,255,0.14)",
               background: "rgba(255,255,255,0.97)",
@@ -629,27 +633,35 @@ export default function Homepage() {
                   cursor: "pointer",
                   textAlign: "left",
                 }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1.2fr repeat(3, minmax(0, 1fr))",
-                    gap: "8px",
-                    alignItems: "center",
-                  }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: "14px" }}>{port.name}</div>
-                  {[
-                    { label: "HSFO", value: port.hsfo },
-                    { label: "VLSFO", value: port.vlsfo },
-                    { label: "MGO", value: port.mgo },
-                  ].map((item) => (
-                    <div key={item.label} style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: "10px", color: "#abd8ff" }}>{item.label}</div>
-                      <div style={{ fontSize: "13px", fontWeight: 700 }}>{item.value ?? "-"}</div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isMobile ? "1fr" : "1.2fr repeat(3, minmax(0, 1fr))",
+                      gap: isMobile ? "6px" : "8px",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: "14px" }}>{port.name}</div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                        gap: "8px",
+                      }}
+                    >
+                      {[
+                        { label: "HSFO", value: port.hsfo },
+                        { label: "VLSFO", value: port.vlsfo },
+                        { label: "MGO", value: port.mgo },
+                      ].map((item) => (
+                        <div key={item.label} style={{ textAlign: "center" }}>
+                          <div style={{ fontSize: "10px", color: "#abd8ff" }}>{item.label}</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700 }}>{item.value ?? "-"}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
               </button>
             ))}
           </div>
@@ -660,15 +672,15 @@ export default function Homepage() {
       <div
         style={{
           position: "absolute",
-          left: 18,
-          bottom: 18,
+          left: panelInset,
+          bottom: panelInset,
           zIndex: 1000,
           display: "flex",
           gap: "12px",
           pointerEvents: "none",
         }}
       >
-        <div style={{ display: "flex", gap: "12px", pointerEvents: "auto" }}>
+        <div style={{ display: "flex", gap: isMobile ? "10px" : "12px", pointerEvents: "auto" }}>
           {[
             {
               key: "admin",
@@ -737,8 +749,8 @@ export default function Homepage() {
             const expanded = hoveredAction === item.key
 
             const buttonStyle: React.CSSProperties = {
-              width: expanded ? "220px" : "50px",
-              height: "50px",
+              width: expanded && !isMobile ? "220px" : isMobile ? "46px" : "50px",
+              height: isMobile ? "46px" : "50px",
               borderRadius: "999px",
               border: item.key === "whatsapp"
                 ? "1px solid rgba(255,255,255,0.18)"
@@ -747,8 +759,8 @@ export default function Homepage() {
               color: item.textColor,
               display: "inline-flex",
               alignItems: "center",
-              justifyContent: expanded ? "flex-start" : "center",
-              gap: expanded ? "10px" : "0",
+              justifyContent: expanded && !isMobile ? "flex-start" : "center",
+              gap: expanded && !isMobile ? "10px" : "0",
               cursor: "pointer",
               boxShadow: "0 14px 34px rgba(0,0,0,0.2)",
               backdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
@@ -757,7 +769,7 @@ export default function Homepage() {
               overflow: "hidden",
               whiteSpace: "nowrap",
               transition: "width 0.22s ease, background 0.22s ease, transform 0.22s ease",
-              padding: expanded ? "0 18px" : "0",
+              padding: expanded && !isMobile ? "0 18px" : "0",
             }
 
             const content = (
@@ -765,7 +777,7 @@ export default function Homepage() {
                 <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: "22px" }}>
                   {item.icon}
                 </span>
-                {expanded && (
+                {expanded && !isMobile && (
                   <span style={{ fontWeight: 700, fontSize: "14px" }}>
                     {item.label}
                   </span>

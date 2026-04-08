@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
+import { useIsMobile } from "@/lib/useIsMobile"
 import {
   buildTaiwanReportRows,
   formatReportDate,
@@ -61,6 +62,7 @@ function arrow(change: number | null) {
 }
 
 export default function TaiwanReport() {
+  const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [isPreview, setIsPreview] = useState(false)
   const [rows, setRows] = useState<TaiwanReportRow[]>([])
@@ -161,7 +163,7 @@ export default function TaiwanReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
           <div
             style={{
               display: "flex",
@@ -174,7 +176,7 @@ export default function TaiwanReport() {
             <div
               style={{
                 width: "100%",
-                maxWidth: "240px",
+                maxWidth: isMobile ? "180px" : "240px",
                 textAlign: "center",
                 padding: "8px 0",
                 display: "flex",
@@ -185,7 +187,7 @@ export default function TaiwanReport() {
               <img
                 src="/logo-trans.png"
                 alt="Bunker map logo"
-                style={{ width: "100%", height: "auto", maxWidth: "250px", opacity: 0.96 }}
+                style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
             </div>
 
@@ -202,15 +204,15 @@ export default function TaiwanReport() {
 
             <div
               style={{
-                flex: "0 0 auto",
+                flex: isMobile ? "1 1 100%" : "0 0 auto",
                 display: "grid",
                 gap: "8px",
-                justifyItems: "end",
+                justifyItems: isMobile ? "stretch" : "end",
               }}
             >
               {isPreview ? (
                 <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <button
                       onClick={handlePublish}
                       disabled={publishing || rows.length === 0 || published}
@@ -245,7 +247,7 @@ export default function TaiwanReport() {
                       Report Date: {reportDate || "-"}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <a
                       href="/reports/taiwan"
                       target="_blank"
@@ -306,9 +308,9 @@ export default function TaiwanReport() {
             <table
               style={{
                 width: "100%",
-                minWidth: "860px",
+                minWidth: isMobile ? "760px" : "860px",
                 borderCollapse: "collapse",
-                fontSize: "15px",
+                fontSize: isMobile ? "13px" : "15px",
               }}
             >
               <thead>

@@ -6,6 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 const portsWanted = ["Hong Kong"]
 
@@ -62,6 +63,7 @@ function shortDate(value: string | null) {
 }
 
 export default function HongKongReport() {
+  const isMobile = useIsMobile()
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [isPreview, setIsPreview] = useState(false)
   const [rows, setRows] = useState<HongKongReportRow[]>([])
@@ -146,7 +148,7 @@ export default function HongKongReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
           <div
             style={{
               display: "flex",
@@ -159,7 +161,7 @@ export default function HongKongReport() {
             <div
               style={{
                 width: "100%",
-                maxWidth: "240px",
+                maxWidth: isMobile ? "180px" : "240px",
                 textAlign: "center",
                 padding: "8px 0",
                 display: "flex",
@@ -170,7 +172,7 @@ export default function HongKongReport() {
               <img
                 src="/logo-trans.png"
                 alt="Bunker map logo"
-                style={{ width: "100%", height: "auto", maxWidth: "250px", opacity: 0.96 }}
+                style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
             </div>
 
@@ -187,15 +189,15 @@ export default function HongKongReport() {
 
             <div
               style={{
-                flex: "0 0 auto",
+                flex: isMobile ? "1 1 100%" : "0 0 auto",
                 display: "grid",
                 gap: "8px",
-                justifyItems: "end",
+                justifyItems: isMobile ? "stretch" : "end",
               }}
             >
               {isPreview ? (
                 <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <button
                       onClick={handlePublish}
                       disabled={publishing || rows.length === 0 || published}
@@ -230,7 +232,7 @@ export default function HongKongReport() {
                       Report Date: {reportDate || "-"}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
                     <a
                       href="/reports/hongkong"
                       target="_blank"
@@ -291,9 +293,9 @@ export default function HongKongReport() {
             <table
               style={{
                 width: "100%",
-                minWidth: "680px",
+                minWidth: isMobile ? "620px" : "680px",
                 borderCollapse: "collapse",
-                fontSize: "15px",
+                fontSize: isMobile ? "13px" : "15px",
               }}
             >
               <thead>

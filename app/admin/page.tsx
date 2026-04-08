@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -59,6 +60,7 @@ const actionButtonStyle: React.CSSProperties = {
 }
 
 export default function AdminPage() {
+  const isMobile = useIsMobile()
   const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const [username, setUsername] = useState("")
@@ -102,7 +104,13 @@ export default function AdminPage() {
 
   return (
     <div style={pageStyle}>
-      <div style={shellStyle}>
+      <div
+        style={{
+          ...shellStyle,
+          gridTemplateColumns: isMobile ? "1fr" : shellStyle.gridTemplateColumns,
+          gap: isMobile ? "14px" : "18px",
+        }}
+      >
         <form onSubmit={handleLogin} style={panelStyle}>
           <div
             style={{
@@ -115,7 +123,7 @@ export default function AdminPage() {
               <img
                 src="/logo-trans.png"
                 alt="Bunker Map"
-                style={{ height: "86px", width: "auto" }}
+                style={{ height: isMobile ? "68px" : "86px", width: "auto" }}
               />
             </div>
 
@@ -137,7 +145,7 @@ export default function AdminPage() {
               style={{
                 margin: "0 0 24px",
                 textAlign: "center",
-                fontSize: "32px",
+                fontSize: isMobile ? "26px" : "32px",
                 lineHeight: 1,
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
@@ -273,6 +281,7 @@ export default function AdminPage() {
                 disabled={!authenticated}
                 style={{
                   ...actionButtonStyle,
+                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
                   background: authenticated ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
                   color: authenticated ? "#edf7ff" : "transparent",
                   borderColor: authenticated ? "rgba(173, 216, 255, 0.18)" : "rgba(255,255,255,0.06)",
@@ -325,6 +334,7 @@ export default function AdminPage() {
                 disabled={!authenticated}
                 style={{
                   ...actionButtonStyle,
+                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
                   background: authenticated ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
                   color: authenticated ? "#edf7ff" : "transparent",
                   borderColor: authenticated ? "rgba(173, 216, 255, 0.18)" : "rgba(255,255,255,0.06)",
