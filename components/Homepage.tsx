@@ -310,7 +310,7 @@ export default function Homepage() {
     setSelectedIndex(-1)
   }, [search, ports])
 
-  const keyPortNames = ["Hong Kong", "Singapore", "Zhoushan", "Busan", "Kaohsiung"]
+  const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Port Klang"]
   const keyPorts = useMemo(
     () =>
       keyPortNames

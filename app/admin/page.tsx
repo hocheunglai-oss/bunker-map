@@ -271,9 +271,9 @@ export default function AdminPage() {
           <div style={{ display: "grid", gap: "12px" }}>
             {[
               { label: "CHINA AND COMPACT", path: "/admin/pricesetter" },
-              { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
               { label: "HONG KONG", path: "/admin/hongkongpricehistory" },
-              { label: "TAIWAN REPORT REMARKS", path: "/admin/taiwanremarks" },
+              { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
+              { label: "TAIWAN REMARKS", path: "/admin/taiwanremarks" },
             ].map((item) => (
               <button
                 key={item.label}

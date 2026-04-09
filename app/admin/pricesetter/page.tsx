@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
@@ -15,6 +15,33 @@ type SavingPortsState = Record<string, boolean>
 
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
 
+const tertiaryPortNames = new Set(
+  [
+    "ningbo",
+    "jiangyin",
+    "nanjing",
+    "nantong",
+    "taicang",
+    "taizhou",
+    "zhangjiagang",
+    "lanqiao",
+    "lanshan",
+    "ningde",
+    "putian",
+    "xiuyu",
+    "huangpu",
+    "nansha",
+    "machong",
+    "shekou",
+  ].map((name) => name.toLowerCase())
+)
+
+const fuelFieldConfigs = [
+  { priceField: "hsfo", formulaField: "hsfo_formula", label: "HSFO" },
+  { priceField: "vlsfo", formulaField: "vlsfo_formula", label: "VLSFO" },
+  { priceField: "mgo", formulaField: "mgo_formula", label: "MGO" },
+] as const
+
 export default function AdminPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
 
@@ -24,17 +51,19 @@ export default function AdminPage() {
   const [savingPorts, setSavingPorts] = useState<SavingPortsState>({})
   const [selectedPortGroup, setSelectedPortGroup] = useState<PortGroupMode>("All")
   const [selectedTab, setSelectedTab] = useState("All")
+  const [hideTertiary, setHideTertiary] = useState(false)
   const [publishingChina, setPublishingChina] = useState(false)
   const [publishedChina, setPublishedChina] = useState(false)
   const [publishingCompact, setPublishingCompact] = useState(false)
   const [publishedCompact, setPublishedCompact] = useState(false)
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const today = new Date().toDateString()
 
   const th: React.CSSProperties = {
     borderBottom: "1px solid rgba(255,255,255,0.12)",
-    padding: "8px 6px",
-    fontSize: "11px",
+    padding: "7px 5px",
+    fontSize: "10px",
     letterSpacing: "0.08em",
     textTransform: "uppercase",
     color: "#b9d6ed",
@@ -44,7 +73,7 @@ export default function AdminPage() {
 
   const td: React.CSSProperties = {
     borderBottom: "1px solid rgba(255,255,255,0.08)",
-    padding: "4px 6px",
+    padding: "2px 5px",
     verticalAlign: "middle",
   }
 
@@ -262,7 +291,81 @@ export default function AdminPage() {
   }
 
   function isFormulaStylePort(port: any) {
-    return hasFormulaForAnyFuel(port) || String(port.name).toLowerCase() === "zhanjiang"
+    const portName = String(port.name).toLowerCase()
+    if (portName === "vizag") return false
+    return hasFormulaForAnyFuel(port) || portName === "zhanjiang"
+  }
+
+  function getDisplayTabLabel(label: string) {
+    return label
+      .replace(/\s*\(([^)]+)\)/g, " $1")
+      .replace(/\s+\/\s+/g, " / ")
+  }
+
+  function getDisplayGroupLabel(group: PortGroupMode) {
+    if (group === "Primary Ports") return "Primary"
+    if (group === "Secondary Ports") return "Secondary"
+    return "All"
+  }
+
+  function focusGridCell(row: number, col: number) {
+    const key = `${row}:${col}`
+    const element = inputRefs.current[key]
+    if (!element) return false
+    element.focus()
+    element.select()
+    return true
+  }
+
+  function moveFocus(row: number, col: number, direction: "up" | "down" | "left" | "right") {
+    if (direction === "left") {
+      for (let nextCol = col - 1; nextCol >= 0; nextCol -= 1) {
+        if (focusGridCell(row, nextCol)) return
+      }
+      return
+    }
+
+    if (direction === "right") {
+      for (let nextCol = col + 1; nextCol < 12; nextCol += 1) {
+        if (focusGridCell(row, nextCol)) return
+      }
+      return
+    }
+
+    const step = direction === "up" ? -1 : 1
+    for (let nextRow = row + step; nextRow >= 0 && nextRow < visiblePorts.length; nextRow += step) {
+      if (focusGridCell(nextRow, col)) return
+
+      for (let offset = 1; offset < 12; offset += 1) {
+        if (focusGridCell(nextRow, col - offset) || focusGridCell(nextRow, col + offset)) return
+      }
+    }
+  }
+
+  function handleGridKeyDown(
+    event: React.KeyboardEvent<HTMLInputElement>,
+    row: number,
+    col: number
+  ) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      moveFocus(row, col, "up")
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault()
+      moveFocus(row, col, "down")
+    } else if (event.key === "ArrowLeft" && event.currentTarget.selectionStart === 0) {
+      event.preventDefault()
+      moveFocus(row, col, "left")
+    } else if (
+      event.key === "ArrowRight" &&
+      event.currentTarget.selectionStart === event.currentTarget.value.length
+    ) {
+      event.preventDefault()
+      moveFocus(row, col, "right")
+    } else if (event.key === "Enter") {
+      event.preventDefault()
+      moveFocus(row, col, "down")
+    }
   }
 
   async function buildSnapshotFromPorts(
@@ -321,6 +424,7 @@ export default function AdminPage() {
       const portName = String(port.name).toLowerCase()
       const inTab = !allowedPorts || allowedPorts.has(portName)
       if (!inTab) return false
+      if (hideTertiary && tertiaryPortNames.has(portName)) return false
 
       if (selectedPortGroup === "All") return true
 
@@ -335,7 +439,7 @@ export default function AdminPage() {
 
       return hasFormula || !hasPrice
     })
-  }, [ports, selectedPortGroup, selectedTab])
+  }, [hideTertiary, ports, selectedPortGroup, selectedTab])
 
   function switchPortGroup(nextGroup: PortGroupMode) {
     if (nextGroup === selectedPortGroup) return
@@ -489,15 +593,28 @@ export default function AdminPage() {
                   style={{
                     ...tabButtonStyle,
                     background:
-                      selectedPortGroup === group ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.06)",
+                      selectedPortGroup === group ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
                     borderColor:
-                      selectedPortGroup === group ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.08)",
+                      selectedPortGroup === group ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.06)",
                     color: selectedPortGroup === group ? "#edf7ff" : "#b9d6ed",
                   }}
                 >
-                  {group}
+                  {getDisplayGroupLabel(group)}
                 </button>
               ))}
+              <button
+                onClick={() => setHideTertiary((prev) => !prev)}
+                style={{
+                  ...tabButtonStyle,
+                  background: hideTertiary ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
+                  borderColor: hideTertiary
+                    ? "rgba(143,215,255,0.38)"
+                    : "rgba(255,255,255,0.06)",
+                  color: hideTertiary ? "#edf7ff" : "#b9d6ed",
+                }}
+              >
+                Hide Tertiary
+              </button>
             </div>
           </div>
 
@@ -510,21 +627,21 @@ export default function AdminPage() {
             }}
           >
             {priceSetterTabs.map((tab) => (
-              <button
-                key={tab.label}
-                onClick={() => setSelectedTab(tab.label)}
-                style={{
-                  ...tabButtonStyle,
-                  background:
-                    selectedTab === tab.label ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.06)",
-                  borderColor:
-                    selectedTab === tab.label ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.08)",
-                  color: selectedTab === tab.label ? "#edf7ff" : "#b9d6ed",
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
+                <button
+                  key={tab.label}
+                  onClick={() => setSelectedTab(tab.label)}
+                  style={{
+                    ...tabButtonStyle,
+                    background:
+                      selectedTab === tab.label ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
+                    borderColor:
+                      selectedTab === tab.label ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.06)",
+                    color: selectedTab === tab.label ? "#edf7ff" : "#b9d6ed",
+                  }}
+                >
+                  {getDisplayTabLabel(tab.label)}
+                </button>
+              ))}
           </div>
         </div>
 
@@ -541,7 +658,7 @@ export default function AdminPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showCoords ? "980px" : "860px" }}>
             <thead>
               <tr>
-                <th style={th}>↕</th>
+                <th style={th}>⇅</th>
                 <th style={th}>Status</th>
                 <th style={th}>Port</th>
                 {showCoords && <th style={th}>Lat</th>}
@@ -572,11 +689,15 @@ export default function AdminPage() {
                           value={port.name}
                           onChange={(event) => updateValue(port.id, "name", event.target.value)}
                           onBlur={() => saveDivider(port)}
+                          ref={(element) => {
+                            inputRefs.current[`${index}:0`] = element
+                          }}
+                          onKeyDown={(event) => handleGridKeyDown(event, index, 0)}
                           style={{
                             ...compactInputStyle,
                             width: "100%",
                             fontWeight: 700,
-                            fontSize: "13px",
+                            fontSize: "12px",
                           }}
                         />
                       </td>
@@ -593,6 +714,9 @@ export default function AdminPage() {
                 const isSaving = Boolean(savingPorts[port.id])
                 const isSaved = Boolean(savedPorts[port.id])
                 const isFormulaPort = isFormulaStylePort(port)
+                const rowTint = isFormulaPort
+                  ? "rgba(24, 74, 128, 0.34)"
+                  : "rgba(14, 52, 96, 0.34)"
 
                 return (
                   <tr
@@ -601,14 +725,32 @@ export default function AdminPage() {
                     onDragStart={(event) => dragStart(event, index)}
                     onDrop={(event) => dragDrop(event, index)}
                     onDragOver={(event) => event.preventDefault()}
+                    style={{ background: rowTint }}
                   >
-                    <td style={td}>↕</td>
-                    <td style={{ ...td, fontSize: "13px" }}>{updated ? "🟢" : "🔴"}</td>
+                    <td style={{ ...td, color: "#8fb7d5", fontSize: "11px" }}>⇅</td>
+                    <td style={td}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: updated ? "#38d39f" : "#e05a5a",
+                          boxShadow: updated
+                            ? "0 0 0 2px rgba(56, 211, 159, 0.12)"
+                            : "0 0 0 2px rgba(224, 90, 90, 0.12)",
+                        }}
+                      />
+                    </td>
                     <td style={td}>
                       <input
                         value={port.name ?? ""}
                         onChange={(event) => updateValue(port.id, "name", event.target.value)}
-                        style={{ ...compactInputStyle, width: "116px" }}
+                        ref={(element) => {
+                          inputRefs.current[`${index}:0`] = element
+                        }}
+                        onKeyDown={(event) => handleGridKeyDown(event, index, 0)}
+                        style={{ ...compactInputStyle, width: "114px", fontWeight: 600 }}
                       />
                     </td>
 
@@ -617,6 +759,10 @@ export default function AdminPage() {
                         <input
                           value={port.lat ?? ""}
                           onChange={(event) => updateValue(port.id, "lat", event.target.value)}
+                          ref={(element) => {
+                            inputRefs.current[`${index}:1`] = element
+                          }}
+                          onKeyDown={(event) => handleGridKeyDown(event, index, 1)}
                           style={{ ...compactInputStyle, width: "74px" }}
                         />
                       </td>
@@ -627,16 +773,16 @@ export default function AdminPage() {
                         <input
                           value={port.lng ?? ""}
                           onChange={(event) => updateValue(port.id, "lng", event.target.value)}
+                          ref={(element) => {
+                            inputRefs.current[`${index}:2`] = element
+                          }}
+                          onKeyDown={(event) => handleGridKeyDown(event, index, 2)}
                           style={{ ...compactInputStyle, width: "74px" }}
                         />
                       </td>
                     )}
 
-                    {[
-                      { priceField: "hsfo", formulaField: "hsfo_formula" },
-                      { priceField: "vlsfo", formulaField: "vlsfo_formula" },
-                      { priceField: "mgo", formulaField: "mgo_formula" },
-                    ].map((field) => (
+                    {fuelFieldConfigs.map((field, fuelIndex) => (
                       <td key={field.priceField} style={td}>
                         <input
                           placeholder={isFormulaPort ? "formula" : "price"}
@@ -648,15 +794,21 @@ export default function AdminPage() {
                               event.target.value
                             )
                           }
+                          ref={(element) => {
+                            inputRefs.current[`${index}:${fuelIndex + (showCoords ? 3 : 1)}`] = element
+                          }}
+                          onKeyDown={(event) =>
+                            handleGridKeyDown(event, index, fuelIndex + (showCoords ? 3 : 1))
+                          }
                           style={{
                             ...compactInputStyle,
-                            width: isFormulaPort ? "130px" : "64px",
+                            width: isFormulaPort ? "124px" : "62px",
                           }}
                         />
                       </td>
                     ))}
 
-                    <td style={{ ...td, fontSize: "13px", whiteSpace: "nowrap" }}>
+                    <td style={{ ...td, fontSize: "12px", whiteSpace: "nowrap", color: "#c4dff2" }}>
                       {port.updated_at
                         ? new Date(port.updated_at).toLocaleDateString("en-GB")
                         : "-"}
@@ -692,53 +844,55 @@ export default function AdminPage() {
 }
 
 const compactInputStyle: React.CSSProperties = {
-  padding: "5px 7px",
-  borderRadius: "10px",
-  border: "1px solid rgba(173, 216, 255, 0.2)",
-  background: "rgba(255,255,255,0.06)",
+  padding: "4px 6px",
+  borderRadius: "8px",
+  border: "1px solid rgba(173, 216, 255, 0.16)",
+  background: "rgba(255,255,255,0.03)",
   color: "#edf7ff",
   fontSize: "12px",
   outline: "none",
+  lineHeight: 1.2,
 }
 
 const toolbarButtonStyle: React.CSSProperties = {
-  padding: "10px 14px",
+  padding: "8px 12px",
   border: "1px solid rgba(255,255,255,0.14)",
-  borderRadius: "14px",
-  background: "rgba(255,255,255,0.08)",
+  borderRadius: "12px",
+  background: "rgba(255,255,255,0.07)",
   color: "#edf7ff",
   cursor: "pointer",
-  fontSize: "14px",
+  fontSize: "13px",
   fontWeight: 700,
 }
 
 const tabButtonStyle: React.CSSProperties = {
-  padding: "9px 12px",
-  border: "1px solid rgba(255,255,255,0.08)",
+  padding: "7px 11px",
+  border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "999px",
-  background: "rgba(255,255,255,0.06)",
+  background: "rgba(255,255,255,0.04)",
   cursor: "pointer",
-  fontSize: "12px",
+  fontSize: "11px",
   fontWeight: 700,
+  letterSpacing: "0.02em",
 }
 
 const saveButtonStyle: React.CSSProperties = {
   color: "white",
-  padding: "8px 12px",
+  padding: "6px 10px",
   border: "none",
-  borderRadius: "10px",
+  borderRadius: "8px",
   cursor: "pointer",
-  fontSize: "13px",
+  fontSize: "12px",
   fontWeight: 700,
 }
 
 const dangerButtonStyle: React.CSSProperties = {
   background: "#e63946",
   color: "white",
-  padding: "8px 12px",
+  padding: "6px 10px",
   border: "none",
-  borderRadius: "10px",
+  borderRadius: "8px",
   cursor: "pointer",
-  fontSize: "13px",
+  fontSize: "12px",
   fontWeight: 700,
 }
