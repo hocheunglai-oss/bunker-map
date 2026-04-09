@@ -1,70 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { supabase } from "@/lib/supabase"
-import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
-import { buildChinaReportSections, type ChinaReportSection } from "@/lib/chinaReport"
-import { formatReportDate } from "@/lib/taiwanReport"
+import {
+  compactLeftColumnTitles,
+  compactReportSections as reportSections,
+  defaultExpandablePreviewRows,
+} from "@/data/reportSections"
+import { loadReportSnapshot } from "@/lib/reportSnapshots"
+import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
-
-const reportSections = [
-  { title: "HONG KONG / SINGAPORE", ports: ["Hong Kong", "Singapore"] },
-  {
-    title: "CHINA (NORTH)",
-    ports: ["Dalian", "Bayuquan", "Qinhuangdao", "Tianjin", "Caofeidian", "Huanghua", "Jingtang"],
-  },
-  {
-    title: "CHINA (EAST)",
-    ports: [
-      "Qingdao",
-      "Zhoushan",
-      "Beilun",
-      "Ningbo",
-      "Shanghai",
-      "Changshu",
-      "Jiang Yin",
-      "Nanjing",
-      "Nantong",
-      "Taicang",
-      "Taizhou",
-      "Zhangjiagang",
-      "Rizhao",
-      "Lianyungang",
-      "Lanshan",
-      "Lanqiao",
-      "Xiamen",
-      "Fuzhou",
-      "Mawei",
-      "Ningde",
-      "Putian",
-      "Xiuyu",
-    ],
-  },
-  {
-    title: "CHINA (SOUTH)",
-    ports: ["Guangzhou", "Huangpu", "Nansha", "Chiwan", "Chiwian", "Macao", "Machong", "Shekou", "Zhanjiang", "Fangcheng", "Yangpu"],
-  },
-  { title: "JAPAN", ports: ["Tokyo Bay", "Tokyo", "Osaka Bay", "Osaka"] },
-  { title: "SOUTH KOREA", ports: ["Busan", "Yosu", "Yeosu", "Ulsan", "Inchon", "Incheon"] },
-  { title: "TAIWAN", ports: ["Kaohsiung", "Taichung", "Keelung", "Suao", "Hualien", "Mailiao"] },
-  { title: "VIETNAM", ports: ["Ho Chi Minh", "Ho Chi Minh City", "Hochiminh City", "Haiphong"] },
-  { title: "PHILIPPINES", ports: ["Manila"] },
-  { title: "THAILAND", ports: ["Bangkok", "Koh Sichang", "Kohsichang", "Maptaphut"] },
-  { title: "MALAYSIA", ports: ["Pasir Gudang", "Port Klang", "Tanjung Pelepas"] },
-  { title: "SRI LANKA", ports: ["Colombo"] },
-  { title: "INDIA", ports: ["Kochi", "Mumbai", "Vizag"] },
-  { title: "INDONESIA", ports: ["Jakarta", "Surabaya"] },
-]
-
-const leftColumnTitles = ["HONG KONG / SINGAPORE", "CHINA (NORTH)", "CHINA (EAST)", "CHINA (SOUTH)", "JAPAN", "SOUTH KOREA", "TAIWAN"]
-const defaultPreviewRows: Record<string, string[]> = {
-  "CHINA (NORTH)": ["Dalian", "Tianjin"],
-  "CHINA (EAST)": ["Zhoushan", "Shanghai"],
-  "CHINA (SOUTH)": ["Guangzhou", "Fangcheng"],
-}
-
-const includedPorts = Array.from(new Set(reportSections.flatMap((section) => section.ports)))
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -111,57 +55,12 @@ function formatValue(value: number | null) {
 
 export default function CompactReport() {
   const isMobile = useIsMobile()
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [sections, setSections] = useState<ChinaReportSection[]>([])
   const [reportDate, setReportDate] = useState("")
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
-  const [publishing, setPublishing] = useState(false)
-  const [published, setPublished] = useState(false)
-
-  useEffect(() => {
-    setIsPreview(new URLSearchParams(window.location.search).get("preview") === "1")
-  }, [])
-
-  async function loadLiveCompactData() {
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", includedPorts)
-
-    if (!portsData) return null
-
-    const nextSections = buildChinaReportSections(portsData, reportSections)
-
-    const latestUpdated = portsData
-      .map((port) => port.updated_at)
-      .filter(Boolean)
-      .sort()
-      .at(-1)
-
-    const nextReportDate = latestUpdated ? formatReportDate(latestUpdated) : ""
-
-    return {
-      reportDate: nextReportDate,
-      sections: nextSections,
-    }
-  }
-
-  async function refreshPreviewData() {
-    const liveData = await loadLiveCompactData()
-    if (!liveData) return
-
-    setSections(liveData.sections)
-    setReportDate(liveData.reportDate)
-  }
 
   useEffect(() => {
     async function load() {
-      if (isPreview) {
-        await refreshPreviewData()
-        return
-      }
-
       const snapshot = await loadReportSnapshot<{
         reportDate: string
         sections: ChinaReportSection[]
@@ -173,56 +72,16 @@ export default function CompactReport() {
       setSections(snapshot.sections)
     }
 
-    if (isPreview == null) return
-    if (isPreview && adminLoading) return
-    if (isPreview && !authenticated) return
-
     load()
-  }, [isPreview, adminLoading, authenticated])
-
-  useEffect(() => {
-    if (isPreview !== true || !authenticated) return
-
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") {
-        refreshPreviewData()
-      }
-    }
-
-    const interval = window.setInterval(refreshIfVisible, 15000)
-    window.addEventListener("focus", refreshIfVisible)
-    document.addEventListener("visibilitychange", refreshIfVisible)
-
-    return () => {
-      window.clearInterval(interval)
-      window.removeEventListener("focus", refreshIfVisible)
-      document.removeEventListener("visibilitychange", refreshIfVisible)
-    }
-  }, [isPreview, authenticated])
-
-  async function handlePublish() {
-    setPublishing(true)
-    const liveData = await loadLiveCompactData()
-
-    if (liveData) {
-      setSections(liveData.sections)
-      setReportDate(liveData.reportDate)
-      await saveReportSnapshot("compact", liveData)
-    } else {
-      await saveReportSnapshot("compact", { reportDate, sections })
-    }
-
-    setPublishing(false)
-    setPublished(true)
-  }
+  }, [])
 
   const totalRows = useMemo(
     () => sections.reduce((sum, section) => sum + section.rows.length, 0),
     [sections]
   )
 
-  const leftSections = sections.filter((section) => leftColumnTitles.includes(section.title))
-  const rightSections = sections.filter((section) => !leftColumnTitles.includes(section.title))
+  const leftSections = sections.filter((section) => compactLeftColumnTitles.includes(section.title))
+  const rightSections = sections.filter((section) => !compactLeftColumnTitles.includes(section.title))
 
   function toggleSection(title: string) {
     setExpandedSections((prev) => ({
@@ -233,15 +92,11 @@ export default function CompactReport() {
 
   function visibleRows(section: ChinaReportSection) {
     if (expandedSections[section.title]) return section.rows
-    const preview = defaultPreviewRows[section.title]
+    const preview = defaultExpandablePreviewRows[section.title]
     if (!preview) return section.rows
     const previewSet = new Set(preview)
     return section.rows.filter((row) => previewSet.has(row.port))
   }
-
-  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
 
   return (
     <div style={pageStyle}>
@@ -294,95 +149,21 @@ export default function CompactReport() {
                 justifyItems: isMobile ? "stretch" : "end",
               }}
             >
-              {isPreview ? (
-                <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <button
-                      onClick={handlePublish}
-                      disabled={publishing || totalRows === 0 || published}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: published ? "1px solid rgba(255,255,255,0.12)" : "none",
-                        background: published
-                          ? "rgba(255,255,255,0.08)"
-                          : "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        cursor: published ? "default" : "pointer",
-                      }}
-                    >
-                      {publishing ? "Publishing..." : published ? "Published" : "Publish"}
-                    </button>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        color: "#d7e9ff",
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Report Date: {reportDate || "-"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <a
-                      href="/reports/compact"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "none",
-                        background: "#c53939",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Check
-                    </a>
-                    <a
-                      href="/admin"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(255,255,255,0.08)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Back To Admin
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "8px 12px",
-                    borderRadius: "999px",
-                    background: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#d7e9ff",
-                    fontSize: "14px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Report Date: {reportDate || "-"}
-                </span>
-              )}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: "999px",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#d7e9ff",
+                  fontSize: "14px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Report Date: {reportDate || "-"}
+              </span>
             </div>
           </div>
         </div>
@@ -404,7 +185,7 @@ export default function CompactReport() {
               <div key={columnIndex} style={{ display: "grid", gap: "18px", alignContent: "start" }}>
                 {columnSections.map((section) => {
                   const rowsToShow = visibleRows(section)
-                  const isExpandable = Boolean(defaultPreviewRows[section.title])
+                  const isExpandable = Boolean(defaultExpandablePreviewRows[section.title])
                   const isExpanded = Boolean(expandedSections[section.title])
 
                   return (

@@ -158,7 +158,7 @@ export default function AdminRemarks() {
                 fontWeight: 700,
               }}
             >
-              Back To Admin Home
+              ← Back To Admin
             </a>
 
             <button

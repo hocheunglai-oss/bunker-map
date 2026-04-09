@@ -370,7 +370,7 @@ export default function TaiwanPriceHistoryPage() {
                 fontWeight: 700,
               }}
             >
-              Back To Admin Home
+              ← Back To Admin
             </a>
 
             <a

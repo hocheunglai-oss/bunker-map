@@ -1,14 +1,10 @@
 "use client"
 
 import { Fragment, useEffect, useState } from "react"
-import { supabase } from "@/lib/supabase"
-import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
-import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
+import { loadReportSnapshot } from "@/lib/reportSnapshots"
+import { type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
 import { useIsMobile } from "@/lib/useIsMobile"
-
-const portsWanted = ["Hong Kong"]
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -64,51 +60,11 @@ function shortDate(value: string | null) {
 
 export default function HongKongReport() {
   const isMobile = useIsMobile()
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [rows, setRows] = useState<HongKongReportRow[]>([])
   const [reportDate, setReportDate] = useState("")
-  const [publishing, setPublishing] = useState(false)
-  const [published, setPublished] = useState(false)
-
-  useEffect(() => {
-    setIsPreview(new URLSearchParams(window.location.search).get("preview") === "1")
-  }, [])
-
-  async function loadLiveHongKongData() {
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    return {
-      reportDate: formatReportDate(historyData[0].recorded_at),
-      rows: buildHongKongReportRows(portsData, historyData, portsWanted),
-    }
-  }
 
   useEffect(() => {
     async function load() {
-      if (isPreview) {
-        const liveData = await loadLiveHongKongData()
-        if (!liveData) return
-        setReportDate(liveData.reportDate)
-        setRows(liveData.rows)
-        return
-      }
-
       const snapshot = await loadReportSnapshot<{
         reportDate: string
         rows: HongKongReportRow[]
@@ -120,32 +76,8 @@ export default function HongKongReport() {
       setRows(snapshot.rows)
     }
 
-    if (isPreview == null) return
-    if (isPreview && adminLoading) return
-    if (isPreview && !authenticated) return
-
     load()
-  }, [isPreview, adminLoading, authenticated])
-
-  async function handlePublish() {
-    setPublishing(true)
-    const liveData = await loadLiveHongKongData()
-
-    if (liveData) {
-      setReportDate(liveData.reportDate)
-      setRows(liveData.rows)
-      await saveReportSnapshot("hongkong", liveData)
-    } else {
-      await saveReportSnapshot("hongkong", { reportDate, rows })
-    }
-
-    setPublishing(false)
-    setPublished(true)
-  }
-
-  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
+  }, [])
 
   return (
     <div style={pageStyle}>
@@ -198,95 +130,21 @@ export default function HongKongReport() {
                 justifyItems: isMobile ? "stretch" : "end",
               }}
             >
-              {isPreview ? (
-                <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <button
-                      onClick={handlePublish}
-                      disabled={publishing || rows.length === 0 || published}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: published ? "1px solid rgba(255,255,255,0.12)" : "none",
-                        background: published
-                          ? "rgba(255,255,255,0.08)"
-                          : "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        cursor: published ? "default" : "pointer",
-                      }}
-                    >
-                      {publishing ? "Publishing..." : published ? "Published" : "Publish"}
-                    </button>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        color: "#d7e9ff",
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Report Date: {reportDate || "-"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <a
-                      href="/reports/hongkong"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "none",
-                        background: "#c53939",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Check
-                    </a>
-                    <a
-                      href="/admin"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(255,255,255,0.08)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Back To Admin
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "8px 12px",
-                    borderRadius: "999px",
-                    background: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#d7e9ff",
-                    fontSize: "14px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Report Date: {reportDate || "-"}
-                </span>
-              )}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: "999px",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#d7e9ff",
+                  fontSize: "14px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Report Date: {reportDate || "-"}
+              </span>
             </div>
           </div>
         </div>

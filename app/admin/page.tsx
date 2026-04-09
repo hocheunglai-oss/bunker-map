@@ -19,7 +19,7 @@ const pageStyle: React.CSSProperties = {
 const shellStyle: React.CSSProperties = {
   width: "min(1320px, 100%)",
   display: "grid",
-  gridTemplateColumns: "1.05fr 1fr 0.9fr",
+  gridTemplateColumns: "1.05fr 1fr",
   gap: "18px",
 }
 
@@ -270,63 +270,10 @@ export default function AdminPage() {
 
           <div style={{ display: "grid", gap: "12px" }}>
             {[
-              { label: "Price Setter", path: "/admin/pricesetter" },
-              { label: "Taiwan Price History", path: "/admin/taiwanpricehistory" },
-              { label: "Hong Kong Price History", path: "/admin/hongkongpricehistory" },
-              { label: "Taiwan Market Report Remarks", path: "/admin/taiwanremarks" },
-            ].map((item) => (
-              <button
-                key={item.label}
-                onClick={() => authenticated && router.push(item.path)}
-                disabled={!authenticated}
-                style={{
-                  ...actionButtonStyle,
-                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                  background: authenticated ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
-                  color: authenticated ? "#edf7ff" : "transparent",
-                  borderColor: authenticated ? "rgba(173, 216, 255, 0.18)" : "rgba(255,255,255,0.06)",
-                  cursor: authenticated ? "pointer" : "default",
-                  boxShadow: authenticated ? "0 10px 24px rgba(0,0,0,0.14)" : "none",
-                }}
-              >
-                <span style={{ filter: authenticated ? "none" : "blur(7px)" }}>
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
-
-        </div>
-
-        <div
-          style={{
-            ...panelStyle,
-            background: authenticated ? panelStyle.background : "rgba(34, 40, 48, 0.78)",
-            border: authenticated
-              ? panelStyle.border
-              : "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: "12px",
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              color: authenticated ? "#8fd7ff" : "#8f98a2",
-              marginBottom: "10px",
-              fontWeight: 700,
-            }}
-          >
-            Market Reports
-          </div>
-
-          <div style={{ display: "grid", gap: "12px" }}>
-            {[
-              { label: "Taiwan Market Report", path: "/reports/taiwan?preview=1" },
-              { label: "Hong Kong Market Report", path: "/reports/hongkong?preview=1" },
-              { label: "China Market Report", path: "/reports/china?preview=1" },
-              { label: "Compact Market Report", path: "/reports/compact?preview=1" },
+              { label: "CHINA AND COMPACT", path: "/admin/pricesetter" },
+              { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
+              { label: "HONG KONG", path: "/admin/hongkongpricehistory" },
+              { label: "TAIWAN REPORT REMARKS", path: "/admin/taiwanremarks" },
             ].map((item) => (
               <button
                 key={item.label}

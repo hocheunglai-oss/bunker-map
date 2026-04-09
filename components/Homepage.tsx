@@ -389,7 +389,7 @@ export default function Homepage() {
       <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
         <MapContainer
           center={center}
-          zoom={3}
+          zoom={4}
           zoomControl={false}
           style={{ height: "100%", width: "100%" }}
         >

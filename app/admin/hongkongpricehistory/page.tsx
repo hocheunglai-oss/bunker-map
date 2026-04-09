@@ -360,7 +360,7 @@ export default function HongKongPriceHistoryPage() {
                 fontWeight: 700,
               }}
             >
-              Back To Admin Home
+              ← Back To Admin
             </a>
 
             <a

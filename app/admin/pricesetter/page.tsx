@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
+import { chinaReportSections, compactReportSections } from "@/data/reportSections"
 import { hasFormulaForAnyFuel, parseSimpleFormula } from "@/lib/portPricing"
+import { saveReportSnapshot } from "@/lib/reportSnapshots"
+import { buildChinaReportSections } from "@/lib/chinaReport"
+import { formatReportDate } from "@/lib/taiwanReport"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
@@ -20,6 +24,10 @@ export default function AdminPage() {
   const [savingPorts, setSavingPorts] = useState<SavingPortsState>({})
   const [selectedPortGroup, setSelectedPortGroup] = useState<PortGroupMode>("All")
   const [selectedTab, setSelectedTab] = useState("All")
+  const [publishingChina, setPublishingChina] = useState(false)
+  const [publishedChina, setPublishedChina] = useState(false)
+  const [publishingCompact, setPublishingCompact] = useState(false)
+  const [publishedCompact, setPublishedCompact] = useState(false)
 
   const today = new Date().toDateString()
 
@@ -257,6 +265,47 @@ export default function AdminPage() {
     return hasFormulaForAnyFuel(port) || String(port.name).toLowerCase() === "zhanjiang"
   }
 
+  async function buildSnapshotFromPorts(
+    key: "china" | "compact",
+    sections: Array<{ title: string; ports: string[] }>
+  ) {
+    const includedPorts = Array.from(new Set(sections.flatMap((section) => section.ports)))
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", includedPorts)
+
+    if (!portsData) return null
+
+    const latestUpdated = portsData
+      .map((port) => port.updated_at)
+      .filter(Boolean)
+      .sort()
+      .at(-1)
+
+    const snapshot = {
+      reportDate: latestUpdated ? formatReportDate(latestUpdated) : "",
+      sections: buildChinaReportSections(portsData, sections),
+    }
+
+    await saveReportSnapshot(key, snapshot)
+    return snapshot
+  }
+
+  async function handlePublishChina() {
+    setPublishingChina(true)
+    const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
+    if (snapshot) setPublishedChina(true)
+    setPublishingChina(false)
+  }
+
+  async function handlePublishCompact() {
+    setPublishingCompact(true)
+    const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
+    if (snapshot) setPublishedCompact(true)
+    setPublishingCompact(false)
+  }
+
   const visiblePorts = useMemo(() => {
     const activeTab = priceSetterTabs.find((tab) => tab.label === selectedTab)
     const allowedPorts =
@@ -361,13 +410,61 @@ export default function AdminPage() {
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
               <a href="/admin" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
-                Back To Admin Home
+                ← Back To Admin
+              </a>
+              <button
+                onClick={handlePublishChina}
+                disabled={publishingChina}
+                style={{
+                  ...toolbarButtonStyle,
+                  background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
+                  border: "none",
+                }}
+              >
+                {publishingChina ? "Publishing China..." : publishedChina ? "Published China" : "Publish China"}
+              </button>
+              <a
+                href="/reports/china"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...toolbarButtonStyle,
+                  textDecoration: "none",
+                  background: "#c53939",
+                  border: "none",
+                }}
+              >
+                Check China
+              </a>
+              <button
+                onClick={handlePublishCompact}
+                disabled={publishingCompact}
+                style={{
+                  ...toolbarButtonStyle,
+                  background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
+                  border: "none",
+                }}
+              >
+                {publishingCompact ? "Publishing Compact..." : publishedCompact ? "Published Compact" : "Publish Compact"}
+              </button>
+              <a
+                href="/reports/compact"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...toolbarButtonStyle,
+                  textDecoration: "none",
+                  background: "#c53939",
+                  border: "none",
+                }}
+              >
+                Check Compact
               </a>
               <button onClick={addPort} style={toolbarButtonStyle}>
                 Add Port
               </button>
               <button onClick={addDivider} style={toolbarButtonStyle}>
-                Add Section Divider
+                Add Divider
               </button>
               <button onClick={() => setShowCoords(!showCoords)} style={toolbarButtonStyle}>
                 {showCoords ? "Hide Coordinates" : "Show Coordinates"}

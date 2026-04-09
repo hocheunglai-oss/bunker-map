@@ -1,17 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { supabase } from "@/lib/supabase"
-import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { loadReportSnapshot, saveReportSnapshot } from "@/lib/reportSnapshots"
+import { loadReportSnapshot } from "@/lib/reportSnapshots"
 import { useIsMobile } from "@/lib/useIsMobile"
-import {
-  buildTaiwanReportRows,
-  formatReportDate,
-  type TaiwanReportRow,
-} from "@/lib/taiwanReport"
-
-const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
+import { type TaiwanReportRow } from "@/lib/taiwanReport"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -63,60 +55,12 @@ function arrow(change: number | null) {
 
 export default function TaiwanReport() {
   const isMobile = useIsMobile()
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [isPreview, setIsPreview] = useState<boolean | null>(null)
   const [rows, setRows] = useState<TaiwanReportRow[]>([])
   const [remark, setRemark] = useState("")
   const [reportDate, setReportDate] = useState("")
-  const [publishing, setPublishing] = useState(false)
-  const [published, setPublished] = useState(false)
-
-  useEffect(() => {
-    setIsPreview(new URLSearchParams(window.location.search).get("preview") === "1")
-  }, [])
-
-  async function loadLiveTaiwanData() {
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    const { data: remarkData } = await supabase
-      .from("remarks")
-      .select("*")
-      .eq("id", 1)
-      .maybeSingle()
-
-    return {
-      reportDate: formatReportDate(historyData[0].recorded_at),
-      rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
-      remark: remarkData?.content || "",
-    }
-  }
 
   useEffect(() => {
     async function load() {
-      if (isPreview) {
-        const liveData = await loadLiveTaiwanData()
-        if (!liveData) return
-        setReportDate(liveData.reportDate)
-        setRows(liveData.rows)
-        setRemark(liveData.remark)
-        return
-      }
-
       const snapshot = await loadReportSnapshot<{
         reportDate: string
         rows: TaiwanReportRow[]
@@ -130,37 +74,8 @@ export default function TaiwanReport() {
       setRemark(snapshot.remark)
     }
 
-    if (isPreview == null) return
-    if (isPreview && adminLoading) return
-    if (isPreview && !authenticated) return
-
     load()
-  }, [isPreview, adminLoading, authenticated])
-
-  async function handlePublish() {
-    setPublishing(true)
-    const liveData = await loadLiveTaiwanData()
-
-    if (liveData) {
-      setReportDate(liveData.reportDate)
-      setRows(liveData.rows)
-      setRemark(liveData.remark)
-      await saveReportSnapshot("taiwan", liveData)
-    } else {
-      await saveReportSnapshot("taiwan", {
-        reportDate,
-        rows,
-        remark,
-      })
-    }
-
-    setPublishing(false)
-    setPublished(true)
-  }
-
-  if (isPreview == null) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (isPreview && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
+  }, [])
 
   return (
     <div style={pageStyle}>
@@ -202,7 +117,7 @@ export default function TaiwanReport() {
                 textAlign: "center",
               }}
             >
-              <h1 style={sectionTitleStyle}>TAIWAN MARKET REPORT</h1>
+              <h1 style={sectionTitleStyle}>TAIWAN POSTED PRICE</h1>
             </div>
 
             <div
@@ -213,95 +128,21 @@ export default function TaiwanReport() {
                 justifyItems: isMobile ? "stretch" : "end",
               }}
             >
-              {isPreview ? (
-                <>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <button
-                      onClick={handlePublish}
-                      disabled={publishing || rows.length === 0 || published}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: published ? "1px solid rgba(255,255,255,0.12)" : "none",
-                        background: published
-                          ? "rgba(255,255,255,0.08)"
-                          : "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        cursor: published ? "default" : "pointer",
-                      }}
-                    >
-                      {publishing ? "Publishing..." : published ? "Published" : "Publish"}
-                    </button>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        color: "#d7e9ff",
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Report Date: {reportDate || "-"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: isMobile ? "stretch" : "flex-end" }}>
-                    <a
-                      href="/reports/taiwan"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "none",
-                        background: "#c53939",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Check
-                    </a>
-                    <a
-                      href="/admin"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: "999px",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(255,255,255,0.08)",
-                        color: "#fff",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Back To Admin
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "8px 12px",
-                    borderRadius: "999px",
-                    background: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#d7e9ff",
-                    fontSize: "14px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Report Date: {reportDate || "-"}
-                </span>
-              )}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: "999px",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#d7e9ff",
+                  fontSize: "14px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Report Date: {reportDate || "-"}
+              </span>
             </div>
           </div>
         </div>
