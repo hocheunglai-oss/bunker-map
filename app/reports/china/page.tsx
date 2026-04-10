@@ -9,6 +9,7 @@ import {
 import { loadReportSnapshot } from "@/lib/reportSnapshots"
 import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
+import DisclaimerLink from "@/components/DisclaimerLink"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -418,6 +419,10 @@ export default function ChinaReport() {
           >
             Contact On WhatsApp
           </a>
+        </div>
+
+        <div style={{ marginTop: "20px" }}>
+          <DisclaimerLink centered />
         </div>
       </div>
     </div>

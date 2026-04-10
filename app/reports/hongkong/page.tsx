@@ -5,6 +5,7 @@ import { loadReportSnapshot } from "@/lib/reportSnapshots"
 import { type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
 import { useIsMobile } from "@/lib/useIsMobile"
+import DisclaimerLink from "@/components/DisclaimerLink"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -406,6 +407,10 @@ export default function HongKongReport() {
           >
             Contact On WhatsApp
           </a>
+        </div>
+
+        <div style={{ marginTop: "20px" }}>
+          <DisclaimerLink centered />
         </div>
       </div>
     </div>
