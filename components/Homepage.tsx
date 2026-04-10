@@ -527,12 +527,24 @@ export default function Homepage() {
         }}
       >
         <div style={{ display: "flex", justifyContent: "center", marginBottom: isMobile ? "12px" : "18px" }}>
-          <div style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+          <div style={{ width: "100%", display: "flex", justifyContent: "center", flexDirection: "column", alignItems: "center" }}>
             <img
               src="/logo-trans.png"
               alt="Bunker Map"
               style={{ height: isMobile ? "64px" : "88px", width: "auto" }}
             />
+            <div
+              style={{
+                fontSize: "12px",
+                textTransform: "uppercase",
+                letterSpacing: "0.2em",
+                color: "#8fd7ff",
+                marginTop: "6px",
+                fontWeight: 800,
+              }}
+            >
+              Market Intelligence
+            </div>
           </div>
         </div>
 
@@ -601,18 +613,6 @@ export default function Homepage() {
 
         {!search && selectedPortId == null && (
           <div style={{ display: "grid", gap: "8px" }}>
-            <div
-              style={{
-                fontSize: "12px",
-                textTransform: "uppercase",
-                letterSpacing: "0.2em",
-                color: "#8fd7ff",
-                marginBottom: "2px",
-                fontWeight: 800,
-              }}
-            >
-              Key Port Snapshot
-            </div>
             {keyPorts.map((port) => (
               <button
                 key={port.id}

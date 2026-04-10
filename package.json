@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "restart:dev": "sh ./scripts/restart-dev.sh",
     "build": "next build",
     "start": "next start",
     "vercel-build": "next build"
