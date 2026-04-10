@@ -350,6 +350,11 @@ export default function Homepage() {
     return () => clearReportsCloseTimeout()
   }, [])
 
+  useEffect(() => {
+    if (!isMobile) return
+    window.scrollTo(0, 0)
+  }, [isMobile])
+
   const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Port Klang"]
   const keyPorts = useMemo(
     () =>
@@ -1045,18 +1050,20 @@ export default function Homepage() {
         </div>
       </div>
 
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          transform: "translateX(-50%)",
-          bottom: isMobile ? "18px" : "20px",
-          zIndex: 1000,
-          pointerEvents: "auto",
-        }}
-      >
-        <DisclaimerLink subtle centered />
-      </div>
+      {!isMobile && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: "20px",
+            zIndex: 1000,
+            pointerEvents: "auto",
+          }}
+        >
+          <DisclaimerLink subtle centered />
+        </div>
+      )}
 
     </div>
   )
