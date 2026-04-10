@@ -25,11 +25,12 @@ const shellStyle: React.CSSProperties = {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "rgba(4, 24, 49, 0.72)",
-  border: "1px solid rgba(173, 216, 255, 0.2)",
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+  border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
-  boxShadow: "0 24px 60px rgba(0, 0, 0, 0.28)",
-  backdropFilter: "blur(10px)",
+  boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
+  backdropFilter: "blur(16px)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
@@ -37,7 +38,8 @@ const sectionTitleStyle: React.CSSProperties = {
   fontSize: "clamp(1.28rem, 2.2vw, 1.9rem)",
   lineHeight: 1.1,
   letterSpacing: "0.08em",
-  fontWeight: 400,
+  fontWeight: 600,
+  textShadow: "0 10px 28px rgba(4,16,29,0.24)",
 }
 
 const pillButtonStyle: React.CSSProperties = {
@@ -46,12 +48,12 @@ const pillButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   padding: "10px 18px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid rgba(210,236,255,0.18)",
   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
   color: "#d7e8ff",
   textDecoration: "none",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
 }
 
 function formatValue(value: number | null) {
@@ -60,11 +62,12 @@ function formatValue(value: number | null) {
 }
 
 const sectionCardStyle: React.CSSProperties = {
-  background: "rgba(4, 24, 49, 0.72)",
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.12), transparent 32%), linear-gradient(180deg, rgba(4, 24, 49, 0.82) 0%, rgba(5, 22, 40, 0.76) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "20px",
   overflow: "hidden",
-  boxShadow: "0 18px 44px rgba(0, 0, 0, 0.24)",
+  boxShadow: "0 18px 44px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 export default function ChinaReport() {
@@ -115,7 +118,17 @@ export default function ChinaReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "3px",
+              background: "linear-gradient(90deg, #5aa9ff 0%, #7fd0ff 50%, #5aa9ff 100%)",
+            }}
+          />
           <div
             style={{
               display: "flex",
@@ -169,11 +182,12 @@ export default function ChinaReport() {
                   alignItems: "center",
                   padding: "8px 12px",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-                  border: "1px solid rgba(210,236,255,0.16)",
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.24) 0%, rgba(20, 112, 196, 0.12) 100%)",
+                  border: "1px solid rgba(143,215,255,0.24)",
                   color: "#d7e8ff",
                   fontSize: "14px",
                   whiteSpace: "nowrap",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                 }}
               >
                 Report Date: {reportDate || "-"}
@@ -207,7 +221,7 @@ export default function ChinaReport() {
                       <div
                         style={{
                           padding: "11px 16px",
-                          background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)",
+                          background: "linear-gradient(90deg, rgba(16, 71, 126, 0.98) 0%, rgba(10, 43, 78, 0.98) 100%)",
                           color: "#f4fbff",
                           fontWeight: 700,
                           letterSpacing: "0.1em",
@@ -227,13 +241,14 @@ export default function ChinaReport() {
                               width: "28px",
                               height: "28px",
                               borderRadius: "999px",
-                              border: "1px solid rgba(210,236,255,0.16)",
-                              background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                              border: "1px solid rgba(143,215,255,0.22)",
+                              background: "linear-gradient(180deg, rgba(72, 170, 255, 0.24) 0%, rgba(20, 112, 196, 0.12) 100%)",
                               color: "#d7e8ff",
                               cursor: "pointer",
                               fontSize: "17px",
                               lineHeight: 1,
                               fontWeight: 700,
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                             }}
                           >
                             {isExpanded ? "−" : "+"}
@@ -247,13 +262,18 @@ export default function ChinaReport() {
                           gridTemplateColumns: isMobile
                             ? "minmax(110px, 1fr) 68px 68px 68px"
                             : "minmax(180px, 1fr) 100px 100px 100px",
-                          background: "rgba(255,255,255,0.05)",
+                          background: "rgba(255,255,255,0.04)",
                           borderTop: "1px solid rgba(255,255,255,0.08)",
                         }}
                       >
-                        {["PORT", "HSFO", "VLSFO", "LSMGO"].map((label, index) => (
+                        {[
+                          { label: "PORT", accent: "transparent" },
+                          { label: "HSFO", accent: "rgba(90,169,255,0.18)" },
+                          { label: "VLSFO", accent: "rgba(87,227,176,0.18)" },
+                          { label: "LSMGO", accent: "rgba(255,209,102,0.18)" },
+                        ].map((item, index) => (
                           <div
-                            key={label}
+                            key={item.label}
                             style={{
                               padding: isMobile ? "8px 10px" : "10px 14px",
                               fontSize: isMobile ? "10px" : "12px",
@@ -262,9 +282,10 @@ export default function ChinaReport() {
                               textAlign: index === 0 ? "left" : "center",
                               borderRight: index < 3 ? "1px solid rgba(255,255,255,0.12)" : undefined,
                               letterSpacing: "0.06em",
+                              boxShadow: index === 0 ? undefined : `inset 0 -2px 0 ${item.accent}`,
                             }}
                           >
-                            {label}
+                            {item.label}
                           </div>
                         ))}
                       </div>
@@ -279,8 +300,8 @@ export default function ChinaReport() {
                               : "minmax(180px, 1fr) 100px 100px 100px",
                             background:
                               index % 2 === 0
-                                ? "rgba(8, 46, 88, 0.86)"
-                                : "rgba(7, 37, 70, 0.86)",
+                                ? "rgba(8, 46, 88, 0.84)"
+                                : "rgba(7, 37, 70, 0.78)",
                             borderTop: "1px solid rgba(255,255,255,0.08)",
                           }}
                         >
@@ -293,6 +314,7 @@ export default function ChinaReport() {
                               whiteSpace: "nowrap",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
+                              background: "rgba(255,255,255,0.02)",
                             }}
                           >
                             {row.port}
@@ -347,7 +369,7 @@ export default function ChinaReport() {
               gap: "10px",
               color: "#ffd4d8",
               background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-              border: "1px solid rgba(255, 120, 120, 0.16)",
+              border: "1px solid rgba(255, 120, 120, 0.18)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}
@@ -383,9 +405,9 @@ export default function ChinaReport() {
             style={{
               ...pillButtonStyle,
               minWidth: "220px",
-              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.32) 0%, rgba(20, 130, 93, 0.14) 100%)",
               color: "#ddffef",
-              border: "1px solid rgba(73, 219, 165, 0.22)",
+              border: "1px solid rgba(73, 219, 165, 0.26)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}

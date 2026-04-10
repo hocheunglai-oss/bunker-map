@@ -20,19 +20,21 @@ const shellStyle: React.CSSProperties = {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "rgba(4, 24, 49, 0.72)",
-  border: "1px solid rgba(173, 216, 255, 0.2)",
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+  border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
-  boxShadow: "0 24px 60px rgba(0, 0, 0, 0.28)",
-  backdropFilter: "blur(10px)",
+  boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
+  backdropFilter: "blur(16px)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: "clamp(1.35rem, 2.4vw, 2rem)",
   lineHeight: 1.1,
-  letterSpacing: "0.03em",
-  fontWeight: 500,
+  letterSpacing: "0.04em",
+  fontWeight: 600,
+  textShadow: "0 10px 28px rgba(4,16,29,0.24)",
 }
 
 const pillButtonStyle: React.CSSProperties = {
@@ -41,13 +43,28 @@ const pillButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   padding: "10px 18px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid rgba(210,236,255,0.18)",
   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
   color: "#d7e8ff",
   textDecoration: "none",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
 }
+
+const fuelAccentStyles = {
+  hsfo: {
+    color: "#8fd7ff",
+    glow: "rgba(90,169,255,0.16)",
+  },
+  vlsfo: {
+    color: "#7df0c2",
+    glow: "rgba(87,227,176,0.16)",
+  },
+  mgo: {
+    color: "#ffd166",
+    glow: "rgba(255,209,102,0.16)",
+  },
+} as const
 
 function color(change: number | null) {
   if (change == null) return "#f5fbff"
@@ -94,7 +111,17 @@ export default function TaiwanReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "3px",
+              background: "linear-gradient(90deg, #5aa9ff 0%, #7fd0ff 50%, #5aa9ff 100%)",
+            }}
+          />
           <div
             style={{
               display: "flex",
@@ -148,11 +175,12 @@ export default function TaiwanReport() {
                   alignItems: "center",
                   padding: "8px 12px",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-                  border: "1px solid rgba(210,236,255,0.16)",
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.24) 0%, rgba(20, 112, 196, 0.12) 100%)",
+                  border: "1px solid rgba(143,215,255,0.24)",
                   color: "#d7e8ff",
                   fontSize: "14px",
                   whiteSpace: "nowrap",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                 }}
               >
                 Report Date: {reportDate || "-"}
@@ -174,30 +202,31 @@ export default function TaiwanReport() {
               <thead>
                 <tr
                   style={{
-                    background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)",
+                    background: "linear-gradient(90deg, rgba(16, 71, 126, 0.98) 0%, rgba(10, 43, 78, 0.98) 100%)",
                   }}
                 >
                   <th
                     rowSpan={2}
                     style={{
                       padding: "18px 16px",
-                      fontSize: "18px",
+                      fontSize: "17px",
+                      letterSpacing: "0.06em",
                       borderRight: "1px solid rgba(255,255,255,0.14)",
                     }}
                   >
                     Port
                   </th>
-                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)" }}>
+                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)", color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.hsfo.glow}` }}>
                     HSFO
                   </th>
-                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)" }}>
+                  <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)", color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.vlsfo.glow}` }}>
                     VLSFO
                   </th>
-                  <th colSpan={3}>LSMGO</th>
+                  <th colSpan={3} style={{ color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.mgo.glow}` }}>LSMGO</th>
                 </tr>
                 <tr
                   style={{
-                    background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)",
+                    background: "linear-gradient(90deg, rgba(16, 71, 126, 0.98) 0%, rgba(10, 43, 78, 0.98) 100%)",
                   }}
                 >
                   {["Today", "Last", "Change", "Today", "Last", "Change", "Today", "Last", "Change"].map(
@@ -206,6 +235,9 @@ export default function TaiwanReport() {
                         key={label + index}
                         style={{
                           padding: "12px 10px",
+                          fontSize: "13px",
+                          fontWeight: 800,
+                          letterSpacing: "0.08em",
                           borderRight:
                             index === 2 || index === 5
                               ? "1px solid rgba(255,255,255,0.14)"
@@ -226,8 +258,8 @@ export default function TaiwanReport() {
                       textAlign: "center",
                       background:
                         index % 2 === 0
-                          ? "rgba(8, 46, 88, 0.86)"
-                          : "rgba(7, 37, 70, 0.86)",
+                          ? "rgba(8, 46, 88, 0.84)"
+                          : "rgba(7, 37, 70, 0.78)",
                     }}
                   >
                     <td
@@ -237,6 +269,7 @@ export default function TaiwanReport() {
                         fontSize: "16px",
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                         borderRight: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.03)",
                       }}
                     >
                       {row.port}
@@ -312,7 +345,7 @@ export default function TaiwanReport() {
               gap: "10px",
               color: "#ffd4d8",
               background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-              border: "1px solid rgba(255, 120, 120, 0.16)",
+              border: "1px solid rgba(255, 120, 120, 0.18)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}
@@ -348,8 +381,8 @@ export default function TaiwanReport() {
                       gap: "8px",
                       padding: "8px 10px",
                       borderRadius: "12px",
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.06)",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
+                      border: "1px solid rgba(255,255,255,0.08)",
                       color: "#e8f4ff",
                       fontSize: "13px",
                     }}
@@ -363,7 +396,7 @@ export default function TaiwanReport() {
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        background: "rgba(141, 207, 255, 0.14)",
+                        background: "linear-gradient(180deg, rgba(88, 182, 255, 0.24) 0%, rgba(28, 102, 168, 0.14) 100%)",
                         color: "#dff3ff",
                         fontSize: "10px",
                         fontWeight: 700,
@@ -405,9 +438,9 @@ export default function TaiwanReport() {
             style={{
               ...pillButtonStyle,
               minWidth: "220px",
-              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.32) 0%, rgba(20, 130, 93, 0.14) 100%)",
               color: "#ddffef",
-              border: "1px solid rgba(73, 219, 165, 0.22)",
+              border: "1px solid rgba(73, 219, 165, 0.26)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}

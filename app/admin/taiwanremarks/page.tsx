@@ -17,7 +17,35 @@ const pillButtonStyle: React.CSSProperties = {
   textDecoration: "none",
   fontSize: "13px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+}
+
+const memoCardStyle: React.CSSProperties = {
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 32%), linear-gradient(180deg, rgba(14, 43, 70, 0.94) 0%, rgba(7, 26, 44, 0.9) 100%)",
+  border: "1px solid rgba(173, 216, 255, 0.14)",
+  borderRadius: "22px",
+  padding: "18px",
+  display: "grid",
+  gap: "14px",
+  boxShadow: "0 18px 40px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+}
+
+const textareaStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: "120px",
+  padding: "16px 18px",
+  fontSize: "15px",
+  lineHeight: 1.6,
+  borderRadius: "16px",
+  border: "1px solid rgba(173, 216, 255, 0.18)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.04) 100%)",
+  color: "#edf7ff",
+  resize: "vertical",
+  outline: "none",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  boxSizing: "border-box",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
 }
 
 export default function AdminRemarks() {
@@ -114,7 +142,7 @@ export default function AdminRemarks() {
     >
       <div
         style={{
-          maxWidth: "1480px",
+          maxWidth: "980px",
           margin: "0 auto",
           background: "rgba(6, 24, 44, 0.68)",
           border: "1px solid rgba(210, 236, 255, 0.16)",
@@ -156,7 +184,7 @@ export default function AdminRemarks() {
             Taiwan Market Report Remarks
           </h1>
 
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <a
               href="/admin"
               style={pillButtonStyle}
@@ -168,6 +196,9 @@ export default function AdminRemarks() {
               onClick={addMemo}
               style={{
                 ...pillButtonStyle,
+                background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
+                border: "1px solid rgba(80, 170, 255, 0.2)",
+                color: "#e2f3ff",
                 cursor: "pointer",
               }}
               aria-label="Add remark"
@@ -181,11 +212,11 @@ export default function AdminRemarks() {
               style={{
                 ...pillButtonStyle,
                 background: isDirty
-                  ? "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)"
-                  : pillButtonStyle.background,
-                color: isDirty ? "#ddffef" : "#d7e8ff",
+                  ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)"
+                  : "linear-gradient(180deg, rgba(56, 214, 154, 0.2) 0%, rgba(20, 130, 93, 0.1) 100%)",
+                color: "#ddffef",
                 textTransform: "uppercase",
-                border: isDirty ? "1px solid rgba(73, 219, 165, 0.22)" : "1px solid rgba(210,236,255,0.16)",
+                border: isDirty ? "1px solid rgba(73, 219, 165, 0.32)" : "1px solid rgba(73, 219, 165, 0.22)",
                 cursor: saving ? "wait" : "pointer",
               }}
             >
@@ -198,16 +229,7 @@ export default function AdminRemarks() {
           {memos.map((memo, index) => (
             <div
               key={memo.id}
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(14, 43, 70, 0.92) 0%, rgba(7, 26, 44, 0.9) 100%)",
-                border: "1px solid rgba(173, 216, 255, 0.14)",
-                borderRadius: "22px",
-                padding: "16px",
-                display: "grid",
-                gap: "12px",
-                boxShadow: "0 18px 40px rgba(0, 0, 0, 0.18)",
-              }}
+              style={memoCardStyle}
             >
               <div
                 style={{
@@ -226,16 +248,18 @@ export default function AdminRemarks() {
                 >
                   <span
                     style={{
-                      width: "28px",
-                      height: "28px",
+                      width: "30px",
+                      height: "30px",
                       borderRadius: "999px",
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "rgba(141, 207, 255, 0.14)",
-                      border: "1px solid rgba(141, 207, 255, 0.18)",
+                      background: "linear-gradient(180deg, rgba(88, 182, 255, 0.24) 0%, rgba(28, 102, 168, 0.14) 100%)",
+                      border: "1px solid rgba(141, 207, 255, 0.22)",
                       color: "#dff3ff",
                       fontSize: "12px",
+                      fontWeight: 800,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                     }}
                   >
                     {index + 1}
@@ -245,14 +269,12 @@ export default function AdminRemarks() {
                 <button
                   onClick={() => removeMemo(memo.id)}
                   style={{
+                    ...pillButtonStyle,
                     padding: "8px 12px",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(255, 120, 120, 0.16)",
-                    background: "rgba(230, 57, 70, 0.14)",
+                    border: "1px solid rgba(255, 120, 120, 0.18)",
+                    background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
                     color: "#ffd4d8",
                     cursor: "pointer",
-                    fontWeight: 700,
-                    fontSize: "13px",
                   }}
                 >
                   Remove
@@ -260,23 +282,10 @@ export default function AdminRemarks() {
               </div>
 
               <textarea
-                style={{
-                  width: "100%",
-                  minHeight: "120px",
-                  padding: "14px",
-                  fontSize: "15px",
-                  lineHeight: 1.6,
-                  borderRadius: "16px",
-                  border: "1px solid rgba(173, 216, 255, 0.16)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "#edf7ff",
-                  resize: "vertical",
-                  outline: "none",
-                  fontFamily: "Arial, Helvetica, sans-serif",
-                  boxSizing: "border-box",
-                }}
+                style={textareaStyle}
                 value={memo.text}
                 onChange={(e) => updateMemo(memo.id, e.target.value)}
+                placeholder="Write a concise Taiwan market remark..."
               />
             </div>
           ))}

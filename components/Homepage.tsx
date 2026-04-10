@@ -143,13 +143,14 @@ function ZoomControls() {
           style={{
             width: "44px",
             height: "44px",
-            border: "1px solid rgba(210,236,255,0.18)",
-            borderRadius: "14px",
-            background: "linear-gradient(180deg, rgba(10, 31, 53, 0.88) 0%, rgba(7, 23, 41, 0.82) 100%)",
-            color: "white",
+            border: "1px solid rgba(143,215,255,0.34)",
+            borderRadius: "999px",
+            background: "linear-gradient(180deg, rgba(43, 112, 196, 0.4) 0%, rgba(18, 53, 95, 0.24) 100%)",
+            color: "#eef7ff",
             fontSize: "22px",
+            fontWeight: 700,
             cursor: "pointer",
-            boxShadow: "0 14px 30px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12), 0 12px 30px rgba(8,24,44,0.24), 0 0 0 1px rgba(90,169,255,0.12)",
             backdropFilter: "blur(14px)",
             WebkitBackdropFilter: "blur(14px)",
           }}
@@ -290,7 +291,23 @@ export default function Homepage() {
 
   const mapRef = useRef<L.Map | null>(null)
   const markerRefs = useRef<Record<number, L.CircleMarker>>({})
+  const reportsCloseTimeoutRef = useRef<number | null>(null)
   const router = useRouter()
+
+  function clearReportsCloseTimeout() {
+    if (reportsCloseTimeoutRef.current != null) {
+      window.clearTimeout(reportsCloseTimeoutRef.current)
+      reportsCloseTimeoutRef.current = null
+    }
+  }
+
+  function scheduleReportsClose() {
+    clearReportsCloseTimeout()
+    reportsCloseTimeoutRef.current = window.setTimeout(() => {
+      setReportsOpen(false)
+      reportsCloseTimeoutRef.current = null
+    }, 220)
+  }
 
   useEffect(() => {
     async function loadPorts() {
@@ -327,6 +344,10 @@ export default function Homepage() {
     setResults(filtered.slice(0, 8))
     setSelectedIndex(-1)
   }, [search, ports])
+
+  useEffect(() => {
+    return () => clearReportsCloseTimeout()
+  }, [])
 
   const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Port Klang"]
   const keyPorts = useMemo(
@@ -551,17 +572,6 @@ export default function Homepage() {
                             <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1.05 }}>
                               {item.value ?? "-"}
                             </div>
-                            <div
-                              style={{
-                                marginTop: "1px",
-                                fontSize: "9px",
-                                color: "rgba(237,247,255,0.54)",
-                                fontWeight: 700,
-                                letterSpacing: "0.08em",
-                              }}
-                            >
-                              USD/MT
-                            </div>
                             {deltaLabel && (
                               <div
                                 style={{
@@ -641,8 +651,8 @@ export default function Homepage() {
               style={{
                 ...panelSectionStyle,
                 border: "1px solid rgba(90,169,255,0.2)",
-                background: "linear-gradient(180deg, rgba(90,169,255,0.2) 0%, rgba(255,255,255,0.04) 100%)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(90,169,255,0.2)",
+                background: "linear-gradient(180deg, rgba(90,169,255,0.1) 0%, rgba(255,255,255,0.02) 100%), rgba(6, 24, 44, 0.72)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(90,169,255,0.12)",
                 overflow: "hidden",
                 minHeight: "300px",
                 position: "relative",
@@ -747,7 +757,7 @@ export default function Homepage() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     padding: "12px 14px",
-                    background: index === selectedIndex ? "#e7f4ff" : "transparent",
+                    background: index === selectedIndex ? "#8fc9ff" : "transparent",
                     border: "none",
                     borderBottom:
                       index === results.length - 1 ? "none" : "1px solid rgba(16,36,58,0.06)",
@@ -900,8 +910,8 @@ export default function Homepage() {
               height: isMobile ? "46px" : "50px",
               borderRadius: "999px",
               border: item.key === "whatsapp"
-                ? "1px solid rgba(255,255,255,0.18)"
-                : "1px solid rgba(210,236,255,0.16)",
+                ? "1px solid rgba(73, 219, 165, 0.42)"
+                : "1px solid rgba(143, 215, 255, 0.46)",
               background: item.background,
               color: item.textColor,
               display: "inline-flex",
@@ -910,8 +920,8 @@ export default function Homepage() {
               gap: expanded && !isMobile ? "10px" : "0",
               cursor: "pointer",
               boxShadow: item.key === "whatsapp"
-                ? "inset 0 1px 0 rgba(255,255,255,0.05)"
-                : "inset 0 1px 0 rgba(255,255,255,0.05)",
+                ? "inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(20,130,93,0.26), 0 0 0 1px rgba(37,211,102,0.12)"
+                : "inset 0 1px 0 rgba(255,255,255,0.14), 0 14px 34px rgba(8,24,44,0.28), 0 0 0 1px rgba(90,169,255,0.16)",
               backdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
               WebkitBackdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
               textDecoration: "none",
@@ -953,24 +963,42 @@ export default function Homepage() {
             }
 
             return (
-              <div key={item.key} style={{ position: "relative" }}>
+              <div
+                key={item.key}
+                style={{ position: "relative" }}
+                onMouseEnter={() => {
+                  if (item.key === "reports") clearReportsCloseTimeout()
+                }}
+                onMouseLeave={() => {
+                  setHoveredAction(null)
+                  if (item.key === "reports") scheduleReportsClose()
+                }}
+              >
                 <button
                   onClick={item.onClick}
                   aria-label={item.label}
                   title={item.label}
                   style={buttonStyle}
-                  onMouseEnter={() => setHoveredAction(item.key)}
-                  onMouseLeave={() => setHoveredAction(null)}
+                  onMouseEnter={() => {
+                    setHoveredAction(item.key)
+                    if (item.key === "reports") clearReportsCloseTimeout()
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredAction(null)
+                    if (item.key === "reports") scheduleReportsClose()
+                  }}
                 >
                   {content}
                 </button>
 
                 {item.key === "reports" && reportsOpen && (
                   <div
+                    onMouseEnter={clearReportsCloseTimeout}
+                    onMouseLeave={scheduleReportsClose}
                     style={{
                       position: "absolute",
                       left: 0,
-                      bottom: "calc(100% + 10px)",
+                      bottom: "calc(100% + 4px)",
                       minWidth: "240px",
                       background: "radial-gradient(circle at top left, rgba(88,182,255,0.16), transparent 34%), linear-gradient(180deg, rgba(9, 22, 39, 0.82) 0%, rgba(7, 20, 35, 0.76) 100%)",
                       border: "1px solid rgba(210,236,255,0.2)",

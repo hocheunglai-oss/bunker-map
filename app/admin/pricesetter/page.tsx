@@ -736,13 +736,18 @@ export default function AdminPage() {
                       <span
                         style={{
                           display: "inline-block",
-                          width: "8px",
-                          height: "8px",
+                          width: "11px",
+                          height: "11px",
                           borderRadius: "50%",
-                          background: updated ? "#38d39f" : "#e05a5a",
+                          background: updated
+                            ? "radial-gradient(circle at 30% 30%, rgba(214,255,238,0.95) 0%, rgba(92,237,177,0.95) 34%, rgba(28,154,110,0.98) 100%)"
+                            : "radial-gradient(circle at 30% 30%, rgba(255,225,230,0.95) 0%, rgba(255,126,143,0.95) 34%, rgba(191,56,75,0.98) 100%)",
+                          border: updated
+                            ? "1px solid rgba(109, 241, 191, 0.45)"
+                            : "1px solid rgba(255, 136, 150, 0.42)",
                           boxShadow: updated
-                            ? "0 0 0 2px rgba(56, 211, 159, 0.12)"
-                            : "0 0 0 2px rgba(224, 90, 90, 0.12)",
+                            ? "0 0 0 2px rgba(56, 211, 159, 0.14), 0 0 14px rgba(56, 211, 159, 0.18)"
+                            : "0 0 0 2px rgba(224, 90, 90, 0.14), 0 0 14px rgba(224, 90, 90, 0.18)",
                         }}
                       />
                     </td>
@@ -824,7 +829,16 @@ export default function AdminPage() {
                         disabled={isSaving}
                         style={{
                           ...saveButtonStyle,
-                          background: isSaved ? "#6c757d" : "#1fa97a",
+                          color: isSaved ? "#e5eef7" : "#ddffef",
+                          border: isSaved
+                            ? "1px solid rgba(196, 212, 231, 0.24)"
+                            : "1px solid rgba(73, 219, 165, 0.32)",
+                          background: isSaved
+                            ? "linear-gradient(180deg, rgba(171, 187, 204, 0.2) 0%, rgba(98, 112, 128, 0.12) 100%)"
+                            : "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
+                          boxShadow: isSaved
+                            ? "inset 0 1px 0 rgba(255,255,255,0.1), 0 10px 24px rgba(8,24,44,0.16)"
+                            : "inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 24px rgba(20,130,93,0.18), 0 0 0 1px rgba(37,211,102,0.08)",
                         }}
                       >
                         {isSaving ? "Saving..." : isSaved ? "Saved" : "Save"}
@@ -886,13 +900,13 @@ const tabButtonStyle: React.CSSProperties = {
 const saveButtonStyle: React.CSSProperties = {
   color: "#ddffef",
   padding: "6px 12px",
-  border: "1px solid rgba(73, 219, 165, 0.22)",
+  border: "1px solid rgba(73, 219, 165, 0.32)",
   borderRadius: "999px",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
-  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 24px rgba(20,130,93,0.18), 0 0 0 1px rgba(37,211,102,0.08)",
 }
 
 const dangerButtonStyle: React.CSSProperties = {

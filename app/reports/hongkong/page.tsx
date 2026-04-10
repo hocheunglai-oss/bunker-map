@@ -21,19 +21,21 @@ const shellStyle: React.CSSProperties = {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "rgba(4, 24, 49, 0.72)",
-  border: "1px solid rgba(173, 216, 255, 0.2)",
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+  border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
-  boxShadow: "0 24px 60px rgba(0, 0, 0, 0.28)",
-  backdropFilter: "blur(10px)",
+  boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
+  backdropFilter: "blur(16px)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: "clamp(1.35rem, 2.4vw, 2rem)",
   lineHeight: 1.1,
-  letterSpacing: "0.03em",
-  fontWeight: 500,
+  letterSpacing: "0.04em",
+  fontWeight: 600,
+  textShadow: "0 10px 28px rgba(4,16,29,0.24)",
 }
 
 const pillButtonStyle: React.CSSProperties = {
@@ -42,13 +44,28 @@ const pillButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   padding: "10px 18px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid rgba(210,236,255,0.18)",
   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
   color: "#d7e8ff",
   textDecoration: "none",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
 }
+
+const fuelAccentStyles = {
+  hsfo: {
+    color: "#8fd7ff",
+    glow: "rgba(90,169,255,0.16)",
+  },
+  vlsfo: {
+    color: "#7df0c2",
+    glow: "rgba(87,227,176,0.16)",
+  },
+  mgo: {
+    color: "#ffd166",
+    glow: "rgba(255,209,102,0.16)",
+  },
+} as const
 
 function shortDate(value: string | null) {
   if (!value) return "-"
@@ -96,7 +113,17 @@ export default function HongKongReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px" }}>
+        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "3px",
+              background: "linear-gradient(90deg, #5aa9ff 0%, #7fd0ff 50%, #5aa9ff 100%)",
+            }}
+          />
           <div
             style={{
               display: "flex",
@@ -150,11 +177,12 @@ export default function HongKongReport() {
                   alignItems: "center",
                   padding: "8px 12px",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-                  border: "1px solid rgba(210,236,255,0.16)",
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.24) 0%, rgba(20, 112, 196, 0.12) 100%)",
+                  border: "1px solid rgba(143,215,255,0.24)",
                   color: "#d7e8ff",
                   fontSize: "14px",
                   whiteSpace: "nowrap",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                 }}
               >
                 Report Date: {reportDate || "-"}
@@ -174,26 +202,33 @@ export default function HongKongReport() {
               }}
             >
               <thead>
-                <tr style={{ background: "linear-gradient(90deg, #0f4478 0%, #0b3359 100%)", color: "#f5fbff" }}>
+                <tr style={{ background: "linear-gradient(90deg, rgba(16, 71, 126, 0.98) 0%, rgba(10, 43, 78, 0.98) 100%)", color: "#f5fbff" }}>
                   <th
                     colSpan={2}
                     style={{
-                      padding: "10px 16px",
+                      padding: "12px 16px",
                       borderRight: "1px solid rgba(255,255,255,0.14)",
                     }}
                   >
                   </th>
-                  {["HSFO", "VLSFO", "MGO S0.05%"].map((label, index) => (
+                  {[
+                    { label: "HSFO", accent: fuelAccentStyles.hsfo },
+                    { label: "VLSFO", accent: fuelAccentStyles.vlsfo },
+                    { label: "MGO S0.05%", accent: fuelAccentStyles.mgo },
+                  ].map((item, index) => (
                     <th
-                      key={label}
+                      key={item.label}
                       style={{
-                        padding: "10px 12px",
-                        fontSize: "14px",
-                        fontWeight: 700,
+                        padding: "12px 12px",
+                        fontSize: "13px",
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        color: "#f5fbff",
+                        boxShadow: `inset 0 -2px 0 ${item.accent.glow}`,
                         borderRight: index < 2 ? "1px solid rgba(255,255,255,0.14)" : undefined,
                       }}
                     >
-                      {label}
+                      {item.label}
                     </th>
                   ))}
                 </tr>
@@ -204,7 +239,7 @@ export default function HongKongReport() {
                     <tr
                       style={{
                         textAlign: "center",
-                        background: "rgba(22, 86, 148, 0.98)",
+                        background: "linear-gradient(90deg, rgba(32, 110, 180, 0.96) 0%, rgba(18, 84, 148, 0.96) 100%)",
                         color: "#edf7ff",
                         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
                       }}
@@ -218,7 +253,8 @@ export default function HongKongReport() {
                           fontWeight: 800,
                           color: "#ffffff",
                           borderRight: "1px solid rgba(255,255,255,0.16)",
-                          background: "rgba(255,255,255,0.08)",
+                          background: "rgba(255,255,255,0.1)",
+                          letterSpacing: "0.08em",
                         }}
                       >
                         NEW
@@ -232,18 +268,19 @@ export default function HongKongReport() {
                           fontWeight: 700,
                           color: "#ffffff",
                           background: "rgba(255,255,255,0.06)",
+                          letterSpacing: "0.03em",
                         }}
                       >
                         {shortDate(row.todayDate)}
                       </td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.hsfo.today ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.vlsfo.today ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)" }}>{row.mgo.today ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{row.hsfo.today ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{row.vlsfo.today ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.mgo.glow}` }}>{row.mgo.today ?? "-"}</td>
                     </tr>
                     <tr
                       style={{
                         textAlign: "center",
-                        background: "rgba(12, 58, 106, 0.9)",
+                        background: "linear-gradient(90deg, rgba(13, 60, 108, 0.9) 0%, rgba(10, 50, 92, 0.9) 100%)",
                         color: "#edf7ff",
                       }}
                     >
@@ -255,6 +292,7 @@ export default function HongKongReport() {
                           whiteSpace: "nowrap",
                           borderRight: "1px solid rgba(255,255,255,0.12)",
                           fontSize: "14px",
+                          letterSpacing: "0.06em",
                         }}
                       >
                         LAST RECORD
@@ -278,8 +316,8 @@ export default function HongKongReport() {
                         textAlign: "center",
                         background:
                           index % 2 === 0
-                            ? "rgba(8, 46, 88, 0.86)"
-                            : "rgba(7, 37, 70, 0.86)",
+                            ? "rgba(8, 46, 88, 0.84)"
+                            : "rgba(7, 37, 70, 0.78)",
                         color: "#edf7ff",
                       }}
                     >
@@ -321,7 +359,7 @@ export default function HongKongReport() {
               gap: "10px",
               color: "#ffd4d8",
               background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-              border: "1px solid rgba(255, 120, 120, 0.16)",
+              border: "1px solid rgba(255, 120, 120, 0.18)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}
@@ -357,9 +395,9 @@ export default function HongKongReport() {
             style={{
               ...pillButtonStyle,
               minWidth: "220px",
-              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.32) 0%, rgba(20, 130, 93, 0.14) 100%)",
               color: "#ddffef",
-              border: "1px solid rgba(73, 219, 165, 0.22)",
+              border: "1px solid rgba(73, 219, 165, 0.26)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
             }}
