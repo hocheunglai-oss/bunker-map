@@ -26,7 +26,7 @@ const shellStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.1), transparent 30%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
   boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -63,7 +63,7 @@ function formatValue(value: number | null) {
 
 const sectionCardStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.12), transparent 32%), linear-gradient(180deg, rgba(4, 24, 49, 0.82) 0%, rgba(5, 22, 40, 0.76) 100%)",
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.08), transparent 28%), linear-gradient(180deg, rgba(4, 24, 49, 0.82) 0%, rgba(5, 22, 40, 0.76) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "20px",
   overflow: "hidden",
@@ -230,7 +230,7 @@ export default function ChinaReport() {
                           alignItems: "center",
                           justifyContent: "space-between",
                           gap: "12px",
-                          fontSize: "13px",
+                          fontSize: "12px",
                         }}
                       >
                         <span>{section.title}</span>
@@ -262,8 +262,9 @@ export default function ChinaReport() {
                           gridTemplateColumns: isMobile
                             ? "minmax(110px, 1fr) 68px 68px 68px"
                             : "minmax(180px, 1fr) 100px 100px 100px",
-                          background: "rgba(255,255,255,0.04)",
+                          background: "rgba(255,255,255,0.035)",
                           borderTop: "1px solid rgba(255,255,255,0.08)",
+                          fontVariantNumeric: "tabular-nums",
                         }}
                       >
                         {[
@@ -300,8 +301,8 @@ export default function ChinaReport() {
                               : "minmax(180px, 1fr) 100px 100px 100px",
                             background:
                               index % 2 === 0
-                                ? "rgba(8, 46, 88, 0.84)"
-                                : "rgba(7, 37, 70, 0.78)",
+                                ? "rgba(8, 46, 88, 0.76)"
+                                : "rgba(7, 37, 70, 0.68)",
                             borderTop: "1px solid rgba(255,255,255,0.08)",
                           }}
                         >
@@ -326,6 +327,7 @@ export default function ChinaReport() {
                               textAlign: "center",
                               whiteSpace: "nowrap",
                               fontSize: "14px",
+                              color: "#eef7ff",
                             }}
                           >
                             {formatValue(row.hsfo)}
@@ -337,6 +339,7 @@ export default function ChinaReport() {
                               textAlign: "center",
                               whiteSpace: "nowrap",
                               fontSize: "14px",
+                              color: "#eef7ff",
                             }}
                           >
                             {formatValue(row.vlsfo)}
@@ -347,6 +350,7 @@ export default function ChinaReport() {
                               textAlign: "center",
                               whiteSpace: "nowrap",
                               fontSize: "14px",
+                              color: "#eef7ff",
                             }}
                           >
                             {formatValue(row.mgo)}

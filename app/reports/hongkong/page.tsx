@@ -22,7 +22,7 @@ const shellStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.1), transparent 30%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
   boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -199,6 +199,7 @@ export default function HongKongReport() {
                 minWidth: isMobile ? "620px" : "680px",
                 borderCollapse: "collapse",
                 fontSize: isMobile ? "13px" : "15px",
+                fontVariantNumeric: "tabular-nums",
               }}
             >
               <thead>
@@ -255,6 +256,7 @@ export default function HongKongReport() {
                           borderRight: "1px solid rgba(255,255,255,0.16)",
                           background: "rgba(255,255,255,0.1)",
                           letterSpacing: "0.08em",
+                          fontSize: "12px",
                         }}
                       >
                         NEW
@@ -273,14 +275,14 @@ export default function HongKongReport() {
                       >
                         {shortDate(row.todayDate)}
                       </td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{row.hsfo.today ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{row.vlsfo.today ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.mgo.glow}` }}>{row.mgo.today ?? "-"}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{row.hsfo.today ?? "-"}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{row.vlsfo.today ?? "-"}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.mgo.glow}` }}>{row.mgo.today ?? "-"}</td>
                     </tr>
                     <tr
                       style={{
                         textAlign: "center",
-                        background: "linear-gradient(90deg, rgba(13, 60, 108, 0.9) 0%, rgba(10, 50, 92, 0.9) 100%)",
+                        background: "linear-gradient(90deg, rgba(12, 56, 101, 0.9) 0%, rgba(9, 46, 84, 0.9) 100%)",
                         color: "#edf7ff",
                       }}
                     >
@@ -316,8 +318,8 @@ export default function HongKongReport() {
                         textAlign: "center",
                         background:
                           index % 2 === 0
-                            ? "rgba(8, 46, 88, 0.84)"
-                            : "rgba(7, 37, 70, 0.78)",
+                            ? "rgba(8, 46, 88, 0.76)"
+                            : "rgba(7, 37, 70, 0.68)",
                         color: "#edf7ff",
                       }}
                     >

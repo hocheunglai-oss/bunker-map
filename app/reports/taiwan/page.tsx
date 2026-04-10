@@ -21,7 +21,7 @@ const shellStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 34%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.1), transparent 30%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "24px",
   boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -197,6 +197,7 @@ export default function TaiwanReport() {
                 minWidth: isMobile ? "760px" : "860px",
                 borderCollapse: "collapse",
                 fontSize: isMobile ? "13px" : "15px",
+                fontVariantNumeric: "tabular-nums",
               }}
             >
               <thead>
@@ -258,8 +259,8 @@ export default function TaiwanReport() {
                       textAlign: "center",
                       background:
                         index % 2 === 0
-                          ? "rgba(8, 46, 88, 0.84)"
-                          : "rgba(7, 37, 70, 0.78)",
+                          ? "rgba(8, 46, 88, 0.76)"
+                          : "rgba(7, 37, 70, 0.68)",
                     }}
                   >
                     <td
@@ -270,6 +271,7 @@ export default function TaiwanReport() {
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                         borderRight: "1px solid rgba(255,255,255,0.08)",
                         background: "rgba(255,255,255,0.03)",
+                        letterSpacing: "0.02em",
                       }}
                     >
                       {row.port}
@@ -381,7 +383,7 @@ export default function TaiwanReport() {
                       gap: "8px",
                       padding: "8px 10px",
                       borderRadius: "12px",
-                      background: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.025) 100%)",
                       border: "1px solid rgba(255,255,255,0.08)",
                       color: "#e8f4ff",
                       fontSize: "13px",
@@ -396,7 +398,7 @@ export default function TaiwanReport() {
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        background: "linear-gradient(180deg, rgba(88, 182, 255, 0.24) 0%, rgba(28, 102, 168, 0.14) 100%)",
+                        background: "linear-gradient(180deg, rgba(88, 182, 255, 0.2) 0%, rgba(28, 102, 168, 0.12) 100%)",
                         color: "#dff3ff",
                         fontSize: "10px",
                         fontWeight: 700,
