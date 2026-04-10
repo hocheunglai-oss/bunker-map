@@ -35,6 +35,20 @@ const sectionTitleStyle: React.CSSProperties = {
   fontWeight: 500,
 }
 
+const pillButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "10px 18px",
+  borderRadius: "999px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+  color: "#d7e8ff",
+  textDecoration: "none",
+  fontWeight: 700,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+}
+
 function color(change: number | null) {
   if (change == null) return "#f5fbff"
   if (change > 0) return "#60d394"
@@ -134,9 +148,9 @@ export default function TaiwanReport() {
                   alignItems: "center",
                   padding: "8px 12px",
                   borderRadius: "999px",
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#d7e9ff",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                  border: "1px solid rgba(210,236,255,0.16)",
+                  color: "#d7e8ff",
                   fontSize: "14px",
                   whiteSpace: "nowrap",
                 }}
@@ -294,19 +308,13 @@ export default function TaiwanReport() {
           <a
             href="/"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
+              ...pillButtonStyle,
               gap: "10px",
-              padding: "12px 22px",
-              borderRadius: "999px",
-              background: "#f05454",
-              color: "#fff",
-              textDecoration: "none",
-              fontWeight: 700,
+              color: "#ffd4d8",
+              background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+              border: "1px solid rgba(255, 120, 120, 0.16)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              boxShadow: "0 10px 24px rgba(240, 84, 84, 0.24)",
             }}
           >
             Back To Bunker Map
@@ -395,19 +403,13 @@ export default function TaiwanReport() {
             target="_blank"
             rel="noopener noreferrer"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
+              ...pillButtonStyle,
               minWidth: "220px",
-              padding: "14px 22px",
-              borderRadius: "999px",
-              background: "linear-gradient(135deg, #25d366 0%, #0cb955 100%)",
-              color: "#fff",
-              textDecoration: "none",
-              fontWeight: 700,
+              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+              color: "#ddffef",
+              border: "1px solid rgba(73, 219, 165, 0.22)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              boxShadow: "0 14px 30px rgba(37, 211, 102, 0.25)",
             }}
           >
             Contact On WhatsApp

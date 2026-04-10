@@ -33,12 +33,19 @@ const mapTilerStyle =
 
 const glassPanelStyle: React.CSSProperties = {
   background:
-    "rgba(6, 24, 44, 0.62)",
-  border: "1px solid rgba(210, 236, 255, 0.18)",
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.16), transparent 34%), linear-gradient(180deg, rgba(6, 24, 44, 0.8) 0%, rgba(7, 27, 49, 0.72) 100%)",
+  border: "1px solid rgba(210, 236, 255, 0.2)",
   backdropFilter: "blur(20px) saturate(145%)",
   WebkitBackdropFilter: "blur(20px) saturate(145%)",
-  boxShadow: "0 20px 70px rgba(0, 0, 0, 0.22)",
+  boxShadow: "0 26px 80px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
   color: "#edf7ff",
+}
+
+const panelSectionStyle: React.CSSProperties = {
+  borderRadius: "18px",
+  border: "1px solid rgba(255,255,255,0.1)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 function formatUpdatedDate(value: string | null | undefined) {
@@ -53,6 +60,15 @@ function formatUpdatedDate(value: string | null | undefined) {
     day: "2-digit",
     timeZone: "Asia/Hong_Kong",
   }).format(parsed)
+}
+
+function formatFuelDelta(value: number | null, singaporeValue: number | null) {
+  if (value == null || singaporeValue == null) return null
+
+  const delta = value - singaporeValue
+  if (delta === 0) return "vs SGP 0"
+
+  return `vs SGP ${delta > 0 ? "+" : ""}${delta}`
 }
 
 function MapController({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
@@ -127,13 +143,15 @@ function ZoomControls() {
           style={{
             width: "44px",
             height: "44px",
-            border: "1px solid rgba(255,255,255,0.14)",
+            border: "1px solid rgba(210,236,255,0.18)",
             borderRadius: "14px",
-            background: "rgba(7, 23, 41, 0.86)",
+            background: "linear-gradient(180deg, rgba(10, 31, 53, 0.88) 0%, rgba(7, 23, 41, 0.82) 100%)",
             color: "white",
             fontSize: "22px",
             cursor: "pointer",
-            boxShadow: "0 12px 24px rgba(0,0,0,0.18)",
+            boxShadow: "0 14px 30px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
+            backdropFilter: "blur(14px)",
+            WebkitBackdropFilter: "blur(14px)",
           }}
         >
           {control.label}
@@ -220,14 +238,14 @@ function IconButton({
     width: "50px",
     height: "50px",
     borderRadius: "999px",
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(6, 24, 44, 0.72)",
-    color: "#edf7ff",
+    border: "1px solid rgba(210,236,255,0.16)",
+    background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+    color: "#d7e8ff",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
-    boxShadow: "0 14px 34px rgba(0,0,0,0.2)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
     backdropFilter: "blur(14px)",
     WebkitBackdropFilter: "blur(14px)",
     textDecoration: "none",
@@ -318,6 +336,10 @@ export default function Homepage() {
         .filter((port): port is Port => port != null),
     [ports]
   )
+  const singaporePort = useMemo(
+    () => ports.find((port) => port.name.toLowerCase() === "singapore") ?? null,
+    [ports]
+  )
 
   function zoomToPort(port: Port) {
     if (!mapRef.current || port.lat == null || port.lng == null) return
@@ -403,6 +425,7 @@ export default function Homepage() {
             const updatedDate = formatUpdatedDate(
               port.recorded_at || port.updated_at || port.date || "-"
             )
+            const isSingapore = port.name.toLowerCase() === "singapore"
 
             return (
               <CircleMarker
@@ -419,10 +442,40 @@ export default function Homepage() {
                 fillColor="#1e90ff"
                 fillOpacity={0.88}
               >
-                <Popup minWidth={220} className="glass-popup">
-                  <div style={{ minWidth: "210px", color: "#eef7ff" }}>
-                    <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: "12px" }}>
-                      {port.name}
+                <Popup minWidth={260} className="glass-popup">
+                  <div style={{ minWidth: "248px", color: "#eef7ff" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "12px",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.18em",
+                            color: "#8fd7ff",
+                            marginBottom: "6px",
+                            fontWeight: 800,
+                          }}
+                        >
+                          Port Pricing
+                        </div>
+                        <div
+                          style={{
+                            color: "#eef7ff",
+                            fontSize: "22px",
+                            fontWeight: 800,
+                            lineHeight: 1.05,
+                          }}
+                        >
+                          {port.name}
+                        </div>
+                      </div>
                     </div>
 
                     <div
@@ -430,35 +483,121 @@ export default function Homepage() {
                         display: "grid",
                         gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
                         gap: "8px",
-                        marginBottom: "12px",
+                        marginBottom: "8px",
                       }}
                     >
                       {[
-                        { label: "HSFO", value: port.hsfo },
-                        { label: "VLSFO", value: port.vlsfo },
-                        { label: "LSMGO", value: port.mgo },
-                      ].map((item) => (
-                        <div
-                          key={item.label}
-                          style={{
-                            padding: "10px 8px",
-                            borderRadius: "12px",
-                            background: "rgba(255,255,255,0.09)",
-                            textAlign: "center",
-                          }}
-                        >
-                          <div style={{ fontSize: "11px", color: "#abd8ff", marginBottom: "4px" }}>
-                            {item.label}
+                        {
+                          label: "HSFO",
+                          value: port.hsfo,
+                          singaporeValue: singaporePort?.hsfo ?? null,
+                          accent: "#5aa9ff",
+                          glow: "rgba(90,169,255,0.2)",
+                        },
+                        {
+                          label: "VLSFO",
+                          value: port.vlsfo,
+                          singaporeValue: singaporePort?.vlsfo ?? null,
+                          accent: "#57e3b0",
+                          glow: "rgba(87,227,176,0.18)",
+                        },
+                        {
+                          label: "LSMGO",
+                          value: port.mgo,
+                          singaporeValue: singaporePort?.mgo ?? null,
+                          accent: "#ffd166",
+                          glow: "rgba(255,209,102,0.18)",
+                        },
+                      ].map((item) => {
+                        const deltaLabel = isSingapore
+                          ? null
+                          : formatFuelDelta(item.value, item.singaporeValue)
+
+                        return (
+                          <div
+                            key={item.label}
+                            style={{
+                              padding: "10px 8px 8px",
+                              borderRadius: "14px",
+                              border: `1px solid ${item.glow}`,
+                              background: `linear-gradient(180deg, ${item.glow} 0%, rgba(255,255,255,0.05) 100%)`,
+                              textAlign: "center",
+                              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px ${item.glow}`,
+                              position: "relative",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                height: "3px",
+                                background: item.accent,
+                              }}
+                            />
+                            <div
+                              style={{
+                                fontSize: "10px",
+                                color: item.accent,
+                                marginBottom: "4px",
+                                fontWeight: 800,
+                                letterSpacing: "0.12em",
+                              }}
+                            >
+                              {item.label}
+                            </div>
+                            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1.05 }}>
+                              {item.value ?? "-"}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: "1px",
+                                fontSize: "9px",
+                                color: "rgba(237,247,255,0.54)",
+                                fontWeight: 700,
+                                letterSpacing: "0.08em",
+                              }}
+                            >
+                              USD/MT
+                            </div>
+                            {deltaLabel && (
+                              <div
+                                style={{
+                                  marginTop: "4px",
+                                  fontSize: "9px",
+                                  color: "rgba(237,247,255,0.72)",
+                                  fontWeight: 800,
+                                  letterSpacing: "0.04em",
+                                }}
+                              >
+                                {deltaLabel}
+                              </div>
+                            )}
                           </div>
-                          <div style={{ fontSize: "16px", fontWeight: 700 }}>
-                            {item.value ?? "-"}
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
 
-                    <div style={{ fontSize: "12px", color: "#abd8ff" }}>
-                      Updated: <strong style={{ color: "#eef7ff" }}>{updatedDate}</strong>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        padding: "8px 10px",
+                        borderRadius: "12px",
+                        background: "linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)",
+                        border: "1px solid rgba(143,215,255,0.12)",
+                      }}
+                    >
+                      <div style={{ fontSize: "10px", color: "#8fd7ff", fontWeight: 800, letterSpacing: "0.12em" }}>
+                        UPDATED
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#eef7ff", fontWeight: 700 }}>
+                        {updatedDate}
+                      </div>
                     </div>
                   </div>
                 </Popup>
@@ -500,13 +639,26 @@ export default function Homepage() {
             </div>
             <div
               style={{
-                borderRadius: "16px",
-                border: "1px solid rgba(255,255,255,0.1)",
-                background: "rgba(255,255,255,0.04)",
+                ...panelSectionStyle,
+                border: "1px solid rgba(90,169,255,0.2)",
+                background: "linear-gradient(180deg, rgba(90,169,255,0.2) 0%, rgba(255,255,255,0.04) 100%)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(90,169,255,0.2)",
                 overflow: "hidden",
                 minHeight: "300px",
+                position: "relative",
               }}
             >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: "3px",
+                  background: "#5aa9ff",
+                  zIndex: 1,
+                }}
+              />
               <OilWidget />
             </div>
           </div>
@@ -562,11 +714,12 @@ export default function Homepage() {
               width: "100%",
               padding: isMobile ? "12px 14px" : "14px 16px",
               borderRadius: "18px",
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.97)",
+              border: "1px solid rgba(210,236,255,0.16)",
+              background: "linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%)",
               color: "#10243a",
               fontSize: "15px",
               outline: "none",
+              boxShadow: "0 12px 28px rgba(4,16,29,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
             }}
           />
 
@@ -577,9 +730,9 @@ export default function Homepage() {
                 top: "calc(100% + 8px)",
                 left: 0,
                 right: 0,
-                background: "rgba(255,255,255,0.98)",
+                background: "linear-gradient(180deg, rgba(247,251,255,0.99) 0%, rgba(237,245,252,0.98) 100%)",
                 borderRadius: "18px",
-                boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+                boxShadow: "0 22px 44px rgba(0,0,0,0.18)",
                 overflow: "hidden",
                 border: "1px solid rgba(16, 36, 58, 0.08)",
               }}
@@ -594,7 +747,7 @@ export default function Homepage() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     padding: "12px 14px",
-                    background: index === selectedIndex ? "#e9f5ff" : "white",
+                    background: index === selectedIndex ? "#e7f4ff" : "transparent",
                     border: "none",
                     borderBottom:
                       index === results.length - 1 ? "none" : "1px solid rgba(16,36,58,0.06)",
@@ -619,13 +772,13 @@ export default function Homepage() {
                 onClick={() => selectPort(port, { clearSearch: true })}
                 style={{
                   width: "100%",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: "14px",
-                  background: "rgba(255,255,255,0.06)",
+                  ...panelSectionStyle,
                   color: "#edf7ff",
                   padding: "10px 12px",
                   cursor: "pointer",
                   textAlign: "left",
+                  backdropFilter: "blur(14px)",
+                  WebkitBackdropFilter: "blur(14px)",
                 }}
                 >
                   <div
@@ -695,8 +848,8 @@ export default function Homepage() {
                   />
                 </svg>
               ),
-              background: "rgba(6, 24, 44, 0.72)",
-              textColor: "#edf7ff",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+              textColor: "#d7e8ff",
             },
             {
               key: "reports",
@@ -715,8 +868,8 @@ export default function Homepage() {
                   <path d="M8.5 17h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
               ),
-              background: "rgba(6, 24, 44, 0.72)",
-              textColor: "#edf7ff",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+              textColor: "#d7e8ff",
             },
             {
               key: "whatsapp",
@@ -736,8 +889,8 @@ export default function Homepage() {
                   />
                 </svg>
               ),
-              background: "#25D366",
-              textColor: "#ffffff",
+              background: "linear-gradient(180deg, rgba(37, 211, 102, 0.2) 0%, rgba(24, 148, 70, 0.12) 100%)",
+              textColor: "#d8ffe7",
             },
           ].map((item) => {
             const expanded = hoveredAction === item.key
@@ -748,7 +901,7 @@ export default function Homepage() {
               borderRadius: "999px",
               border: item.key === "whatsapp"
                 ? "1px solid rgba(255,255,255,0.18)"
-                : "1px solid rgba(255,255,255,0.14)",
+                : "1px solid rgba(210,236,255,0.16)",
               background: item.background,
               color: item.textColor,
               display: "inline-flex",
@@ -756,13 +909,15 @@ export default function Homepage() {
               justifyContent: expanded && !isMobile ? "flex-start" : "center",
               gap: expanded && !isMobile ? "10px" : "0",
               cursor: "pointer",
-              boxShadow: "0 14px 34px rgba(0,0,0,0.2)",
+              boxShadow: item.key === "whatsapp"
+                ? "inset 0 1px 0 rgba(255,255,255,0.05)"
+                : "inset 0 1px 0 rgba(255,255,255,0.05)",
               backdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
               WebkitBackdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
               textDecoration: "none",
               overflow: "hidden",
               whiteSpace: "nowrap",
-              transition: "width 0.22s ease, background 0.22s ease, transform 0.22s ease",
+              transition: "width 0.22s ease, background 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease",
               padding: expanded && !isMobile ? "0 18px" : "0",
             }
 
@@ -817,13 +972,13 @@ export default function Homepage() {
                       left: 0,
                       bottom: "calc(100% + 10px)",
                       minWidth: "240px",
-                      background: "rgba(9, 22, 39, 0.72)",
-                      border: "1px solid rgba(210,236,255,0.18)",
+                      background: "radial-gradient(circle at top left, rgba(88,182,255,0.16), transparent 34%), linear-gradient(180deg, rgba(9, 22, 39, 0.82) 0%, rgba(7, 20, 35, 0.76) 100%)",
+                      border: "1px solid rgba(210,236,255,0.2)",
                       borderRadius: "18px",
                       overflow: "hidden",
                       backdropFilter: "blur(18px)",
                       WebkitBackdropFilter: "blur(18px)",
-                      boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+                      boxShadow: "0 20px 44px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)",
                     }}
                   >
                     {[
@@ -842,10 +997,10 @@ export default function Homepage() {
                           width: "100%",
                           border: "none",
                           background: "transparent",
-                          padding: "12px 14px",
+                          padding: "13px 14px",
                           textAlign: "left",
                           cursor: "pointer",
-                          color: "#edf7ff",
+                          color: "#d7e8ff",
                           fontWeight: 600,
                           borderTop: index > 0 ? "1px solid rgba(255,255,255,0.08)" : "none",
                         }}

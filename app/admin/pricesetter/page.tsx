@@ -521,8 +521,9 @@ export default function AdminPage() {
                 disabled={publishingChina}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                  border: "none",
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  color: "#e2f3ff",
                 }}
               >
                 {publishingChina ? "Publishing China..." : publishedChina ? "Published China" : "Publish China"}
@@ -534,8 +535,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "#c53939",
-                  border: "none",
+                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+                  border: "1px solid rgba(255, 120, 120, 0.16)",
+                  color: "#ffd4d8",
                 }}
               >
                 Check China
@@ -545,8 +547,9 @@ export default function AdminPage() {
                 disabled={publishingCompact}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                  border: "none",
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  color: "#e2f3ff",
                 }}
               >
                 {publishingCompact ? "Publishing Compact..." : publishedCompact ? "Published Compact" : "Publish Compact"}
@@ -558,8 +561,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "#c53939",
-                  border: "none",
+                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+                  border: "1px solid rgba(255, 120, 120, 0.16)",
+                  color: "#ffd4d8",
                 }}
               >
                 Check Compact
@@ -855,44 +859,50 @@ const compactInputStyle: React.CSSProperties = {
 }
 
 const toolbarButtonStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  border: "1px solid rgba(255,255,255,0.14)",
-  borderRadius: "12px",
-  background: "rgba(255,255,255,0.07)",
-  color: "#edf7ff",
+  padding: "9px 14px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  borderRadius: "999px",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+  color: "#d7e8ff",
   cursor: "pointer",
   fontSize: "13px",
   fontWeight: 700,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 const tabButtonStyle: React.CSSProperties = {
   padding: "7px 11px",
-  border: "1px solid rgba(255,255,255,0.06)",
+  border: "1px solid rgba(210,236,255,0.14)",
   borderRadius: "999px",
-  background: "rgba(255,255,255,0.04)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%)",
   cursor: "pointer",
   fontSize: "11px",
   fontWeight: 700,
   letterSpacing: "0.02em",
+  color: "#d7e8ff",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 const saveButtonStyle: React.CSSProperties = {
-  color: "white",
-  padding: "6px 10px",
-  border: "none",
-  borderRadius: "8px",
+  color: "#ddffef",
+  padding: "6px 12px",
+  border: "1px solid rgba(73, 219, 165, 0.22)",
+  borderRadius: "999px",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
+  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
-  background: "#e63946",
-  color: "white",
-  padding: "6px 10px",
-  border: "none",
-  borderRadius: "8px",
+  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
+  color: "#ffd4d8",
+  padding: "6px 12px",
+  border: "1px solid rgba(255, 120, 120, 0.16)",
+  borderRadius: "999px",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }

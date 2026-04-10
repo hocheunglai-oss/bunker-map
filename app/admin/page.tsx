@@ -26,37 +26,40 @@ const shellStyle: React.CSSProperties = {
 const panelStyle: React.CSSProperties = {
   borderRadius: "28px",
   padding: "30px",
-  background: "rgba(6, 24, 44, 0.68)",
-  border: "1px solid rgba(210, 236, 255, 0.16)",
+  background:
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.16), transparent 34%), linear-gradient(180deg, rgba(6, 24, 44, 0.8) 0%, rgba(7, 27, 49, 0.72) 100%)",
+  border: "1px solid rgba(210, 236, 255, 0.2)",
   backdropFilter: "blur(18px)",
   WebkitBackdropFilter: "blur(18px)",
-  boxShadow: "0 24px 80px rgba(0, 0, 0, 0.24)",
+  boxShadow: "0 26px 80px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
   color: "#edf7ff",
 }
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
-  border: "1px solid rgba(173, 216, 255, 0.2)",
+  border: "1px solid rgba(210,236,255,0.16)",
   borderRadius: "14px",
   fontSize: "15px",
-  background: "rgba(255,255,255,0.92)",
+  background: "linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%)",
   color: "#10243a",
   outline: "none",
+  boxShadow: "0 12px 28px rgba(4,16,29,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
 }
 
 const actionButtonStyle: React.CSSProperties = {
   width: "100%",
-  padding: "15px 16px",
-  border: "1px solid rgba(173, 216, 255, 0.18)",
-  borderRadius: "18px",
-  background: "rgba(255,255,255,0.08)",
-  color: "#edf7ff",
+  padding: "12px 16px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  borderRadius: "999px",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+  color: "#d7e8ff",
   cursor: "pointer",
-  fontSize: "15px",
+  fontSize: "14px",
   fontWeight: 700,
   textAlign: "left",
   transition: "transform 0.16s ease, background 0.16s ease, border-color 0.16s ease",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 export default function AdminPage() {
@@ -178,19 +181,19 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  style={{
-                    width: "100%",
-                    padding: "14px 16px",
-                    border: "none",
-                    borderRadius: "16px",
-                    background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                    color: "white",
-                    cursor: "pointer",
-                    fontSize: "15px",
-                    fontWeight: 800,
-                    boxShadow: "0 14px 34px rgba(16, 97, 166, 0.28)",
-                    marginBottom: "12px",
-                  }}
+                style={{
+                  width: "100%",
+                  padding: "14px 16px",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  borderRadius: "999px",
+                  background: "linear-gradient(180deg, rgba(36, 144, 234, 0.18) 0%, rgba(11, 95, 159, 0.1) 100%)",
+                  color: "#c9e6ff",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                  marginBottom: "12px",
+                }}
                 >
                   Logout
                 </button>
@@ -198,19 +201,19 @@ export default function AdminPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  style={{
-                    width: "100%",
-                    padding: "14px 16px",
-                    border: "none",
-                    borderRadius: "16px",
-                    background: "linear-gradient(135deg, #1f7acb 0%, #0a4f87 100%)",
-                    color: "white",
-                    cursor: "pointer",
-                    fontSize: "15px",
-                    fontWeight: 800,
-                    boxShadow: "0 14px 34px rgba(16, 97, 166, 0.28)",
-                    marginBottom: "12px",
-                  }}
+                style={{
+                  width: "100%",
+                  padding: "14px 16px",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  borderRadius: "999px",
+                  background: "linear-gradient(180deg, rgba(36, 144, 234, 0.18) 0%, rgba(11, 95, 159, 0.1) 100%)",
+                  color: "#c9e6ff",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                  marginBottom: "12px",
+                }}
                 >
                   {submitting ? "Signing In..." : "Login"}
                 </button>
@@ -221,14 +224,15 @@ export default function AdminPage() {
                 onClick={() => router.push("/")}
                 style={{
                   width: "100%",
-                  padding: "13px 16px",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: "16px",
-                  background: "rgba(255,255,255,0.08)",
-                  color: "#edf7ff",
+                  padding: "12px 16px",
+                  border: "1px solid rgba(210,236,255,0.16)",
+                  borderRadius: "999px",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                  color: "#d7e8ff",
                   cursor: "pointer",
-                  fontSize: "15px",
+                  fontSize: "14px",
                   fontWeight: 700,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
                 }}
               >
                 Back To Bunker Map
@@ -246,7 +250,9 @@ export default function AdminPage() {
         <div
           style={{
             ...panelStyle,
-            background: authenticated ? panelStyle.background : "rgba(34, 40, 48, 0.78)",
+            background: authenticated
+              ? panelStyle.background
+              : "linear-gradient(180deg, rgba(31, 38, 47, 0.82) 0%, rgba(24, 30, 38, 0.78) 100%)",
             border: authenticated
               ? panelStyle.border
               : "1px solid rgba(255,255,255,0.08)",
@@ -282,11 +288,15 @@ export default function AdminPage() {
                 style={{
                   ...actionButtonStyle,
                   padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                  background: authenticated ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                  background: authenticated
+                    ? "linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)"
+                    : "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.03) 100%)",
                   color: authenticated ? "#edf7ff" : "transparent",
-                  borderColor: authenticated ? "rgba(173, 216, 255, 0.18)" : "rgba(255,255,255,0.06)",
+                  borderColor: authenticated ? "rgba(210,236,255,0.18)" : "rgba(255,255,255,0.06)",
                   cursor: authenticated ? "pointer" : "default",
-                  boxShadow: authenticated ? "0 10px 24px rgba(0,0,0,0.14)" : "none",
+                  boxShadow: authenticated
+                    ? "0 16px 36px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)"
+                    : "none",
                 }}
               >
                 <span style={{ filter: authenticated ? "none" : "blur(7px)" }}>

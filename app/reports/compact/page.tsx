@@ -48,6 +48,20 @@ const sectionTitleStyle: React.CSSProperties = {
   fontWeight: 400,
 }
 
+const pillButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "10px 18px",
+  borderRadius: "999px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+  color: "#d7e8ff",
+  textDecoration: "none",
+  fontWeight: 700,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+}
+
 function formatValue(value: number | null) {
   if (value == null) return "-"
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
@@ -155,9 +169,9 @@ export default function CompactReport() {
                   alignItems: "center",
                   padding: "8px 12px",
                   borderRadius: "999px",
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#d7e9ff",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                  border: "1px solid rgba(210,236,255,0.16)",
+                  color: "#d7e8ff",
                   fontSize: "14px",
                   whiteSpace: "nowrap",
                 }}
@@ -213,9 +227,9 @@ export default function CompactReport() {
                               width: "28px",
                               height: "28px",
                               borderRadius: "999px",
-                              border: "1px solid rgba(255,255,255,0.18)",
-                              background: "rgba(255,255,255,0.08)",
-                              color: "#f4fbff",
+                              border: "1px solid rgba(210,236,255,0.16)",
+                              background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                              color: "#d7e8ff",
                               cursor: "pointer",
                               fontSize: "17px",
                               lineHeight: 1,
@@ -329,19 +343,13 @@ export default function CompactReport() {
           <a
             href="/"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
+              ...pillButtonStyle,
               gap: "10px",
-              padding: "12px 22px",
-              borderRadius: "999px",
-              background: "#f05454",
-              color: "#fff",
-              textDecoration: "none",
-              fontWeight: 700,
+              color: "#ffd4d8",
+              background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+              border: "1px solid rgba(255, 120, 120, 0.16)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              boxShadow: "0 10px 24px rgba(240, 84, 84, 0.24)",
             }}
           >
             Back To Bunker Map

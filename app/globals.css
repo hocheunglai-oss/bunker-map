@@ -26,24 +26,44 @@ body {
 }
 
 .glass-popup .leaflet-popup-content-wrapper {
-  background: rgba(6, 24, 44, 0.72);
+  background:
+    radial-gradient(circle at top left, rgba(88, 182, 255, 0.22), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(87, 227, 176, 0.1), transparent 30%),
+    linear-gradient(180deg, rgba(6, 24, 44, 0.9) 0%, rgba(7, 27, 49, 0.82) 100%);
   color: #edf7ff;
-  border: 1px solid rgba(210, 236, 255, 0.18);
-  border-radius: 20px;
+  border: 1px solid rgba(210, 236, 255, 0.22);
+  border-radius: 24px;
   backdrop-filter: blur(20px) saturate(145%);
   -webkit-backdrop-filter: blur(20px) saturate(145%);
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .glass-popup .leaflet-popup-tip {
-  background: rgba(16, 35, 60, 0.72);
+  background: rgba(10, 30, 52, 0.92);
   border: 1px solid rgba(223, 242, 255, 0.22);
 }
 
 .glass-popup .leaflet-popup-content {
-  margin: 14px 16px;
+  margin: 14px;
+  min-width: 0;
+}
+
+.glass-popup .leaflet-popup-tip-container {
+  margin-top: -1px;
 }
 
 .glass-popup .leaflet-popup-close-button {
   color: #edf7ff;
+  top: 10px;
+  right: 10px;
+  font-size: 18px;
+  opacity: 0.8;
+  width: 28px;
+  height: 28px;
+}
+
+.glass-popup .leaflet-popup-close-button:hover {
+  opacity: 1;
 }

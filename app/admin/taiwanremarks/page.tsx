@@ -8,6 +8,18 @@ function createEmptyMemo() {
   return { id: crypto.randomUUID(), text: "" }
 }
 
+const pillButtonStyle: React.CSSProperties = {
+  padding: "9px 14px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  borderRadius: "999px",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+  color: "#d7e8ff",
+  textDecoration: "none",
+  fontSize: "13px",
+  fontWeight: 700,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+}
+
 export default function AdminRemarks() {
   const [memos, setMemos] = useState<Array<{ id: string; text: string }>>([])
   const [loading, setLoading] = useState<boolean>(true)
@@ -147,16 +159,7 @@ export default function AdminRemarks() {
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <a
               href="/admin"
-              style={{
-                padding: "10px 16px",
-                border: "1px solid rgba(255,255,255,0.14)",
-                borderRadius: "12px",
-                background: "rgba(255,255,255,0.08)",
-                color: "#edf7ff",
-                textDecoration: "none",
-                fontSize: "14px",
-                fontWeight: 700,
-              }}
+              style={pillButtonStyle}
             >
               ← Back To Admin
             </a>
@@ -164,14 +167,8 @@ export default function AdminRemarks() {
             <button
               onClick={addMemo}
               style={{
-                padding: "10px 16px",
-                border: "1px solid rgba(255,255,255,0.14)",
-                borderRadius: "12px",
-                background: "rgba(255,255,255,0.08)",
-                color: "#edf7ff",
+                ...pillButtonStyle,
                 cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: 700,
               }}
               aria-label="Add remark"
             >
@@ -182,14 +179,13 @@ export default function AdminRemarks() {
               onClick={saveRemark}
               disabled={saving}
               style={{
-                backgroundColor: isDirty ? "#1fa97a" : "rgba(255,255,255,0.08)",
-                color: "white",
+                ...pillButtonStyle,
+                background: isDirty
+                  ? "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)"
+                  : pillButtonStyle.background,
+                color: isDirty ? "#ddffef" : "#d7e8ff",
                 textTransform: "uppercase",
-                fontWeight: 700,
-                fontSize: "14px",
-                padding: "10px 16px",
-                borderRadius: "12px",
-                border: isDirty ? "none" : "1px solid rgba(255,255,255,0.14)",
+                border: isDirty ? "1px solid rgba(73, 219, 165, 0.22)" : "1px solid rgba(210,236,255,0.16)",
                 cursor: saving ? "wait" : "pointer",
               }}
             >
