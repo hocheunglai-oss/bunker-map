@@ -19,7 +19,7 @@ const pageStyle: React.CSSProperties = {
 const shellStyle: React.CSSProperties = {
   width: "min(1320px, 100%)",
   display: "grid",
-  gridTemplateColumns: "1.05fr 1fr",
+  gridTemplateColumns: "1.05fr 1fr 1fr",
   gap: "18px",
 }
 
@@ -309,6 +309,75 @@ export default function AdminPage() {
             ))}
           </div>
 
+        </div>
+
+        <div
+          style={{
+            ...panelStyle,
+            background: "linear-gradient(180deg, rgba(58, 64, 72, 0.9) 0%, rgba(35, 39, 46, 0.86) 100%)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+          }}
+        >
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: "12px",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "#c0c6cd",
+              marginBottom: "10px",
+              fontWeight: 700,
+            }}
+          >
+            Trading Tools
+          </div>
+
+          <div style={{ display: "grid", gap: "12px" }}>
+            {[
+              { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
+            ].map((item) => (
+              <button
+                key={item.label}
+                onClick={() => authenticated && router.push(item.path)}
+                disabled={!authenticated}
+                style={{
+                  ...actionButtonStyle,
+                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+                  background: authenticated
+                    ? "linear-gradient(180deg, rgba(112, 120, 132, 0.28) 0%, rgba(62, 69, 79, 0.18) 100%)"
+                    : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
+                  color: authenticated ? "#e1e6eb" : "transparent",
+                  borderColor: authenticated ? "rgba(190, 198, 208, 0.22)" : "rgba(255,255,255,0.08)",
+                  cursor: authenticated ? "pointer" : "default",
+                  boxShadow: authenticated
+                    ? "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(180,190,200,0.08)"
+                    : "none",
+                }}
+              >
+                <span style={{ filter: authenticated ? "none" : "blur(7px)" }}>
+                  {item.label}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
+              textAlign: "center",
+              color: "#b7bdc4",
+              fontSize: "12px",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+            }}
+          >
+            Under Construction
+          </div>
         </div>
       </div>
     </div>
