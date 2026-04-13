@@ -9,6 +9,7 @@ import { hasFormulaForAnyFuel, parseSimpleFormula } from "@/lib/portPricing"
 import { saveReportSnapshot } from "@/lib/reportSnapshots"
 import { buildChinaReportSections } from "@/lib/chinaReport"
 import { formatReportDate } from "@/lib/taiwanReport"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
@@ -44,6 +45,7 @@ const fuelFieldConfigs = [
 
 export default function AdminPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const isMobile = useIsMobile()
 
   const [ports, setPorts] = useState<any[]>([])
   const [showCoords, setShowCoords] = useState(false)
@@ -476,8 +478,8 @@ export default function AdminPage() {
       >
         <div
           style={{
-            position: "sticky",
-            top: "0",
+            position: isMobile ? "static" : "sticky",
+            top: isMobile ? undefined : "0",
             zIndex: 20,
             margin: "-22px -22px 16px",
             padding: "18px 22px 14px",
