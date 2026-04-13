@@ -62,6 +62,14 @@ const actionButtonStyle: React.CSSProperties = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 12px 28px rgba(8,24,44,0.18), 0 0 0 1px rgba(90,169,255,0.08)",
 }
 
+const mutedTradingButtonStyle: React.CSSProperties = {
+  ...actionButtonStyle,
+  background: "linear-gradient(180deg, rgba(134, 141, 151, 0.22) 0%, rgba(72, 78, 88, 0.12) 100%)",
+  color: "#bcc5ce",
+  borderColor: "rgba(190, 198, 208, 0.18)",
+  boxShadow: "0 18px 40px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(180,190,200,0.06)",
+}
+
 export default function AdminPage() {
   const isMobile = useIsMobile()
   const router = useRouter()
@@ -318,7 +326,6 @@ export default function AdminPage() {
             border: "1px solid rgba(255,255,255,0.12)",
             display: "flex",
             flexDirection: "column",
-            justifyContent: "space-between",
             boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
@@ -338,6 +345,7 @@ export default function AdminPage() {
 
           <div style={{ display: "grid", gap: "12px" }}>
             {[
+              { label: "ENQUIRY WORKFLOW", path: "/admin/enqworkflow" },
               { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
             ].map((item) => (
               <button
@@ -345,20 +353,24 @@ export default function AdminPage() {
                 onClick={() => authenticated && router.push(item.path)}
                 disabled={!authenticated}
                 style={{
-                  ...actionButtonStyle,
+                  ...mutedTradingButtonStyle,
                   padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
                   background: authenticated
-                    ? "linear-gradient(180deg, rgba(112, 120, 132, 0.28) 0%, rgba(62, 69, 79, 0.18) 100%)"
+                    ? mutedTradingButtonStyle.background
                     : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
-                  color: authenticated ? "#e1e6eb" : "transparent",
-                  borderColor: authenticated ? "rgba(190, 198, 208, 0.22)" : "rgba(255,255,255,0.08)",
+                  color: authenticated ? mutedTradingButtonStyle.color : "transparent",
+                  borderColor: authenticated ? mutedTradingButtonStyle.borderColor : "rgba(255,255,255,0.08)",
                   cursor: authenticated ? "pointer" : "default",
                   boxShadow: authenticated
-                    ? "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(180,190,200,0.08)"
+                    ? mutedTradingButtonStyle.boxShadow
                     : "none",
                 }}
               >
-                <span style={{ filter: authenticated ? "none" : "blur(7px)" }}>
+                <span
+                  style={{
+                    filter: authenticated ? "none" : "blur(7px)",
+                  }}
+                >
                   {item.label}
                 </span>
               </button>
@@ -367,7 +379,7 @@ export default function AdminPage() {
 
           <div
             style={{
-              marginTop: "24px",
+              marginTop: "12px",
               textAlign: "center",
               color: "#b7bdc4",
               fontSize: "12px",
