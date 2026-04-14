@@ -1,0 +1,957 @@
+# Japan Curated Draft
+
+- Country count: 1
+- Port count: 185
+
+## Country
+
+### Japan
+
+(REFINERY INFO IS MOVED TO ANOTHER DOCUMENT: REFINERIES LOCATION) 
+
+DOMESTIC PRODUCTS: DELIVERY DURING DAY TIME ONLY. NO DELIVERY ON SUNDAY AND PUBLIC HOLIDAYS
+
+BONDED PRODUCT: DELIVERY DURING DAY TIME ONLY IS OBSERVED FOR MOST PORTS. KAMEI HAS OWN MGO TANK AND PRODUCT AT TOKYO BAY, COMPETITIVE PRICE FOR MORE THAN 70MTS, SULFUR CONTENT S0.001% MAX. 
+
+BARGE OPERATORS: 2 MAIN BARGE OPERATORS AT TOKYO BAY ASAHI TANKER / TSURUMI SUNMARINE MAKE UP 90% OF VOLUME
+
+LNG VSLS: BARGE HAS TO SUPPLY VIA PORT PIPELINE FACILITIES, DIRECT CONNECTION TO BARGE IS PROHIBITED DUE TO SAFETY REASON. ANCHORAGE DELIVERY IS NOT ALLOWED. PORT WITH PIPELINE FACILITIES ARE OHGISHIMA/SODEGAURA/HIMEJI/SENBOKU/SAKAI/CHITA/YOKKAICHI/TOBATA.
+
+LPG VSLS:
+OSAKA BAY
+SUPPLY IS NOT ALLOWED IN BOTH BERTH AND ANCHORAGE.
+<201912>
+
+TOKYO BAY
+FOR BUNKERS ONLY CALL, YOKOHAMA PORT AUTHORITY IS MORE WELCOME THAN CHIBA PORT AUTHORITY.
+<201912>
+
+
+LSMDO: PRICE IS SIGNIFICANTLY LOWER THAN LSMGO (AROUND $60/MT AT MAIN PORTS), IF PREVIOUS CARGO ON BARGE WAS NORMAL MDO THEN SUPPLIER NORMALLY NEED A MIN QTTY OF 50MTS TO GUARANTEE SULFUR 0.1% MAX (TYPICAL SPECS PLS REFER TO END OF DOCUMENT)
+
+## Ports
+
+### Aioi
+
+- Updated: AUG 09
+- Information: BARGE FROM OSAKA/MIZUSHIMA
+
+### Akita
+
+- Updated: No date found
+- Information: No information yet
+
+### Amagasaki
+
+- Updated: NOV 20, MAY 25, NOV 20
+- Information: ONLY DOMESTIC MDO S0.5%, ALMOST IMPOSSIBLE TO SUPPLY INTERNATIONAL VESSELS, SUGGEST NIIGATA OR HAKODATE B.O. HELIOS CAN SUPPLY MDO / LSMDO / LSMGO OSAKA BAY
+
+### Anan
+
+- Updated: DEC 03
+- Information: BARGE FROM OSAKA
+
+### Aomori
+
+- Updated: NOV 04
+- Information: ONLY DOMESTIC MDO
+
+### Ariake
+
+- Updated: JAN 09
+- Information: UNIVERSAL SHIPBUILDING ARIAKE SHIPYARD
+
+### Chiba
+
+- Updated: JUL 15, NOV 19
+- Information: TOKYO PRICE DEFAULT B.O. LOCATION IN TOKYO BAY, NO OIL FENCE DURING DAY TIME SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Chita
+
+- Updated: NOV 13
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS)
+
+### Etajima
+
+- Updated: OCT 17
+- Information: OPPOSITE OF KURE, TANKER CAN BE SUPPLIED AT KURE ANCH
+
+### Fukuoka
+
+- Updated: No date found
+- Information: No information yet
+
+### Fukushima
+
+- Updated: SEP 21
+- Information: PORT NAME = HAKATA, FUKOUKA SHIPYARD IS THERE ONLY ONAHAMA HAS MDO S0.5% AVAILS AT HIGH LEVEL
+
+### Fukuyama
+
+- Updated: No date found
+- Information: No information yet
+
+### Lsmgo Min 20mt
+
+- Updated: FEB 22
+- Information: No information yet
+
+### Funabashi
+
+- Updated: JUL 01
+- Information: TOKYO PRICE
+
+### Funakawa
+
+- Updated: AUG 97
+- Information: NO BUNKER FACILITIES
+
+### Futtsu
+
+- Updated: MAY 11
+- Information: TOKYO PRICE
+
+### Hachinohe
+
+- Updated: JUN 20
+- Information: ONLY DOMESTIC MDO AND LSMDO, BERTH DELY ONLY
+
+### Hakata
+
+- Updated: JAN 04
+- Information: KYUSHU ISLAND, MAIN PORT PRICE, FUKUOKA SHIPYARD
+
+### Hakatajima
+
+- Updated: MAR 08
+- Information: HAKATA ISLAND, NOMINATED AS IMABARI , BDN HAKATAJIMA
+
+### Hakodate
+
+- Updated: MAR 20, OCT 19, FEB 22, MAY 25
+- Information: DOMESTIC LSFO/MDO/LSMGO AVAILS BY SMALL BARGE AT VERY HIGH LEVELS ONLY PORT IN HOKKAIDO HAS MGO AVAILS B/O IS OK BUT SUPPLY AT BERTH ONLY HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Hannan
+
+- Updated: MAR 01, JAN 20
+- Information: OSAKA BAY PRICE SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Haramachi
+
+- Updated: JUN 07
+- Information: PERMISSIONS FOR BUNKER SUPPLIES AT “TOHOKU ELECTRIC POWER CO” ARE ONLY GRANTED TO ORDERS ARRANGED THROUGH “FISHING ASSOCIATION OF FUKUSHIMA AT HARAMACHI”
+
+### Harumi
+
+- Updated: JUL 15
+- Information: TOKYO BAY
+
+### Himeji
+
+- Updated: NOV 13, JUN 16, MAR 22
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) SINANEN: ONLY 1 BARGE OPERATOR NEABY, HARD TO ARRANGE SMALL QTTY DELY FOR DOMESTIC VSLS ONLY
+
+### Hibi
+
+- Updated: SEP 20
+- Information: SUBJECT ENQUIRY, ALMOST IMPOSSIBLE TO ARRANGE
+
+### Hibikinada
+
+- Updated: OCT 20, MAY 25
+- Information: SINANEN: SUPPLY IS NOT ALLOWED AT NIPPON COKES BERTH BARGE LOAD PRODUCT FROM UBE/TOKUYAMA/OITA FAR FROM REFINERY, 7 DAYS NOTICE IS SUGGESTED HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Hidakatsu
+
+- Updated: JUN 15
+- Information: NO BUNKER FACILITIES AT TSUSHIMA ISLAND
+
+### Higashi Harima
+
+- Updated: No date found
+- Information: = KAKOGAWA SOME BERTH WITH SUPPLY TIME LIMIT 09:00-14:00
+
+### Hikari
+
+- Updated: FEB 01
+- Information: BONDED PRODUCTS ARE TRANSPORTED FROM TOKUYAMA AT $10/MT FOR 300T.
+
+### Hirohata
+
+- Updated: SEP 06
+- Information: MAIN PORT PRICE
+
+### Hiroshima
+
+- Updated: JUL 06
+- Information: MAIN PORT PRICE
+
+### Hitachi
+
+- Updated: DEC 20
+- Information: ONLY ONE MDO SUPPLIER SUPPLY LOCAL FISHING BOATS ONLY, NO LICENSE FOR OCEAN GOING VESSELS TRUCK DELIVERY IS PROHIBITED BY LOCAL FIRE STATION
+
+### Hitachinaka
+
+- Updated: MAR 19
+- Information: DOMESTIC MDO MAYBE POSSIBLE LOCALLY FOR CONTRACTUAL VSLS, BARGE FROM TOKYO BAY
+
+### Hososhima
+
+- Updated: NOV 21
+- Information: KYUSHU, NO LOCAL SUPPLIER, BARGE LOAD FROM OTHER PORTS SO PRICE IS SKY HIGH (MGO/LSMDO MIN 30MTS)
+
+### Ichihara
+
+- Updated: No date found
+- Information: No information yet
+
+### Ichikawa
+
+- Updated: APR 10, DEC 21
+- Information: TOKYO PRICE TOKYO BAY
+
+### Imabari
+
+- Updated: JUN 15
+- Information: MURAKAMI HIDE SHIPYARD CAN SUPPLY
+
+### Imari
+
+- Updated: FEB 17
+- Information: ON KYUSHU ISLAND, NAMURA SHIPYARD IS THERE, DELY OK
+
+### Innoshima
+
+- Updated: No date found
+- Information: No information yet
+
+### Seto Inland Sea
+
+- Updated: JUN 13
+- Information: No information yet
+
+### Ise Bay
+
+- Updated: APR 15
+- Information: NAGOYA MAIN PORT PRICE
+
+### Ishigaki
+
+- Updated: MAY 16
+- Information: PART OF OKINAWA, EXPENSIVE DOMESTIC PRODUCTS BY RTW 16KL EACH
+
+### Ishikari
+
+- Updated: JUN 20
+- Information: KAMEI: ONLY MDO S0.5%
+
+### Ishinomaki
+
+- Updated: JUN 02
+- Information: KAMEI IS THE SOLE SUPPLIER, DOMESTIC PRODUCTS, MDO 60T $250
+
+### Iwakuni
+
+- Updated: APR 21
+- Information: JXTG NIPPON OIL REFINERY IS LOCATED, DELY TO TANKER BEFORE/AFTER CARGO OPS BOTH OK
+
+### Iyomishima
+
+- Updated: FEB 06
+- Information: FM MIZUSHIMA, SLIGHTLY HIGHER, 3 DAYS NOTICE
+
+### Izuhara
+
+- Updated: JUN 15
+- Information: NO BUNKER FACILITIES AT TSUSHIMA ISLAND
+
+### Kadamatsu
+
+- Updated: APR 10
+- Information: CLOSED TO TOKUYAMA, ALL GRADES AVAILS SHIN KASADO SHIPYARD
+
+### Kagoshima
+
+- Updated: NOV 12, FEB 17
+- Information: IF380/IF180 BARGE FROM OITA, DOMESTIC MGO IS AVAILABLE KAGOSHIMA GRAIN BERTH & SHIBUSHI GRAIN BERTH, BOTH SUPPLY OK
+
+### Kakogawa
+
+- Updated: No date found
+- Information: = HIGASHI HARIMA
+
+### Barged From Kobe/Osaka
+
+- Updated: SEP 14, NOV 15
+- Information: SOME BERTH WITH SUPPLY TIME LIMIT 09:00-14:00
+
+### Kamaishi
+
+- Updated: MAY 20
+- Information: ONLY MDO S0.5% AVAILABLE, QNTY RANGE 10-80KL
+
+### Kanazawa
+
+- Updated: MAR 06
+- Information: SINANEN NA FOR ANY GRADE
+
+### Kanda
+
+- Updated: No date found
+- Information: No information yet
+
+### Moji Area
+
+- Updated: MAR 22
+- Information: No information yet
+
+### Kanmon
+
+- Updated: JAN 12
+- Information: ALL GRADES AVAILABLE, B/O OK
+
+### Kanokawa
+
+- Updated: JAN 18
+- Information: TANKER PORT, CANNOT SUPPLY AT ALLMIN
+
+### Karatsu
+
+- Updated: SEP 21
+- Information: SINANEN: NO BONDED PRODUCT
+
+### Kasaoka
+
+- Updated: JUL 12
+- Information: MAIN PORT PRICE
+
+### Kashima
+
+- Updated: No date found
+- Information: No information yet
+
+### No Mgo
+
+- Updated: NOV 19, MAY 25
+- Information: VLSFO/MDO S0.5% AVAILABLE BY LOCAL SUPPLIER, ONLY ONE BARGE AVAILABLE LOCALLY, MIN 20MTS(SINANEN) IF380/IF180 AVAILABLE, VLSFO POSSIBLE TO BARGE PRODUCTS FM TOKYO BAY ONLY NIPPON STEEL/PUBLIC BERTH AVAILABLE, NO DELY FOR GRAIN BULKER AND TANKER, DELY AT BERTH ONLY HELIOS CAN SUPPLY MDO
+
+### Kawajiri
+
+- Updated: FEB 01
+- Information: FROM OITA. KANDA SHIPYARD.
+
+### Kawanoe
+
+- Updated: NOV 16
+- Information: NORTH SHIKOKU, MAIN PORT PRICE
+
+### Kawasaki
+
+- Updated: APR 15, OCT 16, JAN 20, NOV 19, SEP 20
+- Information: TOKYO BAY TANKER DELIVERY AT ANCHORAGE BEFORE CARGO, AFTER CARGO SUBJECT PERMISSION ARRANGED BY AGENT, OR VSL SHIFT TO CHIBA ANCHORAGE NO SUPPLY AT GRAIN BERTH SEE LPG VSLS REMARK IN GENERAL INFO MITSUI WHARF - DELY DURING WEEKDAYS ONLY
+
+### Keihin
+
+- Updated: No date found
+- Information: No information yet
+
+### Kiire
+
+- Updated: DEC 17, JUN 21
+- Information: TOKYO BAY ONLY ONE BARGE FOR IF380 DELY LOCALLY, MIN QNTY 800MTS
+
+### Kikuma
+
+- Updated: MAR 21
+- Information: SUPPLY AT ANCHORAGE IS NOT ALLOWED DUE TO FAST TIDE, NEED TO SHIFT TO TOKUYAMA OR MATSUYAMA
+
+### Kimitsu
+
+- Updated: JUN 15
+- Information: TOKYO BAY PRICES
+
+### Kinuura
+
+- Updated: DEC 17, APR 15, AUG 20, MAR 21
+- Information: SIMILARLY AS NAGOYA PRICE, NO DELY AT ANCHORAGE TANKER CAN ONLY BE SUPPLIED AT BERTH AFTER CARGO OPS MIN 100/20 MTS DELY IS ONLY ALLOWED ON SECOND DAY FROM ETA AT JERA TERMINAL
+
+### Kisarazu
+
+- Updated: MAY 11, NOV 19
+- Information: TOKYO BAY PRICES SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Kishiwada
+
+- Updated: No date found
+- Information: No information yet
+
+### Kitakyushu
+
+- Updated: JAN 20, JAN 21
+- Information: OSAKA BAY SEE LPG VSLS REMARK IN GENERAL INFO NEAR MOJI
+
+### Kobe
+
+- Updated: NOV 15, JAN 20, JAN 20
+- Information: OSAKA BAY PRICES SEE LPG VSLS REMARK IN GENERAL INFO NO SUPPLY AT ANCHORAGE DUE TO FAST TIDAL CURRENT
+
+### Kochi
+
+- Updated: NOV 21
+- Information: DOMESTIC PRODUCT ONLY
+
+### Kokura
+
+- Updated: NOV 15
+- Information: CLOSE TO MOJI, ALL GRADES
+
+### Komatsushima
+
+- Updated: DEC 02
+- Information: SLIGHTLY HIGHER THAN OSAKA
+
+### Kudamatsu
+
+- Updated: No date found
+- Information: No information yet
+
+### Kurashiki
+
+- Updated: MAR 15, JUL 20
+- Information: SHIN KASADO SHIPYARD CAN SUPPLY
+
+### Kure
+
+- Updated: No date found
+- Information: BARGE FROM OTHER PORTS LIKE MIZUSHIMA
+
+### Lsmdo Avails Locally
+
+- Updated: FEB 04, OCT 21
+- Information: DELY WEEKDAYS ONLY
+
+### Kurosaki
+
+- Updated: MAY 15
+- Information: No information yet
+
+### Kushiro
+
+- Updated: OCT 22
+- Information: KAMEI THE STRONGEST. DOMESTIC MDO/LSMGO SUBJECT ENQUIRY.
+
+### Maizuru
+
+- Updated: DEC 21, MAY 15
+- Information: NO BUNKER SERVICE HITOCHI ZOSEN SHIPYARD
+
+### Marifu
+
+- Updated: APR 21
+- Information: PART OF IWAKUNI
+
+### Marugame
+
+- Updated: FEB 04
+- Information: IMABARI SHIPYARD, SLIGHTLY HIGHER THAN TOKYO
+
+### Matsunaga
+
+- Updated: NOV 13
+- Information: ALL GRADES AVAILABLE, NEAR MIZUSHIMA
+
+### Matsuura
+
+- Updated: FEB 20
+- Information: SINANEN: BARGED PRODUCTS FROM OITA OR UBE REFINERY
+
+### Matsuyama
+
+- Updated: JUL 18
+- Information: ALL GRADES OK / TANKER SUPPLY AT ANCH OK BUT ROUGH SEA OFTEN
+
+### Mihara
+
+- Updated: No date found
+- Information: No information yet
+
+### Barged Fm Mizushima/Sakaide
+
+- Updated: NOV 15
+- Information: No information yet
+
+### Miike
+
+- Updated: AUG 18
+- Information: KYUSHU – ALL GRADES AVAILABLE
+
+### Minamata
+
+- Updated: AUG 06
+- Information: No information yet
+
+### Mishima- Kawanoe
+
+- Updated: JUN 20
+- Information: SINANEN: DELY WEEKDAYS ONLY
+
+### Miyako
+
+- Updated: JAN 99
+- Information: 2 DAYS SAILING FROM NEAREST REFINERY, MAX NOTICE NEEDED
+
+### Miyanoura
+
+- Updated: MAR 17
+- Information: A SMALL ISLAND SOUTH OF KYUSHU, NOTHING AVAILS
+
+### Mizushima
+
+- Updated: NOV 01, JUL 16, JUL 16, NOV 01, AUG 20
+- Information: SIMILAR TO TOKYO PRICE, MITSUBISHI (REFINERY THERE) PACIFIC GRAIN CENTRE CAN BUNKER MONDAY TO FRIDAY SATOFUTO BERTH (GRAIN TERMINAL) ONLY ALLOWS SUPPLY DURING LUNCH TIME (1200-1300LT). NO SUPPLY AT ANCHORAGE FOR VSL’S LOA >200M MR/LR/CRUDE OIL TANKERS NOT ALLOWED, SMALL CHEMICAL TANKERS SUPPLY OK, LARGE TANKERS SOMETIMES AT QUARANTINE ANCHORAGE OK
+
+### Moji
+
+- Updated: JAN 18
+- Information: BUNKERING ONLY (INCLUDING TANKER) AT TANOURA ANCHORAGE POSSIBLE
+
+### Muroran
+
+- Updated: No date found
+- Information: No information yet
+
+### Mutsuogawara
+
+- Updated: SEP 21, APR 20, FEB 22
+- Information: ONLY MITSUBISHI REFINERY. THE ONLY PORT HAS VLSFO AVAILS IN HOKKAIDO DUE TO COVID-19 DOMESTIC IF180/MDO AVAILS AT SKY-HIGH LEVELS. NO BUNKER FALICITIES
+
+### Mutsure
+
+- Updated: AUG 20, DEC 20
+- Information: DOMESTIC PRODUCT ONLY, DELY AT ANCHORAGE ONLY SUBJECT TO SIZE OF VSL & WP (UNLIKELY DURING WINTER)
+
+### Nagasaki
+
+- Updated: NOV 13, JUN 14, MAY 25
+- Information: WEST KYUSHU ISLAND OSHIMA SHIPYARD ALL GRADES AVAILS, DELY AT ANCHORAGE NOT ALLOWED HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Nagoya
+
+- Updated: JUN 16, JUN 16, FEB 20
+- Information: NISSHIN GRAIN SILO BERTH SUPPLY IS NOT ALLOWED KINJYO BERTH AND ANCHORAGE SUPPLY OK DELY AT PUBLIC BERTH AFTER CARGO OPS (DELY AT CARGO BERTH/AT ANCHORAGE AFTER CARGO OPS IS NOT ALLOWED, AT ANCHORAGE BEFORE CARGO OPS CAN BE PERMITTED IN SPECIAL CASES ONLY)
+
+### Naha
+
+- Updated: NOV 16, NOV 16
+- Information: ONLY DOMESTIC MDO/MGO AT SKY HIGH LEVELS, NO FUEL RYUSEKI IS THE SOLE BARGE OPERATOR OKINAWA MGO MAY BE SUPPLIED BY DIRTY BARGE, DELY BY RTW IS AVAILABLE
+
+### Nakagusuku
+
+- Updated: JAN 13
+- Information: NO FACILITY, NEAREST NAHA
+
+### Namikata
+
+- Updated: JUN 02
+- Information: ALL GRADES AVAILABLE
+
+### Nanao
+
+- Updated: JAN 15
+- Information: ONLY DOMECTIC MDO AVAILABLE AND NORMALLY RESERVED FOR DOMESTIC VSLS
+
+### Nanyo
+
+- Updated: MAR 20
+- Information: NO LSMGO BUT LSMDO
+
+### Naoetsu
+
+- Updated: DEC 13
+- Information: NO SUPPLY, NEAREST NIIGATA FOR IFO/MDO
+
+### Naoshima
+
+- Updated: JAN 98, AUG 06, FEB 20
+- Information: IN KYUSHU. NORMAL PRICES, CANNOT DELY AT ANCH, NEAR TO HIBI MITSUBISHI MATERIAL WHARF – MAX 80% OF VSLS’ TANK CACAPITY SUPPLY STRICTLY DURING WEEKDAYS
+
+### Negishi
+
+- Updated: JUN 03
+- Information: NEAR YOKOHAMA, NO OIL FENCE/NO WATCHING BOAT AT BERTH (FM SINANEN)
+
+### Niigata
+
+- Updated: FEB 22, JAN 12, MAY 25
+- Information: DOMESTIC MDO (NO IF380/MGO) ONLY FOR SUPPLY WEST PORT ONLY NO MGO, MDO CAN BE SUPPLIED AT WESTERN WHARF ONLY HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Niihama
+
+- Updated: JUN 14, OCT 17, JUL 20
+- Information: MAIN PORT PRICE, BARGED FM MIZUSHIMA B/O CALL SUSPENDED?? (SINANEN ADVISED) DELY AT ANCHORAGE ONLY (SINANEN ADVISED)
+
+### Noshiro
+
+- Updated: OCT 16
+- Information: NO FACILITIES, NEAREST NIIGATA WEST PORT
+
+### Numazu
+
+- Updated: No date found
+- Information: No information yet
+
+### Nagoya Bay
+
+- Updated: NOV 15
+- Information: No information yet
+
+### Ofunato
+
+- Updated: No date found
+- Information: No information yet
+
+### Ogishima
+
+- Updated: NOV 13
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS)
+
+### Oita
+
+- Updated: MAR 17, JAN 16, SEP 20
+- Information: MAIN PORT ON KYUSHU ISLAND, NIPPON STEEL BERTH OK TANKER CAN SUPPLY AT ANCHORAGE & DURING DAYTIME ONLY SINANEN: NO LSMGO FROM LOCAL SUPPLIER, LOAD FROM UBE REFINERY, MIN 200/60 MTS
+
+### Onahama
+
+- Updated: JUL 97, APR 13, SEP 21
+- Information: SUPPLY AT BERTH ONLY. MC ENERGY CAN SUPPLY MIN FO/DO (OWN BARGE) NO IF380, VLSFO/MDO/LSMDO/LSMGO AVAILABLE
+
+### Onomichi
+
+- Updated: No date found
+- Information: No information yet
+
+### Barged Fm Mizushima/Sakaide
+
+- Updated: NOV 15, NOV 21
+- Information: SANWA SHIPYARD SELDOM ALLOW BUNKERING, DELIVERY AT BERTH ONLY ANCHORAGE DELY IS PROHIBITED
+
+### Osaka
+
+- Updated: No date found
+- Information: No information yet
+
+### Oshima
+
+- Updated: JAN 03
+- Information: BERTH SETO FUTO ONLY ALLOWS BUNKERING DURING LUNCH TIME
+
+### Otaru
+
+- Updated: NOV 21, MAY 25
+- Information: KAMEI: NO ANCHORAGE DELY ONLY ONE BARGE WITH CAPACITY 80KL, MDO / LSMDO AVAILS, MAX TWO TRIPS LSMGO AVAILABLE BETWEEN APR AND OCT ONLY, MIN 15KL HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Reihoku
+
+- Updated: FEB 20
+- Information: SINANEN: BARGED PRODUCTS FROM OITA OR UBE REFINERY
+
+### Saganoseki
+
+- Updated: No date found
+- Information: (SEKI SAKI)
+
+### Saijo
+
+- Updated: JAN 21, NOV 21
+- Information: CLOSE TO OITA (2-3 HRS), VLSFO/LSMGO AVAILS IMABARI SHIPYARD, ALL GRADES AVAILS
+
+### Saiki
+
+- Updated: No date found
+- Information: No information yet
+
+### Kyushu
+
+- Updated: NOV 15
+- Information: No information yet
+
+### Sakai
+
+- Updated: NOV 15, NOV 13, APR 21, NOV 19, JAN 20
+- Information: OSAKA BAY EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) TANKER CAN ONLY BE SUPPLIED AT ANCH B4 CARGO OPS OTHERWISE VSL NEED TO SHIFT TO NIIHAMA ANCH SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Sakaide
+
+- Updated: NOV 19
+- Information: NORTH SHIKOKU, MAIN PORT PRICE MITSUBISHI CHEMICAL WHARF NOT ALLOW DELY ON SAT/SUN/PH
+
+### Sakaiminato
+
+- Updated: SEP 21
+- Information: NORTHER OF HONSHU, NOT POSSIBLE FOR OCEAN GOING VESSELS
+
+### Sasebo
+
+- Updated: NOV 12, JUN 14, MAY 25
+- Information: WEST KYUSHU ISLAND, DELY AT ANCHORAGE NOT ALLOWED OSHIMA SHIPYARD ALL GRADES AVAILS HELIOS CAN SUPPLY MDO / LSMDO / LSMGO
+
+### Senboku
+
+- Updated: NOV 13, JAN 20
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Sendai (Kagoshima)
+
+- Updated: NOV 15
+- Information: 薩摩川內市(鹿兒島縣 LOCATED AT SW PART OF KYUSHU ISLAND
+
+### Sendai (Miyagi)
+
+- Updated: APR 15, JUN 20, FEB 20
+- Information: 仙台市(宮城縣) ON HONSHU ISLAND, NEAR ISHINOMAKI HIGHLY DIFFICULT TO GET SUPPLY, PRIORITY FOR SUPPLY TO JX ENEGY PRODUCT TANKER/DOMESTIC VESSELS SINANEN: DOMESTIC MDO S0.5% ONLY, BARGE FROM ISHINOMAKI KAMEI: VLSFO/MDO S0.5% AVAILABLE ONLY, MIN QNTY 650KL/60KL, DELY WEEKDAYS ONLY
+
+### Setoda
+
+- Updated: APR 16
+- Information: NEAR MIZUSHIMA/ONOMICHI, SLIGHTLY HIGHER THAN MAIN PORT PRICE, NANKAI SETODA S/Y
+
+### Shibushi
+
+- Updated: No date found
+- Information: No information yet
+
+### Shikama
+
+- Updated: AUG 01, JUN 21, APR 22
+- Information: BARGE FROM OITA 12 HR (ONE SUPPLIER)/KAMMON AREA 2 BERTHS (PRIVATE/ZENNOV SIDE, PUBLIC/SHIBUSHI SIDE) SUPPLY AT GRAIN BERTH POSSIBLE BUT DIFFICULT (SUBJECT TO BERTH PERMITTING) ANCHORAGE DELY NOT ALLOWED
+
+### Shimizu (Honshu)
+
+- Updated: No date found
+- Information: No information yet
+
+### Shimizu (Shikoku)
+
+- Updated: AUG 21, JUL 20
+- Information: IN SHIZUOKA PREFECTURE, VLSFO/MDO AVAILS, MIN 300MTS FOR VLSFO, LOAD PRODUCT FROM TOKYO BAY, MIN 10MTS FOR MDO, MIN 50MTS FOR LSMDO NOT A MAJOR BUNKEIRNG PORT, DOMESTIC PRODUCT ONLY
+
+### Shimonoseki
+
+- Updated: JUL 15
+- Information: MITSUBISHI HEAVY INDUSTRY SHIPYARD
+
+### Shimotsu
+
+- Updated: No date found
+- Information: No information yet
+
+### Shiogama
+
+- Updated: APR 21, SEP 21
+- Information: PART OF WAKAYAMA ONLY MDO S0.5% AVAILABLE
+
+### Shishimi
+
+- Updated: JUN 15
+- Information: NO BUNKER FACILITIES AT TSUSHIMA ISLAND
+
+### Sodegaura
+
+- Updated: NOV 13, DEC 21
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) TOKYO PRICE
+
+### Susaki
+
+- Updated: APR 22
+- Information: BUNKERING NOT ALLOWED BY PORT REGULATION, ADVISED BY SINANEN
+
+### Tachibana
+
+- Updated: MAY 15, JUN 20
+- Information: ALL GRADES INCLUDING MGO NO DELY AT ANCHORAGE DUE TO FAST TIDE
+
+### Tadotsu
+
+- Updated: DEC 17
+- Information: TUG BOATS REQUIRED FOR BARGE AS DROPPING ANCHOR IS NOT ALLOWED OWING TO REQUEST FROM LOCAL FISHERY
+
+### Tagonoura
+
+- Updated: NOV 08
+- Information: ONLY DOMESTIC MDO, MGO MUST BE BARGE FROM TOKYO
+
+### Tahara
+
+- Updated: DEC 16
+- Information: NAGOYA BAY, ALL GRADES AVAILS
+
+### Takamatsu
+
+- Updated: MAR 17
+- Information: MGO AVAILS, OTHER GRADES TO TBC
+
+### Takehara
+
+- Updated: NOV 15
+- Information: MAIN PORT PRICE
+
+### Taketoyo
+
+- Updated: JAN 25
+- Information: SINANEN SAID THERE IS JERA’S TERMINAL WHO DOES NOT ALLOW SUPPLY FIRST DAY AND LAST DAY OF BERTHING
+
+### Tamano
+
+- Updated: NOV 15
+- Information: = UNO, FROM MIZUSHIMA, SLIGHTLY HIGHER THAN TOKYO
+
+### Taniyama
+
+- Updated: No date found
+- Information: No information yet
+
+### Kyushu, Near Kagoshima
+
+- Updated: NOV 15
+- Information: No information yet
+
+### Tanoura
+
+- Updated: No date found
+- Information: No information yet
+
+### Kyushu
+
+- Updated: NOV 15
+- Information: No information yet
+
+### Tobata
+
+- Updated: NOV 13, FEB 17, FEB 22
+- Information: EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) IF380/IF180/MDO/MGO AVAILS MITSUBISHI HAS OWN BARGE (SINANEN ADVISED)
+
+### Tokachi
+
+- Updated: NOV 19
+- Information: IN HOKKAIDO, ONLY DOMESTIC MDO?
+
+### Tokai
+
+- Updated: NOV 15
+- Information: NAGOYA PRICE
+
+### Tokuyama
+
+- Updated: APR 21
+- Information: ALL GRADES AVAILS, B/O AT ANCH OK INCL TANKER
+
+### Tomakomai
+
+- Updated: AUG 20, AUG 20, OCT 97
+- Information: NO LSMGO AVAILS BUT MDO S0.5% ONLY DOMESTIC SUPPLY, CURRENTLY REFUSED TO SUPPLY FOREIGN VSL DUE TO COVID-19 SUPPLY AT WEST PORT ONLY, NOT EAST PORT
+
+### Tonda
+
+- Updated: NOV 15
+- Information: ALL GRADES SLIGHTLY HIGHER THAN TOKYO MC ENERGY PRODUCT FROM TOKUYAMA OR MIZUSHIMA
+
+### Toyama
+
+- Updated: MAY 16
+- Information: NO FACILITY AT ALL, NOT EVEN DOMESTIC FO/DO. NEAREST NIIGATA WITH DOMESTIC IF180/MDO/MGO
+
+### Toyamashinko
+
+- Updated: JUN 21
+- Information: NO FACILITY AT ALL, NOT EVEN DOMESTIC FO/DO. NEAREST NIIGATA WITH DOMESTIC IF180/MDO/MGO
+
+### Toyohashi
+
+- Updated: NOV 15
+- Information: IN NAGOYA BAY, BARGED FM NAGOYA, IF QTY <300MT, BARGING $3,000
+
+### Tsukumi
+
+- Updated: No date found
+- Information: IF180 200T $100 (T $ 85), MOST SUPPLIERS BARGE PRODUCTS FM OITA WHILE
+
+### Tsuneishi
+
+- Updated: No date found
+- Information: No information yet
+
+### Barge Fm Mizushima
+
+- Updated: NOV 12
+- Information: No information yet
+
+### Tsuruga
+
+- Updated: JUN 05
+- Information: WEST HONSHU. ONLY DOMESTIC PRODUCTS FOR DOMESTIC VESSELS.
+
+### Ube
+
+- Updated: NOV 04, DEC 19
+- Information: ALL GRADES AVAILS TANKER SUPPLY AT ANCHORAGE
+
+### Uno
+
+- Updated: MAY 01
+- Information: = TAMANO. OSAKA PRICE
+
+### Wakayama
+
+- Updated: APR 21
+- Information: OSAKA BAY, FOR TANKER – ONLY MARUBENI MAY OFFER (AT ANCHORAGE ONLY) WITH PREMIUM $40-50, EVERYONE ELSE DECLINED SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Wakkanai
+
+- Updated: JUL 15
+- Information: NO FUEL, ONLY MDO & MGO
+
+### Yawata
+
+- Updated: JUL 04
+- Information: ON KYUSHU ISLAND, NEAR TO MOJI, FEW $ HIGHER THAN MOJI
+
+### Yatsushiro
+
+- Updated: No date found
+- Information: No information yet
+
+### Kyushu
+
+- Updated: JUL 04
+- Information: No information yet
+
+### Yokkaichi
+
+- Updated: NOV 15, NOV 13, JAN 19, DEC 21
+- Information: NEAR TO NAGOYA, PRICE SAME AS NAGOYA EQUIPPED WITH PIPELINE FACILITIES (CAN SUPPLY LNG VSLS) TANKER CAN BE SUPPLIED AT ANCHORAGE MIN QNTY 20MT FOR LSMGO
+
+### Yokohama
+
+- Updated: No date found
+- Information: No information yet
+
+### Toyko Price
+
+- Updated: NOV 15, NOV 19
+- Information: NO SUPPLY AT NISSHIN OILLIO BERTH SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Yokosuka
+
+- Updated: NOV 15, APR 22, JUN 16, NOV 19
+- Information: TOKYO PRICE SUMITOMO SHIPYARD CHEMICAL TANKER SUPPLY AT ANCHOARGE ONLY SEE LPG VSLS REMARK IN GENERAL INFO
+
+### Yura
+
+- Updated: No date found
+- Information: No information yet
+
+### Dockyard Not Possible
+
+- Updated: FEB 22
+- Information: No information yet

@@ -30,6 +30,8 @@ const tertiaryPortNames = new Set(
     "ningde",
     "putian",
     "xiuyu",
+    "huanghua",
+    "jingtang",
     "huangpu",
     "nansha",
     "machong",

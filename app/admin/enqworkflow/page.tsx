@@ -1,15 +1,16 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import ports from "@/data/ports.json"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 
 type EnquiryEntry = {
   id: string
-  body: string
-  group: string
-  createdAt: string
+  rawBody: string
+  displayBody: string
+  country: string
+  agent: string
+  client: string
 }
 
 const STORAGE_KEY = "bunker-map-enquiry-workflow"
@@ -49,7 +50,7 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
 }
 
-const inputStyle: React.CSSProperties = {
+const textareaStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
   borderRadius: "14px",
@@ -59,26 +60,74 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   outline: "none",
   boxSizing: "border-box",
-}
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
   minHeight: "130px",
   resize: "vertical",
   lineHeight: 1.6,
   fontFamily: "Arial, Helvetica, sans-serif",
 }
 
-const groupAliasMap: Record<string, string[]> = {
-  Singapore: ["singapore", "sgp"],
+const modalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(2, 10, 18, 0.62)",
+  backdropFilter: "blur(8px)",
+  WebkitBackdropFilter: "blur(8px)",
+  display: "grid",
+  placeItems: "center",
+  zIndex: 2000,
+  padding: "20px",
+}
+
+const countryPortMap: Record<string, string[]> = {
+  China: [
+    "china",
+    "shanghai",
+    "zhoushan",
+    "jingtang",
+    "ningbo",
+    "qingdao",
+    "dalian",
+    "tianjin",
+    "huanghua",
+    "xiamen",
+    "guangzhou",
+    "shenzhen",
+    "zhanjiang",
+    "caofeidian",
+    "rizhao",
+  ],
   "Hong Kong": ["hong kong", "hk"],
-  Zhoushan: ["zhoushan"],
-  Shanghai: ["shanghai"],
-  Busan: ["busan"],
-  Ulsan: ["ulsan"],
-  Japan: ["tokyo bay", "tokyo", "japan"],
-  "South Korea": ["south korea", "korea"],
-  China: ["china"],
+  Singapore: ["singapore", "sgp"],
+  Japan: [
+    "japan",
+    "tokyo bay",
+    "tokyo",
+    "tokuyama",
+    "yokohama",
+    "chiba",
+    "nagoya",
+    "osaka",
+    "kobe",
+    "mizushima",
+    "sakai",
+  ],
+  "South Korea": [
+    "south korea",
+    "korea",
+    "busan",
+    "ulsan",
+    "incheon",
+    "yeosu",
+    "daesan",
+    "pyongtaek",
+    "masan",
+  ],
+  Malaysia: ["malaysia", "port klang", "klang", "pasir gudang", "tanjung pelepas", "ptp"],
+  Taiwan: ["taiwan", "kaohsiung", "keelung", "taichung", "mailiao", "taipei"],
+  Vietnam: ["vietnam", "ho chi minh", "saigon", "vung tau", "haiphong", "hai phong"],
+  Thailand: ["thailand", "laem chabang", "bangkok", "sriracha"],
+  Indonesia: ["indonesia", "jakarta", "surabaya", "balikpapan", "belawan"],
+  UAE: ["uae", "fujairah", "jebel ali", "dubai", "abu dhabi", "khor fakkan"],
 }
 
 function getHongKongDateParts(date: Date) {
@@ -116,37 +165,122 @@ function getActiveResetKey(date: Date) {
   return utcDate.toISOString().slice(0, 10)
 }
 
-function detectGroup(body: string) {
-  const haystack = body.toLowerCase()
+function cleanWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim()
+}
 
-  for (const [label, aliases] of Object.entries(groupAliasMap)) {
+function splitSegments(value: string) {
+  return value
+    .split(/\s*\/\s*|\n+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+}
+
+function extractField(rawBody: string, field: "agent" | "client") {
+  const regex = new RegExp(`${field}\\s*:\\s*([^/\\n]+)`, "i")
+  const match = rawBody.match(regex)
+  return cleanWhitespace(match?.[1] || "")
+}
+
+function buildVisibleBody(rawBody: string) {
+  return splitSegments(rawBody)
+    .filter((segment) => !/^(agent|client)\s*:/i.test(segment))
+    .join(" / ")
+}
+
+function detectCountry(rawBody: string) {
+  const haystack = rawBody.toLowerCase()
+
+  for (const [country, aliases] of Object.entries(countryPortMap)) {
     if (aliases.some((alias) => haystack.includes(alias))) {
-      return label
-    }
-  }
-
-  for (const port of ports) {
-    if (haystack.includes(port.name.toLowerCase())) {
-      return port.name
+      return country
     }
   }
 
   return "Unsorted"
 }
 
-function formatDateTime(value: string) {
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
+function buildEnquiryEntry(rawBody: string, id?: string): EnquiryEntry {
+  const cleaned = rawBody
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" / ")
 
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Hong_Kong",
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(parsed)
+  return {
+    id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    rawBody: cleaned,
+    displayBody: buildVisibleBody(cleaned),
+    country: detectCountry(cleaned),
+    agent: extractField(cleaned, "agent"),
+    client: extractField(cleaned, "client"),
+  }
+}
+
+function normalizeStoredEntry(value: unknown): EnquiryEntry | null {
+  if (!value || typeof value !== "object") return null
+
+  const record = value as Record<string, unknown>
+  const rawBody =
+    typeof record.rawBody === "string"
+      ? record.rawBody
+      : typeof record.body === "string"
+        ? record.body
+        : ""
+
+  if (!rawBody.trim()) return null
+
+  return buildEnquiryEntry(rawBody, typeof record.id === "string" ? record.id : undefined)
+}
+
+function buildStemText(entry: EnquiryEntry) {
+  const lines = [entry.displayBody]
+
+  if (entry.agent) {
+    lines.push(`agent: ${entry.agent}`)
+  }
+
+  lines.push("")
+  lines.push("buy - sell")
+  lines.push(` - ${entry.client || ""}`)
+
+  return lines.join("\n")
+}
+
+function CompactIconButton({
+  label,
+  title,
+  onClick,
+}: {
+  label: string
+  title: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={title}
+      title={title}
+      style={{
+        width: "24px",
+        height: "24px",
+        borderRadius: "999px",
+        border: "1px solid rgba(210,236,255,0.14)",
+        background: "rgba(255,255,255,0.06)",
+        color: "#d8ebfb",
+        fontSize: "11px",
+        fontWeight: 800,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+      }}
+    >
+      {label}
+    </button>
+  )
 }
 
 export default function EnquiryWorkflowPage() {
@@ -155,6 +289,10 @@ export default function EnquiryWorkflowPage() {
   const [draft, setDraft] = useState("")
   const [entries, setEntries] = useState<EnquiryEntry[]>([])
   const [copiedGroup, setCopiedGroup] = useState("")
+  const [hoveredEntryId, setHoveredEntryId] = useState("")
+  const [editingEntry, setEditingEntry] = useState<EnquiryEntry | null>(null)
+  const [editingDraft, setEditingDraft] = useState("")
+  const [stemEntry, setStemEntry] = useState<EnquiryEntry | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -173,8 +311,8 @@ export default function EnquiryWorkflowPage() {
     if (!raw) return
 
     try {
-      const parsed = JSON.parse(raw) as EnquiryEntry[]
-      setEntries(parsed)
+      const parsed = JSON.parse(raw) as unknown[]
+      setEntries(parsed.map(normalizeStoredEntry).filter((entry): entry is EnquiryEntry => entry != null))
     } catch {
       window.localStorage.removeItem(STORAGE_KEY)
     }
@@ -208,9 +346,9 @@ export default function EnquiryWorkflowPage() {
     const next = new Map<string, EnquiryEntry[]>()
 
     entries.forEach((entry) => {
-      const bucket = next.get(entry.group) || []
+      const bucket = next.get(entry.country) || []
       bucket.push(entry)
-      next.set(entry.group, bucket)
+      next.set(entry.country, bucket)
     })
 
     return Array.from(next.entries()).sort((left, right) => {
@@ -220,18 +358,11 @@ export default function EnquiryWorkflowPage() {
     })
   }, [entries])
 
-  async function handleAddEnquiry() {
+  function handleAddEnquiry() {
     const trimmed = draft.trim()
     if (!trimmed) return
 
-    const nextEntry: EnquiryEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      body: trimmed,
-      group: detectGroup(trimmed),
-      createdAt: new Date().toISOString(),
-    }
-
-    setEntries((current) => [nextEntry, ...current])
+    setEntries((current) => [buildEnquiryEntry(trimmed), ...current])
     setDraft("")
   }
 
@@ -239,11 +370,25 @@ export default function EnquiryWorkflowPage() {
     setEntries((current) => current.filter((entry) => entry.id !== id))
   }
 
-  async function copyGroup(group: string, groupEntries: EnquiryEntry[]) {
-    const text = groupEntries.map((entry) => entry.body).join("\n\n")
+  function openEdit(entry: EnquiryEntry) {
+    setEditingEntry(entry)
+    setEditingDraft(entry.rawBody)
+  }
+
+  function saveEdit() {
+    if (!editingEntry || !editingDraft.trim()) return
+
+    const nextEntry = buildEnquiryEntry(editingDraft, editingEntry.id)
+    setEntries((current) => current.map((entry) => (entry.id === editingEntry.id ? nextEntry : entry)))
+    setEditingEntry(null)
+    setEditingDraft("")
+  }
+
+  async function copyGroup(country: string, groupEntries: EnquiryEntry[]) {
+    const text = groupEntries.map((entry) => entry.rawBody).join("\n")
     await navigator.clipboard.writeText(text)
-    setCopiedGroup(group)
-    window.setTimeout(() => setCopiedGroup((current) => (current === group ? "" : current)), 1600)
+    setCopiedGroup(country)
+    window.setTimeout(() => setCopiedGroup((current) => (current === country ? "" : current)), 1600)
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -273,24 +418,28 @@ export default function EnquiryWorkflowPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
-              gap: "18px",
+              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.05fr) minmax(320px, 0.95fr)",
+              gap: "14px",
             }}
           >
-            <section style={{ ...panelStyle, padding: isMobile ? "18px" : "22px" }}>
-              <div style={{ marginBottom: "14px" }} />
-
+            <section style={{ ...panelStyle, padding: isMobile ? "18px" : "20px" }}>
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.preventDefault()
+                    handleAddEnquiry()
+                  }
+                }}
                 placeholder="Type or paste the enquiry here..."
                 style={textareaStyle}
               />
 
-              <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
                 <button
                   type="button"
-                  onClick={() => void handleAddEnquiry()}
+                  onClick={handleAddEnquiry}
                   style={{
                     ...buttonStyle,
                     background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
@@ -303,76 +452,121 @@ export default function EnquiryWorkflowPage() {
               </div>
             </section>
 
-            <aside style={{ ...panelStyle, padding: isMobile ? "18px" : "22px" }}>
-              <div style={{ marginBottom: "12px" }} />
-
-              {groupedEntries.length === 0 ? (
-                <div style={{ color: "#9ebad1", fontSize: "14px", lineHeight: 1.6 }} />
-              ) : (
-                <div style={{ display: "grid", gap: "14px" }}>
-                  {groupedEntries.map(([group, groupEntries]) => (
+            <aside style={{ ...panelStyle, padding: isMobile ? "14px" : "16px" }}>
+              {groupedEntries.length > 0 && (
+                <div style={{ display: "grid", gap: "8px" }}>
+                  {groupedEntries.map(([country, groupEntries]) => (
                     <div
-                      key={group}
+                      key={country}
                       style={{
-                        borderRadius: "18px",
-                        border: "1px solid rgba(210,236,255,0.12)",
-                        background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)",
-                        padding: "14px",
+                        borderRadius: "14px",
+                        border: "1px solid rgba(210,236,255,0.1)",
+                        background: "rgba(255,255,255,0.04)",
+                        padding: "8px 10px",
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
-                        <div style={{ fontSize: "22px", fontWeight: 700 }}>{group}</div>
-                        <button
-                          type="button"
-                          onClick={() => void copyGroup(group, groupEntries)}
-                          style={{
-                            ...buttonStyle,
-                            minWidth: "100px",
-                            background: copiedGroup === group
-                              ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)"
-                              : buttonStyle.background,
-                            color: copiedGroup === group ? "#ddffef" : buttonStyle.color,
-                          }}
-                        >
-                          {copiedGroup === group ? "Copied" : "Copy All"}
-                        </button>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <div style={{ fontSize: "16px", fontWeight: 700, color: "#eef7ff" }}>
+                          {country}
+                        </div>
+                        <CompactIconButton
+                          label={copiedGroup === country ? "✓" : "⧉"}
+                          title="Copy all"
+                          onClick={() => void copyGroup(country, groupEntries)}
+                        />
                       </div>
 
-                      <div style={{ display: "grid", gap: "10px" }}>
-                        {groupEntries.map((entry) => (
-                          <div
-                            key={entry.id}
-                            style={{
-                              borderRadius: "14px",
-                              border: "1px solid rgba(210,236,255,0.08)",
-                              background: "rgba(6, 20, 34, 0.3)",
-                              padding: "12px",
-                            }}
-                          >
-                            <div style={{ whiteSpace: "pre-wrap", color: "#edf7ff", lineHeight: 1.65, marginBottom: "10px" }}>
-                              {entry.body}
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                              <div style={{ color: "#98c4e4", fontSize: "12px" }}>
-                                Added {formatDateTime(entry.createdAt)}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeEntry(entry.id)}
+                      <div style={{ display: "grid", gap: "4px" }}>
+                        {groupEntries.map((entry) => {
+                          const hasHiddenDetails = Boolean(entry.agent || entry.client)
+
+                          return (
+                            <div
+                              key={entry.id}
+                              style={{
+                                position: "relative",
+                                borderRadius: "10px",
+                                background: "rgba(4, 16, 29, 0.28)",
+                                padding: "6px 8px",
+                              }}
+                              onMouseEnter={() => setHoveredEntryId(entry.id)}
+                              onMouseLeave={() => setHoveredEntryId("")}
+                            >
+                              <div
                                 style={{
-                                  ...buttonStyle,
-                                  padding: "6px 10px",
-                                  fontSize: "12px",
-                                  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                                  color: "#ffd6db",
-                                  border: "1px solid rgba(255, 120, 120, 0.18)",
+                                  display: "grid",
+                                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                                  gap: "8px",
+                                  alignItems: "start",
                                 }}
                               >
-                                Delete
-                              </button>
+                                <div
+                                  style={{
+                                    color: "#edf7ff",
+                                    fontSize: "12px",
+                                    lineHeight: 1.35,
+                                    whiteSpace: "normal",
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {entry.displayBody}
+                                </div>
+
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <CompactIconButton
+                                    label="S"
+                                    title="Stem"
+                                    onClick={() => setStemEntry(entry)}
+                                  />
+                                  <CompactIconButton
+                                    label="E"
+                                    title="Edit"
+                                    onClick={() => openEdit(entry)}
+                                  />
+                                  <CompactIconButton
+                                    label="D"
+                                    title="Delete"
+                                    onClick={() => removeEntry(entry.id)}
+                                  />
+                                </div>
+                              </div>
+
+                              {hasHiddenDetails && hoveredEntryId === entry.id && (
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    right: "8px",
+                                    top: "calc(100% + 6px)",
+                                    zIndex: 20,
+                                    minWidth: "180px",
+                                    maxWidth: "260px",
+                                    borderRadius: "12px",
+                                    border: "1px solid rgba(210,236,255,0.18)",
+                                    background: "linear-gradient(180deg, rgba(9, 25, 42, 0.96) 0%, rgba(6, 18, 30, 0.96) 100%)",
+                                    boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+                                    padding: "8px 10px",
+                                    color: "#d9ebfb",
+                                    fontSize: "12px",
+                                    lineHeight: 1.45,
+                                    whiteSpace: "pre-wrap",
+                                  }}
+                                >
+                                  {entry.agent ? `agent: ${entry.agent}` : ""}
+                                  {entry.agent && entry.client ? "\n" : ""}
+                                  {entry.client ? `client: ${entry.client}` : ""}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   ))}
@@ -382,6 +576,79 @@ export default function EnquiryWorkflowPage() {
           </div>
         </main>
       </div>
+
+      {editingEntry && (
+        <div style={modalBackdropStyle} onClick={() => setEditingEntry(null)}>
+          <div
+            style={{ ...panelStyle, width: "min(720px, 100%)", padding: "18px" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <textarea
+              value={editingDraft}
+              onChange={(event) => setEditingDraft(event.target.value)}
+              style={{ ...textareaStyle, minHeight: "220px" }}
+            />
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "12px" }}>
+              <button type="button" onClick={() => setEditingEntry(null)} style={buttonStyle}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEdit}
+                style={{
+                  ...buttonStyle,
+                  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
+                  color: "#ddffef",
+                  border: "1px solid rgba(73, 219, 165, 0.26)",
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stemEntry && (
+        <div style={modalBackdropStyle} onClick={() => setStemEntry(null)}>
+          <div
+            style={{ ...panelStyle, width: "min(620px, 100%)", padding: "18px" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <pre
+              style={{
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                color: "#edf7ff",
+                fontSize: "14px",
+                lineHeight: 1.6,
+                fontFamily: "Arial, Helvetica, sans-serif",
+              }}
+            >
+              {buildStemText(stemEntry)}
+            </pre>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", marginTop: "14px" }}>
+              <button type="button" onClick={() => setStemEntry(null)} style={buttonStyle}>
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(buildStemText(stemEntry))
+                }}
+                style={{
+                  ...buttonStyle,
+                  background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
+                  color: "#e7f3ff",
+                  border: "1px solid rgba(108, 185, 255, 0.24)",
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
