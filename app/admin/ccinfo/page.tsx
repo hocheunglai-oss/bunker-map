@@ -142,8 +142,6 @@ export default function CountryCompanyInfoPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
   const filePickerRef = useRef<HTMLInputElement | null>(null)
-  const infoRef = useRef<HTMLDivElement | null>(null)
-  const countryInfoRef = useRef<HTMLDivElement | null>(null)
 
   const [query, setQuery] = useState("")
   const [suggestions, setSuggestions] = useState<SearchRecord[]>([])
@@ -157,8 +155,6 @@ export default function CountryCompanyInfoPage() {
   const [matchCount, setMatchCount] = useState(0)
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [editingInfo, setEditingInfo] = useState(false)
-  const [editingCountryInfo, setEditingCountryInfo] = useState(false)
   const [files, setFiles] = useState<CompanyFileRecord[]>([])
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
 
@@ -210,42 +206,17 @@ export default function CountryCompanyInfoPage() {
     setMatchIndex(0)
   }, [searchInPage, selectedId, selectedKind])
 
-  const displayedInfoHtml = useMemo(
-    () => highlightTextHtml(currentRecord.notes || "", editingInfo ? "" : searchInPage),
-    [currentRecord.notes, searchInPage, editingInfo],
-  )
-
-  const displayedCountryInfoHtml = useMemo(
-    () => highlightTextHtml(currentCountry.notes || "", editingCountryInfo ? "" : searchInPage),
-    [currentCountry.notes, searchInPage, editingCountryInfo],
-  )
+  const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
+  const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
 
   useEffect(() => {
-    if (editingInfo || editingCountryInfo) {
-      setMatchCount(0)
-      return
-    }
-
-    const mainMatches = infoRef.current ? Array.from(infoRef.current.querySelectorAll<HTMLElement>('mark[data-search-match="true"]')) : []
-    const countryMatches =
-      selectedKind === "port" && countryInfoRef.current
-        ? Array.from(countryInfoRef.current.querySelectorAll<HTMLElement>('mark[data-search-match="true"]'))
-        : []
-
-    const allMatches = [...mainMatches, ...countryMatches]
-    setMatchCount(allMatches.length)
-
-    allMatches.forEach((match, index) => {
-      if (index === matchIndex && searchInPage.trim()) {
-        match.style.background = "rgba(96, 225, 255, 0.42)"
-        match.style.color = "#f5fdff"
-        match.scrollIntoView({ block: "nearest", behavior: "smooth" })
-      } else {
-        match.style.background = "rgba(255, 226, 94, 0.34)"
-        match.style.color = "#fff6bf"
-      }
-    })
-  }, [displayedInfoHtml, displayedCountryInfoHtml, editingInfo, editingCountryInfo, matchIndex, searchInPage, selectedKind])
+    const parser = new DOMParser()
+    const mainDoc = parser.parseFromString(`<div>${displayedInfoHtml}</div>`, "text/html")
+    const countryDoc = parser.parseFromString(`<div>${displayedCountryInfoHtml}</div>`, "text/html")
+    const mainMatches = Array.from(mainDoc.querySelectorAll('mark[data-search-match="true"]'))
+    const countryMatches = selectedKind === "port" ? Array.from(countryDoc.querySelectorAll('mark[data-search-match="true"]')) : []
+    setMatchCount(mainMatches.length + countryMatches.length)
+  }, [displayedInfoHtml, displayedCountryInfoHtml, matchIndex, searchInPage, selectedKind])
 
   function goToPreviousMatch() {
     setMatchIndex((prev) => (matchCount ? (prev - 1 + matchCount) % matchCount : 0))
@@ -602,7 +573,6 @@ export default function CountryCompanyInfoPage() {
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country</div>
                         <input value={currentCountry.name} onChange={(e) => setCurrentCountry((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
                       </div>
-                      <div style={{ color: "#95b8d3", fontSize: "13px" }}>Saving a port will also save the linked country information below.</div>
                     </div>
                   )}
 
@@ -642,34 +612,20 @@ export default function CountryCompanyInfoPage() {
                   <div>
                     <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Information</div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
-                    <div
-                      ref={infoRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onFocus={() => setEditingInfo(true)}
-                      onBlur={(event) => {
-                        setEditingInfo(false)
-                        setCurrentRecord((prev) => ({ ...prev, notes: event.currentTarget.innerText }))
-                      }}
-                      style={{ ...textareaStyle, whiteSpace: "pre-wrap", overflowY: "auto", minHeight: selectedKind === "port" ? "180px" : "320px" }}
-                      dangerouslySetInnerHTML={{ __html: displayedInfoHtml }}
+                    <textarea
+                      value={currentRecord.notes || ""}
+                      onChange={(event) => setCurrentRecord((prev) => ({ ...prev, notes: event.target.value }))}
+                      style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                     />
                   </div>
 
                   {selectedKind === "port" && (
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country Information</div>
-                      <div
-                        ref={countryInfoRef}
-                        contentEditable
-                        suppressContentEditableWarning
-                        onFocus={() => setEditingCountryInfo(true)}
-                        onBlur={(event) => {
-                          setEditingCountryInfo(false)
-                          setCurrentCountry((prev) => ({ ...prev, notes: event.currentTarget.innerText }))
-                        }}
-                        style={{ ...textareaStyle, whiteSpace: "pre-wrap", overflowY: "auto", minHeight: "180px" }}
-                        dangerouslySetInnerHTML={{ __html: displayedCountryInfoHtml }}
+                      <textarea
+                        value={currentCountry.notes || ""}
+                        onChange={(event) => setCurrentCountry((prev) => ({ ...prev, notes: event.target.value }))}
+                        style={{ ...textareaStyle, minHeight: "180px" }}
                       />
                     </div>
                   )}
@@ -677,17 +633,32 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "country" && (
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Ports</div>
-                      <div style={{ ...panelStyle, padding: "12px", background: "rgba(255,255,255,0.03)", display: "grid", gap: "10px" }}>
+                      <div style={{ ...panelStyle, padding: 0, background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
                         {currentCountryPorts.length === 0 ? (
-                          <div style={{ color: "#9ebad1" }}>No ports linked yet.</div>
+                          <div style={{ color: "#9ebad1", padding: "12px" }}>No ports linked yet.</div>
                         ) : (
-                          currentCountryPorts.map((port) => (
-                            <div key={port.id} style={{ border: "1px solid rgba(210,236,255,0.08)", borderRadius: "14px", padding: "10px 12px", background: "rgba(255,255,255,0.03)" }}>
-                              <div style={{ fontWeight: 700, marginBottom: "6px" }}>{port.name}</div>
-                              <div style={{ color: "#9ebad1", fontSize: "12px", marginBottom: "6px" }}>Updated: {port.summary || "No date found"}</div>
-                              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, color: "#e8f2fb" }}>{port.notes || "No information yet"}</div>
-                            </div>
-                          ))
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.14)", color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Port</th>
+                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.14)", color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Information</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {currentCountryPorts.map((port) => (
+                                  <tr key={port.id}>
+                                    <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
+                                      {port.name}
+                                    </td>
+                                    <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                                      {port.notes || "No information yet"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         )}
                       </div>
                     </div>
