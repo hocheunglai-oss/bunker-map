@@ -72,8 +72,24 @@ create table if not exists public.cc_company_files (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.cc_entry_files (
+  id uuid primary key default gen_random_uuid(),
+  entry_kind text not null,
+  entry_id uuid not null,
+  file_name text not null,
+  file_type text,
+  drive_file_id text,
+  drive_url text,
+  original_path text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create unique index if not exists cc_company_files_company_path_key
 on public.cc_company_files(company_id, original_path);
+
+create unique index if not exists cc_entry_files_entry_path_key
+on public.cc_entry_files(entry_kind, entry_id, original_path);
 
 create or replace function public.set_ccinfo_updated_at()
 returns trigger
@@ -112,5 +128,11 @@ execute function public.set_ccinfo_updated_at();
 drop trigger if exists set_cc_company_files_updated_at on public.cc_company_files;
 create trigger set_cc_company_files_updated_at
 before update on public.cc_company_files
+for each row
+execute function public.set_ccinfo_updated_at();
+
+drop trigger if exists set_cc_entry_files_updated_at on public.cc_entry_files;
+create trigger set_cc_entry_files_updated_at
+before update on public.cc_entry_files
 for each row
 execute function public.set_ccinfo_updated_at();

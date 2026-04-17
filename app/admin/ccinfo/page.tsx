@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -26,6 +26,15 @@ type CompanyFileRecord = {
   file_name: string
   file_type: string | null
   drive_url: string | null
+  drive_file_id?: string | null
+}
+
+type EntryFileRecord = {
+  id: string
+  file_name: string
+  file_type: string | null
+  drive_url: string | null
+  drive_file_id?: string | null
 }
 
 type CountryRecord = BaseRecord & {
@@ -111,6 +120,23 @@ const textareaStyle: React.CSSProperties = {
   fontFamily: "Arial, Helvetica, sans-serif",
 }
 
+const compactFileBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: "36px",
+  height: "20px",
+  borderRadius: "999px",
+  background: "linear-gradient(180deg, rgba(112, 120, 132, 0.28) 0%, rgba(62, 69, 79, 0.18) 100%)",
+  border: "1px solid rgba(190, 198, 208, 0.18)",
+  color: "#e1e6eb",
+  fontSize: "9px",
+  fontWeight: 800,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  padding: "0 6px",
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -138,6 +164,82 @@ function kindLabel(kind: RecordKind) {
   return "Port"
 }
 
+type HighlightCard = {
+  title: string
+  info: string
+}
+
+function parseHighlights(value: string | null): HighlightCard[] {
+  if (!value?.trim()) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => ({
+          title: typeof item?.title === "string" ? item.title : "",
+          info: typeof item?.info === "string" ? item.info : "",
+        }))
+        .filter((item) => item.title.trim() || item.info.trim())
+    }
+  } catch {
+    return value
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => ({ title: "", info: item }))
+  }
+  return []
+}
+
+function serializeHighlights(items: HighlightCard[]) {
+  return JSON.stringify(
+    items
+      .map((item) => ({
+        title: item.title.trim(),
+        info: item.info.trim(),
+      }))
+      .filter((item) => item.title || item.info),
+  )
+}
+
+function getPreviewUrl(file: { drive_file_id?: string | null; drive_url?: string | null }) {
+  if (file.drive_file_id) return `https://drive.google.com/file/d/${file.drive_file_id}/preview`
+  return file.drive_url || ""
+}
+
+function AutoSizeTextarea({
+  value,
+  onChange,
+  style,
+}: {
+  value: string
+  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+  style?: React.CSSProperties
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useLayoutEffect(() => {
+    const node = textareaRef.current
+    if (!node) return
+    node.style.height = "0px"
+    node.style.height = `${node.scrollHeight}px`
+  }, [value])
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={onChange}
+      rows={1}
+      style={{
+        ...style,
+        overflow: "hidden",
+        resize: "none",
+      }}
+    />
+  )
+}
+
 export default function CountryCompanyInfoPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
@@ -157,6 +259,12 @@ export default function CountryCompanyInfoPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [files, setFiles] = useState<CompanyFileRecord[]>([])
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
+  const [highlights, setHighlights] = useState<HighlightCard[]>([])
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
+  const [previewModalOpen, setPreviewModalOpen] = useState(false)
+  const [highlightModalOpen, setHighlightModalOpen] = useState(false)
+  const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
 
   const [currentRecord, setCurrentRecord] = useState<BaseRecord>({
     id: "",
@@ -203,6 +311,16 @@ export default function CountryCompanyInfoPage() {
   }, [query])
 
   useEffect(() => {
+    if (adminLoading || !authenticated || selectedId || typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const kind = params.get("kind")
+    const id = params.get("id")
+    if ((kind === "company" || kind === "country" || kind === "port") && id) {
+      void loadSelected(kind, id)
+    }
+  }, [adminLoading, authenticated, selectedId])
+
+  useEffect(() => {
     setMatchIndex(0)
   }, [searchInPage, selectedId, selectedKind])
 
@@ -233,47 +351,84 @@ export default function CountryCompanyInfoPage() {
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
     setFiles([])
     setCurrentCountryPorts([])
+    setHighlights([])
+    setSelectedPreviewFile(null)
+    setPreviewModalOpen(false)
     setSearchInPage("")
   }
 
   async function loadCompany(id: string) {
-    const [{ data, error }, filesResult] = await Promise.all([
+    const [{ data, error }, filesResult, manualFilesResult] = await Promise.all([
       supabase.from("cc_companies").select("id,name,summary,notes").eq("id", id).single(),
-      supabase.from("cc_company_files").select("id,file_name,file_type,drive_url").eq("company_id", id).order("file_name", { ascending: true }),
+      supabase.from("cc_company_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("company_id", id).order("file_name", { ascending: true }),
+      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "company").eq("entry_id", id).order("file_name", { ascending: true }),
     ])
     if (error || !data) throw error || new Error("Unable to load company")
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
-    setFiles((filesResult.data as CompanyFileRecord[]) || [])
+    setFiles([...(filesResult.data as CompanyFileRecord[] || []), ...(manualFilesResult.data as EntryFileRecord[] || [])])
     setCurrentCountryPorts([])
+    setHighlights(parseHighlights((data as BaseRecord).summary))
+    setSelectedPreviewFile(null)
+    setPreviewModalOpen(false)
   }
 
   async function loadCountry(id: string) {
-    const [{ data, error }, portsResult] = await Promise.all([
+    const [{ data, error }, filesResult] = await Promise.all([
       supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", id).single(),
-      supabase.from("cc_ports").select("id,name,summary,notes").eq("country_id", id).order("name", { ascending: true }),
+      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "country").eq("entry_id", id).order("file_name", { ascending: true }),
     ])
     if (error || !data) throw error || new Error("Unable to load country")
+    const countryName = (data as CountryRecord).name
+    const portsResult = await supabase
+      .from("cc_ports")
+      .select("id,name,summary,notes")
+      .or(`country_id.eq.${id},country_name.ilike.${countryName.replace(/,/g, "\\,")}`)
+      .order("name", { ascending: true })
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry(data as CountryRecord)
-    setFiles([])
+    setFiles((filesResult.data as EntryFileRecord[]) || [])
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
+    setHighlights(parseHighlights((data as BaseRecord).summary))
+    setSelectedPreviewFile(null)
+    setPreviewModalOpen(false)
   }
 
   async function loadPort(id: string) {
-    const { data, error } = await supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name").eq("id", id).single()
+    const [{ data, error }, filesResult] = await Promise.all([
+      supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name").eq("id", id).single(),
+      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "port").eq("entry_id", id).order("file_name", { ascending: true }),
+    ])
     if (error || !data) throw error || new Error("Unable to load port")
     const port = data as PortRecord
     setCurrentRecord(port)
-    setFiles([])
+    setFiles((filesResult.data as EntryFileRecord[]) || [])
     setCurrentCountryPorts([])
+    setHighlights(parseHighlights(port.summary))
+    setSelectedPreviewFile(null)
+    setPreviewModalOpen(false)
 
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", port.country_id).single()
       setCurrentCountry((countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" })
-    } else {
-      setCurrentCountry({ id: "", name: port.country_name || "", summary: "", notes: "" })
+      return
     }
+
+    if (port.country_name?.trim()) {
+      const { data: countryData } = await supabase
+        .from("cc_countries")
+        .select("id,name,summary,notes,region")
+        .ilike("name", port.country_name.trim())
+        .limit(1)
+        .maybeSingle()
+
+      if (countryData) {
+        setCurrentCountry(countryData as CountryRecord)
+        return
+      }
+    }
+
+    setCurrentCountry({ id: "", name: port.country_name || "", summary: "", notes: "" })
   }
 
   async function loadSelected(kind: RecordKind, id: string) {
@@ -319,17 +474,17 @@ export default function CountryCompanyInfoPage() {
     setMessage("")
     try {
       if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim(), summary: currentRecord.summary || null, notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim(), summary: serializeHighlights(highlights) || null, notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim(), summary: currentRecord.summary || null, notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim(), summary: serializeHighlights(highlights) || null, notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "port") {
         const { error } = await supabase.from("cc_ports").update({
           name: currentRecord.name.trim(),
-          summary: currentRecord.summary || null,
+          summary: serializeHighlights(highlights) || null,
           notes: currentRecord.notes || null,
           country_id: currentCountry.id || null,
           country_name: currentCountry.name || null,
@@ -392,12 +547,87 @@ export default function CountryCompanyInfoPage() {
   function handleUploadSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(event.target.files || [])
     if (picked.length === 0) return
-    setMessage(`Selected ${picked.length} file${picked.length > 1 ? "s" : ""}. Upload linking will be the next step.`)
+    void uploadFiles(picked)
     event.target.value = ""
+  }
+
+  async function persistHighlights(nextHighlights: HighlightCard[]) {
+    if (!selectedId || !selectedKind) return
+    const payload = { summary: serializeHighlights(nextHighlights) || null }
+    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
+    const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
+    if (error) throw error
+  }
+
+  async function saveHighlightCard() {
+    if (!highlightDraft.title.trim() && !highlightDraft.info.trim()) {
+      setHighlightModalOpen(false)
+      setHighlightDraft({ title: "", info: "" })
+      return
+    }
+    const nextHighlights = [...highlights, { title: highlightDraft.title.trim(), info: highlightDraft.info.trim() }]
+    setHighlights(nextHighlights)
+    setHighlightDraft({ title: "", info: "" })
+    setHighlightModalOpen(false)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Highlight saved.")
+    } catch {
+      setMessage("Unable to save highlight.")
+    }
+  }
+
+  async function deleteHighlightCard(index: number) {
+    if (!confirm("Delete this highlight card?")) return
+    const nextHighlights = highlights.filter((_, i) => i !== index)
+    setHighlights(nextHighlights)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Highlight deleted.")
+    } catch {
+      setMessage("Unable to delete highlight.")
+    }
+  }
+
+  async function uploadFiles(picked: File[]) {
+    if (!selectedId || !selectedKind) {
+      setMessage("Open a company, country, or port before uploading.")
+      return
+    }
+    setUploadingFile(true)
+    setMessage("")
+    try {
+      const uploaded: EntryFileRecord[] = []
+      for (const file of picked) {
+        const form = new FormData()
+        form.append("entryKind", selectedKind)
+        form.append("entryId", selectedId)
+        form.append("entryName", currentRecord.name || "Untitled")
+        form.append("file", file)
+        const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.message || "Upload failed")
+        uploaded.push(data.file as EntryFileRecord)
+      }
+      setFiles((prev) => [...uploaded, ...prev])
+      setSelectedPreviewFile(uploaded[0] || null)
+      setPreviewModalOpen(true)
+      setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to upload file.")
+    } finally {
+      setUploadingFile(false)
+    }
   }
 
   async function pickSuggestion(item: SearchRecord) {
     await loadSelected(item.kind, item.id)
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("kind", item.kind)
+      url.searchParams.set("id", item.id)
+      window.history.replaceState({}, "", url.toString())
+    }
     setQuery("")
     setSuggestions([])
     setSearchInPage("")
@@ -408,10 +638,58 @@ export default function CountryCompanyInfoPage() {
   if (adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   const mainLabel = selectedKind ? `${kindLabel(selectedKind)} Name` : "Name"
+  const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
+  const fileSection = !initialMode ? (
+    <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
+      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+        Files
+      </div>
+      <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "200px" : "220px", overflowY: "auto", paddingRight: "2px" }}>
+        {files.length === 0 ? (
+          <div style={{ color: "#9ebad1", fontSize: "12px" }}>No linked files yet.</div>
+        ) : (
+          files.map((file) => {
+            const active = selectedPreviewFile?.id === file.id
+            return (
+              <button
+                key={file.id}
+                type="button"
+                onClick={() => {
+                  setSelectedPreviewFile(file)
+                  setPreviewModalOpen(true)
+                }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "42px minmax(0,1fr)",
+                  gap: "8px",
+                  alignItems: "center",
+                  padding: "6px 8px",
+                  borderRadius: "10px",
+                  border: active ? "1px solid rgba(112, 199, 255, 0.32)" : "1px solid rgba(210,236,255,0.08)",
+                  background: active ? "linear-gradient(180deg, rgba(78, 154, 237, 0.18) 0%, rgba(20, 55, 102, 0.18) 100%)" : "rgba(255,255,255,0.03)",
+                  color: "#e5f1fb",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={compactFileBadgeStyle}>{(file.file_type || "file").replace(".", "").slice(0, 4)}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "11px", lineHeight: 1.3 }}>
+                  {file.file_name}
+                </span>
+              </button>
+            )
+          })
+        )}
+      </div>
+      <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
+        {uploadingFile ? "Uploading..." : "Upload File"}
+      </button>
+    </div>
+  ) : null
 
   return (
     <div style={pageShellStyle}>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px minmax(0, 1fr)", minHeight: "100vh" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px minmax(0, 1fr) 320px", minHeight: "100vh" }}>
         {!isMobile && (
           <aside style={sidebarStyle}>
             <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 36px)" }}>
@@ -562,10 +840,65 @@ export default function CountryCompanyInfoPage() {
                       <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
+                      <button
+                        onClick={() => {
+                          setHighlightDraft({ title: "", info: "" })
+                          setHighlightModalOpen(true)
+                        }}
+                        disabled={!selectedId}
+                        style={{
+                          ...buttonStyle,
+                          background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)",
+                          color: "#fff2bc",
+                          border: "1px solid rgba(255, 211, 110, 0.34)",
+                        }}
+                      >
+                        Add Highlight
+                      </button>
                       <button onClick={saveRecord} disabled={saving || !selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving ? "Saving..." : "Save"}</button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
                   </div>
+
+                  {highlights.length > 0 && (
+                    <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                      {highlights.map((highlight, index) => (
+                        <div
+                          key={`highlight-${index}`}
+                          style={{
+                            minWidth: isMobile ? "100%" : "220px",
+                            maxWidth: isMobile ? "100%" : "360px",
+                            padding: "14px 16px",
+                            borderRadius: "20px",
+                            border: "1px solid rgba(255, 214, 117, 0.38)",
+                            background: "linear-gradient(180deg, rgba(255, 222, 134, 0.2) 0%, rgba(177, 122, 18, 0.12) 100%), linear-gradient(180deg, rgba(39, 89, 138, 0.42) 0%, rgba(17, 45, 76, 0.34) 100%)",
+                            boxShadow: "0 24px 48px rgba(0,0,0,0.22), 0 0 0 1px rgba(255, 219, 128, 0.08) inset, inset 0 1px 0 rgba(255,255,255,0.08)",
+                            display: "grid",
+                            gap: "8px",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "start" }}>
+                            <div style={{ display: "grid", gap: "4px" }}>
+                              {highlight.title.trim() ? (
+                                <div style={{ fontWeight: 800, color: "#fff7d7", fontSize: "14px", lineHeight: 1.35, letterSpacing: "0.01em" }}>
+                                  {highlight.title}
+                                </div>
+                              ) : null}
+                              <div style={{ color: "#eef7ff", fontSize: "12px", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                                {highlight.info}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => deleteHighlightCard(index)}
+                              style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.12) 100%)" }}
+                            >
+                              x
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {selectedKind === "port" && (
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px minmax(0, 1fr)", gap: "10px", alignItems: "end" }}>
@@ -576,43 +909,12 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  <div>
-                    <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Highlights</div>
-                    <textarea value={currentRecord.summary || ""} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, summary: e.target.value }))} style={{ ...textareaStyle, minHeight: "100px" }} />
-                  </div>
-
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Files</div>
-                    </div>
-                    <div style={{ ...panelStyle, padding: "12px", background: "rgba(255,255,255,0.03)", display: "grid", gap: "8px" }}>
-                      {selectedKind !== "company" ? (
-                        <button onClick={() => filePickerRef.current?.click()} style={{ ...buttonStyle, justifySelf: "start" }}>Upload File</button>
-                      ) : files.length === 0 ? (
-                        <div style={{ color: "#9ebad1" }}>No linked files yet.</div>
-                      ) : (
-                        files.map((file) => (
-                          <a
-                            key={file.id}
-                            href={file.drive_url || "#"}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr)", gap: "10px", alignItems: "center", padding: "8px 10px", borderRadius: "12px", border: "1px solid rgba(210,236,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#e5f1fb", textDecoration: "none" }}
-                          >
-                            <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "28px", borderRadius: "999px", background: "linear-gradient(180deg, rgba(112, 120, 132, 0.28) 0%, rgba(62, 69, 79, 0.18) 100%)", border: "1px solid rgba(190, 198, 208, 0.18)", color: "#e1e6eb", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "0 10px" }}>
-                              {(file.file_type || "file").replace(".", "").slice(0, 6)}
-                            </div>
-                            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.file_name}</div>
-                          </a>
-                        ))
-                      )}
-                    </div>
-                  </div>
+                  {isMobile && fileSection}
 
                   <div>
                     <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Information</div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
-                    <textarea
+                    <AutoSizeTextarea
                       value={currentRecord.notes || ""}
                       onChange={(event) => setCurrentRecord((prev) => ({ ...prev, notes: event.target.value }))}
                       style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
@@ -622,7 +924,7 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "port" && (
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country Information</div>
-                      <textarea
+                      <AutoSizeTextarea
                         value={currentCountry.notes || ""}
                         onChange={(event) => setCurrentCountry((prev) => ({ ...prev, notes: event.target.value }))}
                         style={{ ...textareaStyle, minHeight: "180px" }}
@@ -649,7 +951,13 @@ export default function CountryCompanyInfoPage() {
                                 {currentCountryPorts.map((port) => (
                                   <tr key={port.id}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                      {port.name}
+                                      <button
+                                        type="button"
+                                        onClick={() => void loadSelected("port", port.id)}
+                                        style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 700, cursor: "pointer", textAlign: "left" }}
+                                      >
+                                        {port.name}
+                                      </button>
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                                       {port.notes || "No information yet"}
@@ -672,7 +980,127 @@ export default function CountryCompanyInfoPage() {
             </div>
           </div>
         </main>
+        {!isMobile && <aside style={{ ...sidebarStyle, width: "320px" }}>{fileSection}</aside>}
       </div>
+      {previewModalOpen && selectedPreviewFile && previewUrl && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(1, 8, 18, 0.74)",
+            display: "grid",
+            placeItems: "center",
+            padding: "22px",
+            zIndex: 45,
+          }}
+          onClick={() => setPreviewModalOpen(false)}
+        >
+          <div
+            style={{
+              ...panelStyle,
+              width: "min(1200px, 100%)",
+              height: "min(88vh, 900px)",
+              padding: "14px",
+              display: "grid",
+              gridTemplateRows: "auto 1fr",
+              gap: "12px",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>File Preview</div>
+                <div style={{ fontWeight: 700, color: "#edf7ff", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPreviewFile.file_name}</div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {selectedPreviewFile.drive_url && (
+                  <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={buttonStyle}>
+                    Open In Drive
+                  </a>
+                )}
+                <button type="button" onClick={() => setPreviewModalOpen(false)} style={buttonStyle}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div style={{ borderRadius: "16px", overflow: "hidden", border: "1px solid rgba(210,236,255,0.12)", background: "rgba(2, 10, 20, 0.34)" }}>
+              <iframe src={previewUrl} title={selectedPreviewFile.file_name} style={{ width: "100%", height: "100%", border: 0 }} />
+            </div>
+          </div>
+        </div>
+      )}
+      {highlightModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(1, 8, 18, 0.58)",
+            display: "grid",
+            placeItems: "center",
+            padding: "20px",
+            zIndex: 40,
+          }}
+          onClick={() => {
+            setHighlightModalOpen(false)
+            setHighlightDraft({ title: "", info: "" })
+          }}
+        >
+          <div
+            style={{
+              ...panelStyle,
+              width: "min(520px, 100%)",
+              padding: "18px",
+              display: "grid",
+              gap: "12px",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>
+              Add Highlight
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Title (optional)</div>
+              <input
+                value={highlightDraft.title}
+                onChange={(event) => setHighlightDraft((prev) => ({ ...prev, title: event.target.value }))}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Info</div>
+              <textarea
+                value={highlightDraft.info}
+                onChange={(event) => setHighlightDraft((prev) => ({ ...prev, info: event.target.value }))}
+                style={{ ...textareaStyle, minHeight: "160px", resize: "vertical", overflow: "auto" }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setHighlightModalOpen(false)
+                  setHighlightDraft({ title: "", info: "" })
+                }}
+                style={buttonStyle}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveHighlightCard}
+                style={{
+                  ...buttonStyle,
+                  background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)",
+                  color: "#fff2bc",
+                  border: "1px solid rgba(255, 211, 110, 0.34)",
+                }}
+              >
+                Save Highlight
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

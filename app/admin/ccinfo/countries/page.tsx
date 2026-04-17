@@ -74,7 +74,14 @@ export default function CountryIndexPage() {
               <tbody>
                 {countries.map((row) => (
                   <tr key={row.id}>
-                    <td style={{ ...tdStyle, whiteSpace: "nowrap", fontWeight: 700 }}>{row.name}</td>
+                    <td style={{ ...tdStyle, whiteSpace: "nowrap", fontWeight: 700 }}>
+                      <a
+                        href={`/admin/ccinfo?kind=country&id=${row.id}`}
+                        style={{ color: "#bfe6ff", textDecoration: "none" }}
+                      >
+                        {row.name}
+                      </a>
+                    </td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
                   </tr>
                 ))}
