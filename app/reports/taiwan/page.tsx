@@ -6,13 +6,16 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
 
+const brandFontFamily = '"Frutiger", "Frutiger Linotype", Univers, Arial, Helvetica, sans-serif'
+const pantone295 = "#003865"
+
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   padding: "32px 20px 56px",
   background:
     "radial-gradient(circle at top, #0e5aa7 0%, #073666 38%, #031b36 100%)",
   color: "#f5fbff",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: brandFontFamily,
 }
 
 const shellStyle: React.CSSProperties = {
@@ -27,6 +30,12 @@ const cardStyle: React.CSSProperties = {
   borderRadius: "24px",
   boxShadow: "0 28px 72px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
   backdropFilter: "blur(16px)",
+}
+
+const headerCardStyle: React.CSSProperties = {
+  ...cardStyle,
+  background:
+    `radial-gradient(circle at top left, rgba(117, 187, 255, 0.14), transparent 34%), linear-gradient(180deg, ${pantone295} 0%, rgba(0, 56, 101, 0.92) 100%)`,
 }
 
 const sectionTitleStyle: React.CSSProperties = {
@@ -112,7 +121,7 @@ export default function TaiwanReport() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <div style={{ ...cardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
+        <div style={{ ...headerCardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
           <div
             style={{
               position: "absolute",

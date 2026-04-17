@@ -27,6 +27,9 @@ type Port = {
   date?: string | null
 }
 
+const brandFontFamily = '"Frutiger", "Frutiger Linotype", Univers, Arial, Helvetica, sans-serif'
+const pantone295 = "#003865"
+
 const mapTilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY
 const mapTilerStyle =
   process.env.NEXT_PUBLIC_MAPTILER_STYLE ||
@@ -34,18 +37,19 @@ const mapTilerStyle =
 
 const glassPanelStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.16), transparent 34%), linear-gradient(180deg, rgba(6, 24, 44, 0.8) 0%, rgba(7, 27, 49, 0.72) 100%)",
+    `radial-gradient(circle at top left, rgba(117, 187, 255, 0.16), transparent 34%), linear-gradient(180deg, ${pantone295} 0%, rgba(0, 56, 101, 0.86) 100%)`,
   border: "1px solid rgba(210, 236, 255, 0.2)",
   backdropFilter: "blur(20px) saturate(145%)",
   WebkitBackdropFilter: "blur(20px) saturate(145%)",
   boxShadow: "0 26px 80px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
   color: "#edf7ff",
+  fontFamily: brandFontFamily,
 }
 
 const panelSectionStyle: React.CSSProperties = {
   borderRadius: "18px",
   border: "1px solid rgba(255,255,255,0.1)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)",
+  background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0, 56, 101, 0.22) 100%)`,
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
@@ -434,7 +438,7 @@ export default function Homepage() {
   const panelInset = isMobile ? 12 : 18
 
   return (
-    <div style={{ height: "100vh", width: "100%", position: "relative", overflow: "hidden" }}>
+    <div style={{ height: "100vh", width: "100%", position: "relative", overflow: "hidden", fontFamily: brandFontFamily }}>
       <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
         <MapContainer
           center={center}

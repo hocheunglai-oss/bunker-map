@@ -7,6 +7,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
+const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
 function loadEnv() {
   return Object.fromEntries(
@@ -91,37 +92,37 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = cookies()
-  if (cookieStore.get("admin-auth")?.value !== "true") {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-  }
-
-  const env = loadEnv()
-  const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-  const formData = await request.formData()
-  const entryKind = String(formData.get("entryKind") || "")
-  const entryId = String(formData.get("entryId") || "")
-  const entryName = String(formData.get("entryName") || "Untitled")
-  const uploadFile = formData.get("file")
-
-  if (!entryKind || !entryId || !(uploadFile instanceof File)) {
-    return NextResponse.json({ message: "Missing upload data." }, { status: 400 })
-  }
-
-  const { drive, rootFolderId } = await getDriveClient()
-  if (!rootFolderId) {
-    return NextResponse.json({ message: "Google Drive folder is not configured." }, { status: 500 })
-  }
-
-  const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
-  const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
-  const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
-
-  const tempPath = path.join(process.cwd(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
-  const bytes = Buffer.from(await uploadFile.arrayBuffer())
-  await fs.writeFile(tempPath, bytes)
-
   try {
+    const cookieStore = await cookies()
+    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    }
+
+    const env = loadEnv()
+    const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    const formData = await request.formData()
+    const entryKind = String(formData.get("entryKind") || "")
+    const entryId = String(formData.get("entryId") || "")
+    const entryName = String(formData.get("entryName") || "Untitled")
+    const uploadFile = formData.get("file")
+
+    if (!entryKind || !entryId || !(uploadFile instanceof File)) {
+      return NextResponse.json({ message: "Missing upload data." }, { status: 400 })
+    }
+
+    const { drive, rootFolderId } = await getDriveClient()
+    if (!rootFolderId) {
+      return NextResponse.json({ message: "Google Drive folder is not configured." }, { status: 500 })
+    }
+
+    const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
+    const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
+    const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
+
+    const tempPath = path.join(process.cwd(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
+    const bytes = Buffer.from(await uploadFile.arrayBuffer())
+    await fs.writeFile(tempPath, bytes)
+
     const uploaded = await drive.files.create({
       requestBody: {
         name: uploadFile.name,
@@ -140,15 +141,20 @@ export async function POST(request: Request) {
 
     const url = uploaded.data.webViewLink || uploaded.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`
 
-    const { error } = await supabase.from("cc_entry_files").upsert({
-      entry_kind: entryKind,
-      entry_id: entryId,
-      file_name: uploadFile.name,
-      file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
-      drive_file_id: fileId,
-      drive_url: url,
-      original_path: `${entryKind}/${entryName}/${uploadFile.name}`,
-    })
+    const { error } = await supabase.from("cc_entry_files").upsert(
+      {
+        entry_kind: entryKind,
+        entry_id: entryId,
+        file_name: uploadFile.name,
+        file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
+        drive_file_id: fileId,
+        drive_url: url,
+        original_path: `${entryKind}/${entryName}/${uploadFile.name}`,
+      },
+      {
+        onConflict: "entry_kind,entry_id,original_path",
+      }
+    )
 
     if (error) throw error
 
@@ -161,7 +167,26 @@ export async function POST(request: Request) {
         drive_url: url,
       },
     })
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: unknown }).message || "Upload failed.")
+          : "Upload failed."
+    const details =
+      typeof error === "object" && error !== null && "details" in error
+        ? String((error as { details?: unknown }).details || "")
+        : ""
+    const hint =
+      typeof error === "object" && error !== null && "hint" in error
+        ? String((error as { hint?: unknown }).hint || "")
+        : ""
+    const joined = [message, details, hint].filter(Boolean).join(" | ")
+    console.error("ccinfo upload failed", error)
+    return NextResponse.json({ message: joined || "Upload failed." }, { status: 500 })
   } finally {
-    await fs.rm(tempPath, { force: true })
+    const uploads = fsSync.readdirSync(process.cwd()).filter((name) => name.startsWith(".tmp-upload-"))
+    await Promise.all(uploads.map((file) => fs.rm(path.join(process.cwd(), file), { force: true })))
   }
 }

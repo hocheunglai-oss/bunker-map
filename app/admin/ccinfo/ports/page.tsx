@@ -174,7 +174,9 @@ export default function PortIndexPage() {
               disabled={savingAll}
               style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}
             >
-              {savingAll ? "Saving..." : "Save All"}
+              <span style={{ display: "inline-block", minWidth: "88px", textAlign: "center" }}>
+                {savingAll ? "Saving..." : "Save All"}
+              </span>
             </button>
           </div>
         </div>

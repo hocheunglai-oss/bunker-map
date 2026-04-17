@@ -411,10 +411,7 @@ export default function CountryCompanyInfoPage() {
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", port.country_id).single()
       setCurrentCountry((countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" })
-      return
-    }
-
-    if (port.country_name?.trim()) {
+    } else if (port.country_name?.trim()) {
       const { data: countryData } = await supabase
         .from("cc_countries")
         .select("id,name,summary,notes,region")
@@ -422,13 +419,10 @@ export default function CountryCompanyInfoPage() {
         .limit(1)
         .maybeSingle()
 
-      if (countryData) {
-        setCurrentCountry(countryData as CountryRecord)
-        return
-      }
+      setCurrentCountry((countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" })
+    } else {
+      setCurrentCountry({ id: "", name: port.country_name || "", summary: "", notes: "" })
     }
-
-    setCurrentCountry({ id: "", name: port.country_name || "", summary: "", notes: "" })
   }
 
   async function loadSelected(kind: RecordKind, id: string) {
@@ -589,6 +583,25 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  async function refreshFiles(kind: RecordKind, id: string) {
+    if (kind === "company") {
+      const [filesResult, manualFilesResult] = await Promise.all([
+        supabase.from("cc_company_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("company_id", id).order("file_name", { ascending: true }),
+        supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "company").eq("entry_id", id).order("file_name", { ascending: true }),
+      ])
+      return [...(((filesResult.data as CompanyFileRecord[]) || [])), ...(((manualFilesResult.data as EntryFileRecord[]) || []))]
+    }
+
+    const result = await supabase
+      .from("cc_entry_files")
+      .select("id,file_name,file_type,drive_url,drive_file_id")
+      .eq("entry_kind", kind)
+      .eq("entry_id", id)
+      .order("file_name", { ascending: true })
+
+    return (result.data as EntryFileRecord[]) || []
+  }
+
   async function uploadFiles(picked: File[]) {
     if (!selectedId || !selectedKind) {
       setMessage("Open a company, country, or port before uploading.")
@@ -609,8 +622,9 @@ export default function CountryCompanyInfoPage() {
         if (!response.ok) throw new Error(data.message || "Upload failed")
         uploaded.push(data.file as EntryFileRecord)
       }
-      setFiles((prev) => [...uploaded, ...prev])
-      setSelectedPreviewFile(uploaded[0] || null)
+      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+      setFiles(refreshedFiles)
+      setSelectedPreviewFile(refreshedFiles[0] || uploaded[0] || null)
       setPreviewModalOpen(true)
       setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
@@ -684,6 +698,11 @@ export default function CountryCompanyInfoPage() {
       <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
         {uploadingFile ? "Uploading..." : "Upload File"}
       </button>
+      {selectedPreviewFile?.drive_url && (
+        <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
+          Open In Drive
+        </a>
+      )}
     </div>
   ) : null
 
@@ -855,7 +874,7 @@ export default function CountryCompanyInfoPage() {
                       >
                         Add Highlight
                       </button>
-                      <button onClick={saveRecord} disabled={saving || !selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving ? "Saving..." : "Save"}</button>
+                      <button onClick={saveRecord} disabled={saving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving ? "Saving..." : "Save"}</button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
                   </div>

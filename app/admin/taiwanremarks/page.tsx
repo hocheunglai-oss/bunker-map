@@ -10,6 +10,7 @@ function createEmptyMemo() {
 
 const pillButtonStyle: React.CSSProperties = {
   padding: "9px 14px",
+  minWidth: "110px",
   border: "1px solid rgba(210,236,255,0.16)",
   borderRadius: "999px",
   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",

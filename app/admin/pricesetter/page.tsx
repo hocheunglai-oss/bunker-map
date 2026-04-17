@@ -13,6 +13,11 @@ import { useIsMobile } from "@/lib/useIsMobile"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
+type ActivityLog = {
+  id: string
+  message: string
+  timestamp: string
+}
 
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
 
@@ -60,6 +65,9 @@ export default function AdminPage() {
   const [publishedChina, setPublishedChina] = useState(false)
   const [publishingCompact, setPublishingCompact] = useState(false)
   const [publishedCompact, setPublishedCompact] = useState(false)
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
+  const [showDeleteButtons, setShowDeleteButtons] = useState(false)
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const today = new Date().toDateString()
@@ -110,6 +118,20 @@ export default function AdminPage() {
     }))
   }
 
+  function addActivityLog(message: string) {
+    const timestamp = new Date().toLocaleString("en-GB", {
+      hour12: false,
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    setActivityLogs((prev) => [
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, message, timestamp },
+      ...prev,
+    ].slice(0, 80))
+  }
+
   async function saveDivider(port: any) {
     await supabase
       .from("ports")
@@ -117,6 +139,7 @@ export default function AdminPage() {
         name: port.name,
       })
       .eq("id", port.id)
+    addActivityLog(`${port.name || "Divider"} divider updated`)
   }
 
   async function savePort(port: any) {
@@ -232,6 +255,11 @@ export default function AdminPage() {
       [port.id]: true,
     }))
     setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
+    addActivityLog(
+      isFormulaStylePort(port)
+        ? `${port.name} formula updated`
+        : `${port.name} price saved`
+    )
   }
 
   async function deletePort(id: string, name: string) {
@@ -239,6 +267,7 @@ export default function AdminPage() {
 
     await supabase.from("ports").delete().eq("id", id)
     setPorts((prev) => prev.filter((port) => port.id !== id))
+    addActivityLog(`${name} deleted`)
   }
 
   async function addPort() {
@@ -252,6 +281,7 @@ export default function AdminPage() {
 
     if (data) {
       setPorts([...ports, ...data])
+      addActivityLog("New port added")
     }
   }
 
@@ -267,6 +297,7 @@ export default function AdminPage() {
 
     if (data) {
       setPorts([...ports, ...data])
+      addActivityLog("Section divider added")
     }
   }
 
@@ -404,6 +435,7 @@ export default function AdminPage() {
     const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
     if (snapshot) setPublishedChina(true)
     setPublishingChina(false)
+    if (snapshot) addActivityLog("China report published")
   }
 
   async function handlePublishCompact() {
@@ -411,6 +443,7 @@ export default function AdminPage() {
     const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
     if (snapshot) setPublishedCompact(true)
     setPublishingCompact(false)
+    if (snapshot) addActivityLog("Compact report published")
   }
 
   const visiblePorts = useMemo(() => {
@@ -572,15 +605,42 @@ export default function AdminPage() {
               >
                 Check Compact
               </a>
-              <button onClick={addPort} style={toolbarButtonStyle}>
-                Add Port
-              </button>
-              <button onClick={addDivider} style={toolbarButtonStyle}>
-                Add Divider
-              </button>
-              <button onClick={() => setShowCoords(!showCoords)} style={toolbarButtonStyle}>
-                {showCoords ? "Hide Coordinates" : "Show Coordinates"}
-              </button>
+              <div style={{ position: "relative" }}>
+                <button onClick={() => setToolsMenuOpen((prev) => !prev)} style={{ ...toolbarButtonStyle, minWidth: "52px", paddingLeft: "12px", paddingRight: "12px" }}>
+                  ☰
+                </button>
+                {toolsMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 8px)",
+                      minWidth: "210px",
+                      padding: "8px",
+                      borderRadius: "16px",
+                      background: "linear-gradient(180deg, rgba(12, 40, 66, 0.96) 0%, rgba(6, 24, 44, 0.96) 100%)",
+                      border: "1px solid rgba(210,236,255,0.14)",
+                      boxShadow: "0 22px 40px rgba(0,0,0,0.22)",
+                      display: "grid",
+                      gap: "6px",
+                      zIndex: 30,
+                    }}
+                  >
+                    <button onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                      Add Port
+                    </button>
+                    <button onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                      Add Divider
+                    </button>
+                    <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                      {showCoords ? "Hide Coordinates" : "Show Coordinates"}
+                    </button>
+                    <button onClick={() => { setShowDeleteButtons((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                      {showDeleteButtons ? "Hide Delete Buttons" : "Show Delete Buttons"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -655,13 +715,12 @@ export default function AdminPage() {
 
         <div
           style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "12px",
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 280px",
+            gap: "16px",
+            alignItems: "start",
           }}
         >
-        </div>
-
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showCoords ? "980px" : "860px" }}>
             <thead>
@@ -676,7 +735,7 @@ export default function AdminPage() {
                 <th style={th}>MGO</th>
                 <th style={th}>Updated</th>
                 <th style={th}>Save</th>
-                <th style={th}>Delete</th>
+                {showDeleteButtons && <th style={th}>Delete</th>}
               </tr>
             </thead>
 
@@ -709,11 +768,13 @@ export default function AdminPage() {
                           }}
                         />
                       </td>
-                      <td style={td}>
-                        <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
-                          Delete
-                        </button>
-                      </td>
+                      {showDeleteButtons && (
+                        <td style={td}>
+                          <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                            Delete
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 }
@@ -849,16 +910,60 @@ export default function AdminPage() {
                       </button>
                     </td>
 
-                    <td style={td}>
-                      <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
-                        Delete
-                      </button>
-                    </td>
+                    {showDeleteButtons && (
+                      <td style={td}>
+                        <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                          Delete
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 )
               })}
             </tbody>
           </table>
+        </div>
+        <aside
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(210,236,255,0.14)",
+            borderRadius: "18px",
+            padding: "14px",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+            display: "grid",
+            gap: "10px",
+            position: isMobile ? "static" : "sticky",
+            top: isMobile ? undefined : "122px",
+          }}
+        >
+          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+            Log
+          </div>
+          <div style={{ display: "grid", gap: "8px", maxHeight: isMobile ? "none" : "70vh", overflowY: "auto", paddingRight: "4px" }}>
+            {activityLogs.length === 0 ? (
+              <div style={{ color: "#a7c3d9", fontSize: "12px", lineHeight: 1.5 }}>
+                No activity yet. Saves, publishes, new ports, and formula changes will appear here.
+              </div>
+            ) : (
+              activityLogs.map((log) => (
+                <div
+                  key={log.id}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "14px",
+                    background: "linear-gradient(180deg, rgba(20, 60, 96, 0.44) 0%, rgba(8, 28, 44, 0.34) 100%)",
+                    border: "1px solid rgba(210,236,255,0.08)",
+                  }}
+                >
+                  <div style={{ color: "#edf7ff", fontSize: "12px", lineHeight: 1.45 }}>{log.message}</div>
+                  <div style={{ marginTop: "4px", color: "#8fb7d5", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                    {log.timestamp}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
         </div>
       </div>
     </div>
@@ -878,6 +983,7 @@ const compactInputStyle: React.CSSProperties = {
 
 const toolbarButtonStyle: React.CSSProperties = {
   padding: "9px 14px",
+  minWidth: "118px",
   border: "1px solid rgba(210,236,255,0.16)",
   borderRadius: "999px",
   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
@@ -902,6 +1008,7 @@ const tabButtonStyle: React.CSSProperties = {
 }
 
 const saveButtonStyle: React.CSSProperties = {
+  minWidth: "84px",
   color: "#ddffef",
   padding: "6px 12px",
   border: "1px solid rgba(73, 219, 165, 0.32)",
