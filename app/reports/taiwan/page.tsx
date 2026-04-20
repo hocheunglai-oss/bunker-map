@@ -420,44 +420,6 @@ export default function TaiwanReport() {
           </div>
         )}
 
-        <div
-          style={{
-            ...cardStyle,
-            padding: "20px 24px",
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "18px",
-          }}
-        >
-          <div style={{ flex: "1 1 320px" }}>
-            <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: "6px" }}>
-              Need more Taiwan bunker information?
-            </div>
-            <div style={{ color: "#d7e9ff", lineHeight: 1.6, fontSize: "15px" }}>
-              Contact us directly on WhatsApp for further details.
-            </div>
-          </div>
-
-          <a
-            href="https://wa.me/85266885575"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              ...pillButtonStyle,
-              minWidth: "220px",
-              background: "linear-gradient(180deg, rgba(56, 214, 154, 0.32) 0%, rgba(20, 130, 93, 0.14) 100%)",
-              color: "#ddffef",
-              border: "1px solid rgba(73, 219, 165, 0.26)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-            }}
-          >
-            Contact On WhatsApp
-          </a>
-        </div>
-
         <div style={{ marginTop: "20px" }}>
           <DisclaimerLink centered />
         </div>
