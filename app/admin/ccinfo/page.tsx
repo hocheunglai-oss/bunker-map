@@ -27,6 +27,8 @@ type CompanyFileRecord = {
   file_type: string | null
   drive_url: string | null
   drive_file_id?: string | null
+  folder_path?: string | null
+  source?: "company" | "entry"
 }
 
 type EntryFileRecord = {
@@ -35,6 +37,14 @@ type EntryFileRecord = {
   file_type: string | null
   drive_url: string | null
   drive_file_id?: string | null
+  folder_path?: string | null
+  source?: "entry"
+}
+
+type EntryFolderRecord = {
+  id: string
+  folder_path: string
+  name: string
 }
 
 type CountryRecord = BaseRecord & {
@@ -207,6 +217,72 @@ function getPreviewUrl(file: { drive_file_id?: string | null; drive_url?: string
   return file.drive_url || ""
 }
 
+function joinFolderPath(folderPath: string, name: string) {
+  return [folderPath.trim(), name.trim()].filter(Boolean).join("/")
+}
+
+function folderDepth(folderPath: string) {
+  return folderPath.split("/").filter(Boolean).length
+}
+
+async function fetchEntryFiles(kind: RecordKind, id: string) {
+  const withFolderPath = await supabase
+    .from("cc_entry_files")
+    .select("id,file_name,file_type,drive_url,drive_file_id,folder_path")
+    .eq("entry_kind", kind)
+    .eq("entry_id", id)
+    .order("folder_path", { ascending: true })
+    .order("file_name", { ascending: true })
+
+  if (!withFolderPath.error) {
+    return (((withFolderPath.data as EntryFileRecord[]) || []).map((file) => ({
+      ...file,
+      folder_path: file.folder_path || "",
+      source: "entry" as const,
+    })))
+  }
+
+  const legacy = await supabase
+    .from("cc_entry_files")
+    .select("id,file_name,file_type,drive_url,drive_file_id")
+    .eq("entry_kind", kind)
+    .eq("entry_id", id)
+    .order("file_name", { ascending: true })
+
+  return (((legacy.data as EntryFileRecord[]) || []).map((file) => ({
+    ...file,
+    folder_path: "",
+    source: "entry" as const,
+  })))
+}
+
+async function fetchCompanyFiles(id: string) {
+  const legacy = await supabase
+    .from("cc_company_files")
+    .select("id,file_name,file_type,drive_url,drive_file_id")
+    .eq("company_id", id)
+    .order("file_name", { ascending: true })
+
+  return (((legacy.data as CompanyFileRecord[]) || []).map((file) => ({
+    ...file,
+    folder_path: "",
+    source: "company" as const,
+  })))
+}
+
+async function fetchFolders(kind: RecordKind, id: string) {
+  const result = await supabase
+    .from("cc_entry_folders")
+    .select("id,folder_path,name")
+    .eq("entry_kind", kind)
+    .eq("entry_id", id)
+    .order("folder_path", { ascending: true })
+    .order("name", { ascending: true })
+
+  if (result.error) return []
+  return (result.data as EntryFolderRecord[]) || []
+}
+
 function AutoSizeTextarea({
   value,
   onChange,
@@ -258,6 +334,10 @@ export default function CountryCompanyInfoPage() {
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const [files, setFiles] = useState<CompanyFileRecord[]>([])
+  const [folders, setFolders] = useState<EntryFolderRecord[]>([])
+  const [currentFolderPath, setCurrentFolderPath] = useState("")
+  const [draggingFileId, setDraggingFileId] = useState("")
+  const [dropFolderPath, setDropFolderPath] = useState("")
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
   const [highlights, setHighlights] = useState<HighlightCard[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -326,6 +406,21 @@ export default function CountryCompanyInfoPage() {
 
   const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
   const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
+  const visibleFolders = useMemo(
+    () =>
+      folders
+        .filter((folder) => folder.folder_path === currentFolderPath)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [currentFolderPath, folders],
+  )
+  const visibleFiles = useMemo(
+    () =>
+      files
+        .filter((file) => (file.folder_path || "") === currentFolderPath)
+        .sort((a, b) => a.file_name.localeCompare(b.file_name)),
+    [currentFolderPath, files],
+  )
+  const breadcrumbSegments = useMemo(() => currentFolderPath.split("/").filter(Boolean), [currentFolderPath])
 
   useEffect(() => {
     const parser = new DOMParser()
@@ -350,6 +445,10 @@ export default function CountryCompanyInfoPage() {
     setCurrentRecord({ id: "", name: "", summary: "", notes: "" })
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
     setFiles([])
+    setFolders([])
+    setCurrentFolderPath("")
+    setDraggingFileId("")
+    setDropFolderPath("")
     setCurrentCountryPorts([])
     setHighlights([])
     setSelectedPreviewFile(null)
@@ -358,15 +457,18 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadCompany(id: string) {
-    const [{ data, error }, filesResult, manualFilesResult] = await Promise.all([
+    const [{ data, error }, filesResult, manualFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_companies").select("id,name,summary,notes").eq("id", id).single(),
-      supabase.from("cc_company_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("company_id", id).order("file_name", { ascending: true }),
-      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "company").eq("entry_id", id).order("file_name", { ascending: true }),
+      fetchCompanyFiles(id),
+      fetchEntryFiles("company", id),
+      fetchFolders("company", id),
     ])
     if (error || !data) throw error || new Error("Unable to load company")
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
-    setFiles([...(filesResult.data as CompanyFileRecord[] || []), ...(manualFilesResult.data as EntryFileRecord[] || [])])
+    setFiles([...filesResult, ...manualFilesResult])
+    setFolders(foldersResult)
+    setCurrentFolderPath("")
     setCurrentCountryPorts([])
     setHighlights(parseHighlights((data as BaseRecord).summary))
     setSelectedPreviewFile(null)
@@ -374,9 +476,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadCountry(id: string) {
-    const [{ data, error }, filesResult] = await Promise.all([
+    const [{ data, error }, filesResult, foldersResult] = await Promise.all([
       supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", id).single(),
-      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "country").eq("entry_id", id).order("file_name", { ascending: true }),
+      fetchEntryFiles("country", id),
+      fetchFolders("country", id),
     ])
     if (error || !data) throw error || new Error("Unable to load country")
     const countryName = (data as CountryRecord).name
@@ -387,7 +490,9 @@ export default function CountryCompanyInfoPage() {
       .order("name", { ascending: true })
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry(data as CountryRecord)
-    setFiles((filesResult.data as EntryFileRecord[]) || [])
+    setFiles(filesResult)
+    setFolders(foldersResult)
+    setCurrentFolderPath("")
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
     setHighlights(parseHighlights((data as BaseRecord).summary))
     setSelectedPreviewFile(null)
@@ -395,14 +500,17 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadPort(id: string) {
-    const [{ data, error }, filesResult] = await Promise.all([
+    const [{ data, error }, filesResult, foldersResult] = await Promise.all([
       supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name").eq("id", id).single(),
-      supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "port").eq("entry_id", id).order("file_name", { ascending: true }),
+      fetchEntryFiles("port", id),
+      fetchFolders("port", id),
     ])
     if (error || !data) throw error || new Error("Unable to load port")
     const port = data as PortRecord
     setCurrentRecord(port)
-    setFiles((filesResult.data as EntryFileRecord[]) || [])
+    setFiles(filesResult)
+    setFolders(foldersResult)
+    setCurrentFolderPath("")
     setCurrentCountryPorts([])
     setHighlights(parseHighlights(port.summary))
     setSelectedPreviewFile(null)
@@ -585,21 +693,10 @@ export default function CountryCompanyInfoPage() {
 
   async function refreshFiles(kind: RecordKind, id: string) {
     if (kind === "company") {
-      const [filesResult, manualFilesResult] = await Promise.all([
-        supabase.from("cc_company_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("company_id", id).order("file_name", { ascending: true }),
-        supabase.from("cc_entry_files").select("id,file_name,file_type,drive_url,drive_file_id").eq("entry_kind", "company").eq("entry_id", id).order("file_name", { ascending: true }),
-      ])
-      return [...(((filesResult.data as CompanyFileRecord[]) || [])), ...(((manualFilesResult.data as EntryFileRecord[]) || []))]
+      const [legacyFiles, manualFiles] = await Promise.all([fetchCompanyFiles(id), fetchEntryFiles("company", id)])
+      return [...legacyFiles, ...manualFiles]
     }
-
-    const result = await supabase
-      .from("cc_entry_files")
-      .select("id,file_name,file_type,drive_url,drive_file_id")
-      .eq("entry_kind", kind)
-      .eq("entry_id", id)
-      .order("file_name", { ascending: true })
-
-    return (result.data as EntryFileRecord[]) || []
+    return fetchEntryFiles(kind, id)
   }
 
   async function uploadFiles(picked: File[]) {
@@ -616,6 +713,7 @@ export default function CountryCompanyInfoPage() {
         form.append("entryKind", selectedKind)
         form.append("entryId", selectedId)
         form.append("entryName", currentRecord.name || "Untitled")
+        form.append("folderPath", currentFolderPath)
         form.append("file", file)
         const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
         const data = await response.json()
@@ -624,13 +722,89 @@ export default function CountryCompanyInfoPage() {
       }
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
-      setSelectedPreviewFile(refreshedFiles[0] || uploaded[0] || null)
-      setPreviewModalOpen(true)
+      const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
+      setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
     } finally {
       setUploadingFile(false)
+    }
+  }
+
+  async function createFolder() {
+    if (!selectedId || !selectedKind) return
+    const name = window.prompt("New folder name")
+    if (!name?.trim()) return
+    try {
+      const response = await fetch("/api/ccinfo/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entryKind: selectedKind,
+          entryId: selectedId,
+          folderPath: currentFolderPath,
+          name: name.trim(),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to create folder.")
+      const nextFolder = data.folder as EntryFolderRecord
+      setFolders((prev) => [...prev, nextFolder].sort((a, b) => joinFolderPath(a.folder_path, a.name).localeCompare(joinFolderPath(b.folder_path, b.name))))
+      setCurrentFolderPath(joinFolderPath(nextFolder.folder_path, nextFolder.name))
+      setMessage("Folder created.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to create folder.")
+    }
+  }
+
+  async function deleteFile(file: CompanyFileRecord | EntryFileRecord) {
+    if (!confirm(`Delete ${file.file_name}?`)) return
+    try {
+      const params = new URLSearchParams({
+        fileId: file.id,
+        source: file.source || "entry",
+      })
+      const response = await fetch(`/api/ccinfo/files?${params.toString()}`, { method: "DELETE" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to delete file.")
+      setFiles((prev) => prev.filter((item) => item.id !== file.id))
+      if (selectedPreviewFile?.id === file.id) {
+        setSelectedPreviewFile(null)
+        setPreviewModalOpen(false)
+      }
+      setMessage("Upload deleted.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete file.")
+    }
+  }
+
+  async function moveFileToFolder(file: CompanyFileRecord | EntryFileRecord, targetFolderPath: string) {
+    if (!selectedId || !selectedKind) return
+    if ((file.folder_path || "") === targetFolderPath) return
+    try {
+      const response = await fetch("/api/ccinfo/files", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileId: file.id,
+          source: file.source || "entry",
+          entryKind: selectedKind,
+          entryId: selectedId,
+          entryName: currentRecord.name || "Untitled",
+          folderPath: targetFolderPath,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to move file.")
+      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+      setFiles(refreshedFiles)
+      setMessage("File moved.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to move file.")
+    } finally {
+      setDraggingFileId("")
+      setDropFolderPath("")
     }
   }
 
@@ -658,46 +832,180 @@ export default function CountryCompanyInfoPage() {
       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
         Files
       </div>
-      <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "200px" : "220px", overflowY: "auto", paddingRight: "2px" }}>
-        {files.length === 0 ? (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => setCurrentFolderPath("")}
+          onDragOver={(event) => {
+            if (!draggingFileId) return
+            event.preventDefault()
+            setDropFolderPath("")
+          }}
+          onDrop={(event) => {
+            if (!draggingFileId) return
+            event.preventDefault()
+            const fileId = event.dataTransfer.getData("text/plain")
+            const file = files.find((item) => item.id === fileId)
+            if (file) void moveFileToFolder(file, "")
+          }}
+          style={{
+            ...buttonStyle,
+            padding: "5px 8px",
+            fontSize: "10px",
+            background:
+              dropFolderPath === ""
+                ? "linear-gradient(180deg, rgba(95, 188, 138, 0.28) 0%, rgba(20, 98, 61, 0.14) 100%)"
+                : currentFolderPath
+                  ? "rgba(255,255,255,0.06)"
+                  : "linear-gradient(180deg, rgba(76, 164, 255, 0.32) 0%, rgba(31, 82, 143, 0.18) 100%)",
+          }}
+        >
+          Root
+        </button>
+        {breadcrumbSegments.map((segment, index) => {
+          const path = breadcrumbSegments.slice(0, index + 1).join("/")
+          const active = path === currentFolderPath
+          return (
+            <button
+              key={path}
+              type="button"
+              onClick={() => setCurrentFolderPath(path)}
+              style={{
+                ...buttonStyle,
+                padding: "5px 8px",
+                fontSize: "10px",
+                background: active ? "linear-gradient(180deg, rgba(76, 164, 255, 0.32) 0%, rgba(31, 82, 143, 0.18) 100%)" : "rgba(255,255,255,0.06)",
+              }}
+            >
+              {segment}
+            </button>
+          )
+        })}
+      </div>
+      <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "240px" : "56vh", overflowY: "auto", paddingRight: "2px" }}>
+        {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
           <div style={{ color: "#9ebad1", fontSize: "12px" }}>No linked files yet.</div>
         ) : (
-          files.map((file) => {
+          <>
+            {visibleFolders.map((folder) => (
+              <button
+              key={folder.id}
+              type="button"
+              onClick={() => setCurrentFolderPath(joinFolderPath(folder.folder_path, folder.name))}
+              onDragOver={(event) => {
+                if (!draggingFileId) return
+                event.preventDefault()
+                setDropFolderPath(joinFolderPath(folder.folder_path, folder.name))
+              }}
+              onDragLeave={() => {
+                if (dropFolderPath === joinFolderPath(folder.folder_path, folder.name)) {
+                  setDropFolderPath("")
+                }
+              }}
+              onDrop={(event) => {
+                if (!draggingFileId) return
+                event.preventDefault()
+                const fileId = event.dataTransfer.getData("text/plain")
+                const file = files.find((item) => item.id === fileId)
+                if (file) void moveFileToFolder(file, joinFolderPath(folder.folder_path, folder.name))
+              }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "42px minmax(0,1fr)",
+                gap: "8px",
+                alignItems: "center",
+                padding: "7px 8px",
+                borderRadius: "10px",
+                border:
+                  dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
+                    ? "1px solid rgba(117, 226, 165, 0.34)"
+                    : "1px solid rgba(210,236,255,0.08)",
+                background:
+                  dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
+                    ? "linear-gradient(180deg, rgba(95, 188, 138, 0.24) 0%, rgba(20, 98, 61, 0.12) 100%)"
+                    : "rgba(255,255,255,0.03)",
+                color: "#e5f1fb",
+                cursor: "pointer",
+                textAlign: "left",
+                }}
+              >
+                <span style={{ ...compactFileBadgeStyle, background: "linear-gradient(180deg, rgba(255, 211, 111, 0.24) 0%, rgba(147, 101, 21, 0.16) 100%)", color: "#fff3c4" }}>
+                  DIR
+                </span>
+                <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>{folder.name}</span>
+              </button>
+            ))}
+            {visibleFiles.map((file) => {
             const active = selectedPreviewFile?.id === file.id
             return (
-              <button
+              <div
                 key={file.id}
-                type="button"
-                onClick={() => {
-                  setSelectedPreviewFile(file)
-                  setPreviewModalOpen(true)
+                draggable={file.source !== "company"}
+                onDragStart={(event) => {
+                  if (file.source === "company") return
+                  setDraggingFileId(file.id)
+                  event.dataTransfer.setData("text/plain", file.id)
+                  event.dataTransfer.effectAllowed = "move"
+                }}
+                onDragEnd={() => {
+                  setDraggingFileId("")
+                  setDropFolderPath("")
                 }}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "42px minmax(0,1fr)",
+                  gridTemplateColumns: "42px minmax(0,1fr) auto",
                   gap: "8px",
                   alignItems: "center",
-                  padding: "6px 8px",
+                  padding: "7px 8px",
                   borderRadius: "10px",
                   border: active ? "1px solid rgba(112, 199, 255, 0.32)" : "1px solid rgba(210,236,255,0.08)",
                   background: active ? "linear-gradient(180deg, rgba(78, 154, 237, 0.18) 0%, rgba(20, 55, 102, 0.18) 100%)" : "rgba(255,255,255,0.03)",
-                  color: "#e5f1fb",
-                  cursor: "pointer",
-                  textAlign: "left",
+                  opacity: draggingFileId === file.id ? 0.6 : 1,
+                  cursor: file.source === "company" ? "default" : "grab",
                 }}
               >
-                <span style={compactFileBadgeStyle}>{(file.file_type || "file").replace(".", "").slice(0, 4)}</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "11px", lineHeight: 1.3 }}>
+                <span style={compactFileBadgeStyle}>{(file.file_type || "file").replace(".", "").slice(0, 5)}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPreviewFile(file)
+                    setPreviewModalOpen(true)
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#e5f1fb",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    padding: 0,
+                    fontSize: "11px",
+                    lineHeight: 1.35,
+                    overflowWrap: "anywhere",
+                  }}
+                >
                   {file.file_name}
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteFile(file)}
+                  style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                >
+                  Delete
+                </button>
+              </div>
             )
-          })
+            })}
+          </>
         )}
       </div>
-      <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
+        <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
+          New Folder
+        </button>
+        <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
         {uploadingFile ? "Uploading..." : "Upload File"}
-      </button>
+        </button>
+      </div>
       {selectedPreviewFile?.drive_url && (
         <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
           Open In Drive

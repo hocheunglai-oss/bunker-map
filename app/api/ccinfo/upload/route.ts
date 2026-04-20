@@ -104,6 +104,7 @@ export async function POST(request: Request) {
     const entryKind = String(formData.get("entryKind") || "")
     const entryId = String(formData.get("entryId") || "")
     const entryName = String(formData.get("entryName") || "Untitled")
+    const folderPath = String(formData.get("folderPath") || "").trim()
     const uploadFile = formData.get("file")
 
     if (!entryKind || !entryId || !(uploadFile instanceof File)) {
@@ -118,6 +119,14 @@ export async function POST(request: Request) {
     const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
     const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
     const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
+    let targetFolderId = entryFolderId
+
+    if (folderPath) {
+      const segments = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean)
+      for (const segment of segments) {
+        targetFolderId = await ensureFolder(drive, targetFolderId, segment)
+      }
+    }
 
     const tempPath = path.join(process.cwd(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
     const bytes = Buffer.from(await uploadFile.arrayBuffer())
@@ -126,7 +135,7 @@ export async function POST(request: Request) {
     const uploaded = await drive.files.create({
       requestBody: {
         name: uploadFile.name,
-        parents: [entryFolderId],
+        parents: [targetFolderId],
       },
       media: {
         mimeType: getMimeType(uploadFile.name),
@@ -145,11 +154,12 @@ export async function POST(request: Request) {
       {
         entry_kind: entryKind,
         entry_id: entryId,
+        folder_path: folderPath || "",
         file_name: uploadFile.name,
         file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
         drive_file_id: fileId,
         drive_url: url,
-        original_path: `${entryKind}/${entryName}/${uploadFile.name}`,
+        original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${uploadFile.name}`,
       },
       {
         onConflict: "entry_kind,entry_id,original_path",
@@ -161,6 +171,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       file: {
         id: fileId,
+        folder_path: folderPath || "",
         file_name: uploadFile.name,
         file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
         drive_file_id: fileId,

@@ -11,16 +11,13 @@ import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
 
-const brandFontFamily = '"Frutiger", "Frutiger Linotype", Univers, Arial, Helvetica, sans-serif'
-const pantone295 = "#003865"
-
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   padding: "32px 20px 56px",
   background:
     "radial-gradient(circle at top, #0e5aa7 0%, #073666 38%, #031b36 100%)",
   color: "#f5fbff",
-  fontFamily: brandFontFamily,
+  fontFamily: "Arial, Helvetica, sans-serif",
 }
 
 const shellStyle: React.CSSProperties = {
@@ -40,7 +37,7 @@ const cardStyle: React.CSSProperties = {
 const headerCardStyle: React.CSSProperties = {
   ...cardStyle,
   background:
-    `radial-gradient(circle at top left, rgba(117, 187, 255, 0.14), transparent 34%), linear-gradient(180deg, ${pantone295} 0%, rgba(0, 56, 101, 0.92) 100%)`,
+    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.1), transparent 30%), linear-gradient(180deg, rgba(4, 24, 49, 0.84) 0%, rgba(5, 22, 40, 0.78) 100%)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
