@@ -50,6 +50,21 @@ const fuelFieldConfigs = [
   { priceField: "mgo", formulaField: "mgo_formula", label: "MGO" },
 ] as const
 
+const taiwanBasisFormulaDefaults: Record<string, { vlsfo_formula?: string; mgo_formula?: string }> = {
+  keelung: {
+    vlsfo_formula: "Taichung + 0",
+    mgo_formula: "Taichung + 0",
+  },
+  suao: {
+    vlsfo_formula: "Taichung + 0",
+    mgo_formula: "Taichung + 0",
+  },
+  hualien: {
+    vlsfo_formula: "Taichung + 0",
+    mgo_formula: "Taichung + 0",
+  },
+}
+
 export default function AdminPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
@@ -144,6 +159,7 @@ export default function AdminPage() {
 
   async function savePort(port: any) {
     setSavingPorts((prev) => ({ ...prev, [port.id]: true }))
+    const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
 
     const now = new Date()
     const dayStart = new Date(now)
@@ -159,8 +175,8 @@ export default function AdminPage() {
       vlsfo: port.vlsfo ? Number(port.vlsfo) : null,
       mgo: port.mgo ? Number(port.mgo) : null,
       hsfo_formula: port.hsfo_formula || null,
-      vlsfo_formula: port.vlsfo_formula || null,
-      mgo_formula: port.mgo_formula || null,
+      vlsfo_formula: port.vlsfo_formula || taiwanDefaults.vlsfo_formula || null,
+      mgo_formula: port.mgo_formula || taiwanDefaults.mgo_formula || null,
       updated_at: now,
     }
 
@@ -328,6 +344,7 @@ export default function AdminPage() {
   function isFormulaStylePort(port: any) {
     const portName = String(port.name).toLowerCase()
     if (portName === "vizag") return false
+    if (taiwanBasisFormulaDefaults[portName]) return true
     return hasFormulaForAnyFuel(port) || portName === "zhanjiang"
   }
 
@@ -783,6 +800,7 @@ export default function AdminPage() {
                 const isSaving = Boolean(savingPorts[port.id])
                 const isSaved = Boolean(savedPorts[port.id])
                 const isFormulaPort = isFormulaStylePort(port)
+                const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
                 const rowTint = isFormulaPort
                   ? "rgba(24, 74, 128, 0.34)"
                   : "rgba(14, 52, 96, 0.34)"
@@ -860,7 +878,11 @@ export default function AdminPage() {
                       <td key={field.priceField} style={td}>
                         <input
                           placeholder={isFormulaPort ? "formula" : "price"}
-                          value={port[isFormulaPort ? field.formulaField : field.priceField] ?? ""}
+                          value={
+                            isFormulaPort
+                              ? port[field.formulaField] ?? taiwanDefaults[field.formulaField as keyof typeof taiwanDefaults] ?? ""
+                              : port[field.priceField] ?? ""
+                          }
                           onChange={(event) =>
                             updateValue(
                               port.id,

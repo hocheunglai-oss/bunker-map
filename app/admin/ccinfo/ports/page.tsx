@@ -133,9 +133,9 @@ export default function PortIndexPage() {
     const { data, error } = await supabase
       .from("cc_ports")
       .insert({
-        name: "New Port",
-        country_name: "Japan",
-        notes: "No info",
+        name: "",
+        country_name: "",
+        notes: "",
         summary: null,
       })
       .select("id,name,country_name,notes,summary")
@@ -166,9 +166,17 @@ export default function PortIndexPage() {
             <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Port</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-            <a href="/admin/ccinfo" style={{ ...buttonStyle, textDecoration: "none" }}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {filteredPorts.length}</div>
-            <button onClick={addPort} style={buttonStyle}>Add Port</button>
+            <button
+              onClick={addPort}
+              style={{
+                ...buttonStyle,
+                background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
+                color: "#e8f4ff",
+                border: "1px solid rgba(108, 185, 255, 0.24)",
+              }}
+            >
+              Add Port
+            </button>
             <button
               onClick={() => void saveAll()}
               disabled={savingAll}
@@ -178,6 +186,8 @@ export default function PortIndexPage() {
                 {savingAll ? "Saving..." : "Save All"}
               </span>
             </button>
+            <a href="/admin/ccinfo" style={{ ...buttonStyle, textDecoration: "none" }}>Back</a>
+            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {filteredPorts.length}</div>
           </div>
         </div>
 

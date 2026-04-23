@@ -30,6 +30,12 @@ type PriceHistoryRecord = {
   recorded_at: string
 }
 
+const taiwanBasisPortFallbacks: Partial<Record<string, Partial<Record<FuelKey, string>>>> = {
+  keelung: { vlsfo: "taichung + 0", mgo: "taichung + 0" },
+  suao: { vlsfo: "taichung + 0", mgo: "taichung + 0" },
+  hualien: { vlsfo: "taichung + 0", mgo: "taichung + 0" },
+}
+
 function buildFuelSnapshot(today: number | null, last: number | null): FuelSnapshot {
   return {
     today,
@@ -55,9 +61,11 @@ function resolveValue(
   const previousEntry = portHistory[1] ?? null
 
   const formula = port[`${fuel}_formula` as const]
+  const fallbackFormula = taiwanBasisPortFallbacks[port.name.toLowerCase()]?.[fuel] ?? null
+  const effectiveFormula = formula?.trim() ? formula : fallbackFormula
 
-  if (formula?.trim()) {
-    const parsed = parseSimpleFormula(formula)
+  if (effectiveFormula?.trim()) {
+    const parsed = parseSimpleFormula(effectiveFormula)
     if (!parsed) return null
 
     const refPort = portsByName.get(parsed.refName)
@@ -65,7 +73,7 @@ function resolveValue(
 
     const refBase = resolveValue(refPort, portsByName, historyByPortId, fuel, version, seen)
 
-    return applyFormula(refBase, formula)
+    return applyFormula(refBase, effectiveFormula)
   }
 
   const directCurrent = currentEntry?.[fuel] ?? null

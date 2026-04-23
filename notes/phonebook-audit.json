@@ -1,0 +1,189 @@
+{
+  "generated_at": "2026-04-23T01:52:53.831Z",
+  "counts": {
+    "source_companies": 2941,
+    "phonebook_companies": 2941,
+    "source_contacts": 6124,
+    "phonebook_contacts": 6123
+  },
+  "missing_companies_in_phonebook": 0,
+  "extra_companies_in_phonebook": 0,
+  "mismatched_companies": 1320,
+  "missing_contacts_in_phonebook": 2,
+  "extra_contacts_in_phonebook": 1,
+  "mismatched_contacts": 0,
+  "examples": {
+    "missing_companies_in_phonebook": [],
+    "extra_companies_in_phonebook": [],
+    "company_differences": [
+      {
+        "label": "A T MARINE SERVICES CO LTD",
+        "diffs": [
+          {
+            "field": "phone",
+            "source": null,
+            "phonebook": "60305503"
+          },
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "george@atmarine.com.hk"
+          }
+        ]
+      },
+      {
+        "label": "ACCORD ENERGY SA",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "bunkers@accordenergy.gr"
+          }
+        ]
+      },
+      {
+        "label": "ABERDEEN HORIZONS SHIPPING COMPANY",
+        "diffs": [
+          {
+            "field": "phone",
+            "source": null,
+            "phonebook": "91922543"
+          },
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "wongjoannes@gmail.com"
+          }
+        ]
+      },
+      {
+        "label": "ACHIEVE BUNKER LTD",
+        "diffs": [
+          {
+            "field": "phone",
+            "source": null,
+            "phonebook": "62209634"
+          }
+        ]
+      },
+      {
+        "label": "ACHIEVER TECHONOLOGY LTD",
+        "diffs": [
+          {
+            "field": "phone",
+            "source": null,
+            "phonebook": "31053103"
+          }
+        ]
+      },
+      {
+        "label": "ACME SHIPPING AGENCY CO LTD",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "op@acmeship.com.tw"
+          }
+        ]
+      },
+      {
+        "label": "ADITYA MARINES",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "aditya@adioil.com"
+          }
+        ]
+      },
+      {
+        "label": "AEGEAN BUNKERING (S) PTE LTD (SINGAPORE)",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "wl.sing@ampni.com"
+          }
+        ]
+      },
+      {
+        "label": "AEGEAN NORTH WEST EUROPE NV (NETHERLANDS)",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "ken.debisschop@ampni.com"
+          }
+        ]
+      },
+      {
+        "label": "AESIR TRADING (PTE) LTD",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "bunkers@aesirt.com"
+          }
+        ]
+      },
+      {
+        "label": "AGENCIAS UNIVERSALES SA",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "gdelasotta@agunsa.cl"
+          }
+        ]
+      },
+      {
+        "label": "AGRICORE SHIPPING (HK) LTD",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "pmxops@agricorehk.com"
+          }
+        ]
+      },
+      {
+        "label": "AIA INTERNATIONAL LTD",
+        "diffs": [
+          {
+            "field": "phone",
+            "source": null,
+            "phonebook": "37276050"
+          }
+        ]
+      },
+      {
+        "label": "AJAX OFFSHORE BUNKERING SERVICES LTD",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "Chris.Piitarides@ajaxbunkering.com"
+          }
+        ]
+      },
+      {
+        "label": "AKRON TRADE AND TRANSPORT FZE",
+        "diffs": [
+          {
+            "field": "email",
+            "source": null,
+            "phonebook": "kostas@akron.ae"
+          }
+        ]
+      }
+    ],
+    "missing_contacts_in_phonebook": [
+      "JOYCE HUANG @ ISLAND OIL (HK) LTD",
+      "MANDY WONG @ ISLAND OIL (HK) LTD"
+    ],
+    "extra_contacts_in_phonebook": [
+      "JOYCE HUANG @ ISLAND OIL (HK) LTD"
+    ],
+    "contact_differences": []
+  }
+}

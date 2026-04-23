@@ -329,6 +329,7 @@ export default function CountryCompanyInfoPage() {
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
   const [matchCount, setMatchCount] = useState(0)
   const [matchIndex, setMatchIndex] = useState(0)
@@ -808,6 +809,32 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  async function downloadBackup() {
+    try {
+      setBackingUp(true)
+      setMessage("")
+      const response = await fetch("/api/ccinfo/backup")
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ message: "Backup failed." }))
+        throw new Error(data.message || "Backup failed.")
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `ccinfo-backup-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      setMessage("Backup downloaded.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Backup failed.")
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
   async function pickSuggestion(item: SearchRecord) {
     await loadSelected(item.kind, item.id)
     if (typeof window !== "undefined") {
@@ -1073,6 +1100,9 @@ export default function CountryCompanyInfoPage() {
                       <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
                       <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
                       <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
+                      <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
+                        {backingUp ? "Preparing Backup..." : "Download Backup"}
+                      </button>
                       <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
                       <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                     </div>
@@ -1149,6 +1179,9 @@ export default function CountryCompanyInfoPage() {
                           <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
                           <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
                           <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
+                          <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
+                            {backingUp ? "Preparing Backup..." : "Download Backup"}
+                          </button>
                           <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
                           <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                         </div>

@@ -347,6 +347,7 @@ export default function AdminPage() {
             {[
               { label: "ENQUIRY WORKFLOW", path: "/admin/enqworkflow" },
               { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
+              { label: "PHONEBOOK", path: "/admin/phonebook" },
             ].map((item) => (
               <button
                 key={item.label}

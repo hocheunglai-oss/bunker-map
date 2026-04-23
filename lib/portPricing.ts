@@ -14,14 +14,15 @@ export type FormulaCapablePort = {
 export function parseSimpleFormula(formula: string | null | undefined) {
   if (!formula) return null
 
-  const parts = formula.trim().split(/\s+/)
-  if (parts.length !== 3) return null
+  const trimmed = formula.trim()
+  const match = trimmed.match(/^(.*?)\s*([+-])\s*(-?\d+(?:\.\d+)?)$/)
+  if (!match) return null
 
-  const refName = parts[0].toLowerCase()
-  const operator = parts[1]
-  const amount = Number(parts[2])
+  const refName = match[1].trim().toLowerCase()
+  const operator = match[2]
+  const amount = Number(match[3])
 
-  if ((operator !== "+" && operator !== "-") || Number.isNaN(amount)) {
+  if (!refName || (operator !== "+" && operator !== "-") || Number.isNaN(amount)) {
     return null
   }
 

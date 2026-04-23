@@ -16,6 +16,20 @@ type HistoryRow = {
   recorded_at: string
 }
 
+type CombinedHistoryRow = {
+  dateKey: string
+  recorded_at: string
+  kaohsiungRow: HistoryRow | null
+  taichungRow: HistoryRow | null
+  hsfo: number | null
+  vlsfoKaohsiung: number | null
+  vlsfoTaichung: number | null
+  mgoKaohsiung: number | null
+  mgoTaichung: number | null
+}
+
+const TAIWAN_SPLIT_EFFECTIVE_FROM = "2026-04-21"
+
 const monthFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "long",
   timeZone: "Asia/Taipei",
@@ -38,8 +52,12 @@ function getTaiwanDateParts(value: string) {
     month: "2-digit",
     timeZone: "Asia/Taipei",
   }).format(date)
+  const day = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    timeZone: "Asia/Taipei",
+  }).format(date)
 
-  return { year, month }
+  return { year, month, day, dateKey: `${year}-${month}-${day}` }
 }
 
 function average(values: Array<number | null>) {
@@ -52,18 +70,16 @@ function average(values: Array<number | null>) {
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background:
-    "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
+  background: "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
   padding: "24px",
   fontFamily: "Arial, Helvetica, sans-serif",
   color: "#edf7ff",
 }
 
 const outerPanelStyle: React.CSSProperties = {
-  maxWidth: "920px",
+  maxWidth: "1220px",
   margin: "0 auto",
-  background:
-    "linear-gradient(180deg, rgba(6, 24, 44, 0.62) 0%, rgba(7, 27, 49, 0.54) 100%)",
+  background: "linear-gradient(180deg, rgba(6, 24, 44, 0.62) 0%, rgba(7, 27, 49, 0.54) 100%)",
   border: "1px solid rgba(210, 236, 255, 0.16)",
   borderRadius: "24px",
   padding: "22px",
@@ -73,8 +89,7 @@ const outerPanelStyle: React.CSSProperties = {
 }
 
 const sectionCardStyle: React.CSSProperties = {
-  background:
-    "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
+  background: "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
   border: "1px solid rgba(210, 236, 255, 0.14)",
   borderRadius: "22px",
   boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -108,7 +123,8 @@ const secondaryButtonStyle: React.CSSProperties = {
 export default function TaiwanPriceHistoryPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [rows, setRows] = useState<HistoryRow[]>([])
-  const [portId, setPortId] = useState<number | null>(null)
+  const [kaohsiungPortId, setKaohsiungPortId] = useState<number | null>(null)
+  const [taichungPortId, setTaichungPortId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -116,8 +132,10 @@ export default function TaiwanPriceHistoryPage() {
   const [selectedMonth, setSelectedMonth] = useState("all")
   const [formDate, setFormDate] = useState("")
   const [formHsfo, setFormHsfo] = useState("")
-  const [formVlsfo, setFormVlsfo] = useState("")
-  const [formMgo, setFormMgo] = useState("")
+  const [formVlsfoKaohsiung, setFormVlsfoKaohsiung] = useState("")
+  const [formVlsfoTaichung, setFormVlsfoTaichung] = useState("")
+  const [formMgoKaohsiung, setFormMgoKaohsiung] = useState("")
+  const [formMgoTaichung, setFormMgoTaichung] = useState("")
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
 
@@ -231,23 +249,25 @@ export default function TaiwanPriceHistoryPage() {
 
       const { data: portData } = await supabase
         .from("ports")
-        .select("id")
-        .eq("name", "Kaohsiung")
-        .limit(1)
-        .single()
+        .select("id,name")
+        .in("name", ["Kaohsiung", "Taichung"])
 
-      if (!portData) {
+      const kaohsiung = portData?.find((port) => port.name === "Kaohsiung") ?? null
+      const taichung = portData?.find((port) => port.name === "Taichung") ?? null
+
+      if (!kaohsiung || !taichung) {
         setRows([])
         setLoading(false)
         return
       }
 
-      setPortId(portData.id)
+      setKaohsiungPortId(kaohsiung.id)
+      setTaichungPortId(taichung.id)
 
       const { data: historyData } = await supabase
         .from("price_history")
         .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-        .eq("port_id", portData.id)
+        .in("port_id", [kaohsiung.id, taichung.id])
         .order("recorded_at", { ascending: false })
 
       setRows(historyData ?? [])
@@ -257,19 +277,63 @@ export default function TaiwanPriceHistoryPage() {
     load()
   }, [])
 
+  const combinedRows = useMemo<CombinedHistoryRow[]>(() => {
+    const grouped = new Map<
+      string,
+      { recorded_at: string; kaohsiungRow: HistoryRow | null; taichungRow: HistoryRow | null }
+    >()
+
+    for (const row of rows) {
+      const { dateKey } = getTaiwanDateParts(row.recorded_at)
+      const current = grouped.get(dateKey) ?? {
+        recorded_at: row.recorded_at,
+        kaohsiungRow: null,
+        taichungRow: null,
+      }
+
+      if (new Date(row.recorded_at) > new Date(current.recorded_at)) {
+        current.recorded_at = row.recorded_at
+      }
+
+      if (row.port_id === kaohsiungPortId) current.kaohsiungRow = row
+      if (row.port_id === taichungPortId) current.taichungRow = row
+      grouped.set(dateKey, current)
+    }
+
+    return Array.from(grouped.entries())
+      .map(([dateKey, value]) => {
+        const isBeforeSplit = dateKey < TAIWAN_SPLIT_EFFECTIVE_FROM
+        const khh = value.kaohsiungRow
+        const txg = value.taichungRow
+
+        return {
+          dateKey,
+          recorded_at: value.recorded_at,
+          kaohsiungRow: khh,
+          taichungRow: txg,
+          hsfo: khh?.hsfo ?? null,
+          vlsfoKaohsiung: khh?.vlsfo ?? null,
+          vlsfoTaichung: txg?.vlsfo ?? (isBeforeSplit ? khh?.vlsfo ?? null : null),
+          mgoKaohsiung: khh?.mgo ?? null,
+          mgoTaichung: txg?.mgo ?? (isBeforeSplit ? khh?.mgo ?? null : null),
+        }
+      })
+      .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())
+  }, [kaohsiungPortId, rows, taichungPortId])
+
   const years = useMemo(() => {
-    return [...new Set(rows.map((row) => getTaiwanDateParts(row.recorded_at).year))]
+    return [...new Set(combinedRows.map((row) => getTaiwanDateParts(row.recorded_at).year))]
       .sort((a, b) => Number(b) - Number(a))
-  }, [rows])
+  }, [combinedRows])
 
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
+    return combinedRows.filter((row) => {
       const parts = getTaiwanDateParts(row.recorded_at)
       const matchesYear = selectedYear === "all" || parts.year === selectedYear
       const matchesMonth = selectedMonth === "all" || parts.month === selectedMonth
       return matchesYear && matchesMonth
     })
-  }, [rows, selectedYear, selectedMonth])
+  }, [combinedRows, selectedMonth, selectedYear])
 
   const showMonthlyAverage = selectedYear !== "all" && selectedMonth !== "all"
 
@@ -278,69 +342,91 @@ export default function TaiwanPriceHistoryPage() {
 
     return {
       hsfo: average(filteredRows.map((row) => row.hsfo)),
-      vlsfo: average(filteredRows.map((row) => row.vlsfo)),
-      mgo: average(filteredRows.map((row) => row.mgo)),
+      vlsfoKaohsiung: average(filteredRows.map((row) => row.vlsfoKaohsiung)),
+      vlsfoTaichung: average(filteredRows.map((row) => row.vlsfoTaichung)),
+      mgoKaohsiung: average(filteredRows.map((row) => row.mgoKaohsiung)),
+      mgoTaichung: average(filteredRows.map((row) => row.mgoTaichung)),
       count: filteredRows.length,
     }
   }, [filteredRows, showMonthlyAverage])
 
-  async function deleteHistoryRow(row: HistoryRow) {
+  async function deleteHistoryRow(row: CombinedHistoryRow) {
     const firstConfirm = window.confirm(
       `Delete the history record on ${dateFormatter.format(new Date(row.recorded_at))}?`
     )
-
     if (!firstConfirm) return
 
     const secondConfirm = window.confirm(
       "Please confirm again. This history record will be permanently deleted."
     )
-
     if (!secondConfirm) return
 
-    setDeletingId(row.id)
-    await supabase.from("price_history").delete().eq("id", row.id)
-    setRows((prev) => prev.filter((item) => item.id !== row.id))
-    await syncPortFromLatestHistory(row.port_id)
+    const idsToDelete = [row.kaohsiungRow?.id, row.taichungRow?.id].filter(
+      (value): value is number => value != null
+    )
+
+    if (idsToDelete.length === 0) return
+
+    setDeletingId(idsToDelete[0])
+    await supabase.from("price_history").delete().in("id", idsToDelete)
+    setRows((prev) => prev.filter((item) => !idsToDelete.includes(item.id)))
+    if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
+    if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
     setDeletingId(null)
   }
 
+  async function insertTaiwanHistory(recordedAt: string) {
+    if (!kaohsiungPortId || !taichungPortId) return []
+
+    const { data } = await supabase
+      .from("price_history")
+      .insert([
+        {
+          port_id: kaohsiungPortId,
+          hsfo: formHsfo ? Number(formHsfo) : null,
+          vlsfo: formVlsfoKaohsiung ? Number(formVlsfoKaohsiung) : null,
+          mgo: formMgoKaohsiung ? Number(formMgoKaohsiung) : null,
+          recorded_at: recordedAt,
+        },
+        {
+          port_id: taichungPortId,
+          hsfo: null,
+          vlsfo: formVlsfoTaichung ? Number(formVlsfoTaichung) : null,
+          mgo: formMgoTaichung ? Number(formMgoTaichung) : null,
+          recorded_at: recordedAt,
+        },
+      ])
+      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
+
+    return data ?? []
+  }
+
+  function resetForm() {
+    setFormDate("")
+    setFormHsfo("")
+    setFormVlsfoKaohsiung("")
+    setFormVlsfoTaichung("")
+    setFormMgoKaohsiung("")
+    setFormMgoTaichung("")
+  }
+
   async function addMissingRecord() {
-    if (!portId || !formDate) return
-
-    const firstConfirm = window.confirm(
-      `Add a missing history record for ${formDate}?`
-    )
-
+    if (!formDate) return
+    const firstConfirm = window.confirm(`Add a missing history record for ${formDate}?`)
     if (!firstConfirm) return
 
     setSaving(true)
+    const inserted = await insertTaiwanHistory(`${formDate}T12:00:00+08:00`)
 
-    const recordedAt = `${formDate}T12:00:00+08:00`
-
-    const { data: inserted } = await supabase
-      .from("price_history")
-      .insert({
-        port_id: portId,
-        hsfo: formHsfo ? Number(formHsfo) : null,
-        vlsfo: formVlsfo ? Number(formVlsfo) : null,
-        mgo: formMgo ? Number(formMgo) : null,
-        recorded_at: recordedAt,
-      })
-      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-      .single()
-
-    if (inserted) {
+    if (inserted.length > 0) {
       setRows((prev) =>
-        [...prev, inserted].sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
+        [...prev, ...inserted].sort(
+          (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
         )
       )
-      setFormDate("")
-      setFormHsfo("")
-      setFormVlsfo("")
-      setFormMgo("")
-      await syncPortFromLatestHistory(portId)
+      resetForm()
+      if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
+      if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
       setPublished(false)
     }
 
@@ -348,8 +434,6 @@ export default function TaiwanPriceHistoryPage() {
   }
 
   async function addAsLatestRecord() {
-    if (!portId) return
-
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Taipei",
       year: "numeric",
@@ -361,31 +445,21 @@ export default function TaiwanPriceHistoryPage() {
     if (!firstConfirm) return
 
     setSaving(true)
+    const inserted = await insertTaiwanHistory(`${today}T12:00:00+08:00`)
 
-    const recordedAt = `${today}T12:00:00+08:00`
-    const { data: inserted } = await supabase
-      .from("price_history")
-      .insert({
-        port_id: portId,
-        hsfo: formHsfo ? Number(formHsfo) : null,
-        vlsfo: formVlsfo ? Number(formVlsfo) : null,
-        mgo: formMgo ? Number(formMgo) : null,
-        recorded_at: recordedAt,
-      })
-      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-      .single()
-
-    if (inserted) {
+    if (inserted.length > 0) {
       setRows((prev) =>
-        [...prev, inserted].sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
+        [...prev, ...inserted].sort(
+          (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
         )
       )
       setFormHsfo("")
-      setFormVlsfo("")
-      setFormMgo("")
-      await syncPortFromLatestHistory(portId)
+      setFormVlsfoKaohsiung("")
+      setFormVlsfoTaichung("")
+      setFormMgoKaohsiung("")
+      setFormMgoTaichung("")
+      if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
+      if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
       setPublished(false)
     }
 
@@ -402,9 +476,10 @@ export default function TaiwanPriceHistoryPage() {
     setPublishing(false)
   }
 
+  if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
+  if (adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
+
   return (
-    !adminLoading && !authenticated ? <p style={{ padding: "40px" }}>Access Denied</p> :
-    adminLoading ? <p style={{ padding: "40px" }}>Loading...</p> :
     <div style={pageShellStyle}>
       <div style={outerPanelStyle}>
         <div
@@ -439,10 +514,7 @@ export default function TaiwanPriceHistoryPage() {
           </h1>
 
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <a
-              href="/admin"
-              style={secondaryButtonStyle}
-            >
+            <a href="/admin" style={secondaryButtonStyle}>
               ← Back To Admin
             </a>
 
@@ -471,7 +543,9 @@ export default function TaiwanPriceHistoryPage() {
                   : "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
                 color: published ? "#d7e8ff" : "#e2f3ff",
                 cursor: "pointer",
-                boxShadow: published ? secondaryButtonStyle.boxShadow : "inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(80,170,255,0.06)",
+                boxShadow: published
+                  ? secondaryButtonStyle.boxShadow
+                  : "inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(80,170,255,0.06)",
               }}
             >
               {publishing ? "Publishing..." : published ? "Published" : "Publish"}
@@ -489,23 +563,13 @@ export default function TaiwanPriceHistoryPage() {
               justifyContent: "space-between",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "10px",
-                alignItems: "end",
-              }}
-            >
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "end" }}>
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>Year</span>
                 <select
                   value={selectedYear}
                   onChange={(event) => setSelectedYear(event.target.value)}
-                  style={{
-                    ...controlStyle,
-                    minWidth: "160px",
-                  }}
+                  style={{ ...controlStyle, minWidth: "160px" }}
                 >
                   <option value="all">All years</option>
                   {years.map((year) => (
@@ -521,10 +585,7 @@ export default function TaiwanPriceHistoryPage() {
                 <select
                   value={selectedMonth}
                   onChange={(event) => setSelectedMonth(event.target.value)}
-                  style={{
-                    ...controlStyle,
-                    minWidth: "160px",
-                  }}
+                  style={{ ...controlStyle, minWidth: "160px" }}
                 >
                   <option value="all">All months</option>
                   {Array.from({ length: 12 }, (_, index) => {
@@ -541,7 +602,7 @@ export default function TaiwanPriceHistoryPage() {
               <div
                 style={{
                   minHeight: "58px",
-                  minWidth: "280px",
+                  minWidth: "420px",
                   padding: "10px 12px",
                   borderRadius: "16px",
                   background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)",
@@ -557,7 +618,7 @@ export default function TaiwanPriceHistoryPage() {
                 <strong style={{ color: "#dff3ff" }}>Monthly Average</strong>
                 {showMonthlyAverage && monthlyAverage ? (
                   <span style={{ color: "#edf7ff" }}>
-                    HSFO: {monthlyAverage.hsfo ?? "-"} | VLSFO: {monthlyAverage.vlsfo ?? "-"} | MGO: {monthlyAverage.mgo ?? "-"}
+                    HSFO: {monthlyAverage.hsfo ?? "-"} | VLSFO KHH: {monthlyAverage.vlsfoKaohsiung ?? "-"} | VLSFO TXG: {monthlyAverage.vlsfoTaichung ?? "-"} | MGO KHH: {monthlyAverage.mgoKaohsiung ?? "-"} | MGO TXG: {monthlyAverage.mgoTaichung ?? "-"}
                   </span>
                 ) : (
                   <span style={{ color: "#9db9cf" }}>Select both year and month to show data.</span>
@@ -568,60 +629,40 @@ export default function TaiwanPriceHistoryPage() {
         </div>
 
         <div style={{ ...sectionCardStyle, padding: "16px", marginBottom: "14px" }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "8px",
-              alignItems: "end",
-            }}
-          >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "end" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>Date</span>
               <input
                 type="date"
                 value={formDate}
                 onChange={(event) => setFormDate(event.target.value)}
-                style={{
-                  ...controlStyle,
-                }}
+                style={controlStyle}
               />
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>HSFO</span>
-              <input
-                value={formHsfo}
-                onChange={(event) => setFormHsfo(event.target.value)}
-                style={{
-                  ...controlStyle,
-                  width: "90px",
-                }}
-              />
+              <input value={formHsfo} onChange={(event) => setFormHsfo(event.target.value)} style={{ ...controlStyle, width: "90px" }} />
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>VLSFO</span>
-              <input
-                value={formVlsfo}
-                onChange={(event) => setFormVlsfo(event.target.value)}
-                style={{
-                  ...controlStyle,
-                  width: "90px",
-                }}
-              />
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>VLSFO KHH</span>
+              <input value={formVlsfoKaohsiung} onChange={(event) => setFormVlsfoKaohsiung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>MGO</span>
-              <input
-                value={formMgo}
-                onChange={(event) => setFormMgo(event.target.value)}
-                style={{
-                  ...controlStyle,
-                  width: "90px",
-                }}
-              />
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>VLSFO TXG</span>
+              <input value={formVlsfoTaichung} onChange={(event) => setFormVlsfoTaichung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>MGO KHH</span>
+              <input value={formMgoKaohsiung} onChange={(event) => setFormMgoKaohsiung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>MGO TXG</span>
+              <input value={formMgoTaichung} onChange={(event) => setFormMgoTaichung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
             </label>
 
             <button
@@ -653,7 +694,6 @@ export default function TaiwanPriceHistoryPage() {
                 border: "1px solid rgba(73, 219, 165, 0.22)",
                 cursor: saving ? "wait" : "pointer",
                 height: "42px",
-                textDecoration: "none",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(73,219,165,0.04)",
               }}
             >
@@ -670,7 +710,7 @@ export default function TaiwanPriceHistoryPage() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "rgba(7, 31, 54, 0.88)", color: "white" }}>
-                    {["Date", "HSFO", "VLSFO", "MGO", "Delete"].map((label) => (
+                    {["Date", "HSFO", "VLSFO KHH", "VLSFO TXG", "MGO KHH", "MGO TXG", "Delete"].map((label) => (
                       <th
                         key={label}
                         style={{
@@ -689,7 +729,7 @@ export default function TaiwanPriceHistoryPage() {
                 <tbody>
                   {filteredRows.map((row, index) => (
                     <tr
-                      key={row.id}
+                      key={row.dateKey}
                       style={{
                         background: index % 2 === 0 ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)",
                       }}
@@ -698,12 +738,14 @@ export default function TaiwanPriceHistoryPage() {
                         {dateFormatter.format(new Date(row.recorded_at))}
                       </td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.hsfo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgo ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfoKaohsiung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfoTaichung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgoKaohsiung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgoTaichung ?? "-"}</td>
                       <td style={{ padding: "8px 12px" }}>
                         <button
                           onClick={() => deleteHistoryRow(row)}
-                          disabled={deletingId === row.id}
+                          disabled={deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id}
                           style={{
                             background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
                             color: "#ffd4d8",
@@ -716,14 +758,14 @@ export default function TaiwanPriceHistoryPage() {
                             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
                           }}
                         >
-                          {deletingId === row.id ? "Deleting..." : "Delete"}
+                          {deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id ? "Deleting..." : "Delete"}
                         </button>
                       </td>
                     </tr>
                   ))}
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={5} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
+                      <td colSpan={7} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
                         No history records found for the current filters.
                       </td>
                     </tr>
@@ -735,6 +777,5 @@ export default function TaiwanPriceHistoryPage() {
         </div>
       </div>
     </div>
-    
   )
 }
