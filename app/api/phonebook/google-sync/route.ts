@@ -1,5 +1,4 @@
 import fs from "node:fs/promises"
-import fsSync from "node:fs"
 import path from "node:path"
 import { google, people_v1 } from "googleapis"
 import { cookies } from "next/headers"
@@ -15,6 +14,7 @@ type PhonebookContact = {
   id: string
   full_name: string
   company: string | null
+  company_phone: string | null
   title: string | null
   position: string | null
   department: string | null
@@ -27,26 +27,27 @@ type PhonebookContact = {
   notes: string | null
 }
 
-function loadEnv() {
-  return Object.fromEntries(
-    fsSync
-      .readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .filter((line: string) => !line.trim().startsWith("#"))
-      .map((line: string) => {
-        const idx = line.indexOf("=")
-        return [line.slice(0, idx).trim(), line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "")]
-      }),
-  )
+type PhonebookCompany = {
+  name: string
+  tel_country: string | null
+  tel_area: string | null
+  tel_no_1: string | null
+  phone: string | null
+}
+
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`Missing environment variable: ${name}`)
+  }
+  return value
 }
 
 async function getPeopleClient() {
-  const env = loadEnv()
   const auth = new google.auth.OAuth2(
-    env.GOOGLE_OAUTH_CLIENT_ID,
-    env.GOOGLE_OAUTH_CLIENT_SECRET,
-    env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
+    requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
+    requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
+    process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
   )
   const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
   auth.setCredentials(JSON.parse(tokenRaw))
@@ -98,7 +99,7 @@ function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person 
   if (contact.private_email) emailAddresses.push({ value: contact.private_email, type: "other" })
 
   const phoneNumbers: people_v1.Schema$PhoneNumber[] = []
-  if (contact.direct_line) phoneNumbers.push({ value: normalizeDialablePhone(contact.direct_line), type: "work" })
+  if (contact.company_phone) phoneNumbers.push({ value: normalizeDialablePhone(contact.company_phone), type: "work" })
   if (contact.mobile_1) phoneNumbers.push({ value: normalizeDialablePhone(contact.mobile_1), type: "mobile" })
   if (contact.mobile_2) phoneNumbers.push({ value: normalizeDialablePhone(contact.mobile_2), type: "mobile" })
 
@@ -135,8 +136,48 @@ function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person 
   }
 }
 
+function normalizeCompanyKey(value: string | null | undefined) {
+  return normalizeText(value).toUpperCase()
+}
+
+function buildCompanyPhone(company: PhonebookCompany) {
+  if (company.phone) return company.phone
+  const country = normalizeText(company.tel_country)
+  const area = normalizeText(company.tel_area)
+  const tel1 = normalizeText(company.tel_no_1)
+  if (!tel1) return ""
+  if (country && area) return `+${country}-${area}-${tel1}`
+  if (country) return `+${country}-${tel1}`
+  if (area) return `${area}-${tel1}`
+  return tel1
+}
+
+async function loadCompanyPhoneMap(supabase: any) {
+  const rows: PhonebookCompany[] = []
+  const pageSize = 1000
+  let from = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("phonebook_companies")
+      .select("name,tel_country,tel_area,tel_no_1,phone")
+      .order("name", { ascending: true })
+      .range(from, from + pageSize - 1)
+
+    if (error) throw error
+
+    const batch = (data || []) as PhonebookCompany[]
+    rows.push(...batch)
+    if (batch.length < pageSize) break
+    from += pageSize
+  }
+
+  return new Map(rows.map((company) => [normalizeCompanyKey(company.name), buildCompanyPhone(company)]))
+}
+
 async function fetchContacts(supabase: any, company: string | null) {
   const rows: PhonebookContact[] = []
+  const companyPhoneMap = await loadCompanyPhoneMap(supabase)
   const pageSize = 1000
   let from = 0
 
@@ -155,8 +196,13 @@ async function fetchContacts(supabase: any, company: string | null) {
     const { data, error } = await query
     if (error) throw error
 
-    const batch = (data || []) as PhonebookContact[]
-    rows.push(...batch)
+    const batch = (data || []) as Omit<PhonebookContact, "company_phone">[]
+    rows.push(
+      ...batch.map((contact) => ({
+        ...contact,
+        company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company)) || null,
+      })),
+    )
     if (batch.length < pageSize) break
     from += pageSize
   }
@@ -260,8 +306,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
     }
 
-    const env = loadEnv()
-    const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    const supabase = createClient(
+      requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+      requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    )
     const body = (await request.json().catch(() => ({}))) as {
       selectedCompany?: string
       fullRebuild?: boolean
