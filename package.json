@@ -9,6 +9,7 @@
     "start": "next start",
     "vercel-build": "next build",
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
+    "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
     "upload:company-files": "node scripts/upload-company-files-to-drive.mjs",

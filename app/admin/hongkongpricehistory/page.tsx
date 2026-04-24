@@ -121,6 +121,7 @@ export default function HongKongPriceHistoryPage() {
   const [formMgo, setFormMgo] = useState("")
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
+  const [showDeleteButtons, setShowDeleteButtons] = useState(false)
 
   async function buildHongKongSnapshot(): Promise<{
     reportDate: string
@@ -442,9 +443,9 @@ export default function HongKongPriceHistoryPage() {
               rel="noopener noreferrer"
               style={{
                 ...secondaryButtonStyle,
-                border: "1px solid rgba(255, 120, 120, 0.16)",
-                background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                color: "#ffd4d8",
+                border: "1px solid rgba(255, 145, 86, 0.24)",
+                background: "linear-gradient(180deg, rgba(255, 128, 64, 0.26) 0%, rgba(201, 88, 22, 0.14) 100%)",
+                color: "#ffd2b2",
               }}
             >
               Check
@@ -465,6 +466,20 @@ export default function HongKongPriceHistoryPage() {
               }}
             >
               {publishing ? "Publishing..." : published ? "Published" : "Publish"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDeleteButtons((prev) => !prev)}
+              style={{
+                ...secondaryButtonStyle,
+                cursor: "pointer",
+                background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
+                border: "1px solid rgba(255, 120, 120, 0.16)",
+                color: "#ffd4d8",
+              }}
+            >
+              {showDeleteButtons ? "Hide Delete" : "Show Delete"}
             </button>
           </div>
         </div>
@@ -608,7 +623,7 @@ export default function HongKongPriceHistoryPage() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "rgba(7, 31, 54, 0.88)", color: "white" }}>
-                    {["Date", "HSFO", "VLSFO", "MGO", "Delete"].map((label) => (
+                    {["Date", "HSFO", "VLSFO", "MGO", ...(showDeleteButtons ? ["Delete"] : [])].map((label) => (
                       <th
                         key={label}
                         style={{
@@ -638,30 +653,32 @@ export default function HongKongPriceHistoryPage() {
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.hsfo ?? "-"}</td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfo ?? "-"}</td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px" }}>
-                        <button
-                          onClick={() => deleteHistoryRow(row)}
-                          disabled={deletingId === row.id}
-                          style={{
-                            background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-                            color: "#ffd4d8",
-                            border: "1px solid rgba(255, 120, 120, 0.16)",
-                            borderRadius: "999px",
-                            padding: "7px 12px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: 700,
-                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-                          }}
-                        >
-                          {deletingId === row.id ? "Deleting..." : "Delete"}
-                        </button>
-                      </td>
+                      {showDeleteButtons && (
+                        <td style={{ padding: "8px 12px" }}>
+                          <button
+                            onClick={() => deleteHistoryRow(row)}
+                            disabled={deletingId === row.id}
+                            style={{
+                              background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
+                              color: "#ffd4d8",
+                              border: "1px solid rgba(255, 120, 120, 0.16)",
+                              borderRadius: "999px",
+                              padding: "7px 12px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                            }}
+                          >
+                            {deletingId === row.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={5} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
+                      <td colSpan={showDeleteButtons ? 5 : 4} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
                         No history records found for the current filters.
                       </td>
                     </tr>

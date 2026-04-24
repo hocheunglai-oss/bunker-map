@@ -79,6 +79,71 @@ type Company = {
 type PinHoverState = string | null
 type CompanyDraft = Company | null
 
+const LAST_GOOGLE_SYNC_FAILED_KEY = "phonebook_last_google_sync_failed"
+
+type GoogleSyncFailure = {
+  id: string
+  label: string
+}
+
+const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
+
+const COUNTRY_OPTIONS = [
+  { name: "ALGERIA", code: "213" },
+  { name: "ARGENTINA", code: "54" },
+  { name: "AUSTRALIA", code: "61" },
+  { name: "BAHRAIN", code: "973" },
+  { name: "BANGLADESH", code: "880" },
+  { name: "BELGIUM", code: "32" },
+  { name: "BRAZIL", code: "55" },
+  { name: "CANADA", code: "1" },
+  { name: "CHILE", code: "56" },
+  { name: "CHINA", code: "86" },
+  { name: "CYPRUS", code: "357" },
+  { name: "DENMARK", code: "45" },
+  { name: "EGYPT", code: "20" },
+  { name: "FRANCE", code: "33" },
+  { name: "GERMANY", code: "49" },
+  { name: "GREECE", code: "30" },
+  { name: "HONG KONG", code: "852" },
+  { name: "INDIA", code: "91" },
+  { name: "INDONESIA", code: "62" },
+  { name: "IRELAND", code: "353" },
+  { name: "ITALY", code: "39" },
+  { name: "JAPAN", code: "81" },
+  { name: "KOREA", code: "82" },
+  { name: "KUWAIT", code: "965" },
+  { name: "MALAYSIA", code: "60" },
+  { name: "MEXICO", code: "52" },
+  { name: "MONACO", code: "377" },
+  { name: "NETHERLANDS", code: "31" },
+  { name: "NEW ZEALAND", code: "64" },
+  { name: "NORWAY", code: "47" },
+  { name: "OMAN", code: "968" },
+  { name: "PAKISTAN", code: "92" },
+  { name: "PANAMA", code: "507" },
+  { name: "PHILIPPINES", code: "63" },
+  { name: "PORTUGAL", code: "351" },
+  { name: "QATAR", code: "974" },
+  { name: "SAUDI ARABIA", code: "966" },
+  { name: "SINGAPORE", code: "65" },
+  { name: "SOUTH AFRICA", code: "27" },
+  { name: "SPAIN", code: "34" },
+  { name: "SRI LANKA", code: "94" },
+  { name: "SWEDEN", code: "46" },
+  { name: "SWITZERLAND", code: "41" },
+  { name: "TAIWAN", code: "886" },
+  { name: "THAILAND", code: "66" },
+  { name: "TURKEY", code: "90" },
+  { name: "UAE", code: "971" },
+  { name: "UK", code: "44" },
+  { name: "UNITED ARAB EMIRATES", code: "971" },
+  { name: "UNITED KINGDOM", code: "44" },
+  { name: "UNITED STATES", code: "1" },
+  { name: "USA", code: "1" },
+  { name: "VIETNAM", code: "84" },
+]
+
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
@@ -174,8 +239,75 @@ const modalSectionStyle: React.CSSProperties = {
   boxShadow: "none",
 }
 
+const menuPanelStyle: React.CSSProperties = {
+  ...panelStyle,
+  position: "absolute",
+  top: "calc(100% + 8px)",
+  right: 0,
+  padding: "10px",
+  display: "grid",
+  gap: "8px",
+  zIndex: 20,
+  minWidth: "180px",
+}
+
+const sidebarPanelStyle: React.CSSProperties = {
+  ...panelStyle,
+  padding: "0",
+  display: "grid",
+  background: "linear-gradient(180deg, rgba(20, 66, 112, 0.92) 0%, rgba(10, 39, 74, 0.9) 100%)",
+  border: "1px solid rgba(126, 185, 255, 0.16)",
+  borderRadius: "20px",
+  overflow: "hidden",
+}
+
+const listRowStyle: React.CSSProperties = {
+  width: "100%",
+  border: "none",
+  background: "transparent",
+  borderBottom: "1px solid rgba(210,236,255,0.08)",
+  textAlign: "left",
+  padding: "11px 14px",
+  color: "#edf7ff",
+  cursor: "pointer",
+}
+
 function normalizeCompanyName(value: string | null | undefined) {
   return value?.trim() || "No Company"
+}
+
+function normalizeCompanyKey(value: string | null | undefined) {
+  return normalizeCompanyName(value).toLowerCase()
+}
+
+function normalizeCountryName(value: string | null | undefined) {
+  const upper = (value || "").trim().toUpperCase()
+  if (!upper) return ""
+  if (upper === "U.S.A." || upper === "U.S.A" || upper === "US") return "USA"
+  if (upper === "UNITED STATES OF AMERICA") return "USA"
+  if (upper === "U.A.E." || upper === "U.A.E") return "UAE"
+  return upper
+}
+
+function getCountryCode(countryName: string | null | undefined) {
+  const normalized = normalizeCountryName(countryName)
+  return COUNTRY_OPTIONS.find((country) => country.name === normalized)?.code || ""
+}
+
+function normalizeTitleValue(value: string | null | undefined) {
+  const upper = (value || "").trim().toUpperCase()
+  return TITLE_OPTIONS.includes(upper as (typeof TITLE_OPTIONS)[number]) ? upper : ""
+}
+
+function formatCompanyPhoneLine(company: Company) {
+  const countryCode = (company.tel_country || "").trim()
+  const areaCode = (company.tel_area || "").trim()
+  const tel1 = (company.tel_no_1 || "").trim()
+  if (!tel1) return ""
+  if (countryCode && areaCode) return `+${countryCode}-${areaCode}-${tel1}`
+  if (countryCode) return `+${countryCode}-${tel1}`
+  if (areaCode) return `${areaCode}-${tel1}`
+  return tel1
 }
 
 function buildSearchTokens(value: string) {
@@ -208,50 +340,25 @@ function buildContactSearchText(contact: Partial<Contact>) {
     .toLowerCase()
 }
 
-function vcardEscape(value: string) {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-}
-
-function buildVcard(contact: Contact) {
-  const lines = [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    `FN:${vcardEscape(contact.full_name || "")}`,
-  ]
-
-  if (contact.company) lines.push(`ORG:${vcardEscape(contact.company)}`)
-  if (contact.mobile_1) lines.push(`TEL;TYPE=CELL:${vcardEscape(contact.mobile_1)}`)
-  if (contact.mobile_2) lines.push(`TEL;TYPE=CELL,VOICE:${vcardEscape(contact.mobile_2)}`)
-  if (contact.direct_line) lines.push(`TEL;TYPE=WORK:${vcardEscape(contact.direct_line)}`)
-  if (contact.general_email) lines.push(`EMAIL;TYPE=INTERNET:${vcardEscape(contact.general_email)}`)
-  if (contact.personal_email) lines.push(`EMAIL;TYPE=INTERNET:${vcardEscape(contact.personal_email)}`)
-  if (contact.private_email) lines.push(`EMAIL;TYPE=INTERNET:${vcardEscape(contact.private_email)}`)
-  if (contact.notes) lines.push(`NOTE:${vcardEscape(contact.notes)}`)
-  lines.push("END:VCARD")
-  return lines.join("\n")
-}
-
-function downloadTextFile(filename: string, contents: string, type = "text/vcard;charset=utf-8") {
-  const blob = new Blob([contents], { type })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
 function copyToClipboard(value: string, onDone: (message: string) => void) {
   navigator.clipboard
     .writeText(value)
     .then(() => onDone("Copied."))
     .catch(() => onDone("Unable to copy."))
+}
+
+function normalizeDialablePhone(value: string | null | undefined) {
+  const trimmed = (value || "").trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith("+")) return trimmed
+
+  const digits = trimmed.replace(/[^\d]/g, "")
+  const looksLikeHongKongLocal =
+    digits.length === 8 && !trimmed.includes("-") && !trimmed.includes("(") && !trimmed.includes(")")
+
+  if (looksLikeHongKongLocal) return digits
+  if (/^\d{1,4}-/.test(trimmed)) return `+${trimmed}`
+  return trimmed
 }
 
 export default function PhonebookPage() {
@@ -277,6 +384,9 @@ export default function PhonebookPage() {
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
+  const [googleSyncing, setGoogleSyncing] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [creatingCompany, setCreatingCompany] = useState(false)
 
   async function loadContacts() {
     const allContacts: Contact[] = []
@@ -333,8 +443,22 @@ export default function PhonebookPage() {
     setLoading(true)
     try {
       const [companyData, contactData] = await Promise.all([loadCompanies(), loadContacts()])
-      setCompanies(companyData)
-      setContacts(contactData)
+      setCompanies(
+        companyData.map((company) => ({
+          ...company,
+          name: company.name?.toUpperCase?.() || company.name,
+          country: normalizeCountryName(company.country) || null,
+          tel_country: company.tel_country || getCountryCode(company.country) || null,
+        })),
+      )
+      setContacts(
+        contactData.map((contact) => ({
+          ...contact,
+          full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
+          company: contact.company?.toUpperCase?.() || contact.company,
+          title: normalizeTitleValue(contact.title) || null,
+        })),
+      )
     } catch {
       setMessage("Unable to load phonebook.")
     } finally {
@@ -361,6 +485,7 @@ export default function PhonebookPage() {
   }, [contacts, selectedId])
 
   const queryTokens = useMemo(() => buildSearchTokens(query), [query])
+  const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
 
   const companiesWithMatchingContacts = useMemo(() => {
     if (queryTokens.length === 0) return new Set<string>()
@@ -371,7 +496,7 @@ export default function PhonebookPage() {
           const haystack = contact.search_text || ""
           return queryTokens.every((token) => haystack.includes(token))
         })
-        .map((contact) => normalizeCompanyName(contact.company))
+        .map((contact) => normalizeCompanyKey(contact.company))
     )
   }, [contacts, queryTokens])
 
@@ -380,13 +505,13 @@ export default function PhonebookPage() {
     return companies.filter((company) => {
       const haystack = company.name.toLowerCase()
       const matchesCompanyName = queryTokens.every((token) => haystack.includes(token))
-      return matchesCompanyName || companiesWithMatchingContacts.has(company.name)
+      return matchesCompanyName || companiesWithMatchingContacts.has(normalizeCompanyKey(company.name))
     })
   }, [companies, companiesWithMatchingContacts, queryTokens])
 
   const filteredContacts = useMemo(() => {
     let next = contacts.filter((contact) => {
-      const matchesCompany = !selectedCompany || normalizeCompanyName(contact.company) === selectedCompany
+      const matchesCompany = !selectedCompany || normalizeCompanyKey(contact.company) === selectedCompanyKey
       const haystack = contact.search_text || ""
       const matchesQuery =
         selectedCompany
@@ -400,34 +525,34 @@ export default function PhonebookPage() {
       return (a.full_name || "").localeCompare(b.full_name || "")
     })
     return next
-  }, [contacts, queryTokens, selectedCompany])
+  }, [contacts, queryTokens, selectedCompany, selectedCompanyKey])
 
   async function saveCurrent() {
     if (!draft) return
     setSaving(true)
     setMessage("")
     const payload = {
-      full_name: draft.full_name.trim(),
-      company: draft.company?.trim() || null,
+      full_name: draft.full_name.trim().toUpperCase(),
+      company: draft.company?.trim().toUpperCase() || null,
       company_source_id: draft.company_source_id?.trim() || null,
-      title: draft.title?.trim() || null,
+      title: normalizeTitleValue(draft.title) || null,
       name_remark: draft.name_remark?.trim() || null,
       position: draft.position?.trim() || null,
       department: draft.department?.trim() || null,
       tel_ext: draft.tel_ext?.trim() || null,
-      direct_line: draft.direct_line?.trim() || null,
+      direct_line: normalizeDialablePhone(draft.direct_line),
       mobile_area: draft.mobile_area?.trim() || null,
-      mobile_1: draft.mobile_1?.trim() || null,
-      mobile_2: draft.mobile_2?.trim() || null,
+      mobile_1: normalizeDialablePhone(draft.mobile_1),
+      mobile_2: normalizeDialablePhone(draft.mobile_2),
       personal_email: draft.personal_email?.trim() || null,
       general_email: draft.general_email?.trim() || null,
       private_email: draft.private_email?.trim() || null,
       instant_messaging: draft.instant_messaging?.trim() || null,
       others: draft.others?.trim() || null,
       area_of_responsibility: draft.area_of_responsibility?.trim() || null,
-      mobile_phone: draft.mobile_1?.trim() || null,
-      pager: draft.mobile_2?.trim() || null,
-      business_phone: draft.direct_line?.trim() || null,
+      mobile_phone: normalizeDialablePhone(draft.mobile_1),
+      pager: normalizeDialablePhone(draft.mobile_2),
+      business_phone: normalizeDialablePhone(draft.direct_line),
       business_phone_2: draft.tel_ext?.trim() || null,
       other_phone: draft.others?.trim() || null,
       email_1: draft.personal_email?.trim() || null,
@@ -447,13 +572,14 @@ export default function PhonebookPage() {
     setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setEditing(false)
-    setMessage("Saved.")
+    await syncGoogleContacts(false, [draft.id], { successMessage: "Saved and synced." })
     setSaving(false)
   }
 
   async function deleteCurrent() {
     if (!current) return
     if (!confirm(`Delete ${current.full_name}?`)) return
+    const deletingId = current.id
     const { error } = await supabase.from("phonebook_contacts").delete().eq("id", current.id)
     if (error) {
       setMessage("Unable to delete contact.")
@@ -461,11 +587,16 @@ export default function PhonebookPage() {
     }
     setContacts((prev) => prev.filter((item) => item.id !== current.id))
     setSelectedId("")
-    setMessage("Deleted.")
+    await syncGoogleContacts(false, null, {
+      deleteContactIds: [deletingId],
+      successMessage: "Deleted and synced.",
+    })
   }
 
-  async function addCompany() {
-    const payload = {
+  function addCompany() {
+    setCreatingCompany(true)
+    setCompanyDraft({
+      id: `new-company-${Date.now()}`,
       name: "",
       other_name: null,
       phone: null,
@@ -501,19 +632,17 @@ export default function PhonebookPage() {
       buyer_remark_4: null,
       notes: null,
       source_key: `manual-company-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    }
-    const { data, error } = await supabase.from("phonebook_companies").insert(payload).select("*").single()
-    if (error || !data) {
-      setMessage("Unable to add company.")
-      return
-    }
-    setCompanies((prev) => [...prev, data as Company].sort((a, b) => a.name.localeCompare(b.name)))
-    setSelectedCompany((data as Company).name || "")
-    setMessage("New company added.")
+    })
+    setCompanyModalOpen(true)
+    setMessage("")
   }
 
   function openCompanyModal(company: Company) {
-    setCompanyDraft({ ...company })
+    setCompanyDraft({
+      ...company,
+      country: normalizeCountryName(company.country) || null,
+      tel_country: company.tel_country || getCountryCode(company.country) || null,
+    })
     setCompanyModalOpen(true)
     setMessage("")
   }
@@ -522,19 +651,21 @@ export default function PhonebookPage() {
     setCompanyModalOpen(false)
     setCompanyDraft(null)
     setCompanySaving(false)
+    setCreatingCompany(false)
   }
 
   async function saveCompany() {
     if (!companyDraft) return
     setCompanySaving(true)
     setMessage("")
+    const previousCompanyName = companyDraft.name.trim().toUpperCase()
     const payload = {
-      name: companyDraft.name.trim(),
+      name: companyDraft.name.trim().toUpperCase(),
       other_name: companyDraft.other_name?.trim() || null,
       phone: companyDraft.phone?.trim() || null,
       address: companyDraft.address?.trim() || null,
-      country: companyDraft.country?.trim() || null,
-      tel_country: companyDraft.tel_country?.trim() || null,
+      country: normalizeCountryName(companyDraft.country) || null,
+      tel_country: getCountryCode(companyDraft.country) || null,
       tel_area: companyDraft.tel_area?.trim() || null,
       tel_no_1: companyDraft.tel_no_1?.trim() || null,
       tel_no_2: companyDraft.tel_no_2?.trim() || null,
@@ -565,12 +696,16 @@ export default function PhonebookPage() {
       notes: companyDraft.notes?.trim() || null,
     }
 
-    const { data, error } = await supabase
-      .from("phonebook_companies")
-      .update(payload)
-      .eq("id", companyDraft.id)
-      .select("*")
-      .single()
+    const query = creatingCompany
+      ? supabase.from("phonebook_companies").insert(payload).select("*").single()
+      : supabase
+          .from("phonebook_companies")
+          .update(payload)
+          .eq("id", companyDraft.id)
+          .select("*")
+          .single()
+
+    const { data, error } = await query
 
     if (error || !data) {
       setMessage("Unable to save company.")
@@ -578,26 +713,112 @@ export default function PhonebookPage() {
       return
     }
 
-    setCompanies((prev) =>
-      prev
-        .map((item) => (item.id === companyDraft.id ? (data as Company) : item))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    )
+    setCompanies((prev) => {
+      const next = creatingCompany
+        ? [...prev, data as Company]
+        : prev.map((item) => (item.id === companyDraft.id ? (data as Company) : item))
+      return next.sort((a, b) => a.name.localeCompare(b.name))
+    })
 
-    if (selectedCompany === companyDraft.name && payload.name !== companyDraft.name) {
+    const affectedContacts = contacts.filter(
+      (contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(previousCompanyName),
+    )
+    let syncedContactIds = affectedContacts.map((contact) => contact.id)
+
+    if (!creatingCompany && previousCompanyName !== payload.name && affectedContacts.length > 0) {
+      const contactIds = affectedContacts.map((contact) => contact.id)
+      const nextContacts = affectedContacts.map((contact) => {
+        const nextContact = { ...contact, company: payload.name }
+        return { ...nextContact, search_text: buildContactSearchText(nextContact) }
+      })
+
+      const updates = nextContacts.map((contact) =>
+        supabase
+          .from("phonebook_contacts")
+          .update({ company: payload.name, search_text: contact.search_text })
+          .eq("id", contact.id),
+      )
+      const results = await Promise.all(updates)
+      if (results.some((result) => result.error)) {
+        setMessage("Company saved, but linked contacts could not be renamed.")
+        setCompanySaving(false)
+        return
+      }
+
+      setContacts((prev) =>
+        prev.map((contact) => {
+          const updated = nextContacts.find((item) => item.id === contact.id)
+          return updated ? updated : contact
+        }),
+      )
+      if (current && contactIds.includes(current.id)) {
+        const updatedCurrent = nextContacts.find((contact) => contact.id === current.id) || null
+        setCurrent(updatedCurrent)
+        setDraft(updatedCurrent ? { ...updatedCurrent } : null)
+      }
+    }
+
+    if (creatingCompany) {
       setSelectedCompany(payload.name)
+      setMessage("New company added.")
+    } else {
+      if (selectedCompany === companyDraft.name && payload.name !== companyDraft.name) {
+        setSelectedCompany(payload.name)
+      }
+      setMessage("Company saved.")
     }
 
     setCompanyDraft(data as Company)
     setCompanySaving(false)
-    setMessage("Company saved.")
     setCompanyModalOpen(false)
+    setCreatingCompany(false)
+
+    if (!creatingCompany && previousCompanyName === payload.name) {
+      syncedContactIds = contacts
+        .filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(payload.name))
+        .map((contact) => contact.id)
+    }
+
+    if (syncedContactIds.length > 0) {
+      await syncGoogleContacts(false, syncedContactIds, { successMessage: "Company saved and synced." })
+    }
+  }
+
+  async function deleteCompany() {
+    if (!companyDraft || creatingCompany) return
+    if (!confirm(`Delete ${companyDraft.name || "this company"}?`)) return
+    const companyNameToDelete = companyDraft.name
+    const companyContactIds = contacts
+      .filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(companyNameToDelete))
+      .map((contact) => contact.id)
+
+    const { error } = await supabase.from("phonebook_companies").delete().eq("id", companyDraft.id)
+    if (error) {
+      setMessage("Unable to delete company.")
+      return
+    }
+
+    setCompanies((prev) => prev.filter((item) => item.id !== companyDraft.id))
+    if (selectedCompany === companyDraft.name) {
+      setSelectedCompany("")
+    }
+    setCompanyModalOpen(false)
+    setCompanyDraft(null)
+    setCreatingCompany(false)
+    if (companyContactIds.length > 0) {
+      await syncGoogleContacts(false, null, {
+        deleteContactIds: companyContactIds,
+        successMessage: "Company deleted and Google contacts updated.",
+      })
+    } else {
+      setMessage("Company deleted.")
+    }
   }
 
   async function addContact() {
     const payload = {
       full_name: "",
-      company: selectedCompany,
+      company: selectedCompany.toUpperCase(),
       company_source_id: "",
       title: "",
       name_remark: "",
@@ -656,12 +877,69 @@ export default function PhonebookPage() {
     setDraft({ ...draft, [field]: value })
   }
 
-  function exportAllVcards() {
-    const source = selectedCompany ? filteredContacts : contacts
-    if (source.length === 0) return
-    const contents = source.map((contact) => buildVcard(contact)).join("\n")
-    downloadTextFile(`phonebook-${new Date().toISOString().slice(0, 10)}.vcf`, `${contents}\n`)
-    setMessage("vCards exported.")
+  async function syncGoogleContacts(
+    fullRebuild = false,
+    contactIds: string[] | null = null,
+    options?: { deleteContactIds?: string[]; successMessage?: string; retryMissing?: boolean },
+  ) {
+    setGoogleSyncing(true)
+    setMessage("")
+    try {
+      if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !options?.retryMissing && !selectedCompany) {
+        setMessage("Select a company first, or use Full Rebuild from the menu.")
+        return
+      }
+
+      const response = await fetch("/api/phonebook/google-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedCompany: fullRebuild ? null : selectedCompany || null,
+          fullRebuild,
+          contactIds: contactIds?.length ? contactIds : null,
+          deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
+          retryMissing: Boolean(options?.retryMissing),
+        }),
+      })
+
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: GoogleSyncFailure[] }
+      if (!response.ok) {
+        setMessage(payload.message || "Unable to sync Google Contacts.")
+        return
+      }
+
+      if (payload.failed) {
+        localStorage.setItem(LAST_GOOGLE_SYNC_FAILED_KEY, JSON.stringify(payload.failed))
+      }
+      setMessage(options?.successMessage || payload.message || "Google Contacts synced.")
+    } catch {
+      setMessage("Unable to sync Google Contacts.")
+    } finally {
+      setGoogleSyncing(false)
+      setMenuOpen(false)
+    }
+  }
+
+  async function retryFailedGoogleContacts() {
+    const raw = localStorage.getItem(LAST_GOOGLE_SYNC_FAILED_KEY)
+    const failedEntries = raw ? (JSON.parse(raw) as GoogleSyncFailure[]) : []
+    if (failedEntries.length > 0) {
+      const ids = failedEntries.map((entry) => entry.id).filter(Boolean)
+
+      if (ids.length === 0) {
+        setMessage("Unable to find the failed contacts in phonebook.")
+        setMenuOpen(false)
+        return
+      }
+
+      await syncGoogleContacts(false, ids, { successMessage: "Retried failed Google contacts." })
+      return
+    }
+
+    await syncGoogleContacts(false, null, {
+      retryMissing: true,
+      successMessage: "Retried missing Google contacts.",
+    })
   }
 
   function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -724,33 +1002,48 @@ export default function PhonebookPage() {
             <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Trading Tools</div>
             <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Phonebook</h1>
           </div>
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
+            <a href="/admin" style={buttonStyle}>Back To Admin</a>
             <button
-              onClick={() => void addCompany()}
+              onClick={() => void syncGoogleContacts(false)}
+              disabled={googleSyncing}
               style={{
                 ...buttonStyle,
-                background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
-                color: "#e8f4ff",
-                border: "1px solid rgba(108, 185, 255, 0.24)",
+                minWidth: "190px",
+                background: "linear-gradient(180deg, rgba(66, 133, 244, 0.34) 0%, rgba(52, 168, 83, 0.16) 100%)",
+                color: "#f4f8ff",
+                border: "1px solid rgba(126, 180, 255, 0.28)",
               }}
             >
-              Add Company
+              {googleSyncing ? "Syncing" : `Synced ${contacts.length} Contacts`}
             </button>
             <button
-              onClick={exportAllVcards}
-              style={{
-                ...buttonStyle,
-                background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-                color: "#ddffef",
-                border: "1px solid rgba(73, 219, 165, 0.26)",
-              }}
+              type="button"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              style={buttonStyle}
             >
-              Export vCard
+              ☰
             </button>
-            <a href="/admin" style={buttonStyle}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>
-              Count: {filteredContacts.length}
-            </div>
+            {menuOpen ? (
+              <div style={menuPanelStyle}>
+                <button
+                  type="button"
+                  onClick={() => void retryFailedGoogleContacts()}
+                  disabled={googleSyncing}
+                  style={buttonStyle}
+                >
+                  Retry Failed
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void syncGoogleContacts(true)}
+                  disabled={googleSyncing}
+                  style={buttonStyle}
+                >
+                  Full Rebuild
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -758,7 +1051,10 @@ export default function PhonebookPage() {
           <input
             ref={searchRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              if (selectedCompany) setSelectedCompany("")
+            }}
             onKeyDown={onSearchKeyDown}
             placeholder="Search name, company, phone, or email..."
             style={inputStyle}
@@ -773,46 +1069,84 @@ export default function PhonebookPage() {
             alignItems: "start",
           }}
         >
-          <aside style={{ ...panelStyle, padding: "12px", display: "grid", gap: "8px", maxHeight: isMobile ? "unset" : "72vh", overflowY: "auto" }}>
-            <button
-              type="button"
-              onClick={() => setSelectedCompany("")}
+          <aside style={{ ...sidebarPanelStyle, maxHeight: isMobile ? "unset" : "72vh" }}>
+            <div
               style={{
-                ...buttonStyle,
-                width: "100%",
-                textAlign: "left",
-                background: !selectedCompany ? "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" : buttonStyle.background,
+                position: isMobile ? "static" : "sticky",
+                top: 0,
+                zIndex: 2,
+                display: "grid",
+                gap: "8px",
+                background: "linear-gradient(180deg, rgba(12, 49, 88, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                padding: "12px",
+                borderBottom: "1px solid rgba(210,236,255,0.08)",
               }}
             >
-              All Companies
-            </button>
-            {filteredCompanies.map((company) => (
-              <button
-                key={company.id}
-                ref={(node) => {
-                  companyRefs.current[company.id] = node
-                }}
-                type="button"
-                onClick={() => setSelectedCompany(company.name)}
-                onDoubleClick={() => openCompanyModal(company)}
-                onKeyDown={(event) => onCompanyKeyDown(event, company.id)}
-                style={{
-                  ...buttonStyle,
-                  width: "100%",
-                  textAlign: "left",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "10px",
-                  background: selectedCompany === company.name ? "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" : buttonStyle.background,
-                }}
-              >
-                <span style={{ whiteSpace: "normal", lineHeight: 1.35, textAlign: "left", flex: "1 1 auto" }}>{company.name || "No Company"}</span>
-              </button>
-            ))}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCompany("")}
+                  style={{
+                    ...buttonStyle,
+                    width: "100%",
+                    textAlign: "left",
+                    background: !selectedCompany ? "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" : buttonStyle.background,
+                  }}
+                >
+                  All Companies
+                </button>
+                <button
+                  onClick={() => void addCompany()}
+                  style={{
+                    ...buttonStyle,
+                    background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
+                    color: "#e8f4ff",
+                    border: "1px solid rgba(108, 185, 255, 0.24)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  New Company
+                </button>
+              </div>
+            </div>
+            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
+              {filteredCompanies.map((company) => (
+                <button
+                  key={company.id}
+                  ref={(node) => {
+                    companyRefs.current[company.id] = node
+                  }}
+                  type="button"
+                  onClick={() => setSelectedCompany(company.name)}
+                  onDoubleClick={() => openCompanyModal(company)}
+                  onKeyDown={(event) => onCompanyKeyDown(event, company.id)}
+                  style={{
+                    ...listRowStyle,
+                    background:
+                      selectedCompany === company.name
+                        ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)"
+                        : "transparent",
+                  }}
+                >
+                  <span style={{ whiteSpace: "normal", lineHeight: 1.2, textAlign: "left", display: "block" }}>
+                    <div style={{ textTransform: "uppercase", fontWeight: 800, fontSize: "14px" }}>{company.name || "No Company"}</div>
+                    {company.other_name ? (
+                      <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 500, marginTop: "4px" }}>
+                        {company.other_name}
+                      </div>
+                    ) : null}
+                    {formatCompanyPhoneLine(company) ? (
+                      <div style={{ color: "#bcdcff", fontSize: "11px", marginTop: "4px" }}>
+                        {formatCompanyPhoneLine(company)}
+                      </div>
+                    ) : null}
+                  </span>
+                </button>
+              ))}
+            </div>
           </aside>
 
-          <section style={{ ...panelStyle, overflow: "hidden" }}>
+          <section style={{ ...sidebarPanelStyle }}>
             <div style={{ padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
               {selectedCompany ? (
                 <button
@@ -829,7 +1163,7 @@ export default function PhonebookPage() {
                 </button>
               ) : null}
             </div>
-            <div style={{ maxHeight: isMobile ? "unset" : "72vh", overflowY: "auto" }}>
+            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 58px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
               {filteredContacts.map((contact) => (
                 <button
                   key={contact.id}
@@ -841,35 +1175,36 @@ export default function PhonebookPage() {
                   onMouseEnter={() => setPinHoverId(contact.id)}
                   onMouseLeave={() => setPinHoverId((prev) => (prev === contact.id ? null : prev))}
                   style={{
-                    width: "100%",
-                    border: "none",
+                    ...listRowStyle,
                     background: selectedId === contact.id ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)" : "transparent",
-                    borderBottom: "1px solid rgba(210,236,255,0.08)",
-                    textAlign: "left",
-                    padding: "11px 14px",
-                    color: "#edf7ff",
-                    cursor: "pointer",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "3px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                       {contact.favorite ? <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>Top</span> : null}
-                      <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0 }}>{contact.full_name || "(No Name)"}</div>
+                      <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
+                      {contact.tel_ext ? (
+                        <span style={{ color: "#ffd166", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                          EXT {contact.tel_ext}
+                        </span>
+                      ) : null}
                     </div>
-                    {selectedCompany && pinHoverId === contact.id ? (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void togglePinned(contact)
-                        }}
-                        style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px" }}
-                      >
-                        Pin
-                      </button>
-                    ) : null}
+                    <div style={{ width: "44px", display: "flex", justifyContent: "flex-end", flex: "0 0 44px" }}>
+                      {selectedCompany && pinHoverId === contact.id ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void togglePinned(contact)
+                          }}
+                          style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", minWidth: "40px" }}
+                        >
+                          Pin
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  <div style={{ color: "#8fd7ff", fontSize: "12px" }}>{normalizeCompanyName(contact.company)}</div>
+                  <div style={{ color: "#8fd7ff", fontSize: "12px", textTransform: "uppercase" }}>{normalizeCompanyName(contact.company)}</div>
                 </button>
               ))}
             </div>
@@ -884,25 +1219,27 @@ export default function PhonebookPage() {
                     {editing ? (
                       <input value={draft?.full_name || ""} onChange={(event) => updateField("full_name", event.target.value)} style={detailInputStyle} />
                     ) : (
-                      <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15 }}>{current?.full_name || "(No Name)"}</div>
+                      <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15, textTransform: "uppercase" }}>{current?.full_name || "(No Name)"}</div>
                     )}
                   </div>
-                  <button
-                    ref={editButtonRef}
-                    onClick={() => {
-                      setDraft(current ? { ...current } : null)
-                      setEditing(true)
-                    }}
-                    disabled={editing || !current}
-                    style={{
-                      ...buttonStyle,
-                      background: "linear-gradient(180deg, rgba(255, 210, 86, 0.36) 0%, rgba(191, 136, 16, 0.18) 100%)",
-                      color: "#fff2bc",
-                      border: "1px solid rgba(255, 211, 110, 0.34)",
-                    }}
-                  >
-                    Edit
-                  </button>
+                  {!editing ? (
+                    <button
+                      ref={editButtonRef}
+                      onClick={() => {
+                        setDraft(current ? { ...current } : null)
+                        setEditing(true)
+                      }}
+                      disabled={!current}
+                      style={{
+                        ...buttonStyle,
+                        background: "linear-gradient(180deg, rgba(255, 210, 86, 0.36) 0%, rgba(191, 136, 16, 0.18) 100%)",
+                        color: "#fff2bc",
+                        border: "1px solid rgba(255, 211, 110, 0.34)",
+                      }}
+                    >
+                      Edit
+                    </button>
+                  ) : null}
                   {editing ? (
                     <>
                       <button onClick={() => void saveCurrent()} disabled={saving} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
@@ -922,7 +1259,7 @@ export default function PhonebookPage() {
                     <input value={draft?.company || ""} onChange={(event) => updateField("company", event.target.value)} style={detailInputStyle} />
                   ) : current?.company ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
-                      <span style={{ fontSize: "15px", lineHeight: 1.5 }}>{current.company}</span>
+                      <span style={{ fontSize: "15px", lineHeight: 1.5, textTransform: "uppercase" }}>{current.company}</span>
                       <button onClick={() => copyToClipboard(current.company || "", setMessage)} style={iconButtonStyle} title="Copy">
                         ⧉
                       </button>
@@ -936,19 +1273,14 @@ export default function PhonebookPage() {
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
                       {[
                         ["Title", "title"],
-                        ["Name Remark", "name_remark"],
-                        ["Position", "position"],
-                        ["Department", "department"],
                         ["Ext", "tel_ext"],
                         ["Direct line", "direct_line"],
-                        ["Mobile area", "mobile_area"],
                         ["Mobile 1", "mobile_1"],
                         ["Mobile 2", "mobile_2"],
                         ["Personal Email", "personal_email"],
                         ["General Email", "general_email"],
                         ["Private Email", "private_email"],
                         ["Others", "others"],
-                        ["Area of Responsibility", "area_of_responsibility"],
                       ].map(([label, field]) => {
                         const key = field as keyof Contact
                         const value = displayed[key] as string | null
@@ -956,7 +1288,20 @@ export default function PhonebookPage() {
                         return (
                           <div key={field}>
                             <div style={sectionLabelStyle}>{label}</div>
-                            {editing ? (
+                            {editing ? key === "title" ? (
+                              <select
+                                value={(draft?.[key] as string) || ""}
+                                onChange={(event) => updateField(key, event.target.value as never)}
+                                style={detailInputStyle}
+                              >
+                                <option value="">Select title</option>
+                                {TITLE_OPTIONS.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
                               <input value={(draft?.[key] as string) || ""} onChange={(event) => updateField(key, event.target.value as never)} style={detailInputStyle} />
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
@@ -972,35 +1317,6 @@ export default function PhonebookPage() {
                     </div>
                   </div>
 
-                  {(editing || displayed.instant_messaging) && (
-                    <div style={modalSectionStyle}>
-                      <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Instant Messaging</div>
-                      {editing ? (
-                        <textarea
-                          value={draft?.instant_messaging || ""}
-                          onChange={(event) => updateField("instant_messaging", event.target.value)}
-                          style={{ ...detailInputStyle, minHeight: "110px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.55 }}
-                        />
-                      ) : (
-                        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{displayed.instant_messaging}</div>
-                      )}
-                    </div>
-                  )}
-
-                  {(editing || displayed.notes) && (
-                    <div style={modalSectionStyle}>
-                      <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Notes</div>
-                      {editing ? (
-                        <textarea
-                          value={draft?.notes || ""}
-                          onChange={(event) => updateField("notes", event.target.value)}
-                          style={{ ...detailInputStyle, minHeight: "140px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.5 }}
-                        />
-                      ) : (
-                        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{displayed.notes}</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               </>
             ) : (
@@ -1038,6 +1354,20 @@ export default function PhonebookPage() {
                 >
                   {companySaving ? "Saving..." : "Save"}
                 </button>
+                {!creatingCompany ? (
+                  <button
+                    onClick={() => void deleteCompany()}
+                    style={{
+                      ...buttonStyle,
+                      background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
+                      color: "#ffd6db",
+                      border: "1px solid rgba(255, 120, 120, 0.22)",
+                      minWidth: "84px",
+                    }}
+                  >
+                    Delete
+                  </button>
+                ) : null}
                 <button onClick={closeCompanyModal} style={{ ...buttonStyle, minWidth: "84px" }}>
                   Close
                 </button>
@@ -1066,11 +1396,28 @@ export default function PhonebookPage() {
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Country</div>
-                    <input value={companyDraft.country || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, country: event.target.value })} style={detailInputStyle} />
+                    <select
+                      value={companyDraft.country || ""}
+                      onChange={(event) =>
+                        setCompanyDraft({
+                          ...companyDraft,
+                          country: event.target.value || null,
+                          tel_country: getCountryCode(event.target.value) || null,
+                        })
+                      }
+                      style={detailInputStyle}
+                    >
+                      <option value="">Select country</option>
+                      {COUNTRY_OPTIONS.map((country) => (
+                        <option key={country.name} value={country.name}>
+                          {country.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Country Code</div>
-                    <input value={companyDraft.tel_country || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_country: event.target.value })} style={detailInputStyle} />
+                    <input value={companyDraft.tel_country || ""} readOnly style={{ ...detailInputStyle, opacity: 0.88 }} />
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Area Code</div>
@@ -1084,92 +1431,7 @@ export default function PhonebookPage() {
                     <div style={sectionLabelStyle}>Tel 2</div>
                     <input value={companyDraft.tel_no_2 || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_no_2: event.target.value })} style={detailInputStyle} />
                   </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Tel Speed Dial</div>
-                    <input value={companyDraft.tel_speed_dial || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_speed_dial: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Fax</div>
-                    <input value={companyDraft.fax_no_1 || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, fax_no_1: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Website</div>
-                    <input value={companyDraft.website || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, website: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Domain</div>
-                    <input value={companyDraft.email || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, email: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Contact Type</div>
-                    <input value={companyDraft.contact_type || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, contact_type: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Stem Management</div>
-                    <input value={companyDraft.stem_management || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, stem_management: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Status</div>
-                    <input value={companyDraft.company_status || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, company_status: event.target.value })} style={detailInputStyle} />
-                  </div>
-                  <div style={{ gridColumn: isMobile ? "auto" : "1 / -1" }}>
-                    <div style={sectionLabelStyle}>Remarks</div>
-                    <textarea
-                      value={companyDraft.company_info || ""}
-                      onChange={(event) => setCompanyDraft({ ...companyDraft, company_info: event.target.value })}
-                      style={{ ...detailInputStyle, minHeight: "110px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.55 }}
-                    />
-                  </div>
                 </div>
-              </div>
-
-              <div style={modalSectionStyle}>
-                <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Profile As Seller</div>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
-                  <div><div style={sectionLabelStyle}>Term</div><input value={companyDraft.seller_term || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, seller_term: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>Credit Limit</div><input value={companyDraft.seller_credit_limit || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, seller_credit_limit: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>Credit Limit Flexibility</div><input value={companyDraft.seller_credit_limit_flexibility || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, seller_credit_limit_flexibility: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>Classification</div><input value={companyDraft.seller_classification || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, seller_classification: event.target.value })} style={detailInputStyle} /></div>
-                  {(["seller_remark_1","seller_remark_2","seller_remark_3","seller_remark_4"] as const).map((field, index) => (
-                    <div key={field} style={{ gridColumn: isMobile ? "auto" : "1 / -1" }}>
-                      <div style={sectionLabelStyle}>{`Remarks ${index + 1}`}</div>
-                      <textarea
-                        value={companyDraft[field] || ""}
-                        onChange={(event) => setCompanyDraft({ ...companyDraft, [field]: event.target.value })}
-                        style={{ ...detailInputStyle, minHeight: "96px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.55 }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={modalSectionStyle}>
-                <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Profile As Buyer</div>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
-                  <div><div style={sectionLabelStyle}>Term</div><input value={companyDraft.buyer_term || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, buyer_term: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>Credit Limit</div><input value={companyDraft.buyer_credit_limit || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, buyer_credit_limit: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>Credit Limit Flexibility</div><input value={companyDraft.buyer_credit_limit_flexibility || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, buyer_credit_limit_flexibility: event.target.value })} style={detailInputStyle} /></div>
-                  <div><div style={sectionLabelStyle}>PDD Classification</div><input value={companyDraft.buyer_classification || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, buyer_classification: event.target.value })} style={detailInputStyle} /></div>
-                  {(["buyer_remark_1","buyer_remark_2","buyer_remark_3","buyer_remark_4"] as const).map((field, index) => (
-                    <div key={field} style={{ gridColumn: isMobile ? "auto" : "1 / -1" }}>
-                      <div style={sectionLabelStyle}>{`Remarks ${index + 1}`}</div>
-                      <textarea
-                        value={companyDraft[field] || ""}
-                        onChange={(event) => setCompanyDraft({ ...companyDraft, [field]: event.target.value })}
-                        style={{ ...detailInputStyle, minHeight: "96px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.55 }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={modalSectionStyle}>
-                <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Notes</div>
-                <textarea
-                  value={companyDraft.notes || ""}
-                  onChange={(event) => setCompanyDraft({ ...companyDraft, notes: event.target.value })}
-                  style={{ ...detailInputStyle, minHeight: "120px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.55 }}
-                />
               </div>
             </div>
           </div>

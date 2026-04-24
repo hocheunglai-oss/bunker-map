@@ -55,6 +55,20 @@ function normalizePhone(value) {
   return (value || "").trim()
 }
 
+function normalizeDialablePhone(value) {
+  const trimmed = (value || "").trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith("+")) return trimmed
+
+  const digits = trimmed.replace(/[^\d]/g, "")
+  const looksLikeHongKongLocal =
+    digits.length === 8 && !trimmed.includes("-") && !trimmed.includes("(") && !trimmed.includes(")")
+
+  if (looksLikeHongKongLocal) return digits
+  if (/^\d{1,4}-/.test(trimmed)) return `+${trimmed}`
+  return trimmed
+}
+
 function normalizeText(value) {
   return (value || "").trim()
 }
@@ -229,9 +243,13 @@ function stripTitleAndRemark(text) {
 
 function parseClipContact(line) {
   const text = normalizeText(line)
-  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+  const emails = Array.from(
+    new Set(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []),
+  )
   return {
-    email: emailMatch?.[0] || null,
+    personalEmail: emails[0] || null,
+    generalEmail: emails[1] || null,
+    privateEmail: emails[2] || null,
   }
 }
 
@@ -261,7 +279,7 @@ function buildContactSourceKey(row) {
   return [
     row.company_source_id || "",
     row.full_name || "",
-    row.general_email || "",
+    row.personal_email || row.general_email || row.private_email || "",
     row.direct_line || "",
     row.mobile_1 || "",
   ]
@@ -282,6 +300,7 @@ function parseContactsFromCompanyRow(rowHtml) {
     const parsedName = stripTitleAndRemark(contact.name)
     const clipContact = parseClipContact(clipContacts[index] || "")
     const row = {
+      contact_source_id: contact.contactId || null,
       full_name: parsedName.fullName || contact.name,
       company: companyName || null,
       company_source_id: companyId || null,
@@ -290,23 +309,23 @@ function parseContactsFromCompanyRow(rowHtml) {
       position: null,
       department: null,
       tel_ext: normalizeText(contact.ext) || null,
-      direct_line: normalizeText(contact.direct) || null,
+      direct_line: normalizeDialablePhone(contact.direct),
       mobile_area: null,
-      mobile_1: normalizeText(contact.mobile1) || null,
-      mobile_2: normalizeText(contact.mobile2) || null,
-      personal_email: null,
-      general_email: clipContact.email,
-      private_email: null,
+      mobile_1: normalizeDialablePhone(contact.mobile1),
+      mobile_2: normalizeDialablePhone(contact.mobile2),
+      personal_email: clipContact.personalEmail,
+      general_email: clipContact.generalEmail,
+      private_email: clipContact.privateEmail,
       instant_messaging: null,
       others: null,
       area_of_responsibility: null,
-      mobile_phone: normalizeText(contact.mobile1) || null,
-      pager: normalizeText(contact.mobile2) || null,
-      business_phone: normalizeText(contact.direct) || null,
+      mobile_phone: normalizeDialablePhone(contact.mobile1),
+      pager: normalizeDialablePhone(contact.mobile2),
+      business_phone: normalizeDialablePhone(contact.direct),
       business_phone_2: normalizeText(contact.ext) || null,
       other_phone: null,
-      email_1: clipContact.email,
-      email_2: null,
+      email_1: clipContact.personalEmail,
+      email_2: clipContact.generalEmail || clipContact.privateEmail,
       notes: null,
       favorite: false,
     }
@@ -316,6 +335,37 @@ function parseContactsFromCompanyRow(rowHtml) {
       search_text: buildSearchText(row),
     }
   })
+}
+
+function parseContactDetails(html) {
+  return {
+    personal_email: matchInputValue(html, "x_compcontact_email") || null,
+    general_email: matchInputValue(html, "x_compcontact_email_group") || null,
+    private_email: matchInputValue(html, "x_compcontact_email_pvt") || null,
+  }
+}
+
+async function collectContactDetails(root, cookies, contacts) {
+  const results = new Map()
+  const targets = contacts.filter((contact) => contact.contact_source_id)
+  const concurrency = 10
+  let index = 0
+
+  async function worker() {
+    while (index < targets.length) {
+      const currentIndex = index
+      index += 1
+      const contact = targets[currentIndex]
+      const html = await fetchText(`${root}/compcontactedit.php?id=${contact.contact_source_id}`, cookies)
+      results.set(contact.contact_source_id, parseContactDetails(html))
+      if ((currentIndex + 1) % 100 === 0 || currentIndex + 1 === targets.length) {
+        console.log(`Fetched contact details ${currentIndex + 1}/${targets.length}`)
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  return results
 }
 
 async function collectCompaniesAndContacts(root, cookies) {
@@ -494,10 +544,29 @@ async function main() {
 
   const { cookies, root } = await loginAndAuthenticate(baseUrl, username, password)
   const { companyIds, contacts: uniqueRows } = await collectCompaniesAndContacts(root, cookies)
+  const contactDetails = await collectContactDetails(root, cookies, uniqueRows)
   const detailedCompanies = await collectCompanyDetails(root, cookies, companyIds)
 
+  const enrichedRows = uniqueRows.map((row) => {
+    const detail = row.contact_source_id ? contactDetails.get(row.contact_source_id) : null
+    const next = {
+      ...row,
+      personal_email: detail?.personal_email || row.personal_email,
+      general_email: detail?.general_email || row.general_email,
+      private_email: detail?.private_email || row.private_email,
+    }
+    const { contact_source_id, ...persisted } = next
+    return {
+      ...persisted,
+      email_1: persisted.personal_email,
+      email_2: persisted.general_email || persisted.private_email,
+      source_key: buildContactSourceKey(persisted),
+      search_text: buildSearchText(persisted),
+    }
+  })
+
   const companyMap = new Map(detailedCompanies.map((company) => [company.source_key, company]))
-  for (const row of uniqueRows) {
+  for (const row of enrichedRows) {
     const name = normalizeText(row.company)
     if (!name) continue
     const key = companySourceKey(name)
@@ -556,14 +625,14 @@ async function main() {
     if (error) throw error
   }
 
-  for (let i = 0; i < uniqueRows.length; i += 200) {
-    const chunk = uniqueRows.slice(i, i + 200)
+  for (let i = 0; i < enrichedRows.length; i += 200) {
+    const chunk = enrichedRows.slice(i, i + 200)
     const { error } = await supabase.from("phonebook_contacts").upsert(chunk, { onConflict: "source_key" })
     if (error) throw error
-    console.log(`Imported ${Math.min(i + chunk.length, uniqueRows.length)}/${uniqueRows.length}`)
+    console.log(`Imported ${Math.min(i + chunk.length, enrichedRows.length)}/${enrichedRows.length}`)
   }
 
-  console.log(`Imported ${uniqueRows.length} Cistem contacts across ${companies.length} companies.`)
+  console.log(`Imported ${enrichedRows.length} Cistem contacts across ${companies.length} companies.`)
 }
 
 main().catch((error) => {

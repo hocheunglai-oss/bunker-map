@@ -120,6 +120,8 @@ const secondaryButtonStyle: React.CSSProperties = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
+const taiwanEntryGridColumns = "220px 120px repeat(4, 128px) minmax(196px, 1fr)"
+
 export default function TaiwanPriceHistoryPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [rows, setRows] = useState<HistoryRow[]>([])
@@ -138,6 +140,7 @@ export default function TaiwanPriceHistoryPage() {
   const [formMgoTaichung, setFormMgoTaichung] = useState("")
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
+  const [showDeleteButtons, setShowDeleteButtons] = useState(false)
 
   async function buildTaiwanSnapshot(): Promise<{
     reportDate: string
@@ -524,9 +527,9 @@ export default function TaiwanPriceHistoryPage() {
               rel="noopener noreferrer"
               style={{
                 ...secondaryButtonStyle,
-                border: "1px solid rgba(255, 120, 120, 0.16)",
-                background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                color: "#ffd4d8",
+                border: "1px solid rgba(255, 145, 86, 0.24)",
+                background: "linear-gradient(180deg, rgba(255, 128, 64, 0.26) 0%, rgba(201, 88, 22, 0.14) 100%)",
+                color: "#ffd2b2",
               }}
             >
               Check
@@ -549,6 +552,20 @@ export default function TaiwanPriceHistoryPage() {
               }}
             >
               {publishing ? "Publishing..." : published ? "Published" : "Publish"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDeleteButtons((prev) => !prev)}
+              style={{
+                ...secondaryButtonStyle,
+                cursor: "pointer",
+                background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
+                border: "1px solid rgba(255, 120, 120, 0.16)",
+                color: "#ffd4d8",
+              }}
+            >
+              {showDeleteButtons ? "Hide Delete" : "Show Delete"}
             </button>
           </div>
         </div>
@@ -618,7 +635,7 @@ export default function TaiwanPriceHistoryPage() {
                 <strong style={{ color: "#dff3ff" }}>Monthly Average</strong>
                 {showMonthlyAverage && monthlyAverage ? (
                   <span style={{ color: "#edf7ff" }}>
-                    HSFO: {monthlyAverage.hsfo ?? "-"} | VLSFO KHH: {monthlyAverage.vlsfoKaohsiung ?? "-"} | VLSFO TXG: {monthlyAverage.vlsfoTaichung ?? "-"} | MGO KHH: {monthlyAverage.mgoKaohsiung ?? "-"} | MGO TXG: {monthlyAverage.mgoTaichung ?? "-"}
+                    HSFO: {monthlyAverage.hsfo ?? "-"} | VLSFO Kaohsiung: {monthlyAverage.vlsfoKaohsiung ?? "-"} | VLSFO Taichung: {monthlyAverage.vlsfoTaichung ?? "-"} | MGO Kaohsiung: {monthlyAverage.mgoKaohsiung ?? "-"} | MGO Taichung: {monthlyAverage.mgoTaichung ?? "-"}
                   </span>
                 ) : (
                   <span style={{ color: "#9db9cf" }}>Select both year and month to show data.</span>
@@ -628,77 +645,145 @@ export default function TaiwanPriceHistoryPage() {
           </div>
         </div>
 
-        <div style={{ ...sectionCardStyle, padding: "16px", marginBottom: "14px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "end" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+        <div style={{ ...sectionCardStyle, padding: "10px 16px 12px", marginBottom: "14px" }}>
+          <div style={{ display: "grid", gap: "2px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: taiwanEntryGridColumns,
+                gap: "8px",
+                alignItems: "end",
+                marginBottom: "-2px",
+              }}
+            >
+              <div style={{ minHeight: "1px" }} />
+              <div style={{ minHeight: "1px" }} />
+              <div
+                style={{
+                  gridColumn: "3 / span 2",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  color: "#dff3ff",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  lineHeight: 1,
+                }}
+              >
+                VLSFO
+              </div>
+              <div
+                style={{
+                  gridColumn: "5 / span 2",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  color: "#dff3ff",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  lineHeight: 1,
+                }}
+              >
+                MGO
+              </div>
+              <div style={{ minHeight: "1px" }} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: taiwanEntryGridColumns, gap: "8px", alignItems: "end" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>Date</span>
               <input
                 type="date"
                 value={formDate}
                 onChange={(event) => setFormDate(event.target.value)}
-                style={controlStyle}
+                style={{ ...controlStyle, height: "38px" }}
               />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>HSFO</span>
-              <input value={formHsfo} onChange={(event) => setFormHsfo(event.target.value)} style={{ ...controlStyle, width: "90px" }} />
+            <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff", textAlign: "center" }}>HSFO</span>
+              <input
+                value={formHsfo}
+                onChange={(event) => setFormHsfo(event.target.value)}
+                style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
+              />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>VLSFO KHH</span>
-              <input value={formVlsfoKaohsiung} onChange={(event) => setFormVlsfoKaohsiung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            <label style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#dff3ff", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Kaohsiung</span>
+              <input
+                value={formVlsfoKaohsiung}
+                onChange={(event) => setFormVlsfoKaohsiung(event.target.value)}
+                style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
+              />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>VLSFO TXG</span>
-              <input value={formVlsfoTaichung} onChange={(event) => setFormVlsfoTaichung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            <label style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#dff3ff", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Taichung</span>
+              <input
+                value={formVlsfoTaichung}
+                onChange={(event) => setFormVlsfoTaichung(event.target.value)}
+                style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
+              />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>MGO KHH</span>
-              <input value={formMgoKaohsiung} onChange={(event) => setFormMgoKaohsiung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            <label style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#dff3ff", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Kaohsiung</span>
+              <input
+                value={formMgoKaohsiung}
+                onChange={(event) => setFormMgoKaohsiung(event.target.value)}
+                style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
+              />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>MGO TXG</span>
-              <input value={formMgoTaichung} onChange={(event) => setFormMgoTaichung(event.target.value)} style={{ ...controlStyle, width: "96px" }} />
+            <label style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#dff3ff", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Taichung</span>
+              <input
+                value={formMgoTaichung}
+                onChange={(event) => setFormMgoTaichung(event.target.value)}
+                style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
+              />
             </label>
 
-            <button
-              onClick={addMissingRecord}
-              disabled={saving || !formDate}
-              style={{
-                ...secondaryButtonStyle,
-                background: saving || !formDate
-                  ? "linear-gradient(180deg, rgba(236, 193, 79, 0.16) 0%, rgba(176, 132, 26, 0.08) 100%)"
-                  : "linear-gradient(180deg, rgba(236, 193, 79, 0.28) 0%, rgba(176, 132, 26, 0.14) 100%)",
-                color: saving || !formDate ? "#f3dfac" : "#ffe7a6",
-                border: saving || !formDate
-                  ? "1px solid rgba(236, 193, 79, 0.16)"
-                  : "1px solid rgba(236, 193, 79, 0.24)",
-                cursor: saving ? "wait" : "pointer",
-                height: "42px",
-              }}
-            >
-              {saving ? "Saving..." : "Add Missing Record"}
-            </button>
+            <div style={{ display: "grid", gap: "6px", alignSelf: "end" }}>
+              <button
+                onClick={addMissingRecord}
+                disabled={saving || !formDate}
+                style={{
+                  ...secondaryButtonStyle,
+                  width: "100%",
+                  background: saving || !formDate
+                    ? "linear-gradient(180deg, rgba(236, 193, 79, 0.16) 0%, rgba(176, 132, 26, 0.08) 100%)"
+                    : "linear-gradient(180deg, rgba(236, 193, 79, 0.28) 0%, rgba(176, 132, 26, 0.14) 100%)",
+                  color: saving || !formDate ? "#f3dfac" : "#ffe7a6",
+                  border: saving || !formDate
+                    ? "1px solid rgba(236, 193, 79, 0.16)"
+                    : "1px solid rgba(236, 193, 79, 0.24)",
+                  cursor: saving ? "wait" : "pointer",
+                  height: "38px",
+                }}
+              >
+                {saving ? "Saving..." : "Add Missing Record"}
+              </button>
 
-            <button
-              onClick={addAsLatestRecord}
-              disabled={saving}
-              style={{
-                ...secondaryButtonStyle,
-                background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
-                color: "#ddffef",
-                border: "1px solid rgba(73, 219, 165, 0.22)",
-                cursor: saving ? "wait" : "pointer",
-                height: "42px",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(73,219,165,0.04)",
-              }}
-            >
-              {saving ? "Saving..." : "Add As Latest"}
-            </button>
+              <button
+                onClick={addAsLatestRecord}
+                disabled={saving}
+                style={{
+                  ...secondaryButtonStyle,
+                  width: "100%",
+                  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
+                  color: "#ddffef",
+                  border: "1px solid rgba(73, 219, 165, 0.22)",
+                  cursor: saving ? "wait" : "pointer",
+                  height: "38px",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(73,219,165,0.04)",
+                }}
+              >
+                {saving ? "Saving..." : "Add As Latest"}
+              </button>
+            </div>
+          </div>
           </div>
         </div>
 
@@ -707,18 +792,85 @@ export default function TaiwanPriceHistoryPage() {
             <p style={{ margin: 0, padding: "14px", color: "#dff3ff" }}>Loading history...</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                 <thead>
                   <tr style={{ background: "rgba(7, 31, 54, 0.88)", color: "white" }}>
-                    {["Date", "HSFO", "VLSFO KHH", "VLSFO TXG", "MGO KHH", "MGO TXG", "Delete"].map((label) => (
+                    <th
+                      rowSpan={2}
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        verticalAlign: "middle",
+                      }}
+                    >
+                      Date
+                    </th>
+                    <th
+                      rowSpan={2}
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        verticalAlign: "middle",
+                      }}
+                    >
+                      HSFO
+                    </th>
+                    <th
+                      colSpan={2}
+                      style={{
+                        padding: "10px 12px 6px",
+                        textAlign: "center",
+                        fontSize: "13px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      VLSFO
+                    </th>
+                    <th
+                      colSpan={2}
+                      style={{
+                        padding: "10px 12px 6px",
+                        textAlign: "center",
+                        fontSize: "13px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      MGO
+                    </th>
+                    {showDeleteButtons && (
                       <th
-                        key={label}
+                        rowSpan={2}
                         style={{
                           padding: "10px 12px",
                           textAlign: "left",
                           fontSize: "13px",
                           textTransform: "uppercase",
                           letterSpacing: "0.08em",
+                          verticalAlign: "middle",
+                        }}
+                      >
+                        Delete
+                      </th>
+                    )}
+                  </tr>
+                  <tr style={{ background: "rgba(7, 31, 54, 0.88)", color: "white" }}>
+                    {["Kaohsiung", "Taichung", "Kaohsiung", "Taichung"].map((label) => (
+                      <th
+                        key={label}
+                        style={{
+                          padding: "6px 12px 10px",
+                          textAlign: "center",
+                          fontSize: "11px",
+                          letterSpacing: "0.03em",
+                          color: "rgba(223,243,255,0.88)",
                         }}
                       >
                         {label}
@@ -737,35 +889,37 @@ export default function TaiwanPriceHistoryPage() {
                       <td style={{ padding: "8px 12px", fontSize: "13px", whiteSpace: "nowrap", color: "#edf7ff" }}>
                         {dateFormatter.format(new Date(row.recorded_at))}
                       </td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.hsfo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfoKaohsiung ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfoTaichung ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgoKaohsiung ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgoTaichung ?? "-"}</td>
-                      <td style={{ padding: "8px 12px" }}>
-                        <button
-                          onClick={() => deleteHistoryRow(row)}
-                          disabled={deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id}
-                          style={{
-                            background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-                            color: "#ffd4d8",
-                            border: "1px solid rgba(255, 120, 120, 0.16)",
-                            borderRadius: "999px",
-                            padding: "7px 12px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: 700,
-                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-                          }}
-                        >
-                          {deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id ? "Deleting..." : "Delete"}
-                        </button>
-                      </td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff", textAlign: "center" }}>{row.hsfo ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff", textAlign: "center" }}>{row.vlsfoKaohsiung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff", textAlign: "center" }}>{row.vlsfoTaichung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff", textAlign: "center" }}>{row.mgoKaohsiung ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff", textAlign: "center" }}>{row.mgoTaichung ?? "-"}</td>
+                      {showDeleteButtons && (
+                        <td style={{ padding: "8px 12px" }}>
+                          <button
+                            onClick={() => deleteHistoryRow(row)}
+                            disabled={deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id}
+                            style={{
+                              background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
+                              color: "#ffd4d8",
+                              border: "1px solid rgba(255, 120, 120, 0.16)",
+                              borderRadius: "999px",
+                              padding: "7px 12px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                            }}
+                          >
+                            {deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
+                      <td colSpan={showDeleteButtons ? 7 : 6} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
                         No history records found for the current filters.
                       </td>
                     </tr>

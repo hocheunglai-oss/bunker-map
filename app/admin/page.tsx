@@ -345,9 +345,8 @@ export default function AdminPage() {
 
           <div style={{ display: "grid", gap: "12px" }}>
             {[
-              { label: "ENQUIRY WORKFLOW", path: "/admin/enqworkflow" },
-              { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
               { label: "PHONEBOOK", path: "/admin/phonebook" },
+              { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
             ].map((item) => (
               <button
                 key={item.label}
