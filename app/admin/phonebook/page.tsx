@@ -1002,7 +1002,7 @@ export default function PhonebookPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: GoogleSyncFailure[] }
       if (!response.ok) {
         if (options?.failureMessage) {
-          setMessage(options.failureMessage)
+          setMessage(payload.message ? `${options.failureMessage} ${payload.message}` : options.failureMessage)
         } else if (!options?.silentFailure) {
           setMessage(payload.message || "Unable to sync Google Contacts.")
         }
@@ -1014,9 +1014,10 @@ export default function PhonebookPage() {
       }
       setMessage(options?.successMessage || payload.message || "Google Contacts synced.")
       return true
-    } catch {
+    } catch (error) {
       if (options?.failureMessage) {
-        setMessage(options.failureMessage)
+        const fallback = error instanceof Error ? error.message : ""
+        setMessage(fallback ? `${options.failureMessage} ${fallback}` : options.failureMessage)
       } else if (!options?.silentFailure) {
         setMessage("Unable to sync Google Contacts.")
       }
