@@ -619,11 +619,11 @@ export default function PhonebookPage() {
       setEditing(false)
       setCreatingContact(false)
       setContactModalOpen(false)
-      await syncGoogleContacts(false, [nextContact.id], {
-        successMessage: "Saved.",
-        silentFailure: true,
+      const synced = await syncGoogleContacts(false, [nextContact.id], {
+        successMessage: "Saved and synced.",
+        failureMessage: "Saved locally, but web Google sync failed.",
       })
-      setMessage("Saved.")
+      if (synced) setMessage("Saved and synced.")
       setSaving(false)
       return
     }
@@ -638,11 +638,11 @@ export default function PhonebookPage() {
     setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setEditing(false)
-    await syncGoogleContacts(false, [draft.id], {
-      successMessage: "Saved.",
-      silentFailure: true,
+    const synced = await syncGoogleContacts(false, [draft.id], {
+      successMessage: "Saved and synced.",
+      failureMessage: "Saved locally, but web Google sync failed.",
     })
-    setMessage("Saved.")
+    if (synced) setMessage("Saved and synced.")
     setSaving(false)
   }
 
@@ -858,10 +858,11 @@ export default function PhonebookPage() {
     }
 
     if (syncedContactIds.length > 0) {
-      await syncGoogleContacts(false, syncedContactIds, {
-        successMessage: "Saved.",
-        silentFailure: true,
+      const synced = await syncGoogleContacts(false, syncedContactIds, {
+        successMessage: "Saved and synced.",
+        failureMessage: "Saved locally, but web Google sync failed.",
       })
+      if (synced) setMessage("Saved and synced.")
     }
   }
 
