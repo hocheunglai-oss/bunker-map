@@ -49,8 +49,13 @@ async function getPeopleClient() {
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
   )
-  const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
-  auth.setCredentials(JSON.parse(tokenRaw))
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+  if (refreshToken) {
+    auth.setCredentials({ refresh_token: refreshToken })
+  } else {
+    const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
+    auth.setCredentials(JSON.parse(tokenRaw))
+  }
   return google.people({ version: "v1", auth })
 }
 
@@ -147,15 +152,20 @@ function normalizeCompanyKey(value: string | null | undefined) {
 }
 
 function buildCompanyPhone(company: PhonebookCompany) {
-  if (company.phone) return company.phone
   const country = normalizeText(company.tel_country)
   const area = normalizeText(company.tel_area)
   const tel1 = normalizeText(company.tel_no_1)
-  if (!tel1) return ""
+  if (tel1) {
+    if (country && area) return `+${country}-${area}-${tel1}`
+    if (country) return `+${country}-${tel1}`
+    if (area) return `${area}-${tel1}`
+    return tel1
+  }
+  if (company.phone) return normalizeDialablePhone(company.phone)
   if (country && area) return `+${country}-${area}-${tel1}`
   if (country) return `+${country}-${tel1}`
   if (area) return `${area}-${tel1}`
-  return tel1
+  return ""
 }
 
 async function loadCompanyPhoneMap(supabase: any) {

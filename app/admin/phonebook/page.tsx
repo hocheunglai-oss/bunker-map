@@ -1254,20 +1254,18 @@ export default function PhonebookPage() {
 
           <section style={{ ...sidebarPanelStyle }}>
             <div style={{ padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
-              {selectedCompany ? (
-                <button
-                  onClick={() => void addContact()}
-                  style={{
-                    ...buttonStyle,
-                    width: "100%",
-                    background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
-                    color: "#e8f4ff",
-                    border: "1px solid rgba(108, 185, 255, 0.24)",
-                  }}
-                >
-                  Add Contact
-                </button>
-              ) : null}
+              <button
+                onClick={() => void addContact()}
+                style={{
+                  ...buttonStyle,
+                  width: "100%",
+                  background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
+                  color: "#e8f4ff",
+                  border: "1px solid rgba(108, 185, 255, 0.24)",
+                }}
+              >
+                Add Contact
+              </button>
             </div>
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 58px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
               {filteredContacts.map((contact) => (
