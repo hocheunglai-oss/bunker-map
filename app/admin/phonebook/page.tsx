@@ -353,7 +353,7 @@ function buildContactSearchText(contact: Partial<Contact>) {
 function copyToClipboard(value: string, onDone: (message: string) => void) {
   navigator.clipboard
     .writeText(value)
-    .then(() => onDone("Copied."))
+    .then(() => onDone("Copied"))
     .catch(() => onDone("Unable to copy."))
 }
 
@@ -390,6 +390,8 @@ export default function PhonebookPage() {
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [creatingContact, setCreatingContact] = useState(false)
+  const [contactModalOpen, setContactModalOpen] = useState(false)
   const [pinHoverId, setPinHoverId] = useState<PinHoverState>(null)
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
@@ -397,6 +399,7 @@ export default function PhonebookPage() {
   const [googleSyncing, setGoogleSyncing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
+  const [copiedKey, setCopiedKey] = useState("")
 
   function normalizeLoadedContacts(contactData: Contact[]) {
     return contactData.map((contact) => ({
@@ -512,6 +515,12 @@ export default function PhonebookPage() {
     setEditing(false)
   }, [contacts, selectedId])
 
+  useEffect(() => {
+    if (!copiedKey) return
+    const timer = window.setTimeout(() => setCopiedKey(""), 1200)
+    return () => window.clearTimeout(timer)
+  }, [copiedKey])
+
   const queryTokens = useMemo(() => buildSearchTokens(query), [query])
   const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
 
@@ -590,6 +599,35 @@ export default function PhonebookPage() {
       search_text: buildContactSearchText(draft),
     }
 
+    if (creatingContact) {
+      const insertPayload = {
+        ...payload,
+        source_key: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      }
+      const { data, error } = await supabase.from("phonebook_contacts").insert(insertPayload).select("*").single()
+      if (error || !data) {
+        setMessage("Unable to save contact.")
+        setSaving(false)
+        return
+      }
+
+      const nextContact = data as Contact
+      setContacts((prev) => [nextContact, ...prev])
+      setSelectedId(nextContact.id)
+      setCurrent(nextContact)
+      setDraft(nextContact)
+      setEditing(false)
+      setCreatingContact(false)
+      setContactModalOpen(false)
+      await syncGoogleContacts(false, [nextContact.id], {
+        successMessage: "Saved.",
+        silentFailure: true,
+      })
+      setMessage("Saved.")
+      setSaving(false)
+      return
+    }
+
     const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id)
     if (error) {
       setMessage("Unable to save contact.")
@@ -601,9 +639,10 @@ export default function PhonebookPage() {
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setEditing(false)
     await syncGoogleContacts(false, [draft.id], {
-      successMessage: "Saved and synced.",
-      failureMessage: "Saved locally. Google sync needs to be run from your local setup.",
+      successMessage: "Saved.",
+      silentFailure: true,
     })
+    setMessage("Saved.")
     setSaving(false)
   }
 
@@ -685,6 +724,13 @@ export default function PhonebookPage() {
     setCreatingCompany(false)
   }
 
+  function closeContactModal() {
+    setContactModalOpen(false)
+    setCreatingContact(false)
+    setSaving(false)
+    setDraft(current ? { ...current } : null)
+  }
+
   async function saveCompany() {
     if (!companyDraft) return
     setCompanySaving(true)
@@ -692,6 +738,7 @@ export default function PhonebookPage() {
     const previousCompanyName = companyDraft.name.trim().toUpperCase()
     const payload = {
       name: companyDraft.name.trim().toUpperCase(),
+      source_key: companyDraft.source_key,
       other_name: companyDraft.other_name?.trim().toUpperCase() || null,
       phone: companyDraft.phone?.trim().toUpperCase() || null,
       address: companyDraft.address?.trim().toUpperCase() || null,
@@ -791,12 +838,12 @@ export default function PhonebookPage() {
 
     if (creatingCompany) {
       setSelectedCompany(payload.name)
-      setMessage("New company added.")
+      setMessage("Saved.")
     } else {
       if (selectedCompany === companyDraft.name && payload.name !== companyDraft.name) {
         setSelectedCompany(payload.name)
       }
-      setMessage("Company saved.")
+      setMessage("Saved.")
     }
 
     setCompanyDraft(data as Company)
@@ -812,8 +859,8 @@ export default function PhonebookPage() {
 
     if (syncedContactIds.length > 0) {
       await syncGoogleContacts(false, syncedContactIds, {
-        successMessage: "Company saved and synced.",
-        failureMessage: "Company saved locally. Google sync needs to be run from your local setup.",
+        successMessage: "Saved.",
+        silentFailure: true,
       })
     }
   }
@@ -852,6 +899,7 @@ export default function PhonebookPage() {
 
   async function addContact() {
     const payload = {
+      id: `new-contact-${Date.now()}`,
       full_name: "",
       company: selectedCompany.toUpperCase(),
       company_source_id: "",
@@ -879,18 +927,15 @@ export default function PhonebookPage() {
       email_2: "",
       notes: "",
       favorite: false,
-      source_key: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       search_text: selectedCompany.toLowerCase(),
+      created_at: "",
+      updated_at: "",
     }
-    const { data, error } = await supabase.from("phonebook_contacts").insert(payload).select("*").single()
-    if (error || !data) {
-      setMessage("Unable to add contact.")
-      return
-    }
-    setContacts((prev) => [data as Contact, ...prev])
-    setSelectedId((data as Contact).id)
+    setDraft(payload as Contact)
+    setCreatingContact(true)
+    setContactModalOpen(true)
     setEditing(true)
-    setMessage("New contact added.")
+    setMessage("")
   }
 
   async function togglePinned(contact: Contact) {
@@ -1321,16 +1366,24 @@ export default function PhonebookPage() {
                   ) : current?.company ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                       <span style={{ fontSize: "15px", lineHeight: 1.5, textTransform: "uppercase" }}>{current.company}</span>
-                      <button onClick={() => copyToClipboard(current.company || "", setMessage)} style={iconButtonStyle} title="Copy">
+                      <button
+                        onClick={() =>
+                          copyToClipboard(current.company || "", (status) => {
+                            if (status === "Copied") setCopiedKey("company")
+                          })
+                        }
+                        style={iconButtonStyle}
+                        title="Copy"
+                      >
                         ⧉
                       </button>
+                      {copiedKey === "company" ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                     </div>
                   ) : null}
                 </div>
 
                 <div style={{ display: "grid", gap: "12px" }}>
                   <div style={modalSectionStyle}>
-                    <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>Contact Data</div>
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
                       {[
                         ["Title", "title"],
@@ -1341,7 +1394,6 @@ export default function PhonebookPage() {
                         ["Personal Email", "personal_email"],
                         ["General Email", "general_email"],
                         ["Private Email", "private_email"],
-                        ["Others", "others"],
                       ].map(([label, field]) => {
                         const key = field as keyof Contact
                         const value = displayed[key] as string | null
@@ -1375,9 +1427,18 @@ export default function PhonebookPage() {
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                                 <span style={{ fontSize: "15px", lineHeight: 1.5 }}>{value}</span>
-                                <button onClick={() => copyToClipboard(value || "", setMessage)} style={iconButtonStyle} title="Copy">
+                                <button
+                                  onClick={() =>
+                                    copyToClipboard(value || "", (status) => {
+                                      if (status === "Copied") setCopiedKey(field)
+                                    })
+                                  }
+                                  style={iconButtonStyle}
+                                  title="Copy"
+                                >
                                   ⧉
                                 </button>
+                                {copiedKey === field ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                               </div>
                             )}
                           </div>
@@ -1445,7 +1506,6 @@ export default function PhonebookPage() {
 
             <div style={{ display: "grid", gap: "12px" }}>
               <div style={modalSectionStyle}>
-                <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>General Data</div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
                   <div>
                     <div style={sectionLabelStyle}>Company Name</div>
@@ -1493,18 +1553,93 @@ export default function PhonebookPage() {
                     <input value={companyDraft.tel_area || ""} onChange={(event) => updateCompanyDraftField("tel_area", event.target.value)} style={detailInputStyle} />
                   </div>
                   <div>
-                    <div style={sectionLabelStyle}>Tel 1</div>
+                    <div style={sectionLabelStyle}>Telephone</div>
                     <input
                       value={companyDraft.tel_no_1 || ""}
                       onChange={(event) => setCompanyDraft({ ...companyDraft, tel_no_1: toCaps(event.target.value), phone: toCaps(event.target.value) })}
                       style={detailInputStyle}
                     />
                   </div>
-                  <div>
-                    <div style={sectionLabelStyle}>Tel 2</div>
-                    <input value={companyDraft.tel_no_2 || ""} onChange={(event) => updateCompanyDraftField("tel_no_2", event.target.value)} style={detailInputStyle} />
-                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {contactModalOpen && draft ? (
+        <div style={modalOverlayStyle} onClick={closeContactModal}>
+          <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
+              <div>
+                <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Contact</div>
+                <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15 }}>{draft.full_name || "(NO NAME)"}</div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  onClick={() => void saveCurrent()}
+                  disabled={saving}
+                  style={{
+                    ...buttonStyle,
+                    background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
+                    color: "#ddffef",
+                    border: "1px solid rgba(73, 219, 165, 0.26)",
+                    minWidth: "84px",
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button onClick={closeContactModal} style={{ ...buttonStyle, minWidth: "84px" }}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div style={modalSectionStyle}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
+                {[
+                  ["Name", "full_name"],
+                  ["Company", "company"],
+                  ["Title", "title"],
+                  ["Ext", "tel_ext"],
+                  ["Direct line", "direct_line"],
+                  ["Mobile 1", "mobile_1"],
+                  ["Mobile 2", "mobile_2"],
+                  ["Personal Email", "personal_email"],
+                  ["General Email", "general_email"],
+                  ["Private Email", "private_email"],
+                ].map(([label, field]) => {
+                  const key = field as keyof Contact
+                  return (
+                    <div key={field}>
+                      <div style={sectionLabelStyle}>{label}</div>
+                      {key === "title" ? (
+                        <select
+                          value={(draft[key] as string) || ""}
+                          onChange={(event) => updateField(key, event.target.value as never)}
+                          style={selectStyle}
+                        >
+                          <option value="">Select title</option>
+                          {TITLE_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={(draft[key] as string) || ""}
+                          onChange={(event) =>
+                            key === "personal_email" || key === "general_email" || key === "private_email"
+                              ? updateField(key, event.target.value as never)
+                              : updateCapsField(key, event.target.value)
+                          }
+                          style={detailInputStyle}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
