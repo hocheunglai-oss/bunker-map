@@ -76,6 +76,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function getErrorStatus(error: unknown) {
+  return typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status?: unknown }).status || 0)
+    : 0
+}
+
 function buildDisplayName(contact: PhonebookContact) {
   const raw = normalizeText(contact.full_name)
   const stripped = raw
@@ -246,8 +252,36 @@ async function listManagedGoogleContacts(people: ReturnType<typeof google.people
 }
 
 async function deleteManagedContacts(people: ReturnType<typeof google.people>, resourceNames: string[]) {
-  for (const resourceName of resourceNames) {
-    await people.people.deleteContact({ resourceName })
+  for (let index = 0; index < resourceNames.length; index += 1) {
+    const resourceName = resourceNames[index]
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        await people.people.deleteContact({ resourceName })
+        break
+      } catch (error) {
+        const status = getErrorStatus(error)
+
+        if (status === 429 && attempt < 5) {
+          console.warn(`Google delete quota hit at ${index + 1}/${resourceNames.length}; waiting before retrying...`)
+          await sleep(65000)
+          continue
+        }
+
+        if ((status === 500 || status === 502 || status === 503 || status === 504) && attempt < 5) {
+          await sleep(3000 * attempt)
+          continue
+        }
+
+        throw error
+      }
+    }
+
+    if ((index + 1) % 50 === 0 || index + 1 === resourceNames.length) {
+      console.log(`Deleted Google contacts ${index + 1}/${resourceNames.length}`)
+    }
+
+    await sleep(120)
   }
 }
 
@@ -268,10 +302,7 @@ async function createContacts(people: ReturnType<typeof google.people>, contacts
         synced += 1
         break
       } catch (error) {
-        const status =
-          typeof error === "object" && error !== null && "status" in error
-            ? Number((error as { status?: unknown }).status || 0)
-            : 0
+        const status = getErrorStatus(error)
 
         if ((status === 500 || status === 502 || status === 503 || status === 504) && attempt < 3) {
           await sleep(1500 * attempt)

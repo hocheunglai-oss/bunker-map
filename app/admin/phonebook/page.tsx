@@ -388,6 +388,24 @@ export default function PhonebookPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
 
+  function normalizeLoadedContacts(contactData: Contact[]) {
+    return contactData.map((contact) => ({
+      ...contact,
+      full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
+      company: contact.company?.toUpperCase?.() || contact.company,
+      title: normalizeTitleValue(contact.title) || null,
+    }))
+  }
+
+  function normalizeLoadedCompanies(companyData: Company[]) {
+    return companyData.map((company) => ({
+      ...company,
+      name: company.name?.toUpperCase?.() || company.name,
+      country: normalizeCountryName(company.country) || null,
+      tel_country: company.tel_country || getCountryCode(company.country) || null,
+    }))
+  }
+
   async function loadContacts() {
     const allContacts: Contact[] = []
     const pageSize = 1000
@@ -443,22 +461,8 @@ export default function PhonebookPage() {
     setLoading(true)
     try {
       const [companyData, contactData] = await Promise.all([loadCompanies(), loadContacts()])
-      setCompanies(
-        companyData.map((company) => ({
-          ...company,
-          name: company.name?.toUpperCase?.() || company.name,
-          country: normalizeCountryName(company.country) || null,
-          tel_country: company.tel_country || getCountryCode(company.country) || null,
-        })),
-      )
-      setContacts(
-        contactData.map((contact) => ({
-          ...contact,
-          full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
-          company: contact.company?.toUpperCase?.() || contact.company,
-          title: normalizeTitleValue(contact.title) || null,
-        })),
-      )
+      setCompanies(normalizeLoadedCompanies(companyData))
+      setContacts(normalizeLoadedContacts(contactData))
     } catch {
       setMessage("Unable to load phonebook.")
     } finally {
