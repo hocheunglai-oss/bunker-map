@@ -190,6 +190,12 @@ const detailInputStyle: React.CSSProperties = {
   padding: "10px 12px",
 }
 
+const selectStyle: React.CSSProperties = {
+  ...detailInputStyle,
+  background: "linear-gradient(180deg, rgba(248, 252, 255, 0.98) 0%, rgba(235, 244, 252, 0.96) 100%)",
+  color: "#10243a",
+}
+
 const iconButtonStyle: React.CSSProperties = {
   border: "none",
   background: "transparent",
@@ -278,6 +284,10 @@ function normalizeCompanyName(value: string | null | undefined) {
 
 function normalizeCompanyKey(value: string | null | undefined) {
   return normalizeCompanyName(value).toLowerCase()
+}
+
+function toCaps(value: string | null | undefined) {
+  return (value || "").toUpperCase()
 }
 
 function normalizeCountryName(value: string | null | undefined) {
@@ -394,6 +404,15 @@ export default function PhonebookPage() {
       full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
       company: contact.company?.toUpperCase?.() || contact.company,
       title: normalizeTitleValue(contact.title) || null,
+      name_remark: contact.name_remark?.toUpperCase?.() || contact.name_remark,
+      position: contact.position?.toUpperCase?.() || contact.position,
+      department: contact.department?.toUpperCase?.() || contact.department,
+      tel_ext: contact.tel_ext?.toUpperCase?.() || contact.tel_ext,
+      mobile_area: contact.mobile_area?.toUpperCase?.() || contact.mobile_area,
+      instant_messaging: contact.instant_messaging?.toUpperCase?.() || contact.instant_messaging,
+      others: contact.others?.toUpperCase?.() || contact.others,
+      area_of_responsibility: contact.area_of_responsibility?.toUpperCase?.() || contact.area_of_responsibility,
+      notes: contact.notes?.toUpperCase?.() || contact.notes,
     }))
   }
 
@@ -401,8 +420,13 @@ export default function PhonebookPage() {
     return companyData.map((company) => ({
       ...company,
       name: company.name?.toUpperCase?.() || company.name,
+      other_name: company.other_name?.toUpperCase?.() || company.other_name,
+      address: company.address?.toUpperCase?.() || company.address,
       country: normalizeCountryName(company.country) || null,
       tel_country: company.tel_country || getCountryCode(company.country) || null,
+      tel_area: company.tel_area?.toUpperCase?.() || company.tel_area,
+      tel_no_1: company.tel_no_1?.toUpperCase?.() || company.tel_no_1,
+      tel_no_2: company.tel_no_2?.toUpperCase?.() || company.tel_no_2,
     }))
   }
 
@@ -540,28 +564,28 @@ export default function PhonebookPage() {
       company: draft.company?.trim().toUpperCase() || null,
       company_source_id: draft.company_source_id?.trim() || null,
       title: normalizeTitleValue(draft.title) || null,
-      name_remark: draft.name_remark?.trim() || null,
-      position: draft.position?.trim() || null,
-      department: draft.department?.trim() || null,
-      tel_ext: draft.tel_ext?.trim() || null,
+      name_remark: draft.name_remark?.trim().toUpperCase() || null,
+      position: draft.position?.trim().toUpperCase() || null,
+      department: draft.department?.trim().toUpperCase() || null,
+      tel_ext: draft.tel_ext?.trim().toUpperCase() || null,
       direct_line: normalizeDialablePhone(draft.direct_line),
-      mobile_area: draft.mobile_area?.trim() || null,
+      mobile_area: draft.mobile_area?.trim().toUpperCase() || null,
       mobile_1: normalizeDialablePhone(draft.mobile_1),
       mobile_2: normalizeDialablePhone(draft.mobile_2),
       personal_email: draft.personal_email?.trim() || null,
       general_email: draft.general_email?.trim() || null,
       private_email: draft.private_email?.trim() || null,
-      instant_messaging: draft.instant_messaging?.trim() || null,
-      others: draft.others?.trim() || null,
-      area_of_responsibility: draft.area_of_responsibility?.trim() || null,
+      instant_messaging: draft.instant_messaging?.trim().toUpperCase() || null,
+      others: draft.others?.trim().toUpperCase() || null,
+      area_of_responsibility: draft.area_of_responsibility?.trim().toUpperCase() || null,
       mobile_phone: normalizeDialablePhone(draft.mobile_1),
       pager: normalizeDialablePhone(draft.mobile_2),
       business_phone: normalizeDialablePhone(draft.direct_line),
-      business_phone_2: draft.tel_ext?.trim() || null,
-      other_phone: draft.others?.trim() || null,
+      business_phone_2: draft.tel_ext?.trim().toUpperCase() || null,
+      other_phone: draft.others?.trim().toUpperCase() || null,
       email_1: draft.personal_email?.trim() || null,
       email_2: draft.general_email?.trim() || null,
-      notes: draft.notes?.trim() || null,
+      notes: draft.notes?.trim().toUpperCase() || null,
       favorite: draft.favorite,
       search_text: buildContactSearchText(draft),
     }
@@ -576,7 +600,10 @@ export default function PhonebookPage() {
     setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setEditing(false)
-    await syncGoogleContacts(false, [draft.id], { successMessage: "Saved and synced." })
+    await syncGoogleContacts(false, [draft.id], {
+      successMessage: "Saved and synced.",
+      failureMessage: "Saved locally. Google sync needs to be run from your local setup.",
+    })
     setSaving(false)
   }
 
@@ -665,39 +692,39 @@ export default function PhonebookPage() {
     const previousCompanyName = companyDraft.name.trim().toUpperCase()
     const payload = {
       name: companyDraft.name.trim().toUpperCase(),
-      other_name: companyDraft.other_name?.trim() || null,
-      phone: companyDraft.phone?.trim() || null,
-      address: companyDraft.address?.trim() || null,
+      other_name: companyDraft.other_name?.trim().toUpperCase() || null,
+      phone: companyDraft.phone?.trim().toUpperCase() || null,
+      address: companyDraft.address?.trim().toUpperCase() || null,
       country: normalizeCountryName(companyDraft.country) || null,
       tel_country: getCountryCode(companyDraft.country) || null,
-      tel_area: companyDraft.tel_area?.trim() || null,
-      tel_no_1: companyDraft.tel_no_1?.trim() || null,
-      tel_no_2: companyDraft.tel_no_2?.trim() || null,
-      tel_speed_dial: companyDraft.tel_speed_dial?.trim() || null,
-      fax_no_1: companyDraft.fax_no_1?.trim() || null,
-      website: companyDraft.website?.trim() || null,
+      tel_area: companyDraft.tel_area?.trim().toUpperCase() || null,
+      tel_no_1: companyDraft.tel_no_1?.trim().toUpperCase() || null,
+      tel_no_2: companyDraft.tel_no_2?.trim().toUpperCase() || null,
+      tel_speed_dial: companyDraft.tel_speed_dial?.trim().toUpperCase() || null,
+      fax_no_1: companyDraft.fax_no_1?.trim().toUpperCase() || null,
+      website: companyDraft.website?.trim().toUpperCase() || null,
       email: companyDraft.email?.trim() || null,
-      contact_type: companyDraft.contact_type?.trim() || null,
-      stem_management: companyDraft.stem_management?.trim() || null,
-      company_status: companyDraft.company_status?.trim() || null,
-      company_info: companyDraft.company_info?.trim() || null,
-      seller_term: companyDraft.seller_term?.trim() || null,
-      seller_credit_limit: companyDraft.seller_credit_limit?.trim() || null,
-      seller_credit_limit_flexibility: companyDraft.seller_credit_limit_flexibility?.trim() || null,
-      seller_classification: companyDraft.seller_classification?.trim() || null,
-      seller_remark_1: companyDraft.seller_remark_1?.trim() || null,
-      seller_remark_2: companyDraft.seller_remark_2?.trim() || null,
-      seller_remark_3: companyDraft.seller_remark_3?.trim() || null,
-      seller_remark_4: companyDraft.seller_remark_4?.trim() || null,
-      buyer_term: companyDraft.buyer_term?.trim() || null,
-      buyer_credit_limit: companyDraft.buyer_credit_limit?.trim() || null,
-      buyer_credit_limit_flexibility: companyDraft.buyer_credit_limit_flexibility?.trim() || null,
-      buyer_classification: companyDraft.buyer_classification?.trim() || null,
-      buyer_remark_1: companyDraft.buyer_remark_1?.trim() || null,
-      buyer_remark_2: companyDraft.buyer_remark_2?.trim() || null,
-      buyer_remark_3: companyDraft.buyer_remark_3?.trim() || null,
-      buyer_remark_4: companyDraft.buyer_remark_4?.trim() || null,
-      notes: companyDraft.notes?.trim() || null,
+      contact_type: companyDraft.contact_type?.trim().toUpperCase() || null,
+      stem_management: companyDraft.stem_management?.trim().toUpperCase() || null,
+      company_status: companyDraft.company_status?.trim().toUpperCase() || null,
+      company_info: companyDraft.company_info?.trim().toUpperCase() || null,
+      seller_term: companyDraft.seller_term?.trim().toUpperCase() || null,
+      seller_credit_limit: companyDraft.seller_credit_limit?.trim().toUpperCase() || null,
+      seller_credit_limit_flexibility: companyDraft.seller_credit_limit_flexibility?.trim().toUpperCase() || null,
+      seller_classification: companyDraft.seller_classification?.trim().toUpperCase() || null,
+      seller_remark_1: companyDraft.seller_remark_1?.trim().toUpperCase() || null,
+      seller_remark_2: companyDraft.seller_remark_2?.trim().toUpperCase() || null,
+      seller_remark_3: companyDraft.seller_remark_3?.trim().toUpperCase() || null,
+      seller_remark_4: companyDraft.seller_remark_4?.trim().toUpperCase() || null,
+      buyer_term: companyDraft.buyer_term?.trim().toUpperCase() || null,
+      buyer_credit_limit: companyDraft.buyer_credit_limit?.trim().toUpperCase() || null,
+      buyer_credit_limit_flexibility: companyDraft.buyer_credit_limit_flexibility?.trim().toUpperCase() || null,
+      buyer_classification: companyDraft.buyer_classification?.trim().toUpperCase() || null,
+      buyer_remark_1: companyDraft.buyer_remark_1?.trim().toUpperCase() || null,
+      buyer_remark_2: companyDraft.buyer_remark_2?.trim().toUpperCase() || null,
+      buyer_remark_3: companyDraft.buyer_remark_3?.trim().toUpperCase() || null,
+      buyer_remark_4: companyDraft.buyer_remark_4?.trim().toUpperCase() || null,
+      notes: companyDraft.notes?.trim().toUpperCase() || null,
     }
 
     const query = creatingCompany
@@ -784,7 +811,10 @@ export default function PhonebookPage() {
     }
 
     if (syncedContactIds.length > 0) {
-      await syncGoogleContacts(false, syncedContactIds, { successMessage: "Company saved and synced." })
+      await syncGoogleContacts(false, syncedContactIds, {
+        successMessage: "Company saved and synced.",
+        failureMessage: "Company saved locally. Google sync needs to be run from your local setup.",
+      })
     }
   }
 
@@ -813,6 +843,7 @@ export default function PhonebookPage() {
       await syncGoogleContacts(false, null, {
         deleteContactIds: companyContactIds,
         successMessage: "Company deleted and Google contacts updated.",
+        failureMessage: "Company deleted locally. Google sync needs to be run from your local setup.",
       })
     } else {
       setMessage("Company deleted.")
@@ -881,17 +912,33 @@ export default function PhonebookPage() {
     setDraft({ ...draft, [field]: value })
   }
 
+  function updateCapsField<K extends keyof Contact>(field: K, value: string) {
+    if (!draft) return
+    setDraft({ ...draft, [field]: toCaps(value) as Contact[K] })
+  }
+
+  function updateCompanyDraftField<K extends keyof Company>(field: K, value: string) {
+    if (!companyDraft) return
+    setCompanyDraft({ ...companyDraft, [field]: toCaps(value) as Company[K] })
+  }
+
   async function syncGoogleContacts(
     fullRebuild = false,
     contactIds: string[] | null = null,
-    options?: { deleteContactIds?: string[]; successMessage?: string; retryMissing?: boolean },
+    options?: {
+      deleteContactIds?: string[]
+      successMessage?: string
+      retryMissing?: boolean
+      failureMessage?: string
+      silentFailure?: boolean
+    },
   ) {
     setGoogleSyncing(true)
-    setMessage("")
+    if (!options?.silentFailure) setMessage("")
     try {
       if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !options?.retryMissing && !selectedCompany) {
         setMessage("Select a company first, or use Full Rebuild from the menu.")
-        return
+        return false
       }
 
       const response = await fetch("/api/phonebook/google-sync", {
@@ -908,16 +955,26 @@ export default function PhonebookPage() {
 
       const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: GoogleSyncFailure[] }
       if (!response.ok) {
-        setMessage(payload.message || "Unable to sync Google Contacts.")
-        return
+        if (options?.failureMessage) {
+          setMessage(options.failureMessage)
+        } else if (!options?.silentFailure) {
+          setMessage(payload.message || "Unable to sync Google Contacts.")
+        }
+        return false
       }
 
       if (payload.failed) {
         localStorage.setItem(LAST_GOOGLE_SYNC_FAILED_KEY, JSON.stringify(payload.failed))
       }
       setMessage(options?.successMessage || payload.message || "Google Contacts synced.")
+      return true
     } catch {
-      setMessage("Unable to sync Google Contacts.")
+      if (options?.failureMessage) {
+        setMessage(options.failureMessage)
+      } else if (!options?.silentFailure) {
+        setMessage("Unable to sync Google Contacts.")
+      }
+      return false
     } finally {
       setGoogleSyncing(false)
       setMenuOpen(false)
@@ -1221,7 +1278,7 @@ export default function PhonebookPage() {
                   <div>
                     <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
                     {editing ? (
-                      <input value={draft?.full_name || ""} onChange={(event) => updateField("full_name", event.target.value)} style={detailInputStyle} />
+                      <input value={draft?.full_name || ""} onChange={(event) => updateCapsField("full_name", event.target.value)} style={detailInputStyle} />
                     ) : (
                       <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15, textTransform: "uppercase" }}>{current?.full_name || "(No Name)"}</div>
                     )}
@@ -1260,7 +1317,7 @@ export default function PhonebookPage() {
                 <div>
                   <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                   {editing ? (
-                    <input value={draft?.company || ""} onChange={(event) => updateField("company", event.target.value)} style={detailInputStyle} />
+                    <input value={draft?.company || ""} onChange={(event) => updateCapsField("company", event.target.value)} style={detailInputStyle} />
                   ) : current?.company ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                       <span style={{ fontSize: "15px", lineHeight: 1.5, textTransform: "uppercase" }}>{current.company}</span>
@@ -1296,7 +1353,7 @@ export default function PhonebookPage() {
                               <select
                                 value={(draft?.[key] as string) || ""}
                                 onChange={(event) => updateField(key, event.target.value as never)}
-                                style={detailInputStyle}
+                                style={selectStyle}
                               >
                                 <option value="">Select title</option>
                                 {TITLE_OPTIONS.map((option) => (
@@ -1306,7 +1363,15 @@ export default function PhonebookPage() {
                                 ))}
                               </select>
                             ) : (
-                              <input value={(draft?.[key] as string) || ""} onChange={(event) => updateField(key, event.target.value as never)} style={detailInputStyle} />
+                              <input
+                                value={(draft?.[key] as string) || ""}
+                                onChange={(event) =>
+                                  key === "personal_email" || key === "general_email" || key === "private_email"
+                                    ? updateField(key, event.target.value as never)
+                                    : updateCapsField(key, event.target.value)
+                                }
+                                style={detailInputStyle}
+                              />
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                                 <span style={{ fontSize: "15px", lineHeight: 1.5 }}>{value}</span>
@@ -1383,18 +1448,18 @@ export default function PhonebookPage() {
                 <div style={{ ...sectionLabelStyle, marginBottom: "10px" }}>General Data</div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
                   <div>
-                    <div style={sectionLabelStyle}>Name</div>
-                    <input value={companyDraft.name || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, name: event.target.value })} style={detailInputStyle} />
+                    <div style={sectionLabelStyle}>Company Name</div>
+                    <input value={companyDraft.name || ""} onChange={(event) => updateCompanyDraftField("name", event.target.value)} style={detailInputStyle} />
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Other Name</div>
-                    <input value={companyDraft.other_name || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, other_name: event.target.value })} style={detailInputStyle} />
+                    <input value={companyDraft.other_name || ""} onChange={(event) => updateCompanyDraftField("other_name", event.target.value)} style={detailInputStyle} />
                   </div>
                   <div style={{ gridColumn: isMobile ? "auto" : "1 / -1" }}>
                     <div style={sectionLabelStyle}>Address</div>
                     <textarea
                       value={companyDraft.address || ""}
-                      onChange={(event) => setCompanyDraft({ ...companyDraft, address: event.target.value })}
+                      onChange={(event) => updateCompanyDraftField("address", event.target.value)}
                       style={{ ...detailInputStyle, minHeight: "90px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.5 }}
                     />
                   </div>
@@ -1409,7 +1474,7 @@ export default function PhonebookPage() {
                           tel_country: getCountryCode(event.target.value) || null,
                         })
                       }
-                      style={detailInputStyle}
+                      style={selectStyle}
                     >
                       <option value="">Select country</option>
                       {COUNTRY_OPTIONS.map((country) => (
@@ -1425,15 +1490,19 @@ export default function PhonebookPage() {
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Area Code</div>
-                    <input value={companyDraft.tel_area || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_area: event.target.value })} style={detailInputStyle} />
+                    <input value={companyDraft.tel_area || ""} onChange={(event) => updateCompanyDraftField("tel_area", event.target.value)} style={detailInputStyle} />
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Tel 1</div>
-                    <input value={companyDraft.tel_no_1 || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_no_1: event.target.value, phone: event.target.value })} style={detailInputStyle} />
+                    <input
+                      value={companyDraft.tel_no_1 || ""}
+                      onChange={(event) => setCompanyDraft({ ...companyDraft, tel_no_1: toCaps(event.target.value), phone: toCaps(event.target.value) })}
+                      style={detailInputStyle}
+                    />
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Tel 2</div>
-                    <input value={companyDraft.tel_no_2 || ""} onChange={(event) => setCompanyDraft({ ...companyDraft, tel_no_2: event.target.value })} style={detailInputStyle} />
+                    <input value={companyDraft.tel_no_2 || ""} onChange={(event) => updateCompanyDraftField("tel_no_2", event.target.value)} style={detailInputStyle} />
                   </div>
                 </div>
               </div>
