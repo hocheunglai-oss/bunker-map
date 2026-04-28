@@ -78,6 +78,7 @@ type Company = {
 
 type PinHoverState = string | null
 type CompanyDraft = Company | null
+type PriorityMenuState = string | null
 
 const LAST_GOOGLE_SYNC_FAILED_KEY = "phonebook_last_google_sync_failed"
 
@@ -87,6 +88,7 @@ type GoogleSyncFailure = {
 }
 
 const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
+const PRIORITY_OPTIONS = ["OPS", "PIC"] as const
 
 const COUNTRY_OPTIONS = [
   { name: "ALGERIA", code: "213" },
@@ -197,17 +199,21 @@ const selectStyle: React.CSSProperties = {
 }
 
 const iconButtonStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#bfe3ff",
+  width: "26px",
+  height: "26px",
+  borderRadius: "999px",
+  border: "1px solid rgba(210,236,255,0.16)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%)",
+  color: "#d7e8ff",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  fontSize: "13px",
+  fontSize: "12px",
   fontWeight: 800,
   cursor: "pointer",
   padding: 0,
   lineHeight: 1,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 18px rgba(8,24,44,0.14)",
 }
 
 const modalOverlayStyle: React.CSSProperties = {
@@ -309,6 +315,11 @@ function normalizeTitleValue(value: string | null | undefined) {
   return TITLE_OPTIONS.includes(upper as (typeof TITLE_OPTIONS)[number]) ? upper : ""
 }
 
+function normalizePriorityTag(value: string | null | undefined) {
+  const upper = (value || "").trim().toUpperCase()
+  return PRIORITY_OPTIONS.includes(upper as (typeof PRIORITY_OPTIONS)[number]) ? upper : ""
+}
+
 function formatCompanyPhoneLine(company: Company) {
   const countryCode = (company.tel_country || "").trim()
   const areaCode = (company.tel_area || "").trim()
@@ -393,6 +404,7 @@ export default function PhonebookPage() {
   const [creatingContact, setCreatingContact] = useState(false)
   const [contactModalOpen, setContactModalOpen] = useState(false)
   const [pinHoverId, setPinHoverId] = useState<PinHoverState>(null)
+  const [priorityMenuId, setPriorityMenuId] = useState<PriorityMenuState>(null)
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
@@ -400,6 +412,7 @@ export default function PhonebookPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
+  const menuHideTimerRef = useRef<number | null>(null)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
     return contactData.map((contact) => ({
@@ -407,7 +420,7 @@ export default function PhonebookPage() {
       full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
       company: contact.company?.toUpperCase?.() || contact.company,
       title: normalizeTitleValue(contact.title) || null,
-      name_remark: contact.name_remark?.toUpperCase?.() || contact.name_remark,
+      name_remark: normalizePriorityTag(contact.name_remark) || null,
       position: contact.position?.toUpperCase?.() || contact.position,
       department: contact.department?.toUpperCase?.() || contact.department,
       tel_ext: contact.tel_ext?.toUpperCase?.() || contact.tel_ext,
@@ -521,6 +534,12 @@ export default function PhonebookPage() {
     return () => window.clearTimeout(timer)
   }, [copiedKey])
 
+  useEffect(() => {
+    return () => {
+      if (menuHideTimerRef.current) window.clearTimeout(menuHideTimerRef.current)
+    }
+  }, [])
+
   const queryTokens = useMemo(() => buildSearchTokens(query), [query])
   const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
 
@@ -558,7 +577,15 @@ export default function PhonebookPage() {
     })
 
     next = [...next].sort((a, b) => {
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
+      if (selectedCompany) {
+        const aPriority = normalizePriorityTag(a.name_remark)
+        const bPriority = normalizePriorityTag(b.name_remark)
+        if (aPriority && !bPriority) return -1
+        if (!aPriority && bPriority) return 1
+        if (aPriority && bPriority && aPriority !== bPriority) {
+          return aPriority === "OPS" ? -1 : 1
+        }
+      }
       return (a.full_name || "").localeCompare(b.full_name || "")
     })
     return next
@@ -573,7 +600,7 @@ export default function PhonebookPage() {
       company: draft.company?.trim().toUpperCase() || null,
       company_source_id: draft.company_source_id?.trim() || null,
       title: normalizeTitleValue(draft.title) || null,
-      name_remark: draft.name_remark?.trim().toUpperCase() || null,
+      name_remark: normalizePriorityTag(draft.name_remark) || null,
       position: draft.position?.trim().toUpperCase() || null,
       department: draft.department?.trim().toUpperCase() || null,
       tel_ext: draft.tel_ext?.trim().toUpperCase() || null,
@@ -595,7 +622,7 @@ export default function PhonebookPage() {
       email_1: draft.personal_email?.trim() || null,
       email_2: draft.general_email?.trim() || null,
       notes: draft.notes?.trim().toUpperCase() || null,
-      favorite: draft.favorite,
+      favorite: Boolean(normalizePriorityTag(draft.name_remark)),
       search_text: buildContactSearchText(draft),
     }
 
@@ -941,16 +968,33 @@ export default function PhonebookPage() {
 
   async function togglePinned(contact: Contact) {
     if (!selectedCompany) return
-    const nextFavorite = !contact.favorite
-    const { error } = await supabase.from("phonebook_contacts").update({ favorite: nextFavorite }).eq("id", contact.id)
+    const { error } = await supabase.from("phonebook_contacts").update({ favorite: false, name_remark: null }).eq("id", contact.id)
     if (error) {
       setMessage("Unable to update priority.")
       return
     }
-    setContacts((prev) => prev.map((item) => (item.id === contact.id ? { ...item, favorite: nextFavorite } : item)))
-    if (draft?.id === contact.id) setDraft({ ...draft, favorite: nextFavorite })
-    if (current?.id === contact.id) setCurrent({ ...current, favorite: nextFavorite })
-    setMessage(nextFavorite ? "Pinned to top." : "Removed from top.")
+    setContacts((prev) => prev.map((item) => (item.id === contact.id ? { ...item, favorite: false, name_remark: null } : item)))
+    if (draft?.id === contact.id) setDraft({ ...draft, favorite: false, name_remark: null })
+    if (current?.id === contact.id) setCurrent({ ...current, favorite: false, name_remark: null })
+    setPriorityMenuId(null)
+    setMessage("Priority cleared.")
+  }
+
+  async function setPriority(contact: Contact, tag: "" | "OPS" | "PIC") {
+    const payload = {
+      favorite: Boolean(tag),
+      name_remark: tag || null,
+    }
+    const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", contact.id)
+    if (error) {
+      setMessage("Unable to update priority.")
+      return
+    }
+    setContacts((prev) => prev.map((item) => (item.id === contact.id ? { ...item, ...payload } : item)))
+    if (draft?.id === contact.id) setDraft({ ...draft, ...payload })
+    if (current?.id === contact.id) setCurrent({ ...current, ...payload })
+    setPriorityMenuId(null)
+    setMessage(tag ? `${tag} set.` : "Priority cleared.")
   }
 
   function updateField<K extends keyof Contact>(field: K, value: Contact[K]) {
@@ -966,6 +1010,23 @@ export default function PhonebookPage() {
   function updateCompanyDraftField<K extends keyof Company>(field: K, value: string) {
     if (!companyDraft) return
     setCompanyDraft({ ...companyDraft, [field]: toCaps(value) as Company[K] })
+  }
+
+  function clearSearchAndSelection() {
+    setQuery("")
+    setSelectedCompany("")
+  }
+
+  function scheduleMenuHide() {
+    if (menuHideTimerRef.current) window.clearTimeout(menuHideTimerRef.current)
+    menuHideTimerRef.current = window.setTimeout(() => setMenuOpen(false), 320)
+  }
+
+  function cancelMenuHide() {
+    if (menuHideTimerRef.current) {
+      window.clearTimeout(menuHideTimerRef.current)
+      menuHideTimerRef.current = null
+    }
   }
 
   async function syncGoogleContacts(
@@ -1107,8 +1168,7 @@ export default function PhonebookPage() {
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Trading Tools</div>
-            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Phonebook</h1>
+            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Phone Book</div>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
             <a href="/admin" style={buttonStyle}>Back To Admin</a>
@@ -1127,13 +1187,17 @@ export default function PhonebookPage() {
             </button>
             <button
               type="button"
-              onClick={() => setMenuOpen((prev) => !prev)}
+              onClick={() => {
+                cancelMenuHide()
+                setMenuOpen((prev) => !prev)
+              }}
+              onMouseEnter={cancelMenuHide}
               style={buttonStyle}
             >
               ☰
             </button>
             {menuOpen ? (
-              <div style={menuPanelStyle}>
+              <div style={menuPanelStyle} onMouseEnter={cancelMenuHide} onMouseLeave={scheduleMenuHide}>
                 <button
                   type="button"
                   onClick={() => void retryFailedGoogleContacts()}
@@ -1156,23 +1220,31 @@ export default function PhonebookPage() {
         </div>
 
         <div style={{ ...panelStyle, padding: "12px 14px" }}>
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              if (selectedCompany) setSelectedCompany("")
-            }}
-            onKeyDown={onSearchKeyDown}
-            placeholder="Search name, company, phone, or email..."
-            style={inputStyle}
-          />
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto auto", gap: "10px", alignItems: "center" }}>
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                if (selectedCompany) setSelectedCompany("")
+              }}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Search name, company, phone, or email..."
+              style={inputStyle}
+            />
+            <button type="button" onClick={() => setQuery((value) => value.trim())} style={buttonStyle}>
+              Search
+            </button>
+            <button type="button" onClick={clearSearchAndSelection} style={buttonStyle}>
+              Clear
+            </button>
+          </div>
         </div>
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "420px minmax(280px, 360px) minmax(0, 1fr)",
+            gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
             gap: "14px",
             alignItems: "start",
           }}
@@ -1193,7 +1265,7 @@ export default function PhonebookPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "8px" }}>
                 <button
                   type="button"
-                  onClick={() => setSelectedCompany("")}
+                  onClick={clearSearchAndSelection}
                   style={{
                     ...buttonStyle,
                     width: "100%",
@@ -1266,7 +1338,7 @@ export default function PhonebookPage() {
                   border: "1px solid rgba(108, 185, 255, 0.24)",
                 }}
               >
-                Add Contact
+                New Contact
               </button>
             </div>
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 58px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
@@ -1283,11 +1355,13 @@ export default function PhonebookPage() {
                   style={{
                     ...listRowStyle,
                     background: selectedId === contact.id ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)" : "transparent",
+                    minHeight: "58px",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "3px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-                      {contact.favorite ? <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>Top</span> : null}
+                      {normalizePriorityTag(contact.name_remark) === "OPS" ? <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>OPS</span> : null}
+                      {normalizePriorityTag(contact.name_remark) === "PIC" ? <span style={{ color: "#8ff0c8", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>PIC</span> : null}
                       <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
                       {contact.tel_ext ? (
                         <span style={{ color: "#ffd166", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -1295,18 +1369,52 @@ export default function PhonebookPage() {
                         </span>
                       ) : null}
                     </div>
-                    <div style={{ width: "44px", display: "flex", justifyContent: "flex-end", flex: "0 0 44px" }}>
-                      {selectedCompany && pinHoverId === contact.id ? (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void togglePinned(contact)
-                          }}
-                          style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", minWidth: "40px" }}
-                        >
-                          Pin
-                        </button>
+                    <div style={{ width: "74px", display: "flex", justifyContent: "flex-end", flex: "0 0 74px", position: "relative" }}>
+                      {selectedCompany ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setPriorityMenuId((prev) => (prev === contact.id ? null : contact.id))
+                            }}
+                            style={{
+                              ...buttonStyle,
+                              padding: "4px 8px",
+                              fontSize: "10px",
+                              minWidth: "46px",
+                              visibility: pinHoverId === contact.id || priorityMenuId === contact.id ? "visible" : "hidden",
+                            }}
+                          >
+                            PIN
+                          </button>
+                          {priorityMenuId === contact.id ? (
+                            <div
+                              onClick={(event) => event.stopPropagation()}
+                              style={{
+                                ...panelStyle,
+                                position: "absolute",
+                                top: "calc(100% + 6px)",
+                                right: 0,
+                                padding: "8px",
+                                display: "grid",
+                                gap: "6px",
+                                zIndex: 5,
+                                minWidth: "78px",
+                              }}
+                            >
+                              <button type="button" onClick={() => void setPriority(contact, "OPS")} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", color: "#ffd166" }}>
+                                OPS
+                              </button>
+                              <button type="button" onClick={() => void setPriority(contact, "PIC")} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", color: "#8ff0c8" }}>
+                                PIC
+                              </button>
+                              <button type="button" onClick={() => void togglePinned(contact)} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px" }}>
+                                CLEAR
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
                   </div>
@@ -1375,7 +1483,7 @@ export default function PhonebookPage() {
                         style={iconButtonStyle}
                         title="Copy"
                       >
-                        ⧉
+                        {copiedKey === "company" ? "✓" : "⧉"}
                       </button>
                       {copiedKey === "company" ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                     </div>
@@ -1384,7 +1492,7 @@ export default function PhonebookPage() {
 
                 <div style={{ display: "grid", gap: "12px" }}>
                   <div style={modalSectionStyle}>
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px" }}>
                       {[
                         ["Title", "title"],
                         ["Ext", "tel_ext"],
@@ -1436,7 +1544,7 @@ export default function PhonebookPage() {
                                   style={iconButtonStyle}
                                   title="Copy"
                                 >
-                                  ⧉
+                                  {copiedKey === field ? "✓" : "⧉"}
                                 </button>
                                 {copiedKey === field ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                               </div>
@@ -1506,10 +1614,10 @@ export default function PhonebookPage() {
 
             <div style={{ display: "grid", gap: "12px" }}>
               <div style={modalSectionStyle}>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
-                  <div>
-                    <div style={sectionLabelStyle}>Company Name</div>
-                    <input value={companyDraft.name || ""} onChange={(event) => updateCompanyDraftField("name", event.target.value)} style={detailInputStyle} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
+                      <div>
+                        <div style={sectionLabelStyle}>Company Name</div>
+                        <input value={companyDraft.name || ""} onChange={(event) => updateCompanyDraftField("name", event.target.value)} style={detailInputStyle} />
                   </div>
                   <div>
                     <div style={sectionLabelStyle}>Other Name</div>
@@ -1595,8 +1703,8 @@ export default function PhonebookPage() {
               </div>
             </div>
 
-            <div style={modalSectionStyle}>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
+              <div style={modalSectionStyle}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
                 {[
                   ["Name", "full_name"],
                   ["Company", "company"],
