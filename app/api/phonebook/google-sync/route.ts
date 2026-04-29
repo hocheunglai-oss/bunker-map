@@ -155,16 +155,12 @@ function buildCompanyPhone(company: PhonebookCompany) {
   const country = normalizeText(company.tel_country)
   const area = normalizeText(company.tel_area)
   const tel1 = normalizeText(company.tel_no_1)
-  if (tel1) {
-    if (country && area) return `+${country}-${area}-${tel1}`
-    if (country) return `+${country}-${tel1}`
-    if (area) return `${area}-${tel1}`
-    return tel1
-  }
-  if (company.phone) return normalizeDialablePhone(company.phone)
+  const isHongKong = country === "852"
+
+  if (!tel1) return ""
+  if (isHongKong) return tel1
   if (country && area) return `+${country}-${area}-${tel1}`
   if (country) return `+${country}-${tel1}`
-  if (area) return `${area}-${tel1}`
   return ""
 }
 

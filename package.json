@@ -21,6 +21,7 @@
     "@maptiler/leaflet-maptilersdk": "^4.1.1",
     "@maptiler/sdk": "^3.11.1",
     "@supabase/supabase-js": "^2.98.0",
+    "@vercel/analytics": "^2.0.1",
     "googleapis": "^171.4.0",
     "leaflet": "^1.9.4",
     "next": "14.2.5",

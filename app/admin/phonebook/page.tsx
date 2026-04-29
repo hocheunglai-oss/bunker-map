@@ -76,11 +76,10 @@ type Company = {
   source_key: string
 }
 
-type PinHoverState = string | null
 type CompanyDraft = Company | null
-type PriorityMenuState = string | null
 
 const LAST_GOOGLE_SYNC_FAILED_KEY = "phonebook_last_google_sync_failed"
+const CONTACT_ORDER_STORAGE_KEY = "phonebook_contact_order_by_company"
 
 type GoogleSyncFailure = {
   id: string
@@ -88,7 +87,6 @@ type GoogleSyncFailure = {
 }
 
 const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
-const PRIORITY_OPTIONS = ["OPS", "PIC"] as const
 
 const COUNTRY_OPTIONS = [
   { name: "ALGERIA", code: "213" },
@@ -315,11 +313,6 @@ function normalizeTitleValue(value: string | null | undefined) {
   return TITLE_OPTIONS.includes(upper as (typeof TITLE_OPTIONS)[number]) ? upper : ""
 }
 
-function normalizePriorityTag(value: string | null | undefined) {
-  const upper = (value || "").trim().toUpperCase()
-  return PRIORITY_OPTIONS.includes(upper as (typeof PRIORITY_OPTIONS)[number]) ? upper : ""
-}
-
 function formatCompanyPhoneLine(company: Company) {
   const countryCode = (company.tel_country || "").trim()
   const areaCode = (company.tel_area || "").trim()
@@ -356,6 +349,13 @@ function buildContactSearchText(contact: Partial<Contact>) {
     contact.area_of_responsibility,
     contact.notes,
   ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+}
+
+function getCompanySearchText(company: Partial<Company>) {
+  return [company.name, company.other_name, formatCompanyPhoneLine(company as Company)]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
@@ -403,8 +403,6 @@ export default function PhonebookPage() {
   const [editing, setEditing] = useState(false)
   const [creatingContact, setCreatingContact] = useState(false)
   const [contactModalOpen, setContactModalOpen] = useState(false)
-  const [pinHoverId, setPinHoverId] = useState<PinHoverState>(null)
-  const [priorityMenuId, setPriorityMenuId] = useState<PriorityMenuState>(null)
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
@@ -412,6 +410,8 @@ export default function PhonebookPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
+  const [draggingContactId, setDraggingContactId] = useState("")
+  const [contactOrderByCompany, setContactOrderByCompany] = useState<Record<string, string[]>>({})
   const menuHideTimerRef = useRef<number | null>(null)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
@@ -420,7 +420,7 @@ export default function PhonebookPage() {
       full_name: contact.full_name?.toUpperCase?.() || contact.full_name,
       company: contact.company?.toUpperCase?.() || contact.company,
       title: normalizeTitleValue(contact.title) || null,
-      name_remark: normalizePriorityTag(contact.name_remark) || null,
+      name_remark: contact.name_remark?.toUpperCase?.() || contact.name_remark,
       position: contact.position?.toUpperCase?.() || contact.position,
       department: contact.department?.toUpperCase?.() || contact.department,
       tel_ext: contact.tel_ext?.toUpperCase?.() || contact.tel_ext,
@@ -535,6 +535,25 @@ export default function PhonebookPage() {
   }, [copiedKey])
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CONTACT_ORDER_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Record<string, string[]>
+      setContactOrderByCompany(parsed)
+    } catch {
+      setContactOrderByCompany({})
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(CONTACT_ORDER_STORAGE_KEY, JSON.stringify(contactOrderByCompany))
+  }, [contactOrderByCompany])
+
+  useEffect(() => {
+    setSelectedId("")
+  }, [selectedCompany])
+
+  useEffect(() => {
     return () => {
       if (menuHideTimerRef.current) window.clearTimeout(menuHideTimerRef.current)
     }
@@ -542,6 +561,12 @@ export default function PhonebookPage() {
 
   const queryTokens = useMemo(() => buildSearchTokens(query), [query])
   const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
+  const companyById = useMemo(() => {
+    return new Map(companies.map((company) => [company.id, company]))
+  }, [companies])
+  const companyByNameKey = useMemo(() => {
+    return new Map(companies.map((company) => [normalizeCompanyKey(company.name), company]))
+  }, [companies])
 
   const companiesWithMatchingContacts = useMemo(() => {
     if (queryTokens.length === 0) return new Set<string>()
@@ -559,7 +584,7 @@ export default function PhonebookPage() {
   const filteredCompanies = useMemo(() => {
     if (queryTokens.length === 0) return companies
     return companies.filter((company) => {
-      const haystack = company.name.toLowerCase()
+      const haystack = getCompanySearchText(company)
       const matchesCompanyName = queryTokens.every((token) => haystack.includes(token))
       return matchesCompanyName || companiesWithMatchingContacts.has(normalizeCompanyKey(company.name))
     })
@@ -568,7 +593,9 @@ export default function PhonebookPage() {
   const filteredContacts = useMemo(() => {
     let next = contacts.filter((contact) => {
       const matchesCompany = !selectedCompany || normalizeCompanyKey(contact.company) === selectedCompanyKey
-      const haystack = contact.search_text || ""
+      const companyMatchText =
+        companyByNameKey.get(normalizeCompanyKey(contact.company))?.other_name?.toLowerCase() || ""
+      const haystack = [contact.search_text || "", companyMatchText].filter(Boolean).join(" ")
       const matchesQuery =
         selectedCompany
           ? true
@@ -578,18 +605,24 @@ export default function PhonebookPage() {
 
     next = [...next].sort((a, b) => {
       if (selectedCompany) {
-        const aPriority = normalizePriorityTag(a.name_remark)
-        const bPriority = normalizePriorityTag(b.name_remark)
-        if (aPriority && !bPriority) return -1
-        if (!aPriority && bPriority) return 1
-        if (aPriority && bPriority && aPriority !== bPriority) {
-          return aPriority === "OPS" ? -1 : 1
+        const order = contactOrderByCompany[selectedCompanyKey] || []
+        const aIndex = order.indexOf(a.id)
+        const bIndex = order.indexOf(b.id)
+        const aOrdered = aIndex !== -1
+        const bOrdered = bIndex !== -1
+        if (aOrdered && bOrdered && aIndex !== bIndex) return aIndex - bIndex
+        if (aOrdered && !bOrdered) return -1
+        if (!aOrdered && bOrdered) return 1
+        if (a.name_remark && !b.name_remark) return -1
+        if (!a.name_remark && b.name_remark) return 1
+        if (a.name_remark && b.name_remark && a.name_remark !== b.name_remark) {
+          return a.name_remark.localeCompare(b.name_remark)
         }
       }
       return (a.full_name || "").localeCompare(b.full_name || "")
     })
     return next
-  }, [contacts, queryTokens, selectedCompany, selectedCompanyKey])
+  }, [companyByNameKey, contactOrderByCompany, contacts, queryTokens, selectedCompany, selectedCompanyKey])
 
   async function saveCurrent() {
     if (!draft) return
@@ -600,7 +633,7 @@ export default function PhonebookPage() {
       company: draft.company?.trim().toUpperCase() || null,
       company_source_id: draft.company_source_id?.trim() || null,
       title: normalizeTitleValue(draft.title) || null,
-      name_remark: normalizePriorityTag(draft.name_remark) || null,
+      name_remark: draft.name_remark?.trim().toUpperCase() || null,
       position: draft.position?.trim().toUpperCase() || null,
       department: draft.department?.trim().toUpperCase() || null,
       tel_ext: draft.tel_ext?.trim().toUpperCase() || null,
@@ -622,7 +655,7 @@ export default function PhonebookPage() {
       email_1: draft.personal_email?.trim() || null,
       email_2: draft.general_email?.trim() || null,
       notes: draft.notes?.trim().toUpperCase() || null,
-      favorite: Boolean(normalizePriorityTag(draft.name_remark)),
+      favorite: false,
       search_text: buildContactSearchText(draft),
     }
 
@@ -762,7 +795,8 @@ export default function PhonebookPage() {
     if (!companyDraft) return
     setCompanySaving(true)
     setMessage("")
-    const previousCompanyName = companyDraft.name.trim().toUpperCase()
+    const originalCompany = creatingCompany ? null : companyById.get(companyDraft.id) || null
+    const previousCompanyName = (originalCompany?.name || companyDraft.name).trim().toUpperCase()
     const payload = {
       name: companyDraft.name.trim().toUpperCase(),
       source_key: companyDraft.source_key,
@@ -867,7 +901,7 @@ export default function PhonebookPage() {
       setSelectedCompany(payload.name)
       setMessage("Saved.")
     } else {
-      if (selectedCompany === companyDraft.name && payload.name !== companyDraft.name) {
+      if (selectedCompany === previousCompanyName && payload.name !== previousCompanyName) {
         setSelectedCompany(payload.name)
       }
       setMessage("Saved.")
@@ -966,35 +1000,76 @@ export default function PhonebookPage() {
     setMessage("")
   }
 
-  async function togglePinned(contact: Contact) {
-    if (!selectedCompany) return
-    const { error } = await supabase.from("phonebook_contacts").update({ favorite: false, name_remark: null }).eq("id", contact.id)
-    if (error) {
-      setMessage("Unable to update priority.")
-      return
+  function reorderCompanyContacts(companyKey: string, draggedId: string, targetId: string) {
+    const companyContacts = contacts
+      .filter((contact) => normalizeCompanyKey(contact.company) === companyKey)
+      .map((contact) => contact.id)
+
+    const currentOrder = contactOrderByCompany[companyKey] || []
+    const merged = [...currentOrder.filter((id) => companyContacts.includes(id))]
+    for (const id of companyContacts) {
+      if (!merged.includes(id)) merged.push(id)
     }
-    setContacts((prev) => prev.map((item) => (item.id === contact.id ? { ...item, favorite: false, name_remark: null } : item)))
-    if (draft?.id === contact.id) setDraft({ ...draft, favorite: false, name_remark: null })
-    if (current?.id === contact.id) setCurrent({ ...current, favorite: false, name_remark: null })
-    setPriorityMenuId(null)
-    setMessage("Priority cleared.")
+
+    const fromIndex = merged.indexOf(draggedId)
+    const toIndex = merged.indexOf(targetId)
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return
+
+    const nextOrder = [...merged]
+    const [moved] = nextOrder.splice(fromIndex, 1)
+    nextOrder.splice(toIndex, 0, moved)
+    setContactOrderByCompany((prev) => ({ ...prev, [companyKey]: nextOrder }))
   }
 
-  async function setPriority(contact: Contact, tag: "" | "OPS" | "PIC") {
+  async function archiveCurrentContact() {
+    if (!draft) return
+    if (!confirm(`Archive ${draft.full_name || "this contact"} as past contact?`)) return
+
     const payload = {
-      favorite: Boolean(tag),
-      name_remark: tag || null,
+      tel_ext: null,
+      direct_line: null,
+      personal_email: null,
+      general_email: null,
+      business_phone: null,
+      business_phone_2: null,
+      email_1: null,
+      email_2: null,
+      name_remark: "PAST CONTACT",
+      favorite: false,
+      search_text: buildContactSearchText({
+        ...draft,
+        tel_ext: null,
+        direct_line: null,
+        personal_email: null,
+        general_email: null,
+        business_phone: null,
+        business_phone_2: null,
+        email_1: null,
+        email_2: null,
+        name_remark: "PAST CONTACT",
+      }),
     }
-    const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", contact.id)
+
+    setSaving(true)
+    setMessage("")
+    const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id)
     if (error) {
-      setMessage("Unable to update priority.")
+      setMessage("Unable to archive contact.")
+      setSaving(false)
       return
     }
-    setContacts((prev) => prev.map((item) => (item.id === contact.id ? { ...item, ...payload } : item)))
-    if (draft?.id === contact.id) setDraft({ ...draft, ...payload })
-    if (current?.id === contact.id) setCurrent({ ...current, ...payload })
-    setPriorityMenuId(null)
-    setMessage(tag ? `${tag} set.` : "Priority cleared.")
+
+    const nextDraft = { ...draft, ...payload }
+    setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
+    setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
+    setDraft(nextDraft)
+    setEditing(false)
+    const synced = await syncGoogleContacts(false, [draft.id], {
+      successMessage: "Archived and synced.",
+      failureMessage: "Archived locally, but web Google sync failed.",
+    })
+    if (synced) setMessage("Archived and synced.")
+    setSaving(false)
   }
 
   function updateField<K extends keyof Contact>(field: K, value: Contact[K]) {
@@ -1052,7 +1127,10 @@ export default function PhonebookPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          selectedCompany: fullRebuild ? null : selectedCompany || null,
+          selectedCompany:
+            fullRebuild || contactIds?.length || options?.deleteContactIds?.length || options?.retryMissing
+              ? null
+              : selectedCompany || null,
           fullRebuild,
           contactIds: contactIds?.length ? contactIds : null,
           deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
@@ -1348,20 +1426,35 @@ export default function PhonebookPage() {
                   ref={(node) => {
                     contactRefs.current[contact.id] = node
                   }}
+                  draggable={Boolean(selectedCompany)}
                   onClick={() => setSelectedId(contact.id)}
                   onKeyDown={(event) => onContactKeyDown(event, contact.id)}
-                  onMouseEnter={() => setPinHoverId(contact.id)}
-                  onMouseLeave={() => setPinHoverId((prev) => (prev === contact.id ? null : prev))}
+                  onDragStart={() => setDraggingContactId(contact.id)}
+                  onDragEnd={() => setDraggingContactId("")}
+                  onDragOver={(event) => {
+                    if (!selectedCompany || !draggingContactId || draggingContactId === contact.id) return
+                    event.preventDefault()
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    if (!selectedCompany || !draggingContactId || draggingContactId === contact.id) return
+                    reorderCompanyContacts(selectedCompanyKey, draggingContactId, contact.id)
+                    setDraggingContactId("")
+                  }}
                   style={{
                     ...listRowStyle,
                     background: selectedId === contact.id ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)" : "transparent",
                     minHeight: "58px",
+                    opacity: draggingContactId === contact.id ? 0.72 : 1,
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "3px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-                      {normalizePriorityTag(contact.name_remark) === "OPS" ? <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>OPS</span> : null}
-                      {normalizePriorityTag(contact.name_remark) === "PIC" ? <span style={{ color: "#8ff0c8", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>PIC</span> : null}
+                      {contact.name_remark ? (
+                        <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>
+                          {contact.name_remark}
+                        </span>
+                      ) : null}
                       <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
                       {contact.tel_ext ? (
                         <span style={{ color: "#ffd166", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -1369,53 +1462,8 @@ export default function PhonebookPage() {
                         </span>
                       ) : null}
                     </div>
-                    <div style={{ width: "74px", display: "flex", justifyContent: "flex-end", flex: "0 0 74px", position: "relative" }}>
-                      {selectedCompany ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setPriorityMenuId((prev) => (prev === contact.id ? null : contact.id))
-                            }}
-                            style={{
-                              ...buttonStyle,
-                              padding: "4px 8px",
-                              fontSize: "10px",
-                              minWidth: "46px",
-                              visibility: pinHoverId === contact.id || priorityMenuId === contact.id ? "visible" : "hidden",
-                            }}
-                          >
-                            PIN
-                          </button>
-                          {priorityMenuId === contact.id ? (
-                            <div
-                              onClick={(event) => event.stopPropagation()}
-                              style={{
-                                ...panelStyle,
-                                position: "absolute",
-                                top: "calc(100% + 6px)",
-                                right: 0,
-                                padding: "8px",
-                                display: "grid",
-                                gap: "6px",
-                                zIndex: 5,
-                                minWidth: "78px",
-                              }}
-                            >
-                              <button type="button" onClick={() => void setPriority(contact, "OPS")} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", color: "#ffd166" }}>
-                                OPS
-                              </button>
-                              <button type="button" onClick={() => void setPriority(contact, "PIC")} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", color: "#8ff0c8" }}>
-                                PIC
-                              </button>
-                              <button type="button" onClick={() => void togglePinned(contact)} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px" }}>
-                                CLEAR
-                              </button>
-                            </div>
-                          ) : null}
-                        </>
-                      ) : null}
+                    <div style={{ width: "58px", display: "flex", justifyContent: "flex-end", flex: "0 0 58px" }}>
+                      {selectedCompany ? <span style={{ color: "#8fd7ff", fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>↕</span> : null}
                     </div>
                   </div>
                   <div style={{ color: "#8fd7ff", fontSize: "12px", textTransform: "uppercase" }}>{normalizeCompanyName(contact.company)}</div>
@@ -1427,7 +1475,26 @@ export default function PhonebookPage() {
           <section style={{ ...panelStyle, padding: "16px", display: "grid", gap: "12px" }}>
             {displayed ? (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto auto auto auto", gap: "10px", alignItems: "end" }}>
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {editing ? (
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                      <button onClick={() => void saveCurrent()} disabled={saving} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
+                        {saving ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        onClick={() => void archiveCurrentContact()}
+                        disabled={saving}
+                        style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 175, 64, 0.3) 0%, rgba(180, 97, 10, 0.14) 100%)", color: "#fff0cb", border: "1px solid rgba(255, 176, 89, 0.24)" }}
+                      >
+                        Archive
+                      </button>
+                      <button onClick={() => void deleteCurrent()} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>
+                        Delete
+                      </button>
+                      <button onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px" }}>Cancel</button>
+                    </div>
+                  ) : null}
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                   <div>
                     <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
                     {editing ? (
@@ -1454,17 +1521,7 @@ export default function PhonebookPage() {
                       Edit
                     </button>
                   ) : null}
-                  {editing ? (
-                    <>
-                      <button onClick={() => void saveCurrent()} disabled={saving} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
-                        {saving ? "Saving..." : "Save"}
-                      </button>
-                      <button onClick={() => setEditing(false)} style={buttonStyle}>Cancel</button>
-                      <button onClick={() => void deleteCurrent()} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>
-                        Delete
-                      </button>
-                    </>
-                  ) : null}
+                  </div>
                 </div>
 
                 <div>
@@ -1493,8 +1550,45 @@ export default function PhonebookPage() {
                 <div style={{ display: "grid", gap: "12px" }}>
                   <div style={modalSectionStyle}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px" }}>
+                      {editing ? (
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
+                          <div>
+                            <div style={sectionLabelStyle}>Title</div>
+                            <select
+                              value={(draft?.title as string) || ""}
+                              onChange={(event) => updateField("title", event.target.value as never)}
+                              style={selectStyle}
+                            >
+                              <option value="">Select title</option>
+                              {TITLE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <div style={sectionLabelStyle}>Label</div>
+                            <input value={draft?.name_remark || ""} onChange={(event) => updateCapsField("name_remark", event.target.value)} style={detailInputStyle} />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {displayed.title ? (
+                            <div>
+                              <div style={sectionLabelStyle}>Title</div>
+                              <div style={{ fontSize: "15px", lineHeight: 1.5, padding: "2px 0" }}>{displayed.title}</div>
+                            </div>
+                          ) : null}
+                          {displayed.name_remark ? (
+                            <div>
+                              <div style={sectionLabelStyle}>Label</div>
+                              <div style={{ fontSize: "15px", lineHeight: 1.5, padding: "2px 0", color: "#ffd166", textTransform: "uppercase", fontWeight: 700 }}>{displayed.name_remark}</div>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
                       {[
-                        ["Title", "title"],
                         ["Ext", "tel_ext"],
                         ["Direct line", "direct_line"],
                         ["Mobile 1", "mobile_1"],
@@ -1509,20 +1603,7 @@ export default function PhonebookPage() {
                         return (
                           <div key={field}>
                             <div style={sectionLabelStyle}>{label}</div>
-                            {editing ? key === "title" ? (
-                              <select
-                                value={(draft?.[key] as string) || ""}
-                                onChange={(event) => updateField(key, event.target.value as never)}
-                                style={selectStyle}
-                              >
-                                <option value="">Select title</option>
-                                {TITLE_OPTIONS.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
+                            {editing ? (
                               <input
                                 value={(draft?.[key] as string) || ""}
                                 onChange={(event) =>
@@ -1705,10 +1786,30 @@ export default function PhonebookPage() {
 
               <div style={modalSectionStyle}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <div style={sectionLabelStyle}>Title</div>
+                    <select
+                      value={(draft.title as string) || ""}
+                      onChange={(event) => updateField("title", event.target.value as never)}
+                      style={selectStyle}
+                    >
+                      <option value="">Select title</option>
+                      {TITLE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={sectionLabelStyle}>Label</div>
+                    <input value={draft.name_remark || ""} onChange={(event) => updateCapsField("name_remark", event.target.value)} style={detailInputStyle} />
+                  </div>
+                </div>
                 {[
                   ["Name", "full_name"],
                   ["Company", "company"],
-                  ["Title", "title"],
                   ["Ext", "tel_ext"],
                   ["Direct line", "direct_line"],
                   ["Mobile 1", "mobile_1"],
@@ -1721,30 +1822,15 @@ export default function PhonebookPage() {
                   return (
                     <div key={field}>
                       <div style={sectionLabelStyle}>{label}</div>
-                      {key === "title" ? (
-                        <select
-                          value={(draft[key] as string) || ""}
-                          onChange={(event) => updateField(key, event.target.value as never)}
-                          style={selectStyle}
-                        >
-                          <option value="">Select title</option>
-                          {TITLE_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          value={(draft[key] as string) || ""}
-                          onChange={(event) =>
-                            key === "personal_email" || key === "general_email" || key === "private_email"
-                              ? updateField(key, event.target.value as never)
-                              : updateCapsField(key, event.target.value)
-                          }
-                          style={detailInputStyle}
-                        />
-                      )}
+                      <input
+                        value={(draft[key] as string) || ""}
+                        onChange={(event) =>
+                          key === "personal_email" || key === "general_email" || key === "private_email"
+                            ? updateField(key, event.target.value as never)
+                            : updateCapsField(key, event.target.value)
+                        }
+                        style={detailInputStyle}
+                      />
                     </div>
                   )
                 })}
