@@ -585,7 +585,6 @@ export default function TaiwanReport() {
                         padding: "11px 10px",
                         fontWeight: 700,
                         letterSpacing: "0.03em",
-                        textTransform: "uppercase",
                         textAlign: "center",
                         borderTop: "1px solid rgba(255,255,255,0.06)",
                         borderRight: "1px solid rgba(255,255,255,0.06)",
