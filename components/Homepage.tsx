@@ -128,7 +128,7 @@ function ZoomControls() {
       style={{
         position: "absolute",
         right: 18,
-        bottom: isMobile ? 92 : 20,
+        bottom: isMobile ? 118 : 20,
         zIndex: 1000,
         display: "flex",
         flexDirection: "column",
@@ -837,7 +837,7 @@ export default function Homepage() {
         style={{
           position: "absolute",
           left: panelInset,
-          bottom: isMobile ? 88 : panelInset,
+          bottom: isMobile ? 114 : panelInset,
           zIndex: 1000,
           display: "flex",
           gap: "12px",
