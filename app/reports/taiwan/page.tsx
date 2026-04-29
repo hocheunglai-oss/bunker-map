@@ -545,7 +545,7 @@ export default function TaiwanReport() {
                       color: "#dff3ff",
                     }}
                   >
-                    Port Characteristics
+                    Minimum Quantity
                   </th>
                 </tr>
                 <tr>
