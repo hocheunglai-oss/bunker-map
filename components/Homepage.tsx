@@ -121,13 +121,14 @@ function BaseMapLayer() {
 
 function ZoomControls() {
   const map = useMap()
+  const isMobile = useIsMobile()
 
   return (
     <div
       style={{
         position: "absolute",
         right: 18,
-        bottom: 20,
+        bottom: isMobile ? 92 : 20,
         zIndex: 1000,
         display: "flex",
         flexDirection: "column",
@@ -836,7 +837,7 @@ export default function Homepage() {
         style={{
           position: "absolute",
           left: panelInset,
-          bottom: panelInset,
+          bottom: isMobile ? 88 : panelInset,
           zIndex: 1000,
           display: "flex",
           gap: "12px",

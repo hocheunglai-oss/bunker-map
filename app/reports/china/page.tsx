@@ -101,7 +101,20 @@ export default function ChinaReport() {
 
   useEffect(() => {
     if (!isMobile) return
-    window.scrollTo(0, 0)
+    const resetScroll = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" })
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+    }
+
+    resetScroll()
+    const frame = window.requestAnimationFrame(resetScroll)
+    const timer = window.setTimeout(resetScroll, 180)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
   }, [isMobile])
 
   const totalRows = useMemo(
