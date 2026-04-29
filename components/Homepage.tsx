@@ -14,6 +14,7 @@ import DisclaimerLink from "@/components/DisclaimerLink"
 type Port = {
   id: number
   name: string
+  type?: string | null
   lat: number | null
   lng: number | null
   hsfo: number | null
@@ -339,8 +340,10 @@ export default function Homepage() {
       return
     }
 
-    const filtered = ports.filter((port) =>
-      port.name.toLowerCase().includes(search.toLowerCase())
+    const filtered = ports.filter(
+      (port) =>
+        port.type !== "divider" &&
+        port.name.toLowerCase().includes(search.toLowerCase())
     )
 
     setResults(filtered.slice(0, 8))

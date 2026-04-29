@@ -29,6 +29,7 @@ type PhonebookContact = {
 
 type PhonebookCompany = {
   name: string
+  country: string | null
   tel_country: string | null
   tel_area: string | null
   tel_no_1: string | null
@@ -152,10 +153,11 @@ function normalizeCompanyKey(value: string | null | undefined) {
 }
 
 function buildCompanyPhone(company: PhonebookCompany) {
+  const countryName = normalizeText(company.country).toUpperCase()
   const country = normalizeText(company.tel_country)
   const area = normalizeText(company.tel_area)
   const tel1 = normalizeText(company.tel_no_1)
-  const isHongKong = country === "852"
+  const isHongKong = country === "852" || countryName === "HONG KONG"
 
   if (!tel1) return ""
   if (isHongKong) return tel1
@@ -172,7 +174,7 @@ async function loadCompanyPhoneMap(supabase: any) {
   while (true) {
     const { data, error } = await supabase
       .from("phonebook_companies")
-      .select("name,tel_country,tel_area,tel_no_1,phone")
+      .select("name,country,tel_country,tel_area,tel_no_1,phone")
       .order("name", { ascending: true })
       .range(from, from + pageSize - 1)
 

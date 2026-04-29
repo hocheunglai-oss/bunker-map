@@ -411,6 +411,8 @@ export default function PhonebookPage() {
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
   const [draggingContactId, setDraggingContactId] = useState("")
+  const [dragOverContactId, setDragOverContactId] = useState("")
+  const [dragInsertPosition, setDragInsertPosition] = useState<"before" | "after">("before")
   const [contactOrderByCompany, setContactOrderByCompany] = useState<Record<string, string[]>>({})
   const menuHideTimerRef = useRef<number | null>(null)
 
@@ -1000,7 +1002,7 @@ export default function PhonebookPage() {
     setMessage("")
   }
 
-  function reorderCompanyContacts(companyKey: string, draggedId: string, targetId: string) {
+  function reorderCompanyContacts(companyKey: string, draggedId: string, targetId: string, position: "before" | "after") {
     const companyContacts = contacts
       .filter((contact) => normalizeCompanyKey(contact.company) === companyKey)
       .map((contact) => contact.id)
@@ -1013,11 +1015,14 @@ export default function PhonebookPage() {
 
     const fromIndex = merged.indexOf(draggedId)
     const toIndex = merged.indexOf(targetId)
-    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return
+    if (fromIndex === -1 || toIndex === -1) return
 
     const nextOrder = [...merged]
     const [moved] = nextOrder.splice(fromIndex, 1)
-    nextOrder.splice(toIndex, 0, moved)
+    const adjustedTargetIndex = nextOrder.indexOf(targetId)
+    if (adjustedTargetIndex === -1) return
+    const insertIndex = position === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex
+    nextOrder.splice(insertIndex, 0, moved)
     setContactOrderByCompany((prev) => ({ ...prev, [companyKey]: nextOrder }))
   }
 
@@ -1429,35 +1434,57 @@ export default function PhonebookPage() {
                   draggable={Boolean(selectedCompany)}
                   onClick={() => setSelectedId(contact.id)}
                   onKeyDown={(event) => onContactKeyDown(event, contact.id)}
-                  onDragStart={() => setDraggingContactId(contact.id)}
-                  onDragEnd={() => setDraggingContactId("")}
+                  onDragStart={() => {
+                    setDraggingContactId(contact.id)
+                    setDragOverContactId("")
+                  }}
+                  onDragEnd={() => {
+                    setDraggingContactId("")
+                    setDragOverContactId("")
+                  }}
                   onDragOver={(event) => {
                     if (!selectedCompany || !draggingContactId || draggingContactId === contact.id) return
                     event.preventDefault()
+                    const bounds = event.currentTarget.getBoundingClientRect()
+                    const midpoint = bounds.top + bounds.height / 2
+                    setDragOverContactId(contact.id)
+                    setDragInsertPosition(event.clientY >= midpoint ? "after" : "before")
+                  }}
+                  onDragLeave={() => {
+                    setDragOverContactId((prev) => (prev === contact.id ? "" : prev))
                   }}
                   onDrop={(event) => {
                     event.preventDefault()
                     if (!selectedCompany || !draggingContactId || draggingContactId === contact.id) return
-                    reorderCompanyContacts(selectedCompanyKey, draggingContactId, contact.id)
+                    reorderCompanyContacts(selectedCompanyKey, draggingContactId, contact.id, dragInsertPosition)
                     setDraggingContactId("")
+                    setDragOverContactId("")
                   }}
                   style={{
                     ...listRowStyle,
                     background: selectedId === contact.id ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)" : "transparent",
                     minHeight: "58px",
                     opacity: draggingContactId === contact.id ? 0.72 : 1,
+                    borderTop:
+                      dragOverContactId === contact.id && dragInsertPosition === "before"
+                        ? "2px solid rgba(143, 215, 255, 0.95)"
+                        : listRowStyle.borderTop,
+                    borderBottom:
+                      dragOverContactId === contact.id && dragInsertPosition === "after"
+                        ? "2px solid rgba(143, 215, 255, 0.95)"
+                        : listRowStyle.borderBottom,
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "3px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
                       {contact.name_remark ? (
-                        <span style={{ color: "#ffd166", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800 }}>
+                        <span style={{ color: "#ffb15c", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, whiteSpace: "nowrap" }}>
                           {contact.name_remark}
                         </span>
                       ) : null}
-                      <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
                       {contact.tel_ext ? (
-                        <span style={{ color: "#ffd166", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                        <span style={{ color: "#8ff0c8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
                           EXT {contact.tel_ext}
                         </span>
                       ) : null}
