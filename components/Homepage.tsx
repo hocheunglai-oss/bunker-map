@@ -780,7 +780,7 @@ export default function Homepage() {
           )}
         </div>
 
-        {!search && selectedPortId == null && (
+        {!isMobile && !search && selectedPortId == null && (
           <div style={{ display: "grid", gap: "8px" }}>
             {keyPorts.map((port) => (
               <button
@@ -887,27 +887,6 @@ export default function Homepage() {
               background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
               textColor: "#d7e8ff",
             },
-            {
-              key: "whatsapp",
-              label: "Contact Us",
-              href: "https://wa.me/85266885575",
-              icon: (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M20 11.54c0 4.47-3.66 8.1-8.17 8.1-1.42 0-2.75-.36-3.9-1l-3.93 1.23 1.28-3.8a8.03 8.03 0 0 1-1.38-4.53c0-4.47 3.66-8.1 8.17-8.1S20 7.07 20 11.54Z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9.27 8.72c.16-.37.32-.38.47-.39.12 0 .26-.01.4-.01.13 0 .34.05.52.45.18.4.61 1.39.66 1.49.05.1.09.23.02.37-.07.14-.1.23-.2.35-.1.12-.22.27-.31.36-.1.1-.2.2-.09.4.11.19.48.79 1.03 1.28.71.64 1.31.84 1.5.94.19.1.3.08.42-.05.11-.13.46-.53.59-.72.13-.18.26-.15.44-.09.18.06 1.14.53 1.34.62.2.1.33.15.37.24.05.09.05.54-.13 1.06-.18.51-1.05 1-1.45 1.06-.39.07-.88.1-2.49-.55-1.94-.78-3.2-2.74-3.3-2.87-.1-.13-.79-1.04-.79-1.99 0-.95.5-1.42.67-1.61Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              ),
-              background: "linear-gradient(180deg, rgba(37, 211, 102, 0.2) 0%, rgba(24, 148, 70, 0.12) 100%)",
-              textColor: "#d8ffe7",
-            },
           ].map((item) => {
             const expanded = hoveredAction === item.key
 
@@ -915,9 +894,7 @@ export default function Homepage() {
               width: expanded && !isMobile ? "220px" : isMobile ? "46px" : "50px",
               height: isMobile ? "46px" : "50px",
               borderRadius: "999px",
-              border: item.key === "whatsapp"
-                ? "1px solid rgba(73, 219, 165, 0.42)"
-                : "1px solid rgba(143, 215, 255, 0.46)",
+              border: "1px solid rgba(143, 215, 255, 0.46)",
               background: item.background,
               color: item.textColor,
               display: "inline-flex",
@@ -925,11 +902,9 @@ export default function Homepage() {
               justifyContent: expanded && !isMobile ? "flex-start" : "center",
               gap: expanded && !isMobile ? "10px" : "0",
               cursor: "pointer",
-              boxShadow: item.key === "whatsapp"
-                ? "inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(20,130,93,0.26), 0 0 0 1px rgba(37,211,102,0.12)"
-                : "inset 0 1px 0 rgba(255,255,255,0.14), 0 14px 34px rgba(8,24,44,0.28), 0 0 0 1px rgba(90,169,255,0.16)",
-              backdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
-              WebkitBackdropFilter: item.key === "whatsapp" ? undefined : "blur(14px)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), 0 14px 34px rgba(8,24,44,0.28), 0 0 0 1px rgba(90,169,255,0.16)",
+              backdropFilter: "blur(14px)",
+              WebkitBackdropFilter: "blur(14px)",
               textDecoration: "none",
               overflow: "hidden",
               whiteSpace: "nowrap",
@@ -949,24 +924,6 @@ export default function Homepage() {
                 )}
               </>
             )
-
-            if (item.href) {
-              return (
-                <a
-                  key={item.key}
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={item.label}
-                  title={item.label}
-                  style={buttonStyle}
-                  onMouseEnter={() => setHoveredAction(item.key)}
-                  onMouseLeave={() => setHoveredAction(null)}
-                >
-                  {content}
-                </a>
-              )
-            }
 
             return (
               <div

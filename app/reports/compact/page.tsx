@@ -104,6 +104,11 @@ export default function CompactReport() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!isMobile) return
+    window.scrollTo(0, 0)
+  }, [isMobile])
+
   const totalRows = useMemo(
     () => sections.reduce((sum, section) => sum + section.rows.length, 0),
     [sections]

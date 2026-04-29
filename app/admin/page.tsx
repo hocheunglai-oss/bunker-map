@@ -70,6 +70,13 @@ const mutedTradingButtonStyle: React.CSSProperties = {
   boxShadow: "0 18px 40px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(180,190,200,0.06)",
 }
 
+const lockedPanelShellStyle: React.CSSProperties = {
+  ...panelStyle,
+  background: "linear-gradient(180deg, rgba(33, 43, 54, 0.9) 0%, rgba(23, 31, 40, 0.86) 100%)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+}
+
 export default function AdminPage() {
   const isMobile = useIsMobile()
   const router = useRouter()
@@ -131,11 +138,13 @@ export default function AdminPage() {
             }}
           >
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
-              <img
-                src="/logo-trans.png"
-                alt="Bunker Map"
-                style={{ height: isMobile ? "68px" : "86px", width: "auto" }}
-              />
+              <a href="/" style={{ display: "inline-flex" }}>
+                <img
+                  src="/logo-trans.png"
+                  alt="Bunker Map"
+                  style={{ height: isMobile ? "68px" : "86px", width: "auto" }}
+                />
+              </a>
             </div>
 
             <div
@@ -257,139 +266,103 @@ export default function AdminPage() {
 
         <div
           style={{
-            ...panelStyle,
-            background: authenticated
-              ? panelStyle.background
-              : "linear-gradient(180deg, rgba(28, 38, 50, 0.9) 0%, rgba(20, 28, 38, 0.84) 100%)",
-            border: authenticated
-              ? panelStyle.border
-              : "1px solid rgba(255,255,255,0.12)",
+            ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
-            boxShadow: authenticated
-              ? panelStyle.boxShadow
-              : "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: "12px",
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              color: authenticated ? "#8fd7ff" : "#8f98a2",
-              marginBottom: "10px",
-              fontWeight: 700,
-            }}
-          >
-            Report Tools
-          </div>
-
-          <div style={{ display: "grid", gap: "12px" }}>
-            {[
-              { label: "CHINA AND COMPACT", path: "/admin/pricesetter" },
-              { label: "HONG KONG", path: "/admin/hongkongpricehistory" },
-              { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
-              { label: "TAIWAN REMARKS", path: "/admin/taiwanremarks" },
-            ].map((item) => (
-              <button
-                key={item.label}
-                onClick={() => authenticated && router.push(item.path)}
-                disabled={!authenticated}
+          {authenticated ? (
+            <>
+              <div
                 style={{
-                  ...actionButtonStyle,
-                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                  background: authenticated
-                    ? "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)"
-                    : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
-                  color: authenticated ? "#d9eeff" : "transparent",
-                  borderColor: authenticated ? "rgba(120, 188, 255, 0.26)" : "rgba(255,255,255,0.08)",
-                  cursor: authenticated ? "pointer" : "default",
-                  boxShadow: authenticated
-                    ? "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)"
-                    : "none",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#8fd7ff",
+                  marginBottom: "10px",
+                  fontWeight: 700,
                 }}
               >
-                <span style={{ filter: authenticated ? "none" : "blur(7px)" }}>
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
+                Report Tools
+              </div>
+
+              <div style={{ display: "grid", gap: "12px" }}>
+                {[
+                  { label: "CHINA AND COMPACT", path: "/admin/pricesetter" },
+                  { label: "HONG KONG", path: "/admin/hongkongpricehistory" },
+                  { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
+                  { label: "TAIWAN REMARKS", path: "/admin/taiwanremarks" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => router.push(item.path)}
+                    style={{
+                      ...actionButtonStyle,
+                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
+                      color: "#d9eeff",
+                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      cursor: "pointer",
+                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
 
         </div>
 
         <div
           style={{
-            ...panelStyle,
-            background: "linear-gradient(180deg, rgba(58, 64, 72, 0.9) 0%, rgba(35, 39, 46, 0.86) 100%)",
-            border: "1px solid rgba(255,255,255,0.12)",
+            ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
-            boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: "12px",
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              color: "#c0c6cd",
-              marginBottom: "10px",
-              fontWeight: 700,
-            }}
-          >
-            Trading Tools
-          </div>
-
-          <div style={{ display: "grid", gap: "12px" }}>
-            {[
-              { label: "PHONEBOOK", path: "/admin/phonebook" },
-              { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
-            ].map((item) => (
-              <button
-                key={item.label}
-                onClick={() => authenticated && router.push(item.path)}
-                disabled={!authenticated}
+          {authenticated ? (
+            <>
+              <div
                 style={{
-                  ...mutedTradingButtonStyle,
-                  padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                  background: authenticated
-                    ? mutedTradingButtonStyle.background
-                    : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
-                  color: authenticated ? mutedTradingButtonStyle.color : "transparent",
-                  borderColor: authenticated ? mutedTradingButtonStyle.borderColor : "rgba(255,255,255,0.08)",
-                  cursor: authenticated ? "pointer" : "default",
-                  boxShadow: authenticated
-                    ? mutedTradingButtonStyle.boxShadow
-                    : "none",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#8fd7ff",
+                  marginBottom: "10px",
+                  fontWeight: 700,
                 }}
               >
-                <span
-                  style={{
-                    filter: authenticated ? "none" : "blur(7px)",
-                  }}
-                >
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
+                Trading Tools
+              </div>
 
-          <div
-            style={{
-              marginTop: "12px",
-              textAlign: "center",
-              color: "#b7bdc4",
-              fontSize: "12px",
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              fontWeight: 700,
-            }}
-          >
-            Under Construction
-          </div>
+              <div style={{ display: "grid", gap: "12px" }}>
+                {[
+                  { label: "PHONEBOOK", path: "/admin/phonebook" },
+                  { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => router.push(item.path)}
+                    style={{
+                      ...actionButtonStyle,
+                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
+                      color: "#d9eeff",
+                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      cursor: "pointer",
+                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
     </div>

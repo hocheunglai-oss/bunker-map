@@ -117,6 +117,11 @@ export default function HongKongReport() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!isMobile) return
+    window.scrollTo(0, 0)
+  }, [isMobile])
+
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
