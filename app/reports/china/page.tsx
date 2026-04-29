@@ -146,7 +146,8 @@ export default function ChinaReport() {
               gap: isMobile ? "10px" : "18px",
             }}
           >
-            <div
+            <a
+              href="/"
               style={{
                 width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "220px",
@@ -155,6 +156,7 @@ export default function ChinaReport() {
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
+                textDecoration: "none",
               }}
             >
               <img
@@ -162,7 +164,7 @@ export default function ChinaReport() {
                 alt="Bunker map logo"
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "210px", opacity: 0.96 }}
               />
-            </div>
+            </a>
 
             <div
               style={{

@@ -141,7 +141,8 @@ export default function HongKongReport() {
               gap: isMobile ? "10px" : "18px",
             }}
           >
-            <div
+            <a
+              href="/"
               style={{
                 width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "240px",
@@ -150,6 +151,7 @@ export default function HongKongReport() {
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
+                textDecoration: "none",
               }}
             >
               <img
@@ -157,7 +159,7 @@ export default function HongKongReport() {
                 alt="Bunker map logo"
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
-            </div>
+            </a>
 
             <div
               style={{

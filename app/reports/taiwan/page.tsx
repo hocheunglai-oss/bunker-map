@@ -42,6 +42,7 @@ const sectionTitleStyle: React.CSSProperties = {
   letterSpacing: "0.04em",
   fontWeight: 600,
   textShadow: "0 10px 28px rgba(4,16,29,0.24)",
+  textTransform: "uppercase",
 }
 
 const pillButtonStyle: React.CSSProperties = {
@@ -73,22 +74,62 @@ const fuelAccentStyles = {
   },
 } as const
 
+const taiwanMinimumQuantityRows = [
+  { port: "Kaohsiung", oilFenceCharge: "89 or 338", hsfo: "30", vlsfo: "60", lsmgo: "25" },
+  { port: "Keelung", oilFenceCharge: "208", hsfo: "NA", vlsfo: "60", lsmgo: "20" },
+  { port: "Taichung", oilFenceCharge: "475", hsfo: "NA", vlsfo: "60", lsmgo: "20" },
+  { port: "Suao", oilFenceCharge: "NA", hsfo: "NA", vlsfo: "19", lsmgo: "10" },
+  { port: "Hualien", oilFenceCharge: "NA", hsfo: "NA", vlsfo: "19", lsmgo: "20" },
+]
+
+function subtleNaText(portName?: string) {
+  if (portName === "Keelung" || portName === "Suao") {
+    return "rgba(86, 113, 140, 0.42)"
+  }
+
+  return "rgba(70, 96, 122, 0.4)"
+}
+
 function color(change: number | null) {
   if (change == null) return "#f5fbff"
   if (change > 0) return "#60d394"
   if (change < 0) return "#ff7b72"
-  return "#f5fbff"
+  return "#ffd166"
 }
 
 function fmt(change: number | null) {
   if (change == null) return "-"
   if (change > 0) return `+${change}`
+  if (change === 0) return "-"
   return String(change)
 }
 
 function arrow(change: number | null) {
   if (change == null || change === 0) return ""
   return change > 0 ? " ▲" : " ▼"
+}
+
+function isHsfoUnavailablePort(portName: string) {
+  return ["Keelung", "Taichung", "Hualien", "Suao"].includes(portName)
+}
+
+function unavailableHsfoColor(portName: string) {
+  return subtleNaText(portName)
+}
+
+function renderUnavailableHsfo(portName: string) {
+  return (
+    <span
+      style={{
+        color: unavailableHsfoColor(portName),
+        fontSize: "13px",
+        fontWeight: 700,
+        letterSpacing: "0.03em",
+      }}
+    >
+      NA
+    </span>
+  )
 }
 
 export default function TaiwanReport() {
@@ -139,7 +180,8 @@ export default function TaiwanReport() {
               gap: isMobile ? "10px" : "18px",
             }}
           >
-            <div
+            <a
+              href="/"
               style={{
                 width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "240px",
@@ -148,6 +190,7 @@ export default function TaiwanReport() {
                 display: "flex",
                 justifyContent: "center",
                 flex: "0 0 auto",
+                textDecoration: "none",
               }}
             >
               <img
@@ -155,7 +198,7 @@ export default function TaiwanReport() {
                 alt="Bunker map logo"
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
-            </div>
+            </a>
 
             <div
               style={{
@@ -285,22 +328,32 @@ export default function TaiwanReport() {
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.hsfo.today ?? "-"}
+                      {isHsfoUnavailablePort(row.port)
+                        ? renderUnavailableHsfo(row.port)
+                        : row.hsfo.today ?? "-"}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.hsfo.last ?? "-"}
+                      {isHsfoUnavailablePort(row.port)
+                        ? renderUnavailableHsfo(row.port)
+                        : row.hsfo.last ?? "-"}
                     </td>
                     <td
                       style={{
                         padding: "16px 10px",
                         fontWeight: 700,
-                        color: color(row.hsfo.change),
+                        color: isHsfoUnavailablePort(row.port) ? unavailableHsfoColor(row.port) : color(row.hsfo.change),
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                         borderRight: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >
-                      {fmt(row.hsfo.change)}
-                      {arrow(row.hsfo.change)}
+                      {isHsfoUnavailablePort(row.port)
+                        ? renderUnavailableHsfo(row.port)
+                        : (
+                          <>
+                            {fmt(row.hsfo.change)}
+                            {arrow(row.hsfo.change)}
+                          </>
+                        )}
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -413,12 +466,152 @@ export default function TaiwanReport() {
                     >
                       {index + 1}
                     </span>
-                    <span style={{ lineHeight: 1.5 }}>{item}</span>
+                    <span style={{ lineHeight: 1.5, textTransform: "uppercase" }}>{item}</span>
                   </div>
                 ))}
             </div>
           </div>
         )}
+
+        <div style={{ ...cardStyle, overflow: "hidden", marginBottom: "20px" }}>
+          <div
+            style={{
+              padding: "12px 16px 0",
+              fontSize: "10px",
+              textTransform: "uppercase",
+              letterSpacing: "0.12em",
+              color: "#8dcfff",
+            }}
+          >
+            Port Characteristics
+          </div>
+          <div style={{ overflowX: "auto", padding: "10px 12px 14px" }}>
+            <table
+              style={{
+                width: "100%",
+                minWidth: isMobile ? "640px" : "100%",
+                borderCollapse: "separate",
+                borderSpacing: 0,
+                fontSize: "13px",
+                fontVariantNumeric: "tabular-nums",
+                overflow: "hidden",
+                borderRadius: "16px",
+                border: "1px solid rgba(173, 216, 255, 0.14)",
+                background: "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.015) 100%)",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th
+                    rowSpan={2}
+                    style={{
+                      padding: "12px 10px",
+                      textAlign: "center",
+                      background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                      borderRight: "1px solid rgba(255,255,255,0.08)",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Port
+                  </th>
+                  <th
+                    rowSpan={2}
+                    style={{
+                      padding: "12px 10px",
+                      textAlign: "center",
+                      background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                      borderRight: "1px solid rgba(255,255,255,0.08)",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Oil Fence Charge (USD)
+                  </th>
+                  <th
+                    colSpan={3}
+                    style={{
+                      padding: "10px 10px 8px",
+                      textAlign: "center",
+                      background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      fontSize: "11px",
+                      color: "#dff3ff",
+                    }}
+                  >
+                    Port Characteristics
+                  </th>
+                </tr>
+                <tr>
+                  {[
+                    { label: "HSFO", glow: fuelAccentStyles.hsfo.glow },
+                    { label: "VLSFO", glow: fuelAccentStyles.vlsfo.glow },
+                    { label: "LSMGO", glow: fuelAccentStyles.mgo.glow },
+                  ].map((item, index) => (
+                    <th
+                      key={item.label}
+                      style={{
+                        padding: "10px 10px",
+                        textAlign: "center",
+                        background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                        borderBottom: "1px solid rgba(255,255,255,0.08)",
+                        borderRight: index < 2 ? "1px solid rgba(255,255,255,0.08)" : undefined,
+                        boxShadow: `inset 0 -2px 0 ${item.glow}`,
+                        letterSpacing: "0.06em",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {item.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {taiwanMinimumQuantityRows.map((row, index) => (
+                  <tr
+                    key={row.port}
+                    style={{
+                      background: index % 2 === 0 ? "rgba(8, 46, 88, 0.52)" : "rgba(7, 37, 70, 0.4)",
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: "11px 10px",
+                        fontWeight: 700,
+                        letterSpacing: "0.03em",
+                        textTransform: "uppercase",
+                        textAlign: "center",
+                        borderTop: "1px solid rgba(255,255,255,0.06)",
+                        borderRight: "1px solid rgba(255,255,255,0.06)",
+                        background: "rgba(255,255,255,0.025)",
+                      }}
+                    >
+                      {row.port}
+                    </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", color: row.oilFenceCharge === "NA" ? subtleNaText(row.port) : "#f5fbff", textTransform: "uppercase" }}>
+                      {row.oilFenceCharge}
+                    </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", color: row.hsfo === "NA" ? subtleNaText(row.port) : "#f5fbff" }}>
+                      {row.hsfo}
+                    </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+                      {row.vlsfo}
+                    </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      {row.lsmgo}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <div style={{ marginTop: "20px" }}>
           <DisclaimerLink centered />
