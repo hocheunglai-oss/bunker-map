@@ -381,15 +381,12 @@ function getCompanySearchText(company: Partial<Company>) {
 }
 
 function buildContactClipboardText(contact: Partial<Contact>) {
+  const displayName = [contact.title, contact.full_name].filter(Boolean).join(" ").trim()
   const lines = [
-    contact.full_name ? `NAME: ${contact.full_name}` : "",
+    displayName ? `NAME: ${displayName}` : "",
     contact.company ? `COMPANY: ${contact.company}` : "",
-    contact.title ? `TITLE: ${contact.title}` : "",
-    contact.name_remark ? `LABEL: ${contact.name_remark}` : "",
-    contact.tel_ext ? `EXT: ${contact.tel_ext}` : "",
-    contact.direct_line ? `DIRECT LINE: ${contact.direct_line}` : "",
-    contact.mobile_1 ? `MOBILE 1: ${contact.mobile_1}` : "",
-    contact.mobile_2 ? `MOBILE 2: ${contact.mobile_2}` : "",
+    contact.mobile_1 ? `MOBILE: ${contact.mobile_1}` : "",
+    contact.mobile_2 ? `MOBILE: ${contact.mobile_2}` : "",
     contact.personal_email ? `PERSONAL EMAIL: ${contact.personal_email}` : "",
     contact.general_email ? `GENERAL EMAIL: ${contact.general_email}` : "",
     contact.private_email ? `PRIVATE EMAIL: ${contact.private_email}` : "",
