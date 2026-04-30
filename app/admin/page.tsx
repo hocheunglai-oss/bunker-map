@@ -150,29 +150,18 @@ export default function AdminPage() {
             <div
               style={{
                 textAlign: "center",
-                fontSize: "12px",
-                letterSpacing: "0.16em",
+                fontSize: isMobile ? "14px" : "16px",
+                letterSpacing: "0.34em",
                 textTransform: "uppercase",
                 color: "#8fd7ff",
-                marginBottom: "10px",
-                fontWeight: 700,
+                marginBottom: "24px",
+                fontWeight: 800,
+                fontStyle: "italic",
+                textShadow: "0 10px 24px rgba(4,16,29,0.22)",
               }}
             >
-              Admin Access
+              - ONE -
             </div>
-
-            <h1
-              style={{
-                margin: "0 0 24px",
-                textAlign: "center",
-                fontSize: isMobile ? "26px" : "32px",
-                lineHeight: 1,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-              }}
-            >
-              Login
-            </h1>
 
             <label style={{ display: "block", marginBottom: 16 }}>
               <div style={{ marginBottom: 8, fontWeight: 700, color: "#d8edff" }}>Username</div>

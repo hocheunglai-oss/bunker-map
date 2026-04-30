@@ -359,7 +359,7 @@ export default function Homepage() {
     window.scrollTo(0, 0)
   }, [isMobile])
 
-  const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Port Klang"]
+  const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Kaohsiung"]
   const keyPorts = useMemo(
     () =>
       keyPortNames
