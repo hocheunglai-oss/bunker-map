@@ -77,9 +77,19 @@ type Company = {
 }
 
 type CompanyDraft = Company | null
+type ChangeLogEntry = {
+  id: string
+  entityType: "contact" | "company"
+  action: "create" | "update" | "delete"
+  label: string
+  timestamp: string
+  before: Contact | Company | null
+  after: Contact | Company | null
+}
 
 const LAST_GOOGLE_SYNC_FAILED_KEY = "phonebook_last_google_sync_failed"
 const CONTACT_ORDER_STORAGE_KEY = "phonebook_contact_order_by_company"
+const PHONEBOOK_CHANGE_LOG_KEY = "phonebook_change_log"
 
 type GoogleSyncFailure = {
   id: string
@@ -157,6 +167,13 @@ const panelStyle: React.CSSProperties = {
   border: "1px solid rgba(210, 236, 255, 0.14)",
   borderRadius: "18px",
   boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+}
+
+const lightBluePanelStyle: React.CSSProperties = {
+  background: "linear-gradient(180deg, rgba(26, 74, 120, 0.9) 0%, rgba(13, 50, 92, 0.86) 100%)",
+  border: "1px solid rgba(155, 210, 255, 0.18)",
+  borderRadius: "18px",
+  boxShadow: "0 18px 40px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 const buttonStyle: React.CSSProperties = {
@@ -250,15 +267,17 @@ const modalSectionStyle: React.CSSProperties = {
 }
 
 const menuPanelStyle: React.CSSProperties = {
-  ...panelStyle,
-  position: "absolute",
-  top: "calc(100% + 8px)",
-  right: 0,
-  padding: "10px",
+  ...lightBluePanelStyle,
+  position: "fixed",
+  top: "84px",
+  right: "18px",
+  padding: "12px",
   display: "grid",
-  gap: "8px",
-  zIndex: 20,
-  minWidth: "180px",
+  gap: "12px",
+  zIndex: 40,
+  width: "min(360px, calc(100vw - 36px))",
+  maxHeight: "70vh",
+  overflowY: "auto",
 }
 
 const sidebarPanelStyle: React.CSSProperties = {
@@ -361,6 +380,24 @@ function getCompanySearchText(company: Partial<Company>) {
     .toLowerCase()
 }
 
+function buildContactClipboardText(contact: Partial<Contact>) {
+  const lines = [
+    contact.full_name ? `NAME: ${contact.full_name}` : "",
+    contact.company ? `COMPANY: ${contact.company}` : "",
+    contact.title ? `TITLE: ${contact.title}` : "",
+    contact.name_remark ? `LABEL: ${contact.name_remark}` : "",
+    contact.tel_ext ? `EXT: ${contact.tel_ext}` : "",
+    contact.direct_line ? `DIRECT LINE: ${contact.direct_line}` : "",
+    contact.mobile_1 ? `MOBILE 1: ${contact.mobile_1}` : "",
+    contact.mobile_2 ? `MOBILE 2: ${contact.mobile_2}` : "",
+    contact.personal_email ? `PERSONAL EMAIL: ${contact.personal_email}` : "",
+    contact.general_email ? `GENERAL EMAIL: ${contact.general_email}` : "",
+    contact.private_email ? `PRIVATE EMAIL: ${contact.private_email}` : "",
+  ].filter(Boolean)
+
+  return lines.join("\n")
+}
+
 function copyToClipboard(value: string, onDone: (message: string) => void) {
   navigator.clipboard
     .writeText(value)
@@ -414,6 +451,8 @@ export default function PhonebookPage() {
   const [dragOverContactId, setDragOverContactId] = useState("")
   const [dragInsertPosition, setDragInsertPosition] = useState<"before" | "after">("before")
   const [contactOrderByCompany, setContactOrderByCompany] = useState<Record<string, string[]>>({})
+  const [changeLog, setChangeLog] = useState<ChangeLogEntry[]>([])
+  const [undoingLogId, setUndoingLogId] = useState("")
   const menuHideTimerRef = useRef<number | null>(null)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
@@ -552,6 +591,20 @@ export default function PhonebookPage() {
   }, [contactOrderByCompany])
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PHONEBOOK_CHANGE_LOG_KEY)
+      if (!raw) return
+      setChangeLog(JSON.parse(raw) as ChangeLogEntry[])
+    } catch {
+      setChangeLog([])
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(PHONEBOOK_CHANGE_LOG_KEY, JSON.stringify(changeLog))
+  }, [changeLog])
+
+  useEffect(() => {
     setSelectedId("")
   }, [selectedCompany])
 
@@ -674,6 +727,13 @@ export default function PhonebookPage() {
       }
 
       const nextContact = data as Contact
+      recordChange({
+        entityType: "contact",
+        action: "create",
+        label: nextContact.full_name || "NEW CONTACT",
+        before: null,
+        after: nextContact,
+      })
       setContacts((prev) => [nextContact, ...prev])
       setSelectedId(nextContact.id)
       setCurrent(nextContact)
@@ -690,6 +750,7 @@ export default function PhonebookPage() {
       return
     }
 
+    const beforeContact = current ? { ...current } : { ...draft }
     const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id)
     if (error) {
       setMessage("Unable to save contact.")
@@ -697,8 +758,16 @@ export default function PhonebookPage() {
       return
     }
 
-    setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
-    setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
+    const updatedContact = { ...beforeContact, ...payload } as Contact
+    recordChange({
+      entityType: "contact",
+      action: "update",
+      label: updatedContact.full_name || "CONTACT",
+      before: beforeContact as Contact,
+      after: updatedContact,
+    })
+    setContacts((prev) => prev.map((item) => (item.id === draft.id ? updatedContact : item)))
+    setCurrent((prev) => (prev ? updatedContact : prev))
     setEditing(false)
     const synced = await syncGoogleContacts(false, [draft.id], {
       successMessage: "Saved and synced.",
@@ -717,6 +786,13 @@ export default function PhonebookPage() {
       setMessage("Unable to delete contact.")
       return
     }
+    recordChange({
+      entityType: "contact",
+      action: "delete",
+      label: current.full_name || "CONTACT",
+      before: current,
+      after: null,
+    })
     setContacts((prev) => prev.filter((item) => item.id !== current.id))
     setSelectedId("")
     await syncGoogleContacts(false, null, {
@@ -854,6 +930,14 @@ export default function PhonebookPage() {
       return
     }
 
+    recordChange({
+      entityType: "company",
+      action: creatingCompany ? "create" : "update",
+      label: payload.name || "COMPANY",
+      before: originalCompany,
+      after: data as Company,
+    })
+
     setCompanies((prev) => {
       const next = creatingCompany
         ? [...prev, data as Company]
@@ -942,6 +1026,13 @@ export default function PhonebookPage() {
       setMessage("Unable to delete company.")
       return
     }
+    recordChange({
+      entityType: "company",
+      action: "delete",
+      label: companyDraft.name || "COMPANY",
+      before: companyDraft,
+      after: null,
+    })
 
     setCompanies((prev) => prev.filter((item) => item.id !== companyDraft.id))
     if (selectedCompany === companyDraft.name) {
@@ -1026,6 +1117,93 @@ export default function PhonebookPage() {
     setContactOrderByCompany((prev) => ({ ...prev, [companyKey]: nextOrder }))
   }
 
+  function recordChange(entry: Omit<ChangeLogEntry, "id" | "timestamp">) {
+    const nextEntry: ChangeLogEntry = {
+      ...entry,
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date().toISOString(),
+    }
+    setChangeLog((prev) => [nextEntry, ...prev].slice(0, 10))
+  }
+
+  async function undoLogEntry(entry: ChangeLogEntry) {
+    setUndoingLogId(entry.id)
+    setMessage("")
+    try {
+      if (entry.entityType === "contact") {
+        if (entry.action === "create" && entry.after) {
+          const { error } = await supabase.from("phonebook_contacts").delete().eq("id", entry.after.id)
+          if (error) throw error
+          setContacts((prev) => prev.filter((item) => item.id !== entry.after!.id))
+          if (selectedId === entry.after.id) setSelectedId("")
+          await syncGoogleContacts(false, null, { deleteContactIds: [entry.after.id], successMessage: "Undone and synced." })
+        } else if (entry.action === "delete" && entry.before) {
+          const { data, error } = await supabase.from("phonebook_contacts").insert(entry.before).select("*").single()
+          if (error || !data) throw error || new Error("Unable to restore contact.")
+          setContacts((prev) => [data as Contact, ...prev])
+          await syncGoogleContacts(false, [data.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but web Google sync failed." })
+        } else if (entry.action === "update" && entry.before && entry.after) {
+          const { error } = await supabase.from("phonebook_contacts").update(entry.before).eq("id", entry.after.id)
+          if (error) throw error
+          setContacts((prev) => prev.map((item) => (item.id === entry.after!.id ? (entry.before as Contact) : item)))
+          if (current?.id === entry.after.id) {
+            setCurrent(entry.before as Contact)
+            setDraft(entry.before as Contact)
+          }
+          await syncGoogleContacts(false, [entry.after.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but web Google sync failed." })
+        }
+      } else {
+        if (entry.action === "create" && entry.after) {
+          const { error } = await supabase.from("phonebook_companies").delete().eq("id", entry.after.id)
+          if (error) throw error
+          setCompanies((prev) => prev.filter((item) => item.id !== entry.after!.id))
+          if (selectedCompany === (entry.after as Company).name) setSelectedCompany("")
+        } else if (entry.action === "delete" && entry.before) {
+          const { data, error } = await supabase.from("phonebook_companies").insert(entry.before).select("*").single()
+          if (error || !data) throw error || new Error("Unable to restore company.")
+          setCompanies((prev) => [...prev, data as Company].sort((a, b) => a.name.localeCompare(b.name)))
+        } else if (entry.action === "update" && entry.before && entry.after) {
+          const beforeCompany = entry.before as Company
+          const afterCompany = entry.after as Company
+          const { error } = await supabase.from("phonebook_companies").update(beforeCompany).eq("id", afterCompany.id)
+          if (error) throw error
+          setCompanies((prev) =>
+            prev.map((item) => (item.id === afterCompany.id ? beforeCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
+          )
+          if (beforeCompany.name !== afterCompany.name) {
+            const affected = contacts.filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(afterCompany.name))
+            for (const contact of affected) {
+              const reverted = { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
+              const { error: contactError } = await supabase
+                .from("phonebook_contacts")
+                .update({ company: reverted.company, search_text: reverted.search_text })
+                .eq("id", contact.id)
+              if (contactError) throw contactError
+            }
+            setContacts((prev) =>
+              prev.map((contact) =>
+                normalizeCompanyKey(contact.company) === normalizeCompanyKey(afterCompany.name)
+                  ? { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
+                  : contact,
+              ),
+            )
+            await syncGoogleContacts(false, affected.map((contact) => contact.id), {
+              successMessage: "Undone and synced.",
+              failureMessage: "Undone locally, but web Google sync failed.",
+            })
+          }
+        }
+      }
+
+      setChangeLog((prev) => prev.filter((item) => item.id !== entry.id))
+      setMessage("Undo complete.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to undo change.")
+    } finally {
+      setUndoingLogId("")
+    }
+  }
+
   async function archiveCurrentContact() {
     if (!draft) return
     if (!confirm(`Archive ${draft.full_name || "this contact"} as past contact?`)) return
@@ -1099,7 +1277,7 @@ export default function PhonebookPage() {
 
   function scheduleMenuHide() {
     if (menuHideTimerRef.current) window.clearTimeout(menuHideTimerRef.current)
-    menuHideTimerRef.current = window.setTimeout(() => setMenuOpen(false), 320)
+    menuHideTimerRef.current = window.setTimeout(() => setMenuOpen(false), 950)
   }
 
   function cancelMenuHide() {
@@ -1107,6 +1285,13 @@ export default function PhonebookPage() {
       window.clearTimeout(menuHideTimerRef.current)
       menuHideTimerRef.current = null
     }
+  }
+
+  async function confirmAndRunFullRebuild() {
+    if (!confirm("Run Full Rebuild for Google Contacts? This can take a long time and replace the currently synced contacts.")) {
+      return
+    }
+    await syncGoogleContacts(true)
   }
 
   async function syncGoogleContacts(
@@ -1291,18 +1476,47 @@ export default function PhonebookPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void syncGoogleContacts(true)}
+                  onClick={() => void confirmAndRunFullRebuild()}
                   disabled={googleSyncing}
                   style={buttonStyle}
                 >
                   Full Rebuild
                 </button>
+                <div style={{ display: "grid", gap: "8px" }}>
+                  <div style={{ color: "#bfe4ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>Log</div>
+                  {changeLog.length === 0 ? (
+                    <div style={{ color: "#d0e8ff", fontSize: "12px", lineHeight: 1.5 }}>No recent changes yet.</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: "8px" }}>
+                      {changeLog.map((entry) => (
+                        <div key={entry.id} style={{ ...panelStyle, padding: "10px 12px", borderRadius: "14px", boxShadow: "none" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "start" }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: "12px", fontWeight: 800, color: "#eef7ff", textTransform: "uppercase" }}>{entry.label}</div>
+                              <div style={{ fontSize: "11px", color: "#9fd3ff", marginTop: "3px", textTransform: "uppercase" }}>
+                                {entry.entityType} {entry.action}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void undoLogEntry(entry)}
+                              disabled={undoingLogId === entry.id}
+                              style={{ ...buttonStyle, padding: "5px 9px", fontSize: "11px", background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" }}
+                            >
+                              {undoingLogId === entry.id ? "Undoing..." : "Undo"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : null}
           </div>
         </div>
 
-        <div style={{ ...panelStyle, padding: "12px 14px" }}>
+        <div style={{ ...lightBluePanelStyle, padding: "12px 14px" }}>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto auto", gap: "10px", alignItems: "center" }}>
             <input
               ref={searchRef}
@@ -1410,7 +1624,18 @@ export default function PhonebookPage() {
           </aside>
 
           <section style={{ ...sidebarPanelStyle }}>
-            <div style={{ padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+            <div
+              style={{
+                position: isMobile ? "static" : "sticky",
+                top: 0,
+                zIndex: 2,
+                display: "grid",
+                gap: "8px",
+                background: "linear-gradient(180deg, rgba(12, 49, 88, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                padding: "12px",
+                borderBottom: "1px solid rgba(210,236,255,0.08)",
+              }}
+            >
               <button
                 onClick={() => void addContact()}
                 style={{
@@ -1424,7 +1649,7 @@ export default function PhonebookPage() {
                 New Contact
               </button>
             </div>
-            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 58px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
+            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
               {filteredContacts.map((contact) => (
                 <button
                   key={contact.id}
@@ -1499,7 +1724,7 @@ export default function PhonebookPage() {
             </div>
           </section>
 
-          <section style={{ ...panelStyle, padding: "16px", display: "grid", gap: "12px" }}>
+          <section style={{ ...lightBluePanelStyle, padding: "16px", display: "grid", gap: "12px" }}>
             {displayed ? (
               <>
                 <div style={{ display: "grid", gap: "10px" }}>
@@ -1531,22 +1756,40 @@ export default function PhonebookPage() {
                     )}
                   </div>
                   {!editing ? (
-                    <button
-                      ref={editButtonRef}
-                      onClick={() => {
-                        setDraft(current ? { ...current } : null)
-                        setEditing(true)
-                      }}
-                      disabled={!current}
-                      style={{
-                        ...buttonStyle,
-                        background: "linear-gradient(180deg, rgba(255, 210, 86, 0.36) 0%, rgba(191, 136, 16, 0.18) 100%)",
-                        color: "#fff2bc",
-                        border: "1px solid rgba(255, 211, 110, 0.34)",
-                      }}
-                    >
-                      Edit
-                    </button>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyToClipboard(buildContactClipboardText(current || displayed), (status) => {
+                            if (status === "Copied") setCopiedKey("contact-all")
+                          })
+                        }
+                        style={{
+                          ...buttonStyle,
+                          background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
+                          color: "#e8f4ff",
+                          border: "1px solid rgba(108, 185, 255, 0.24)",
+                        }}
+                      >
+                        {copiedKey === "contact-all" ? "Copied" : "Copy Contact"}
+                      </button>
+                      <button
+                        ref={editButtonRef}
+                        onClick={() => {
+                          setDraft(current ? { ...current } : null)
+                          setEditing(true)
+                        }}
+                        disabled={!current}
+                        style={{
+                          ...buttonStyle,
+                          background: "linear-gradient(180deg, rgba(255, 210, 86, 0.36) 0%, rgba(191, 136, 16, 0.18) 100%)",
+                          color: "#fff2bc",
+                          border: "1px solid rgba(255, 211, 110, 0.34)",
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
                   ) : null}
                   </div>
                 </div>
