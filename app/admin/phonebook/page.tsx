@@ -1270,6 +1270,8 @@ export default function PhonebookPage() {
   function clearSearchAndSelection() {
     setQuery("")
     setSelectedCompany("")
+    setSelectedId("")
+    setEditing(false)
   }
 
   function scheduleMenuHide() {
@@ -1521,6 +1523,12 @@ export default function PhonebookPage() {
               onChange={(event) => {
                 setQuery(event.target.value)
                 if (selectedCompany) setSelectedCompany("")
+              }}
+              onFocus={() => {
+                setQuery("")
+                setSelectedCompany("")
+                setSelectedId("")
+                setEditing(false)
               }}
               onKeyDown={onSearchKeyDown}
               placeholder="Search name, company, phone, or email..."
