@@ -5,11 +5,11 @@ import "leaflet/dist/leaflet.css"
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://cosulich.vercel.app"),
-  title: "Bunker Map",
-  description: "Live bunker prices, market reports, and admin publishing tools for bunker market coverage.",
+  title: " ",
+  description: "",
   openGraph: {
-    title: "Bunker Map",
-    description: "Live bunker prices, market reports, and admin publishing tools for bunker market coverage.",
+    title: " ",
+    description: "",
     images: [
       {
         url: "/homepage-preview.png",
@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Bunker Map",
-    description: "Live bunker prices, market reports, and admin publishing tools for bunker market coverage.",
+    title: " ",
+    description: "",
     images: ["/homepage-preview.png"],
   },
 }
