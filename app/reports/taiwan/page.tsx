@@ -75,11 +75,11 @@ const fuelAccentStyles = {
 } as const
 
 const taiwanMinimumQuantityRows = [
-  { port: "Kaohsiung", oilFenceCharge: "89 or 338", hsfo: "30", vlsfo: "60", lsmgo: "25" },
-  { port: "Keelung", oilFenceCharge: "208", hsfo: "NA", vlsfo: "60", lsmgo: "20" },
-  { port: "Taichung", oilFenceCharge: "475", hsfo: "NA", vlsfo: "60", lsmgo: "20" },
-  { port: "Suao", oilFenceCharge: "NA", hsfo: "NA", vlsfo: "19", lsmgo: "10" },
-  { port: "Hualien", oilFenceCharge: "NA", hsfo: "NA", vlsfo: "19", lsmgo: "20" },
+  { port: "Kaohsiung", oilFenceCharge: "89 OR 338", deliveryMode: "BARGE", hsfo: "30", vlsfo: "60", lsmgo: "25", mgoSulfur: "0.1" },
+  { port: "Keelung", oilFenceCharge: "208", deliveryMode: "BARGE", hsfo: "NA", vlsfo: "60", lsmgo: "20", mgoSulfur: "0.1" },
+  { port: "Taichung", oilFenceCharge: "475", deliveryMode: "BARGE", hsfo: "NA", vlsfo: "60", lsmgo: "20", mgoSulfur: "0.1" },
+  { port: "Suao", oilFenceCharge: "NA", deliveryMode: "RTW", hsfo: "NA", vlsfo: "19", lsmgo: "10", mgoSulfur: "0.5" },
+  { port: "Hualien", oilFenceCharge: "NA", deliveryMode: "RTW / PIPELINE", hsfo: "NA", vlsfo: "19", lsmgo: "20", mgoSulfur: "0.5" },
 ]
 
 function subtleNaText(portName?: string) {
@@ -281,6 +281,7 @@ export default function TaiwanReport() {
                       fontSize: "17px",
                       letterSpacing: "0.06em",
                       borderRight: "1px solid rgba(255,255,255,0.14)",
+                      textTransform: "uppercase",
                     }}
                   >
                     Port
@@ -291,7 +292,7 @@ export default function TaiwanReport() {
                   <th colSpan={3} style={{ borderRight: "1px solid rgba(255,255,255,0.14)", color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.vlsfo.glow}` }}>
                     VLSFO
                   </th>
-                  <th colSpan={3} style={{ color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.mgo.glow}` }}>LSMGO</th>
+                  <th colSpan={3} style={{ color: "#f5fbff", boxShadow: `inset 0 -2px 0 ${fuelAccentStyles.mgo.glow}` }}>MGO</th>
                 </tr>
                 <tr
                   style={{
@@ -303,13 +304,14 @@ export default function TaiwanReport() {
                       <th
                         key={label + index}
                         style={{
-                          padding: "12px 10px",
-                          fontSize: "13px",
-                          fontWeight: 800,
-                          letterSpacing: "0.08em",
-                          borderRight:
-                            index === 2 || index === 5
-                              ? "1px solid rgba(255,255,255,0.14)"
+                        padding: "12px 10px",
+                        fontSize: "13px",
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        borderRight:
+                          index === 2 || index === 5
+                            ? "1px solid rgba(255,255,255,0.14)"
                               : undefined,
                         }}
                       >
@@ -417,80 +419,6 @@ export default function TaiwanReport() {
           </div>
         </div>
 
-        <div style={{ textAlign: "center", marginBottom: "24px" }}>
-          <a
-            href="/"
-            style={{
-              ...pillButtonStyle,
-              gap: "10px",
-              color: "#ffd4d8",
-              background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-              border: "1px solid rgba(255, 120, 120, 0.18)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-            }}
-          >
-            Back To Bunker Map
-          </a>
-        </div>
-
-        {remark && (
-          <div style={{ ...cardStyle, padding: "14px 16px", marginBottom: "20px" }}>
-            <div
-              style={{
-                fontSize: "10px",
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-                color: "#8dcfff",
-                marginBottom: "6px",
-              }}
-            >
-              Remarks
-            </div>
-            <div style={{ display: "grid", gap: "6px" }}>
-              {remark
-                .split(/\n+/)
-                .map((item) => item.trim())
-                .filter(Boolean)
-                .map((item, index) => (
-                  <div
-                    key={`${item}-${index}`}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "8px",
-                      padding: "8px 10px",
-                      borderRadius: "12px",
-                      background: "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.025) 100%)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      color: "#e8f4ff",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "20px",
-                        height: "20px",
-                        flexShrink: 0,
-                        borderRadius: "999px",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "linear-gradient(180deg, rgba(88, 182, 255, 0.2) 0%, rgba(28, 102, 168, 0.12) 100%)",
-                        color: "#dff3ff",
-                        fontSize: "10px",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {index + 1}
-                    </span>
-                    <span style={{ lineHeight: 1.5, textTransform: "uppercase" }}>{item}</span>
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
         <div style={{ ...cardStyle, overflow: "hidden", marginBottom: "20px" }}>
           <div
             style={{
@@ -551,6 +479,21 @@ export default function TaiwanReport() {
                     Oil Fence Charge (USD)
                   </th>
                   <th
+                    rowSpan={2}
+                    style={{
+                      padding: "12px 10px",
+                      textAlign: "center",
+                      background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                      borderRight: "1px solid rgba(255,255,255,0.08)",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Delivery Mode
+                  </th>
+                  <th
                     colSpan={3}
                     style={{
                       padding: "10px 10px 8px",
@@ -565,12 +508,26 @@ export default function TaiwanReport() {
                   >
                     Minimum Quantity
                   </th>
+                  <th
+                    rowSpan={2}
+                    style={{
+                      padding: "12px 10px",
+                      textAlign: "center",
+                      background: "linear-gradient(180deg, rgba(10, 43, 78, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      letterSpacing: "0.06em",
+                      fontSize: "12px",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    MGO Sulfur (%)
+                  </th>
                 </tr>
                 <tr>
                   {[
                     { label: "HSFO", glow: fuelAccentStyles.hsfo.glow },
                     { label: "VLSFO", glow: fuelAccentStyles.vlsfo.glow },
-                    { label: "LSMGO", glow: fuelAccentStyles.mgo.glow },
+                    { label: "MGO", glow: fuelAccentStyles.mgo.glow },
                   ].map((item, index) => (
                     <th
                       key={item.label}
@@ -614,20 +571,100 @@ export default function TaiwanReport() {
                     <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", color: row.oilFenceCharge === "NA" ? subtleNaText(row.port) : "#f5fbff", textTransform: "uppercase" }}>
                       {row.oilFenceCharge}
                     </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", textTransform: "uppercase" }}>
+                      {row.deliveryMode}
+                    </td>
                     <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", color: row.hsfo === "NA" ? subtleNaText(row.port) : "#f5fbff" }}>
                       {row.hsfo}
                     </td>
                     <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                       {row.vlsfo}
                     </td>
-                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                       {row.lsmgo}
+                    </td>
+                    <td style={{ padding: "11px 10px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      {row.mgoSulfur}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </div>
+
+        {remark && (
+          <div style={{ ...cardStyle, padding: "14px 16px", marginBottom: "20px" }}>
+            <div
+              style={{
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "0.12em",
+                color: "#8dcfff",
+                marginBottom: "6px",
+              }}
+            >
+              Remarks
+            </div>
+            <div style={{ display: "grid", gap: "6px" }}>
+              {remark
+                .split(/\n+/)
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .map((item, index) => (
+                  <div
+                    key={`${item}-${index}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "8px",
+                      padding: "8px 10px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.025) 100%)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      color: "#e8f4ff",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "20px",
+                        height: "20px",
+                        flexShrink: 0,
+                        borderRadius: "999px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "linear-gradient(180deg, rgba(88, 182, 255, 0.2) 0%, rgba(28, 102, 168, 0.12) 100%)",
+                        color: "#dff3ff",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {index + 1}
+                    </span>
+                    <span style={{ lineHeight: 1.5, textTransform: "uppercase" }}>{item}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ textAlign: "center", marginBottom: "24px" }}>
+          <a
+            href="/"
+            style={{
+              ...pillButtonStyle,
+              gap: "10px",
+              color: "#ffd4d8",
+              background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+              border: "1px solid rgba(255, 120, 120, 0.18)",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            Back To Bunker Map
+          </a>
         </div>
 
         <div style={{ marginTop: "20px" }}>
