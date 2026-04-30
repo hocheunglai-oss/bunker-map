@@ -140,9 +140,9 @@ export default function AdminPage() {
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
               <a href="/" style={{ display: "inline-flex" }}>
                 <img
-                  src="/logo-trans.png"
+                  src="/fcone-logo-transparent.png"
                   alt="Bunker Map"
-                  style={{ height: isMobile ? "68px" : "86px", width: "auto" }}
+                  style={{ height: isMobile ? "74px" : "94px", width: "auto" }}
                 />
               </a>
             </div>
@@ -150,17 +150,16 @@ export default function AdminPage() {
             <div
               style={{
                 textAlign: "center",
-                fontSize: isMobile ? "14px" : "16px",
-                letterSpacing: "0.34em",
+                fontSize: "12px",
+                letterSpacing: "0.16em",
                 textTransform: "uppercase",
                 color: "#8fd7ff",
-                marginBottom: "24px",
-                fontWeight: 800,
-                fontStyle: "italic",
+                marginBottom: "22px",
+                fontWeight: 700,
                 textShadow: "0 10px 24px rgba(4,16,29,0.22)",
               }}
             >
-              - ONE -
+              Admin Login
             </div>
 
             <label style={{ display: "block", marginBottom: 16 }}>
