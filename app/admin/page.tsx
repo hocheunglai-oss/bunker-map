@@ -142,28 +142,25 @@ export default function AdminPage() {
                 <img
                   src="/fcone-logo-transparent.png"
                   alt="Bunker Map"
-                  style={{ height: isMobile ? "74px" : "94px", width: "auto" }}
+                  style={{ height: isMobile ? "123px" : "156px", width: "auto" }}
                 />
               </a>
             </div>
 
-            <div
-              style={{
-                textAlign: "center",
-                fontSize: "12px",
-                letterSpacing: "0.16em",
-                textTransform: "uppercase",
-                color: "#8fd7ff",
-                marginBottom: "22px",
-                fontWeight: 700,
-                textShadow: "0 10px 24px rgba(4,16,29,0.22)",
-              }}
-            >
-              Admin Login
-            </div>
-
             <label style={{ display: "block", marginBottom: 16 }}>
-              <div style={{ marginBottom: 8, fontWeight: 700, color: "#d8edff" }}>Username</div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#8fd7ff",
+                  fontWeight: 700,
+                  textShadow: "0 10px 24px rgba(4,16,29,0.22)",
+                }}
+              >
+                Username
+              </div>
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -172,7 +169,19 @@ export default function AdminPage() {
             </label>
 
             <label style={{ display: "block", marginBottom: 20 }}>
-              <div style={{ marginBottom: 8, fontWeight: 700, color: "#d8edff" }}>Password</div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#8fd7ff",
+                  fontWeight: 700,
+                  textShadow: "0 10px 24px rgba(4,16,29,0.22)",
+                }}
+              >
+                Password
+              </div>
               <input
                 type="password"
                 value={password}
