@@ -5,11 +5,11 @@ import "leaflet/dist/leaflet.css"
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://cosulich.vercel.app"),
-  title: " ",
-  description: "",
+  title: "Fratelli Cosulich",
+  description: "Fratelli Cosulich",
   openGraph: {
-    title: " ",
-    description: "",
+    title: "Fratelli Cosulich",
+    description: "Fratelli Cosulich",
     images: [
       {
         url: "/homepage-preview.png",
@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: " ",
-    description: "",
+    title: "Fratelli Cosulich",
+    description: "Fratelli Cosulich",
     images: ["/homepage-preview.png"],
   },
 }
