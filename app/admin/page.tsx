@@ -140,7 +140,7 @@ export default function AdminPage() {
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
               <a href="/" style={{ display: "inline-flex" }}>
                 <img
-                  src="/fcone-logo-transparent.png"
+                  src="/uno-transparent.png"
                   alt="Bunker Map"
                   style={{ height: isMobile ? "123px" : "156px", width: "auto" }}
                 />

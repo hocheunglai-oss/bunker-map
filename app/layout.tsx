@@ -5,25 +5,25 @@ import "leaflet/dist/leaflet.css"
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://cosulich.vercel.app"),
-  title: "Fratelli Cosulich",
-  description: "Fratelli Cosulich",
+  title: "Fratelli Cosulich Uno",
+  description: "Market Intelligence",
   openGraph: {
-    title: "Fratelli Cosulich",
-    description: "Fratelli Cosulich",
+    title: "Fratelli Cosulich Uno",
+    description: "Market Intelligence",
     images: [
       {
-        url: "/homepage-preview.png",
-        width: 632,
-        height: 270,
-        alt: "Fratelli Cosulich Market Intelligence",
+        url: "/uno-metadata-preview.png",
+        width: 348,
+        height: 170,
+        alt: "Fratelli Cosulich Uno Market Intelligence",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Fratelli Cosulich",
-    description: "Fratelli Cosulich",
-    images: ["/homepage-preview.png"],
+    title: "Fratelli Cosulich Uno",
+    description: "Market Intelligence",
+    images: ["/uno-metadata-preview.png"],
   },
 }
 
