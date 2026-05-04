@@ -408,11 +408,9 @@ function normalizeDialablePhone(value: string | null | undefined) {
   if (trimmed.startsWith("+")) return trimmed
 
   const digits = trimmed.replace(/[^\d]/g, "")
-  const looksLikeHongKongLocal =
-    digits.length === 8 && !trimmed.includes("-") && !trimmed.includes("(") && !trimmed.includes(")")
-
-  if (looksLikeHongKongLocal) return digits
-  if (/^\d{1,4}-/.test(trimmed)) return `+${trimmed}`
+  if (digits.length === 8) return digits
+  if (trimmed.startsWith("00") && digits.length > 8) return `+${trimmed.slice(2)}`
+  if (digits.length > 8) return /^\d+$/.test(trimmed) ? `+${digits}` : `+${trimmed}`
   return trimmed
 }
 
@@ -777,6 +775,19 @@ export default function PhonebookPage() {
   async function deleteCurrent() {
     if (!current) return
     if (!confirm(`Delete ${current.full_name}?`)) return
+    const companyName = current.company || ""
+    const companyContacts = contacts.filter(
+      (item) => normalizeCompanyKey(item.company) === normalizeCompanyKey(companyName),
+    )
+    const isLastCompanyContact = Boolean(companyName) && companyContacts.length === 1
+    const matchingCompany = companies.find(
+      (item) => normalizeCompanyKey(item.name) === normalizeCompanyKey(companyName),
+    )
+    const deleteCompanyToo =
+      isLastCompanyContact && matchingCompany
+        ? confirm(`This is the last contact under ${companyName}. Delete the company too?`)
+        : false
+
     const deletingId = current.id
     const { error } = await supabase.from("phonebook_contacts").delete().eq("id", current.id)
     if (error) {
@@ -792,9 +803,35 @@ export default function PhonebookPage() {
     })
     setContacts((prev) => prev.filter((item) => item.id !== current.id))
     setSelectedId("")
+    if (deleteCompanyToo && matchingCompany) {
+      const { error: companyDeleteError } = await supabase
+        .from("phonebook_companies")
+        .delete()
+        .eq("id", matchingCompany.id)
+      if (companyDeleteError) {
+        setMessage("Contact deleted, but company could not be deleted.")
+        return
+      }
+
+      recordChange({
+        entityType: "company",
+        action: "delete",
+        label: matchingCompany.name || "COMPANY",
+        before: matchingCompany,
+        after: null,
+      })
+      setCompanies((prev) => prev.filter((item) => item.id !== matchingCompany.id))
+      if (selectedCompany === matchingCompany.name) {
+        setSelectedCompany("")
+      }
+      if (companyDraft?.id === matchingCompany.id) {
+        setCompanyDraft(null)
+        setCompanyModalOpen(false)
+      }
+    }
     await syncGoogleContacts(false, null, {
       deleteContactIds: [deletingId],
-      successMessage: "Deleted and synced.",
+      successMessage: deleteCompanyToo ? "Deleted contact and company, then synced." : "Deleted and synced.",
     })
   }
 
@@ -1014,9 +1051,28 @@ export default function PhonebookPage() {
     if (!companyDraft || creatingCompany) return
     if (!confirm(`Delete ${companyDraft.name || "this company"}?`)) return
     const companyNameToDelete = companyDraft.name
-    const companyContactIds = contacts
-      .filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(companyNameToDelete))
-      .map((contact) => contact.id)
+    const companyContacts = contacts.filter(
+      (contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(companyNameToDelete),
+    )
+    const companyContactIds = companyContacts.map((contact) => contact.id)
+
+    if (
+      companyContacts.length > 0 &&
+      !confirm(`Delete ${companyContacts.length} contact${companyContacts.length === 1 ? "" : "s"} inside this company as well?`)
+    ) {
+      return
+    }
+
+    if (companyContactIds.length > 0) {
+      const { error: contactDeleteError } = await supabase
+        .from("phonebook_contacts")
+        .delete()
+        .in("id", companyContactIds)
+      if (contactDeleteError) {
+        setMessage("Unable to delete company contacts.")
+        return
+      }
+    }
 
     const { error } = await supabase.from("phonebook_companies").delete().eq("id", companyDraft.id)
     if (error) {
@@ -1032,6 +1088,15 @@ export default function PhonebookPage() {
     })
 
     setCompanies((prev) => prev.filter((item) => item.id !== companyDraft.id))
+    if (companyContactIds.length > 0) {
+      setContacts((prev) => prev.filter((item) => !companyContactIds.includes(item.id)))
+      if (current && companyContactIds.includes(current.id)) {
+        setCurrent(null)
+        setDraft(null)
+        setSelectedId("")
+        setEditing(false)
+      }
+    }
     if (selectedCompany === companyDraft.name) {
       setSelectedCompany("")
     }

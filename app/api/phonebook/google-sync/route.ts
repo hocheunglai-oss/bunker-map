@@ -15,6 +15,7 @@ type PhonebookContact = {
   full_name: string
   company: string | null
   company_phone: string | null
+  company_other_name: string | null
   title: string | null
   position: string | null
   department: string | null
@@ -29,6 +30,7 @@ type PhonebookContact = {
 
 type PhonebookCompany = {
   name: string
+  other_name: string | null
   country: string | null
   tel_country: string | null
   tel_area: string | null
@@ -106,9 +108,9 @@ function buildDisplayName(contact: PhonebookContact) {
 
 function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person {
   const emailAddresses: people_v1.Schema$EmailAddress[] = []
-  if (contact.personal_email) emailAddresses.push({ value: contact.personal_email, type: "home" })
-  if (contact.general_email) emailAddresses.push({ value: contact.general_email, type: "work" })
-  if (contact.private_email) emailAddresses.push({ value: contact.private_email, type: "other" })
+  if (contact.personal_email) emailAddresses.push({ value: contact.personal_email, type: "work" })
+  if (contact.general_email) emailAddresses.push({ value: contact.general_email, type: "other" })
+  if (contact.private_email) emailAddresses.push({ value: contact.private_email, type: "home" })
 
   const phoneNumbers: people_v1.Schema$PhoneNumber[] = []
   if (contact.company_phone) phoneNumbers.push({ value: normalizeDialablePhone(contact.company_phone), type: "work" })
@@ -119,6 +121,13 @@ function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person 
     { key: SYNC_MARKER_KEY, value: "1" },
     { key: CONTACT_ID_KEY, value: contact.id },
   ]
+
+  const biographies = [
+    contact.company_other_name ? `OTHER NAME: ${contact.company_other_name}` : "",
+    contact.notes || "",
+  ]
+    .filter(Boolean)
+    .join("\n")
 
   return {
     names: [
@@ -137,10 +146,10 @@ function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person 
       : undefined,
     emailAddresses: emailAddresses.length > 0 ? emailAddresses : undefined,
     phoneNumbers: phoneNumbers.length > 0 ? phoneNumbers : undefined,
-    biographies: contact.notes
+    biographies: biographies
       ? [
           {
-            value: contact.notes,
+            value: biographies,
           },
         ]
       : undefined,
@@ -174,7 +183,7 @@ async function loadCompanyPhoneMap(supabase: any) {
   while (true) {
     const { data, error } = await supabase
       .from("phonebook_companies")
-      .select("name,country,tel_country,tel_area,tel_no_1,phone")
+      .select("name,other_name,country,tel_country,tel_area,tel_no_1,phone")
       .order("name", { ascending: true })
       .range(from, from + pageSize - 1)
 
@@ -186,7 +195,15 @@ async function loadCompanyPhoneMap(supabase: any) {
     from += pageSize
   }
 
-  return new Map(rows.map((company) => [normalizeCompanyKey(company.name), buildCompanyPhone(company)]))
+  return new Map(
+    rows.map((company) => [
+      normalizeCompanyKey(company.name),
+      {
+        phone: buildCompanyPhone(company),
+        otherName: company.other_name || null,
+      },
+    ]),
+  )
 }
 
 async function fetchContacts(supabase: any, company: string | null) {
@@ -210,11 +227,12 @@ async function fetchContacts(supabase: any, company: string | null) {
     const { data, error } = await query
     if (error) throw error
 
-    const batch = (data || []) as Omit<PhonebookContact, "company_phone">[]
+    const batch = (data || []) as Omit<PhonebookContact, "company_phone" | "company_other_name">[]
     rows.push(
       ...batch.map((contact) => ({
         ...contact,
-        company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company)) || null,
+        company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.phone || null,
+        company_other_name: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.otherName || null,
       })),
     )
     if (batch.length < pageSize) break

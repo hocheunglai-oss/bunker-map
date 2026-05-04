@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.bunkermap.weekly-backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/zsh</string>
+      <string>-lc</string>
+      <string>cd /Users/hocheunglai/Desktop/bunker-map &amp;&amp; npm run backup:bunker-map-drive &gt;&gt; /Users/hocheunglai/Desktop/bunker-map/backups/bunker-map/weekly-backup.log 2&gt;&amp;1</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/hocheunglai/Desktop/bunker-map</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Weekday</key>
+      <integer>7</integer>
+      <key>Hour</key>
+      <integer>3</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/hocheunglai/Desktop/bunker-map/backups/bunker-map/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/hocheunglai/Desktop/bunker-map/backups/bunker-map/launchd.stderr.log</string>
+  </dict>
+</plist>

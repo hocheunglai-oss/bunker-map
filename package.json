@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "vercel-build": "next build",
+    "auth:google-drive": "node scripts/auth-google-drive.mjs",
+    "backup:bunker-map-drive": "node scripts/backup-bunker-map-drive.mjs",
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
