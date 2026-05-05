@@ -516,6 +516,7 @@ export default function AdminPage() {
     reportDate: string
     rows: TaiwanReportRow[]
     remark: string
+    specialNotice: string
   } | null> {
     const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
     const { data: portsData } = await supabase
@@ -534,11 +535,13 @@ export default function AdminPage() {
 
     if (!historyData || historyData.length === 0) return null
 
-    const { data: remarkData } = await supabase
+    const { data: remarksData } = await supabase
       .from("remarks")
       .select("*")
-      .eq("id", 1)
-      .maybeSingle()
+      .in("id", [1, 2])
+
+    const remarkData = remarksData?.find((item) => item.id === 1)
+    const noticeData = remarksData?.find((item) => item.id === 2)
 
     const automaticReportDate = formatReportDate(historyData[0].recorded_at)
 
@@ -546,6 +549,7 @@ export default function AdminPage() {
       reportDate: getReportDateForSnapshot("taiwan", automaticReportDate),
       rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
       remark: remarkData?.content || "",
+      specialNotice: noticeData?.content || "",
     }
   }
 

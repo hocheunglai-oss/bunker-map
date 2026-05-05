@@ -136,6 +136,7 @@ export default function TaiwanReport() {
   const isMobile = useIsMobile()
   const [rows, setRows] = useState<TaiwanReportRow[]>([])
   const [remark, setRemark] = useState("")
+  const [specialNotice, setSpecialNotice] = useState("")
   const [reportDate, setReportDate] = useState("")
 
   useEffect(() => {
@@ -144,6 +145,7 @@ export default function TaiwanReport() {
         reportDate: string
         rows: TaiwanReportRow[]
         remark: string
+        specialNotice?: string
       }>("taiwan")
 
       if (!snapshot) return
@@ -151,6 +153,7 @@ export default function TaiwanReport() {
       setReportDate(snapshot.reportDate)
       setRows(snapshot.rows)
       setRemark(snapshot.remark)
+      setSpecialNotice(snapshot.specialNotice || "")
     }
 
     load()
@@ -418,6 +421,36 @@ export default function TaiwanReport() {
             </table>
           </div>
         </div>
+
+        {specialNotice.trim() && (
+          <div
+            style={{
+              ...cardStyle,
+              padding: "14px 16px",
+              marginBottom: "20px",
+              border: "1px solid rgba(255, 178, 84, 0.28)",
+              background:
+                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.2), transparent 34%), linear-gradient(180deg, rgba(68, 42, 18, 0.78) 0%, rgba(24, 23, 28, 0.82) 100%)",
+              boxShadow: "0 18px 42px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(255, 178, 84, 0.06)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "0.14em",
+                color: "#ffd59a",
+                marginBottom: "7px",
+                fontWeight: 800,
+              }}
+            >
+              Special Notice
+            </div>
+            <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700 }}>
+              {specialNotice.trim()}
+            </div>
+          </div>
+        )}
 
         <div style={{ ...cardStyle, overflow: "hidden", marginBottom: "20px" }}>
           <div

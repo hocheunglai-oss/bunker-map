@@ -51,19 +51,23 @@ const textareaStyle: React.CSSProperties = {
 
 export default function AdminRemarks() {
   const [memos, setMemos] = useState<Array<{ id: string; text: string }>>([])
+  const [specialNotice, setSpecialNotice] = useState<string>("")
   const [loading, setLoading] = useState<boolean>(true)
   const [saving, setSaving] = useState<boolean>(false)
   const [message, setMessage] = useState<string>("")
   const [isDirty, setIsDirty] = useState<boolean>(false)
+  const [noticeDirty, setNoticeDirty] = useState<boolean>(false)
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
 
   useEffect(() => {
     const loadRemark = async () => {
-      const { data: remarkData } = await supabase
+      const { data: remarksData } = await supabase
         .from("remarks")
         .select("*")
-        .eq("id", 1)
-        .maybeSingle()
+        .in("id", [1, 2])
+
+      const remarkData = remarksData?.find((item) => item.id === 1)
+      const noticeData = remarksData?.find((item) => item.id === 2)
 
       const initialMemos =
         remarkData?.content
@@ -73,7 +77,9 @@ export default function AdminRemarks() {
           .map((text: string) => ({ id: crypto.randomUUID(), text })) || []
 
       setMemos(initialMemos.length > 0 ? initialMemos : [createEmptyMemo()])
+      setSpecialNotice(noticeData?.content || "")
       setIsDirty(false)
+      setNoticeDirty(false)
       setLoading(false)
     }
 
@@ -95,12 +101,16 @@ export default function AdminRemarks() {
 
     const { error } = await supabase
       .from("remarks")
-      .upsert({ id: 1, content: serializedRemark })
+      .upsert([
+        { id: 1, content: serializedRemark },
+        { id: 2, content: specialNotice.trim() },
+      ])
 
     if (error) setMessage("Error saving remarks")
     else {
       setMessage("Remarks saved successfully")
       setIsDirty(false)
+      setNoticeDirty(false)
     }
 
     setSaving(false)
@@ -125,6 +135,18 @@ export default function AdminRemarks() {
     })
     setMessage("")
     setIsDirty(true)
+  }
+
+  function updateSpecialNotice(value: string) {
+    setSpecialNotice(value)
+    setMessage("")
+    setNoticeDirty(true)
+  }
+
+  function clearSpecialNotice() {
+    setSpecialNotice("")
+    setMessage("")
+    setNoticeDirty(true)
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -212,21 +234,82 @@ export default function AdminRemarks() {
               disabled={saving}
               style={{
                 ...pillButtonStyle,
-                background: isDirty
+                background: isDirty || noticeDirty
                   ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)"
                   : "linear-gradient(180deg, rgba(56, 214, 154, 0.2) 0%, rgba(20, 130, 93, 0.1) 100%)",
                 color: "#ddffef",
                 textTransform: "uppercase",
-                border: isDirty ? "1px solid rgba(73, 219, 165, 0.32)" : "1px solid rgba(73, 219, 165, 0.22)",
+                border: isDirty || noticeDirty ? "1px solid rgba(73, 219, 165, 0.32)" : "1px solid rgba(73, 219, 165, 0.22)",
                 cursor: saving ? "wait" : "pointer",
               }}
             >
-              {saving ? "Saving..." : isDirty ? "Save" : "Saved"}
+              {saving ? "Saving..." : isDirty || noticeDirty ? "Save" : "Saved"}
             </button>
           </div>
         </div>
 
         <div style={{ display: "grid", gap: "14px" }}>
+          <div
+            style={{
+              ...memoCardStyle,
+              border: "1px solid rgba(255, 178, 84, 0.28)",
+              background:
+                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.2), transparent 34%), linear-gradient(180deg, rgba(70, 42, 16, 0.86) 0%, rgba(34, 24, 14, 0.72) 100%)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    color: "#ffd59a",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Special Notice
+                </div>
+                <div style={{ marginTop: "4px", color: "#f8d9b2", fontSize: "12px" }}>
+                  Appears below the Taiwan price table only when text is entered.
+                </div>
+              </div>
+
+              <button
+                onClick={clearSpecialNotice}
+                style={{
+                  ...pillButtonStyle,
+                  padding: "8px 12px",
+                  border: "1px solid rgba(255, 178, 84, 0.22)",
+                  background: "linear-gradient(180deg, rgba(255, 178, 84, 0.18) 0%, rgba(255, 126, 64, 0.1) 100%)",
+                  color: "#ffe2bd",
+                  cursor: "pointer",
+                }}
+              >
+                Remove Notice
+              </button>
+            </div>
+
+            <textarea
+              style={{
+                ...textareaStyle,
+                border: "1px solid rgba(255, 178, 84, 0.28)",
+                background: "linear-gradient(180deg, rgba(255, 178, 84, 0.1) 0%, rgba(255,255,255,0.035) 100%)",
+              }}
+              value={specialNotice}
+              onChange={(e) => updateSpecialNotice(e.target.value)}
+              placeholder="Write a short Taiwan special notice..."
+            />
+          </div>
+
           {memos.map((memo, index) => (
             <div
               key={memo.id}
