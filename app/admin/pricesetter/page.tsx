@@ -6,9 +6,10 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
 import { chinaReportSections, compactReportSections } from "@/data/reportSections"
 import { hasFormulaForAnyFuel, parseSimpleFormula } from "@/lib/portPricing"
-import { saveReportSnapshot } from "@/lib/reportSnapshots"
+import { loadReportSnapshot, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
 import { buildChinaReportSections } from "@/lib/chinaReport"
-import { formatReportDate } from "@/lib/taiwanReport"
+import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
+import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
 import { useIsMobile } from "@/lib/useIsMobile"
 
 type SavedPortsState = Record<string, boolean>
@@ -20,6 +21,8 @@ type ActivityLog = {
 }
 
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
+type ReportDateOverrides = Record<ReportSnapshotKey, string>
+type ReportDates = Record<ReportSnapshotKey, string>
 
 const tertiaryPortNames = new Set(
   [
@@ -65,6 +68,27 @@ const taiwanBasisFormulaDefaults: Record<string, { vlsfo_formula?: string; mgo_f
   },
 }
 
+const emptyReportDateOverrides: ReportDateOverrides = {
+  taiwan: "",
+  hongkong: "",
+  china: "",
+  compact: "",
+}
+
+const emptyReportDates: ReportDates = {
+  taiwan: "",
+  hongkong: "",
+  china: "",
+  compact: "",
+}
+
+const reportDateItems: Array<{ key: ReportSnapshotKey; label: string }> = [
+  { key: "china", label: "China" },
+  { key: "compact", label: "Compact" },
+  { key: "taiwan", label: "Taiwan" },
+  { key: "hongkong", label: "Hong Kong" },
+]
+
 export default function AdminPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
@@ -80,6 +104,12 @@ export default function AdminPage() {
   const [publishedChina, setPublishedChina] = useState(false)
   const [publishingCompact, setPublishingCompact] = useState(false)
   const [publishedCompact, setPublishedCompact] = useState(false)
+  const [publishingTaiwan, setPublishingTaiwan] = useState(false)
+  const [publishedTaiwan, setPublishedTaiwan] = useState(false)
+  const [publishingHongKong, setPublishingHongKong] = useState(false)
+  const [publishedHongKong, setPublishedHongKong] = useState(false)
+  const [reportDateOverrides, setReportDateOverrides] = useState<ReportDateOverrides>(emptyReportDateOverrides)
+  const [reportDates, setReportDates] = useState<ReportDates>(emptyReportDates)
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
@@ -120,6 +150,24 @@ export default function AdminPage() {
     }
 
     loadPorts()
+  }, [])
+
+  useEffect(() => {
+    async function loadReportDates() {
+      const entries = await Promise.all(
+        reportDateItems.map(async (item) => {
+          const snapshot = await loadReportSnapshot<{ reportDate?: string }>(item.key)
+          return [item.key, snapshot?.reportDate || ""] as const
+        })
+      )
+
+      setReportDates((prev) => ({
+        ...prev,
+        ...Object.fromEntries(entries),
+      }))
+    }
+
+    loadReportDates()
   }, [])
 
   function updateValue(id: string, field: string, value: any) {
@@ -438,8 +486,9 @@ export default function AdminPage() {
       .sort()
       .at(-1)
 
+    const automaticReportDate = latestUpdated ? formatReportDate(latestUpdated) : ""
     const snapshot = {
-      reportDate: latestUpdated ? formatReportDate(latestUpdated) : "",
+      reportDate: getReportDateForSnapshot(key, automaticReportDate),
       sections: buildChinaReportSections(portsData, sections),
     }
 
@@ -447,10 +496,93 @@ export default function AdminPage() {
     return snapshot
   }
 
+  function formatOverrideDate(value: string) {
+    if (!value) return ""
+    return formatReportDate(`${value}T12:00:00+08:00`)
+  }
+
+  function getReportDateForSnapshot(key: ReportSnapshotKey, automaticReportDate: string) {
+    return formatOverrideDate(reportDateOverrides[key]) || automaticReportDate
+  }
+
+  function updateReportDateOverride(key: ReportSnapshotKey, value: string) {
+    setReportDateOverrides((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+  }
+
+  async function buildTaiwanSnapshot(): Promise<{
+    reportDate: string
+    rows: TaiwanReportRow[]
+    remark: string
+  } | null> {
+    const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", portsWanted)
+
+    if (!portsData) return null
+
+    const portIds = portsData.map((port) => port.id)
+    const { data: historyData } = await supabase
+      .from("price_history")
+      .select("*")
+      .in("port_id", portIds)
+      .order("recorded_at", { ascending: false })
+
+    if (!historyData || historyData.length === 0) return null
+
+    const { data: remarkData } = await supabase
+      .from("remarks")
+      .select("*")
+      .eq("id", 1)
+      .maybeSingle()
+
+    const automaticReportDate = formatReportDate(historyData[0].recorded_at)
+
+    return {
+      reportDate: getReportDateForSnapshot("taiwan", automaticReportDate),
+      rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
+      remark: remarkData?.content || "",
+    }
+  }
+
+  async function buildHongKongSnapshot(): Promise<{
+    reportDate: string
+    rows: HongKongReportRow[]
+  } | null> {
+    const portsWanted = ["Hong Kong"]
+    const { data: portsData } = await supabase
+      .from("ports")
+      .select("*")
+      .in("name", portsWanted)
+
+    if (!portsData) return null
+
+    const portIds = portsData.map((port) => port.id)
+    const { data: historyData } = await supabase
+      .from("price_history")
+      .select("*")
+      .in("port_id", portIds)
+      .order("recorded_at", { ascending: false })
+
+    if (!historyData || historyData.length === 0) return null
+
+    const automaticReportDate = formatReportDate(historyData[0].recorded_at)
+
+    return {
+      reportDate: getReportDateForSnapshot("hongkong", automaticReportDate),
+      rows: buildHongKongReportRows(portsData, historyData, portsWanted),
+    }
+  }
+
   async function handlePublishChina() {
     setPublishingChina(true)
     const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
     if (snapshot) setPublishedChina(true)
+    if (snapshot) setReportDates((prev) => ({ ...prev, china: snapshot.reportDate }))
     setPublishingChina(false)
     if (snapshot) addActivityLog("China report published")
   }
@@ -459,8 +591,33 @@ export default function AdminPage() {
     setPublishingCompact(true)
     const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
     if (snapshot) setPublishedCompact(true)
+    if (snapshot) setReportDates((prev) => ({ ...prev, compact: snapshot.reportDate }))
     setPublishingCompact(false)
     if (snapshot) addActivityLog("Compact report published")
+  }
+
+  async function handlePublishTaiwan() {
+    setPublishingTaiwan(true)
+    const snapshot = await buildTaiwanSnapshot()
+    if (snapshot) {
+      await saveReportSnapshot("taiwan", snapshot)
+      setPublishedTaiwan(true)
+      setReportDates((prev) => ({ ...prev, taiwan: snapshot.reportDate }))
+      addActivityLog("Taiwan report published")
+    }
+    setPublishingTaiwan(false)
+  }
+
+  async function handlePublishHongKong() {
+    setPublishingHongKong(true)
+    const snapshot = await buildHongKongSnapshot()
+    if (snapshot) {
+      await saveReportSnapshot("hongkong", snapshot)
+      setPublishedHongKong(true)
+      setReportDates((prev) => ({ ...prev, hongkong: snapshot.reportDate }))
+      addActivityLog("Hong Kong report published")
+    }
+    setPublishingHongKong(false)
   }
 
   const visiblePorts = useMemo(() => {
@@ -566,7 +723,16 @@ export default function AdminPage() {
               </h1>
             </div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile
+                  ? "1fr"
+                  : "200px repeat(4, 188px) 72px",
+                gap: "10px",
+                alignItems: "center",
+              }}
+            >
               <a href="/admin" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
                 ← Back To Admin
               </a>
@@ -643,21 +809,97 @@ export default function AdminPage() {
                       zIndex: 30,
                     }}
                   >
-                    <button onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                    <button onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Port
                     </button>
-                    <button onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                    <button onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Divider
                     </button>
-                    <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                    <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       {showCoords ? "Hide Coordinates" : "Show Coordinates"}
                     </button>
-                    <button onClick={() => { setShowDeleteButtons((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, textAlign: "left" }}>
+                    <button onClick={() => { setShowDeleteButtons((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       {showDeleteButtons ? "Hide Delete Buttons" : "Show Delete Buttons"}
                     </button>
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile
+                ? "1fr"
+                : "200px repeat(4, 188px) 72px",
+              justifyContent: "end",
+              gap: "10px",
+              marginTop: "-6px",
+              marginBottom: "12px",
+            }}
+          >
+            {!isMobile && <div />}
+            <div
+              style={{
+                display: "grid",
+                gridColumn: isMobile ? "auto" : "2 / span 4",
+                gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 188px)",
+                gap: "10px",
+              }}
+            >
+              <button
+                onClick={handlePublishTaiwan}
+                disabled={publishingTaiwan}
+                style={{
+                  ...toolbarButtonStyle,
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  color: "#e2f3ff",
+                }}
+              >
+                {publishingTaiwan ? "Publishing Taiwan..." : publishedTaiwan ? "Published Taiwan" : "Publish Taiwan"}
+              </button>
+              <a
+                href="/reports/taiwan"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...toolbarButtonStyle,
+                  textDecoration: "none",
+                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+                  border: "1px solid rgba(255, 120, 120, 0.16)",
+                  color: "#ffd4d8",
+                }}
+              >
+                Check Taiwan
+              </a>
+              <button
+                onClick={handlePublishHongKong}
+                disabled={publishingHongKong}
+                style={{
+                  ...toolbarButtonStyle,
+                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
+                  border: "1px solid rgba(80, 170, 255, 0.18)",
+                  color: "#e2f3ff",
+                }}
+              >
+                {publishingHongKong ? "Publishing HK..." : publishedHongKong ? "Published HK" : "Publish HK"}
+              </button>
+              <a
+                href="/reports/hongkong"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...toolbarButtonStyle,
+                  textDecoration: "none",
+                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
+                  border: "1px solid rgba(255, 120, 120, 0.16)",
+                  color: "#ffd4d8",
+                }}
+              >
+                Check HK
+              </a>
             </div>
           </div>
 
@@ -987,6 +1229,75 @@ export default function AdminPage() {
           </div>
         </aside>
         </div>
+
+        <section
+          style={{
+            marginTop: "16px",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(210,236,255,0.14)",
+            borderRadius: "18px",
+            padding: "14px",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "12px",
+            }}
+          >
+            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+              Report Dates
+            </div>
+            <div style={{ color: "#a7c3d9", fontSize: "12px" }}>
+              Leave blank to use the automatic publish date.
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
+              gap: "10px",
+            }}
+          >
+            {reportDateItems.map((item) => (
+              <label
+                key={item.key}
+                style={{
+                  display: "grid",
+                  gap: "8px",
+                  padding: "12px",
+                  borderRadius: "14px",
+                  background: "linear-gradient(180deg, rgba(20, 60, 96, 0.44) 0%, rgba(8, 28, 44, 0.34) 100%)",
+                  border: "1px solid rgba(210,236,255,0.08)",
+                }}
+              >
+                <span style={{ color: "#edf7ff", fontSize: "13px", fontWeight: 800 }}>
+                  {item.label}
+                </span>
+                <span style={{ color: "#a7c3d9", fontSize: "12px" }}>
+                  Current: {reportDates[item.key] || "-"}
+                </span>
+                <input
+                  type="date"
+                  value={reportDateOverrides[item.key]}
+                  onChange={(event) => updateReportDateOverride(item.key, event.target.value)}
+                  style={{
+                    ...compactInputStyle,
+                    width: "100%",
+                    minHeight: "34px",
+                    colorScheme: "dark",
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   )
@@ -1004,7 +1315,11 @@ const compactInputStyle: React.CSSProperties = {
 }
 
 const toolbarButtonStyle: React.CSSProperties = {
-  padding: "9px 14px",
+  alignItems: "center",
+  display: "inline-flex",
+  justifyContent: "center",
+  padding: "7px 14px",
+  minHeight: "40px",
   minWidth: "118px",
   border: "1px solid rgba(210,236,255,0.16)",
   borderRadius: "999px",
@@ -1013,6 +1328,9 @@ const toolbarButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: "13px",
   fontWeight: 700,
+  lineHeight: 1.1,
+  textAlign: "center",
+  whiteSpace: "nowrap",
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
