@@ -9,32 +9,28 @@ import { createClient } from "@supabase/supabase-js"
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
-function loadEnv() {
-  return Object.fromEntries(
-    fsSync
-      .readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .filter((line: string) => !line.trim().startsWith("#"))
-      .map((line: string) => {
-        const idx = line.indexOf("=")
-        return [line.slice(0, idx).trim(), line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "")]
-      }),
-  )
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing environment variable: ${name}`)
+  return value
 }
 
 async function getDriveClient() {
-  const env = loadEnv()
   const auth = new google.auth.OAuth2(
-    env.GOOGLE_OAUTH_CLIENT_ID,
-    env.GOOGLE_OAUTH_CLIENT_SECRET,
-    env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
+    requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
+    requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
+    process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
   )
-  const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
-  auth.setCredentials(JSON.parse(tokenRaw))
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+  if (refreshToken) {
+    auth.setCredentials({ refresh_token: refreshToken })
+  } else {
+    const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
+    auth.setCredentials(JSON.parse(tokenRaw))
+  }
   return {
     drive: google.drive({ version: "v3", auth }),
-    rootFolderId: env.GOOGLE_DRIVE_COMPANY_FOLDER_ID,
+    rootFolderId: process.env.GOOGLE_DRIVE_COMPANY_FOLDER_ID || null,
   }
 }
 
@@ -98,8 +94,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
     }
 
-    const env = loadEnv()
-    const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
     const formData = await request.formData()
     const entryKind = String(formData.get("entryKind") || "")
     const entryId = String(formData.get("entryId") || "")

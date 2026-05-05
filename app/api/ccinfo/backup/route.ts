@@ -6,18 +6,10 @@ import { createClient } from "@supabase/supabase-js"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
-function loadEnv() {
-  return Object.fromEntries(
-    fs
-      .readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .filter((line: string) => !line.trim().startsWith("#"))
-      .map((line: string) => {
-        const idx = line.indexOf("=")
-        return [line.slice(0, idx).trim(), line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "")]
-      }),
-  )
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing environment variable: ${name}`)
+  return value
 }
 
 export async function GET() {
@@ -27,8 +19,7 @@ export async function GET() {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
     }
 
-    const env = loadEnv()
-    const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
 
     const [companies, countries, ports, companyFiles, entryFiles, entryFolders] = await Promise.all([
       supabase.from("cc_companies").select("*").order("name", { ascending: true }),
