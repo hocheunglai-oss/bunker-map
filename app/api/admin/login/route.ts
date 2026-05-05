@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
+const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
 export async function POST(request: Request) {
   const { username, password } = await request.json()
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 8,
+    maxAge: ADMIN_COOKIE_MAX_AGE,
   })
 
   return NextResponse.json({ success: true })
