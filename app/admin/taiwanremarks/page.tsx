@@ -279,7 +279,7 @@ export default function AdminRemarks() {
                   Special Notice
                 </div>
                 <div style={{ marginTop: "4px", color: "#f8d9b2", fontSize: "12px" }}>
-                  Appears below the Taiwan price table only when text is entered.
+                  Appears only when text is entered.
                 </div>
               </div>
 

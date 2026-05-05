@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { loadReportSnapshot } from "@/lib/reportSnapshots"
+import { supabase } from "@/lib/supabase"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
@@ -145,7 +146,6 @@ export default function TaiwanReport() {
         reportDate: string
         rows: TaiwanReportRow[]
         remark: string
-        specialNotice?: string
       }>("taiwan")
 
       if (!snapshot) return
@@ -153,7 +153,14 @@ export default function TaiwanReport() {
       setReportDate(snapshot.reportDate)
       setRows(snapshot.rows)
       setRemark(snapshot.remark)
-      setSpecialNotice(snapshot.specialNotice || "")
+
+      const { data: noticeData } = await supabase
+        .from("remarks")
+        .select("content")
+        .eq("id", 2)
+        .maybeSingle()
+
+      setSpecialNotice(noticeData?.content || "")
     }
 
     load()
