@@ -10,6 +10,7 @@ import { loadReportSnapshot } from "@/lib/reportSnapshots"
 import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
+import { buildFallbackKey, loadReportFallbacks, type FallbackMap } from "@/lib/reportFallbacks"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -63,8 +64,8 @@ const pillButtonStyle: React.CSSProperties = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
 }
 
-function formatValue(value: number | null) {
-  if (value == null) return "-"
+function formatValue(value: number | null, fallback: string) {
+  if (value == null) return fallback
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
@@ -81,6 +82,7 @@ export default function ChinaReport() {
   const isMobile = useIsMobile()
   const [sections, setSections] = useState<ChinaReportSection[]>([])
   const [reportDate, setReportDate] = useState("")
+  const [fallbacks, setFallbacks] = useState<FallbackMap>({})
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -98,6 +100,17 @@ export default function ChinaReport() {
 
     load()
   }, [])
+
+  useEffect(() => {
+    async function load() {
+      setFallbacks(await loadReportFallbacks())
+    }
+    load()
+  }, [])
+
+  function fuelFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+    return fallbacks[buildFallbackKey(port, fuel)] || "-"
+  }
 
   useEffect(() => {
     if (!isMobile) return
@@ -357,7 +370,7 @@ export default function ChinaReport() {
                               color: "#eef7ff",
                             }}
                           >
-                            {formatValue(row.hsfo)}
+                            {formatValue(row.hsfo, fuelFallback(row.port, "hsfo"))}
                           </div>
                           <div
                             style={{
@@ -369,7 +382,7 @@ export default function ChinaReport() {
                               color: "#eef7ff",
                             }}
                           >
-                            {formatValue(row.vlsfo)}
+                            {formatValue(row.vlsfo, fuelFallback(row.port, "vlsfo"))}
                           </div>
                           <div
                             style={{
@@ -380,7 +393,7 @@ export default function ChinaReport() {
                               color: "#eef7ff",
                             }}
                           >
-                            {formatValue(row.mgo)}
+                            {formatValue(row.mgo, fuelFallback(row.port, "mgo"))}
                           </div>
                         </div>
                       ))}

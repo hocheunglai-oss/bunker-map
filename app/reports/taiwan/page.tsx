@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
+import { buildFallbackKey, loadReportFallbacks, type FallbackMap } from "@/lib/reportFallbacks"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -139,6 +140,7 @@ export default function TaiwanReport() {
   const [remark, setRemark] = useState("")
   const [specialNotice, setSpecialNotice] = useState("")
   const [reportDate, setReportDate] = useState("")
+  const [fallbacks, setFallbacks] = useState<FallbackMap>({})
 
   useEffect(() => {
     async function load() {
@@ -165,6 +167,17 @@ export default function TaiwanReport() {
 
     load()
   }, [])
+
+  useEffect(() => {
+    async function load() {
+      setFallbacks(await loadReportFallbacks())
+    }
+    load()
+  }, [])
+
+  function fuelFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+    return fallbacks[buildFallbackKey(port, fuel)] || "-"
+  }
 
   useEffect(() => {
     if (!isMobile) return
@@ -360,12 +373,12 @@ export default function TaiwanReport() {
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {isHsfoUnavailablePort(row.port)
                         ? renderUnavailableHsfo(row.port)
-                        : row.hsfo.today ?? "-"}
+                        : (row.hsfo.today ?? fuelFallback(row.port, "hsfo"))}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {isHsfoUnavailablePort(row.port)
                         ? renderUnavailableHsfo(row.port)
-                        : row.hsfo.last ?? "-"}
+                        : (row.hsfo.last ?? fuelFallback(row.port, "hsfo"))}
                     </td>
                     <td
                       style={{
@@ -387,10 +400,10 @@ export default function TaiwanReport() {
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.vlsfo.today ?? "-"}
+                      {row.vlsfo.today ?? fuelFallback(row.port, "vlsfo")}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.vlsfo.last ?? "-"}
+                      {row.vlsfo.last ?? fuelFallback(row.port, "vlsfo")}
                     </td>
                     <td
                       style={{
@@ -406,10 +419,10 @@ export default function TaiwanReport() {
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.mgo.today ?? "-"}
+                      {row.mgo.today ?? fuelFallback(row.port, "mgo")}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.mgo.last ?? "-"}
+                      {row.mgo.last ?? fuelFallback(row.port, "mgo")}
                     </td>
                     <td
                       style={{

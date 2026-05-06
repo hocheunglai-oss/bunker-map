@@ -6,6 +6,7 @@ import { type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
+import { buildFallbackKey, loadReportFallbacks, type FallbackMap } from "@/lib/reportFallbacks"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -100,6 +101,7 @@ export default function HongKongReport() {
   const isMobile = useIsMobile()
   const [rows, setRows] = useState<HongKongReportRow[]>([])
   const [reportDate, setReportDate] = useState("")
+  const [fallbacks, setFallbacks] = useState<FallbackMap>({})
 
   useEffect(() => {
     async function load() {
@@ -116,6 +118,22 @@ export default function HongKongReport() {
 
     load()
   }, [])
+
+  useEffect(() => {
+    async function load() {
+      setFallbacks(await loadReportFallbacks())
+    }
+    load()
+  }, [])
+
+  function fuelFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+    return fallbacks[buildFallbackKey(port, fuel)] || "-"
+  }
+
+  function formatFuel(value: number | null, port: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+    if (value == null) return fuelFallback(port, fuel)
+    return String(value)
+  }
 
   useEffect(() => {
     if (!isMobile) return
@@ -302,9 +320,9 @@ export default function HongKongReport() {
                       >
                         {shortDate(row.todayDate)}
                       </td>
-                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{row.hsfo.today ?? "-"}</td>
-                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{row.vlsfo.today ?? "-"}</td>
-                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.mgo.glow}` }}>{row.mgo.today ?? "-"}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{formatFuel(row.hsfo.today, row.port, "hsfo")}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{formatFuel(row.vlsfo.today, row.port, "vlsfo")}</td>
+                      <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.mgo.glow}` }}>{formatFuel(row.mgo.today, row.port, "mgo")}</td>
                     </tr>
                     <tr
                       style={{
@@ -336,9 +354,9 @@ export default function HongKongReport() {
                       >
                         {shortDate(row.last1Date)}
                       </td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.hsfo.last1 ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.vlsfo.last1 ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{row.mgo.last1 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.hsfo.last1, row.port, "hsfo")}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.vlsfo.last1, row.port, "vlsfo")}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{formatFuel(row.mgo.last1, row.port, "mgo")}</td>
                     </tr>
                     <tr
                       style={{
@@ -369,9 +387,9 @@ export default function HongKongReport() {
                       >
                         {shortDate(row.last2Date)}
                       </td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.hsfo.last2 ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{row.vlsfo.last2 ?? "-"}</td>
-                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{row.mgo.last2 ?? "-"}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.hsfo.last2, row.port, "hsfo")}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.vlsfo.last2, row.port, "vlsfo")}</td>
+                      <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>{formatFuel(row.mgo.last2, row.port, "mgo")}</td>
                     </tr>
                   </Fragment>
                 ))}

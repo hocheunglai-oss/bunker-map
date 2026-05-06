@@ -5,12 +5,19 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
 import { chinaReportSections, compactReportSections } from "@/data/reportSections"
-import { hasFormulaForAnyFuel, parseSimpleFormula } from "@/lib/portPricing"
+import { hasFormulaForAnyFuel, parseSimpleFormula, resolvePortFuelValue } from "@/lib/portPricing"
 import { loadReportSnapshot, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
 import { buildChinaReportSections } from "@/lib/chinaReport"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
 import { useIsMobile } from "@/lib/useIsMobile"
+import {
+  buildFallbackKey,
+  loadReportFallbacks,
+  saveReportFallbacks,
+  type FallbackMap,
+  type FallbackValue,
+} from "@/lib/reportFallbacks"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
@@ -113,6 +120,7 @@ export default function AdminPage() {
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
+  const [reportFallbacks, setReportFallbacks] = useState<FallbackMap>({})
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const today = new Date().toDateString()
@@ -168,6 +176,14 @@ export default function AdminPage() {
     }
 
     loadReportDates()
+  }, [])
+
+  useEffect(() => {
+    async function loadFallbacks() {
+      const next = await loadReportFallbacks()
+      setReportFallbacks(next)
+    }
+    loadFallbacks()
   }, [])
 
   function updateValue(id: string, field: string, value: any) {
@@ -655,6 +671,44 @@ export default function AdminPage() {
       return hasFormula || !hasPrice
     })
   }, [hideTertiary, ports, selectedPortGroup, selectedTab])
+
+  const missingFuelEntries = useMemo(() => {
+    const portsByName = new Map(
+      ports.map((item) => [String(item.name).toLowerCase(), item] as const)
+    )
+    const fuels: Array<{ key: "hsfo" | "vlsfo" | "mgo"; label: string }> = [
+      { key: "hsfo", label: "HSFO" },
+      { key: "vlsfo", label: "VLSFO" },
+      { key: "mgo", label: "MGO" },
+    ]
+
+    const rows: Array<{ port: string; fuel: "hsfo" | "vlsfo" | "mgo"; label: string }> = []
+    for (const port of ports) {
+      for (const fuel of fuels) {
+        const resolved = resolvePortFuelValue(port, portsByName, fuel.key)
+        if (resolved == null) {
+          rows.push({
+            port: port.name,
+            fuel: fuel.key,
+            label: fuel.label,
+          })
+        }
+      }
+    }
+
+    return rows.sort((a, b) => a.port.localeCompare(b.port) || a.label.localeCompare(b.label))
+  }, [ports])
+
+  async function setFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo", value: FallbackValue) {
+    const key = buildFallbackKey(port, fuel)
+    const next = {
+      ...reportFallbacks,
+      [key]: value,
+    }
+    setReportFallbacks(next)
+    await saveReportFallbacks(next)
+    addActivityLog(`${port} ${fuel.toUpperCase()} fallback set to ${value}`)
+  }
 
   function switchPortGroup(nextGroup: PortGroupMode) {
     if (nextGroup === selectedPortGroup) return
@@ -1301,6 +1355,74 @@ export default function AdminPage() {
               </label>
             ))}
           </div>
+        </section>
+
+        <section
+          style={{
+            marginTop: "16px",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(210,236,255,0.14)",
+            borderRadius: "18px",
+            padding: "14px",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+          }}
+        >
+          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "10px" }}>
+            Missing Value Overrides
+          </div>
+
+          {missingFuelEntries.length === 0 ? (
+            <div style={{ color: "#a7c3d9", fontSize: "12px" }}>No missing price/formula fields right now.</div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+                gap: "8px",
+              }}
+            >
+              {missingFuelEntries.map((item) => {
+                const mapKey = buildFallbackKey(item.port, item.fuel)
+                const current = reportFallbacks[mapKey] ?? "-"
+                return (
+                  <div
+                    key={mapKey}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "10px 12px",
+                      borderRadius: "12px",
+                      border: "1px solid rgba(210,236,255,0.1)",
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ color: "#edf7ff", fontSize: "12px", fontWeight: 700 }}>
+                      {item.port} · {item.label}
+                    </div>
+                    <select
+                      value={current}
+                      onChange={(event) => {
+                        void setFallback(item.port, item.fuel, event.target.value as FallbackValue)
+                      }}
+                      style={{
+                        ...compactInputStyle,
+                        minHeight: "30px",
+                        width: "84px",
+                        padding: "4px 8px",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      <option value="-">-</option>
+                      <option value="NA">NA</option>
+                      <option value="SE">SE</option>
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </section>
       </div>
     </div>
