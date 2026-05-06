@@ -24,6 +24,9 @@ async function getDriveClient() {
   if (refreshToken) {
     auth.setCredentials({ refresh_token: refreshToken })
   } else {
+    if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+      throw new Error("Google Drive is not authorized on the hosted app yet. Add GOOGLE_DRIVE_REFRESH_TOKEN in Vercel.")
+    }
     const tokenRaw = fs.readFileSync(TOKEN_PATH, "utf8")
     auth.setCredentials(JSON.parse(tokenRaw))
   }
@@ -233,7 +236,7 @@ export async function PATCH(request: Request) {
     }
 
     const { drive, rootFolderId } = await getDriveClient()
-    if (!rootFolderId) throw new Error("Google Drive folder is not configured.")
+    if (!rootFolderId) throw new Error("Google Drive folder is not configured. Add GOOGLE_DRIVE_COMPANY_FOLDER_ID in Vercel.")
 
     const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, entryKind, entryName, folderPath)
     const current = await drive.files.get({
