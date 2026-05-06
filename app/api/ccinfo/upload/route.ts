@@ -1,5 +1,6 @@
 import fs from "node:fs/promises"
 import fsSync from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { google } from "googleapis"
 import { cookies } from "next/headers"
@@ -91,6 +92,7 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
 }
 
 export async function POST(request: Request) {
+  let tempPath = ""
   try {
     const cookieStore = await cookies()
     if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
@@ -129,7 +131,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const tempPath = path.join(process.cwd(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
+    tempPath = path.join(os.tmpdir(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
     const bytes = Buffer.from(await uploadFile.arrayBuffer())
     await fs.writeFile(tempPath, bytes)
 
@@ -198,7 +200,8 @@ export async function POST(request: Request) {
     console.error("ccinfo upload failed", error)
     return NextResponse.json({ message: joined || "Upload failed." }, { status: 500 })
   } finally {
-    const uploads = fsSync.readdirSync(process.cwd()).filter((name) => name.startsWith(".tmp-upload-"))
-    await Promise.all(uploads.map((file) => fs.rm(path.join(process.cwd(), file), { force: true })))
+    if (tempPath) {
+      await fs.rm(tempPath, { force: true })
+    }
   }
 }
