@@ -672,31 +672,33 @@ export default function AdminPage() {
     })
   }, [hideTertiary, ports, selectedPortGroup, selectedTab])
 
-  const missingFuelEntries = useMemo(() => {
+  const missingFuelMatrix = useMemo(() => {
     const portsByName = new Map(
       ports.map((item) => [String(item.name).toLowerCase(), item] as const)
     )
-    const fuels: Array<{ key: "hsfo" | "vlsfo" | "mgo"; label: string }> = [
-      { key: "hsfo", label: "HSFO" },
-      { key: "vlsfo", label: "VLSFO" },
-      { key: "mgo", label: "MGO" },
-    ]
+    const rows: Array<{
+      group: string
+      port: string
+      missing: Partial<Record<"hsfo" | "vlsfo" | "mgo", true>>
+    }> = []
+    let currentGroup = "Other"
 
-    const rows: Array<{ port: string; fuel: "hsfo" | "vlsfo" | "mgo"; label: string }> = []
     for (const port of ports) {
-      for (const fuel of fuels) {
-        const resolved = resolvePortFuelValue(port, portsByName, fuel.key)
+      if (port.type === "divider") {
+        currentGroup = String(port.name || "Other")
+        continue
+      }
+      const missing: Partial<Record<"hsfo" | "vlsfo" | "mgo", true>> = {}
+      for (const fuel of ["hsfo", "vlsfo", "mgo"] as const) {
+        const resolved = resolvePortFuelValue(port, portsByName, fuel)
         if (resolved == null) {
-          rows.push({
-            port: port.name,
-            fuel: fuel.key,
-            label: fuel.label,
-          })
+          missing[fuel] = true
         }
       }
+      if (Object.keys(missing).length > 0) rows.push({ group: currentGroup, port: port.name, missing })
     }
 
-    return rows.sort((a, b) => a.port.localeCompare(b.port) || a.label.localeCompare(b.label))
+    return rows
   }, [ports])
 
   async function setFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo", value: FallbackValue) {
@@ -1371,53 +1373,90 @@ export default function AdminPage() {
             Missing Value Overrides
           </div>
 
-          {missingFuelEntries.length === 0 ? (
+          {missingFuelMatrix.length === 0 ? (
             <div style={{ color: "#a7c3d9", fontSize: "12px" }}>No missing price/formula fields right now.</div>
           ) : (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
-                gap: "8px",
+                gap: "6px",
               }}
             >
-              {missingFuelEntries.map((item) => {
-                const mapKey = buildFallbackKey(item.port, item.fuel)
-                const current = reportFallbacks[mapKey] ?? "-"
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "minmax(0, 1fr) repeat(3, 82px)" : "minmax(0, 1fr) repeat(3, 90px)",
+                  gap: "8px",
+                  padding: "4px 2px",
+                }}
+              >
+                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>Port</div>
+                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>HSFO</div>
+                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>VLSFO</div>
+                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>MGO</div>
+              </div>
+
+              {missingFuelMatrix.map((item, index) => {
+                const showGroupHeader = index === 0 || missingFuelMatrix[index - 1].group !== item.group
                 return (
-                  <div
-                    key={mapKey}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "10px 12px",
-                      borderRadius: "12px",
-                      border: "1px solid rgba(210,236,255,0.1)",
-                      background: "rgba(255,255,255,0.02)",
-                    }}
-                  >
-                    <div style={{ color: "#edf7ff", fontSize: "12px", fontWeight: 700 }}>
-                      {item.port} · {item.label}
-                    </div>
-                    <select
-                      value={current}
-                      onChange={(event) => {
-                        void setFallback(item.port, item.fuel, event.target.value as FallbackValue)
-                      }}
+                  <div key={item.port}>
+                    {showGroupHeader && (
+                      <div
+                        style={{
+                          marginTop: index === 0 ? "2px" : "8px",
+                          marginBottom: "5px",
+                          fontSize: "11px",
+                          fontWeight: 800,
+                          color: "#8fd7ff",
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {item.group}
+                      </div>
+                    )}
+                    <div
                       style={{
-                        ...compactInputStyle,
-                        minHeight: "30px",
-                        width: "84px",
-                        padding: "4px 8px",
-                        textTransform: "uppercase",
+                        display: "grid",
+                        gridTemplateColumns: isMobile ? "minmax(0, 1fr) repeat(3, 82px)" : "minmax(0, 1fr) repeat(3, 90px)",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px 10px",
+                        borderRadius: "12px",
+                        border: "1px solid rgba(210,236,255,0.1)",
+                        background: "rgba(255,255,255,0.02)",
                       }}
                     >
-                      <option value="-">-</option>
-                      <option value="NA">NA</option>
-                      <option value="SE">SE</option>
-                    </select>
+                      <div style={{ color: "#edf7ff", fontSize: "12px", fontWeight: 700 }}>{item.port}</div>
+                      {(["hsfo", "vlsfo", "mgo"] as const).map((fuel) => {
+                        if (!item.missing[fuel]) {
+                          return <div key={fuel} style={{ textAlign: "center", color: "#6d8ca8", fontSize: "12px" }}>-</div>
+                        }
+                        const mapKey = buildFallbackKey(item.port, fuel)
+                        const current = reportFallbacks[mapKey] ?? "-"
+                        return (
+                          <select
+                            key={fuel}
+                            value={current}
+                            onChange={(event) => {
+                              void setFallback(item.port, fuel, event.target.value as FallbackValue)
+                            }}
+                            style={{
+                              ...compactInputStyle,
+                              minHeight: "30px",
+                              width: "100%",
+                              padding: "4px 6px",
+                              textTransform: "uppercase",
+                              textAlign: "center",
+                            }}
+                          >
+                            <option value="-">-</option>
+                            <option value="NA">NA</option>
+                            <option value="SE">SE</option>
+                          </select>
+                        )
+                      })}
+                    </div>
                   </div>
                 )
               })}
