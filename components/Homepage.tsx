@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { resolvePortFuelValue } from "@/lib/portPricing"
 import DisclaimerLink from "@/components/DisclaimerLink"
+import { buildFallbackKey, loadReportFallbacks, type FallbackMap } from "@/lib/reportFallbacks"
 
 type Port = {
   id: number
@@ -291,6 +292,7 @@ export default function Homepage() {
   const [selectedPortId, setSelectedPortId] = useState<number | null>(null)
   const [reportsOpen, setReportsOpen] = useState(false)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
+  const [fallbacks, setFallbacks] = useState<FallbackMap>({})
 
   const mapRef = useRef<L.Map | null>(null)
   const markerRefs = useRef<Record<number, L.CircleMarker>>({})
@@ -333,6 +335,22 @@ export default function Homepage() {
 
     loadPorts()
   }, [])
+
+  useEffect(() => {
+    async function load() {
+      setFallbacks(await loadReportFallbacks())
+    }
+    load()
+  }, [])
+
+  function fuelFallback(portName: string, fuel: "hsfo" | "vlsfo" | "mgo") {
+    return fallbacks[buildFallbackKey(portName, fuel)] || "-"
+  }
+
+  function formatFuelValue(portName: string, fuel: "hsfo" | "vlsfo" | "mgo", value: number | null) {
+    if (value == null) return fuelFallback(portName, fuel)
+    return String(value)
+  }
 
   useEffect(() => {
     if (!search) {
@@ -520,6 +538,7 @@ export default function Homepage() {
                       {[
                         {
                           label: "HSFO",
+                          fuel: "hsfo" as const,
                           value: port.hsfo,
                           singaporeValue: singaporePort?.hsfo ?? null,
                           accent: "#5aa9ff",
@@ -527,6 +546,7 @@ export default function Homepage() {
                         },
                         {
                           label: "VLSFO",
+                          fuel: "vlsfo" as const,
                           value: port.vlsfo,
                           singaporeValue: singaporePort?.vlsfo ?? null,
                           accent: "#57e3b0",
@@ -534,6 +554,7 @@ export default function Homepage() {
                         },
                         {
                           label: "LSMGO",
+                          fuel: "mgo" as const,
                           value: port.mgo,
                           singaporeValue: singaporePort?.mgo ?? null,
                           accent: "#ffd166",
@@ -580,7 +601,7 @@ export default function Homepage() {
                               {item.label}
                             </div>
                             <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1.05 }}>
-                              {item.value ?? "-"}
+                              {formatFuelValue(port.name, item.fuel, item.value)}
                             </div>
                             {deltaLabel && (
                               <div
@@ -806,13 +827,13 @@ export default function Homepage() {
                       }}
                     >
                       {[
-                        { label: "HSFO", value: port.hsfo },
-                        { label: "VLSFO", value: port.vlsfo },
-                        { label: "MGO", value: port.mgo },
+                        { label: "HSFO", fuel: "hsfo" as const, value: port.hsfo },
+                        { label: "VLSFO", fuel: "vlsfo" as const, value: port.vlsfo },
+                        { label: "MGO", fuel: "mgo" as const, value: port.mgo },
                       ].map((item) => (
                         <div key={item.label} style={{ textAlign: "center" }}>
                           <div style={{ fontSize: "10px", color: "#abd8ff", marginBottom: "2px" }}>{item.label}</div>
-                          <div style={{ fontSize: "13px", fontWeight: 700 }}>{item.value ?? "-"}</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700 }}>{formatFuelValue(port.name, item.fuel, item.value)}</div>
                         </div>
                       ))}
                     </div>
