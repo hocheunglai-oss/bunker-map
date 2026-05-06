@@ -1382,20 +1382,6 @@ export default function AdminPage() {
                 gap: "6px",
               }}
             >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "minmax(0, 1fr) repeat(3, 82px)" : "minmax(0, 1fr) repeat(3, 90px)",
-                  gap: "8px",
-                  padding: "4px 2px",
-                }}
-              >
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>Port</div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>HSFO</div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>VLSFO</div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>MGO</div>
-              </div>
-
               {missingFuelMatrix.map((item, index) => {
                 const showGroupHeader = index === 0 || missingFuelMatrix[index - 1].group !== item.group
                 return (
@@ -1403,16 +1389,18 @@ export default function AdminPage() {
                     {showGroupHeader && (
                       <div
                         style={{
+                          display: "grid",
+                          gridTemplateColumns: isMobile ? "minmax(0, 1fr) repeat(3, 82px)" : "minmax(0, 1fr) repeat(3, 90px)",
+                          gap: "8px",
                           marginTop: index === 0 ? "2px" : "8px",
                           marginBottom: "5px",
-                          fontSize: "11px",
-                          fontWeight: 800,
-                          color: "#8fd7ff",
-                          letterSpacing: "0.1em",
-                          textTransform: "uppercase",
+                          padding: "2px 2px",
                         }}
                       >
-                        {item.group}
+                        <div style={{ fontSize: "11px", fontWeight: 800, color: "#8fd7ff", letterSpacing: "0.1em", textTransform: "uppercase" }}>{item.group}</div>
+                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>HSFO</div>
+                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>VLSFO</div>
+                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>MGO</div>
                       </div>
                     )}
                     <div
@@ -1434,6 +1422,8 @@ export default function AdminPage() {
                         }
                         const mapKey = buildFallbackKey(item.port, fuel)
                         const current = reportFallbacks[mapKey] ?? "-"
+                        const selectColor =
+                          current === "NA" ? "#ff8d8d" : current === "SE" ? "#ffd166" : "#edf7ff"
                         return (
                           <select
                             key={fuel}
@@ -1448,6 +1438,7 @@ export default function AdminPage() {
                               padding: "4px 6px",
                               textTransform: "uppercase",
                               textAlign: "center",
+                              color: selectColor,
                             }}
                           >
                             <option value="-">-</option>
