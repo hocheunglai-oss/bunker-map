@@ -1,0 +1,25 @@
+services:
+  bunker-map-cn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bunker-map-cn
+    restart: unless-stopped
+    env_file:
+      - .env.cn
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    ports:
+      - "3000:3000"
+
+  bunker-map-nginx:
+    image: nginx:1.27-alpine
+    container_name: bunker-map-nginx
+    depends_on:
+      - bunker-map-cn
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/cn.conf:/etc/nginx/conf.d/default.conf:ro
