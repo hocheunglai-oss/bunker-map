@@ -212,6 +212,10 @@ function serializeHighlights(items: HighlightCard[]) {
   )
 }
 
+function normalizeSectionTitle(value: string) {
+  return value.trim().toUpperCase()
+}
+
 function getPreviewUrl(file: { drive_file_id?: string | null; drive_url?: string | null }) {
   if (file.drive_file_id) return `https://drive.google.com/file/d/${file.drive_file_id}/preview`
   return file.drive_url || ""
@@ -286,10 +290,12 @@ async function fetchFolders(kind: RecordKind, id: string) {
 function AutoSizeTextarea({
   value,
   onChange,
+  onBlur,
   style,
 }: {
   value: string
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void
   style?: React.CSSProperties
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -306,6 +312,7 @@ function AutoSizeTextarea({
       ref={textareaRef}
       value={value}
       onChange={onChange}
+      onBlur={onBlur}
       rows={1}
       style={{
         ...style,
@@ -703,12 +710,12 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function saveHighlightCard() {
-    if (!highlightDraft.title.trim() && !highlightDraft.info.trim()) {
+    if (!highlightDraft.title.trim()) {
       setHighlightModalOpen(false)
       setHighlightDraft({ title: "", info: "" })
       return
     }
-    const nextHighlights = [...highlights, { title: highlightDraft.title.trim(), info: highlightDraft.info.trim() }]
+    const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "" }]
     setHighlights(nextHighlights)
     setHighlightDraft({ title: "", info: "" })
     setHighlightModalOpen(false)
@@ -717,6 +724,17 @@ export default function CountryCompanyInfoPage() {
       setMessage("Highlight saved.")
     } catch {
       setMessage("Unable to save highlight.")
+    }
+  }
+
+  async function saveHighlightInfo(index: number, info: string) {
+    const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, info } : item))
+    setHighlights(nextHighlights)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section saved.")
+    } catch {
+      setMessage("Unable to save section.")
     }
   }
 
@@ -1268,65 +1286,10 @@ export default function CountryCompanyInfoPage() {
                       <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button
-                        onClick={() => {
-                          setHighlightDraft({ title: "", info: "" })
-                          setHighlightModalOpen(true)
-                        }}
-                        disabled={!selectedId}
-                        style={{
-                          ...buttonStyle,
-                          background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)",
-                          color: "#fff2bc",
-                          border: "1px solid rgba(255, 211, 110, 0.34)",
-                        }}
-                      >
-                        Add Highlight
-                      </button>
                       <button onClick={saveRecord} disabled={saving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving ? "Saving..." : "Save"}</button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
                   </div>
-
-                  {highlights.length > 0 && (
-                    <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                      {highlights.map((highlight, index) => (
-                        <div
-                          key={`highlight-${index}`}
-                          style={{
-                            minWidth: isMobile ? "100%" : "220px",
-                            maxWidth: isMobile ? "100%" : "360px",
-                            padding: "14px 16px",
-                            borderRadius: "20px",
-                            border: "1px solid rgba(255, 214, 117, 0.38)",
-                            background: "linear-gradient(180deg, rgba(255, 222, 134, 0.2) 0%, rgba(177, 122, 18, 0.12) 100%), linear-gradient(180deg, rgba(39, 89, 138, 0.42) 0%, rgba(17, 45, 76, 0.34) 100%)",
-                            boxShadow: "0 24px 48px rgba(0,0,0,0.22), 0 0 0 1px rgba(255, 219, 128, 0.08) inset, inset 0 1px 0 rgba(255,255,255,0.08)",
-                            display: "grid",
-                            gap: "8px",
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "start" }}>
-                            <div style={{ display: "grid", gap: "4px" }}>
-                              {highlight.title.trim() ? (
-                                <div style={{ fontWeight: 800, color: "#fff7d7", fontSize: "14px", lineHeight: 1.35, letterSpacing: "0.01em" }}>
-                                  {highlight.title}
-                                </div>
-                              ) : null}
-                              <div style={{ color: "#eef7ff", fontSize: "12px", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                                {highlight.info}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => deleteHighlightCard(index)}
-                              style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.12) 100%)" }}
-                            >
-                              x
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
 
                   {selectedKind === "port" && (
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px minmax(0, 1fr)", gap: "10px", alignItems: "end" }}>
@@ -1340,7 +1303,20 @@ export default function CountryCompanyInfoPage() {
                   {isMobile && fileSection}
 
                   <div>
-                    <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{informationLabel}</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
+                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
+                      <button
+                        onClick={() => {
+                          setHighlightDraft({ title: "", info: "" })
+                          setHighlightModalOpen(true)
+                        }}
+                        disabled={!selectedId}
+                        style={{ ...buttonStyle, width: "26px", height: "26px", borderRadius: "50%", padding: 0, fontSize: "16px", lineHeight: 1 }}
+                        title="Add section"
+                      >
+                        +
+                      </button>
+                    </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     <AutoSizeTextarea
                       value={currentRecord.notes || ""}
@@ -1348,6 +1324,30 @@ export default function CountryCompanyInfoPage() {
                       style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                     />
                   </div>
+
+                  {highlights.length > 0 && (
+                    <div style={{ display: "grid", gap: "12px" }}>
+                      {highlights.map((highlight, index) => (
+                        <div key={`section-${index}`}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
+                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700 }}>
+                              {highlight.title || `SECTION ${index + 1}`}
+                            </div>
+                            <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
+                          </div>
+                          <AutoSizeTextarea
+                            value={highlight.info}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value } : item)))
+                            }}
+                            onBlur={(event) => void saveHighlightInfo(index, event.target.value)}
+                            style={{ ...textareaStyle, minHeight: "140px" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {selectedKind === "port" && (
                     <div>
@@ -1484,22 +1484,15 @@ export default function CountryCompanyInfoPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>
-              Add Highlight
+              Add Section
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Title (optional)</div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Section Name</div>
               <input
                 value={highlightDraft.title}
                 onChange={(event) => setHighlightDraft((prev) => ({ ...prev, title: event.target.value }))}
                 style={inputStyle}
-              />
-            </div>
-            <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Info</div>
-              <textarea
-                value={highlightDraft.info}
-                onChange={(event) => setHighlightDraft((prev) => ({ ...prev, info: event.target.value }))}
-                style={{ ...textareaStyle, minHeight: "160px", resize: "vertical", overflow: "auto" }}
+                placeholder="e.g. REFINERY"
               />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
@@ -1523,7 +1516,7 @@ export default function CountryCompanyInfoPage() {
                   border: "1px solid rgba(255, 211, 110, 0.34)",
                 }}
               >
-                Save Highlight
+                Add
               </button>
             </div>
           </div>
