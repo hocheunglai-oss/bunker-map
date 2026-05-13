@@ -251,6 +251,34 @@ function getFileTypeLabel(name: string, fileType?: string | null) {
   return { icon: "📄", color: "#d8e8f9", label: "File" }
 }
 
+function renderLineHoverGutter(text: string, updates: Record<string, string>) {
+  const lineCount = Math.max(1, text.split("\n").length)
+  return (
+    <div style={{ minWidth: "24px", display: "grid", alignContent: "start", gap: "0px", paddingTop: "8px" }}>
+      {Array.from({ length: lineCount }).map((_, index) => {
+        const stamp = updates[String(index)]
+        return (
+          <div
+            key={`line-${index}`}
+            title={stamp ? `Updated: ${new Date(stamp).toLocaleString()}` : "No update timestamp"}
+            style={{
+              height: "22px",
+              fontSize: "10px",
+              color: stamp ? "#9dd8ff" : "#5d7f9e",
+              display: "grid",
+              placeItems: "center",
+              cursor: "help",
+              userSelect: "none",
+            }}
+          >
+            {index + 1}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 async function fetchEntryFiles(kind: RecordKind, id: string) {
   const withFolderPath = await supabase
     .from("cc_entry_files")
@@ -1457,31 +1485,26 @@ export default function CountryCompanyInfoPage() {
                       </button>
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
-                    <AutoSizeTextarea
-                      value={currentRecord.notes || ""}
-                      onChange={(event) => {
-                        const nextNotes = event.target.value
-                        const prevLines = (currentRecord.notes || "").split("\n")
-                        const nextLines = nextNotes.split("\n")
-                        const lineUpdates: Record<string, string> = { ...mainInfoLineUpdates }
-                        const now = new Date().toISOString()
-                        for (let i = 0; i < nextLines.length; i += 1) {
-                          if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
-                        }
-                        setMainInfoLineUpdates(lineUpdates)
-                        setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-                        queueMainInfoAutoSave(nextNotes)
-                      }}
-                      style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
-                    />
-                    {Object.keys(mainInfoLineUpdates).length > 0 && (
-                      <div style={{ marginTop: "4px", fontSize: "10px", color: "#8fc2e8", lineHeight: 1.35 }}>
-                        {Object.entries(mainInfoLineUpdates)
-                          .sort((a, b) => Number(a[0]) - Number(b[0]))
-                          .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
-                          .join(" | ")}
-                      </div>
-                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", gap: "8px" }}>
+                      {renderLineHoverGutter(currentRecord.notes || "", mainInfoLineUpdates)}
+                      <AutoSizeTextarea
+                        value={currentRecord.notes || ""}
+                        onChange={(event) => {
+                          const nextNotes = event.target.value
+                          const prevLines = (currentRecord.notes || "").split("\n")
+                          const nextLines = nextNotes.split("\n")
+                          const lineUpdates: Record<string, string> = { ...mainInfoLineUpdates }
+                          const now = new Date().toISOString()
+                          for (let i = 0; i < nextLines.length; i += 1) {
+                            if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
+                          }
+                          setMainInfoLineUpdates(lineUpdates)
+                          setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
+                          queueMainInfoAutoSave(nextNotes)
+                        }}
+                        style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
+                      />
+                    </div>
                   </div>
 
                   {highlights.length > 0 && (
@@ -1498,37 +1521,29 @@ export default function CountryCompanyInfoPage() {
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
                             </div>
                           </div>
-                          <AutoSizeTextarea
-                            value={highlight.info}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setHighlights((prev) => {
-                                const prevItem = prev[index]
-                                const prevLines = (prevItem?.info || "").split("\n")
-                                const nextLines = value.split("\n")
-                                const lineUpdates: Record<string, string> = { ...(prevItem?.line_updates || {}) }
-                                const now = new Date().toISOString()
-                                for (let i = 0; i < nextLines.length; i += 1) {
-                                  if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
-                                }
-                                const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
-                                queueSectionSave(next)
-                                return next
-                              })
-                            }}
-                            style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
-                            title={Object.entries(highlight.line_updates || {})
-                              .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
-                              .join("\n")}
-                          />
-                          {Object.keys(highlight.line_updates || {}).length > 0 && (
-                            <div style={{ marginTop: "4px", fontSize: "10px", color: "#8fc2e8", lineHeight: 1.35 }}>
-                              {Object.entries(highlight.line_updates || {})
-                                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
-                                .join(" | ")}
-                            </div>
-                          )}
+                          <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", gap: "8px" }}>
+                            {renderLineHoverGutter(highlight.info || "", highlight.line_updates || {})}
+                            <AutoSizeTextarea
+                              value={highlight.info}
+                              onChange={(event) => {
+                                const value = event.target.value
+                                setHighlights((prev) => {
+                                  const prevItem = prev[index]
+                                  const prevLines = (prevItem?.info || "").split("\n")
+                                  const nextLines = value.split("\n")
+                                  const lineUpdates: Record<string, string> = { ...(prevItem?.line_updates || {}) }
+                                  const now = new Date().toISOString()
+                                  for (let i = 0; i < nextLines.length; i += 1) {
+                                    if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
+                                  }
+                                  const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
+                                  queueSectionSave(next)
+                                  return next
+                                })
+                              }}
+                              style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
