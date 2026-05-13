@@ -149,11 +149,10 @@ const compactFileBadgeStyle: React.CSSProperties = {
 }
 
 const fileIconStyle: React.CSSProperties = {
-  width: "18px",
-  height: "18px",
+  width: "24px",
+  height: "20px",
   display: "inline-grid",
   placeItems: "center",
-  fontSize: "16px",
   lineHeight: 1,
 }
 
@@ -276,11 +275,56 @@ function folderDepth(folderPath: string) {
 function getFileTypeLabel(name: string, fileType?: string | null) {
   const ext = (name.split(".").pop() || "").toLowerCase()
   const normalized = (fileType || "").toLowerCase()
-  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { icon: "📗", color: "#93f5a9", label: "Excel" }
-  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { icon: "📘", color: "#98c8ff", label: "Doc" }
-  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { icon: "🟥", color: "#ffb0b0", label: "Image" }
-  if (ext === "pdf" || normalized.includes("pdf")) return { icon: "📕", color: "#ffb3b3", label: "PDF" }
-  return { icon: "📄", color: "#d8e8f9", label: "File" }
+  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { color: "#188038", label: "XLS" }
+  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "#1a73e8", label: "DOC" }
+  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { color: "#d93025", label: "IMG" }
+  if (ext === "pdf" || normalized.includes("pdf")) return { color: "#c5221f", label: "PDF" }
+  return { color: "#5f6368", label: "FILE" }
+}
+
+function FolderIcon() {
+  return (
+    <span
+      style={{
+        ...fileIconStyle,
+        position: "relative",
+        borderRadius: "4px",
+        background: "linear-gradient(180deg, #fbbc04 0%, #f6a800 100%)",
+        boxShadow: "inset 0 -1px 0 rgba(92,55,0,0.2)",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          left: "2px",
+          top: "-4px",
+          width: "11px",
+          height: "6px",
+          borderRadius: "3px 3px 0 0",
+          background: "#fdd663",
+        }}
+      />
+    </span>
+  )
+}
+
+function DriveFileIcon({ color, label }: { color: string; label: string }) {
+  return (
+    <span
+      style={{
+        ...fileIconStyle,
+        borderRadius: "3px",
+        background: color,
+        color: "#fff",
+        fontSize: "6px",
+        fontWeight: 900,
+        letterSpacing: "0.02em",
+        boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.18)",
+      }}
+    >
+      {label}
+    </span>
+  )
 }
 
 function formatTimestamp(value?: string | null) {
@@ -303,6 +347,7 @@ function HoverableTextBlock({
   minHeight: string
   onEdit: () => void
 }) {
+  const [hoveredLine, setHoveredLine] = useState<number | null>(null)
   const lines = (value || "").split("\n")
   const fallback = formatTimestamp(fallbackUpdatedAt)
   return (
@@ -313,15 +358,55 @@ function HoverableTextBlock({
       onKeyDown={(event) => {
         if (event.key === "Enter") onEdit()
       }}
-      style={{ ...textareaStyle, minHeight, cursor: "text", whiteSpace: "pre-wrap" }}
+      style={{
+        ...textareaStyle,
+        minHeight,
+        cursor: "text",
+        whiteSpace: "pre-wrap",
+        position: "relative",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+        transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
+      }}
+      onMouseLeave={() => setHoveredLine(null)}
     >
+      {hoveredLine !== null && (formatTimestamp(updates[String(hoveredLine)]) || fallback) && (
+        <div
+          style={{
+            position: "absolute",
+            right: "12px",
+            top: `${12 + hoveredLine * 22}px`,
+            maxWidth: "220px",
+            padding: "6px 9px",
+            borderRadius: "8px",
+            background: "rgba(7, 20, 35, 0.92)",
+            border: "1px solid rgba(160, 210, 245, 0.18)",
+            color: "#eaf7ff",
+            fontSize: "10px",
+            fontWeight: 700,
+            boxShadow: "0 14px 30px rgba(0,0,0,0.22)",
+            pointerEvents: "none",
+            zIndex: 3,
+          }}
+        >
+          {formatTimestamp(updates[String(hoveredLine)]) || fallback}
+        </div>
+      )}
       {lines.map((line, index) => {
         const stamp = formatTimestamp(updates[String(index)]) || fallback
         return (
           <div
             key={`hover-line-${index}`}
-            title={stamp ? `Updated: ${stamp}` : ""}
-            style={{ minHeight: "1.55em", cursor: stamp ? "help" : "text" }}
+            onMouseEnter={() => setHoveredLine(index)}
+            style={{
+              minHeight: "1.55em",
+              cursor: "text",
+              borderRadius: "6px",
+              padding: "0 2px",
+              margin: "0 -2px",
+              background: hoveredLine === index ? "rgba(185, 224, 255, 0.09)" : "transparent",
+              boxShadow: hoveredLine === index ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
+              transition: "background 120ms ease, box-shadow 120ms ease",
+            }}
           >
             {line || "\u00a0"}
           </div>
@@ -826,6 +911,12 @@ export default function CountryCompanyInfoPage() {
   }
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setQuery("")
+      setSuggestions([])
+      return
+    }
     if (!suggestions.length) return
     if (event.key === "ArrowDown") {
       event.preventDefault()
@@ -841,6 +932,11 @@ export default function CountryCompanyInfoPage() {
   }
 
   function handleSearchInPageKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setSearchInPage("")
+      return
+    }
     if (event.key !== "Enter") return
     event.preventDefault()
     if (event.shiftKey) goToPreviousMatch()
@@ -1245,7 +1341,7 @@ export default function CountryCompanyInfoPage() {
                 textAlign: "left",
                 }}
               >
-                <span style={{ ...fileIconStyle, color: "#ffd472" }}>📁</span>
+                <FolderIcon />
                 <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>{folder.name}</span>
               </button>
             ))}
@@ -1279,7 +1375,7 @@ export default function CountryCompanyInfoPage() {
                   cursor: file.source === "company" ? "default" : "grab",
                 }}
               >
-                <span style={{ ...fileIconStyle, color: fileTypeVisual.color }} title={fileTypeVisual.label}>{fileTypeVisual.icon}</span>
+                <DriveFileIcon color={fileTypeVisual.color} label={fileTypeVisual.label} />
                 <button
                   type="button"
                   onClick={() => {
@@ -1543,6 +1639,9 @@ export default function CountryCompanyInfoPage() {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
+                      <span style={{ padding: "3px 8px", borderRadius: "999px", background: mainInfoEditing ? "rgba(255, 210, 86, 0.18)" : "rgba(122, 196, 255, 0.12)", border: "1px solid rgba(210,236,255,0.12)", color: mainInfoEditing ? "#fff2bc" : "#b9e3ff", fontSize: "10px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        {mainInfoEditing ? "Edit Mode" : "View Mode"}
+                      </span>
                       <button
                         onClick={() => {
                           setHighlightDraft({ title: "", info: "" })
@@ -1595,6 +1694,9 @@ export default function CountryCompanyInfoPage() {
                               {highlight.title || `SECTION ${index + 1}`}
                             </div>
                             <div style={{ display: "flex", gap: "6px" }}>
+                              <span style={{ alignSelf: "center", padding: "3px 8px", borderRadius: "999px", background: sectionEditing[index] ? "rgba(255, 210, 86, 0.18)" : "rgba(122, 196, 255, 0.12)", border: "1px solid rgba(210,236,255,0.12)", color: sectionEditing[index] ? "#fff2bc" : "#b9e3ff", fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                                {sectionEditing[index] ? "Edit" : "View"}
+                              </span>
                               <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
                               <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
