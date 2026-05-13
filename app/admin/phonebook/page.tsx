@@ -640,6 +640,15 @@ export default function PhonebookPage() {
     })
   }, [companies, companiesWithMatchingContacts, queryTokens])
 
+  const companyNameSuggestions = useMemo(
+    () =>
+      companies
+        .map((company) => company.name)
+        .filter((name): name is string => Boolean(name && name.trim()))
+        .sort((a, b) => a.localeCompare(b)),
+    [companies],
+  )
+
   const filteredContacts = useMemo(() => {
     let next = contacts.filter((contact) => {
       const matchesCompany = !selectedCompany || normalizeCompanyKey(contact.company) === selectedCompanyKey
@@ -1867,7 +1876,19 @@ export default function PhonebookPage() {
                 <div>
                   <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                   {editing ? (
-                    <input value={draft?.company || ""} onChange={(event) => updateCapsField("company", event.target.value)} style={detailInputStyle} />
+                    <>
+                      <input
+                        list="phonebook-company-name-suggestions"
+                        value={draft?.company || ""}
+                        onChange={(event) => updateCapsField("company", event.target.value)}
+                        style={detailInputStyle}
+                      />
+                      <datalist id="phonebook-company-name-suggestions">
+                        {companyNameSuggestions.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
+                    </>
                   ) : current?.company ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                       <span style={{ fontSize: "15px", lineHeight: 1.5, textTransform: "uppercase" }}>{current.company}</span>

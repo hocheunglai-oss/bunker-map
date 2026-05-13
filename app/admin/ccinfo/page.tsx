@@ -892,7 +892,19 @@ export default function CountryCompanyInfoPage() {
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
   if (adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
 
-  const mainLabel = selectedKind ? `${kindLabel(selectedKind)} Name` : "Name"
+  const mainLabel =
+    selectedKind === "country"
+      ? "Country"
+      : selectedKind === "port"
+        ? "Port"
+        : selectedKind === "company"
+          ? "Company Name"
+          : "Name"
+  const informationLabel =
+    selectedKind === "port"
+      ? "Port Information"
+      : "General Information"
+  const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
   const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
   const fileSection = !initialMode ? (
     <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
@@ -1328,7 +1340,7 @@ export default function CountryCompanyInfoPage() {
                   {isMobile && fileSection}
 
                   <div>
-                    <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Information</div>
+                    <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{informationLabel}</div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     <AutoSizeTextarea
                       value={currentRecord.notes || ""}
@@ -1339,7 +1351,7 @@ export default function CountryCompanyInfoPage() {
 
                   {selectedKind === "port" && (
                     <div>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country Information</div>
+                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{countryInformationLabel}</div>
                       <AutoSizeTextarea
                         value={currentCountry.notes || ""}
                         onChange={(event) => setCurrentCountry((prev) => ({ ...prev, notes: event.target.value }))}
