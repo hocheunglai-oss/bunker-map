@@ -374,13 +374,14 @@ export default function CountryCompanyInfoPage() {
   const [draggingFileId, setDraggingFileId] = useState("")
   const [dropFolderPath, setDropFolderPath] = useState("")
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
-  const [countryPortDrafts, setCountryPortDrafts] = useState<Record<string, { name: string; notes: string }>>({})
   const [highlights, setHighlights] = useState<HighlightCard[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
+  const [addPortModalOpen, setAddPortModalOpen] = useState(false)
+  const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
   const sectionSaveTimerRef = useRef<number | null>(null)
 
@@ -571,11 +572,6 @@ export default function CountryCompanyInfoPage() {
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
-    const draftMap: Record<string, { name: string; notes: string }> = {}
-    ;((portsResult.data as CountryPortListItem[]) || []).forEach((port) => {
-      draftMap[port.id] = { name: port.name || "", notes: port.notes || "" }
-    })
-    setCountryPortDrafts(draftMap)
     setHighlights(parseHighlights((data as BaseRecord).summary))
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -654,10 +650,14 @@ export default function CountryCompanyInfoPage() {
 
   async function addPortUnderCountry() {
     if (selectedKind !== "country" || !selectedId) return
+    if (!addPortDraft.name.trim()) {
+      setMessage("Port name is required.")
+      return
+    }
     const countryName = currentRecord.name.trim() || currentCountry.name.trim() || "New Country"
     const { data, error } = await supabase
       .from("cc_ports")
-      .insert({ name: "New Port", summary: null, notes: "", country_id: selectedId, country_name: countryName, tags: [], status: "active" })
+      .insert({ name: addPortDraft.name.trim(), summary: null, notes: addPortDraft.notes || "", country_id: selectedId, country_name: countryName, tags: [], status: "active" })
       .select("id,name,summary,notes")
       .single()
     if (error || !data) {
@@ -666,22 +666,9 @@ export default function CountryCompanyInfoPage() {
     }
     const nextPort = data as CountryPortListItem
     setCurrentCountryPorts((prev) => [...prev, nextPort].sort((a, b) => a.name.localeCompare(b.name)))
-    setCountryPortDrafts((prev) => ({ ...prev, [nextPort.id]: { name: nextPort.name || "", notes: nextPort.notes || "" } }))
+    setAddPortModalOpen(false)
+    setAddPortDraft({ name: "", notes: "" })
     setMessage("Port added.")
-  }
-
-  async function saveCountryPortInline(portId: string) {
-    const draft = countryPortDrafts[portId]
-    if (!draft) return
-    const { error } = await supabase.from("cc_ports").update({ name: draft.name.trim(), notes: draft.notes }).eq("id", portId)
-    if (error) {
-      setMessage("Unable to save port.")
-      return
-    }
-    setCurrentCountryPorts((prev) =>
-      prev.map((port) => (port.id === portId ? { ...port, name: draft.name.trim(), notes: draft.notes } : port)),
-    )
-    setMessage("Port saved.")
   }
 
   async function saveRecord() {
@@ -829,6 +816,21 @@ export default function CountryCompanyInfoPage() {
       setMessage("Highlight deleted.")
     } catch {
       setMessage("Unable to delete highlight.")
+    }
+  }
+
+  async function moveHighlight(index: number, direction: -1 | 1) {
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= highlights.length) return
+    const nextHighlights = [...highlights]
+    const [moved] = nextHighlights.splice(index, 1)
+    nextHighlights.splice(targetIndex, 0, moved)
+    setHighlights(nextHighlights)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section order updated.")
+    } catch {
+      setMessage("Unable to reorder sections.")
     }
   }
 
@@ -1436,7 +1438,11 @@ export default function CountryCompanyInfoPage() {
                             <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700 }}>
                               {highlight.title || `SECTION ${index + 1}`}
                             </div>
-                            <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
+                              <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
+                              <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
+                            </div>
                           </div>
                           <AutoSizeTextarea
                             value={highlight.info}
@@ -1481,7 +1487,7 @@ export default function CountryCompanyInfoPage() {
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Ports</div>
-                        <button onClick={() => void addPortUnderCountry()} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
+                        <button onClick={() => setAddPortModalOpen(true)} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
                           Add Port
                         </button>
                       </div>
@@ -1501,20 +1507,16 @@ export default function CountryCompanyInfoPage() {
                                 {currentCountryPorts.map((port) => (
                                   <tr key={port.id}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                      <input
-                                        value={countryPortDrafts[port.id]?.name ?? port.name}
-                                        onChange={(event) => setCountryPortDrafts((prev) => ({ ...prev, [port.id]: { name: event.target.value, notes: prev[port.id]?.notes ?? port.notes ?? "" } }))}
-                                        onBlur={() => void saveCountryPortInline(port.id)}
-                                        style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }}
-                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => void loadSelected("port", port.id)}
+                                        style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 700, cursor: "pointer", textAlign: "left" }}
+                                      >
+                                        {port.name}
+                                      </button>
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                      <textarea
-                                        value={countryPortDrafts[port.id]?.notes ?? port.notes ?? ""}
-                                        onChange={(event) => setCountryPortDrafts((prev) => ({ ...prev, [port.id]: { name: prev[port.id]?.name ?? port.name, notes: event.target.value } }))}
-                                        onBlur={() => void saveCountryPortInline(port.id)}
-                                        style={{ ...textareaStyle, minHeight: "82px", fontSize: "12px" }}
-                                      />
+                                      {port.notes || "No information yet"}
                                     </td>
                                   </tr>
                                 ))}
@@ -1644,6 +1646,31 @@ export default function CountryCompanyInfoPage() {
               >
                 Add
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {addPortModalOpen && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(1, 8, 18, 0.58)", display: "grid", placeItems: "center", padding: "20px", zIndex: 40 }}
+          onClick={() => {
+            setAddPortModalOpen(false)
+            setAddPortDraft({ name: "", notes: "" })
+          }}
+        >
+          <div style={{ ...panelStyle, width: "min(580px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>Add Port</div>
+            <div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port</div>
+              <input value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port Information</div>
+              <textarea value={addPortDraft.notes} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "180px" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button type="button" onClick={() => setAddPortModalOpen(false)} style={buttonStyle}>Cancel</button>
+              <button type="button" onClick={() => void addPortUnderCountry()} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>Save Port</button>
             </div>
           </div>
         </div>
