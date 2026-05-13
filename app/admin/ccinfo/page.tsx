@@ -385,6 +385,7 @@ export default function CountryCompanyInfoPage() {
   const [sectionSaving, setSectionSaving] = useState(false)
   const [sectionSaveState, setSectionSaveState] = useState<"idle" | "saving" | "saved">("idle")
   const sectionSaveTimerRef = useRef<number | null>(null)
+  const recordAutoSaveTimerRef = useRef<number | null>(null)
 
   const [currentRecord, setCurrentRecord] = useState<BaseRecord>({
     id: "",
@@ -809,6 +810,30 @@ export default function CountryCompanyInfoPage() {
         setSectionSaving(false)
         if (sectionSaveTimerRef.current) window.clearTimeout(sectionSaveTimerRef.current)
         sectionSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("idle"), 1200)
+      }
+    }, 450)
+  }
+
+  function queueMainInfoAutoSave(nextNotes: string) {
+    if (!selectedId || !selectedKind) return
+    if (recordAutoSaveTimerRef.current) {
+      window.clearTimeout(recordAutoSaveTimerRef.current)
+    }
+    setSectionSaveState("saving")
+    setSectionSaving(true)
+    recordAutoSaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
+        const { error } = await supabase.from(table).update({ notes: nextNotes }).eq("id", selectedId)
+        if (error) throw error
+        setSectionSaveState("saved")
+      } catch {
+        setMessage("Unable to auto-save information.")
+        setSectionSaveState("idle")
+      } finally {
+        setSectionSaving(false)
+        if (recordAutoSaveTimerRef.current) window.clearTimeout(recordAutoSaveTimerRef.current)
+        recordAutoSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("idle"), 1200)
       }
     }, 450)
   }
@@ -1433,7 +1458,11 @@ export default function CountryCompanyInfoPage() {
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     <AutoSizeTextarea
                       value={currentRecord.notes || ""}
-                      onChange={(event) => setCurrentRecord((prev) => ({ ...prev, notes: event.target.value }))}
+                      onChange={(event) => {
+                        const nextNotes = event.target.value
+                        setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
+                        queueMainInfoAutoSave(nextNotes)
+                      }}
                       style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                     />
                   </div>
