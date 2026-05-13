@@ -19,6 +19,7 @@ type BaseRecord = {
   name: string
   summary: string | null
   notes: string | null
+  updated_at?: string | null
 }
 
 type CompanyFileRecord = {
@@ -189,38 +190,69 @@ type HighlightCard = {
   line_updates?: Record<string, string>
 }
 
-function parseHighlights(value: string | null): HighlightCard[] {
-  if (!value?.trim()) return []
-  try {
-    const parsed = JSON.parse(value)
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((item) => ({
-          title: typeof item?.title === "string" ? item.title : "",
-          info: typeof item?.info === "string" ? item.info : "",
-          line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
-        }))
-        .filter((item) => item.title.trim() || item.info.trim())
-    }
-  } catch {
-    return value
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item) => ({ title: "", info: item }))
-  }
-  return []
+type SummaryMeta = {
+  sections: HighlightCard[]
+  mainLineUpdates: Record<string, string>
 }
 
-function serializeHighlights(items: HighlightCard[]) {
+function parseSummaryMeta(value: string | null): SummaryMeta {
+  if (!value?.trim()) return { sections: [], mainLineUpdates: {} }
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
+      const sectionSource = Array.isArray(parsed.sections) ? parsed.sections : []
+      return {
+        sections: sectionSource
+          .map((item: Partial<HighlightCard>) => ({
+            title: typeof item?.title === "string" ? item.title : "",
+            info: typeof item?.info === "string" ? item.info : "",
+            line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
+          }))
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
+        mainLineUpdates: parsed.main_line_updates && typeof parsed.main_line_updates === "object" ? parsed.main_line_updates : {},
+      }
+    }
+    if (Array.isArray(parsed)) {
+      return {
+        sections: parsed
+          .map((item: Partial<HighlightCard>) => ({
+            title: typeof item?.title === "string" ? item.title : "",
+            info: typeof item?.info === "string" ? item.info : "",
+            line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
+          }))
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
+        mainLineUpdates: {},
+      }
+    }
+  } catch {
+    return {
+      sections: value
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => ({ title: "", info: item })),
+      mainLineUpdates: {},
+    }
+  }
+  return { sections: [], mainLineUpdates: {} }
+}
+
+function parseHighlights(value: string | null): HighlightCard[] {
+  return parseSummaryMeta(value).sections
+}
+
+function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<string, string>) {
   return JSON.stringify(
-    items
-      .map((item) => ({
-        title: item.title.trim(),
-        info: item.info.trim(),
-        line_updates: item.line_updates || {},
-      }))
-      .filter((item) => item.title || item.info),
+    {
+      sections: items
+        .map((item) => ({
+          title: item.title.trim(),
+          info: item.info.trim(),
+          line_updates: item.line_updates || {},
+        }))
+        .filter((item) => item.title || item.info),
+      main_line_updates: mainLineUpdates,
+    },
   )
 }
 
@@ -251,27 +283,47 @@ function getFileTypeLabel(name: string, fileType?: string | null) {
   return { icon: "📄", color: "#d8e8f9", label: "File" }
 }
 
-function renderLineHoverGutter(text: string, updates: Record<string, string>) {
-  const lineCount = Math.max(1, text.split("\n").length)
+function formatTimestamp(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleString()
+}
+
+function HoverableTextBlock({
+  value,
+  updates,
+  fallbackUpdatedAt,
+  minHeight,
+  onEdit,
+}: {
+  value: string
+  updates: Record<string, string>
+  fallbackUpdatedAt?: string | null
+  minHeight: string
+  onEdit: () => void
+}) {
+  const lines = (value || "").split("\n")
+  const fallback = formatTimestamp(fallbackUpdatedAt)
   return (
-    <div style={{ minWidth: "24px", display: "grid", alignContent: "start", gap: "0px", paddingTop: "8px" }}>
-      {Array.from({ length: lineCount }).map((_, index) => {
-        const stamp = updates[String(index)]
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onEdit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onEdit()
+      }}
+      style={{ ...textareaStyle, minHeight, cursor: "text", whiteSpace: "pre-wrap" }}
+    >
+      {lines.map((line, index) => {
+        const stamp = formatTimestamp(updates[String(index)]) || fallback
         return (
           <div
-            key={`line-${index}`}
-            title={stamp ? `Updated: ${new Date(stamp).toLocaleString()}` : "No update timestamp"}
-            style={{
-              height: "22px",
-              fontSize: "10px",
-              color: stamp ? "#9dd8ff" : "#5d7f9e",
-              display: "grid",
-              placeItems: "center",
-              cursor: "help",
-              userSelect: "none",
-            }}
+            key={`hover-line-${index}`}
+            title={stamp ? `Updated: ${stamp}` : ""}
+            style={{ minHeight: "1.55em", cursor: stamp ? "help" : "text" }}
           >
-            {index + 1}
+            {line || "\u00a0"}
           </div>
         )
       })}
@@ -413,6 +465,8 @@ export default function CountryCompanyInfoPage() {
   const [sectionSaving, setSectionSaving] = useState(false)
   const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
+  const [mainInfoEditing, setMainInfoEditing] = useState(false)
+  const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
   const recordAutoSaveTimerRef = useRef<number | null>(null)
 
@@ -560,6 +614,9 @@ export default function CountryCompanyInfoPage() {
     setDropFolderPath("")
     setCurrentCountryPorts([])
     setHighlights([])
+    setMainInfoLineUpdates({})
+    setMainInfoEditing(false)
+    setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setSearchInPage("")
@@ -567,7 +624,7 @@ export default function CountryCompanyInfoPage() {
 
   async function loadCompany(id: string) {
     const [{ data, error }, filesResult, manualFilesResult, foldersResult] = await Promise.all([
-      supabase.from("cc_companies").select("id,name,summary,notes").eq("id", id).single(),
+      supabase.from("cc_companies").select("id,name,summary,notes,updated_at").eq("id", id).single(),
       fetchCompanyFiles(id),
       fetchEntryFiles("company", id),
       fetchFolders("company", id),
@@ -579,14 +636,18 @@ export default function CountryCompanyInfoPage() {
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts([])
-    setHighlights(parseHighlights((data as BaseRecord).summary))
+    const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
+    setHighlights(summaryMeta.sections)
+    setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoEditing(false)
+    setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
   }
 
   async function loadCountry(id: string) {
     const [{ data, error }, filesResult, foldersResult] = await Promise.all([
-      supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", id).single(),
+      supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", id).single(),
       fetchEntryFiles("country", id),
       fetchFolders("country", id),
     ])
@@ -603,14 +664,18 @@ export default function CountryCompanyInfoPage() {
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
-    setHighlights(parseHighlights((data as BaseRecord).summary))
+    const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
+    setHighlights(summaryMeta.sections)
+    setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoEditing(false)
+    setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
   }
 
   async function loadPort(id: string) {
     const [{ data, error }, filesResult, foldersResult] = await Promise.all([
-      supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name").eq("id", id).single(),
+      supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name,updated_at").eq("id", id).single(),
       fetchEntryFiles("port", id),
       fetchFolders("port", id),
     ])
@@ -621,17 +686,21 @@ export default function CountryCompanyInfoPage() {
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts([])
-    setHighlights(parseHighlights(port.summary))
+    const summaryMeta = parseSummaryMeta(port.summary)
+    setHighlights(summaryMeta.sections)
+    setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoEditing(false)
+    setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
 
     if (port.country_id) {
-      const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region").eq("id", port.country_id).single()
+      const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", port.country_id).single()
       setCurrentCountry((countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" })
     } else if (port.country_name?.trim()) {
       const { data: countryData } = await supabase
         .from("cc_countries")
-        .select("id,name,summary,notes,region")
+        .select("id,name,summary,notes,region,updated_at")
         .ilike("name", port.country_name.trim())
         .limit(1)
         .maybeSingle()
@@ -708,17 +777,17 @@ export default function CountryCompanyInfoPage() {
     setMessage("")
     try {
       if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim(), summary: serializeHighlights(highlights) || null, notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim(), summary: serializeHighlights(highlights) || null, notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "port") {
         const { error } = await supabase.from("cc_ports").update({
           name: currentRecord.name.trim(),
-          summary: serializeHighlights(highlights) || null,
+          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates),
           notes: currentRecord.notes || null,
           country_id: currentCountry.id || null,
           country_name: currentCountry.name || null,
@@ -787,7 +856,7 @@ export default function CountryCompanyInfoPage() {
 
   async function persistHighlights(nextHighlights: HighlightCard[]) {
     if (!selectedId || !selectedKind) return
-    const payload = { summary: serializeHighlights(nextHighlights) || null }
+    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates) }
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
     if (error) throw error
@@ -801,6 +870,7 @@ export default function CountryCompanyInfoPage() {
     }
     const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "" }]
     setHighlights(nextHighlights)
+    setSectionEditing({ [nextHighlights.length - 1]: true })
     setHighlightDraft({ title: "", info: "" })
     setHighlightModalOpen(false)
     try {
@@ -843,7 +913,7 @@ export default function CountryCompanyInfoPage() {
     }, 450)
   }
 
-  function queueMainInfoAutoSave(nextNotes: string) {
+  function queueMainInfoAutoSave(nextNotes: string, nextLineUpdates: Record<string, string>) {
     if (!selectedId || !selectedKind) return
     if (recordAutoSaveTimerRef.current) {
       window.clearTimeout(recordAutoSaveTimerRef.current)
@@ -853,7 +923,7 @@ export default function CountryCompanyInfoPage() {
     recordAutoSaveTimerRef.current = window.setTimeout(async () => {
       try {
         const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-        const { error } = await supabase.from(table).update({ notes: nextNotes }).eq("id", selectedId)
+        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates) }).eq("id", selectedId)
         if (error) throw error
         setSectionSaveState("saved")
       } catch {
@@ -886,6 +956,7 @@ export default function CountryCompanyInfoPage() {
     const [moved] = nextHighlights.splice(index, 1)
     nextHighlights.splice(targetIndex, 0, moved)
     setHighlights(nextHighlights)
+    setSectionEditing({})
     try {
       await persistHighlights(nextHighlights)
       setMessage("Section order updated.")
@@ -1485,8 +1556,7 @@ export default function CountryCompanyInfoPage() {
                       </button>
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
-                    <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", gap: "8px" }}>
-                      {renderLineHoverGutter(currentRecord.notes || "", mainInfoLineUpdates)}
+                    {mainInfoEditing ? (
                       <AutoSizeTextarea
                         value={currentRecord.notes || ""}
                         onChange={(event) => {
@@ -1500,11 +1570,20 @@ export default function CountryCompanyInfoPage() {
                           }
                           setMainInfoLineUpdates(lineUpdates)
                           setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-                          queueMainInfoAutoSave(nextNotes)
+                          queueMainInfoAutoSave(nextNotes, lineUpdates)
                         }}
+                        onBlur={() => setMainInfoEditing(false)}
                         style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                       />
-                    </div>
+                    ) : (
+                      <HoverableTextBlock
+                        value={currentRecord.notes || ""}
+                        updates={mainInfoLineUpdates}
+                        fallbackUpdatedAt={currentRecord.updated_at}
+                        minHeight={selectedKind === "port" ? "180px" : "320px"}
+                        onEdit={() => setMainInfoEditing(true)}
+                      />
+                    )}
                   </div>
 
                   {highlights.length > 0 && (
@@ -1521,8 +1600,7 @@ export default function CountryCompanyInfoPage() {
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
                             </div>
                           </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", gap: "8px" }}>
-                            {renderLineHoverGutter(highlight.info || "", highlight.line_updates || {})}
+                          {sectionEditing[index] ? (
                             <AutoSizeTextarea
                               value={highlight.info}
                               onChange={(event) => {
@@ -1541,9 +1619,18 @@ export default function CountryCompanyInfoPage() {
                                   return next
                                 })
                               }}
+                              onBlur={() => setSectionEditing((prev) => ({ ...prev, [index]: false }))}
                               style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
                             />
-                          </div>
+                          ) : (
+                            <HoverableTextBlock
+                              value={highlight.info || ""}
+                              updates={highlight.line_updates || {}}
+                              fallbackUpdatedAt={currentRecord.updated_at}
+                              minHeight="calc(1em + 28px)"
+                              onEdit={() => setSectionEditing((prev) => ({ ...prev, [index]: true }))}
+                            />
+                          )}
                         </div>
                       ))}
                     </div>
