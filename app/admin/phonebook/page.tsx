@@ -442,6 +442,7 @@ export default function PhonebookPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
+  const [companySuggestOpen, setCompanySuggestOpen] = useState(false)
   const [draggingContactId, setDraggingContactId] = useState("")
   const [dragOverContactId, setDragOverContactId] = useState("")
   const [dragInsertPosition, setDragInsertPosition] = useState<"before" | "after">("before")
@@ -648,6 +649,13 @@ export default function PhonebookPage() {
         .sort((a, b) => a.localeCompare(b)),
     [companies],
   )
+  const companyInputSuggestions = useMemo(() => {
+    const needle = (draft?.company || "").trim().toLowerCase()
+    if (!needle) return companyNameSuggestions.slice(0, 10)
+    return companyNameSuggestions
+      .filter((name) => name.toLowerCase().includes(needle))
+      .slice(0, 10)
+  }, [companyNameSuggestions, draft?.company])
 
   const filteredContacts = useMemo(() => {
     let next = contacts.filter((contact) => {
@@ -1876,19 +1884,63 @@ export default function PhonebookPage() {
                 <div>
                   <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                   {editing ? (
-                    <>
+                    <div style={{ position: "relative" }}>
                       <input
-                        list="phonebook-company-name-suggestions"
                         value={draft?.company || ""}
-                        onChange={(event) => updateCapsField("company", event.target.value)}
+                        onChange={(event) => {
+                          updateCapsField("company", event.target.value)
+                          setCompanySuggestOpen(true)
+                        }}
+                        onFocus={() => setCompanySuggestOpen(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setCompanySuggestOpen(false), 120)
+                        }}
                         style={detailInputStyle}
                       />
-                      <datalist id="phonebook-company-name-suggestions">
-                        {companyNameSuggestions.map((name) => (
-                          <option key={name} value={name} />
-                        ))}
-                      </datalist>
-                    </>
+                      {companySuggestOpen && companyInputSuggestions.length > 0 ? (
+                        <div
+                          style={{
+                            position: "absolute",
+                            zIndex: 20,
+                            left: 0,
+                            right: 0,
+                            top: "calc(100% + 4px)",
+                            maxHeight: "180px",
+                            overflowY: "auto",
+                            borderRadius: "10px",
+                            border: "1px solid rgba(210,236,255,0.14)",
+                            background: "linear-gradient(180deg, rgba(18, 59, 99, 0.98) 0%, rgba(8, 32, 56, 0.98) 100%)",
+                            padding: "4px",
+                            display: "grid",
+                            gap: "3px",
+                          }}
+                        >
+                          {companyInputSuggestions.map((name) => (
+                            <button
+                              key={name}
+                              type="button"
+                              onMouseDown={(event) => {
+                                event.preventDefault()
+                                updateCapsField("company", name)
+                                setCompanySuggestOpen(false)
+                              }}
+                              style={{
+                                textAlign: "left",
+                                padding: "6px 8px",
+                                borderRadius: "8px",
+                                border: "1px solid rgba(210,236,255,0.08)",
+                                background: "rgba(255,255,255,0.04)",
+                                color: "#eaf5ff",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   ) : current?.company ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
                       <span style={{ fontSize: "15px", lineHeight: 1.5, textTransform: "uppercase" }}>{current.company}</span>
