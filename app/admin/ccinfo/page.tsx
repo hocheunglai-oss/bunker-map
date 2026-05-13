@@ -320,6 +320,7 @@ export default function CountryCompanyInfoPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
   const filePickerRef = useRef<HTMLInputElement | null>(null)
+  const suggestionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const [query, setQuery] = useState("")
   const [suggestions, setSuggestions] = useState<SearchRecord[]>([])
@@ -422,6 +423,13 @@ export default function CountryCompanyInfoPage() {
   useEffect(() => {
     setActiveSuggestion(0)
   }, [query])
+
+  useEffect(() => {
+    if (!suggestions.length) return
+    const node = suggestionRefs.current[activeSuggestion]
+    if (!node) return
+    node.scrollIntoView({ block: "nearest" })
+  }, [activeSuggestion, suggestions.length])
 
   useEffect(() => {
     if (adminLoading || !authenticated || selectedId || typeof window === "undefined") return
@@ -1167,6 +1175,9 @@ export default function CountryCompanyInfoPage() {
                   {suggestions.map((item, index) => (
                     <button
                       key={`${item.kind}-${item.id}`}
+                      ref={(node) => {
+                        suggestionRefs.current[index] = node
+                      }}
                       onClick={() => void pickSuggestion(item)}
                       style={{
                         textAlign: "left",
