@@ -147,6 +147,15 @@ const compactFileBadgeStyle: React.CSSProperties = {
   padding: "0 6px",
 }
 
+const fileIconStyle: React.CSSProperties = {
+  width: "18px",
+  height: "18px",
+  display: "inline-grid",
+  placeItems: "center",
+  fontSize: "16px",
+  lineHeight: 1,
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -227,6 +236,16 @@ function joinFolderPath(folderPath: string, name: string) {
 
 function folderDepth(folderPath: string) {
   return folderPath.split("/").filter(Boolean).length
+}
+
+function getFileTypeLabel(name: string, fileType?: string | null) {
+  const ext = (name.split(".").pop() || "").toLowerCase()
+  const normalized = (fileType || "").toLowerCase()
+  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { icon: "📗", color: "#93f5a9", label: "Excel" }
+  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { icon: "📘", color: "#98c8ff", label: "Doc" }
+  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { icon: "🟥", color: "#ffb0b0", label: "Image" }
+  if (ext === "pdf" || normalized.includes("pdf")) return { icon: "📕", color: "#ffb3b3", label: "PDF" }
+  return { icon: "📄", color: "#d8e8f9", label: "File" }
 }
 
 async function fetchEntryFiles(kind: RecordKind, id: string) {
@@ -929,6 +948,14 @@ export default function CountryCompanyInfoPage() {
       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
         Files
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
+        <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
+          New Folder
+        </button>
+        <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
+          {uploadingFile ? "Uploading..." : "Upload File"}
+        </button>
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
         <button
           type="button"
@@ -957,14 +984,15 @@ export default function CountryCompanyInfoPage() {
                   : "linear-gradient(180deg, rgba(76, 164, 255, 0.32) 0%, rgba(31, 82, 143, 0.18) 100%)",
           }}
         >
-          Root
+          HOME
         </button>
+        {breadcrumbSegments.length > 0 && <span style={{ color: "#91badb", fontSize: "11px" }}>&gt;</span>}
         {breadcrumbSegments.map((segment, index) => {
           const path = breadcrumbSegments.slice(0, index + 1).join("/")
           const active = path === currentFolderPath
           return (
+            <div key={path} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
             <button
-              key={path}
               type="button"
               onClick={() => setCurrentFolderPath(path)}
               style={{
@@ -976,6 +1004,8 @@ export default function CountryCompanyInfoPage() {
             >
               {segment}
             </button>
+            {index < breadcrumbSegments.length - 1 ? <span style={{ color: "#91badb", fontSize: "11px" }}>&gt;</span> : null}
+            </div>
           )
         })}
       </div>
@@ -1026,14 +1056,13 @@ export default function CountryCompanyInfoPage() {
                 textAlign: "left",
                 }}
               >
-                <span style={{ ...compactFileBadgeStyle, background: "linear-gradient(180deg, rgba(255, 211, 111, 0.24) 0%, rgba(147, 101, 21, 0.16) 100%)", color: "#fff3c4" }}>
-                  DIR
-                </span>
+                <span style={{ ...fileIconStyle, color: "#ffd472" }}>📁</span>
                 <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>{folder.name}</span>
               </button>
             ))}
             {visibleFiles.map((file) => {
             const active = selectedPreviewFile?.id === file.id
+            const fileTypeVisual = getFileTypeLabel(file.file_name, file.file_type)
             return (
               <div
                 key={file.id}
@@ -1061,7 +1090,7 @@ export default function CountryCompanyInfoPage() {
                   cursor: file.source === "company" ? "default" : "grab",
                 }}
               >
-                <span style={compactFileBadgeStyle}>{(file.file_type || "file").replace(".", "").slice(0, 5)}</span>
+                <span style={{ ...fileIconStyle, color: fileTypeVisual.color }} title={fileTypeVisual.label}>{fileTypeVisual.icon}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -1095,14 +1124,6 @@ export default function CountryCompanyInfoPage() {
           </>
         )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
-        <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
-          New Folder
-        </button>
-        <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
-        {uploadingFile ? "Uploading..." : "Upload File"}
-        </button>
-      </div>
       {selectedPreviewFile?.drive_url && (
         <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
           Open In Drive
@@ -1113,9 +1134,9 @@ export default function CountryCompanyInfoPage() {
 
   return (
     <div style={pageShellStyle}>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px minmax(0, 1fr) 320px", minHeight: "100vh" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px minmax(0, 1fr) 320px", height: "100vh", overflow: "hidden" }}>
         {!isMobile && (
-          <aside style={sidebarStyle}>
+          <aside style={{ ...sidebarStyle, height: "100vh", overflow: "hidden" }}>
             <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 36px)" }}>
               <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "12px" }}>
                 Country And Company Info
@@ -1183,10 +1204,20 @@ export default function CountryCompanyInfoPage() {
           </aside>
         )}
 
-        <main style={{ padding: isMobile ? "16px" : "22px" }}>
+        <main style={{ padding: isMobile ? "16px" : "22px", height: "100vh", overflowY: "auto" }}>
           <div style={{ display: "grid", gap: "14px" }}>
             <div style={{ ...panelStyle, padding: "14px", position: "sticky", top: "16px", zIndex: 10 }}>
-              <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={handleSearchKeyDown} placeholder="Search company, country or port..." style={searchInputStyle} />
+              <input
+                value={query}
+                onClick={() => {
+                  setQuery("")
+                  setSuggestions([])
+                }}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search company, country or port..."
+                style={searchInputStyle}
+              />
               {suggestions.length > 0 && query.trim() && (
                 <div
                   style={{
@@ -1408,7 +1439,7 @@ export default function CountryCompanyInfoPage() {
             </div>
           </div>
         </main>
-        {!isMobile && <aside style={{ ...sidebarStyle, width: "320px" }}>{fileSection}</aside>}
+        {!isMobile && <aside style={{ ...sidebarStyle, width: "320px", height: "100vh", overflow: "hidden" }}>{fileSection}</aside>}
       </div>
       {previewModalOpen && selectedPreviewFile && previewUrl && (
         <div
