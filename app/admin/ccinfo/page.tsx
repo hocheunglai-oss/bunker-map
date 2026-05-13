@@ -65,7 +65,7 @@ type CountryPortListItem = {
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
+  background: "linear-gradient(180deg, #123f70 0%, #0d3158 34%, #08233f 100%)",
   fontFamily: "Arial, Helvetica, sans-serif",
   color: "#edf7ff",
 }
@@ -74,11 +74,11 @@ const sidebarStyle: React.CSSProperties = {
   width: "280px",
   padding: "18px",
   borderRight: "1px solid rgba(210, 236, 255, 0.1)",
-  background: "linear-gradient(180deg, rgba(8, 24, 44, 0.92) 0%, rgba(5, 18, 34, 0.9) 100%)",
+  background: "linear-gradient(180deg, rgba(20, 63, 106, 0.94) 0%, rgba(13, 45, 79, 0.92) 100%)",
 }
 
 const panelStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
+  background: "linear-gradient(180deg, rgba(24, 76, 126, 0.88) 0%, rgba(12, 44, 77, 0.86) 100%)",
   border: "1px solid rgba(210, 236, 255, 0.14)",
   borderRadius: "18px",
   boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
