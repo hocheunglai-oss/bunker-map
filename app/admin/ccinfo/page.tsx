@@ -390,14 +390,6 @@ export default function CountryCompanyInfoPage() {
       }
 
       const next: SearchRecord[] = []
-      if (!companies.error) {
-        next.push(
-          ...((((companies.data as { id: string; name: string }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
-            ...item,
-            kind: "company" as const,
-          })))),
-        )
-      }
       if (!countries.error) {
         next.push(
           ...((((countries.data as { id: string; name: string }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
@@ -411,6 +403,14 @@ export default function CountryCompanyInfoPage() {
           ...((((ports.data as { id: string; name: string; country_name: string | null }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
             ...item,
             kind: "port" as const,
+          })))),
+        )
+      }
+      if (!companies.error) {
+        next.push(
+          ...((((companies.data as { id: string; name: string }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
+            ...item,
+            kind: "company" as const,
           })))),
         )
       }
