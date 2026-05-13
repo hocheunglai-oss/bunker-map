@@ -383,7 +383,8 @@ export default function CountryCompanyInfoPage() {
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
-  const [sectionSaveState, setSectionSaveState] = useState<"idle" | "saving" | "saved">("idle")
+  const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
+  const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
   const recordAutoSaveTimerRef = useRef<number | null>(null)
 
@@ -805,11 +806,11 @@ export default function CountryCompanyInfoPage() {
         setSectionSaveState("saved")
       } catch {
         setMessage("Unable to auto-save section.")
-        setSectionSaveState("idle")
+        setSectionSaveState("saved")
       } finally {
         setSectionSaving(false)
         if (sectionSaveTimerRef.current) window.clearTimeout(sectionSaveTimerRef.current)
-        sectionSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("idle"), 1200)
+        sectionSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("saved"), 1200)
       }
     }, 450)
   }
@@ -829,11 +830,11 @@ export default function CountryCompanyInfoPage() {
         setSectionSaveState("saved")
       } catch {
         setMessage("Unable to auto-save information.")
-        setSectionSaveState("idle")
+        setSectionSaveState("saved")
       } finally {
         setSectionSaving(false)
         if (recordAutoSaveTimerRef.current) window.clearTimeout(recordAutoSaveTimerRef.current)
-        recordAutoSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("idle"), 1200)
+        recordAutoSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("saved"), 1200)
       }
     }, 450)
   }
@@ -1423,7 +1424,7 @@ export default function CountryCompanyInfoPage() {
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
                       <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
-                        {saving || sectionSaveState === "saving" ? "Saving..." : sectionSaveState === "saved" ? "Saved" : "Save"}
+                        {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
                       </button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
@@ -1460,11 +1461,27 @@ export default function CountryCompanyInfoPage() {
                       value={currentRecord.notes || ""}
                       onChange={(event) => {
                         const nextNotes = event.target.value
+                        const prevLines = (currentRecord.notes || "").split("\n")
+                        const nextLines = nextNotes.split("\n")
+                        const lineUpdates: Record<string, string> = { ...mainInfoLineUpdates }
+                        const now = new Date().toISOString()
+                        for (let i = 0; i < nextLines.length; i += 1) {
+                          if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
+                        }
+                        setMainInfoLineUpdates(lineUpdates)
                         setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
                         queueMainInfoAutoSave(nextNotes)
                       }}
                       style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                     />
+                    {Object.keys(mainInfoLineUpdates).length > 0 && (
+                      <div style={{ marginTop: "4px", fontSize: "10px", color: "#8fc2e8", lineHeight: 1.35 }}>
+                        {Object.entries(mainInfoLineUpdates)
+                          .sort((a, b) => Number(a[0]) - Number(b[0]))
+                          .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
+                          .join(" | ")}
+                      </div>
+                    )}
                   </div>
 
                   {highlights.length > 0 && (
