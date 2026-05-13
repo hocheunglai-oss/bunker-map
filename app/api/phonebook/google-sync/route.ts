@@ -46,6 +46,27 @@ function requireEnv(name: string) {
   return value
 }
 
+function redactTail(value: string | undefined, keep = 6) {
+  if (!value) return "missing"
+  if (value.length <= keep) return value
+  return `***${value.slice(-keep)}`
+}
+
+function isInvalidGrantError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const lower = message.toLowerCase()
+  if (lower.includes("invalid_grant")) return true
+  if (typeof error === "object" && error !== null && "cause" in error) {
+    const cause = (error as { cause?: unknown }).cause
+    const causeMessage =
+      typeof cause === "object" && cause !== null && "message" in cause
+        ? String((cause as { message?: unknown }).message || "").toLowerCase()
+        : ""
+    if (causeMessage.includes("invalid_grant")) return true
+  }
+  return false
+}
+
 async function getPeopleClient() {
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
@@ -445,6 +466,17 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google Contacts sync failed."
     console.error("phonebook google sync failed", error)
+    if (isInvalidGrantError(error)) {
+      const runtime = process.env.VERCEL_ENV || process.env.NODE_ENV || "unknown"
+      const tokenTail = redactTail(process.env.GOOGLE_OAUTH_REFRESH_TOKEN)
+      const clientTail = redactTail(process.env.GOOGLE_OAUTH_CLIENT_ID)
+      return NextResponse.json(
+        {
+          message: `Google auth invalid_grant on ${runtime}. Check Vercel GOOGLE_OAUTH_REFRESH_TOKEN and OAuth client values. token=${tokenTail}, client=${clientTail}`,
+        },
+        { status: 500 },
+      )
+    }
     return NextResponse.json({ message }, { status: 500 })
   }
 }
