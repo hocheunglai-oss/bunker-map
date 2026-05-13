@@ -367,12 +367,14 @@ export default function CountryCompanyInfoPage() {
   const [matchCount, setMatchCount] = useState(0)
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuCloseTimerRef = useRef<number | null>(null)
   const [files, setFiles] = useState<CompanyFileRecord[]>([])
   const [folders, setFolders] = useState<EntryFolderRecord[]>([])
   const [currentFolderPath, setCurrentFolderPath] = useState("")
   const [draggingFileId, setDraggingFileId] = useState("")
   const [dropFolderPath, setDropFolderPath] = useState("")
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
+  const [countryPortDrafts, setCountryPortDrafts] = useState<Record<string, { name: string; notes: string }>>({})
   const [highlights, setHighlights] = useState<HighlightCard[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
@@ -569,6 +571,11 @@ export default function CountryCompanyInfoPage() {
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
+    const draftMap: Record<string, { name: string; notes: string }> = {}
+    ;((portsResult.data as CountryPortListItem[]) || []).forEach((port) => {
+      draftMap[port.id] = { name: port.name || "", notes: port.notes || "" }
+    })
+    setCountryPortDrafts(draftMap)
     setHighlights(parseHighlights((data as BaseRecord).summary))
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -643,6 +650,38 @@ export default function CountryCompanyInfoPage() {
     const { data, error } = await supabase.from("cc_ports").insert({ name: "New Port", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
     if (error || !data) return setMessage("Unable to create port.")
     await loadSelected("port", data.id)
+  }
+
+  async function addPortUnderCountry() {
+    if (selectedKind !== "country" || !selectedId) return
+    const countryName = currentRecord.name.trim() || currentCountry.name.trim() || "New Country"
+    const { data, error } = await supabase
+      .from("cc_ports")
+      .insert({ name: "New Port", summary: null, notes: "", country_id: selectedId, country_name: countryName, tags: [], status: "active" })
+      .select("id,name,summary,notes")
+      .single()
+    if (error || !data) {
+      setMessage("Unable to add port.")
+      return
+    }
+    const nextPort = data as CountryPortListItem
+    setCurrentCountryPorts((prev) => [...prev, nextPort].sort((a, b) => a.name.localeCompare(b.name)))
+    setCountryPortDrafts((prev) => ({ ...prev, [nextPort.id]: { name: nextPort.name || "", notes: nextPort.notes || "" } }))
+    setMessage("Port added.")
+  }
+
+  async function saveCountryPortInline(portId: string) {
+    const draft = countryPortDrafts[portId]
+    if (!draft) return
+    const { error } = await supabase.from("cc_ports").update({ name: draft.name.trim(), notes: draft.notes }).eq("id", portId)
+    if (error) {
+      setMessage("Unable to save port.")
+      return
+    }
+    setCurrentCountryPorts((prev) =>
+      prev.map((port) => (port.id === portId ? { ...port, name: draft.name.trim(), notes: draft.notes } : port)),
+    )
+    setMessage("Port saved.")
   }
 
   async function saveRecord() {
@@ -1212,15 +1251,23 @@ export default function CountryCompanyInfoPage() {
                     ≡
                   </button>
                   {menuOpen && (
-                    <div style={{ ...panelStyle, position: "absolute", right: 0, bottom: "48px", padding: "8px", display: "grid", gap: "6px", minWidth: "150px", zIndex: 20 }}>
-                      <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
+                    <div
+                      style={{ ...panelStyle, position: "absolute", right: 0, bottom: "48px", padding: "8px", display: "grid", gap: "6px", minWidth: "150px", zIndex: 20 }}
+                      onMouseEnter={() => {
+                        if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
+                      }}
+                      onMouseLeave={() => {
+                        menuCloseTimerRef.current = window.setTimeout(() => setMenuOpen(false), 650)
+                      }}
+                    >
                       <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
+                      <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
                       <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
+                      <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
+                      <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
                       <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                         {backingUp ? "Preparing Backup..." : "Download Backup"}
                       </button>
-                      <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
-                      <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                     </div>
                   )}
                 </div>
@@ -1229,7 +1276,7 @@ export default function CountryCompanyInfoPage() {
           </aside>
         )}
 
-        <main style={{ padding: isMobile ? "16px" : "22px", height: "100vh", overflowY: "auto" }}>
+        <main style={{ padding: isMobile ? "16px" : "22px", height: "100vh", overflowY: "auto", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
           <div style={{ display: "grid", gap: "14px" }}>
             <div style={{ ...panelStyle, padding: "14px", position: "sticky", top: "16px", zIndex: 10 }}>
               <input
@@ -1318,14 +1365,14 @@ export default function CountryCompanyInfoPage() {
                       </div>
                       {menuOpen && (
                         <div style={{ ...panelStyle, padding: "8px", display: "grid", gap: "6px", marginBottom: "10px" }}>
-                          <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
                           <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
+                          <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
                           <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
+                          <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
+                          <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
                           <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                             {backingUp ? "Preparing Backup..." : "Download Backup"}
                           </button>
-                          <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
-                          <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                         </div>
                       )}
                       <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
@@ -1367,7 +1414,7 @@ export default function CountryCompanyInfoPage() {
                           setHighlightModalOpen(true)
                         }}
                         disabled={!selectedId}
-                        style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1 }}
+                        style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
                         title="Add section"
                       >
                         Add Section
@@ -1432,7 +1479,12 @@ export default function CountryCompanyInfoPage() {
 
                   {selectedKind === "country" && (
                     <div>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Ports</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Ports</div>
+                        <button onClick={() => void addPortUnderCountry()} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
+                          Add Port
+                        </button>
+                      </div>
                       <div style={{ ...panelStyle, padding: 0, background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
                         {currentCountryPorts.length === 0 ? (
                           <div style={{ color: "#9ebad1", padding: "12px" }}>No ports linked yet.</div>
@@ -1449,16 +1501,20 @@ export default function CountryCompanyInfoPage() {
                                 {currentCountryPorts.map((port) => (
                                   <tr key={port.id}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                      <button
-                                        type="button"
-                                        onClick={() => void loadSelected("port", port.id)}
-                                        style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 700, cursor: "pointer", textAlign: "left" }}
-                                      >
-                                        {port.name}
-                                      </button>
+                                      <input
+                                        value={countryPortDrafts[port.id]?.name ?? port.name}
+                                        onChange={(event) => setCountryPortDrafts((prev) => ({ ...prev, [port.id]: { name: event.target.value, notes: prev[port.id]?.notes ?? port.notes ?? "" } }))}
+                                        onBlur={() => void saveCountryPortInline(port.id)}
+                                        style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }}
+                                      />
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                      {port.notes || "No information yet"}
+                                      <textarea
+                                        value={countryPortDrafts[port.id]?.notes ?? port.notes ?? ""}
+                                        onChange={(event) => setCountryPortDrafts((prev) => ({ ...prev, [port.id]: { name: prev[port.id]?.name ?? port.name, notes: event.target.value } }))}
+                                        onBlur={() => void saveCountryPortInline(port.id)}
+                                        style={{ ...textareaStyle, minHeight: "82px", fontSize: "12px" }}
+                                      />
                                     </td>
                                   </tr>
                                 ))}
