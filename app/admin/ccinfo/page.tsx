@@ -1323,7 +1323,7 @@ export default function CountryCompanyInfoPage() {
               }}
               style={{
                 display: "grid",
-                gridTemplateColumns: "42px minmax(0,1fr)",
+                gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr)",
                 gap: "8px",
                 alignItems: "center",
                 padding: "7px 8px",
@@ -1364,7 +1364,7 @@ export default function CountryCompanyInfoPage() {
                 }}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "42px minmax(0,1fr) auto",
+                  gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr) auto",
                   gap: "8px",
                   alignItems: "center",
                   padding: "7px 8px",
@@ -1396,13 +1396,24 @@ export default function CountryCompanyInfoPage() {
                 >
                   {file.file_name}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void deleteFile(file)}
-                  style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
-                >
-                  Delete
-                </button>
+                {!isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => void deleteFile(file)}
+                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                  >
+                    Delete
+                  </button>
+                )}
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => void deleteFile(file)}
+                    style={{ ...buttonStyle, gridColumn: "2", justifySelf: "start", padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             )
             })}
@@ -1427,7 +1438,16 @@ export default function CountryCompanyInfoPage() {
 
   return (
     <div style={pageShellStyle}>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px minmax(0, 1fr) 320px", height: "100vh", overflow: "hidden" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "260px minmax(0, 1fr) 320px",
+          height: isMobile ? "auto" : "100vh",
+          minHeight: "100vh",
+          overflow: isMobile ? "visible" : "hidden",
+          maxWidth: "100vw",
+        }}
+      >
         {!isMobile && (
           <aside style={{ ...sidebarStyle, height: "100vh", overflow: "hidden" }}>
             <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 36px)" }}>
@@ -1505,9 +1525,9 @@ export default function CountryCompanyInfoPage() {
           </aside>
         )}
 
-        <main style={{ padding: isMobile ? "16px" : "22px", height: "100vh", overflowY: "auto", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
-          <div style={{ display: "grid", gap: "14px" }}>
-            <div style={{ ...panelStyle, padding: "14px", position: "sticky", top: "16px", zIndex: 10 }}>
+        <main style={{ padding: isMobile ? "12px" : "22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
+          <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
+            <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: isMobile ? "8px" : "16px", zIndex: 10, minWidth: 0 }}>
               <input
                 value={query}
                 onClick={() => {
@@ -1561,7 +1581,7 @@ export default function CountryCompanyInfoPage() {
               )}
             </div>
 
-            <div style={{ ...panelStyle, padding: "16px", display: "grid", gap: "12px" }}>
+            <div style={{ ...panelStyle, padding: isMobile ? "12px" : "16px", display: "grid", gap: "12px", minWidth: 0 }}>
               {initialMode ? (
                 <div style={{ minHeight: isMobile ? "unset" : "calc(100vh - 180px)", display: "grid", placeItems: "center", color: "#93b9d6", textAlign: "center", padding: "20px" }}>
                   <div>
@@ -1634,10 +1654,8 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  {isMobile && fileSection}
-
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
                       <span style={{ padding: "3px 8px", borderRadius: "999px", background: mainInfoEditing ? "rgba(255, 210, 86, 0.18)" : "rgba(122, 196, 255, 0.12)", border: "1px solid rgba(210,236,255,0.12)", color: mainInfoEditing ? "#fff2bc" : "#b9e3ff", fontSize: "10px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                         {mainInfoEditing ? "Edit Mode" : "View Mode"}
@@ -1760,6 +1778,23 @@ export default function CountryCompanyInfoPage() {
                       <div style={{ ...panelStyle, padding: 0, background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
                         {currentCountryPorts.length === 0 ? (
                           <div style={{ color: "#9ebad1", padding: "12px" }}>No ports linked yet.</div>
+                        ) : isMobile ? (
+                          <div style={{ display: "grid", gap: "8px", padding: "10px" }}>
+                            {currentCountryPorts.map((port) => (
+                              <div key={port.id} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void loadSelected("port", port.id)}
+                                  style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 800, cursor: "pointer", textAlign: "left", fontSize: "12px" }}
+                                >
+                                  {port.name}
+                                </button>
+                                <div style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                                  {port.notes || "No information yet"}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
                           <div style={{ overflowX: "auto" }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
@@ -1793,6 +1828,8 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
+
+                  {isMobile && fileSection}
 
                   <div style={{ color: message === "Saved." || message === "Deleted." ? "#8ff0c8" : "#ffb0b0", fontWeight: 700 }}>
                     {message}
