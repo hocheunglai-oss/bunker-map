@@ -369,19 +369,51 @@ export default function CountryCompanyInfoPage() {
       setSuggestions([])
       return
     }
+    const tokens = needle
+      .toLowerCase()
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
 
     const timeout = setTimeout(async () => {
+      const firstToken = tokens[0] || needle
       const [companies, countries, ports] = await Promise.all([
-        supabase.from("cc_companies").select("id,name").ilike("name", `%${needle}%`).order("name", { ascending: true }).limit(4),
-        supabase.from("cc_countries").select("id,name").ilike("name", `%${needle}%`).order("name", { ascending: true }).limit(4),
-        supabase.from("cc_ports").select("id,name,country_name").ilike("name", `%${needle}%`).order("name", { ascending: true }).limit(6),
+        supabase.from("cc_companies").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30),
+        supabase.from("cc_countries").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30),
+        supabase.from("cc_ports").select("id,name,country_name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(40),
       ])
 
+      const matchesTokens = (value: string) => {
+        const lower = value.toLowerCase()
+        return tokens.every((token) => lower.includes(token))
+      }
+
       const next: SearchRecord[] = []
-      if (!companies.error) next.push(...(((companies.data as { id: string; name: string }[]) || []).map((item) => ({ ...item, kind: "company" as const }))))
-      if (!countries.error) next.push(...(((countries.data as { id: string; name: string }[]) || []).map((item) => ({ ...item, kind: "country" as const }))))
-      if (!ports.error) next.push(...(((ports.data as { id: string; name: string; country_name: string | null }[]) || []).map((item) => ({ ...item, kind: "port" as const }))))
-      setSuggestions(next.slice(0, 10))
+      if (!companies.error) {
+        next.push(
+          ...((((companies.data as { id: string; name: string }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
+            ...item,
+            kind: "company" as const,
+          })))),
+        )
+      }
+      if (!countries.error) {
+        next.push(
+          ...((((countries.data as { id: string; name: string }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
+            ...item,
+            kind: "country" as const,
+          })))),
+        )
+      }
+      if (!ports.error) {
+        next.push(
+          ...((((ports.data as { id: string; name: string; country_name: string | null }[]) || []).filter((item) => matchesTokens(item.name)).map((item) => ({
+            ...item,
+            kind: "port" as const,
+          })))),
+        )
+      }
+      setSuggestions(next.slice(0, 20))
     }, 120)
 
     return () => clearTimeout(timeout)
@@ -1118,14 +1150,27 @@ export default function CountryCompanyInfoPage() {
             <div style={{ ...panelStyle, padding: "14px", position: "sticky", top: "16px", zIndex: 10 }}>
               <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={handleSearchKeyDown} placeholder="Search company, country or port..." style={searchInputStyle} />
               {suggestions.length > 0 && query.trim() && (
-                <div style={{ ...panelStyle, position: "absolute", top: "calc(100% - 2px)", left: "14px", right: "14px", padding: "8px", display: "grid", gap: "6px" }}>
+                <div
+                  style={{
+                    ...panelStyle,
+                    position: "absolute",
+                    top: "calc(100% - 2px)",
+                    left: "14px",
+                    right: "14px",
+                    padding: "6px",
+                    display: "grid",
+                    gap: "4px",
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                  }}
+                >
                   {suggestions.map((item, index) => (
                     <button
                       key={`${item.kind}-${item.id}`}
                       onClick={() => void pickSuggestion(item)}
                       style={{
                         textAlign: "left",
-                        padding: "10px 12px",
+                        padding: "6px 8px",
                         borderRadius: "12px",
                         border: index === activeSuggestion ? "1px solid rgba(73, 219, 165, 0.26)" : "1px solid rgba(210,236,255,0.08)",
                         background: index === activeSuggestion ? "linear-gradient(180deg, rgba(56, 214, 154, 0.16) 0%, rgba(20, 130, 93, 0.08) 100%)" : "transparent",
@@ -1134,7 +1179,7 @@ export default function CountryCompanyInfoPage() {
                       }}
                     >
                       <div style={{ fontWeight: 700 }}>{item.name}</div>
-                      <div style={{ color: "#8fc2e8", fontSize: "12px", marginTop: "2px" }}>
+                      <div style={{ color: "#8fc2e8", fontSize: "11px", marginTop: "1px" }}>
                         {kindLabel(item.kind)}{item.kind === "port" && item.country_name ? ` • ${item.country_name}` : ""}
                       </div>
                     </button>
