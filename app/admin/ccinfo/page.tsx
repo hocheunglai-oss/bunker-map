@@ -186,6 +186,7 @@ function kindLabel(kind: RecordKind) {
 type HighlightCard = {
   title: string
   info: string
+  line_updates?: Record<string, string>
 }
 
 function parseHighlights(value: string | null): HighlightCard[] {
@@ -197,6 +198,7 @@ function parseHighlights(value: string | null): HighlightCard[] {
         .map((item) => ({
           title: typeof item?.title === "string" ? item.title : "",
           info: typeof item?.info === "string" ? item.info : "",
+          line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
         }))
         .filter((item) => item.title.trim() || item.info.trim())
     }
@@ -216,6 +218,7 @@ function serializeHighlights(items: HighlightCard[]) {
       .map((item) => ({
         title: item.title.trim(),
         info: item.info.trim(),
+        line_updates: item.line_updates || {},
       }))
       .filter((item) => item.title || item.info),
   )
@@ -311,11 +314,13 @@ function AutoSizeTextarea({
   onChange,
   onBlur,
   style,
+  title,
 }: {
   value: string
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
   onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void
   style?: React.CSSProperties
+  title?: string
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -332,6 +337,7 @@ function AutoSizeTextarea({
       value={value}
       onChange={onChange}
       onBlur={onBlur}
+      title={title}
       rows={1}
       style={{
         ...style,
@@ -373,6 +379,8 @@ export default function CountryCompanyInfoPage() {
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
+  const [sectionSaving, setSectionSaving] = useState(false)
+  const sectionSaveTimerRef = useRef<number | null>(null)
 
   const [currentRecord, setCurrentRecord] = useState<BaseRecord>({
     id: "",
@@ -757,6 +765,22 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  function queueSectionSave(nextHighlights: HighlightCard[]) {
+    if (sectionSaveTimerRef.current) {
+      window.clearTimeout(sectionSaveTimerRef.current)
+    }
+    setSectionSaving(true)
+    sectionSaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        await persistHighlights(nextHighlights)
+      } catch {
+        setMessage("Unable to auto-save section.")
+      } finally {
+        setSectionSaving(false)
+      }
+    }, 450)
+  }
+
   async function deleteHighlightCard(index: number) {
     if (!confirm("Delete this highlight card?")) return
     const nextHighlights = highlights.filter((_, i) => i !== index)
@@ -948,14 +972,6 @@ export default function CountryCompanyInfoPage() {
       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
         Files
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
-        <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
-          New Folder
-        </button>
-        <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
-          {uploadingFile ? "Uploading..." : "Upload File"}
-        </button>
-      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
         <button
           type="button"
@@ -976,12 +992,10 @@ export default function CountryCompanyInfoPage() {
             ...buttonStyle,
             padding: "5px 8px",
             fontSize: "10px",
-            background:
-              dropFolderPath === ""
-                ? "linear-gradient(180deg, rgba(95, 188, 138, 0.28) 0%, rgba(20, 98, 61, 0.14) 100%)"
-                : currentFolderPath
-                  ? "rgba(255,255,255,0.06)"
-                  : "linear-gradient(180deg, rgba(76, 164, 255, 0.32) 0%, rgba(31, 82, 143, 0.18) 100%)",
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+            color: currentFolderPath ? "#b8d2e8" : "#edf7ff",
           }}
         >
           HOME
@@ -999,7 +1013,10 @@ export default function CountryCompanyInfoPage() {
                 ...buttonStyle,
                 padding: "5px 8px",
                 fontSize: "10px",
-                background: active ? "linear-gradient(180deg, rgba(76, 164, 255, 0.32) 0%, rgba(31, 82, 143, 0.18) 100%)" : "rgba(255,255,255,0.06)",
+                background: "transparent",
+                border: "none",
+                boxShadow: "none",
+                color: active ? "#edf7ff" : "#b8d2e8",
               }}
             >
               {segment}
@@ -1129,6 +1146,14 @@ export default function CountryCompanyInfoPage() {
           Open In Drive
         </a>
       )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
+        <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
+          New Folder
+        </button>
+        <button onClick={() => filePickerRef.current?.click()} disabled={uploadingFile} style={{ ...buttonStyle, width: "100%" }}>
+          {uploadingFile ? "Uploading..." : "Upload File"}
+        </button>
+      </div>
     </div>
   ) : null
 
@@ -1317,7 +1342,7 @@ export default function CountryCompanyInfoPage() {
                       <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button onClick={saveRecord} disabled={saving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving ? "Saving..." : "Save"}</button>
+                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving || sectionSaving ? "SAVING..." : "Save"}</button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
                   </div>
@@ -1334,7 +1359,7 @@ export default function CountryCompanyInfoPage() {
                   {isMobile && fileSection}
 
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
                       <button
                         onClick={() => {
@@ -1342,10 +1367,10 @@ export default function CountryCompanyInfoPage() {
                           setHighlightModalOpen(true)
                         }}
                         disabled={!selectedId}
-                        style={{ ...buttonStyle, width: "26px", height: "26px", borderRadius: "50%", padding: 0, fontSize: "16px", lineHeight: 1 }}
+                        style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1 }}
                         title="Add section"
                       >
-                        +
+                        Add Section
                       </button>
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
@@ -1370,10 +1395,24 @@ export default function CountryCompanyInfoPage() {
                             value={highlight.info}
                             onChange={(event) => {
                               const value = event.target.value
-                              setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value } : item)))
+                              setHighlights((prev) => {
+                                const prevItem = prev[index]
+                                const prevLines = (prevItem?.info || "").split("\n")
+                                const nextLines = value.split("\n")
+                                const lineUpdates: Record<string, string> = { ...(prevItem?.line_updates || {}) }
+                                const now = new Date().toISOString()
+                                for (let i = 0; i < nextLines.length; i += 1) {
+                                  if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
+                                }
+                                const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
+                                queueSectionSave(next)
+                                return next
+                              })
                             }}
-                            onBlur={(event) => void saveHighlightInfo(index, event.target.value)}
-                            style={{ ...textareaStyle, minHeight: "140px" }}
+                            style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
+                            title={Object.entries(highlight.line_updates || {})
+                              .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
+                              .join("\n")}
                           />
                         </div>
                       ))}
