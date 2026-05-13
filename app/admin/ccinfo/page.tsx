@@ -383,6 +383,7 @@ export default function CountryCompanyInfoPage() {
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
+  const [sectionSaveState, setSectionSaveState] = useState<"idle" | "saving" | "saved">("idle")
   const sectionSaveTimerRef = useRef<number | null>(null)
 
   const [currentRecord, setCurrentRecord] = useState<BaseRecord>({
@@ -796,13 +797,18 @@ export default function CountryCompanyInfoPage() {
       window.clearTimeout(sectionSaveTimerRef.current)
     }
     setSectionSaving(true)
+    setSectionSaveState("saving")
     sectionSaveTimerRef.current = window.setTimeout(async () => {
       try {
         await persistHighlights(nextHighlights)
+        setSectionSaveState("saved")
       } catch {
         setMessage("Unable to auto-save section.")
+        setSectionSaveState("idle")
       } finally {
         setSectionSaving(false)
+        if (sectionSaveTimerRef.current) window.clearTimeout(sectionSaveTimerRef.current)
+        sectionSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("idle"), 1200)
       }
     }, 450)
   }
@@ -1391,7 +1397,9 @@ export default function CountryCompanyInfoPage() {
                       <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>{saving || sectionSaving ? "SAVING..." : "Save"}</button>
+                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
+                        {saving || sectionSaveState === "saving" ? "Saving..." : sectionSaveState === "saved" ? "Saved" : "Save"}
+                      </button>
                       <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                     </div>
                   </div>
@@ -1467,6 +1475,14 @@ export default function CountryCompanyInfoPage() {
                               .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
                               .join("\n")}
                           />
+                          {Object.keys(highlight.line_updates || {}).length > 0 && (
+                            <div style={{ marginTop: "4px", fontSize: "10px", color: "#8fc2e8", lineHeight: 1.35 }}>
+                              {Object.entries(highlight.line_updates || {})
+                                .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                .map(([line, date]) => `Line ${Number(line) + 1}: ${new Date(date).toLocaleString()}`)
+                                .join(" | ")}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
