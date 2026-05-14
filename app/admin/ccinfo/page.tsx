@@ -223,6 +223,7 @@ type SummaryMeta = {
   sections: HighlightCard[]
   mainLineUpdates: Record<string, string>
   mainBlocks: InfoBlock[]
+  mainSections: HighlightCard[]
 }
 
 function newBlockId() {
@@ -261,11 +262,12 @@ function normalizeBlocks(value: unknown, fallbackText: string, updates: Record<s
 }
 
 function parseSummaryMeta(value: string | null): SummaryMeta {
-  if (!value?.trim()) return { sections: [], mainLineUpdates: {}, mainBlocks: [] }
+  if (!value?.trim()) return { sections: [], mainLineUpdates: {}, mainBlocks: [], mainSections: [] }
   try {
     const parsed = JSON.parse(value)
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
       const sectionSource = Array.isArray(parsed.sections) ? parsed.sections : []
+      const mainSectionSource = Array.isArray(parsed.main_sections) ? parsed.main_sections : []
       const mainLineUpdates = parsed.main_line_updates && typeof parsed.main_line_updates === "object" ? parsed.main_line_updates : {}
       return {
         sections: sectionSource
@@ -286,6 +288,14 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
         mainLineUpdates,
         mainBlocks: normalizeBlocks(parsed.main_blocks, "", mainLineUpdates),
+        mainSections: mainSectionSource
+          .map((item: Partial<HighlightCard>) => ({
+            title: typeof item?.title === "string" ? item.title : "",
+            info: typeof item?.info === "string" ? item.info : "",
+            line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
+            blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+          }))
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
       }
     }
     if (Array.isArray(parsed)) {
@@ -308,6 +318,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
         mainLineUpdates: {},
         mainBlocks: [],
+        mainSections: [],
       }
     }
   } catch {
@@ -319,16 +330,17 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
         .map((item) => ({ title: "", info: item, blocks: textToBlocks(item) })),
       mainLineUpdates: {},
       mainBlocks: [],
+      mainSections: [],
     }
   }
-  return { sections: [], mainLineUpdates: {}, mainBlocks: [] }
+  return { sections: [], mainLineUpdates: {}, mainBlocks: [], mainSections: [] }
 }
 
 function parseHighlights(value: string | null): HighlightCard[] {
   return parseSummaryMeta(value).sections
 }
 
-function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<string, string>, mainBlocks: InfoBlock[] = []) {
+function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<string, string>, mainBlocks: InfoBlock[] = [], mainSections: HighlightCard[] = []) {
   return JSON.stringify(
     {
       sections: items
@@ -347,6 +359,12 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
         .filter((item) => item.title || item.info),
       main_line_updates: mainLineUpdates,
       main_blocks: mainBlocks,
+      main_sections: mainSections.map((section) => ({
+        title: section.title.trim(),
+        info: section.info.trim(),
+        line_updates: section.line_updates || {},
+        blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
+      })),
     },
   )
 }
@@ -599,23 +617,23 @@ function BlockTextBlock({
       <div
         onMouseEnter={() => setHoveredInsertIndex(index)}
         onMouseLeave={() => setHoveredInsertIndex(null)}
-        style={{ height: "12px", display: "grid", placeItems: "center", margin: "-2px 0", position: "relative" }}
+        style={{ height: "18px", display: "grid", placeItems: "center", margin: "2px 0", position: "relative" }}
       >
         <button
           type="button"
           onClick={() => onInsertBlock(index)}
           style={{
-            width: hoveredInsertIndex === index ? "100%" : "32px",
-            height: "12px",
-            borderRadius: "999px",
-            border: "1px solid rgba(143, 215, 255, 0.32)",
-            background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.02) 0%, rgba(143, 215, 255, 0.22) 48%, rgba(143, 215, 255, 0.02) 100%)" : "rgba(143, 215, 255, 0.08)",
+            width: "100%",
+            height: "16px",
+            borderRadius: 0,
+            border: "none",
+            background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.42) 0%, rgba(143, 215, 255, 0.42) 45%, transparent 45%, transparent 55%, rgba(143, 215, 255, 0.42) 55%, rgba(143, 215, 255, 0.42) 100%) center/100% 1px no-repeat" : "transparent",
             color: "#bfe6ff",
-            fontSize: "10px",
-            lineHeight: "8px",
+            fontSize: "13px",
+            lineHeight: "13px",
             opacity: hoveredInsertIndex === index ? 1 : 0,
             cursor: "pointer",
-            transition: "width 120ms ease, opacity 120ms ease, background 120ms ease",
+            transition: "opacity 120ms ease, background 120ms ease",
           }}
           aria-label="Add line here"
         >
@@ -660,8 +678,8 @@ function BlockTextBlock({
             style={{
               minHeight: "1.55em",
               borderRadius: "6px",
-              padding: "0 2px",
-              margin: "0 -2px",
+              padding: "3px 2px",
+              margin: "1px -2px",
               position: "relative",
               background: hoveredBlockId === block.id ? "rgba(185, 224, 255, 0.09)" : "transparent",
               boxShadow: hoveredBlockId === block.id ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
@@ -804,6 +822,7 @@ export default function CountryCompanyInfoPage() {
   const isMobile = useIsMobile()
   const filePickerRef = useRef<HTMLInputElement | null>(null)
   const suggestionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const highlightTitleInputRef = useRef<HTMLInputElement | null>(null)
 
   const [query, setQuery] = useState("")
   const [suggestions, setSuggestions] = useState<SearchRecord[]>([])
@@ -842,6 +861,7 @@ export default function CountryCompanyInfoPage() {
   const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
   const [mainInfoBlocks, setMainInfoBlocks] = useState<InfoBlock[]>([])
+  const [mainSections, setMainSections] = useState<HighlightCard[]>([])
   const [mainInfoEditing, setMainInfoEditing] = useState(false)
   const [countryInfoEditing, setCountryInfoEditing] = useState(false)
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
@@ -851,6 +871,7 @@ export default function CountryCompanyInfoPage() {
   const [editingMainBlockId, setEditingMainBlockId] = useState("")
   const [editingSectionBlock, setEditingSectionBlock] = useState<{ sectionIndex: number; blockId: string } | null>(null)
   const [editingNestedSectionBlock, setEditingNestedSectionBlock] = useState<{ tabIndex: number; sectionIndex: number; blockId: string } | null>(null)
+  const [editingMainSectionBlock, setEditingMainSectionBlock] = useState<{ sectionIndex: number; blockId: string } | null>(null)
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
@@ -886,6 +907,11 @@ export default function CountryCompanyInfoPage() {
     if (typeof window === "undefined") return
     window.localStorage.setItem(CHANGE_LOG_STORAGE_KEY, JSON.stringify(changeLog.slice(0, 10)))
   }, [changeLog])
+
+  useEffect(() => {
+    if (!highlightModalOpen) return
+    window.setTimeout(() => highlightTitleInputRef.current?.focus(), 30)
+  }, [highlightModalOpen])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1283,6 +1309,96 @@ export default function CountryCompanyInfoPage() {
     void persistHighlights(nextHighlights)
   }
 
+  function updateMainSectionBlock(sectionIndex: number, blockId: string, value: string) {
+    const now = new Date().toISOString()
+    setMainSections((prev) =>
+      prev.map((section, itemIndex) => {
+        if (itemIndex !== sectionIndex) return section
+        const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+        const blocks = sourceBlocks.map((block) => (block.id === blockId ? { ...block, content: value, updated_at: now } : block))
+        return { ...section, blocks, info: blocksToText(blocks) }
+      }),
+    )
+  }
+
+  function startMainSectionBlockEditing(sectionIndex: number, block: InfoBlock) {
+    const section = mainSections[sectionIndex]
+    if (!section) return
+    const blocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...section, blocks, info: blocksToText(blocks) } : item)))
+    setEditingMainSectionBlock({ sectionIndex, blockId: block.id })
+  }
+
+  function insertMainSectionBlock(sectionIndex: number, blockIndex: number) {
+    const section = mainSections[sectionIndex]
+    if (!section) return
+    const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    const blocks = [...sourceBlocks]
+    blocks.splice(blockIndex, 0, block)
+    setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...section, blocks, info: blocksToText(blocks) } : item)))
+    setEditingMainSectionBlock({ sectionIndex, blockId: block.id })
+  }
+
+  async function finishMainSectionEditing() {
+    setEditingMainSectionBlock(null)
+    await persistMainSections(mainSections)
+  }
+
+  async function deleteMainSectionBlock(sectionIndex: number, blockId: string) {
+    const nextSections = mainSections.map((section, itemIndex) => {
+      if (itemIndex !== sectionIndex) return section
+      const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+      const blocks = sourceBlocks.filter((block) => block.id !== blockId)
+      return { ...section, blocks, info: blocksToText(blocks) }
+    })
+    setMainSections(nextSections)
+    setEditingMainSectionBlock(null)
+    try {
+      await persistMainSections(nextSections)
+      setMessage("Section saved.")
+    } catch {
+      setMessage("Unable to save section.")
+    }
+  }
+
+  function renameMainSection(sectionIndex: number) {
+    const section = mainSections[sectionIndex]
+    if (!section) return
+    const nextTitle = prompt("Section name", section.title || `SECTION ${sectionIndex + 1}`)?.trim()
+    if (!nextTitle) return
+    const nextSections = mainSections.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...item, title: normalizeSectionTitle(nextTitle) } : item))
+    setMainSections(nextSections)
+    void persistMainSections(nextSections)
+  }
+
+  async function moveMainSection(sectionIndex: number, direction: -1 | 1) {
+    const targetIndex = sectionIndex + direction
+    if (targetIndex < 0 || targetIndex >= mainSections.length) return
+    const nextSections = [...mainSections]
+    const [moved] = nextSections.splice(sectionIndex, 1)
+    nextSections.splice(targetIndex, 0, moved)
+    setMainSections(nextSections)
+    try {
+      await persistMainSections(nextSections)
+      setMessage("Section order updated.")
+    } catch {
+      setMessage("Unable to reorder sections.")
+    }
+  }
+
+  async function deleteMainSection(sectionIndex: number) {
+    if (!confirm("Delete this section?")) return
+    const nextSections = mainSections.filter((_, index) => index !== sectionIndex)
+    setMainSections(nextSections)
+    try {
+      await persistMainSections(nextSections)
+      setMessage("Section deleted.")
+    } catch {
+      setMessage("Unable to delete section.")
+    }
+  }
+
   function cancelSectionBlockEditing(index: number) {
     const before = sectionEditStartRef.current[index]
     if (before) {
@@ -1324,12 +1440,14 @@ export default function CountryCompanyInfoPage() {
     setHighlights([])
     setMainInfoLineUpdates({})
     setMainInfoBlocks([])
+    setMainSections([])
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
     setEditingNestedSectionBlock(null)
+    setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setSearchInPage("")
@@ -1354,12 +1472,14 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
+    setMainSections(summaryMeta.mainSections)
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
     setEditingNestedSectionBlock(null)
+    setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1388,12 +1508,14 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
+    setMainSections(summaryMeta.mainSections)
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
     setEditingNestedSectionBlock(null)
+    setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1416,12 +1538,14 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks(port.notes || "", summaryMeta.mainLineUpdates, port.updated_at))
+    setMainSections(summaryMeta.mainSections)
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
     setEditingNestedSectionBlock(null)
+    setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1554,11 +1678,11 @@ export default function CountryCompanyInfoPage() {
     setMessage("")
     try {
       if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "port") {
@@ -1569,7 +1693,7 @@ export default function CountryCompanyInfoPage() {
         }
         const { error } = await supabase.from("cc_ports").update({
           name: currentRecord.name.trim().toUpperCase(),
-          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks),
+          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections),
           notes: currentRecord.notes || null,
           country_id: matchedCountry?.id || null,
           country_name: matchedCountry?.name || null,
@@ -1649,9 +1773,16 @@ export default function CountryCompanyInfoPage() {
 
   async function persistHighlights(nextHighlights: HighlightCard[]) {
     if (!selectedId || !selectedKind) return
-    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates, mainInfoBlocks) }
+    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates, mainInfoBlocks, mainSections) }
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
+    if (error) throw error
+  }
+
+  async function persistMainSections(nextSections: HighlightCard[]) {
+    if (!selectedId || !selectedKind) return
+    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
+    const { error } = await supabase.from(table).update({ summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, nextSections) }).eq("id", selectedId)
     if (error) throw error
   }
 
@@ -1662,6 +1793,21 @@ export default function CountryCompanyInfoPage() {
       return
     }
     const firstBlock = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    if (highlightModalMode === "section" && activeInfoTab === "general") {
+      const nextSections = [...mainSections, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }]
+      setMainSections(nextSections)
+      setEditingMainSectionBlock({ sectionIndex: nextSections.length - 1, blockId: firstBlock.id })
+      setHighlightDraft({ title: "", info: "" })
+      setHighlightModalOpen(false)
+      try {
+        await persistMainSections(nextSections)
+        if (selectedKind) addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} New Section Added`)
+        setMessage("Section saved.")
+      } catch {
+        setMessage("Unable to save section.")
+      }
+      return
+    }
     if (highlightModalMode === "section" && activeInfoTab.startsWith("section-")) {
       const tabIndex = Number(activeInfoTab.replace("section-", ""))
       const nextHighlights = highlights.map((item, itemIndex) => {
@@ -1741,7 +1887,7 @@ export default function CountryCompanyInfoPage() {
     recordAutoSaveTimerRef.current = window.setTimeout(async () => {
       try {
         const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks) }).eq("id", selectedId)
+        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks, mainSections) }).eq("id", selectedId)
         if (error) throw error
         setSectionSaveState("saved")
       } catch {
@@ -1761,7 +1907,7 @@ export default function CountryCompanyInfoPage() {
     setSectionSaving(true)
     try {
       const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks) }).eq("id", selectedId)
+      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks, mainSections) }).eq("id", selectedId)
       if (error) throw error
       setSectionSaveState("saved")
     } catch {
@@ -1773,7 +1919,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function deleteHighlightCard(index: number) {
-    if (!confirm("Delete this highlight card?")) return
+    if (!confirm("Delete this tab?")) return
     const nextHighlights = highlights.filter((_, i) => i !== index)
     setHighlights(nextHighlights)
     try {
@@ -2471,7 +2617,7 @@ export default function CountryCompanyInfoPage() {
 
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
                     <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
-                      GENERAL
+                      GENERAL INFORMATION
                     </button>
                     {selectedKind === "country" && (
                       <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
@@ -2532,9 +2678,6 @@ export default function CountryCompanyInfoPage() {
 
                   {activeInfoTab === "general" && (
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
-                    </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     <BlockTextBlock
                       blocks={mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)}
@@ -2549,6 +2692,39 @@ export default function CountryCompanyInfoPage() {
                       onBlockDelete={(blockId) => void deleteMainBlock(blockId)}
                       onInsertBlock={insertMainBlock}
                     />
+                    {mainSections.length > 0 && (
+                      <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
+                        {mainSections.map((section, sectionIndex) => (
+                          <div key={`main-section-${sectionIndex}`} style={{ border: "1px solid rgba(143, 215, 255, 0.2)", borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", padding: "8px 10px" }}>
+                              <button type="button" onDoubleClick={() => renameMainSection(sectionIndex)} style={{ border: "none", background: "transparent", color: "#bfe6ff", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}>
+                                <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
+                              </button>
+                              <div style={{ display: "flex", gap: "5px" }}>
+                                <button type="button" onClick={() => void moveMainSection(sectionIndex, -1)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>↑</button>
+                                <button type="button" onClick={() => void moveMainSection(sectionIndex, 1)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>↓</button>
+                                <button type="button" onClick={() => void deleteMainSection(sectionIndex)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>x</button>
+                              </div>
+                            </div>
+                            <div style={{ padding: "10px" }}>
+                              <BlockTextBlock
+                                blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
+                                fallbackUpdatedAt={currentRecord.updated_at}
+                                minHeight="calc(1em + 28px)"
+                                query={searchInPage}
+                                editingBlockId={editingMainSectionBlock?.sectionIndex === sectionIndex ? editingMainSectionBlock.blockId : ""}
+                                onBlockDoubleClick={(block) => startMainSectionBlockEditing(sectionIndex, block)}
+                                onBlockChange={(blockId, value) => updateMainSectionBlock(sectionIndex, blockId, value)}
+                                onBlockSave={() => void finishMainSectionEditing()}
+                                onBlockCancel={() => setEditingMainSectionBlock(null)}
+                                onBlockDelete={(blockId) => void deleteMainSectionBlock(sectionIndex, blockId)}
+                                onInsertBlock={(blockIndex) => insertMainSectionBlock(sectionIndex, blockIndex)}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   )}
 
@@ -2556,23 +2732,8 @@ export default function CountryCompanyInfoPage() {
                     <div style={{ display: "grid", gap: "12px" }}>
                       {highlights.map((highlight, index) => activeInfoTab === `section-${index}` ? (
                         <div key={`section-${index}`}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
-                            <button
-                              type="button"
-                              onDoubleClick={(event) => {
-                                event.stopPropagation()
-                                renameHighlight(index)
-                              }}
-                              style={{ border: "none", background: "transparent", padding: 0, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700, cursor: "text", textAlign: "left" }}
-                              title="Double click to rename section"
-                            >
-                              <HighlightedInlineText value={highlight.title || `SECTION ${index + 1}`} query={searchInPage} />
-                            </button>
-                            <div style={{ display: "flex", gap: "6px" }}>
-                              <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
-                              <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
-                              <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
-                            </div>
+                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "6px" }}>
+                            <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}>Delete Tab</button>
                           </div>
                           <BlockTextBlock
                             blocks={highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)}
@@ -2746,7 +2907,7 @@ export default function CountryCompanyInfoPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (!activeInfoTab.startsWith("section-")) {
+                      if (activeInfoTab !== "general" && !activeInfoTab.startsWith("section-")) {
                         setMessage("Please select a tab before adding a section.")
                         return
                       }
@@ -2851,8 +3012,15 @@ export default function CountryCompanyInfoPage() {
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : "Section Name"}</div>
               <input
+                ref={highlightTitleInputRef}
                 value={highlightDraft.title}
                 onChange={(event) => setHighlightDraft((prev) => ({ ...prev, title: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    void saveHighlightCard()
+                  }
+                }}
                 style={inputStyle}
                 placeholder={highlightModalMode === "tab" ? "e.g. OPERATIONS" : "e.g. REFINERY"}
               />
