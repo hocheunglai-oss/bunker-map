@@ -255,6 +255,7 @@ function normalizeBlocks(value: unknown, fallbackText: string, updates: Record<s
       }
     })
   }
+  if (!fallbackText) return []
   return textToBlocks(fallbackText, updates)
 }
 
@@ -751,6 +752,8 @@ export default function CountryCompanyInfoPage() {
   const [mainInfoEditing, setMainInfoEditing] = useState(false)
   const [countryInfoEditing, setCountryInfoEditing] = useState(false)
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
+  const [activeInfoTab, setActiveInfoTab] = useState("general")
+  const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null)
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
@@ -1023,6 +1026,7 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setSearchInPage("")
+    setActiveInfoTab("general")
   }
 
   async function loadCompany(id: string) {
@@ -1048,6 +1052,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setActiveInfoTab("general")
   }
 
   async function loadCountry(id: string) {
@@ -1078,6 +1083,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setActiveInfoTab("general")
   }
 
   async function loadPort(id: string) {
@@ -1102,6 +1108,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setActiveInfoTab("general")
 
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", port.country_id).single()
@@ -1330,6 +1337,7 @@ export default function CountryCompanyInfoPage() {
     }
     const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [{ id: newBlockId(), content: "", updated_at: new Date().toISOString() }] }]
     setHighlights(nextHighlights)
+    setActiveInfoTab(`section-${nextHighlights.length - 1}`)
     setSectionEditing({ [nextHighlights.length - 1]: true })
     setHighlightDraft({ title: "", info: "" })
     setHighlightModalOpen(false)
@@ -1435,6 +1443,22 @@ export default function CountryCompanyInfoPage() {
     nextHighlights.splice(targetIndex, 0, moved)
     setHighlights(nextHighlights)
     setSectionEditing({})
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section order updated.")
+    } catch {
+      setMessage("Unable to reorder sections.")
+    }
+  }
+
+  async function moveHighlightToIndex(index: number, targetIndex: number) {
+    if (index === targetIndex || targetIndex < 0 || targetIndex >= highlights.length) return
+    const nextHighlights = [...highlights]
+    const [moved] = nextHighlights.splice(index, 1)
+    nextHighlights.splice(targetIndex, 0, moved)
+    setHighlights(nextHighlights)
+    setSectionEditing({})
+    setActiveInfoTab(`section-${targetIndex}`)
     try {
       await persistHighlights(nextHighlights)
       setMessage("Section order updated.")
@@ -2096,20 +2120,49 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
+                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
+                      General
+                    </button>
+                    {selectedKind === "country" && (
+                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
+                        Ports
+                      </button>
+                    )}
+                    {highlights.map((highlight, index) => (
+                      <button
+                        key={`tab-${index}`}
+                        type="button"
+                        draggable
+                        onDragStart={() => setDraggingTabIndex(index)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => {
+                          if (draggingTabIndex !== null) void moveHighlightToIndex(draggingTabIndex, index)
+                          setDraggingTabIndex(null)
+                        }}
+                        onClick={() => setActiveInfoTab(`section-${index}`)}
+                        style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}
+                      >
+                        {highlight.title || `Section ${index + 1}`}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHighlightDraft({ title: "", info: "" })
+                        setHighlightModalOpen(true)
+                      }}
+                      disabled={!selectedId}
+                      style={{ ...buttonStyle, padding: "6px 10px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {activeInfoTab === "general" && (
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
-                      <button
-                        onClick={() => {
-                          setHighlightDraft({ title: "", info: "" })
-                          setHighlightModalOpen(true)
-                        }}
-                        disabled={!selectedId}
-                        style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
-                        title="Add section"
-                      >
-                        Add Section
-                      </button>
                       {mainInfoEditing && (
                         <button
                           type="button"
@@ -2168,10 +2221,11 @@ export default function CountryCompanyInfoPage() {
                       />
                     )}
                   </div>
+                  )}
 
-                  {highlights.length > 0 && (
+                  {activeInfoTab.startsWith("section-") && highlights.length > 0 && (
                     <div style={{ display: "grid", gap: "12px" }}>
-                      {highlights.map((highlight, index) => (
+                      {highlights.map((highlight, index) => activeInfoTab === `section-${index}` ? (
                         <div key={`section-${index}`}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
                             <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700 }}>
@@ -2261,7 +2315,7 @@ export default function CountryCompanyInfoPage() {
                             />
                           )}
                         </div>
-                      ))}
+                      ) : null)}
                     </div>
                   )}
 
@@ -2301,7 +2355,7 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  {selectedKind === "country" && (
+                  {selectedKind === "country" && activeInfoTab === "ports" && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Ports</div>
@@ -2381,6 +2435,18 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHighlightDraft({ title: "", info: "" })
+                      setHighlightModalOpen(true)
+                    }}
+                    disabled={!selectedId}
+                    style={{ ...buttonStyle, justifySelf: "start", padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
+                  >
+                    Add Section
+                  </button>
 
                   {isMobile && fileSection}
 
