@@ -34,6 +34,7 @@ export default function CountryIndexPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [countries, setCountries] = useState<CountryRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState("")
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const pageSize = 200
@@ -43,16 +44,30 @@ export default function CountryIndexPage() {
     ;(async () => {
       setLoading(true)
       const from = (page - 1) * pageSize
-      const result = await supabase
+      const needle = filter.trim()
+      let query = supabase
         .from("cc_countries")
         .select("id,name,notes,created_at", { count: "exact" })
         .order("name", { ascending: true })
-        .range(from, from + pageSize - 1)
+      if (needle) query = query.or(`name.ilike.%${needle}%,notes.ilike.%${needle}%`)
+      const result = await query.range(from, from + pageSize - 1)
       setCountries((result.data as CountryRow[]) || [])
       setTotalCount(result.count || 0)
       setLoading(false)
     })()
-  }, [adminLoading, authenticated, page])
+  }, [adminLoading, authenticated, page, filter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter])
+
+  async function deleteCountry(row: CountryRow) {
+    if (!confirm(`Delete country ${row.name}?`)) return
+    const { error } = await supabase.from("cc_countries").delete().eq("id", row.id)
+    if (error) return alert("Unable to delete country.")
+    setCountries((prev) => prev.filter((item) => item.id !== row.id))
+    setTotalCount((prev) => Math.max(0, prev - 1))
+  }
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
@@ -73,6 +88,15 @@ export default function CountryIndexPage() {
           </div>
         </div>
 
+        <section style={{ ...panelStyle, padding: "12px 14px" }}>
+          <input
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Search countries..."
+            style={{ width: "100%", padding: "9px 11px", borderRadius: "12px", border: "1px solid rgba(210,236,255,0.16)", background: "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%)", color: "#edf7ff", fontSize: "12px", outline: "none", boxSizing: "border-box" }}
+          />
+        </section>
+
         <section style={{ ...panelStyle, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
             <table style={tableStyle}>
@@ -80,6 +104,7 @@ export default function CountryIndexPage() {
                 <tr>
                   <th style={thStyle}>Country</th>
                   <th style={thStyle}>Information</th>
+                  <th style={thStyle}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -94,6 +119,9 @@ export default function CountryIndexPage() {
                       </a>
                     </td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
+                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                      <button onClick={() => void deleteCountry(row)} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,120,120,0.24)", background: "linear-gradient(180deg, rgba(230,57,70,0.24) 0%, rgba(170,47,53,0.12) 100%)", color: "#ffd6db", fontSize: "11px", fontWeight: 700 }}>Delete</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

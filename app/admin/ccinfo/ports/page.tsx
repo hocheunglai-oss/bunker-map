@@ -91,6 +91,14 @@ export default function PortIndexPage() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
+  async function deletePort(row: PortRow) {
+    if (!confirm(`Delete port ${row.name}?`)) return
+    const { error } = await supabase.from("cc_ports").delete().eq("id", row.id)
+    if (error) return alert("Unable to delete port.")
+    setPorts((prev) => prev.filter((item) => item.id !== row.id))
+    setTotalCount((prev) => Math.max(0, prev - 1))
+  }
+
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
 
@@ -125,6 +133,7 @@ export default function PortIndexPage() {
                   <th style={thStyle}>Port</th>
                   <th style={thStyle}>Country</th>
                   <th style={thStyle}>Information</th>
+                  <th style={thStyle}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,6 +149,9 @@ export default function PortIndexPage() {
                     </td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap", color: "#bfe6ff" }}>{row.country_name || ""}</td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
+                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                      <button onClick={() => void deletePort(row)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(230,57,70,0.24) 0%, rgba(170,47,53,0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255,120,120,0.24)" }}>Delete</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

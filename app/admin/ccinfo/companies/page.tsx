@@ -87,6 +87,14 @@ export default function CompanyIndexPage() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
+  async function deleteCompany(row: CompanyRow) {
+    if (!confirm(`Delete company ${row.name}?`)) return
+    const { error } = await supabase.from("cc_companies").delete().eq("id", row.id)
+    if (error) return alert("Unable to delete company.")
+    setCompanies((prev) => prev.filter((item) => item.id !== row.id))
+    setTotalCount((prev) => Math.max(0, prev - 1))
+  }
+
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
 
@@ -120,6 +128,7 @@ export default function CompanyIndexPage() {
                 <tr>
                   <th style={thStyle}>Company</th>
                   <th style={thStyle}>Information</th>
+                  <th style={thStyle}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -134,6 +143,9 @@ export default function CompanyIndexPage() {
                       </a>
                     </td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
+                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                      <button onClick={() => void deleteCompany(row)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(230,57,70,0.24) 0%, rgba(170,47,53,0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255,120,120,0.24)" }}>Delete</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
