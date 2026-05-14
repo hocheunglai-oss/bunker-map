@@ -200,6 +200,11 @@ function kindLabel(kind: RecordKind) {
   return "Port"
 }
 
+function changeLogSubject(kind: RecordKind, name: string) {
+  const label = kind === "company" ? "Company" : kind === "country" ? "Country" : "Port"
+  return name.trim() || label
+}
+
 type HighlightCard = {
   title: string
   info: string
@@ -270,6 +275,38 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
       main_line_updates: mainLineUpdates,
     },
   )
+}
+
+function lineTimestampKey(line: string, occurrence: number) {
+  return `v2:${line.trim().replace(/\s+/g, " ").toUpperCase()}#${occurrence}`
+}
+
+function buildLineTimestampKeys(lines: string[]) {
+  const seen = new Map<string, number>()
+  return lines.map((line) => {
+    const normalized = line.trim().replace(/\s+/g, " ").toUpperCase()
+    const occurrence = (seen.get(normalized) || 0) + 1
+    seen.set(normalized, occurrence)
+    return lineTimestampKey(line, occurrence)
+  })
+}
+
+function updateLineTimestamps(previousValue: string, nextValue: string, previousUpdates: Record<string, string>) {
+  const previousLines = previousValue.split("\n")
+  const nextLines = nextValue.split("\n")
+  const previousKeys = buildLineTimestampKeys(previousLines)
+  const nextKeys = buildLineTimestampKeys(nextLines)
+  const now = new Date().toISOString()
+  const nextUpdates: Record<string, string> = {}
+
+  nextLines.forEach((line, index) => {
+    const key = nextKeys[index]
+    const previousIndex = previousKeys.indexOf(key)
+    const existing = previousUpdates[key] || previousUpdates[String(previousIndex)] || previousUpdates[String(index)]
+    nextUpdates[key] = previousIndex >= 0 && previousLines[previousIndex] === line && existing ? existing : now
+  })
+
+  return nextUpdates
 }
 
 function normalizeSectionTitle(value: string) {
@@ -374,6 +411,7 @@ function HoverableTextBlock({
 }) {
   const [hoveredLine, setHoveredLine] = useState<number | null>(null)
   const lines = (value || "").split("\n")
+  const lineKeys = buildLineTimestampKeys(lines)
   const fallback = formatTimestamp(fallbackUpdatedAt)
   return (
     <div
@@ -397,7 +435,7 @@ function HoverableTextBlock({
       onDoubleClick={onDoubleClick}
       title={onDoubleClick ? "Double click to edit" : undefined}
     >
-      {hoveredLine !== null && (formatTimestamp(updates[String(hoveredLine)]) || fallback) && (
+      {hoveredLine !== null && (formatTimestamp(updates[lineKeys[hoveredLine]]) || formatTimestamp(updates[String(hoveredLine)]) || fallback) && (
         <div
           style={{
             position: "absolute",
@@ -416,11 +454,11 @@ function HoverableTextBlock({
             zIndex: 3,
           }}
         >
-          {formatTimestamp(updates[String(hoveredLine)]) || fallback}
+          {formatTimestamp(updates[lineKeys[hoveredLine]]) || formatTimestamp(updates[String(hoveredLine)]) || fallback}
         </div>
       )}
       {lines.map((line, index) => {
-        const stamp = formatTimestamp(updates[String(index)]) || fallback
+        const stamp = formatTimestamp(updates[lineKeys[index]]) || formatTimestamp(updates[String(index)]) || fallback
         return (
           <div
             key={`hover-line-${index}`}
@@ -573,6 +611,7 @@ export default function CountryCompanyInfoPage() {
   const [dropFolderPath, setDropFolderPath] = useState("")
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
   const [countryOptions, setCountryOptions] = useState<Array<{ id: string; name: string }>>([])
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false)
   const [highlights, setHighlights] = useState<HighlightCard[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
@@ -585,6 +624,7 @@ export default function CountryCompanyInfoPage() {
   const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
   const [mainInfoEditing, setMainInfoEditing] = useState(false)
+  const [countryInfoEditing, setCountryInfoEditing] = useState(false)
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string> } | null>(null)
@@ -753,6 +793,18 @@ export default function CountryCompanyInfoPage() {
     setChangeLog((prev) => [{ ...item, id: `${Date.now()}-${Math.random()}`, at: new Date().toISOString() }, ...prev].slice(0, 10))
   }
 
+  function addSimpleChangeLog(label: string) {
+    if (!selectedKind || !selectedId) return
+    addChangeLog({
+      label,
+      entryKind: selectedKind,
+      entryId: selectedId,
+      field: "notes",
+      before: currentRecord.notes || "",
+      after: currentRecord.notes || "",
+    })
+  }
+
   async function undoChangeLogItem(entry: ChangeLogItem) {
     const table = entry.entryKind === "company" ? "cc_companies" : entry.entryKind === "country" ? "cc_countries" : "cc_ports"
     if (entry.field === "notes") {
@@ -774,9 +826,10 @@ export default function CountryCompanyInfoPage() {
     if (!selectedId || !selectedKind) return
     const before = mainEditStartRef.current
     setMainInfoEditing(false)
+    setCountryInfoEditing(false)
     if (before && (before.notes !== (currentRecord.notes || "") || JSON.stringify(before.updates) !== JSON.stringify(mainInfoLineUpdates))) {
       addChangeLog({
-        label: `${informationLabel} updated`,
+        label: `${changeLogSubject(selectedKind, currentRecord.name)} ${informationLabel} updated`,
         entryKind: selectedKind,
         entryId: selectedId,
         field: "notes",
@@ -789,13 +842,14 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function finishSectionEditing(index: number) {
+    if (!selectedKind) return
     const before = sectionEditStartRef.current[index]
     setSectionEditing((prev) => ({ ...prev, [index]: false }))
     if (before) {
       const current = highlights[index]
       if (current && (before.info !== current.info || JSON.stringify(before.line_updates || {}) !== JSON.stringify(current.line_updates || {}))) {
         addChangeLog({
-          label: `${current.title || `Section ${index + 1}`} updated`,
+          label: `${changeLogSubject(selectedKind, currentRecord.name)} ${current.title || `Section ${index + 1}`} updated`,
           entryKind: selectedKind as RecordKind,
           entryId: selectedId,
           field: "section",
@@ -824,6 +878,7 @@ export default function CountryCompanyInfoPage() {
     setHighlights([])
     setMainInfoLineUpdates({})
     setMainInfoEditing(false)
+    setCountryInfoEditing(false)
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -848,6 +903,7 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoEditing(false)
+    setCountryInfoEditing(false)
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -876,6 +932,7 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoEditing(false)
+    setCountryInfoEditing(false)
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -898,6 +955,7 @@ export default function CountryCompanyInfoPage() {
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
     setMainInfoEditing(false)
+    setCountryInfoEditing(false)
     setSectionEditing({})
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
@@ -943,17 +1001,20 @@ export default function CountryCompanyInfoPage() {
       const { data, error } = await supabase.from("cc_companies").insert({ name: "NEW COMPANY", category: "company", summary: null, notes: "No info", contacts: null, tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create company.")
       await loadSelected("company", data.id)
+      addChangeLog({ label: "NEW COMPANY added", entryKind: "company", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
     if (kind === "country") {
       const { data, error } = await supabase.from("cc_countries").insert({ name: "NEW COUNTRY", summary: null, notes: "No info", tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create country.")
       await loadSelected("country", data.id)
+      addChangeLog({ label: "NEW COUNTRY added", entryKind: "country", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
     const { data, error } = await supabase.from("cc_ports").insert({ name: "NEW PORT", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
     if (error || !data) return setMessage("Unable to create port.")
     await loadSelected("port", data.id)
+    addChangeLog({ label: "NEW PORT added", entryKind: "port", entryId: data.id, field: "notes", before: "", after: "No info" })
   }
 
   async function addPortUnderCountry() {
@@ -976,6 +1037,7 @@ export default function CountryCompanyInfoPage() {
     setCurrentCountryPorts((prev) => [...prev, nextPort].sort((a, b) => a.name.localeCompare(b.name)))
     setAddPortModalOpen(false)
     setAddPortDraft({ name: "", notes: "" })
+    addSimpleChangeLog(`${changeLogSubject("country", currentRecord.name)} New Port Added`)
     setMessage("Port added.")
   }
 
@@ -1099,6 +1161,7 @@ export default function CountryCompanyInfoPage() {
     setHighlightModalOpen(false)
     try {
       await persistHighlights(nextHighlights)
+      if (selectedKind) addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} New Section Added`)
       setMessage("Highlight saved.")
     } catch {
       setMessage("Unable to save highlight.")
@@ -1239,6 +1302,7 @@ export default function CountryCompanyInfoPage() {
       setFiles(refreshedFiles)
       const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
+      addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
       setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
@@ -1580,6 +1644,9 @@ export default function CountryCompanyInfoPage() {
       </div>
     </div>
   ) : null
+  const filteredCountryOptions = countryOptions
+    .filter((country) => country.name.includes(currentCountry.name.trim().toUpperCase()))
+    .slice(0, 12)
 
   return (
     <div style={pageShellStyle}>
@@ -1604,12 +1671,11 @@ export default function CountryCompanyInfoPage() {
                 ← Back To Admin
               </a>
 
-              {!initialMode && (
-                <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
+              <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
                   <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
                     Search In Page
                   </div>
-                  <input value={searchInPage} onChange={(e) => setSearchInPage(e.target.value)} onKeyDown={handleSearchInPageKeyDown} style={inputStyle} />
+                  <input value={searchInPage} onChange={(e) => setSearchInPage(e.target.value)} onKeyDown={handleSearchInPageKeyDown} disabled={initialMode} placeholder={initialMode ? "Open an entry first" : ""} style={{ ...inputStyle, opacity: initialMode ? 0.58 : 1 }} />
                   {searchInPage.trim() && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                       <div style={{ color: "#b7d7f3", fontSize: "13px", fontWeight: 700 }}>
@@ -1621,9 +1687,9 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
-                  {changeLog.length > 0 && (
-                    <div style={{ display: "grid", gap: "6px", borderTop: "1px solid rgba(210,236,255,0.1)", paddingTop: "8px" }}>
+                  <div style={{ display: "grid", gap: "6px", borderTop: "1px solid rgba(210,236,255,0.1)", paddingTop: "8px" }}>
                       <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>Recent Changes</div>
+                      {changeLog.length === 0 && <div style={{ color: "#91badb", fontSize: "11px" }}>No recent changes yet.</div>}
                       {changeLog.map((entry) => (
                         <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "rgba(255,255,255,0.04)" }}>
                           <div style={{ minWidth: 0 }}>
@@ -1639,10 +1705,8 @@ export default function CountryCompanyInfoPage() {
                           </button>
                         </div>
                       ))}
-                    </div>
-                  )}
+                  </div>
                 </div>
-              )}
 
               <div style={{ marginTop: "auto", display: "flex", justifyContent: "flex-end" }}>
                 <div style={{ position: "relative" }}>
@@ -1816,27 +1880,47 @@ export default function CountryCompanyInfoPage() {
 
                   {selectedKind === "port" && (
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px minmax(0, 1fr)", gap: "10px", alignItems: "end" }}>
-                      <div>
+                      <div style={{ position: "relative" }}>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country</div>
                         <input
                           value={currentCountry.name}
-                          list="ccinfo-country-options"
+                          onFocus={() => setCountryDropdownOpen(true)}
                           onChange={(e) => {
                             const nextName = e.target.value.toUpperCase()
                             const matched = countryOptions.find((country) => country.name === nextName)
                             setCurrentCountry((prev) => ({ ...prev, id: matched?.id || "", name: nextName }))
+                            setCountryDropdownOpen(true)
                           }}
                           onBlur={() => {
+                            window.setTimeout(() => setCountryDropdownOpen(false), 160)
                             const matched = countryOptions.find((country) => country.name === currentCountry.name.trim().toUpperCase())
-                            if (!matched && currentCountry.name.trim()) setMessage("Please select an existing country.")
+                            if (matched) setCurrentCountry((prev) => ({ ...prev, id: matched.id, name: matched.name }))
+                            else if (currentCountry.name.trim()) setMessage("Please select an existing country.")
                           }}
                           style={inputStyle}
                         />
-                        <datalist id="ccinfo-country-options">
-                          {countryOptions.map((country) => (
-                            <option key={country.id} value={country.name} />
-                          ))}
-                        </datalist>
+                        {countryDropdownOpen && (
+                          <div style={{ ...panelStyle, position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: "6px", display: "grid", gap: "4px", maxHeight: "260px", overflowY: "auto" }}>
+                            {filteredCountryOptions.length === 0 ? (
+                              <div style={{ padding: "8px", color: "#91badb", fontSize: "12px" }}>No matching country</div>
+                            ) : (
+                              filteredCountryOptions.map((country) => (
+                                <button
+                                  type="button"
+                                  key={country.id}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    setCurrentCountry((prev) => ({ ...prev, id: country.id, name: country.name }))
+                                    setCountryDropdownOpen(false)
+                                  }}
+                                  style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === currentCountry.id ? "linear-gradient(180deg, rgba(56, 214, 154, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)" : "rgba(255,255,255,0.04)" }}
+                                >
+                                  {country.name}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1871,14 +1955,7 @@ export default function CountryCompanyInfoPage() {
                         value={currentRecord.notes || ""}
                         onChange={(event) => {
                           const nextNotes = event.target.value
-                          const prevLines = (currentRecord.notes || "").split("\n")
-                          const nextLines = nextNotes.split("\n")
-                          const lineUpdates: Record<string, string> = { ...mainInfoLineUpdates }
-                          const now = new Date().toISOString()
-                          for (let i = 0; i < nextLines.length; i += 1) {
-                            if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
-                          }
-                          setMainInfoLineUpdates(lineUpdates)
+                          setMainInfoLineUpdates(updateLineTimestamps(currentRecord.notes || "", nextNotes, mainInfoLineUpdates))
                           setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
                         }}
                         style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
@@ -1927,13 +2004,7 @@ export default function CountryCompanyInfoPage() {
                                 const value = event.target.value
                                 setHighlights((prev) => {
                                   const prevItem = prev[index]
-                                  const prevLines = (prevItem?.info || "").split("\n")
-                                  const nextLines = value.split("\n")
-                                  const lineUpdates: Record<string, string> = { ...(prevItem?.line_updates || {}) }
-                                  const now = new Date().toISOString()
-                                  for (let i = 0; i < nextLines.length; i += 1) {
-                                    if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
-                                  }
+                                  const lineUpdates = updateLineTimestamps(prevItem?.info || "", value, prevItem?.line_updates || {})
                                   const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
                                   return next
                                 })
@@ -1959,12 +2030,36 @@ export default function CountryCompanyInfoPage() {
 
                   {selectedKind === "port" && (
                     <div>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{countryInformationLabel}</div>
-                      <AutoSizeTextarea
-                        value={currentCountry.notes || ""}
-                        onChange={(event) => setCurrentCountry((prev) => ({ ...prev, notes: event.target.value }))}
-                        style={{ ...textareaStyle, minHeight: "180px" }}
-                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{countryInformationLabel}</div>
+                        {countryInfoEditing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCountryInfoEditing(false)
+                              void saveRecord()
+                            }}
+                            style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
+                          >
+                            Finish Editing
+                          </button>
+                        )}
+                      </div>
+                      {countryInfoEditing ? (
+                        <AutoSizeTextarea
+                          value={currentCountry.notes || ""}
+                          onChange={(event) => setCurrentCountry((prev) => ({ ...prev, notes: event.target.value }))}
+                          style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
+                        />
+                      ) : (
+                        <HoverableTextBlock
+                          value={currentCountry.notes || ""}
+                          updates={{}}
+                          fallbackUpdatedAt={currentCountry.updated_at}
+                          minHeight="calc(1em + 28px)"
+                          onDoubleClick={() => setCountryInfoEditing(true)}
+                        />
+                      )}
                     </div>
                   )}
 

@@ -57,22 +57,35 @@ export default function CompanyIndexPage() {
   const [companies, setCompanies] = useState<CompanyRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("")
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const pageSize = 200
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
     ;(async () => {
       setLoading(true)
-      const result = await supabase.from("cc_companies").select("id,name,notes").order("name", { ascending: true })
+      const from = (page - 1) * pageSize
+      const to = from + pageSize - 1
+      const needle = filter.trim()
+      let query = supabase.from("cc_companies").select("id,name,notes", { count: "exact" }).order("name", { ascending: true })
+      if (needle) query = query.or(`name.ilike.%${needle}%,notes.ilike.%${needle}%`)
+      const result = await query.range(from, to)
       setCompanies((result.data as CompanyRow[]) || [])
+      setTotalCount(result.count || 0)
       setLoading(false)
     })()
-  }, [adminLoading, authenticated])
+  }, [adminLoading, authenticated, filter, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter])
 
   const filteredCompanies = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
-    if (!needle) return companies
-    return companies.filter((row) => [row.name, row.notes || ""].some((value) => value.toLowerCase().includes(needle)))
-  }, [filter, companies])
+    return companies
+  }, [companies])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
@@ -87,7 +100,7 @@ export default function CompanyIndexPage() {
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <a href="/admin/ccinfo" style={buttonStyle}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {filteredCompanies.length}</div>
+            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
           </div>
         </div>
 
@@ -127,6 +140,11 @@ export default function CompanyIndexPage() {
             </table>
           </div>
         </section>
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page <= 1} style={{ ...buttonStyle, opacity: page <= 1 ? 0.5 : 1 }}>Previous</button>
+          <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 800, letterSpacing: "0.08em" }}>Page {page} / {totalPages}</div>
+          <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} style={{ ...buttonStyle, opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
+        </div>
       </div>
     </div>
   )

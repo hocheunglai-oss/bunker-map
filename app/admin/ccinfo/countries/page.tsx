@@ -34,16 +34,27 @@ export default function CountryIndexPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [countries, setCountries] = useState<CountryRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const pageSize = 200
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
     ;(async () => {
       setLoading(true)
-      const result = await supabase.from("cc_countries").select("id,name,notes,created_at").order("name", { ascending: true })
+      const from = (page - 1) * pageSize
+      const result = await supabase
+        .from("cc_countries")
+        .select("id,name,notes,created_at", { count: "exact" })
+        .order("name", { ascending: true })
+        .range(from, from + pageSize - 1)
       setCountries((result.data as CountryRow[]) || [])
+      setTotalCount(result.count || 0)
       setLoading(false)
     })()
-  }, [adminLoading, authenticated])
+  }, [adminLoading, authenticated, page])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
@@ -58,7 +69,7 @@ export default function CountryIndexPage() {
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <a href="/admin/ccinfo" style={{ padding: "10px 14px", borderRadius: "999px", border: "1px solid rgba(210,236,255,0.16)", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)", color: "#d7e8ff", textDecoration: "none", fontSize: "13px", fontWeight: 700 }}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {countries.length}</div>
+            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
           </div>
         </div>
 
@@ -89,6 +100,11 @@ export default function CountryIndexPage() {
             </table>
           </div>
         </section>
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page <= 1} style={{ padding: "10px 14px", borderRadius: "999px", border: "1px solid rgba(210,236,255,0.16)", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)", color: "#d7e8ff", fontSize: "13px", fontWeight: 700, opacity: page <= 1 ? 0.5 : 1 }}>Previous</button>
+          <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 800, letterSpacing: "0.08em" }}>Page {page} / {totalPages}</div>
+          <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} style={{ padding: "10px 14px", borderRadius: "999px", border: "1px solid rgba(210,236,255,0.16)", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)", color: "#d7e8ff", fontSize: "13px", fontWeight: 700, opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
+        </div>
       </div>
     </div>
   )
