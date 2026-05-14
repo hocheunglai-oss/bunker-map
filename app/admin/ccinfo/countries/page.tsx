@@ -54,7 +54,7 @@ export default function CountryIndexPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Country And Company Info</div>
-            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Country</h1>
+            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Country Index</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <a href="/admin/ccinfo" style={{ padding: "10px 14px", borderRadius: "999px", border: "1px solid rgba(210,236,255,0.16)", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)", color: "#d7e8ff", textDecoration: "none", fontSize: "13px", fontWeight: 700 }}>Back</a>

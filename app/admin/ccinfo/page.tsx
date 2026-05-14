@@ -68,8 +68,16 @@ type ChangeLogItem = {
   id: string
   label: string
   at: string
-  undo: () => void
+  entryKind: RecordKind
+  entryId: string
+  field: "notes" | "section"
+  before: string
+  after: string
+  sectionIndex?: number
+  sectionTitle?: string
 }
+
+const CHANGE_LOG_STORAGE_KEY = "ccinfo_recent_changes_v1"
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -340,7 +348,15 @@ function formatTimestamp(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleString()
+  return date.toLocaleString("en-HK", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
 }
 
 function HoverableTextBlock({
@@ -348,11 +364,13 @@ function HoverableTextBlock({
   updates,
   fallbackUpdatedAt,
   minHeight,
+  onDoubleClick,
 }: {
   value: string
   updates: Record<string, string>
   fallbackUpdatedAt?: string | null
   minHeight: string
+  onDoubleClick?: () => void
 }) {
   const [hoveredLine, setHoveredLine] = useState<number | null>(null)
   const lines = (value || "").split("\n")
@@ -369,10 +387,15 @@ function HoverableTextBlock({
         color: "#edf7ff",
         fontSize: "14px",
         lineHeight: 1.55,
-        padding: "8px 2px",
+        padding: "10px 12px",
+        border: "1px solid rgba(143, 215, 255, 0.22)",
+        borderRadius: "14px",
+        background: hoveredLine !== null ? "rgba(185, 224, 255, 0.055)" : "rgba(255,255,255,0.018)",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
       onMouseLeave={() => setHoveredLine(null)}
+      onDoubleClick={onDoubleClick}
+      title={onDoubleClick ? "Double click to edit" : undefined}
     >
       {hoveredLine !== null && (formatTimestamp(updates[String(hoveredLine)]) || fallback) && (
         <div
@@ -549,6 +572,7 @@ export default function CountryCompanyInfoPage() {
   const [draggingFileId, setDraggingFileId] = useState("")
   const [dropFolderPath, setDropFolderPath] = useState("")
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
+  const [countryOptions, setCountryOptions] = useState<Array<{ id: string; name: string }>>([])
   const [highlights, setHighlights] = useState<HighlightCard[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
@@ -582,6 +606,26 @@ export default function CountryCompanyInfoPage() {
   })
 
   const initialMode = !selectedId
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const stored = window.localStorage.getItem(CHANGE_LOG_STORAGE_KEY)
+      if (stored) setChangeLog(JSON.parse(stored).slice(0, 10))
+    } catch {
+      setChangeLog([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(CHANGE_LOG_STORAGE_KEY, JSON.stringify(changeLog.slice(0, 10)))
+  }, [changeLog])
+
+  useEffect(() => {
+    if (adminLoading || !authenticated) return
+    void loadCountryOptions()
+  }, [adminLoading, authenticated])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -700,8 +744,30 @@ export default function CountryCompanyInfoPage() {
     setMatchIndex((prev) => (matchCount ? (prev + 1) % matchCount : 0))
   }
 
-  function addChangeLog(label: string, undo: () => void) {
-    setChangeLog((prev) => [{ id: `${Date.now()}-${Math.random()}`, label, at: new Date().toISOString(), undo }, ...prev].slice(0, 10))
+  async function loadCountryOptions() {
+    const { data } = await supabase.from("cc_countries").select("id,name").order("name", { ascending: true })
+    setCountryOptions(((data as Array<{ id: string; name: string }>) || []).map((item) => ({ id: item.id, name: item.name.toUpperCase() })))
+  }
+
+  function addChangeLog(item: Omit<ChangeLogItem, "id" | "at">) {
+    setChangeLog((prev) => [{ ...item, id: `${Date.now()}-${Math.random()}`, at: new Date().toISOString() }, ...prev].slice(0, 10))
+  }
+
+  async function undoChangeLogItem(entry: ChangeLogItem) {
+    const table = entry.entryKind === "company" ? "cc_companies" : entry.entryKind === "country" ? "cc_countries" : "cc_ports"
+    if (entry.field === "notes") {
+      const { error } = await supabase.from(table).update({ notes: entry.before }).eq("id", entry.entryId)
+      if (error) return setMessage("Unable to undo.")
+      if (entry.entryId === selectedId) setCurrentRecord((prev) => ({ ...prev, notes: entry.before }))
+    } else if (entry.sectionIndex !== undefined) {
+      const next = [...highlights]
+      if (entry.entryId === selectedId && next[entry.sectionIndex]) {
+        next[entry.sectionIndex] = { ...next[entry.sectionIndex], info: entry.before }
+        setHighlights(next)
+        await persistHighlights(next)
+      }
+    }
+    setMessage("Undo complete.")
   }
 
   async function finishMainInfoEditing() {
@@ -709,10 +775,13 @@ export default function CountryCompanyInfoPage() {
     const before = mainEditStartRef.current
     setMainInfoEditing(false)
     if (before && (before.notes !== (currentRecord.notes || "") || JSON.stringify(before.updates) !== JSON.stringify(mainInfoLineUpdates))) {
-      addChangeLog(`${informationLabel} updated`, () => {
-        setCurrentRecord((prev) => ({ ...prev, notes: before.notes }))
-        setMainInfoLineUpdates(before.updates)
-        void queueMainInfoAutoSaveNow(before.notes, before.updates)
+      addChangeLog({
+        label: `${informationLabel} updated`,
+        entryKind: selectedKind,
+        entryId: selectedId,
+        field: "notes",
+        before: before.notes,
+        after: currentRecord.notes || "",
       })
     }
     mainEditStartRef.current = null
@@ -725,10 +794,15 @@ export default function CountryCompanyInfoPage() {
     if (before) {
       const current = highlights[index]
       if (current && (before.info !== current.info || JSON.stringify(before.line_updates || {}) !== JSON.stringify(current.line_updates || {}))) {
-        addChangeLog(`${current.title || `Section ${index + 1}`} updated`, () => {
-          const next = highlights.map((item, itemIndex) => (itemIndex === index ? before : item))
-          setHighlights(next)
-          void persistHighlights(next)
+        addChangeLog({
+          label: `${current.title || `Section ${index + 1}`} updated`,
+          entryKind: selectedKind as RecordKind,
+          entryId: selectedId,
+          field: "section",
+          before: before.info,
+          after: current.info,
+          sectionIndex: index,
+          sectionTitle: current.title,
         })
       }
     }
@@ -866,18 +940,18 @@ export default function CountryCompanyInfoPage() {
     setMenuOpen(false)
     setMessage("")
     if (kind === "company") {
-      const { data, error } = await supabase.from("cc_companies").insert({ name: "New Company", category: "company", summary: null, notes: "No info", contacts: null, tags: [], status: "active" }).select("id").single()
+      const { data, error } = await supabase.from("cc_companies").insert({ name: "NEW COMPANY", category: "company", summary: null, notes: "No info", contacts: null, tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create company.")
       await loadSelected("company", data.id)
       return
     }
     if (kind === "country") {
-      const { data, error } = await supabase.from("cc_countries").insert({ name: "New Country", summary: null, notes: "No info", tags: [], status: "active" }).select("id").single()
+      const { data, error } = await supabase.from("cc_countries").insert({ name: "NEW COUNTRY", summary: null, notes: "No info", tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create country.")
       await loadSelected("country", data.id)
       return
     }
-    const { data, error } = await supabase.from("cc_ports").insert({ name: "New Port", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
+    const { data, error } = await supabase.from("cc_ports").insert({ name: "NEW PORT", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
     if (error || !data) return setMessage("Unable to create port.")
     await loadSelected("port", data.id)
   }
@@ -891,7 +965,7 @@ export default function CountryCompanyInfoPage() {
     const countryName = currentRecord.name.trim() || currentCountry.name.trim() || "New Country"
     const { data, error } = await supabase
       .from("cc_ports")
-      .insert({ name: addPortDraft.name.trim(), summary: null, notes: addPortDraft.notes || "", country_id: selectedId, country_name: countryName, tags: [], status: "active" })
+      .insert({ name: addPortDraft.name.trim().toUpperCase(), summary: null, notes: addPortDraft.notes || "", country_id: selectedId, country_name: countryName.toUpperCase(), tags: [], status: "active" })
       .select("id,name,summary,notes")
       .single()
     if (error || !data) {
@@ -911,29 +985,34 @@ export default function CountryCompanyInfoPage() {
     setMessage("")
     try {
       if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "port") {
+        const matchedCountry = countryOptions.find((country) => country.name.toUpperCase() === currentCountry.name.trim().toUpperCase())
+        if (!matchedCountry && currentCountry.name.trim()) {
+          setMessage("Please select an existing country.")
+          return
+        }
         const { error } = await supabase.from("cc_ports").update({
-          name: currentRecord.name.trim(),
+          name: currentRecord.name.trim().toUpperCase(),
           summary: serializeSummaryMeta(highlights, mainInfoLineUpdates),
           notes: currentRecord.notes || null,
-          country_id: currentCountry.id || null,
-          country_name: currentCountry.name || null,
+          country_id: matchedCountry?.id || null,
+          country_name: matchedCountry?.name || null,
         }).eq("id", selectedId)
         if (error) throw error
 
-        if (currentCountry.id) {
+        if (matchedCountry?.id) {
           const { error: countryError } = await supabase.from("cc_countries").update({
-            name: currentCountry.name.trim(),
+            name: matchedCountry.name,
             summary: currentCountry.summary || null,
             notes: currentCountry.notes || null,
-          }).eq("id", currentCountry.id)
+          }).eq("id", matchedCountry.id)
           if (countryError) throw countryError
         }
       }
@@ -1553,7 +1632,7 @@ export default function CountryCompanyInfoPage() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => entry.undo()}
+                            onClick={() => void undoChangeLogItem(entry)}
                             style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "rgba(255,255,255,0.08)" }}
                           >
                             Undo
@@ -1600,6 +1679,7 @@ export default function CountryCompanyInfoPage() {
                       <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
                       <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                       <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
+                      <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
                       <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                         {backingUp ? "Preparing Backup..." : "Download Backup"}
                       </button>
@@ -1707,6 +1787,7 @@ export default function CountryCompanyInfoPage() {
                           <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
                           <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
                           <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
+                          <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
                           <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                             {backingUp ? "Preparing Backup..." : "Download Backup"}
                           </button>
@@ -1723,7 +1804,7 @@ export default function CountryCompanyInfoPage() {
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{mainLabel}</div>
-                      <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
+                      <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value.toUpperCase() }))} style={inputStyle} />
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
                       <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
@@ -1737,7 +1818,25 @@ export default function CountryCompanyInfoPage() {
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px minmax(0, 1fr)", gap: "10px", alignItems: "end" }}>
                       <div>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country</div>
-                        <input value={currentCountry.name} onChange={(e) => setCurrentCountry((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} />
+                        <input
+                          value={currentCountry.name}
+                          list="ccinfo-country-options"
+                          onChange={(e) => {
+                            const nextName = e.target.value.toUpperCase()
+                            const matched = countryOptions.find((country) => country.name === nextName)
+                            setCurrentCountry((prev) => ({ ...prev, id: matched?.id || "", name: nextName }))
+                          }}
+                          onBlur={() => {
+                            const matched = countryOptions.find((country) => country.name === currentCountry.name.trim().toUpperCase())
+                            if (!matched && currentCountry.name.trim()) setMessage("Please select an existing country.")
+                          }}
+                          style={inputStyle}
+                        />
+                        <datalist id="ccinfo-country-options">
+                          {countryOptions.map((country) => (
+                            <option key={country.id} value={country.name} />
+                          ))}
+                        </datalist>
                       </div>
                     </div>
                   )}
@@ -1745,19 +1844,6 @@ export default function CountryCompanyInfoPage() {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (mainInfoEditing) void finishMainInfoEditing()
-                          else {
-                            mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates } }
-                            setMainInfoEditing(true)
-                          }
-                        }}
-                        style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: mainInfoEditing ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)" : "rgba(255,255,255,0.08)", color: mainInfoEditing ? "#ddffef" : "#d7e8ff" }}
-                      >
-                        {mainInfoEditing ? "Finish Editing" : "Edit"}
-                      </button>
                       <button
                         onClick={() => {
                           setHighlightDraft({ title: "", info: "" })
@@ -1769,6 +1855,15 @@ export default function CountryCompanyInfoPage() {
                       >
                         Add Section
                       </button>
+                      {mainInfoEditing && (
+                        <button
+                          type="button"
+                          onClick={() => void finishMainInfoEditing()}
+                          style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
+                        >
+                          Finish Editing
+                        </button>
+                      )}
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     {mainInfoEditing ? (
@@ -1786,14 +1881,18 @@ export default function CountryCompanyInfoPage() {
                           setMainInfoLineUpdates(lineUpdates)
                           setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
                         }}
-                        style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
+                        style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
                       />
                     ) : (
                       <HoverableTextBlock
                         value={currentRecord.notes || ""}
                         updates={mainInfoLineUpdates}
                         fallbackUpdatedAt={currentRecord.updated_at}
-                        minHeight={selectedKind === "port" ? "180px" : "320px"}
+                        minHeight="calc(1em + 28px)"
+                        onDoubleClick={() => {
+                          mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates } }
+                          setMainInfoEditing(true)
+                        }}
                       />
                     )}
                   </div>
@@ -1807,19 +1906,15 @@ export default function CountryCompanyInfoPage() {
                               {highlight.title || `SECTION ${index + 1}`}
                             </div>
                             <div style={{ display: "flex", gap: "6px" }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (sectionEditing[index]) void finishSectionEditing(index)
-                                  else {
-                                    sectionEditStartRef.current[index] = { ...highlight, line_updates: { ...(highlight.line_updates || {}) } }
-                                    setSectionEditing((prev) => ({ ...prev, [index]: true }))
-                                  }
-                                }}
-                                style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px", background: sectionEditing[index] ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)" : "rgba(255,255,255,0.08)", color: sectionEditing[index] ? "#ddffef" : "#d7e8ff" }}
-                              >
-                                {sectionEditing[index] ? "Finish Editing" : "Edit"}
-                              </button>
+                              {sectionEditing[index] && (
+                                <button
+                                  type="button"
+                                  onClick={() => void finishSectionEditing(index)}
+                                  style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
+                                >
+                                  Finish Editing
+                                </button>
+                              )}
                               <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
                               <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
@@ -1851,6 +1946,10 @@ export default function CountryCompanyInfoPage() {
                               updates={highlight.line_updates || {}}
                               fallbackUpdatedAt={currentRecord.updated_at}
                               minHeight="calc(1em + 28px)"
+                              onDoubleClick={() => {
+                                sectionEditStartRef.current[index] = { ...highlight, line_updates: { ...(highlight.line_updates || {}) } }
+                                setSectionEditing((prev) => ({ ...prev, [index]: true }))
+                              }}
                             />
                           )}
                         </div>

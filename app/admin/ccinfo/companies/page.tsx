@@ -4,10 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
-type PortRow = {
+type CompanyRow = {
   id: string
   name: string
-  country_name: string | null
   notes: string | null
 }
 
@@ -53,9 +52,9 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 700,
 }
 
-export default function PortIndexPage() {
+export default function CompanyIndexPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [ports, setPorts] = useState<PortRow[]>([])
+  const [companies, setCompanies] = useState<CompanyRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("")
 
@@ -63,23 +62,17 @@ export default function PortIndexPage() {
     if (adminLoading || !authenticated) return
     ;(async () => {
       setLoading(true)
-      const result = await supabase
-        .from("cc_ports")
-        .select("id,name,country_name,notes")
-        .order("country_name", { ascending: true })
-        .order("name", { ascending: true })
-      setPorts((result.data as PortRow[]) || [])
+      const result = await supabase.from("cc_companies").select("id,name,notes").order("name", { ascending: true })
+      setCompanies((result.data as CompanyRow[]) || [])
       setLoading(false)
     })()
   }, [adminLoading, authenticated])
 
-  const filteredPorts = useMemo(() => {
+  const filteredCompanies = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    if (!needle) return ports
-    return ports.filter((row) =>
-      [row.name, row.country_name || "", row.notes || ""].some((value) => value.toLowerCase().includes(needle)),
-    )
-  }, [filter, ports])
+    if (!needle) return companies
+    return companies.filter((row) => [row.name, row.notes || ""].some((value) => value.toLowerCase().includes(needle)))
+  }, [filter, companies])
 
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
@@ -90,11 +83,11 @@ export default function PortIndexPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Country And Company Info</div>
-            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Port Index</h1>
+            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Company Index</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <a href="/admin/ccinfo" style={buttonStyle}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {filteredPorts.length}</div>
+            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {filteredCompanies.length}</div>
           </div>
         </div>
 
@@ -102,7 +95,7 @@ export default function PortIndexPage() {
           <input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter ports..."
+            placeholder="Filter companies..."
             style={inputStyle}
           />
         </div>
@@ -112,23 +105,21 @@ export default function PortIndexPage() {
             <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th style={thStyle}>Port</th>
-                  <th style={thStyle}>Country</th>
+                  <th style={thStyle}>Company</th>
                   <th style={thStyle}>Information</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredPorts.map((row) => (
+                {filteredCompanies.map((row) => (
                   <tr key={row.id}>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap", fontWeight: 700 }}>
                       <a
-                        href={`/admin/ccinfo?kind=port&id=${row.id}`}
+                        href={`/admin/ccinfo?kind=company&id=${row.id}`}
                         style={{ color: "#bfe6ff", textDecoration: "none" }}
                       >
                         {row.name}
                       </a>
                     </td>
-                    <td style={{ ...tdStyle, whiteSpace: "nowrap", color: "#bfe6ff" }}>{row.country_name || ""}</td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
                   </tr>
                 ))}
