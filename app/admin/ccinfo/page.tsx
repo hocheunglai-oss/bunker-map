@@ -64,6 +64,12 @@ type CountryPortListItem = {
   notes: string | null
 }
 
+type InfoBlock = {
+  id: string
+  content: string
+  updated_at: string
+}
+
 type ChangeLogItem = {
   id: string
   label: string
@@ -209,28 +215,67 @@ type HighlightCard = {
   title: string
   info: string
   line_updates?: Record<string, string>
+  blocks?: InfoBlock[]
 }
 
 type SummaryMeta = {
   sections: HighlightCard[]
   mainLineUpdates: Record<string, string>
+  mainBlocks: InfoBlock[]
+}
+
+function newBlockId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID()
+  return `block-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function textToBlocks(value: string | null | undefined, updates: Record<string, string> = {}, fallbackUpdatedAt?: string | null): InfoBlock[] {
+  const now = fallbackUpdatedAt || new Date().toISOString()
+  const lines = (value || "").split("\n")
+  const keys = buildLineTimestampKeys(lines)
+  return lines.map((line, index) => ({
+    id: newBlockId(),
+    content: line,
+    updated_at: updates[keys[index]] || updates[String(index)] || now,
+  }))
+}
+
+function blocksToText(blocks: InfoBlock[]) {
+  return blocks.map((block) => block.content).join("\n")
+}
+
+function normalizeBlocks(value: unknown, fallbackText: string, updates: Record<string, string> = {}): InfoBlock[] {
+  if (Array.isArray(value)) {
+    return value.map((block) => {
+      const source = block as Partial<InfoBlock>
+      return {
+        id: typeof source.id === "string" && source.id ? source.id : newBlockId(),
+        content: typeof source.content === "string" ? source.content : "",
+        updated_at: typeof source.updated_at === "string" && source.updated_at ? source.updated_at : new Date().toISOString(),
+      }
+    })
+  }
+  return textToBlocks(fallbackText, updates)
 }
 
 function parseSummaryMeta(value: string | null): SummaryMeta {
-  if (!value?.trim()) return { sections: [], mainLineUpdates: {} }
+  if (!value?.trim()) return { sections: [], mainLineUpdates: {}, mainBlocks: [] }
   try {
     const parsed = JSON.parse(value)
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
       const sectionSource = Array.isArray(parsed.sections) ? parsed.sections : []
+      const mainLineUpdates = parsed.main_line_updates && typeof parsed.main_line_updates === "object" ? parsed.main_line_updates : {}
       return {
         sections: sectionSource
           .map((item: Partial<HighlightCard>) => ({
             title: typeof item?.title === "string" ? item.title : "",
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
+            blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
           }))
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
-        mainLineUpdates: parsed.main_line_updates && typeof parsed.main_line_updates === "object" ? parsed.main_line_updates : {},
+        mainLineUpdates,
+        mainBlocks: normalizeBlocks(parsed.main_blocks, "", mainLineUpdates),
       }
     }
     if (Array.isArray(parsed)) {
@@ -240,9 +285,11 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             title: typeof item?.title === "string" ? item.title : "",
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
+            blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
           }))
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
         mainLineUpdates: {},
+        mainBlocks: [],
       }
     }
   } catch {
@@ -251,18 +298,19 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
         .split("\n")
         .map((item) => item.trim())
         .filter(Boolean)
-        .map((item) => ({ title: "", info: item })),
+        .map((item) => ({ title: "", info: item, blocks: textToBlocks(item) })),
       mainLineUpdates: {},
+      mainBlocks: [],
     }
   }
-  return { sections: [], mainLineUpdates: {} }
+  return { sections: [], mainLineUpdates: {}, mainBlocks: [] }
 }
 
 function parseHighlights(value: string | null): HighlightCard[] {
   return parseSummaryMeta(value).sections
 }
 
-function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<string, string>) {
+function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<string, string>, mainBlocks: InfoBlock[] = []) {
   return JSON.stringify(
     {
       sections: items
@@ -270,9 +318,11 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           title: item.title.trim(),
           info: item.info.trim(),
           line_updates: item.line_updates || {},
+          blocks: item.blocks || textToBlocks(item.info, item.line_updates || {}),
         }))
         .filter((item) => item.title || item.info),
       main_line_updates: mainLineUpdates,
+      main_blocks: mainBlocks,
     },
   )
 }
@@ -491,6 +541,71 @@ function HighlightedInlineText({ value, query }: { value: string; query: string 
   return <span dangerouslySetInnerHTML={{ __html: highlightTextHtml(value, query) }} />
 }
 
+function BlockTextBlock({
+  blocks,
+  fallbackUpdatedAt,
+  minHeight,
+  onDoubleClick,
+  query,
+}: {
+  blocks: InfoBlock[]
+  fallbackUpdatedAt?: string | null
+  minHeight: string
+  onDoubleClick?: () => void
+  query?: string
+}) {
+  const [hoveredBlockId, setHoveredBlockId] = useState("")
+  return (
+    <div
+      style={{
+        minHeight,
+        cursor: "default",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+        position: "relative",
+        color: "#edf7ff",
+        fontSize: "14px",
+        lineHeight: 1.55,
+        padding: "10px 12px",
+        border: "1px solid rgba(143, 215, 255, 0.22)",
+        borderRadius: "14px",
+        background: hoveredBlockId ? "rgba(185, 224, 255, 0.055)" : "rgba(255,255,255,0.018)",
+      }}
+      onMouseLeave={() => setHoveredBlockId("")}
+      onDoubleClick={onDoubleClick}
+      title={onDoubleClick ? "Double click to edit" : undefined}
+    >
+      {blocks.length === 0 ? <div style={{ minHeight: "1.55em" }}>&nbsp;</div> : null}
+      {blocks.map((block) => {
+        const stamp = formatTimestamp(block.updated_at) || formatTimestamp(fallbackUpdatedAt)
+        return (
+          <div
+            key={block.id}
+            onMouseEnter={() => setHoveredBlockId(block.id)}
+            style={{
+              minHeight: "1.55em",
+              borderRadius: "6px",
+              padding: "0 2px",
+              margin: "0 -2px",
+              position: "relative",
+              background: hoveredBlockId === block.id ? "rgba(185, 224, 255, 0.09)" : "transparent",
+              boxShadow: hoveredBlockId === block.id ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
+            }}
+          >
+            {hoveredBlockId === block.id && stamp ? (
+              <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "rgba(7, 20, 35, 0.92)", color: "#eaf7ff", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
+                {stamp}
+              </span>
+            ) : null}
+            {block.content ? <HighlightedInlineText value={block.content} query={query || ""} /> : "\u00a0"}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 async function fetchEntryFiles(kind: RecordKind, id: string) {
   const withFolderPath = await supabase
     .from("cc_entry_files")
@@ -627,14 +742,17 @@ export default function CountryCompanyInfoPage() {
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
+  const [editingCountryPortId, setEditingCountryPortId] = useState("")
+  const [countryPortDraft, setCountryPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
   const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
+  const [mainInfoBlocks, setMainInfoBlocks] = useState<InfoBlock[]>([])
   const [mainInfoEditing, setMainInfoEditing] = useState(false)
   const [countryInfoEditing, setCountryInfoEditing] = useState(false)
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
-  const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string> } | null>(null)
+  const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
   const recordAutoSaveTimerRef = useRef<number | null>(null)
@@ -844,20 +962,22 @@ export default function CountryCompanyInfoPage() {
   async function finishMainInfoEditing() {
     if (!selectedId || !selectedKind) return
     const before = mainEditStartRef.current
+    const nextNotes = blocksToText(mainInfoBlocks)
+    setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
-    if (before && (before.notes !== (currentRecord.notes || "") || JSON.stringify(before.updates) !== JSON.stringify(mainInfoLineUpdates))) {
+    if (before && (before.notes !== nextNotes || JSON.stringify(before.blocks) !== JSON.stringify(mainInfoBlocks))) {
       addChangeLog({
         label: `${changeLogSubject(selectedKind, currentRecord.name)} ${informationLabel} updated`,
         entryKind: selectedKind,
         entryId: selectedId,
         field: "notes",
         before: before.notes,
-        after: currentRecord.notes || "",
+        after: nextNotes,
       })
     }
     mainEditStartRef.current = null
-    await queueMainInfoAutoSaveNow(currentRecord.notes || "", mainInfoLineUpdates)
+    await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, mainInfoBlocks)
   }
 
   async function finishSectionEditing(index: number) {
@@ -896,6 +1016,7 @@ export default function CountryCompanyInfoPage() {
     setCurrentCountryPorts([])
     setHighlights([])
     setMainInfoLineUpdates({})
+    setMainInfoBlocks([])
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
@@ -921,6 +1042,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
@@ -950,6 +1072,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
@@ -973,6 +1096,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta(port.summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
+    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks(port.notes || "", summaryMeta.mainLineUpdates, port.updated_at))
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
@@ -1060,17 +1184,48 @@ export default function CountryCompanyInfoPage() {
     setMessage("Port added.")
   }
 
+  function startCountryPortEditing(port: CountryPortListItem) {
+    setEditingCountryPortId(port.id)
+    setCountryPortDraft({ name: port.name || "", notes: port.notes || "" })
+  }
+
+  async function saveCountryPortEditing() {
+    if (!editingCountryPortId) return
+    const name = countryPortDraft.name.trim().toUpperCase()
+    if (!name) {
+      setMessage("Port name is required.")
+      return
+    }
+    const { error } = await supabase
+      .from("cc_ports")
+      .update({ name, notes: countryPortDraft.notes || null })
+      .eq("id", editingCountryPortId)
+    if (error) {
+      setMessage("Unable to save port.")
+      return
+    }
+    setCurrentCountryPorts((prev) =>
+      prev
+        .map((port) => (port.id === editingCountryPortId ? { ...port, name, notes: countryPortDraft.notes || null } : port))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    )
+    setEditingCountryPortId("")
+    setCountryPortDraft({ name: "", notes: "" })
+    addSimpleChangeLog(`${changeLogSubject("country", currentRecord.name)} Port Updated`)
+    setMessage("Port saved.")
+  }
+
   async function saveRecord() {
     if (!selectedId || !selectedKind) return
     setSaving(true)
     setMessage("")
     try {
       if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates), notes: currentRecord.notes || null }).eq("id", selectedId)
+        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks), notes: currentRecord.notes || null }).eq("id", selectedId)
         if (error) throw error
       }
       if (selectedKind === "port") {
@@ -1081,7 +1236,7 @@ export default function CountryCompanyInfoPage() {
         }
         const { error } = await supabase.from("cc_ports").update({
           name: currentRecord.name.trim().toUpperCase(),
-          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates),
+          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks),
           notes: currentRecord.notes || null,
           country_id: matchedCountry?.id || null,
           country_name: matchedCountry?.name || null,
@@ -1161,7 +1316,7 @@ export default function CountryCompanyInfoPage() {
 
   async function persistHighlights(nextHighlights: HighlightCard[]) {
     if (!selectedId || !selectedKind) return
-    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates) }
+    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates, mainInfoBlocks) }
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
     if (error) throw error
@@ -1173,7 +1328,7 @@ export default function CountryCompanyInfoPage() {
       setHighlightDraft({ title: "", info: "" })
       return
     }
-    const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "" }]
+    const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [{ id: newBlockId(), content: "", updated_at: new Date().toISOString() }] }]
     setHighlights(nextHighlights)
     setSectionEditing({ [nextHighlights.length - 1]: true })
     setHighlightDraft({ title: "", info: "" })
@@ -1219,7 +1374,7 @@ export default function CountryCompanyInfoPage() {
     }, 450)
   }
 
-  function queueMainInfoAutoSave(nextNotes: string, nextLineUpdates: Record<string, string>) {
+  function queueMainInfoAutoSave(nextNotes: string, nextLineUpdates: Record<string, string>, nextBlocks = mainInfoBlocks) {
     if (!selectedId || !selectedKind) return
     if (recordAutoSaveTimerRef.current) {
       window.clearTimeout(recordAutoSaveTimerRef.current)
@@ -1229,7 +1384,7 @@ export default function CountryCompanyInfoPage() {
     recordAutoSaveTimerRef.current = window.setTimeout(async () => {
       try {
         const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates) }).eq("id", selectedId)
+        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks) }).eq("id", selectedId)
         if (error) throw error
         setSectionSaveState("saved")
       } catch {
@@ -1243,13 +1398,13 @@ export default function CountryCompanyInfoPage() {
     }, 450)
   }
 
-  async function queueMainInfoAutoSaveNow(nextNotes: string, nextLineUpdates: Record<string, string>) {
+  async function queueMainInfoAutoSaveNow(nextNotes: string, nextLineUpdates: Record<string, string>, nextBlocks = mainInfoBlocks) {
     if (!selectedId || !selectedKind) return
     setSectionSaveState("saving")
     setSectionSaving(true)
     try {
       const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates) }).eq("id", selectedId)
+      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks) }).eq("id", selectedId)
       if (error) throw error
       setSectionSaveState("saved")
     } catch {
@@ -1692,7 +1847,8 @@ export default function CountryCompanyInfoPage() {
                 ← Back To Admin
               </a>
 
-              <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
+              {!initialMode && (
+                <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
                   <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
                     Search In Page
                   </div>
@@ -1717,17 +1873,11 @@ export default function CountryCompanyInfoPage() {
                             <div style={{ color: "#eaf7ff", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</div>
                             <div style={{ color: "#91badb", fontSize: "10px", marginTop: "2px" }}>{formatTimestamp(entry.at)}</div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void undoChangeLogItem(entry)}
-                            style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "rgba(255,255,255,0.08)" }}
-                          >
-                            Undo
-                          </button>
                         </div>
                       ))}
                   </div>
                 </div>
+              )}
 
               <div style={{ marginTop: "auto", display: "flex", justifyContent: "flex-end" }}>
                 <div style={{ position: "relative" }}>
@@ -1972,24 +2122,47 @@ export default function CountryCompanyInfoPage() {
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
                     {mainInfoEditing ? (
-                      <AutoSizeTextarea
-                        value={currentRecord.notes || ""}
-                        onChange={(event) => {
-                          const nextNotes = event.target.value
-                          setMainInfoLineUpdates(updateLineTimestamps(currentRecord.notes || "", nextNotes, mainInfoLineUpdates))
-                          setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-                        }}
-                        style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
-                      />
+                      <div style={{ display: "grid", gap: "8px" }}>
+                        {(mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)).map((block, index) => (
+                          <div key={block.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start" }}>
+                            <AutoSizeTextarea
+                              value={block.content}
+                              onChange={(event) => {
+                                const value = event.target.value
+                                setMainInfoBlocks((prev) => {
+                                  const source = prev.length ? prev : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+                                  return source.map((item) => (item.id === block.id ? { ...item, content: value, updated_at: new Date().toISOString() } : item))
+                                })
+                              }}
+                              style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setMainInfoBlocks((prev) => prev.filter((item) => item.id !== block.id))}
+                              style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
+                            >
+                              x
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setMainInfoBlocks((prev) => [...(prev.length ? prev : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)), { id: newBlockId(), content: "", updated_at: new Date().toISOString() }])}
+                          style={{ ...buttonStyle, justifySelf: "start", padding: "5px 10px", fontSize: "11px" }}
+                        >
+                          Add Line
+                        </button>
+                      </div>
                     ) : (
-                      <HoverableTextBlock
-                        value={currentRecord.notes || ""}
-                        updates={mainInfoLineUpdates}
+                      <BlockTextBlock
+                        blocks={mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)}
                         fallbackUpdatedAt={currentRecord.updated_at}
                         minHeight="calc(1em + 28px)"
                         query={searchInPage}
                         onDoubleClick={() => {
-                          mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates } }
+                          const blocks = mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+                          setMainInfoBlocks(blocks)
+                          mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates }, blocks: blocks.map((block) => ({ ...block })) }
                           setMainInfoEditing(true)
                         }}
                       />
@@ -2020,28 +2193,69 @@ export default function CountryCompanyInfoPage() {
                             </div>
                           </div>
                           {sectionEditing[index] ? (
-                            <AutoSizeTextarea
-                              value={highlight.info}
-                              onChange={(event) => {
-                                const value = event.target.value
-                                setHighlights((prev) => {
-                                  const prevItem = prev[index]
-                                  const lineUpdates = updateLineTimestamps(prevItem?.info || "", value, prevItem?.line_updates || {})
-                                  const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
-                                  return next
-                                })
-                              }}
-                              style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
-                            />
+                            <div style={{ display: "grid", gap: "8px" }}>
+                              {(highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)).map((block) => (
+                                <div key={block.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start" }}>
+                                  <AutoSizeTextarea
+                                    value={block.content}
+                                    onChange={(event) => {
+                                      const value = event.target.value
+                                      setHighlights((prev) =>
+                                        prev.map((item, itemIndex) => {
+                                          if (itemIndex !== index) return item
+                                          const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
+                                          const blocks = sourceBlocks.map((sourceBlock) => (sourceBlock.id === block.id ? { ...sourceBlock, content: value, updated_at: new Date().toISOString() } : sourceBlock))
+                                          return { ...item, blocks, info: blocksToText(blocks) }
+                                        }),
+                                      )
+                                    }}
+                                    style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setHighlights((prev) =>
+                                        prev.map((item, itemIndex) => {
+                                          if (itemIndex !== index) return item
+                                          const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
+                                          const blocks = sourceBlocks.filter((sourceBlock) => sourceBlock.id !== block.id)
+                                          return { ...item, blocks, info: blocksToText(blocks) }
+                                        }),
+                                      )
+                                    }
+                                    style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
+                                  >
+                                    x
+                                  </button>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setHighlights((prev) =>
+                                    prev.map((item, itemIndex) => {
+                                      if (itemIndex !== index) return item
+                                      const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
+                                      const blocks = [...sourceBlocks, { id: newBlockId(), content: "", updated_at: new Date().toISOString() }]
+                                      return { ...item, blocks, info: blocksToText(blocks) }
+                                    }),
+                                  )
+                                }
+                                style={{ ...buttonStyle, justifySelf: "start", padding: "5px 10px", fontSize: "11px" }}
+                              >
+                                Add Line
+                              </button>
+                            </div>
                           ) : (
-                            <HoverableTextBlock
-                              value={highlight.info || ""}
-                              updates={highlight.line_updates || {}}
+                            <BlockTextBlock
+                              blocks={highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)}
                               fallbackUpdatedAt={currentRecord.updated_at}
                               minHeight="calc(1em + 28px)"
                               query={searchInPage}
                               onDoubleClick={() => {
-                                sectionEditStartRef.current[index] = { ...highlight, line_updates: { ...(highlight.line_updates || {}) } }
+                                const blocks = highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)
+                                setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, blocks, info: blocksToText(blocks) } : item)))
+                                sectionEditStartRef.current[index] = { ...highlight, blocks: blocks.map((block) => ({ ...block })), info: blocksToText(blocks), line_updates: { ...(highlight.line_updates || {}) } }
                                 setSectionEditing((prev) => ({ ...prev, [index]: true }))
                               }}
                             />
@@ -2101,17 +2315,26 @@ export default function CountryCompanyInfoPage() {
                         ) : isMobile ? (
                           <div style={{ display: "grid", gap: "8px", padding: "10px" }}>
                             {currentCountryPorts.map((port) => (
-                              <div key={port.id} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
-                                <button
-                                  type="button"
-                                  onClick={() => void loadSelected("port", port.id)}
-                                  style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 800, cursor: "pointer", textAlign: "left", fontSize: "12px" }}
-                                >
-                                  <HighlightedInlineText value={port.name} query={searchInPage} />
-                                </button>
-                                <div style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                                  <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
-                                </div>
+                              <div key={port.id} onDoubleClick={() => startCountryPortEditing(port)} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
+                                {editingCountryPortId === port.id ? (
+                                  <>
+                                    <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
+                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }} />
+                                    <div style={{ display: "flex", gap: "8px" }}>
+                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "5px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Finish Editing</button>
+                                      <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "5px 10px", fontSize: "11px" }}>Cancel</button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px" }}>
+                                      <HighlightedInlineText value={port.name} query={searchInPage} />
+                                    </div>
+                                    <div style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                                      <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -2126,18 +2349,28 @@ export default function CountryCompanyInfoPage() {
                               </thead>
                               <tbody>
                                 {currentCountryPorts.map((port) => (
-                                  <tr key={port.id}>
+                                  <tr key={port.id} onDoubleClick={() => startCountryPortEditing(port)} style={{ cursor: "text" }}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                      <button
-                                        type="button"
-                                        onClick={() => void loadSelected("port", port.id)}
-                                        style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 700, cursor: "pointer", textAlign: "left" }}
-                                      >
+                                      {editingCountryPortId === port.id ? (
+                                        <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }} />
+                                      ) : (
+                                        <span style={{ color: "#bfe6ff", fontWeight: 700 }}>
                                         <HighlightedInlineText value={port.name} query={searchInPage} />
-                                      </button>
+                                        </span>
+                                      )}
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                      <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
+                                      {editingCountryPortId === port.id ? (
+                                        <div style={{ display: "grid", gap: "8px" }}>
+                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "calc(1em + 28px)", padding: "7px 9px", fontSize: "12px" }} />
+                                          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Finish Editing</button>
+                                            <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
+                                      )}
                                     </td>
                                   </tr>
                                 ))}
