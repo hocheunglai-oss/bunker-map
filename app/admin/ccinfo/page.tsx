@@ -64,6 +64,13 @@ type CountryPortListItem = {
   notes: string | null
 }
 
+type ChangeLogItem = {
+  id: string
+  label: string
+  at: string
+  undo: () => void
+}
+
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #123f70 0%, #0d3158 34%, #08233f 100%)",
@@ -341,34 +348,28 @@ function HoverableTextBlock({
   updates,
   fallbackUpdatedAt,
   minHeight,
-  onEdit,
 }: {
   value: string
   updates: Record<string, string>
   fallbackUpdatedAt?: string | null
   minHeight: string
-  onEdit: () => void
 }) {
   const [hoveredLine, setHoveredLine] = useState<number | null>(null)
   const lines = (value || "").split("\n")
   const fallback = formatTimestamp(fallbackUpdatedAt)
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onEdit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onEdit()
-      }}
       style={{
-        ...textareaStyle,
         minHeight,
-        cursor: "text",
+        cursor: "default",
         whiteSpace: "pre-wrap",
         overflowWrap: "anywhere",
         wordBreak: "break-word",
         position: "relative",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+        color: "#edf7ff",
+        fontSize: "14px",
+        lineHeight: 1.55,
+        padding: "8px 2px",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
       onMouseLeave={() => setHoveredLine(null)}
@@ -403,7 +404,7 @@ function HoverableTextBlock({
             onMouseEnter={() => setHoveredLine(index)}
             style={{
               minHeight: "1.55em",
-              cursor: "text",
+              cursor: stamp ? "default" : "default",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
               borderRadius: "6px",
@@ -498,8 +499,11 @@ function AutoSizeTextarea({
   useLayoutEffect(() => {
     const node = textareaRef.current
     if (!node) return
+    const computed = window.getComputedStyle(node)
+    const fontSize = Number.parseFloat(computed.fontSize) || 14
+    const lineHeight = Number.parseFloat(computed.lineHeight) || fontSize * 1.55
     node.style.height = "0px"
-    node.style.height = `${node.scrollHeight}px`
+    node.style.height = `${node.scrollHeight + lineHeight}px`
   }, [value])
 
   return (
@@ -558,6 +562,9 @@ export default function CountryCompanyInfoPage() {
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
   const [mainInfoEditing, setMainInfoEditing] = useState(false)
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
+  const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
+  const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string> } | null>(null)
+  const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
   const recordAutoSaveTimerRef = useRef<number | null>(null)
 
@@ -691,6 +698,42 @@ export default function CountryCompanyInfoPage() {
 
   function goToNextMatch() {
     setMatchIndex((prev) => (matchCount ? (prev + 1) % matchCount : 0))
+  }
+
+  function addChangeLog(label: string, undo: () => void) {
+    setChangeLog((prev) => [{ id: `${Date.now()}-${Math.random()}`, label, at: new Date().toISOString(), undo }, ...prev].slice(0, 10))
+  }
+
+  async function finishMainInfoEditing() {
+    if (!selectedId || !selectedKind) return
+    const before = mainEditStartRef.current
+    setMainInfoEditing(false)
+    if (before && (before.notes !== (currentRecord.notes || "") || JSON.stringify(before.updates) !== JSON.stringify(mainInfoLineUpdates))) {
+      addChangeLog(`${informationLabel} updated`, () => {
+        setCurrentRecord((prev) => ({ ...prev, notes: before.notes }))
+        setMainInfoLineUpdates(before.updates)
+        void queueMainInfoAutoSaveNow(before.notes, before.updates)
+      })
+    }
+    mainEditStartRef.current = null
+    await queueMainInfoAutoSaveNow(currentRecord.notes || "", mainInfoLineUpdates)
+  }
+
+  async function finishSectionEditing(index: number) {
+    const before = sectionEditStartRef.current[index]
+    setSectionEditing((prev) => ({ ...prev, [index]: false }))
+    if (before) {
+      const current = highlights[index]
+      if (current && (before.info !== current.info || JSON.stringify(before.line_updates || {}) !== JSON.stringify(current.line_updates || {}))) {
+        addChangeLog(`${current.title || `Section ${index + 1}`} updated`, () => {
+          const next = highlights.map((item, itemIndex) => (itemIndex === index ? before : item))
+          setHighlights(next)
+          void persistHighlights(next)
+        })
+      }
+    }
+    delete sectionEditStartRef.current[index]
+    await persistHighlights(highlights)
   }
 
   function resetSelection() {
@@ -1037,6 +1080,23 @@ export default function CountryCompanyInfoPage() {
         recordAutoSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("saved"), 1200)
       }
     }, 450)
+  }
+
+  async function queueMainInfoAutoSaveNow(nextNotes: string, nextLineUpdates: Record<string, string>) {
+    if (!selectedId || !selectedKind) return
+    setSectionSaveState("saving")
+    setSectionSaving(true)
+    try {
+      const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
+      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates) }).eq("id", selectedId)
+      if (error) throw error
+      setSectionSaveState("saved")
+    } catch {
+      setMessage("Unable to save information.")
+      setSectionSaveState("saved")
+    } finally {
+      setSectionSaving(false)
+    }
   }
 
   async function deleteHighlightCard(index: number) {
@@ -1482,6 +1542,26 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
+                  {changeLog.length > 0 && (
+                    <div style={{ display: "grid", gap: "6px", borderTop: "1px solid rgba(210,236,255,0.1)", paddingTop: "8px" }}>
+                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>Recent Changes</div>
+                      {changeLog.map((entry) => (
+                        <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "rgba(255,255,255,0.04)" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: "#eaf7ff", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</div>
+                            <div style={{ color: "#91badb", fontSize: "10px", marginTop: "2px" }}>{formatTimestamp(entry.at)}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => entry.undo()}
+                            style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "rgba(255,255,255,0.08)" }}
+                          >
+                            Undo
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1531,20 +1611,42 @@ export default function CountryCompanyInfoPage() {
           </aside>
         )}
 
-        <main style={{ padding: isMobile ? "12px" : "22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
+        <main style={{ padding: isMobile ? "12px" : "0 22px 22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
           <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
-            <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: isMobile ? "8px" : "16px", zIndex: 10, minWidth: 0 }}>
-              <input
-                value={query}
-                onClick={() => {
-                  setQuery("")
-                  setSuggestions([])
-                }}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search company, country or port..."
-                style={searchInputStyle}
-              />
+            <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: 0, zIndex: 10, minWidth: 0, borderTopLeftRadius: isMobile ? "18px" : 0, borderTopRightRadius: isMobile ? "18px" : 0 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr) 42px" : "1fr", gap: "8px", alignItems: "center" }}>
+                <input
+                  value={query}
+                  onClick={() => {
+                    setQuery("")
+                    setSuggestions([])
+                  }}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search company, country or port..."
+                  style={searchInputStyle}
+                />
+                {isMobile && (
+                  <button
+                    onClick={() => setMenuOpen((prev) => !prev)}
+                    style={{
+                      ...buttonStyle,
+                      width: "42px",
+                      height: "42px",
+                      padding: 0,
+                      borderRadius: "50%",
+                      background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
+                      color: "#e7f3ff",
+                      border: "1px solid rgba(108, 185, 255, 0.24)",
+                      fontSize: "22px",
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ≡
+                  </button>
+                )}
+              </div>
               {suggestions.length > 0 && query.trim() && (
                 <div
                   style={{
@@ -1598,26 +1700,6 @@ export default function CountryCompanyInfoPage() {
                 <>
                   {isMobile && (
                     <div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                        <button
-                          onClick={() => setMenuOpen((prev) => !prev)}
-                          style={{
-                            ...buttonStyle,
-                            width: "42px",
-                            height: "42px",
-                            padding: 0,
-                            borderRadius: "50%",
-                            background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
-                            color: "#e7f3ff",
-                            border: "1px solid rgba(108, 185, 255, 0.24)",
-                            fontSize: "22px",
-                            fontWeight: 700,
-                            lineHeight: 1,
-                          }}
-                        >
-                          ≡
-                        </button>
-                      </div>
                       {menuOpen && (
                         <div style={{ ...panelStyle, padding: "8px", display: "grid", gap: "6px", marginBottom: "10px" }}>
                           <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
@@ -1663,9 +1745,19 @@ export default function CountryCompanyInfoPage() {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
-                      <span style={{ padding: "3px 8px", borderRadius: "999px", background: mainInfoEditing ? "rgba(255, 210, 86, 0.18)" : "rgba(122, 196, 255, 0.12)", border: "1px solid rgba(210,236,255,0.12)", color: mainInfoEditing ? "#fff2bc" : "#b9e3ff", fontSize: "10px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                        {mainInfoEditing ? "Edit Mode" : "View Mode"}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (mainInfoEditing) void finishMainInfoEditing()
+                          else {
+                            mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates } }
+                            setMainInfoEditing(true)
+                          }
+                        }}
+                        style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: mainInfoEditing ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)" : "rgba(255,255,255,0.08)", color: mainInfoEditing ? "#ddffef" : "#d7e8ff" }}
+                      >
+                        {mainInfoEditing ? "Finish Editing" : "Edit"}
+                      </button>
                       <button
                         onClick={() => {
                           setHighlightDraft({ title: "", info: "" })
@@ -1693,9 +1785,7 @@ export default function CountryCompanyInfoPage() {
                           }
                           setMainInfoLineUpdates(lineUpdates)
                           setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-                          queueMainInfoAutoSave(nextNotes, lineUpdates)
                         }}
-                        onBlur={() => setMainInfoEditing(false)}
                         style={{ ...textareaStyle, minHeight: selectedKind === "port" ? "180px" : "320px" }}
                       />
                     ) : (
@@ -1704,7 +1794,6 @@ export default function CountryCompanyInfoPage() {
                         updates={mainInfoLineUpdates}
                         fallbackUpdatedAt={currentRecord.updated_at}
                         minHeight={selectedKind === "port" ? "180px" : "320px"}
-                        onEdit={() => setMainInfoEditing(true)}
                       />
                     )}
                   </div>
@@ -1718,9 +1807,19 @@ export default function CountryCompanyInfoPage() {
                               {highlight.title || `SECTION ${index + 1}`}
                             </div>
                             <div style={{ display: "flex", gap: "6px" }}>
-                              <span style={{ alignSelf: "center", padding: "3px 8px", borderRadius: "999px", background: sectionEditing[index] ? "rgba(255, 210, 86, 0.18)" : "rgba(122, 196, 255, 0.12)", border: "1px solid rgba(210,236,255,0.12)", color: sectionEditing[index] ? "#fff2bc" : "#b9e3ff", fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                                {sectionEditing[index] ? "Edit" : "View"}
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (sectionEditing[index]) void finishSectionEditing(index)
+                                  else {
+                                    sectionEditStartRef.current[index] = { ...highlight, line_updates: { ...(highlight.line_updates || {}) } }
+                                    setSectionEditing((prev) => ({ ...prev, [index]: true }))
+                                  }
+                                }}
+                                style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px", background: sectionEditing[index] ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)" : "rgba(255,255,255,0.08)", color: sectionEditing[index] ? "#ddffef" : "#d7e8ff" }}
+                              >
+                                {sectionEditing[index] ? "Finish Editing" : "Edit"}
+                              </button>
                               <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
                               <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
@@ -1741,11 +1840,9 @@ export default function CountryCompanyInfoPage() {
                                     if ((prevLines[i] || "") !== nextLines[i]) lineUpdates[String(i)] = now
                                   }
                                   const next = prev.map((item, itemIndex) => (itemIndex === index ? { ...item, info: value, line_updates: lineUpdates } : item))
-                                  queueSectionSave(next)
                                   return next
                                 })
                               }}
-                              onBlur={() => setSectionEditing((prev) => ({ ...prev, [index]: false }))}
                               style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
                             />
                           ) : (
@@ -1754,7 +1851,6 @@ export default function CountryCompanyInfoPage() {
                               updates={highlight.line_updates || {}}
                               fallbackUpdatedAt={currentRecord.updated_at}
                               minHeight="calc(1em + 28px)"
-                              onEdit={() => setSectionEditing((prev) => ({ ...prev, [index]: true }))}
                             />
                           )}
                         </div>
