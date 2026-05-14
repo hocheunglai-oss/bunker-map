@@ -121,6 +121,8 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   outline: "none",
   boxSizing: "border-box",
+  minWidth: 0,
+  overflowWrap: "anywhere",
 }
 
 const textareaStyle: React.CSSProperties = {
@@ -363,6 +365,8 @@ function HoverableTextBlock({
         minHeight,
         cursor: "text",
         whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
         position: "relative",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
@@ -400,6 +404,8 @@ function HoverableTextBlock({
             style={{
               minHeight: "1.55em",
               cursor: "text",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
               borderRadius: "6px",
               padding: "0 2px",
               margin: "0 -2px",
