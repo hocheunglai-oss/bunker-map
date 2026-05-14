@@ -547,12 +547,24 @@ function BlockTextBlock({
   fallbackUpdatedAt,
   minHeight,
   onDoubleClick,
+  onBlockDoubleClick,
+  editingBlockId,
+  onBlockChange,
+  onBlockSave,
+  onBlockCancel,
+  onBlockDelete,
   query,
 }: {
   blocks: InfoBlock[]
   fallbackUpdatedAt?: string | null
   minHeight: string
   onDoubleClick?: () => void
+  onBlockDoubleClick?: (block: InfoBlock) => void
+  editingBlockId?: string
+  onBlockChange?: (blockId: string, value: string) => void
+  onBlockSave?: () => void
+  onBlockCancel?: () => void
+  onBlockDelete?: (blockId: string) => void
   query?: string
 }) {
   const [hoveredBlockId, setHoveredBlockId] = useState("")
@@ -584,6 +596,11 @@ function BlockTextBlock({
           <div
             key={block.id}
             onMouseEnter={() => setHoveredBlockId(block.id)}
+            onDoubleClick={(event) => {
+              if (!onBlockDoubleClick) return
+              event.stopPropagation()
+              onBlockDoubleClick(block)
+            }}
             style={{
               minHeight: "1.55em",
               borderRadius: "6px",
@@ -594,12 +611,29 @@ function BlockTextBlock({
               boxShadow: hoveredBlockId === block.id ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
             }}
           >
+            {editingBlockId === block.id ? (
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start", padding: "4px 0" }}>
+                <AutoSizeTextarea
+                  value={block.content}
+                  onChange={(event) => onBlockChange?.(block.id, event.target.value)}
+                  style={{ ...textareaStyle, minHeight: "calc(1em + 28px)", padding: "7px 9px" }}
+                />
+                <div style={{ display: "grid", gap: "5px" }}>
+                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px" }}>Cancel</button>
+                  <button type="button" onClick={() => onBlockDelete?.(block.id)} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}>x</button>
+                </div>
+              </div>
+            ) : (
+              <>
             {hoveredBlockId === block.id && stamp ? (
               <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "rgba(7, 20, 35, 0.92)", color: "#eaf7ff", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
                 {stamp}
               </span>
             ) : null}
             {block.content ? <HighlightedInlineText value={block.content} query={query || ""} /> : "\u00a0"}
+              </>
+            )}
           </div>
         )
       })}
@@ -754,6 +788,9 @@ export default function CountryCompanyInfoPage() {
   const [sectionEditing, setSectionEditing] = useState<Record<number, boolean>>({})
   const [activeInfoTab, setActiveInfoTab] = useState("general")
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null)
+  const [dropTabIndex, setDropTabIndex] = useState<number | null>(null)
+  const [editingMainBlockId, setEditingMainBlockId] = useState("")
+  const [editingSectionBlock, setEditingSectionBlock] = useState<{ sectionIndex: number; blockId: string } | null>(null)
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
@@ -969,6 +1006,7 @@ export default function CountryCompanyInfoPage() {
     setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
+    setEditingMainBlockId("")
     if (before && (before.notes !== nextNotes || JSON.stringify(before.blocks) !== JSON.stringify(mainInfoBlocks))) {
       addChangeLog({
         label: `${changeLogSubject(selectedKind, currentRecord.name)} ${informationLabel} updated`,
@@ -981,6 +1019,45 @@ export default function CountryCompanyInfoPage() {
     }
     mainEditStartRef.current = null
     await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, mainInfoBlocks)
+  }
+
+  async function saveMainInfoBlocks(nextBlocks: InfoBlock[]) {
+    if (!selectedId || !selectedKind) return
+    const nextNotes = blocksToText(nextBlocks)
+    setMainInfoBlocks(nextBlocks)
+    setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
+    await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, nextBlocks)
+  }
+
+  function startMainBlockEditing(block: InfoBlock) {
+    const blocks = mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+    setMainInfoBlocks(blocks)
+    mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates }, blocks: blocks.map((item) => ({ ...item })) }
+    setEditingMainBlockId(block.id)
+  }
+
+  function cancelMainBlockEditing() {
+    if (mainEditStartRef.current) {
+      setMainInfoBlocks(mainEditStartRef.current.blocks.map((block) => ({ ...block })))
+    }
+    mainEditStartRef.current = null
+    setEditingMainBlockId("")
+  }
+
+  function updateMainBlock(blockId: string, value: string) {
+    const now = new Date().toISOString()
+    setMainInfoBlocks((prev) => {
+      const source = prev.length ? prev : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+      return source.map((block) => (block.id === blockId ? { ...block, content: value, updated_at: now } : block))
+    })
+  }
+
+  async function deleteMainBlock(blockId: string) {
+    const source = mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+    const nextBlocks = source.filter((block) => block.id !== blockId)
+    setEditingMainBlockId("")
+    mainEditStartRef.current = null
+    await saveMainInfoBlocks(nextBlocks)
   }
 
   async function finishSectionEditing(index: number) {
@@ -1003,7 +1080,56 @@ export default function CountryCompanyInfoPage() {
       }
     }
     delete sectionEditStartRef.current[index]
+    setEditingSectionBlock(null)
     await persistHighlights(highlights)
+  }
+
+  function startSectionBlockEditing(index: number, block: InfoBlock) {
+    const highlight = highlights[index]
+    if (!highlight) return
+    const blocks = highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)
+    setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, blocks, info: blocksToText(blocks) } : item)))
+    sectionEditStartRef.current[index] = { ...highlight, blocks: blocks.map((item) => ({ ...item })), info: blocksToText(blocks), line_updates: { ...(highlight.line_updates || {}) } }
+    setEditingSectionBlock({ sectionIndex: index, blockId: block.id })
+  }
+
+  function updateSectionBlock(index: number, blockId: string, value: string) {
+    const now = new Date().toISOString()
+    setHighlights((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== index) return item
+        const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
+        const blocks = sourceBlocks.map((block) => (block.id === blockId ? { ...block, content: value, updated_at: now } : block))
+        return { ...item, blocks, info: blocksToText(blocks) }
+      }),
+    )
+  }
+
+  function cancelSectionBlockEditing(index: number) {
+    const before = sectionEditStartRef.current[index]
+    if (before) {
+      setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...before, blocks: before.blocks?.map((block) => ({ ...block })) } : item)))
+    }
+    delete sectionEditStartRef.current[index]
+    setEditingSectionBlock(null)
+  }
+
+  async function deleteSectionBlock(index: number, blockId: string) {
+    const nextHighlights = highlights.map((item, itemIndex) => {
+      if (itemIndex !== index) return item
+      const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
+      const blocks = sourceBlocks.filter((block) => block.id !== blockId)
+      return { ...item, blocks, info: blocksToText(blocks) }
+    })
+    setHighlights(nextHighlights)
+    setEditingSectionBlock(null)
+    delete sectionEditStartRef.current[index]
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section saved.")
+    } catch {
+      setMessage("Unable to save section.")
+    }
   }
 
   function resetSelection() {
@@ -1023,6 +1149,8 @@ export default function CountryCompanyInfoPage() {
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
+    setEditingMainBlockId("")
+    setEditingSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setSearchInPage("")
@@ -1050,6 +1178,8 @@ export default function CountryCompanyInfoPage() {
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
+    setEditingMainBlockId("")
+    setEditingSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1081,6 +1211,8 @@ export default function CountryCompanyInfoPage() {
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
+    setEditingMainBlockId("")
+    setEditingSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1106,6 +1238,8 @@ export default function CountryCompanyInfoPage() {
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
     setSectionEditing({})
+    setEditingMainBlockId("")
+    setEditingSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1222,6 +1356,16 @@ export default function CountryCompanyInfoPage() {
     setMessage("Port saved.")
   }
 
+  function renameHighlight(index: number) {
+    const current = highlights[index]
+    if (!current) return
+    const nextTitle = prompt("Tab name", current.title || `SECTION ${index + 1}`)?.trim()
+    if (!nextTitle) return
+    const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, title: normalizeSectionTitle(nextTitle) } : item))
+    setHighlights(nextHighlights)
+    void persistHighlights(nextHighlights)
+  }
+
   async function saveRecord() {
     if (!selectedId || !selectedKind) return
     setSaving(true)
@@ -1335,10 +1479,11 @@ export default function CountryCompanyInfoPage() {
       setHighlightDraft({ title: "", info: "" })
       return
     }
-    const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [{ id: newBlockId(), content: "", updated_at: new Date().toISOString() }] }]
+    const firstBlock = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }]
     setHighlights(nextHighlights)
     setActiveInfoTab(`section-${nextHighlights.length - 1}`)
-    setSectionEditing({ [nextHighlights.length - 1]: true })
+    setEditingSectionBlock({ sectionIndex: nextHighlights.length - 1, blockId: firstBlock.id })
     setHighlightDraft({ title: "", info: "" })
     setHighlightModalOpen(false)
     try {
@@ -2122,11 +2267,11 @@ export default function CountryCompanyInfoPage() {
 
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
                     <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
-                      General
+                      GENERAL
                     </button>
                     {selectedKind === "country" && (
                       <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
-                        Ports
+                        PORTS
                       </button>
                     )}
                     {highlights.map((highlight, index) => (
@@ -2135,15 +2280,36 @@ export default function CountryCompanyInfoPage() {
                         type="button"
                         draggable
                         onDragStart={() => setDraggingTabIndex(index)}
-                        onDragOver={(event) => event.preventDefault()}
+                        onDragEnd={() => {
+                          setDraggingTabIndex(null)
+                          setDropTabIndex(null)
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault()
+                          setDropTabIndex(index)
+                        }}
+                        onDragLeave={() => setDropTabIndex(null)}
                         onDrop={() => {
                           if (draggingTabIndex !== null) void moveHighlightToIndex(draggingTabIndex, index)
                           setDraggingTabIndex(null)
+                          setDropTabIndex(null)
                         }}
                         onClick={() => setActiveInfoTab(`section-${index}`)}
-                        style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation()
+                          renameHighlight(index)
+                        }}
+                        style={{
+                          ...buttonStyle,
+                          borderRadius: "12px 12px 0 0",
+                          background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)",
+                          boxShadow: dropTabIndex === index ? "0 0 0 2px rgba(255, 224, 138, 0.75), inset 0 -3px 0 #ffe08a" : buttonStyle.boxShadow,
+                          transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
+                          opacity: draggingTabIndex === index ? 0.62 : 1,
+                          transition: "transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease",
+                        }}
                       >
-                        {highlight.title || `Section ${index + 1}`}
+                        {(highlight.title || `Section ${index + 1}`).toUpperCase()}
                       </button>
                     ))}
                     <button
@@ -2153,7 +2319,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, padding: "6px 10px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
+                      style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", padding: "6px 12px", background: "rgba(255,255,255,0.05)", color: "#fff2bc", border: "1px solid rgba(210,236,255,0.16)" }}
                     >
                       +
                     </button>
@@ -2163,63 +2329,20 @@ export default function CountryCompanyInfoPage() {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{informationLabel}</div>
-                      {mainInfoEditing && (
-                        <button
-                          type="button"
-                          onClick={() => void finishMainInfoEditing()}
-                          style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
-                        >
-                          Finish Editing
-                        </button>
-                      )}
                     </div>
                     {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
-                    {mainInfoEditing ? (
-                      <div style={{ display: "grid", gap: "8px" }}>
-                        {(mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)).map((block, index) => (
-                          <div key={block.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start" }}>
-                            <AutoSizeTextarea
-                              value={block.content}
-                              onChange={(event) => {
-                                const value = event.target.value
-                                setMainInfoBlocks((prev) => {
-                                  const source = prev.length ? prev : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
-                                  return source.map((item) => (item.id === block.id ? { ...item, content: value, updated_at: new Date().toISOString() } : item))
-                                })
-                              }}
-                              style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setMainInfoBlocks((prev) => prev.filter((item) => item.id !== block.id))}
-                              style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
-                            >
-                              x
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => setMainInfoBlocks((prev) => [...(prev.length ? prev : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)), { id: newBlockId(), content: "", updated_at: new Date().toISOString() }])}
-                          style={{ ...buttonStyle, justifySelf: "start", padding: "5px 10px", fontSize: "11px" }}
-                        >
-                          Add Line
-                        </button>
-                      </div>
-                    ) : (
-                      <BlockTextBlock
-                        blocks={mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)}
-                        fallbackUpdatedAt={currentRecord.updated_at}
-                        minHeight="calc(1em + 28px)"
-                        query={searchInPage}
-                        onDoubleClick={() => {
-                          const blocks = mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
-                          setMainInfoBlocks(blocks)
-                          mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates }, blocks: blocks.map((block) => ({ ...block })) }
-                          setMainInfoEditing(true)
-                        }}
-                      />
-                    )}
+                    <BlockTextBlock
+                      blocks={mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)}
+                      fallbackUpdatedAt={currentRecord.updated_at}
+                      minHeight="calc(1em + 28px)"
+                      query={searchInPage}
+                      editingBlockId={editingMainBlockId}
+                      onBlockDoubleClick={startMainBlockEditing}
+                      onBlockChange={updateMainBlock}
+                      onBlockSave={() => void finishMainInfoEditing()}
+                      onBlockCancel={cancelMainBlockEditing}
+                      onBlockDelete={(blockId) => void deleteMainBlock(blockId)}
+                    />
                   </div>
                   )}
 
@@ -2228,92 +2351,35 @@ export default function CountryCompanyInfoPage() {
                       {highlights.map((highlight, index) => activeInfoTab === `section-${index}` ? (
                         <div key={`section-${index}`}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
-                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700 }}>
+                            <button
+                              type="button"
+                              onDoubleClick={(event) => {
+                                event.stopPropagation()
+                                renameHighlight(index)
+                              }}
+                              style={{ border: "none", background: "transparent", padding: 0, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700, cursor: "text", textAlign: "left" }}
+                              title="Double click to rename section"
+                            >
                               <HighlightedInlineText value={highlight.title || `SECTION ${index + 1}`} query={searchInPage} />
-                            </div>
+                            </button>
                             <div style={{ display: "flex", gap: "6px" }}>
-                              {sectionEditing[index] && (
-                                <button
-                                  type="button"
-                                  onClick={() => void finishSectionEditing(index)}
-                                  style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
-                                >
-                                  Finish Editing
-                                </button>
-                              )}
                               <button onClick={() => void moveHighlight(index, -1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↑</button>
                               <button onClick={() => void moveHighlight(index, 1)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>↓</button>
                               <button onClick={() => void deleteHighlightCard(index)} style={{ ...buttonStyle, padding: "3px 8px", fontSize: "10px" }}>x</button>
                             </div>
                           </div>
-                          {sectionEditing[index] ? (
-                            <div style={{ display: "grid", gap: "8px" }}>
-                              {(highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)).map((block) => (
-                                <div key={block.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start" }}>
-                                  <AutoSizeTextarea
-                                    value={block.content}
-                                    onChange={(event) => {
-                                      const value = event.target.value
-                                      setHighlights((prev) =>
-                                        prev.map((item, itemIndex) => {
-                                          if (itemIndex !== index) return item
-                                          const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
-                                          const blocks = sourceBlocks.map((sourceBlock) => (sourceBlock.id === block.id ? { ...sourceBlock, content: value, updated_at: new Date().toISOString() } : sourceBlock))
-                                          return { ...item, blocks, info: blocksToText(blocks) }
-                                        }),
-                                      )
-                                    }}
-                                    style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setHighlights((prev) =>
-                                        prev.map((item, itemIndex) => {
-                                          if (itemIndex !== index) return item
-                                          const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
-                                          const blocks = sourceBlocks.filter((sourceBlock) => sourceBlock.id !== block.id)
-                                          return { ...item, blocks, info: blocksToText(blocks) }
-                                        }),
-                                      )
-                                    }
-                                    style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
-                                  >
-                                    x
-                                  </button>
-                                </div>
-                              ))}
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setHighlights((prev) =>
-                                    prev.map((item, itemIndex) => {
-                                      if (itemIndex !== index) return item
-                                      const sourceBlocks = item.blocks?.length ? item.blocks : textToBlocks(item.info || "", item.line_updates || {}, currentRecord.updated_at)
-                                      const blocks = [...sourceBlocks, { id: newBlockId(), content: "", updated_at: new Date().toISOString() }]
-                                      return { ...item, blocks, info: blocksToText(blocks) }
-                                    }),
-                                  )
-                                }
-                                style={{ ...buttonStyle, justifySelf: "start", padding: "5px 10px", fontSize: "11px" }}
-                              >
-                                Add Line
-                              </button>
-                            </div>
-                          ) : (
-                            <BlockTextBlock
-                              blocks={highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)}
-                              fallbackUpdatedAt={currentRecord.updated_at}
-                              minHeight="calc(1em + 28px)"
-                              query={searchInPage}
-                              onDoubleClick={() => {
-                                const blocks = highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)
-                                setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, blocks, info: blocksToText(blocks) } : item)))
-                                sectionEditStartRef.current[index] = { ...highlight, blocks: blocks.map((block) => ({ ...block })), info: blocksToText(blocks), line_updates: { ...(highlight.line_updates || {}) } }
-                                setSectionEditing((prev) => ({ ...prev, [index]: true }))
-                              }}
-                            />
-                          )}
+                          <BlockTextBlock
+                            blocks={highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)}
+                            fallbackUpdatedAt={currentRecord.updated_at}
+                            minHeight="calc(1em + 28px)"
+                            query={searchInPage}
+                            editingBlockId={editingSectionBlock?.sectionIndex === index ? editingSectionBlock.blockId : ""}
+                            onBlockDoubleClick={(block) => startSectionBlockEditing(index, block)}
+                            onBlockChange={(blockId, value) => updateSectionBlock(index, blockId, value)}
+                            onBlockSave={() => void finishSectionEditing(index)}
+                            onBlockCancel={() => cancelSectionBlockEditing(index)}
+                            onBlockDelete={(blockId) => void deleteSectionBlock(index, blockId)}
+                          />
                         </div>
                       ) : null)}
                     </div>
