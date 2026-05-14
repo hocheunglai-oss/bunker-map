@@ -216,6 +216,7 @@ type HighlightCard = {
   info: string
   line_updates?: Record<string, string>
   blocks?: InfoBlock[]
+  sections?: HighlightCard[]
 }
 
 type SummaryMeta = {
@@ -273,6 +274,14 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+            sections: Array.isArray(item?.sections)
+              ? item.sections.map((section: Partial<HighlightCard>) => ({
+                  title: typeof section?.title === "string" ? section.title : "",
+                  info: typeof section?.info === "string" ? section.info : "",
+                  line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
+                  blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
+                }))
+              : [],
           }))
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
         mainLineUpdates,
@@ -287,6 +296,14 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+            sections: Array.isArray(item?.sections)
+              ? item.sections.map((section: Partial<HighlightCard>) => ({
+                  title: typeof section?.title === "string" ? section.title : "",
+                  info: typeof section?.info === "string" ? section.info : "",
+                  line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
+                  blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
+                }))
+              : [],
           }))
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
         mainLineUpdates: {},
@@ -320,6 +337,12 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           info: item.info.trim(),
           line_updates: item.line_updates || {},
           blocks: item.blocks || textToBlocks(item.info, item.line_updates || {}),
+          sections: (item.sections || []).map((section) => ({
+            title: section.title.trim(),
+            info: section.info.trim(),
+            line_updates: section.line_updates || {},
+            blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
+          })),
         }))
         .filter((item) => item.title || item.info),
       main_line_updates: mainLineUpdates,
@@ -553,6 +576,7 @@ function BlockTextBlock({
   onBlockSave,
   onBlockCancel,
   onBlockDelete,
+  onInsertBlock,
   query,
 }: {
   blocks: InfoBlock[]
@@ -565,9 +589,40 @@ function BlockTextBlock({
   onBlockSave?: () => void
   onBlockCancel?: () => void
   onBlockDelete?: (blockId: string) => void
+  onInsertBlock?: (index: number) => void
   query?: string
 }) {
   const [hoveredBlockId, setHoveredBlockId] = useState("")
+  const [hoveredInsertIndex, setHoveredInsertIndex] = useState<number | null>(null)
+  const insertButton = (index: number) =>
+    onInsertBlock ? (
+      <div
+        onMouseEnter={() => setHoveredInsertIndex(index)}
+        onMouseLeave={() => setHoveredInsertIndex(null)}
+        style={{ height: "12px", display: "grid", placeItems: "center", margin: "-2px 0", position: "relative" }}
+      >
+        <button
+          type="button"
+          onClick={() => onInsertBlock(index)}
+          style={{
+            width: hoveredInsertIndex === index ? "100%" : "32px",
+            height: "12px",
+            borderRadius: "999px",
+            border: "1px solid rgba(143, 215, 255, 0.32)",
+            background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.02) 0%, rgba(143, 215, 255, 0.22) 48%, rgba(143, 215, 255, 0.02) 100%)" : "rgba(143, 215, 255, 0.08)",
+            color: "#bfe6ff",
+            fontSize: "10px",
+            lineHeight: "8px",
+            opacity: hoveredInsertIndex === index ? 1 : 0,
+            cursor: "pointer",
+            transition: "width 120ms ease, opacity 120ms ease, background 120ms ease",
+          }}
+          aria-label="Add line here"
+        >
+          +
+        </button>
+      </div>
+    ) : null
   return (
     <div
       style={{
@@ -589,12 +644,13 @@ function BlockTextBlock({
       onDoubleClick={onDoubleClick}
       title={onDoubleClick ? "Double click to edit" : undefined}
     >
-      {blocks.length === 0 ? <div style={{ minHeight: "1.55em" }}>&nbsp;</div> : null}
-      {blocks.map((block) => {
+      {blocks.length === 0 ? <>{insertButton(0)}<div style={{ minHeight: "1.55em" }}>&nbsp;</div></> : null}
+      {blocks.map((block, index) => {
         const stamp = formatTimestamp(block.updated_at) || formatTimestamp(fallbackUpdatedAt)
         return (
+          <div key={block.id}>
+          {insertButton(index)}
           <div
-            key={block.id}
             onMouseEnter={() => setHoveredBlockId(block.id)}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
@@ -634,6 +690,8 @@ function BlockTextBlock({
             {block.content ? <HighlightedInlineText value={block.content} query={query || ""} /> : "\u00a0"}
               </>
             )}
+          </div>
+          {index === blocks.length - 1 ? insertButton(index + 1) : null}
           </div>
         )
       })}
@@ -774,6 +832,7 @@ export default function CountryCompanyInfoPage() {
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
+  const [highlightModalMode, setHighlightModalMode] = useState<"tab" | "section">("section")
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
@@ -791,6 +850,7 @@ export default function CountryCompanyInfoPage() {
   const [dropTabIndex, setDropTabIndex] = useState<number | null>(null)
   const [editingMainBlockId, setEditingMainBlockId] = useState("")
   const [editingSectionBlock, setEditingSectionBlock] = useState<{ sectionIndex: number; blockId: string } | null>(null)
+  const [editingNestedSectionBlock, setEditingNestedSectionBlock] = useState<{ tabIndex: number; sectionIndex: number; blockId: string } | null>(null)
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
@@ -1105,6 +1165,124 @@ export default function CountryCompanyInfoPage() {
     )
   }
 
+  function insertMainBlock(index: number) {
+    const source = mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)
+    const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    const nextBlocks = [...source]
+    nextBlocks.splice(index, 0, block)
+    setMainInfoBlocks(nextBlocks)
+    mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates }, blocks: source.map((item) => ({ ...item })) }
+    setEditingMainBlockId(block.id)
+  }
+
+  function insertSectionBlock(index: number, blockIndex: number) {
+    const highlight = highlights[index]
+    if (!highlight) return
+    const sourceBlocks = highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)
+    const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    const blocks = [...sourceBlocks]
+    blocks.splice(blockIndex, 0, block)
+    setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, blocks, info: blocksToText(blocks) } : item)))
+    sectionEditStartRef.current[index] = { ...highlight, blocks: sourceBlocks.map((item) => ({ ...item })), info: blocksToText(sourceBlocks), line_updates: { ...(highlight.line_updates || {}) } }
+    setEditingSectionBlock({ sectionIndex: index, blockId: block.id })
+  }
+
+  function insertNestedSectionBlock(tabIndex: number, sectionIndex: number, blockIndex: number) {
+    const tab = highlights[tabIndex]
+    const section = tab?.sections?.[sectionIndex]
+    if (!tab || !section) return
+    const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    const blocks = [...sourceBlocks]
+    blocks.splice(blockIndex, 0, block)
+    setHighlights((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== tabIndex) return item
+        const sections = [...(item.sections || [])]
+        sections[sectionIndex] = { ...sections[sectionIndex], blocks, info: blocksToText(blocks) }
+        return { ...item, sections }
+      }),
+    )
+    setEditingNestedSectionBlock({ tabIndex, sectionIndex, blockId: block.id })
+  }
+
+  function updateNestedSectionBlock(tabIndex: number, sectionIndex: number, blockId: string, value: string) {
+    const now = new Date().toISOString()
+    setHighlights((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== tabIndex) return item
+        const sections = [...(item.sections || [])]
+        const section = sections[sectionIndex]
+        if (!section) return item
+        const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+        const blocks = sourceBlocks.map((block) => (block.id === blockId ? { ...block, content: value, updated_at: now } : block))
+        sections[sectionIndex] = { ...section, blocks, info: blocksToText(blocks) }
+        return { ...item, sections }
+      }),
+    )
+  }
+
+  function startNestedSectionBlockEditing(tabIndex: number, sectionIndex: number, block: InfoBlock) {
+    const section = highlights[tabIndex]?.sections?.[sectionIndex]
+    if (!section) return
+    const blocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    setHighlights((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== tabIndex) return item
+        const sections = [...(item.sections || [])]
+        sections[sectionIndex] = { ...section, blocks, info: blocksToText(blocks) }
+        return { ...item, sections }
+      }),
+    )
+    setEditingNestedSectionBlock({ tabIndex, sectionIndex, blockId: block.id })
+  }
+
+
+  async function finishNestedSectionEditing() {
+    setEditingNestedSectionBlock(null)
+    await persistHighlights(highlights)
+  }
+
+  function cancelNestedSectionEditing() {
+    setEditingNestedSectionBlock(null)
+  }
+
+  async function deleteNestedSectionBlock(tabIndex: number, sectionIndex: number, blockId: string) {
+    const nextHighlights = highlights.map((item, itemIndex) => {
+      if (itemIndex !== tabIndex) return item
+      const sections = [...(item.sections || [])]
+      const section = sections[sectionIndex]
+      if (!section) return item
+      const sourceBlocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+      const blocks = sourceBlocks.filter((block) => block.id !== blockId)
+      sections[sectionIndex] = { ...section, blocks, info: blocksToText(blocks) }
+      return { ...item, sections }
+    })
+    setHighlights(nextHighlights)
+    setEditingNestedSectionBlock(null)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section saved.")
+    } catch {
+      setMessage("Unable to save section.")
+    }
+  }
+
+  function renameNestedSection(tabIndex: number, sectionIndex: number) {
+    const section = highlights[tabIndex]?.sections?.[sectionIndex]
+    if (!section) return
+    const nextTitle = prompt("Section name", section.title || `SECTION ${sectionIndex + 1}`)?.trim()
+    if (!nextTitle) return
+    const nextHighlights = highlights.map((item, itemIndex) => {
+      if (itemIndex !== tabIndex) return item
+      const sections = [...(item.sections || [])]
+      sections[sectionIndex] = { ...section, title: normalizeSectionTitle(nextTitle) }
+      return { ...item, sections }
+    })
+    setHighlights(nextHighlights)
+    void persistHighlights(nextHighlights)
+  }
+
   function cancelSectionBlockEditing(index: number) {
     const before = sectionEditStartRef.current[index]
     if (before) {
@@ -1151,6 +1329,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
+    setEditingNestedSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setSearchInPage("")
@@ -1180,6 +1359,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
+    setEditingNestedSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1213,6 +1393,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
+    setEditingNestedSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1240,6 +1421,7 @@ export default function CountryCompanyInfoPage() {
     setSectionEditing({})
     setEditingMainBlockId("")
     setEditingSectionBlock(null)
+    setEditingNestedSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
@@ -1480,6 +1662,28 @@ export default function CountryCompanyInfoPage() {
       return
     }
     const firstBlock = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
+    if (highlightModalMode === "section" && activeInfoTab.startsWith("section-")) {
+      const tabIndex = Number(activeInfoTab.replace("section-", ""))
+      const nextHighlights = highlights.map((item, itemIndex) => {
+        if (itemIndex !== tabIndex) return item
+        return {
+          ...item,
+          sections: [...(item.sections || []), { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }],
+        }
+      })
+      setHighlights(nextHighlights)
+      setEditingNestedSectionBlock({ tabIndex, sectionIndex: (highlights[tabIndex]?.sections || []).length, blockId: firstBlock.id })
+      setHighlightDraft({ title: "", info: "" })
+      setHighlightModalOpen(false)
+      try {
+        await persistHighlights(nextHighlights)
+        if (selectedKind) addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} New Section Added`)
+        setMessage("Section saved.")
+      } catch {
+        setMessage("Unable to save section.")
+      }
+      return
+    }
     const nextHighlights = [...highlights, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }]
     setHighlights(nextHighlights)
     setActiveInfoTab(`section-${nextHighlights.length - 1}`)
@@ -2316,6 +2520,7 @@ export default function CountryCompanyInfoPage() {
                       type="button"
                       onClick={() => {
                         setHighlightDraft({ title: "", info: "" })
+                        setHighlightModalMode("tab")
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
@@ -2342,6 +2547,7 @@ export default function CountryCompanyInfoPage() {
                       onBlockSave={() => void finishMainInfoEditing()}
                       onBlockCancel={cancelMainBlockEditing}
                       onBlockDelete={(blockId) => void deleteMainBlock(blockId)}
+                      onInsertBlock={insertMainBlock}
                     />
                   </div>
                   )}
@@ -2379,7 +2585,42 @@ export default function CountryCompanyInfoPage() {
                             onBlockSave={() => void finishSectionEditing(index)}
                             onBlockCancel={() => cancelSectionBlockEditing(index)}
                             onBlockDelete={(blockId) => void deleteSectionBlock(index, blockId)}
+                            onInsertBlock={(blockIndex) => insertSectionBlock(index, blockIndex)}
                           />
+                          {(highlight.sections || []).length > 0 && (
+                            <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
+                              {(highlight.sections || []).map((section, sectionIndex) => (
+                                <div key={`nested-section-${index}-${sectionIndex}`} style={{ border: "1px solid rgba(143, 215, 255, 0.2)", borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
+                                  <button
+                                    type="button"
+                                    onDoubleClick={(event) => {
+                                      event.stopPropagation()
+                                      renameNestedSection(index, sectionIndex)
+                                    }}
+                                    style={{ width: "100%", border: "none", borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", color: "#bfe6ff", textAlign: "left", padding: "9px 12px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}
+                                    title="Double click to rename section"
+                                  >
+                                    <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
+                                  </button>
+                                  <div style={{ padding: "10px" }}>
+                                    <BlockTextBlock
+                                      blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
+                                      fallbackUpdatedAt={currentRecord.updated_at}
+                                      minHeight="calc(1em + 28px)"
+                                      query={searchInPage}
+                                      editingBlockId={editingNestedSectionBlock?.tabIndex === index && editingNestedSectionBlock.sectionIndex === sectionIndex ? editingNestedSectionBlock.blockId : ""}
+                                      onBlockDoubleClick={(block) => startNestedSectionBlockEditing(index, sectionIndex, block)}
+                                      onBlockChange={(blockId, value) => updateNestedSectionBlock(index, sectionIndex, blockId, value)}
+                                      onBlockSave={() => void finishNestedSectionEditing()}
+                                      onBlockCancel={cancelNestedSectionEditing}
+                                      onBlockDelete={(blockId) => void deleteNestedSectionBlock(index, sectionIndex, blockId)}
+                                      onInsertBlock={(blockIndex) => insertNestedSectionBlock(index, sectionIndex, blockIndex)}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ) : null)}
                     </div>
@@ -2505,7 +2746,12 @@ export default function CountryCompanyInfoPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (!activeInfoTab.startsWith("section-")) {
+                        setMessage("Please select a tab before adding a section.")
+                        return
+                      }
                       setHighlightDraft({ title: "", info: "" })
+                      setHighlightModalMode("section")
                       setHighlightModalOpen(true)
                     }}
                     disabled={!selectedId}
@@ -2600,15 +2846,15 @@ export default function CountryCompanyInfoPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>
-              Add Section
+              {highlightModalMode === "tab" ? "Add Tab" : "Add Section"}
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Section Name</div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : "Section Name"}</div>
               <input
                 value={highlightDraft.title}
                 onChange={(event) => setHighlightDraft((prev) => ({ ...prev, title: event.target.value }))}
                 style={inputStyle}
-                placeholder="e.g. REFINERY"
+                placeholder={highlightModalMode === "tab" ? "e.g. OPERATIONS" : "e.g. REFINERY"}
               />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
