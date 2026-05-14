@@ -402,12 +402,14 @@ function HoverableTextBlock({
   fallbackUpdatedAt,
   minHeight,
   onDoubleClick,
+  query,
 }: {
   value: string
   updates: Record<string, string>
   fallbackUpdatedAt?: string | null
   minHeight: string
   onDoubleClick?: () => void
+  query?: string
 }) {
   const [hoveredLine, setHoveredLine] = useState<number | null>(null)
   const lines = (value || "").split("\n")
@@ -476,12 +478,17 @@ function HoverableTextBlock({
               transition: "background 120ms ease, box-shadow 120ms ease",
             }}
           >
-            {line || "\u00a0"}
+            {line ? <span dangerouslySetInnerHTML={{ __html: highlightTextHtml(line, query || "") }} /> : "\u00a0"}
           </div>
         )
       })}
     </div>
   )
+}
+
+function HighlightedInlineText({ value, query }: { value: string; query: string }) {
+  if (!query.trim()) return <>{value}</>
+  return <span dangerouslySetInnerHTML={{ __html: highlightTextHtml(value, query) }} />
 }
 
 async function fetchEntryFiles(kind: RecordKind, id: string) {
@@ -751,6 +758,14 @@ export default function CountryCompanyInfoPage() {
 
   const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
   const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
+  const highlightedSectionHtml = useMemo(
+    () => highlights.map((section) => `${highlightTextHtml(section.title || "", searchInPage)} ${highlightTextHtml(section.info || "", searchInPage)}`).join(" "),
+    [highlights, searchInPage],
+  )
+  const highlightedFileHtml = useMemo(
+    () => [...files.map((file) => file.file_name), ...folders.map((folder) => folder.name)].map((name) => highlightTextHtml(name, searchInPage)).join(" "),
+    [files, folders, searchInPage],
+  )
   const visibleFolders = useMemo(
     () =>
       folders
@@ -771,10 +786,14 @@ export default function CountryCompanyInfoPage() {
     const parser = new DOMParser()
     const mainDoc = parser.parseFromString(`<div>${displayedInfoHtml}</div>`, "text/html")
     const countryDoc = parser.parseFromString(`<div>${displayedCountryInfoHtml}</div>`, "text/html")
+    const sectionDoc = parser.parseFromString(`<div>${highlightedSectionHtml}</div>`, "text/html")
+    const fileDoc = parser.parseFromString(`<div>${highlightedFileHtml}</div>`, "text/html")
     const mainMatches = Array.from(mainDoc.querySelectorAll('mark[data-search-match="true"]'))
     const countryMatches = selectedKind === "port" ? Array.from(countryDoc.querySelectorAll('mark[data-search-match="true"]')) : []
-    setMatchCount(mainMatches.length + countryMatches.length)
-  }, [displayedInfoHtml, displayedCountryInfoHtml, matchIndex, searchInPage, selectedKind])
+    const sectionMatches = Array.from(sectionDoc.querySelectorAll('mark[data-search-match="true"]'))
+    const fileMatches = Array.from(fileDoc.querySelectorAll('mark[data-search-match="true"]'))
+    setMatchCount(mainMatches.length + countryMatches.length + sectionMatches.length + fileMatches.length)
+  }, [displayedInfoHtml, displayedCountryInfoHtml, highlightedSectionHtml, highlightedFileHtml, searchInPage, selectedKind])
 
   function goToPreviousMatch() {
     setMatchIndex((prev) => (matchCount ? (prev - 1 + matchCount) % matchCount : 0))
@@ -1551,7 +1570,9 @@ export default function CountryCompanyInfoPage() {
                 }}
               >
                 <FolderIcon />
-                <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>{folder.name}</span>
+                <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                  <HighlightedInlineText value={folder.name} query={searchInPage} />
+                </span>
               </button>
             ))}
             {visibleFiles.map((file) => {
@@ -1603,7 +1624,7 @@ export default function CountryCompanyInfoPage() {
                     overflowWrap: "anywhere",
                   }}
                 >
-                  {file.file_name}
+                  <HighlightedInlineText value={file.file_name} query={searchInPage} />
                 </button>
                 {!isMobile && (
                   <button
@@ -1966,6 +1987,7 @@ export default function CountryCompanyInfoPage() {
                         updates={mainInfoLineUpdates}
                         fallbackUpdatedAt={currentRecord.updated_at}
                         minHeight="calc(1em + 28px)"
+                        query={searchInPage}
                         onDoubleClick={() => {
                           mainEditStartRef.current = { notes: currentRecord.notes || "", updates: { ...mainInfoLineUpdates } }
                           setMainInfoEditing(true)
@@ -1980,7 +2002,7 @@ export default function CountryCompanyInfoPage() {
                         <div key={`section-${index}`}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
                             <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#7ec4f1", fontWeight: 700 }}>
-                              {highlight.title || `SECTION ${index + 1}`}
+                              <HighlightedInlineText value={highlight.title || `SECTION ${index + 1}`} query={searchInPage} />
                             </div>
                             <div style={{ display: "flex", gap: "6px" }}>
                               {sectionEditing[index] && (
@@ -2017,6 +2039,7 @@ export default function CountryCompanyInfoPage() {
                               updates={highlight.line_updates || {}}
                               fallbackUpdatedAt={currentRecord.updated_at}
                               minHeight="calc(1em + 28px)"
+                              query={searchInPage}
                               onDoubleClick={() => {
                                 sectionEditStartRef.current[index] = { ...highlight, line_updates: { ...(highlight.line_updates || {}) } }
                                 setSectionEditing((prev) => ({ ...prev, [index]: true }))
@@ -2057,6 +2080,7 @@ export default function CountryCompanyInfoPage() {
                           updates={{}}
                           fallbackUpdatedAt={currentCountry.updated_at}
                           minHeight="calc(1em + 28px)"
+                          query={searchInPage}
                           onDoubleClick={() => setCountryInfoEditing(true)}
                         />
                       )}
@@ -2083,10 +2107,10 @@ export default function CountryCompanyInfoPage() {
                                   onClick={() => void loadSelected("port", port.id)}
                                   style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 800, cursor: "pointer", textAlign: "left", fontSize: "12px" }}
                                 >
-                                  {port.name}
+                                  <HighlightedInlineText value={port.name} query={searchInPage} />
                                 </button>
                                 <div style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                                  {port.notes || "No information yet"}
+                                  <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
                                 </div>
                               </div>
                             ))}
@@ -2109,11 +2133,11 @@ export default function CountryCompanyInfoPage() {
                                         onClick={() => void loadSelected("port", port.id)}
                                         style={{ background: "none", border: 0, padding: 0, margin: 0, color: "#bfe6ff", fontWeight: 700, cursor: "pointer", textAlign: "left" }}
                                       >
-                                        {port.name}
+                                        <HighlightedInlineText value={port.name} query={searchInPage} />
                                       </button>
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                      {port.notes || "No information yet"}
+                                      <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
                                     </td>
                                   </tr>
                                 ))}
