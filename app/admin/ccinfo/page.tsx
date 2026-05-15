@@ -217,6 +217,7 @@ type HighlightCard = {
   line_updates?: Record<string, string>
   blocks?: InfoBlock[]
   sections?: HighlightCard[]
+  table?: string[][]
 }
 
 type SummaryMeta = {
@@ -276,12 +277,14 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+            table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
                   info: typeof section?.info === "string" ? section.info : "",
                   line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
+                  table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
                 }))
               : [],
           }))
@@ -306,12 +309,14 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+            table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
                   info: typeof section?.info === "string" ? section.info : "",
                   line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
+                  table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
                 }))
               : [],
           }))
@@ -349,11 +354,13 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           info: item.info.trim(),
           line_updates: item.line_updates || {},
           blocks: item.blocks || textToBlocks(item.info, item.line_updates || {}),
+          table: item.table,
           sections: (item.sections || []).map((section) => ({
             title: section.title.trim(),
             info: section.info.trim(),
             line_updates: section.line_updates || {},
             blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
+            table: section.table,
           })),
         }))
         .filter((item) => item.title || item.info),
@@ -364,6 +371,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
         info: section.info.trim(),
         line_updates: section.line_updates || {},
         blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
+        table: section.table,
       })),
     },
   )
@@ -617,20 +625,20 @@ function BlockTextBlock({
       <div
         onMouseEnter={() => setHoveredInsertIndex(index)}
         onMouseLeave={() => setHoveredInsertIndex(null)}
-        style={{ height: "18px", display: "grid", placeItems: "center", margin: "2px 0", position: "relative" }}
+        style={{ height: "4px", display: "grid", placeItems: "center", margin: "0", position: "relative" }}
       >
         <button
           type="button"
           onClick={() => onInsertBlock(index)}
           style={{
             width: "100%",
-            height: "16px",
+            height: "12px",
             borderRadius: 0,
             border: "none",
             background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.42) 0%, rgba(143, 215, 255, 0.42) 45%, transparent 45%, transparent 55%, rgba(143, 215, 255, 0.42) 55%, rgba(143, 215, 255, 0.42) 100%) center/100% 1px no-repeat" : "transparent",
             color: "#bfe6ff",
             fontSize: "13px",
-            lineHeight: "13px",
+            lineHeight: "10px",
             opacity: hoveredInsertIndex === index ? 1 : 0,
             cursor: "pointer",
             transition: "opacity 120ms ease, background 120ms ease",
@@ -683,8 +691,8 @@ function BlockTextBlock({
             style={{
               minHeight: "1.55em",
               borderRadius: "6px",
-              padding: "3px 2px",
-              margin: "1px -2px",
+              padding: "0 2px",
+              margin: "0 -2px",
               position: "relative",
               background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "rgba(185, 224, 255, 0.09)" : "transparent",
               boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
@@ -726,6 +734,55 @@ function BlockTextBlock({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function SimpleTable({
+  table,
+  onChange,
+  readOnly = false,
+}: {
+  table: string[][]
+  onChange?: (table: string[][]) => void
+  readOnly?: boolean
+}) {
+  const rows = table.length ? table : [["", ""], ["", ""]]
+  const columnCount = Math.max(2, ...rows.map((row) => row.length))
+  const updateCell = (rowIndex: number, columnIndex: number, value: string) => {
+    const next = rows.map((row) => [...row])
+    while (next[rowIndex].length < columnCount) next[rowIndex].push("")
+    next[rowIndex][columnIndex] = value
+    onChange?.(next)
+  }
+  const addRow = () => onChange?.([...rows, Array.from({ length: columnCount }, () => "")])
+  const addColumn = () => onChange?.(rows.map((row) => [...row, ""]))
+  return (
+    <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`table-row-${rowIndex}`}>
+              {Array.from({ length: columnCount }).map((_, columnIndex) => (
+                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid rgba(143, 215, 255, 0.18)", padding: 0, background: rowIndex === 0 ? "rgba(143, 215, 255, 0.08)" : "rgba(255,255,255,0.018)" }}>
+                  <input
+                    value={row[columnIndex] || ""}
+                    disabled={readOnly}
+                    onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
+                    style={{ width: "100%", border: "none", background: "transparent", color: "#edf7ff", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!readOnly && (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button type="button" onClick={addRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Row</button>
+          <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -865,7 +922,7 @@ export default function CountryCompanyInfoPage() {
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
-  const [highlightModalMode, setHighlightModalMode] = useState<"tab" | "section">("section")
+  const [highlightModalMode, setHighlightModalMode] = useState<"tab" | "section" | "table">("section")
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
@@ -1401,6 +1458,20 @@ export default function CountryCompanyInfoPage() {
     await persistMainSections(mainSections)
   }
 
+  function updateMainSectionTable(sectionIndex: number, table: string[][]) {
+    setMainSections((prev) => prev.map((section, index) => (index === sectionIndex ? { ...section, table } : section)))
+    window.setTimeout(() => void persistMainSections(mainSections.map((section, index) => (index === sectionIndex ? { ...section, table } : section))), 0)
+  }
+
+  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][]) {
+    const nextHighlights = highlights.map((tab, index) => {
+      if (index !== tabIndex) return tab
+      return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table } : section)) }
+    })
+    setHighlights(nextHighlights)
+    void persistHighlights(nextHighlights)
+  }
+
   async function deleteMainSectionBlock(sectionIndex: number, blockId: string) {
     const nextSections = mainSections.map((section, itemIndex) => {
       if (itemIndex !== sectionIndex) return section
@@ -1881,10 +1952,13 @@ export default function CountryCompanyInfoPage() {
       return
     }
     const firstBlock = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
-    if (highlightModalMode === "section" && activeInfoTab === "general") {
-      const nextSections = [...mainSections, { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }]
+    if ((highlightModalMode === "section" || highlightModalMode === "table") && activeInfoTab === "general") {
+      const nextSection: HighlightCard = highlightModalMode === "table"
+        ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]] }
+        : { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }
+      const nextSections = [...mainSections, nextSection]
       setMainSections(nextSections)
-      setEditingMainSectionBlock({ sectionIndex: nextSections.length - 1, blockId: firstBlock.id })
+      if (highlightModalMode === "section") setEditingMainSectionBlock({ sectionIndex: nextSections.length - 1, blockId: firstBlock.id })
       setHighlightDraft({ title: "", info: "" })
       setHighlightModalOpen(false)
       try {
@@ -1896,17 +1970,20 @@ export default function CountryCompanyInfoPage() {
       }
       return
     }
-    if (highlightModalMode === "section" && activeInfoTab.startsWith("section-")) {
+    if ((highlightModalMode === "section" || highlightModalMode === "table") && activeInfoTab.startsWith("section-")) {
       const tabIndex = Number(activeInfoTab.replace("section-", ""))
       const nextHighlights = highlights.map((item, itemIndex) => {
         if (itemIndex !== tabIndex) return item
+        const nextSection: HighlightCard = highlightModalMode === "table"
+          ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]] }
+          : { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }
         return {
           ...item,
-          sections: [...(item.sections || []), { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }],
+          sections: [...(item.sections || []), nextSection],
         }
       })
       setHighlights(nextHighlights)
-      setEditingNestedSectionBlock({ tabIndex, sectionIndex: (highlights[tabIndex]?.sections || []).length, blockId: firstBlock.id })
+      if (highlightModalMode === "section") setEditingNestedSectionBlock({ tabIndex, sectionIndex: (highlights[tabIndex]?.sections || []).length, blockId: firstBlock.id })
       setHighlightDraft({ title: "", info: "" })
       setHighlightModalOpen(false)
       try {
@@ -2756,23 +2833,23 @@ export default function CountryCompanyInfoPage() {
                   )}
 
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
-                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
+                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "general" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
                       {mainInfoTabLabel}
                     </button>
                     {selectedKind === "port" && (
                       <>
-                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "country-general" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
+                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "country-general" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
                           GENERAL INFORMATION
                         </button>
                         {countryTabs.map((tab, index) => (
-                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `country-section-${index}` ? fixedTabActiveBackground : fixedTabBackground, color: "#a9cdea" }}>
+                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#a9cdea", outline: activeInfoTab === `country-section-${index}` ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
                             {(tab.title || `TAB ${index + 1}`).toUpperCase()}
                           </button>
                         ))}
                       </>
                     )}
                     {selectedKind === "country" && (
-                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
+                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "ports" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
                         PORTS
                       </button>
                     )}
@@ -2809,7 +2886,9 @@ export default function CountryCompanyInfoPage() {
                         style={{
                           ...buttonStyle,
                           borderRadius: "12px 12px 0 0",
-                          background: activeInfoTab === `section-${index}` ? userTabActiveBackground : userTabBackground,
+                          background: userTabBackground,
+                          outline: activeInfoTab === `section-${index}` ? "2px solid #bfe6ff" : "none",
+                          outlineOffset: "1px",
                           boxShadow: dropTabIndex === index ? `${dropTabSide === "left" ? "inset 3px 0 0 #bfe6ff" : "inset -3px 0 0 #bfe6ff"}, ${buttonStyle.boxShadow}` : buttonStyle.boxShadow,
                           transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
                           opacity: draggingTabIndex === index ? 0.62 : 1,
@@ -2864,19 +2943,23 @@ export default function CountryCompanyInfoPage() {
                               </div>
                             </div>
                             <div>
-                              <BlockTextBlock
-                                blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
-                                fallbackUpdatedAt={currentRecord.updated_at}
-                                minHeight="calc(1em + 28px)"
-                                query={searchInPage}
-                                editingBlockId={editingMainSectionBlock?.sectionIndex === sectionIndex ? editingMainSectionBlock.blockId : ""}
-                                onBlockDoubleClick={(block) => startMainSectionBlockEditing(sectionIndex, block)}
-                                onBlockChange={(blockId, value) => updateMainSectionBlock(sectionIndex, blockId, value)}
-                                onBlockSave={() => void finishMainSectionEditing()}
-                                onBlockCancel={() => setEditingMainSectionBlock(null)}
-                                onBlockDelete={(blockId) => void deleteMainSectionBlock(sectionIndex, blockId)}
-                                onInsertBlock={(blockIndex) => insertMainSectionBlock(sectionIndex, blockIndex)}
-                              />
+                              {section.table ? (
+                                <SimpleTable table={section.table} onChange={(table) => updateMainSectionTable(sectionIndex, table)} />
+                              ) : (
+                                <BlockTextBlock
+                                  blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
+                                  fallbackUpdatedAt={currentRecord.updated_at}
+                                  minHeight="calc(1em + 28px)"
+                                  query={searchInPage}
+                                  editingBlockId={editingMainSectionBlock?.sectionIndex === sectionIndex ? editingMainSectionBlock.blockId : ""}
+                                  onBlockDoubleClick={(block) => startMainSectionBlockEditing(sectionIndex, block)}
+                                  onBlockChange={(blockId, value) => updateMainSectionBlock(sectionIndex, blockId, value)}
+                                  onBlockSave={() => void finishMainSectionEditing()}
+                                  onBlockCancel={() => setEditingMainSectionBlock(null)}
+                                  onBlockDelete={(blockId) => void deleteMainSectionBlock(sectionIndex, blockId)}
+                                  onInsertBlock={(blockIndex) => insertMainSectionBlock(sectionIndex, blockIndex)}
+                                />
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2925,19 +3008,23 @@ export default function CountryCompanyInfoPage() {
                                     </div>
                                   </div>
                                   <div>
-                                    <BlockTextBlock
-                                      blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
-                                      fallbackUpdatedAt={currentRecord.updated_at}
-                                      minHeight="calc(1em + 28px)"
-                                      query={searchInPage}
-                                      editingBlockId={editingNestedSectionBlock?.tabIndex === index && editingNestedSectionBlock.sectionIndex === sectionIndex ? editingNestedSectionBlock.blockId : ""}
-                                      onBlockDoubleClick={(block) => startNestedSectionBlockEditing(index, sectionIndex, block)}
-                                      onBlockChange={(blockId, value) => updateNestedSectionBlock(index, sectionIndex, blockId, value)}
-                                      onBlockSave={() => void finishNestedSectionEditing()}
-                                      onBlockCancel={cancelNestedSectionEditing}
-                                      onBlockDelete={(blockId) => void deleteNestedSectionBlock(index, sectionIndex, blockId)}
-                                      onInsertBlock={(blockIndex) => insertNestedSectionBlock(index, sectionIndex, blockIndex)}
-                                    />
+                                    {section.table ? (
+                                      <SimpleTable table={section.table} onChange={(table) => updateNestedSectionTable(index, sectionIndex, table)} />
+                                    ) : (
+                                      <BlockTextBlock
+                                        blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
+                                        fallbackUpdatedAt={currentRecord.updated_at}
+                                        minHeight="calc(1em + 28px)"
+                                        query={searchInPage}
+                                        editingBlockId={editingNestedSectionBlock?.tabIndex === index && editingNestedSectionBlock.sectionIndex === sectionIndex ? editingNestedSectionBlock.blockId : ""}
+                                        onBlockDoubleClick={(block) => startNestedSectionBlockEditing(index, sectionIndex, block)}
+                                        onBlockChange={(blockId, value) => updateNestedSectionBlock(index, sectionIndex, blockId, value)}
+                                        onBlockSave={() => void finishNestedSectionEditing()}
+                                        onBlockCancel={cancelNestedSectionEditing}
+                                        onBlockDelete={(blockId) => void deleteNestedSectionBlock(index, sectionIndex, blockId)}
+                                        onInsertBlock={(blockIndex) => insertNestedSectionBlock(index, sectionIndex, blockIndex)}
+                                      />
+                                    )}
                                   </div>
                                 </div>
                               ))}
@@ -3113,22 +3200,40 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activeInfoTab !== "general" && !activeInfoTab.startsWith("section-")) {
-                        setMessage("Please select a tab before adding a section.")
-                        return
-                      }
-                      setHighlightDraft({ title: "", info: "" })
-                      setHighlightModalMode("section")
-                      setHighlightModalOpen(true)
-                    }}
-                    disabled={!selectedId}
-                    style={{ ...buttonStyle, justifySelf: "start", padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
-                  >
-                    Add Section
-                  </button>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeInfoTab !== "general" && !activeInfoTab.startsWith("section-")) {
+                          setMessage("Please select a tab before adding a section.")
+                          return
+                        }
+                        setHighlightDraft({ title: "", info: "" })
+                        setHighlightModalMode("section")
+                        setHighlightModalOpen(true)
+                      }}
+                      disabled={!selectedId}
+                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
+                    >
+                      Add Section
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeInfoTab !== "general" && !activeInfoTab.startsWith("section-")) {
+                          setMessage("Please select a tab before adding a table.")
+                          return
+                        }
+                        setHighlightDraft({ title: "TABLE", info: "" })
+                        setHighlightModalMode("table")
+                        setHighlightModalOpen(true)
+                      }}
+                      disabled={!selectedId}
+                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 151, 67, 0.46) 0%, rgba(191, 92, 16, 0.22) 100%)", color: "#ffe0c2", border: "1px solid rgba(255, 166, 77, 0.38)" }}
+                    >
+                      Add Table
+                    </button>
+                  </div>
 
                   {isMobile && fileSection}
 
@@ -3218,10 +3323,10 @@ export default function CountryCompanyInfoPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>
-              {highlightModalMode === "tab" ? "Add Tab" : "Add Section"}
+              {highlightModalMode === "tab" ? "Add Tab" : highlightModalMode === "table" ? "Add Table" : "Add Section"}
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : "Section Name"}</div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : highlightModalMode === "table" ? "Table Name" : "Section Name"}</div>
               <input
                 ref={highlightTitleInputRef}
                 value={highlightDraft.title}
@@ -3233,7 +3338,7 @@ export default function CountryCompanyInfoPage() {
                   }
                 }}
                 style={inputStyle}
-                placeholder={highlightModalMode === "tab" ? "e.g. OPERATIONS" : "e.g. REFINERY"}
+                placeholder={highlightModalMode === "tab" ? "e.g. OPERATIONS" : highlightModalMode === "table" ? "e.g. SUPPLIERS" : "e.g. REFINERY"}
               />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
