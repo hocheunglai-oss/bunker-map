@@ -1990,6 +1990,18 @@ export default function CountryCompanyInfoPage() {
     if (!selectedId || !selectedKind) return
     if (!confirm(`Delete ${currentRecord.name}?`)) return
     try {
+      if (selectedKind === "country") {
+        const deletePorts = confirm(`Also delete all ports under ${currentRecord.name}?`)
+        if (deletePorts) {
+          const extraWarning = confirm(`Final warning: this will permanently delete ${currentRecord.name} and all ports under this country. Continue?`)
+          if (!extraWarning) return
+          const { error: portError } = await supabase
+            .from("cc_ports")
+            .delete()
+            .or(`country_id.eq.${selectedId},country_name.eq.${currentRecord.name.replace(/,/g, "\\,")}`)
+          if (portError) throw portError
+        }
+      }
       const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
       const { error } = await supabase.from(table).delete().eq("id", selectedId)
       if (error) throw error
