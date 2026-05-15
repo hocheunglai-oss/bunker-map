@@ -1002,6 +1002,8 @@ export default function CountryCompanyInfoPage() {
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [highlightModalMode, setHighlightModalMode] = useState<"tab" | "section" | "table">("section")
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
+  const [recordModalOpen, setRecordModalOpen] = useState(false)
+  const [recordNameDraft, setRecordNameDraft] = useState("")
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
   const [editingCountryPortId, setEditingCountryPortId] = useState("")
@@ -1660,6 +1662,7 @@ export default function CountryCompanyInfoPage() {
     setEditingCountryBlockId("")
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setRecordModalOpen(false)
     setSearchInPage("")
     setActiveInfoTab("general")
   }
@@ -1695,6 +1698,7 @@ export default function CountryCompanyInfoPage() {
     setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setRecordModalOpen(false)
     setActiveInfoTab("general")
   }
 
@@ -1734,6 +1738,7 @@ export default function CountryCompanyInfoPage() {
     setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setRecordModalOpen(false)
     setActiveInfoTab("general")
   }
 
@@ -1765,6 +1770,7 @@ export default function CountryCompanyInfoPage() {
     setEditingCountryBlockId("")
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setRecordModalOpen(false)
     setActiveInfoTab("general")
 
     if (port.country_id) {
@@ -1837,12 +1843,17 @@ export default function CountryCompanyInfoPage() {
     addChangeLog({ label: "NEW PORT added", entryKind: "port", entryId: data.id, field: "notes", before: "", after: "No info" })
   }
 
-  async function renameRecord() {
+  function openRecordModal() {
+    if (!selectedId || !selectedKind) return
+    setRecordNameDraft(currentRecord.name.trim())
+    setRecordModalOpen(true)
+  }
+
+  async function saveRecordNameFromModal() {
     if (!selectedId || !selectedKind) return
     const currentName = currentRecord.name.trim()
-    const nextName = prompt(`${mainLabel} name`, currentName)?.trim().toUpperCase()
+    const nextName = recordNameDraft.trim().toUpperCase()
     if (!nextName || nextName === currentName) return
-    if (!currentName.startsWith("NEW ") && !confirm(`Rename ${currentName} to ${nextName}?`)) return
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     setSaving(true)
     try {
@@ -1855,6 +1866,7 @@ export default function CountryCompanyInfoPage() {
         await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_name", currentName)
       }
       setMessage("Renamed.")
+      setRecordModalOpen(false)
     } catch {
       setMessage("Unable to rename.")
     } finally {
@@ -1976,16 +1988,13 @@ export default function CountryCompanyInfoPage() {
 
   async function deleteRecord() {
     if (!selectedId || !selectedKind) return
-    if (selectedKind === "country") {
-      setMessage("Delete only allowed on Index page.")
-      return
-    }
     if (!confirm(`Delete ${currentRecord.name}?`)) return
     try {
-      const table = selectedKind === "company" ? "cc_companies" : "cc_ports"
+      const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
       const { error } = await supabase.from(table).delete().eq("id", selectedId)
       if (error) throw error
       setMessage("Deleted.")
+      setRecordModalOpen(false)
       resetSelection()
     } catch {
       setMessage("Unable to delete.")
@@ -2898,8 +2907,8 @@ export default function CountryCompanyInfoPage() {
                       <input
                         value={currentRecord.name}
                         readOnly
-                        onDoubleClick={() => void renameRecord()}
-                        title="Double click to rename"
+                        onDoubleClick={openRecordModal}
+                        title="Double click to edit or delete"
                         style={{ ...inputStyle, cursor: selectedId ? "text" : "default" }}
                       />
                       {selectedKind === "port" && currentCountry.name ? (
@@ -2919,11 +2928,6 @@ export default function CountryCompanyInfoPage() {
                       <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
                         {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
                       </button>
-                      {selectedKind === "country" ? (
-                        <span style={{ color: "#9ec7e7", fontSize: "10px", fontWeight: 800, lineHeight: 1.25, textAlign: "center", textTransform: "uppercase", minWidth: "116px" }}>Country can only be<br />deleted on index page</span>
-                      ) : (
-                        <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
-                      )}
                     </div>
                   </div>
 
@@ -3516,6 +3520,55 @@ export default function CountryCompanyInfoPage() {
               >
                 Add
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {recordModalOpen && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(1, 8, 18, 0.58)", display: "grid", placeItems: "center", padding: "20px", zIndex: 42 }}
+          onClick={() => setRecordModalOpen(false)}
+        >
+          <div style={{ ...panelStyle, width: "min(520px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>
+              Edit {mainLabel}
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{mainLabel}</div>
+              <input
+                value={recordNameDraft}
+                onChange={(event) => setRecordNameDraft(event.target.value.toUpperCase())}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    void saveRecordNameFromModal()
+                  }
+                  if (event.key === "Escape") setRecordModalOpen(false)
+                }}
+                style={inputStyle}
+                autoFocus
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => void deleteRecord()}
+                disabled={!selectedId}
+                style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+              >
+                Delete
+              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" onClick={() => setRecordModalOpen(false)} style={buttonStyle}>Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => void saveRecordNameFromModal()}
+                  disabled={saving || !recordNameDraft.trim()}
+                  style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}
+                >
+                  {saving ? "Saving" : "Save"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
