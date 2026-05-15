@@ -218,6 +218,7 @@ type HighlightCard = {
   blocks?: InfoBlock[]
   sections?: HighlightCard[]
   table?: string[][]
+  column_widths?: number[]
 }
 
 type SummaryMeta = {
@@ -245,6 +246,12 @@ function textToBlocks(value: string | null | undefined, updates: Record<string, 
 
 function blocksToText(blocks: InfoBlock[]) {
   return blocks.map((block) => block.content).join("\n")
+}
+
+function compactBlocks(blocks: InfoBlock[], fallbackText: string | null | undefined = "", fallbackUpdatedAt?: string | null): InfoBlock[] {
+  const text = blocks.length ? blocksToText(blocks) : fallbackText || ""
+  if (!text) return []
+  return [{ id: blocks[0]?.id || newBlockId(), content: text, updated_at: blocks[0]?.updated_at || fallbackUpdatedAt || new Date().toISOString() }]
 }
 
 function normalizeBlocks(value: unknown, fallbackText: string, updates: Record<string, string> = {}): InfoBlock[] {
@@ -278,6 +285,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
+            column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -285,6 +293,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                   line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
                   table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
+                  column_widths: Array.isArray(section?.column_widths) ? section.column_widths as number[] : undefined,
                 }))
               : [],
           }))
@@ -310,6 +319,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
+            column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -317,6 +327,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                   line_updates: section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {},
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
                   table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
+                  column_widths: Array.isArray(section?.column_widths) ? section.column_widths as number[] : undefined,
                 }))
               : [],
           }))
@@ -355,12 +366,14 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           line_updates: item.line_updates || {},
           blocks: item.blocks || textToBlocks(item.info, item.line_updates || {}),
           table: item.table,
+          column_widths: item.column_widths,
           sections: (item.sections || []).map((section) => ({
             title: section.title.trim(),
             info: section.info.trim(),
             line_updates: section.line_updates || {},
             blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
             table: section.table,
+            column_widths: section.column_widths,
           })),
         }))
         .filter((item) => item.title || item.info),
@@ -372,6 +385,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
         line_updates: section.line_updates || {},
         blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
         table: section.table,
+        column_widths: section.column_widths,
       })),
     },
   )
@@ -699,21 +713,21 @@ function BlockTextBlock({
             }}
           >
             {editingBlockId === block.id ? (
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "start", padding: "4px 0" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "6px", alignItems: "center", padding: "0" }}>
                 <AutoSizeTextarea
                   value={block.content}
                   onChange={(event) => onBlockChange?.(block.id, event.target.value)}
-                  style={{ ...textareaStyle, minHeight: "calc(1em + 28px)", padding: "7px 9px" }}
+                  style={{ ...textareaStyle, minHeight: "1.55em", padding: "0 2px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", lineHeight: 1.55 }}
                 />
-                <div style={{ display: "grid", gap: "5px" }}>
-                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
-                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px" }}>Cancel</button>
+                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2 }}>Cancel</button>
                   <button
                     type="button"
                     onClick={() => {
                       if (confirm("Delete this line?")) onBlockDelete?.(block.id)
                     }}
-                    style={{ ...buttonStyle, padding: "4px 8px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
+                    style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
                   >
                     x
                   </button>
@@ -740,26 +754,67 @@ function BlockTextBlock({
 
 function SimpleTable({
   table,
-  onChange,
+  columnWidths,
+  onSave,
   readOnly = false,
 }: {
   table: string[][]
-  onChange?: (table: string[][]) => void
+  columnWidths?: number[]
+  onSave?: (table: string[][], columnWidths: number[]) => void
   readOnly?: boolean
 }) {
-  const rows = table.length ? table : [["", ""], ["", ""]]
+  const [editing, setEditing] = useState(false)
+  const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
+  const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
+  useEffect(() => {
+    setDraftRows(table.length ? table : [["", ""], ["", ""]])
+    setDraftWidths(columnWidths || [])
+  }, [table, columnWidths])
+  const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
+  const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
   const updateCell = (rowIndex: number, columnIndex: number, value: string) => {
     const next = rows.map((row) => [...row])
     while (next[rowIndex].length < columnCount) next[rowIndex].push("")
     next[rowIndex][columnIndex] = value
-    onChange?.(next)
+    setDraftRows(next)
   }
-  const addRow = () => onChange?.([...rows, Array.from({ length: columnCount }, () => "")])
-  const addColumn = () => onChange?.(rows.map((row) => [...row, ""]))
+  const addRow = () => setDraftRows([...rows, Array.from({ length: columnCount }, () => "")])
+  const addColumn = () => {
+    const nextCount = columnCount + 1
+    setDraftRows(rows.map((row) => [...row, ""]))
+    setDraftWidths(Array.from({ length: nextCount }).map((_, index) => draftWidths[index] || Math.round(100 / nextCount)))
+  }
+  const deleteRow = () => {
+    if (rows.length <= 1) return
+    setDraftRows(rows.slice(0, -1))
+  }
+  const deleteColumn = () => {
+    if (columnCount <= 1) return
+    setDraftRows(rows.map((row) => row.slice(0, -1)))
+    setDraftWidths(draftWidths.slice(0, -1))
+  }
+  const setWidth = (index: number, value: number) => {
+    setDraftWidths((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+  }
+  const copyTable = async () => {
+    const text = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").join("\t")).join("\n")
+    await navigator.clipboard?.writeText(text)
+  }
+  const save = () => {
+    onSave?.(draftRows, widths)
+    setEditing(false)
+  }
   return (
     <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+        <colgroup>
+          {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
+        </colgroup>
         <tbody>
           {rows.map((row, rowIndex) => (
             <tr key={`table-row-${rowIndex}`}>
@@ -767,7 +822,7 @@ function SimpleTable({
                 <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid rgba(143, 215, 255, 0.18)", padding: 0, background: rowIndex === 0 ? "rgba(143, 215, 255, 0.08)" : "rgba(255,255,255,0.018)" }}>
                   <input
                     value={row[columnIndex] || ""}
-                    disabled={readOnly}
+                    disabled={readOnly || !editing}
                     onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
                     style={{ width: "100%", border: "none", background: "transparent", color: "#edf7ff", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
                   />
@@ -777,10 +832,30 @@ function SimpleTable({
           ))}
         </tbody>
       </table>
-      {!readOnly && (
-        <div style={{ display: "flex", gap: "6px" }}>
+      {!readOnly && editing && (
+        <div style={{ display: "grid", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button type="button" onClick={addRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Row</button>
           <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
+          <button type="button" onClick={deleteRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
+          <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
+          <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+          <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {Array.from({ length: columnCount }).map((_, index) => (
+              <label key={`width-${index}`} style={{ display: "grid", gap: "3px", color: "#9ec7e7", fontSize: "10px", fontWeight: 700 }}>
+                COL {index + 1}
+                <input type="range" min="8" max="80" value={widths[index]} onChange={(event) => setWidth(index, Number(event.target.value))} />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {!readOnly && !editing && (
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setEditing(true)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
+          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Copy Table</button>
         </div>
       )}
     </div>
@@ -1458,15 +1533,16 @@ export default function CountryCompanyInfoPage() {
     await persistMainSections(mainSections)
   }
 
-  function updateMainSectionTable(sectionIndex: number, table: string[][]) {
-    setMainSections((prev) => prev.map((section, index) => (index === sectionIndex ? { ...section, table } : section)))
-    window.setTimeout(() => void persistMainSections(mainSections.map((section, index) => (index === sectionIndex ? { ...section, table } : section))), 0)
+  function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[]) {
+    const nextSections = mainSections.map((section, index) => (index === sectionIndex ? { ...section, table, column_widths: columnWidths } : section))
+    setMainSections(nextSections)
+    void persistMainSections(nextSections)
   }
 
-  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][]) {
+  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[]) {
     const nextHighlights = highlights.map((tab, index) => {
       if (index !== tabIndex) return tab
-      return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table } : section)) }
+      return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table, column_widths: columnWidths } : section)) }
     })
     setHighlights(nextHighlights)
     void persistHighlights(nextHighlights)
@@ -1602,7 +1678,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
-    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
+    setMainInfoBlocks(compactBlocks(summaryMeta.mainBlocks, (data as BaseRecord).notes || "", (data as BaseRecord).updated_at))
     setMainSections(summaryMeta.mainSections)
     setCountryMainBlocks([])
     setCountrySections([])
@@ -1641,7 +1717,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
-    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks((data as BaseRecord).notes || "", summaryMeta.mainLineUpdates, (data as BaseRecord).updated_at))
+    setMainInfoBlocks(compactBlocks(summaryMeta.mainBlocks, (data as BaseRecord).notes || "", (data as BaseRecord).updated_at))
     setMainSections(summaryMeta.mainSections)
     setCountryMainBlocks([])
     setCountrySections([])
@@ -1674,7 +1750,7 @@ export default function CountryCompanyInfoPage() {
     const summaryMeta = parseSummaryMeta(port.summary)
     setHighlights(summaryMeta.sections)
     setMainInfoLineUpdates(summaryMeta.mainLineUpdates)
-    setMainInfoBlocks(summaryMeta.mainBlocks.length ? summaryMeta.mainBlocks : textToBlocks(port.notes || "", summaryMeta.mainLineUpdates, port.updated_at))
+    setMainInfoBlocks(compactBlocks(summaryMeta.mainBlocks, port.notes || "", port.updated_at))
     setMainSections(summaryMeta.mainSections)
     setMainInfoEditing(false)
     setCountryInfoEditing(false)
@@ -1693,7 +1769,7 @@ export default function CountryCompanyInfoPage() {
       const country = (countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" }
       const countryMeta = parseSummaryMeta(country.summary)
       setCurrentCountry(country)
-      setCountryMainBlocks(countryMeta.mainBlocks.length ? countryMeta.mainBlocks : textToBlocks(country.notes || "", countryMeta.mainLineUpdates, country.updated_at))
+      setCountryMainBlocks(compactBlocks(countryMeta.mainBlocks, country.notes || "", country.updated_at))
       setCountrySections(countryMeta.mainSections)
       setCountryTabs(countryMeta.sections)
     } else if (port.country_name?.trim()) {
@@ -1707,7 +1783,7 @@ export default function CountryCompanyInfoPage() {
       const country = (countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" }
       const countryMeta = parseSummaryMeta(country.summary)
       setCurrentCountry(country)
-      setCountryMainBlocks(countryMeta.mainBlocks.length ? countryMeta.mainBlocks : textToBlocks(country.notes || "", countryMeta.mainLineUpdates, country.updated_at))
+      setCountryMainBlocks(compactBlocks(countryMeta.mainBlocks, country.notes || "", country.updated_at))
       setCountrySections(countryMeta.mainSections)
       setCountryTabs(countryMeta.sections)
     } else {
@@ -2283,6 +2359,17 @@ export default function CountryCompanyInfoPage() {
     setSuggestions([])
     setSearchInPage("")
     setMenuOpen(false)
+  }
+
+  async function openPortInline(id: string) {
+    await loadSelected("port", id)
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("kind", "port")
+      url.searchParams.set("id", id)
+      window.history.replaceState({}, "", url.toString())
+    }
+    setSearchInPage("")
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -2944,7 +3031,7 @@ export default function CountryCompanyInfoPage() {
                             </div>
                             <div>
                               {section.table ? (
-                                <SimpleTable table={section.table} onChange={(table) => updateMainSectionTable(sectionIndex, table)} />
+                                <SimpleTable table={section.table} columnWidths={section.column_widths} onSave={(table, widths) => updateMainSectionTable(sectionIndex, table, widths)} />
                               ) : (
                                 <BlockTextBlock
                                   blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
@@ -3009,7 +3096,7 @@ export default function CountryCompanyInfoPage() {
                                   </div>
                                   <div>
                                     {section.table ? (
-                                      <SimpleTable table={section.table} onChange={(table) => updateNestedSectionTable(index, sectionIndex, table)} />
+                                      <SimpleTable table={section.table} columnWidths={section.column_widths} onSave={(table, widths) => updateNestedSectionTable(index, sectionIndex, table, widths)} />
                                     ) : (
                                       <BlockTextBlock
                                         blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
@@ -3145,7 +3232,7 @@ export default function CountryCompanyInfoPage() {
                                   </>
                                 ) : (
                                   <>
-                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
+                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
                                       <HighlightedInlineText value={port.name} query={searchInPage} />
                                     </a>
                                     <div onDoubleClick={() => startCountryPortEditing(port)} style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
@@ -3172,7 +3259,7 @@ export default function CountryCompanyInfoPage() {
                                       {editingCountryPortId === port.id ? (
                                         <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }} />
                                       ) : (
-                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} style={{ color: "#bfe6ff", fontWeight: 700, textDecoration: "none" }}>
+                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "#bfe6ff", fontWeight: 700, textDecoration: "none" }}>
                                         <HighlightedInlineText value={port.name} query={searchInPage} />
                                         </a>
                                       )}
