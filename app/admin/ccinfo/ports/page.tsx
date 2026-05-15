@@ -52,6 +52,8 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "13px",
   fontWeight: 700,
 }
+const navLinkStyle: React.CSSProperties = { ...buttonStyle, padding: "8px 12px", fontSize: "12px", fontWeight: 800, background: "linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.06) 100%)" }
+const activeNavLinkStyle: React.CSSProperties = { ...navLinkStyle, background: "linear-gradient(180deg, rgba(143,215,255,0.28) 0%, rgba(54,123,184,0.16) 100%)", color: "#ffffff", border: "1px solid rgba(143,215,255,0.32)" }
 
 export default function PortIndexPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
@@ -115,6 +117,12 @@ export default function PortIndexPage() {
             <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
           </div>
         </div>
+
+        <nav style={{ ...panelStyle, padding: "10px 12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          <a href="/admin/ccinfo/countries" style={navLinkStyle}>Country Index</a>
+          <a href="/admin/ccinfo/ports" style={activeNavLinkStyle}>Port Index</a>
+          <a href="/admin/ccinfo/companies" style={navLinkStyle}>Company Index</a>
+        </nav>
 
         <div style={{ ...panelStyle, padding: "12px 14px" }}>
           <input

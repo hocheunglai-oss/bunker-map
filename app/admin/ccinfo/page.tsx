@@ -715,13 +715,8 @@ function BlockTextBlock({
             }}
           >
             {editingBlockId === block.id ? (
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "6px", alignItems: "center", padding: "0" }}>
-                <AutoSizeTextarea
-                  value={block.content}
-                  onChange={(event) => onBlockChange?.(block.id, event.target.value)}
-                  style={{ ...textareaStyle, minHeight: "1.55em", padding: "0 2px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", lineHeight: 1.55 }}
-                />
-                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              <div style={{ display: "grid", gap: "6px", padding: "0" }}>
+                <div style={{ display: "flex", gap: "4px", alignItems: "center", justifyContent: "flex-end", position: "sticky", top: "8px", zIndex: 4 }}>
                   <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
                   <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2 }}>Cancel</button>
                   <button
@@ -734,6 +729,11 @@ function BlockTextBlock({
                     x
                   </button>
                 </div>
+                <AutoSizeTextarea
+                  value={block.content}
+                  onChange={(event) => onBlockChange?.(block.id, event.target.value)}
+                  style={{ ...textareaStyle, minHeight: "1.55em", maxHeight: "62vh", padding: "0 2px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", lineHeight: 1.55 }}
+                />
               </div>
             ) : (
               <>
@@ -943,9 +943,11 @@ function AutoSizeTextarea({
     const computed = window.getComputedStyle(node)
     const fontSize = Number.parseFloat(computed.fontSize) || 14
     const lineHeight = Number.parseFloat(computed.lineHeight) || fontSize * 1.55
+    const maxHeight = style?.maxHeight ? window.innerHeight * 0.62 : Number.POSITIVE_INFINITY
     node.style.height = "0px"
-    node.style.height = `${node.scrollHeight + lineHeight}px`
-  }, [value])
+    node.style.height = `${Math.min(node.scrollHeight + lineHeight, maxHeight)}px`
+    node.style.overflowY = node.scrollHeight + lineHeight > maxHeight ? "auto" : "hidden"
+  }, [style?.maxHeight, value])
 
   return (
     <textarea
@@ -957,7 +959,6 @@ function AutoSizeTextarea({
       rows={1}
       style={{
         ...style,
-        overflow: "hidden",
         resize: "none",
       }}
     />
@@ -979,6 +980,7 @@ export default function CountryCompanyInfoPage() {
   const [selectedId, setSelectedId] = useState("")
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
+  const [nameUnlocked, setNameUnlocked] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
@@ -1661,6 +1663,7 @@ export default function CountryCompanyInfoPage() {
     setPreviewModalOpen(false)
     setSearchInPage("")
     setActiveInfoTab("general")
+    setNameUnlocked(false)
   }
 
   async function loadCompany(id: string) {
@@ -1695,6 +1698,7 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
+    setNameUnlocked(false)
   }
 
   async function loadCountry(id: string) {
@@ -1734,6 +1738,7 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
+    setNameUnlocked(false)
   }
 
   async function loadPort(id: string) {
@@ -1765,6 +1770,7 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
+    setNameUnlocked(false)
 
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", port.country_id).single()
@@ -1806,6 +1812,7 @@ export default function CountryCompanyInfoPage() {
       if (kind === "port") await loadPort(id)
       setSelectedKind(kind)
       setSelectedId(id)
+      setNameUnlocked(false)
     } catch {
       setMessage("Unable to load entry.")
     } finally {
@@ -1820,6 +1827,7 @@ export default function CountryCompanyInfoPage() {
       const { data, error } = await supabase.from("cc_companies").insert({ name: "NEW COMPANY", category: "company", summary: null, notes: "No info", contacts: null, tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create company.")
       await loadSelected("company", data.id)
+      setNameUnlocked(true)
       addChangeLog({ label: "NEW COMPANY added", entryKind: "company", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
@@ -1827,13 +1835,29 @@ export default function CountryCompanyInfoPage() {
       const { data, error } = await supabase.from("cc_countries").insert({ name: "NEW COUNTRY", summary: null, notes: "No info", tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create country.")
       await loadSelected("country", data.id)
+      setNameUnlocked(true)
       addChangeLog({ label: "NEW COUNTRY added", entryKind: "country", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
     const { data, error } = await supabase.from("cc_ports").insert({ name: "NEW PORT", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
     if (error || !data) return setMessage("Unable to create port.")
     await loadSelected("port", data.id)
+    setNameUnlocked(true)
     addChangeLog({ label: "NEW PORT added", entryKind: "port", entryId: data.id, field: "notes", before: "", after: "No info" })
+  }
+
+  function unlockNameEditing() {
+    if (!selectedId) return
+    if (currentRecord.name.startsWith("NEW ")) {
+      setNameUnlocked(true)
+      return
+    }
+    const answer = prompt(`Type RENAME to unlock ${mainLabel.toLowerCase()} name editing.`)?.trim().toUpperCase()
+    if (answer === "RENAME") {
+      setNameUnlocked(true)
+      return
+    }
+    if (answer) setMessage("Name editing remains locked.")
   }
 
   async function addPortUnderCountry() {
@@ -1942,6 +1966,7 @@ export default function CountryCompanyInfoPage() {
           if (countryError) throw countryError
         }
       }
+      if (nameUnlocked) setNameUnlocked(false)
       setMessage("Saved.")
     } catch {
       setMessage("Unable to save.")
@@ -2368,6 +2393,17 @@ export default function CountryCompanyInfoPage() {
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("kind", "port")
+      url.searchParams.set("id", id)
+      window.history.replaceState({}, "", url.toString())
+    }
+    setSearchInPage("")
+  }
+
+  async function openCountryInline(id: string) {
+    await loadSelected("country", id)
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("kind", "country")
       url.searchParams.set("id", id)
       window.history.replaceState({}, "", url.toString())
     }
@@ -2860,7 +2896,34 @@ export default function CountryCompanyInfoPage() {
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{mainLabel}</div>
-                      <input value={currentRecord.name} onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value.toUpperCase() }))} style={inputStyle} />
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center" }}>
+                        <input
+                          value={currentRecord.name}
+                          readOnly={!nameUnlocked}
+                          onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value.toUpperCase() }))}
+                          style={{
+                            ...inputStyle,
+                            opacity: nameUnlocked ? 1 : 0.86,
+                            borderColor: nameUnlocked ? "rgba(143, 215, 255, 0.36)" : "rgba(210,236,255,0.12)",
+                            cursor: nameUnlocked ? "text" : "not-allowed",
+                          }}
+                        />
+                        <button type="button" onClick={nameUnlocked ? () => setNameUnlocked(false) : unlockNameEditing} disabled={!selectedId} style={{ ...buttonStyle, padding: "9px 12px", fontSize: "11px" }}>
+                          {nameUnlocked ? "Lock Name" : "Rename"}
+                        </button>
+                      </div>
+                      {selectedKind === "port" && currentCountry.name ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (currentCountry.id) void openCountryInline(currentCountry.id)
+                          }}
+                          disabled={!currentCountry.id}
+                          style={{ border: "none", background: "transparent", color: currentCountry.id ? "#bfe6ff" : "#91badb", padding: "7px 0 0", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, cursor: currentCountry.id ? "pointer" : "default" }}
+                        >
+                          COUNTRY: {currentCountry.name}
+                        </button>
+                      ) : null}
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
                       <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
@@ -3135,13 +3198,11 @@ export default function CountryCompanyInfoPage() {
                       {countrySections.length > 0 && (
                         <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                           {countrySections.map((section, sectionIndex) => (
-                            <div key={`country-main-section-${sectionIndex}`} style={{ borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
-                              <div style={{ borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", color: "#bfe6ff", padding: "9px 12px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
+                            <div key={`country-main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                              <div style={{ color: "#bfe6ff", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
                                 <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                               </div>
-                              <div style={{ padding: "10px" }}>
-                                <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
-                              </div>
+                              <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
                             </div>
                           ))}
                         </div>
@@ -3157,13 +3218,11 @@ export default function CountryCompanyInfoPage() {
                           {(tab.sections || []).length > 0 && (
                             <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                               {(tab.sections || []).map((section, sectionIndex) => (
-                                <div key={`country-nested-${index}-${sectionIndex}`} style={{ borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
-                                  <div style={{ borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", color: "#bfe6ff", padding: "9px 12px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
+                                <div key={`country-nested-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                                  <div style={{ color: "#bfe6ff", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
                                     <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                                   </div>
-                                  <div style={{ padding: "10px" }}>
-                                    <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
-                                  </div>
+                                  <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
                                 </div>
                               ))}
                             </div>
