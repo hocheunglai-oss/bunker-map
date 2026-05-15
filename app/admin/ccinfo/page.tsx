@@ -715,18 +715,18 @@ function BlockTextBlock({
             }}
           >
             {editingBlockId === block.id ? (
-              <div style={{ display: "grid", gap: "6px", padding: "0" }}>
-                <div style={{ display: "flex", gap: "4px", alignItems: "center", justifyContent: "flex-end", position: "sticky", top: "8px", zIndex: 4 }}>
-                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
-                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2 }}>Cancel</button>
+              <div style={{ display: "grid", gap: "8px", padding: "0" }}>
+                <div style={{ display: "flex", gap: "7px", alignItems: "center", justifyContent: "flex-end", position: "sticky", top: "8px", zIndex: 4 }}>
+                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2 }}>Cancel</button>
                   <button
                     type="button"
                     onClick={() => {
                       if (confirm("Delete this line?")) onBlockDelete?.(block.id)
                     }}
-                    style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
+                    style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
                   >
-                    x
+                    X
                   </button>
                 </div>
                 <AutoSizeTextarea
