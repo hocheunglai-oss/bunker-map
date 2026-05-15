@@ -100,7 +100,7 @@ export default function PortIndexPage() {
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: 40 }}>Access Denied</p>
-  if (adminLoading || loading) return <p style={{ padding: 40 }}>Loading...</p>
+  if (adminLoading) return <p style={{ padding: 40 }}>Loading...</p>
 
   return (
     <div style={pageStyle}>
@@ -126,6 +126,7 @@ export default function PortIndexPage() {
         </div>
 
         <section style={{ ...panelStyle, overflow: "hidden" }}>
+          {loading && <div style={{ padding: "10px 12px", color: "#8fd7ff", fontSize: "12px", fontWeight: 700 }}>Loading results...</div>}
           <div style={{ overflowX: "auto" }}>
             <table style={tableStyle}>
               <thead>

@@ -669,7 +669,9 @@ function BlockTextBlock({
           <div key={block.id}>
           {insertButton(index)}
           <div
-            onMouseEnter={() => setHoveredBlockId(block.id)}
+            onMouseEnter={() => {
+              if (hoveredInsertIndex === null) setHoveredBlockId(block.id)
+            }}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
               event.stopPropagation()
@@ -681,8 +683,8 @@ function BlockTextBlock({
               padding: "3px 2px",
               margin: "1px -2px",
               position: "relative",
-              background: hoveredBlockId === block.id ? "rgba(185, 224, 255, 0.09)" : "transparent",
-              boxShadow: hoveredBlockId === block.id ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
+              background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "rgba(185, 224, 255, 0.09)" : "transparent",
+              boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
             }}
           >
             {editingBlockId === block.id ? (
@@ -708,7 +710,7 @@ function BlockTextBlock({
               </div>
             ) : (
               <>
-            {hoveredBlockId === block.id && stamp ? (
+            {hoveredBlockId === block.id && hoveredInsertIndex === null && stamp ? (
               <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "rgba(7, 20, 35, 0.92)", color: "#eaf7ff", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
                 {stamp}
               </span>
@@ -831,6 +833,7 @@ export default function CountryCompanyInfoPage() {
   const filePickerRef = useRef<HTMLInputElement | null>(null)
   const suggestionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const highlightTitleInputRef = useRef<HTMLInputElement | null>(null)
+  const addPortNameInputRef = useRef<HTMLInputElement | null>(null)
 
   const [query, setQuery] = useState("")
   const [suggestions, setSuggestions] = useState<SearchRecord[]>([])
@@ -925,6 +928,11 @@ export default function CountryCompanyInfoPage() {
     if (!highlightModalOpen) return
     window.setTimeout(() => highlightTitleInputRef.current?.focus(), 30)
   }, [highlightModalOpen])
+
+  useEffect(() => {
+    if (!addPortModalOpen) return
+    window.setTimeout(() => addPortNameInputRef.current?.focus(), 30)
+  }, [addPortModalOpen])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1304,6 +1312,38 @@ export default function CountryCompanyInfoPage() {
       setMessage("Section saved.")
     } catch {
       setMessage("Unable to save section.")
+    }
+  }
+
+  async function moveNestedSection(tabIndex: number, sectionIndex: number, direction: -1 | 1) {
+    const targetIndex = sectionIndex + direction
+    const tab = highlights[tabIndex]
+    const sections = [...(tab?.sections || [])]
+    if (!tab || targetIndex < 0 || targetIndex >= sections.length) return
+    const [moved] = sections.splice(sectionIndex, 1)
+    sections.splice(targetIndex, 0, moved)
+    const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === tabIndex ? { ...item, sections } : item))
+    setHighlights(nextHighlights)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section order updated.")
+    } catch {
+      setMessage("Unable to reorder sections.")
+    }
+  }
+
+  async function deleteNestedSection(tabIndex: number, sectionIndex: number) {
+    if (!confirm("Delete this section?")) return
+    const nextHighlights = highlights.map((item, itemIndex) => {
+      if (itemIndex !== tabIndex) return item
+      return { ...item, sections: (item.sections || []).filter((_, index) => index !== sectionIndex) }
+    })
+    setHighlights(nextHighlights)
+    try {
+      await persistHighlights(nextHighlights)
+      setMessage("Section deleted.")
+    } catch {
+      setMessage("Unable to delete section.")
     }
   }
 
@@ -2408,9 +2448,52 @@ export default function CountryCompanyInfoPage() {
                 Country And Company Info
               </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
-              <a href="/admin" style={{ ...buttonStyle, display: "block", textAlign: "center", marginBottom: "16px" }}>
-                ← Back To Admin
-              </a>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 42px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
+                <a href="/admin" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
+                  ← Back To Admin
+                </a>
+                <div style={{ position: "relative" }}>
+                  <button
+                    onClick={() => setMenuOpen((prev) => !prev)}
+                    style={{
+                      ...buttonStyle,
+                      width: "42px",
+                      height: "42px",
+                      padding: 0,
+                      borderRadius: "50%",
+                      background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
+                      color: "#e7f3ff",
+                      border: "1px solid rgba(108, 185, 255, 0.24)",
+                      fontSize: "22px",
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ≡
+                  </button>
+                  {menuOpen && (
+                    <div
+                      style={{ ...panelStyle, position: "absolute", right: 0, top: "48px", padding: "8px", display: "grid", gap: "6px", minWidth: "150px", zIndex: 20 }}
+                      onMouseEnter={() => {
+                        if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
+                      }}
+                      onMouseLeave={() => {
+                        menuCloseTimerRef.current = window.setTimeout(() => setMenuOpen(false), 650)
+                      }}
+                    >
+                      <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
+                      <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
+                      <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
+                      <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
+                      <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
+                      <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
+                      <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
+                        {backingUp ? "Preparing Backup..." : "Download Backup"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {!initialMode && (
                 <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
@@ -2444,7 +2527,7 @@ export default function CountryCompanyInfoPage() {
                 </div>
               )}
 
-              <div style={{ marginTop: "auto", display: "flex", justifyContent: "flex-end" }}>
+              <div style={{ marginTop: "auto", display: "none", justifyContent: "flex-end" }}>
                 <div style={{ position: "relative" }}>
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
@@ -2671,11 +2754,8 @@ export default function CountryCompanyInfoPage() {
                     </button>
                     {selectedKind === "port" && (
                       <>
-                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "country-general" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
-                          GENERAL INFORMATION
-                        </button>
                         {countryTabs.map((tab, index) => (
-                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `country-section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
+                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `country-section-${index}` ? "linear-gradient(180deg, rgba(70, 132, 190, 0.26) 0%, rgba(26, 78, 126, 0.16) 100%)" : "rgba(120,170,210,0.05)", color: "#a9cdea" }}>
                             {(tab.title || `TAB ${index + 1}`).toUpperCase()}
                           </button>
                         ))}
@@ -2719,7 +2799,7 @@ export default function CountryCompanyInfoPage() {
                         style={{
                           ...buttonStyle,
                           borderRadius: "12px 12px 0 0",
-                          background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)",
+                          background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.08)",
                           boxShadow: dropTabIndex === index ? `${dropTabSide === "left" ? "inset 3px 0 0 #bfe6ff" : "inset -3px 0 0 #bfe6ff"}, ${buttonStyle.boxShadow}` : buttonStyle.boxShadow,
                           transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
                           opacity: draggingTabIndex === index ? 0.62 : 1,
@@ -2762,8 +2842,8 @@ export default function CountryCompanyInfoPage() {
                     {mainSections.length > 0 && (
                       <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                         {mainSections.map((section, sectionIndex) => (
-                          <div key={`main-section-${sectionIndex}`} style={{ borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", padding: "8px 10px" }}>
+                          <div key={`main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
                               <button type="button" onDoubleClick={() => renameMainSection(sectionIndex)} style={{ border: "none", background: "transparent", color: "#bfe6ff", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}>
                                 <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                               </button>
@@ -2773,7 +2853,7 @@ export default function CountryCompanyInfoPage() {
                                 <button type="button" onClick={() => void deleteMainSection(sectionIndex)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>x</button>
                               </div>
                             </div>
-                            <div style={{ padding: "10px" }}>
+                            <div>
                               <BlockTextBlock
                                 blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
                                 fallbackUpdatedAt={currentRecord.updated_at}
@@ -2815,19 +2895,26 @@ export default function CountryCompanyInfoPage() {
                           {(highlight.sections || []).length > 0 && (
                             <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                               {(highlight.sections || []).map((section, sectionIndex) => (
-                                <div key={`nested-section-${index}-${sectionIndex}`} style={{ borderRadius: "16px", overflow: "hidden", background: "rgba(255,255,255,0.018)" }}>
-                                  <button
-                                    type="button"
-                                    onDoubleClick={(event) => {
-                                      event.stopPropagation()
-                                      renameNestedSection(index, sectionIndex)
-                                    }}
-                                    style={{ width: "100%", border: "none", borderBottom: "1px solid rgba(143, 215, 255, 0.18)", background: "linear-gradient(180deg, rgba(71, 149, 221, 0.28) 0%, rgba(36, 99, 159, 0.18) 100%)", color: "#bfe6ff", textAlign: "left", padding: "9px 12px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}
-                                    title="Double click to rename section"
-                                  >
-                                    <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
-                                  </button>
-                                  <div style={{ padding: "10px" }}>
+                                <div key={`nested-section-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                                    <button
+                                      type="button"
+                                      onDoubleClick={(event) => {
+                                        event.stopPropagation()
+                                        renameNestedSection(index, sectionIndex)
+                                      }}
+                                      style={{ border: "none", background: "transparent", color: "#bfe6ff", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}
+                                      title="Double click to rename section"
+                                    >
+                                      <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
+                                    </button>
+                                    <div style={{ display: "flex", gap: "5px" }}>
+                                      <button type="button" onClick={() => void moveNestedSection(index, sectionIndex, -1)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>↑</button>
+                                      <button type="button" onClick={() => void moveNestedSection(index, sectionIndex, 1)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>↓</button>
+                                      <button type="button" onClick={() => void deleteNestedSection(index, sectionIndex)} style={{ ...buttonStyle, padding: "3px 7px", fontSize: "10px" }}>x</button>
+                                    </div>
+                                  </div>
+                                  <div>
                                     <BlockTextBlock
                                       blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
                                       fallbackUpdatedAt={currentRecord.updated_at}
@@ -2851,7 +2938,7 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  {selectedKind === "port" && activeInfoTab === "country-general" && (
+                  {selectedKind === "port" && false && activeInfoTab === "country-general" && (
                     <div>
                       <BlockTextBlock
                         blocks={countryMainBlocks.length ? countryMainBlocks : textToBlocks(currentCountry.notes || "", {}, currentCountry.updated_at)}
@@ -2900,7 +2987,7 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  {selectedKind === "port" && (
+                  {selectedKind === "port" && false && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{countryInformationLabel}</div>
@@ -2949,7 +3036,7 @@ export default function CountryCompanyInfoPage() {
                         ) : isMobile ? (
                           <div style={{ display: "grid", gap: "8px", padding: "10px" }}>
                             {currentCountryPorts.map((port) => (
-                              <div key={port.id} onDoubleClick={() => startCountryPortEditing(port)} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
+                              <div key={port.id} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
                                 {editingCountryPortId === port.id ? (
                                   <>
                                     <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
@@ -2961,10 +3048,10 @@ export default function CountryCompanyInfoPage() {
                                   </>
                                 ) : (
                                   <>
-                                    <div style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px" }}>
+                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
                                       <HighlightedInlineText value={port.name} query={searchInPage} />
-                                    </div>
-                                    <div style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                                    </a>
+                                    <div onDoubleClick={() => startCountryPortEditing(port)} style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
                                       <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
                                     </div>
                                   </>
@@ -2983,17 +3070,17 @@ export default function CountryCompanyInfoPage() {
                               </thead>
                               <tbody>
                                 {currentCountryPorts.map((port) => (
-                                  <tr key={port.id} onDoubleClick={() => startCountryPortEditing(port)} style={{ cursor: "text" }}>
+                                  <tr key={port.id}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
                                       {editingCountryPortId === port.id ? (
                                         <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }} />
                                       ) : (
-                                        <span style={{ color: "#bfe6ff", fontWeight: 700 }}>
+                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} style={{ color: "#bfe6ff", fontWeight: 700, textDecoration: "none" }}>
                                         <HighlightedInlineText value={port.name} query={searchInPage} />
-                                        </span>
+                                        </a>
                                       )}
                                     </td>
-                                    <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                                    <td onDoubleClick={() => startCountryPortEditing(port)} style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap", cursor: "text" }}>
                                       {editingCountryPortId === port.id ? (
                                         <div style={{ display: "grid", gap: "8px" }}>
                                           <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "calc(1em + 28px)", padding: "7px 9px", fontSize: "12px" }} />
@@ -3176,7 +3263,7 @@ export default function CountryCompanyInfoPage() {
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>Add Port</div>
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port</div>
-              <input value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
+              <input ref={addPortNameInputRef} value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
             </div>
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port Information</div>
