@@ -1005,7 +1005,7 @@ export default function CountryCompanyInfoPage() {
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [recordNameDraft, setRecordNameDraft] = useState("")
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
-  const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "" })
+  const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "", countryId: "", countryName: "" })
   const [editingCountryPortId, setEditingCountryPortId] = useState("")
   const [countryPortDraft, setCountryPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
@@ -1048,6 +1048,9 @@ export default function CountryCompanyInfoPage() {
   })
 
   const initialMode = !selectedId
+  const filteredAddPortCountryOptions = countryOptions
+    .filter((country) => country.name.includes(addPortDraft.countryName.trim().toUpperCase()))
+    .slice(0, 12)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1837,10 +1840,8 @@ export default function CountryCompanyInfoPage() {
       addChangeLog({ label: "NEW COUNTRY added", entryKind: "country", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
-    const { data, error } = await supabase.from("cc_ports").insert({ name: "NEW PORT", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
-    if (error || !data) return setMessage("Unable to create port.")
-    await loadSelected("port", data.id)
-    addChangeLog({ label: "NEW PORT added", entryKind: "port", entryId: data.id, field: "notes", before: "", after: "No info" })
+    setAddPortDraft({ name: "", notes: "", countryId: "", countryName: "" })
+    setAddPortModalOpen(true)
   }
 
   function openRecordModal() {
@@ -1874,16 +1875,25 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
-  async function addPortUnderCountry() {
+  function openAddPortForCurrentCountry() {
     if (selectedKind !== "country" || !selectedId) return
+    setAddPortDraft({ name: "", notes: "", countryId: selectedId, countryName: currentRecord.name.trim().toUpperCase() })
+    setAddPortModalOpen(true)
+  }
+
+  async function addPort() {
     if (!addPortDraft.name.trim()) {
       setMessage("Port name is required.")
       return
     }
-    const countryName = currentRecord.name.trim() || currentCountry.name.trim() || "New Country"
+    const matchedCountry = countryOptions.find((country) => country.id === addPortDraft.countryId || country.name === addPortDraft.countryName.trim().toUpperCase())
+    if (!matchedCountry) {
+      setMessage("Country is required. Please select an existing country.")
+      return
+    }
     const { data, error } = await supabase
       .from("cc_ports")
-      .insert({ name: addPortDraft.name.trim().toUpperCase(), summary: null, notes: addPortDraft.notes || "", country_id: selectedId, country_name: countryName.toUpperCase(), tags: [], status: "active" })
+      .insert({ name: addPortDraft.name.trim().toUpperCase(), summary: null, notes: addPortDraft.notes || "", country_id: matchedCountry.id, country_name: matchedCountry.name, tags: [], status: "active" })
       .select("id,name,summary,notes")
       .single()
     if (error || !data) {
@@ -1891,11 +1901,14 @@ export default function CountryCompanyInfoPage() {
       return
     }
     const nextPort = data as CountryPortListItem
-    setCurrentCountryPorts((prev) => [...prev, nextPort].sort((a, b) => a.name.localeCompare(b.name)))
+    if (selectedKind === "country" && selectedId === matchedCountry.id) {
+      setCurrentCountryPorts((prev) => [...prev, nextPort].sort((a, b) => a.name.localeCompare(b.name)))
+    }
     setAddPortModalOpen(false)
-    setAddPortDraft({ name: "", notes: "" })
-    addSimpleChangeLog(`${changeLogSubject("country", currentRecord.name)} New Port Added`)
+    setAddPortDraft({ name: "", notes: "", countryId: "", countryName: "" })
+    addSimpleChangeLog(`${matchedCountry.name} New Port Added`)
     setMessage("Port added.")
+    await loadSelected("port", nextPort.id)
   }
 
   function startCountryPortEditing(port: CountryPortListItem) {
@@ -3299,7 +3312,7 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "country" && activeInfoTab === "ports" && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                        <button onClick={() => setAddPortModalOpen(true)} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
+                        <button onClick={openAddPortForCurrentCountry} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
                           Add Port
                         </button>
                       </div>
@@ -3593,7 +3606,7 @@ export default function CountryCompanyInfoPage() {
           style={{ position: "fixed", inset: 0, background: "rgba(1, 8, 18, 0.58)", display: "grid", placeItems: "center", padding: "20px", zIndex: 40 }}
           onClick={() => {
             setAddPortModalOpen(false)
-            setAddPortDraft({ name: "", notes: "" })
+            setAddPortDraft({ name: "", notes: "", countryId: "", countryName: "" })
           }}
         >
           <div style={{ ...panelStyle, width: "min(580px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
@@ -3602,13 +3615,46 @@ export default function CountryCompanyInfoPage() {
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port</div>
               <input ref={addPortNameInputRef} value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
             </div>
+            <div style={{ position: "relative" }}>
+              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Country</div>
+              <input
+                value={addPortDraft.countryName}
+                onFocus={() => setCountryDropdownOpen(true)}
+                onChange={(event) => setAddPortDraft((prev) => ({ ...prev, countryName: event.target.value.toUpperCase(), countryId: "" }))}
+                onBlur={() => window.setTimeout(() => setCountryDropdownOpen(false), 160)}
+                style={inputStyle}
+                placeholder="SELECT COUNTRY"
+              />
+              {countryDropdownOpen && (
+                <div style={{ ...panelStyle, position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 60, padding: "6px", display: "grid", gap: "4px", maxHeight: "240px", overflowY: "auto" }}>
+                  {filteredAddPortCountryOptions.length === 0 ? (
+                    <div style={{ padding: "8px", color: "#91badb", fontSize: "12px" }}>No matching country</div>
+                  ) : (
+                    filteredAddPortCountryOptions.map((country) => (
+                      <button
+                        type="button"
+                        key={country.id}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setAddPortDraft((prev) => ({ ...prev, countryId: country.id, countryName: country.name }))
+                          setCountryDropdownOpen(false)
+                        }}
+                        style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === addPortDraft.countryId ? "linear-gradient(180deg, rgba(56, 214, 154, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)" : "rgba(255,255,255,0.04)" }}
+                      >
+                        {country.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port Information</div>
               <textarea value={addPortDraft.notes} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "180px" }} />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
               <button type="button" onClick={() => setAddPortModalOpen(false)} style={buttonStyle}>Cancel</button>
-              <button type="button" onClick={() => void addPortUnderCountry()} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>Save Port</button>
+              <button type="button" onClick={() => void addPort()} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>Save Port</button>
             </div>
           </div>
         </div>
