@@ -2441,6 +2441,14 @@ export default function CountryCompanyInfoPage() {
         : selectedKind === "company"
           ? "Company Name"
           : "Name"
+  const recordDeleteLabel =
+    selectedKind === "country"
+      ? "Delete this Country"
+      : selectedKind === "port"
+        ? "Delete this Port"
+        : selectedKind === "company"
+          ? "Delete this Company"
+          : "Delete this Entry"
   const informationLabel =
     selectedKind === "port"
       ? "Port Information"
@@ -3405,11 +3413,6 @@ export default function CountryCompanyInfoPage() {
 
                   {isMobile && fileSection}
 
-                  {message && !/saved|deleted|updated|uploaded|complete|added|moved|created/i.test(message) && (
-                    <div style={{ color: "#ffb0b0", fontWeight: 700 }}>
-                      {message}
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -3568,7 +3571,7 @@ export default function CountryCompanyInfoPage() {
                 disabled={!selectedId}
                 style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
               >
-                Delete
+                {recordDeleteLabel}
               </button>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button type="button" onClick={() => setRecordModalOpen(false)} style={buttonStyle}>Cancel</button>
@@ -3597,7 +3600,7 @@ export default function CountryCompanyInfoPage() {
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>Add Port</div>
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port</div>
-              <input ref={addPortNameInputRef} value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
+              <input ref={addPortNameInputRef} value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
             </div>
             <div>
               <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port Information</div>
