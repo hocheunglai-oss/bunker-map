@@ -11,6 +11,7 @@
     "auth:google-drive": "node scripts/auth-google-drive.mjs",
     "backup:bunker-map-drive": "node scripts/backup-bunker-map-drive.mjs",
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
+    "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",

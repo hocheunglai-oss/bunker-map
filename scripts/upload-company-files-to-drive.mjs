@@ -237,6 +237,11 @@ async function uploadFileToDrive(drive, filePath, parentFolderId) {
 
   const fileId = response.data.id
   if (!fileId) throw new Error(`Unable to upload ${filePath}`)
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role: "reader", type: "anyone" },
+    supportsAllDrives: true,
+  })
 
   return {
     fileId,

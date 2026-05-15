@@ -23,14 +23,18 @@ async function getDriveClient() {
     process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1",
   )
   const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
-  if (refreshToken) {
-    auth.setCredentials({ refresh_token: refreshToken })
-  } else {
-    if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+  const useHostedToken = process.env.VERCEL || process.env.NODE_ENV === "production"
+  if (useHostedToken) {
+    if (!refreshToken) {
       throw new Error("Google Drive is not authorized on the hosted app yet. Add GOOGLE_DRIVE_REFRESH_TOKEN in Vercel.")
     }
-    const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
-    auth.setCredentials(JSON.parse(tokenRaw))
+    auth.setCredentials({ refresh_token: refreshToken })
+  } else if (fsSync.existsSync(TOKEN_PATH)) {
+    auth.setCredentials(JSON.parse(await fs.readFile(TOKEN_PATH, "utf8")))
+  } else if (refreshToken) {
+    auth.setCredentials({ refresh_token: refreshToken })
+  } else {
+    throw new Error("Google Drive is not authorized. Run npm run auth:google-drive.")
   }
   return {
     drive: google.drive({ version: "v3", auth }),
@@ -89,6 +93,17 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
   })
   if (!created.data.id) throw new Error(`Unable to create folder ${name}`)
   return created.data.id
+}
+
+async function makeDriveFilePublic(drive: any, fileId: string) {
+  await drive.permissions.create({
+    fileId,
+    requestBody: {
+      role: "reader",
+      type: "anyone",
+    },
+    supportsAllDrives: true,
+  })
 }
 
 export async function POST(request: Request) {
@@ -150,6 +165,7 @@ export async function POST(request: Request) {
 
     const fileId = uploaded.data.id
     if (!fileId) throw new Error("Google Drive upload failed.")
+    await makeDriveFilePublic(drive, fileId)
 
     const url = uploaded.data.webViewLink || uploaded.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`
 

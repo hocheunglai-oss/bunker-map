@@ -980,7 +980,6 @@ export default function CountryCompanyInfoPage() {
   const [selectedId, setSelectedId] = useState("")
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
-  const [nameUnlocked, setNameUnlocked] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
@@ -1663,7 +1662,6 @@ export default function CountryCompanyInfoPage() {
     setPreviewModalOpen(false)
     setSearchInPage("")
     setActiveInfoTab("general")
-    setNameUnlocked(false)
   }
 
   async function loadCompany(id: string) {
@@ -1698,7 +1696,6 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
-    setNameUnlocked(false)
   }
 
   async function loadCountry(id: string) {
@@ -1738,7 +1735,6 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
-    setNameUnlocked(false)
   }
 
   async function loadPort(id: string) {
@@ -1770,7 +1766,6 @@ export default function CountryCompanyInfoPage() {
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
     setActiveInfoTab("general")
-    setNameUnlocked(false)
 
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", port.country_id).single()
@@ -1812,7 +1807,6 @@ export default function CountryCompanyInfoPage() {
       if (kind === "port") await loadPort(id)
       setSelectedKind(kind)
       setSelectedId(id)
-      setNameUnlocked(false)
     } catch {
       setMessage("Unable to load entry.")
     } finally {
@@ -1827,7 +1821,6 @@ export default function CountryCompanyInfoPage() {
       const { data, error } = await supabase.from("cc_companies").insert({ name: "NEW COMPANY", category: "company", summary: null, notes: "No info", contacts: null, tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create company.")
       await loadSelected("company", data.id)
-      setNameUnlocked(true)
       addChangeLog({ label: "NEW COMPANY added", entryKind: "company", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
@@ -1835,29 +1828,38 @@ export default function CountryCompanyInfoPage() {
       const { data, error } = await supabase.from("cc_countries").insert({ name: "NEW COUNTRY", summary: null, notes: "No info", tags: [], status: "active" }).select("id").single()
       if (error || !data) return setMessage("Unable to create country.")
       await loadSelected("country", data.id)
-      setNameUnlocked(true)
       addChangeLog({ label: "NEW COUNTRY added", entryKind: "country", entryId: data.id, field: "notes", before: "", after: "No info" })
       return
     }
     const { data, error } = await supabase.from("cc_ports").insert({ name: "NEW PORT", summary: null, notes: "No info", country_name: null, tags: [], status: "active" }).select("id").single()
     if (error || !data) return setMessage("Unable to create port.")
     await loadSelected("port", data.id)
-    setNameUnlocked(true)
     addChangeLog({ label: "NEW PORT added", entryKind: "port", entryId: data.id, field: "notes", before: "", after: "No info" })
   }
 
-  function unlockNameEditing() {
-    if (!selectedId) return
-    if (currentRecord.name.startsWith("NEW ")) {
-      setNameUnlocked(true)
-      return
+  async function renameRecord() {
+    if (!selectedId || !selectedKind) return
+    const currentName = currentRecord.name.trim()
+    const nextName = prompt(`${mainLabel} name`, currentName)?.trim().toUpperCase()
+    if (!nextName || nextName === currentName) return
+    if (!currentName.startsWith("NEW ") && !confirm(`Rename ${currentName} to ${nextName}?`)) return
+    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
+    setSaving(true)
+    try {
+      const { error } = await supabase.from(table).update({ name: nextName }).eq("id", selectedId)
+      if (error) throw error
+      setCurrentRecord((prev) => ({ ...prev, name: nextName }))
+      if (selectedKind === "country") {
+        setCurrentCountry((prev) => ({ ...prev, name: nextName }))
+        await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_id", selectedId)
+        await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_name", currentName)
+      }
+      setMessage("Renamed.")
+    } catch {
+      setMessage("Unable to rename.")
+    } finally {
+      setSaving(false)
     }
-    const answer = prompt(`Type RENAME to unlock ${mainLabel.toLowerCase()} name editing.`)?.trim().toUpperCase()
-    if (answer === "RENAME") {
-      setNameUnlocked(true)
-      return
-    }
-    if (answer) setMessage("Name editing remains locked.")
   }
 
   async function addPortUnderCountry() {
@@ -1918,13 +1920,11 @@ export default function CountryCompanyInfoPage() {
   function renameHighlight(index: number) {
     const current = highlights[index]
     if (!current) return
-    const action = prompt(`Type a new tab name, or type DELETE to delete this tab.`, current.title || `TAB ${index + 1}`)?.trim()
-    if (!action) return
-    if (action.toUpperCase() === "DELETE") {
-      void deleteHighlightCard(index)
-      return
-    }
-    const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, title: normalizeSectionTitle(action) } : item))
+    const nextTitle = prompt("Tab name", current.title || `TAB ${index + 1}`)?.trim()
+    if (!nextTitle) return
+    const normalizedTitle = normalizeSectionTitle(nextTitle)
+    if (normalizedTitle === current.title) return
+    const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, title: normalizedTitle } : item))
     setHighlights(nextHighlights)
     void persistHighlights(nextHighlights)
   }
@@ -1966,7 +1966,6 @@ export default function CountryCompanyInfoPage() {
           if (countryError) throw countryError
         }
       }
-      if (nameUnlocked) setNameUnlocked(false)
       setMessage("Saved.")
     } catch {
       setMessage("Unable to save.")
@@ -2896,22 +2895,13 @@ export default function CountryCompanyInfoPage() {
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                     <div>
                       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{mainLabel}</div>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center" }}>
-                        <input
-                          value={currentRecord.name}
-                          readOnly={!nameUnlocked}
-                          onChange={(e) => setCurrentRecord((prev) => ({ ...prev, name: e.target.value.toUpperCase() }))}
-                          style={{
-                            ...inputStyle,
-                            opacity: nameUnlocked ? 1 : 0.86,
-                            borderColor: nameUnlocked ? "rgba(143, 215, 255, 0.36)" : "rgba(210,236,255,0.12)",
-                            cursor: nameUnlocked ? "text" : "not-allowed",
-                          }}
-                        />
-                        <button type="button" onClick={nameUnlocked ? () => setNameUnlocked(false) : unlockNameEditing} disabled={!selectedId} style={{ ...buttonStyle, padding: "9px 12px", fontSize: "11px" }}>
-                          {nameUnlocked ? "Lock Name" : "Rename"}
-                        </button>
-                      </div>
+                      <input
+                        value={currentRecord.name}
+                        readOnly
+                        onDoubleClick={() => void renameRecord()}
+                        title="Double click to rename"
+                        style={{ ...inputStyle, cursor: selectedId ? "text" : "default" }}
+                      />
                       {selectedKind === "port" && currentCountry.name ? (
                         <button
                           type="button"
@@ -3006,9 +2996,8 @@ export default function CountryCompanyInfoPage() {
                       </button>
                     )}
                     {highlights.map((highlight, index) => (
-                      <button
+                      <div
                         key={`tab-${index}`}
-                        type="button"
                         draggable
                         onDragStart={() => setDraggingTabIndex(index)}
                         onDragEnd={() => {
@@ -3045,10 +3034,25 @@ export default function CountryCompanyInfoPage() {
                           transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
                           opacity: draggingTabIndex === index ? 0.62 : 1,
                           transition: "transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          cursor: "pointer",
                         }}
                       >
-                        {(highlight.title || `Section ${index + 1}`).toUpperCase()}
-                      </button>
+                        <span>{(highlight.title || `Section ${index + 1}`).toUpperCase()}</span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void deleteHighlightCard(index)
+                          }}
+                          title="Delete tab"
+                          style={{ border: "none", width: "17px", height: "17px", borderRadius: "999px", background: "rgba(255,255,255,0.1)", color: "#d7e8ff", fontSize: "12px", lineHeight: "15px", cursor: "pointer", padding: 0 }}
+                        >
+                          ×
+                        </button>
+                      </div>
                     ))}
                     <button
                       type="button"
