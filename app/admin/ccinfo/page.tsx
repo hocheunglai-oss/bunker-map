@@ -669,8 +669,11 @@ function BlockTextBlock({
           <div key={block.id}>
           {insertButton(index)}
           <div
-            onMouseEnter={() => {
+            onMouseMove={() => {
               if (hoveredInsertIndex === null) setHoveredBlockId(block.id)
+            }}
+            onMouseLeave={() => {
+              setHoveredBlockId((current) => (current === block.id ? "" : current))
             }}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
@@ -2221,6 +2224,10 @@ export default function CountryCompanyInfoPage() {
       ? "Port Information"
       : "General Information"
   const mainInfoTabLabel = selectedKind === "port" ? "PORT INFORMATION" : "GENERAL INFORMATION"
+  const fixedTabBackground = "linear-gradient(180deg, rgba(54, 118, 176, 0.22) 0%, rgba(22, 70, 114, 0.14) 100%)"
+  const fixedTabActiveBackground = "linear-gradient(180deg, rgba(70, 142, 204, 0.34) 0%, rgba(30, 88, 142, 0.2) 100%)"
+  const userTabBackground = "linear-gradient(180deg, rgba(86, 164, 255, 0.22) 0%, rgba(32, 106, 194, 0.12) 100%)"
+  const userTabActiveBackground = "linear-gradient(180deg, rgba(86, 164, 255, 0.42) 0%, rgba(32, 106, 194, 0.24) 100%)"
   const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
   const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
   const fileSection = !initialMode ? (
@@ -2694,7 +2701,7 @@ export default function CountryCompanyInfoPage() {
                         {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
                       </button>
                       {selectedKind === "country" ? (
-                        <span style={{ color: "#9ec7e7", fontSize: "11px", fontWeight: 700 }}>Delete only allowed on Index page</span>
+                        <span style={{ color: "#9ec7e7", fontSize: "11px", fontWeight: 700, lineHeight: 1.25, textAlign: isMobile ? "left" : "right" }}>Country can only be<br />deleted on index page</span>
                       ) : (
                         <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                       )}
@@ -2749,20 +2756,23 @@ export default function CountryCompanyInfoPage() {
                   )}
 
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
-                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
+                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "general" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
                       {mainInfoTabLabel}
                     </button>
                     {selectedKind === "port" && (
                       <>
+                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "country-general" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
+                          GENERAL INFORMATION
+                        </button>
                         {countryTabs.map((tab, index) => (
-                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `country-section-${index}` ? "linear-gradient(180deg, rgba(70, 132, 190, 0.26) 0%, rgba(26, 78, 126, 0.16) 100%)" : "rgba(120,170,210,0.05)", color: "#a9cdea" }}>
+                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === `country-section-${index}` ? fixedTabActiveBackground : fixedTabBackground, color: "#a9cdea" }}>
                             {(tab.title || `TAB ${index + 1}`).toUpperCase()}
                           </button>
                         ))}
                       </>
                     )}
                     {selectedKind === "country" && (
-                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.05)" }}>
+                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: activeInfoTab === "ports" ? fixedTabActiveBackground : fixedTabBackground, color: "#b9d7ee" }}>
                         PORTS
                       </button>
                     )}
@@ -2799,7 +2809,7 @@ export default function CountryCompanyInfoPage() {
                         style={{
                           ...buttonStyle,
                           borderRadius: "12px 12px 0 0",
-                          background: activeInfoTab === `section-${index}` ? "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)" : "rgba(255,255,255,0.08)",
+                          background: activeInfoTab === `section-${index}` ? userTabActiveBackground : userTabBackground,
                           boxShadow: dropTabIndex === index ? `${dropTabSide === "left" ? "inset 3px 0 0 #bfe6ff" : "inset -3px 0 0 #bfe6ff"}, ${buttonStyle.boxShadow}` : buttonStyle.boxShadow,
                           transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
                           opacity: draggingTabIndex === index ? 0.62 : 1,
@@ -2938,7 +2948,7 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  {selectedKind === "port" && false && activeInfoTab === "country-general" && (
+                  {selectedKind === "port" && activeInfoTab === "country-general" && (
                     <div>
                       <BlockTextBlock
                         blocks={countryMainBlocks.length ? countryMainBlocks : textToBlocks(currentCountry.notes || "", {}, currentCountry.updated_at)}
@@ -3122,9 +3132,11 @@ export default function CountryCompanyInfoPage() {
 
                   {isMobile && fileSection}
 
-                  <div style={{ color: message === "Saved." || message === "Deleted." ? "#8ff0c8" : "#ffb0b0", fontWeight: 700 }}>
-                    {message}
-                  </div>
+                  {message && !/saved|deleted|updated|uploaded|complete|added|moved|created/i.test(message) && (
+                    <div style={{ color: "#ffb0b0", fontWeight: 700 }}>
+                      {message}
+                    </div>
+                  )}
                 </>
               )}
             </div>
