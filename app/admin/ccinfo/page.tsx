@@ -249,6 +249,8 @@ function blocksToText(blocks: InfoBlock[]) {
 }
 
 function compactBlocks(blocks: InfoBlock[], fallbackText: string | null | undefined = "", fallbackUpdatedAt?: string | null): InfoBlock[] {
+  const uniqueStamps = new Set(blocks.map((block) => block.updated_at).filter(Boolean))
+  if (blocks.length > 1 && uniqueStamps.size > 1) return blocks
   const text = blocks.length ? blocksToText(blocks) : fallbackText || ""
   if (!text) return []
   return [{ id: blocks[0]?.id || newBlockId(), content: text, updated_at: blocks[0]?.updated_at || fallbackUpdatedAt || new Date().toISOString() }]
@@ -639,20 +641,20 @@ function BlockTextBlock({
       <div
         onMouseEnter={() => setHoveredInsertIndex(index)}
         onMouseLeave={() => setHoveredInsertIndex(null)}
-        style={{ height: "4px", display: "grid", placeItems: "center", margin: "0", position: "relative" }}
+        style={{ height: "18px", display: "grid", placeItems: "center", margin: "2px 0", position: "relative" }}
       >
         <button
           type="button"
           onClick={() => onInsertBlock(index)}
           style={{
             width: "100%",
-            height: "12px",
+            height: "16px",
             borderRadius: 0,
             border: "none",
             background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.42) 0%, rgba(143, 215, 255, 0.42) 45%, transparent 45%, transparent 55%, rgba(143, 215, 255, 0.42) 55%, rgba(143, 215, 255, 0.42) 100%) center/100% 1px no-repeat" : "transparent",
             color: "#bfe6ff",
             fontSize: "13px",
-            lineHeight: "10px",
+            lineHeight: "13px",
             opacity: hoveredInsertIndex === index ? 1 : 0,
             cursor: "pointer",
             transition: "opacity 120ms ease, background 120ms ease",
@@ -705,8 +707,8 @@ function BlockTextBlock({
             style={{
               minHeight: "1.55em",
               borderRadius: "6px",
-              padding: "0 2px",
-              margin: "0 -2px",
+              padding: "3px 2px",
+              margin: "1px -2px",
               position: "relative",
               background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "rgba(185, 224, 255, 0.09)" : "transparent",
               boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
@@ -2865,7 +2867,7 @@ export default function CountryCompanyInfoPage() {
                         {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
                       </button>
                       {selectedKind === "country" ? (
-                        <span style={{ color: "#9ec7e7", fontSize: "11px", fontWeight: 700, lineHeight: 1.25, textAlign: isMobile ? "left" : "right" }}>Country can only be<br />deleted on index page</span>
+                        <span style={{ color: "#9ec7e7", fontSize: "10px", fontWeight: 800, lineHeight: 1.25, textAlign: "center", textTransform: "uppercase", minWidth: "116px" }}>Country can only be<br />deleted on index page</span>
                       ) : (
                         <button onClick={deleteRecord} disabled={!selectedId} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>Delete</button>
                       )}
@@ -3224,10 +3226,10 @@ export default function CountryCompanyInfoPage() {
                                 {editingCountryPortId === port.id ? (
                                   <>
                                     <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
-                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "calc(1em + 28px)" }} />
+                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", fontSize: "12px" }} />
                                     <div style={{ display: "flex", gap: "8px" }}>
-                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "5px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Finish Editing</button>
-                                      <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "5px 10px", fontSize: "11px" }}>Cancel</button>
+                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                                      <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
                                     </div>
                                   </>
                                 ) : (
@@ -3267,10 +3269,10 @@ export default function CountryCompanyInfoPage() {
                                     <td onDoubleClick={() => startCountryPortEditing(port)} style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap", cursor: "text" }}>
                                       {editingCountryPortId === port.id ? (
                                         <div style={{ display: "grid", gap: "8px" }}>
-                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "calc(1em + 28px)", padding: "7px 9px", fontSize: "12px" }} />
+                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", fontSize: "12px" }} />
                                           <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Finish Editing</button>
-                                            <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
+                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                                            <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
                                           </div>
                                         </div>
                                       ) : (
