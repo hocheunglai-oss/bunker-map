@@ -34,6 +34,7 @@ yarn-error.log*
 .env*
 .google-drive-oauth-token.json
 .google-people-oauth-token.json
+.google-calendar-oauth-token.json
 
 # vercel
 .vercel

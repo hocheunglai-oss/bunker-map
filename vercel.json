@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/event-calendar/daily-reminder",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}

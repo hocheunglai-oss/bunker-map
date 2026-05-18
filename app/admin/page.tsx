@@ -17,9 +17,9 @@ const pageStyle: React.CSSProperties = {
 }
 
 const shellStyle: React.CSSProperties = {
-  width: "min(1320px, 100%)",
+  width: "min(1540px, 100%)",
   display: "grid",
-  gridTemplateColumns: "1.05fr 1fr 1fr",
+  gridTemplateColumns: "1.05fr 1fr 1fr 1fr",
   gap: "18px",
 }
 
@@ -340,6 +340,54 @@ export default function AdminPage() {
                 {[
                   { label: "PHONEBOOK", path: "/admin/phonebook" },
                   { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => router.push(item.path)}
+                    style={{
+                      ...actionButtonStyle,
+                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
+                      color: "#d9eeff",
+                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      cursor: "pointer",
+                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            ...(authenticated ? panelStyle : lockedPanelShellStyle),
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {authenticated ? (
+            <>
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#8fd7ff",
+                  marginBottom: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                Office Tools
+              </div>
+
+              <div style={{ display: "grid", gap: "12px" }}>
+                {[
+                  { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
                 ].map((item) => (
                   <button
                     key={item.label}

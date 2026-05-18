@@ -13,6 +13,7 @@
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
     "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
+    "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs",
