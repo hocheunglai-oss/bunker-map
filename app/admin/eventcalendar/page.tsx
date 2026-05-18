@@ -186,27 +186,31 @@ function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventC
 }
 
 function getCategoryStyle(category: EventCategory) {
-  const styles: Record<EventCategory, { background: string; border: string; color: string; glow: string }> = {
+  const styles: Record<EventCategory, { background: string; solid: string; border: string; color: string; glow: string }> = {
     "Public Holiday": {
-      background: "rgba(255, 139, 102, 0.16)",
-      border: "rgba(255, 139, 102, 0.42)",
-      color: "#ffd0bd",
-      glow: "rgba(255, 139, 102, 0.08)",
+      background: "rgba(255, 91, 91, 0.24)",
+      solid: "linear-gradient(180deg, rgba(255, 91, 91, 0.9) 0%, rgba(177, 39, 56, 0.88) 100%)",
+      border: "rgba(255, 105, 105, 0.62)",
+      color: "#ffe3e3",
+      glow: "rgba(255, 78, 78, 0.13)",
     },
     "Leave or Travel": {
-      background: "rgba(255, 218, 97, 0.18)",
-      border: "rgba(255, 218, 97, 0.48)",
-      color: "#ffe895",
-      glow: "rgba(255, 218, 97, 0.1)",
+      background: "rgba(255, 218, 97, 0.24)",
+      solid: "linear-gradient(180deg, rgba(255, 218, 97, 0.94) 0%, rgba(190, 142, 22, 0.9) 100%)",
+      border: "rgba(255, 218, 97, 0.62)",
+      color: "#fff4bf",
+      glow: "rgba(255, 218, 97, 0.13)",
     },
     Meeting: {
-      background: "rgba(120, 188, 255, 0.14)",
-      border: "rgba(120, 188, 255, 0.4)",
-      color: "#c4e3ff",
-      glow: "rgba(120, 188, 255, 0.08)",
+      background: "rgba(173, 126, 255, 0.22)",
+      solid: "linear-gradient(180deg, rgba(164, 116, 255, 0.9) 0%, rgba(92, 62, 184, 0.88) 100%)",
+      border: "rgba(181, 143, 255, 0.62)",
+      color: "#eadfff",
+      glow: "rgba(164, 116, 255, 0.12)",
     },
     Unclassified: {
       background: "rgba(210, 224, 236, 0.11)",
+      solid: "linear-gradient(180deg, rgba(130, 151, 169, 0.78) 0%, rgba(72, 92, 109, 0.78) 100%)",
       border: "rgba(210, 224, 236, 0.26)",
       color: "#e1edf6",
       glow: "rgba(210, 224, 236, 0.06)",
@@ -279,6 +283,7 @@ export default function EventCalendarPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
   const [peopleModalOpen, setPeopleModalOpen] = useState(false)
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<ManagedEvent>(() => buildBlankEvent(todayKey))
   const [draftPeopleText, setDraftPeopleText] = useState(defaultPeople.join("\n"))
   const [emailModalOpen, setEmailModalOpen] = useState(false)
@@ -475,6 +480,7 @@ export default function EventCalendarPage() {
 
   function openPeopleModal() {
     setDraftPeopleText(people.join("\n"))
+    setToolsMenuOpen(false)
     setPeopleModalOpen(true)
   }
 
@@ -490,6 +496,17 @@ export default function EventCalendarPage() {
     )
     setSelectedPeople((current) => current.filter((person) => nextPeople.includes(person)))
     setPeopleModalOpen(false)
+  }
+
+  function openEmailModal() {
+    setToolsMenuOpen(false)
+    setEmailModalOpen(true)
+  }
+
+  function deleteDraftEvent() {
+    if (eventModalMode !== "edit") return
+    setEvents((current) => current.filter((event) => event.id !== draftEvent.id))
+    setEventModalMode(null)
   }
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
@@ -533,6 +550,47 @@ export default function EventCalendarPage() {
               Office Tools
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setToolsMenuOpen((current) => !current)}
+                  aria-label="Event calendar menu"
+                  style={{ ...buttonStyle, height: "36px", padding: "0 12px" }}
+                >
+                  Menu
+                </button>
+                {toolsMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "42px",
+                      left: 0,
+                      zIndex: 30,
+                      minWidth: "178px",
+                      padding: "7px",
+                      border: "1px solid rgba(210,236,255,0.18)",
+                      borderRadius: "14px",
+                      background: "linear-gradient(180deg, rgba(10, 35, 60, 0.98) 0%, rgba(6, 24, 42, 0.98) 100%)",
+                      boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={openEmailModal}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}
+                    >
+                      Edit Email List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openPeopleModal}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start" }}
+                    >
+                      Edit People List
+                    </button>
+                  </div>
+                )}
+              </div>
               <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "#edf7ff" }}>
                 Event Calendar
               </h1>
@@ -567,14 +625,6 @@ export default function EventCalendarPage() {
               </button>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button type="button" onClick={() => setEmailModalOpen(true)} style={buttonStyle}>
-              Email List
-            </button>
-            <span style={{ color: "#9ff2cb", fontSize: "12px", fontWeight: 800 }}>
-              {[syncStatus, holidayImportStatus].filter(Boolean).join(" · ")}
-            </span>
-          </div>
         </header>
 
         <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
@@ -588,13 +638,17 @@ export default function EventCalendarPage() {
                   type="button"
                   onClick={() => setSelectedCategory(category)}
                   style={{
-                    border: `1px solid ${style?.border || "rgba(210,236,255,0.16)"}`,
+                    border: `1px solid ${style?.border || "rgba(210,236,255,0.22)"}`,
                     borderRadius: "999px",
-                    background: active ? style?.background || "rgba(143, 215, 255, 0.18)" : "rgba(5, 19, 34, 0.5)",
-                    color: active ? style?.color || "#d9eeff" : "#9ab6cc",
+                    background: style?.solid || "linear-gradient(180deg, rgba(143, 215, 255, 0.5) 0%, rgba(42, 94, 132, 0.5) 100%)",
+                    boxShadow: active
+                      ? "0 0 0 2px rgba(255,255,255,0.2), 0 12px 26px rgba(0,0,0,0.18)"
+                      : "inset 0 1px 0 rgba(255,255,255,0.1)",
+                    color: "#ffffff",
                     cursor: "pointer",
                     fontSize: "11px",
                     fontWeight: 900,
+                    opacity: active ? 1 : 0.72,
                     padding: "7px 10px",
                   }}
                 >
@@ -634,35 +688,12 @@ export default function EventCalendarPage() {
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th rowSpan={2} style={{ ...thStyle, width: "210px" }}>
+                <th style={{ ...thStyle, width: "210px" }}>
                   Date
                 </th>
-                <th rowSpan={2} style={thStyle}>
+                <th style={thStyle}>
                   Event
                 </th>
-                <th colSpan={people.length} style={{ ...thStyle, textAlign: "center" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                    <span>People</span>
-                    <button
-                      type="button"
-                      onClick={openPeopleModal}
-                      style={{
-                        border: "1px solid rgba(143, 215, 255, 0.24)",
-                        borderRadius: "999px",
-                        background: "rgba(143, 215, 255, 0.1)",
-                        color: "#d9eeff",
-                        cursor: "pointer",
-                        fontSize: "9px",
-                        fontWeight: 900,
-                        padding: "2px 6px",
-                      }}
-                    >
-                      Edit
-                    </button>
-                  </span>
-                </th>
-              </tr>
-              <tr>
                 {people.map((person) => (
                   <th key={person} style={{ ...thStyle, width: "52px", textAlign: "center" }}>
                     {person}
@@ -850,13 +881,29 @@ export default function EventCalendarPage() {
                 )
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
-              <button type="button" onClick={() => setEventModalMode(null)} style={buttonStyle}>
-                Cancel
-              </button>
-              <button type="button" onClick={saveDraftEvent} style={buttonStyle}>
-                Save
-              </button>
+            <div style={{ display: "flex", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
+              {eventModalMode === "edit" && (
+                <button
+                  type="button"
+                  onClick={deleteDraftEvent}
+                  style={{
+                    ...buttonStyle,
+                    borderColor: "rgba(255, 105, 105, 0.48)",
+                    background: "linear-gradient(180deg, rgba(255, 91, 91, 0.26) 0%, rgba(177, 39, 56, 0.16) 100%)",
+                    color: "#ffd6d6",
+                  }}
+                >
+                  Delete Event
+                </button>
+              )}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+                <button type="button" onClick={() => setEventModalMode(null)} style={buttonStyle}>
+                  Cancel
+                </button>
+                <button type="button" onClick={saveDraftEvent} style={buttonStyle}>
+                  Save
+                </button>
+              </div>
             </div>
           </div>
         </div>
