@@ -128,6 +128,7 @@ function buildDisplayName(contact: PhonebookContact) {
 }
 
 function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person {
+  const displayName = buildDisplayName(contact)
   const emailAddresses: people_v1.Schema$EmailAddress[] = []
   if (contact.personal_email) emailAddresses.push({ value: contact.personal_email, type: "work" })
   if (contact.general_email) emailAddresses.push({ value: contact.general_email, type: "other" })
@@ -153,7 +154,8 @@ function buildGoogleContact(contact: PhonebookContact): people_v1.Schema$Person 
   return {
     names: [
       {
-        givenName: buildDisplayName(contact),
+        unstructuredName: displayName,
+        givenName: displayName,
       },
     ],
     organizations: contact.company
