@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import {
-  compactLeftColumnTitles,
   compactReportSections as reportSections,
   defaultExpandablePreviewRows,
 } from "@/data/reportSections"
@@ -78,6 +77,21 @@ function formatValue(value: number | null, fallback: string) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
+function balanceSectionsByRows(sections: ChinaReportSection[], rowCount: (section: ChinaReportSection) => number) {
+  const columns: [ChinaReportSection[], ChinaReportSection[]] = [[], []]
+  const counts = [0, 0]
+
+  for (const section of [...sections].sort((a, b) => rowCount(b) - rowCount(a))) {
+    const columnIndex = counts[0] <= counts[1] ? 0 : 1
+    columns[columnIndex].push(section)
+    counts[columnIndex] += rowCount(section) + 1
+  }
+
+  return columns.map((columnSections) =>
+    columnSections.sort((a, b) => sections.findIndex((section) => section.title === a.title) - sections.findIndex((section) => section.title === b.title))
+  ) as [ChinaReportSection[], ChinaReportSection[]]
+}
+
 const compactExpandablePreviewRows: Record<string, string[]> = {
   ...defaultExpandablePreviewRows,
   TAIWAN: ["Kaohsiung", "Keelung"],
@@ -140,8 +154,10 @@ export default function CompactReport() {
     [sections]
   )
 
-  const leftSections = sections.filter((section) => compactLeftColumnTitles.includes(section.title))
-  const rightSections = sections.filter((section) => !compactLeftColumnTitles.includes(section.title))
+  const [leftSections, rightSections] = useMemo(
+    () => balanceSectionsByRows(sections, (section) => visibleRows(section).length),
+    [sections, expandedSections]
+  )
 
   function toggleSection(title: string) {
     setExpandedSections((prev) => ({
