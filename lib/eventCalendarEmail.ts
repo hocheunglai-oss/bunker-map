@@ -1,6 +1,7 @@
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
 
 const TIME_ZONE = "Asia/Hong_Kong"
+const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
 
 export function normalizeEmailList(value: unknown) {
   const raw = Array.isArray(value) ? value.join(",") : typeof value === "string" ? value : ""
@@ -46,19 +47,17 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;")
 }
 
-export function buildChangedEventEmail(event: OfficeCalendarEvent, action: "created" | "updated") {
-  const actionText = action === "created" ? "New event added" : "Event updated"
+export function buildChangedEventEmail(event: OfficeCalendarEvent, _action: "created" | "updated") {
   const people = event.people.length ? event.people.join(", ") : "No attendees selected"
 
   return {
-    subject: `${actionText}: ${event.title}`,
+    subject: "***** Event Calendar Update",
     html: `
       <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
-        <h2 style="margin:0 0 12px">${escapeHtml(actionText)}</h2>
         <p style="margin:0 0 8px"><strong>Date:</strong> ${escapeHtml(formatEventRange(event))}</p>
         <p style="margin:0 0 8px"><strong>Event:</strong> ${escapeHtml(event.title)}</p>
-        <p style="margin:0 0 8px"><strong>People:</strong> ${escapeHtml(people)}</p>
-        <p style="margin:0;color:#5f7384">Sent from FC Event Calendar.</p>
+        <p style="margin:0 0 8px"><strong>Who is attending:</strong> ${escapeHtml(people)}</p>
+        <p style="margin:12px 0 0"><a href="${EVENT_CALENDAR_URL}" style="color:#0a73c9">${EVENT_CALENDAR_URL}</a></p>
       </div>
     `,
   }

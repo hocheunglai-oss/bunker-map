@@ -4,7 +4,6 @@ import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
-const TIME_ZONE = "Asia/Hong_Kong"
 
 function hasAccess(request: Request) {
   const secret = process.env.CRON_SECRET
@@ -12,35 +11,10 @@ function hasAccess(request: Request) {
   return false
 }
 
-function formatHongKongDate(date = new Date()) {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIME_ZONE,
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    weekday: "short",
-  }).format(date)
-}
-
 function buildLinkReminderEmail() {
-  const dateText = formatHongKongDate()
-
   return {
-    subject: `FC Event Calendar - ${dateText}`,
-    html: `
-      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.5">
-        <h2 style="margin:0 0 12px">FC Event Calendar</h2>
-        <p style="margin:0 0 16px">Please check today&apos;s event calendar.</p>
-        <p style="margin:0 0 18px">
-          <a href="${EVENT_CALENDAR_URL}" style="display:inline-block;padding:10px 14px;border-radius:8px;background:#0a73c9;color:#ffffff;text-decoration:none;font-weight:700">
-            Open Event Calendar
-          </a>
-        </p>
-        <p style="margin:0;color:#5f7384">
-          ${EVENT_CALENDAR_URL}
-        </p>
-      </div>
-    `,
+    subject: "***** Event Reminder (Today or Tomorrow)",
+    html: `<a href="${EVENT_CALENDAR_URL}">${EVENT_CALENDAR_URL}</a>`,
   }
 }
 

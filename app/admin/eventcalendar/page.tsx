@@ -292,6 +292,7 @@ export default function EventCalendarPage() {
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const loadedRef = useRef(false)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     try {
@@ -384,6 +385,12 @@ export default function EventCalendarPage() {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
     }
   }, [authenticated, events])
+
+  useEffect(() => {
+    return () => {
+      if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
+    }
+  }, [])
 
   async function sendEventEmail(event: ManagedEvent, action: "created" | "updated") {
     const recipients = normalizeEmails(emailRecipientsText)
@@ -484,6 +491,20 @@ export default function EventCalendarPage() {
     setPeopleModalOpen(true)
   }
 
+  function cancelToolsMenuClose() {
+    if (toolsMenuCloseTimerRef.current) {
+      clearTimeout(toolsMenuCloseTimerRef.current)
+      toolsMenuCloseTimerRef.current = null
+    }
+  }
+
+  function scheduleToolsMenuClose() {
+    cancelToolsMenuClose()
+    toolsMenuCloseTimerRef.current = setTimeout(() => {
+      setToolsMenuOpen(false)
+    }, 650)
+  }
+
   function savePeople() {
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
     setPeople(nextPeople)
@@ -550,10 +571,17 @@ export default function EventCalendarPage() {
               Office Tools
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
-              <div style={{ position: "relative" }}>
+              <div
+                style={{ position: "relative" }}
+                onMouseEnter={cancelToolsMenuClose}
+                onMouseLeave={scheduleToolsMenuClose}
+              >
                 <button
                   type="button"
-                  onClick={() => setToolsMenuOpen((current) => !current)}
+                  onClick={() => {
+                    cancelToolsMenuClose()
+                    setToolsMenuOpen((current) => !current)
+                  }}
                   aria-label="Event calendar menu"
                   style={{
                     ...buttonStyle,
