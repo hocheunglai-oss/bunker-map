@@ -155,9 +155,8 @@ function formatDate(value: string) {
   const date = parseLocalDate(value)
   const day = String(date.getDate()).padStart(2, "0")
   const month = new Intl.DateTimeFormat("en-GB", { month: "short" }).format(date)
-  const year = String(date.getFullYear()).slice(-2)
   const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date)
-  return `${day} ${month} ${year} (${weekday})`
+  return `${day} ${month} (${weekday})`
 }
 
 function formatEventRange(event: ManagedEvent) {
@@ -534,6 +533,27 @@ export default function EventCalendarPage() {
     setEmailModalOpen(true)
   }
 
+  async function importNextYearPublicHolidays() {
+    const nextYear = new Date().getFullYear() + 1
+    setToolsMenuOpen(false)
+    setHolidayImportStatus(`Importing ${nextYear} holidays`)
+
+    try {
+      const response = await fetch(`/api/event-calendar/public-holidays?years=${nextYear}`)
+      const payload = await response.json()
+
+      if (!response.ok || !Array.isArray(payload.events)) {
+        setHolidayImportStatus(`${nextYear} holiday import pending`)
+        return
+      }
+
+      setEvents((current) => mergeImportedEvents(current, normalizeStoredEvents(payload.events)))
+      setHolidayImportStatus(`${nextYear} holidays added`)
+    } catch {
+      setHolidayImportStatus(`${nextYear} holiday import pending`)
+    }
+  }
+
   function deleteDraftEvent() {
     if (eventModalMode !== "edit") return
     setEvents((current) => current.filter((event) => event.id !== draftEvent.id))
@@ -581,6 +601,13 @@ export default function EventCalendarPage() {
               Office Tools
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
+              <button
+                type="button"
+                onClick={() => router.push("/admin")}
+                style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}
+              >
+                Back
+              </button>
               <div
                 style={{ position: "relative" }}
                 onMouseEnter={cancelToolsMenuClose}
@@ -615,7 +642,7 @@ export default function EventCalendarPage() {
                       top: "42px",
                       left: 0,
                       zIndex: 30,
-                      minWidth: "178px",
+                      minWidth: "220px",
                       padding: "7px",
                       border: "1px solid rgba(210,236,255,0.18)",
                       borderRadius: "14px",
@@ -633,9 +660,16 @@ export default function EventCalendarPage() {
                     <button
                       type="button"
                       onClick={openPeopleModal}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start" }}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}
                     >
                       Edit People List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={importNextYearPublicHolidays}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal" }}
+                    >
+                      Add USA, Taiwan, Singapore Holidays
                     </button>
                   </div>
                 )}
@@ -737,14 +771,14 @@ export default function EventCalendarPage() {
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: "210px" }}>
+                <th style={{ ...thStyle, width: "150px" }}>
                   Date
                 </th>
                 <th style={thStyle}>
                   Event
                 </th>
                 {people.map((person) => (
-                  <th key={person} style={{ ...thStyle, width: "52px", textAlign: "center" }}>
+                  <th key={person} style={{ ...thStyle, width: "38px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
                     {person}
                   </th>
                 ))}
@@ -788,12 +822,12 @@ export default function EventCalendarPage() {
                       const uncertain = (event.uncertainPeople || []).includes(person)
                       const highlighted = selectedPeople.includes(person)
                       return (
-                        <td key={person} style={{ ...tdStyle, textAlign: "center" }}>
+                        <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
                           <button
                             type="button"
                             onClick={() => cycleAttendance(event.id, person)}
                             style={{
-                              width: "36px",
+                              width: "28px",
                               border: highlighted
                                 ? "1px solid rgba(143, 215, 255, 0.76)"
                                 : uncertain || attending
