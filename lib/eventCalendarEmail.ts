@@ -9,7 +9,10 @@ export function normalizeEmailList(value: unknown) {
     new Set(
       raw
         .split(/[\n,;]+/)
-        .map((item) => item.trim().toLowerCase())
+        .map((item) => {
+          const trimmed = item.trim().toLowerCase()
+          return trimmed.match(/<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>/)?.[1] || trimmed
+        })
         .filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item))
     )
   )
