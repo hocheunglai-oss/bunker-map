@@ -539,7 +539,7 @@ export default function EventCalendarPage() {
     setHolidayImportStatus(`Importing ${nextYear} holidays`)
 
     try {
-      const response = await fetch(`/api/event-calendar/public-holidays?years=${nextYear}`)
+      const response = await fetch(`/api/event-calendar/public-holidays?years=${nextYear}&countries=TW,US,SG`)
       const payload = await response.json()
 
       if (!response.ok || !Array.isArray(payload.events)) {
@@ -551,6 +551,29 @@ export default function EventCalendarPage() {
       setHolidayImportStatus(`${nextYear} holidays added`)
     } catch {
       setHolidayImportStatus(`${nextYear} holiday import pending`)
+    }
+  }
+
+  async function importNextYearHongKongHolidays() {
+    const nextYear = new Date().getFullYear() + 1
+    setToolsMenuOpen(false)
+    setHolidayImportStatus(`Importing ${nextYear} Hong Kong holidays`)
+
+    try {
+      const response = await fetch(
+        `/api/event-calendar/public-holidays?years=${nextYear}&countries=HK&titleStyle=holiday-attendance`
+      )
+      const payload = await response.json()
+
+      if (!response.ok || !Array.isArray(payload.events)) {
+        setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
+        return
+      }
+
+      setEvents((current) => mergeImportedEvents(current, normalizeStoredEvents(payload.events)))
+      setHolidayImportStatus(`${nextYear} Hong Kong holidays added`)
+    } catch {
+      setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
     }
   }
 
@@ -667,9 +690,16 @@ export default function EventCalendarPage() {
                     <button
                       type="button"
                       onClick={importNextYearPublicHolidays}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal" }}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal", marginBottom: "6px" }}
                     >
                       Add USA, Taiwan, Singapore Holidays
+                    </button>
+                    <button
+                      type="button"
+                      onClick={importNextYearHongKongHolidays}
+                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal" }}
+                    >
+                      Add HK Holidays
                     </button>
                   </div>
                 )}
@@ -876,7 +906,7 @@ export default function EventCalendarPage() {
                     setDraftEvent((current) => ({
                       ...current,
                       startDate: event.target.value,
-                      endDate: current.endDate || event.target.value,
+                      endDate: event.target.value,
                     }))
                   }
                   style={inputStyle}
@@ -896,7 +926,7 @@ export default function EventCalendarPage() {
               Event
               <input
                 value={draftEvent.title}
-                onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value }))}
+                onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value.toUpperCase() }))}
                 style={inputStyle}
               />
             </label>

@@ -7,10 +7,14 @@ const HOLIDAY_COUNTRIES = [
   { code: "TW", label: "TAIWAN" },
   { code: "US", label: "USA" },
   { code: "SG", label: "SINGAPORE" },
+  { code: "HK", label: "HONG KONG" },
 ] as const
+type HolidayCountryCode = (typeof HOLIDAY_COUNTRIES)[number]["code"]
 
 type NagerHoliday = {
   date: string
+  localName?: string
+  name?: string
   global?: boolean
   counties?: string[] | null
   types?: string[]
@@ -24,6 +28,16 @@ function parseYears(value: string | null) {
     .filter((item) => Number.isInteger(item) && item >= currentYear - 1 && item <= currentYear + 3)
 
   return Array.from(new Set(years.length ? years : [currentYear]))
+}
+
+function parseCountries(value: string | null) {
+  const allowedCountries = new Set<HolidayCountryCode>(HOLIDAY_COUNTRIES.map((country) => country.code))
+  const countries = (value || "TW,US,SG")
+    .split(",")
+    .map((item) => item.trim().toUpperCase())
+    .filter((item): item is HolidayCountryCode => allowedCountries.has(item as HolidayCountryCode))
+
+  return Array.from(new Set(countries.length ? countries : ["TW", "US", "SG"]))
 }
 
 async function fetchCountryHolidays(year: number, countryCode: string) {
@@ -57,12 +71,14 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const years = parseYears(searchParams.get("years"))
+  const countries = parseCountries(searchParams.get("countries"))
+  const titleStyle = searchParams.get("titleStyle")
   const events: OfficeCalendarEvent[] = []
   const seen = new Set<string>()
 
   try {
     for (const year of years) {
-      for (const country of HOLIDAY_COUNTRIES) {
+      for (const country of HOLIDAY_COUNTRIES.filter((item) => countries.includes(item.code))) {
         const holidays = await fetchCountryHolidays(year, country.code)
 
         for (const holiday of holidays) {
@@ -75,7 +91,10 @@ export async function GET(request: Request) {
             id: `public-holiday-${country.code.toLowerCase()}-${holiday.date}`,
             startDate: holiday.date,
             endDate: holiday.date,
-            title: `PUBLIC HOLIDAY - ${country.label}`,
+            title:
+              titleStyle === "holiday-attendance"
+                ? `HOLIDAY ATTENDANCE - ${(holiday.localName || holiday.name || country.label).toUpperCase()}`
+                : `PUBLIC HOLIDAY - ${country.label}`,
             people: [],
             tags: ["public-holiday", country.code],
             eventType: "Public Holiday",
