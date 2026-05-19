@@ -555,9 +555,20 @@ export default function EventCalendarPage() {
                   type="button"
                   onClick={() => setToolsMenuOpen((current) => !current)}
                   aria-label="Event calendar menu"
-                  style={{ ...buttonStyle, height: "36px", padding: "0 12px" }}
+                  style={{
+                    ...buttonStyle,
+                    width: "36px",
+                    height: "36px",
+                    padding: 0,
+                    display: "inline-grid",
+                    placeItems: "center",
+                  }}
                 >
-                  Menu
+                  <span style={{ display: "grid", gap: "4px", width: "16px" }} aria-hidden="true">
+                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
+                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
+                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
+                  </span>
                 </button>
                 {toolsMenuOpen && (
                   <div
