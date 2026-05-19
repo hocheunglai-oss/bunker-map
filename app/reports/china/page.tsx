@@ -93,6 +93,11 @@ function getSection(sections: ChinaReportSection[], title: string) {
   return sections.find((section) => section.title === title)
 }
 
+function withoutSections(sections: ChinaReportSection[], titles: string[]) {
+  const titleSet = new Set(titles)
+  return sections.filter((section) => !titleSet.has(section.title))
+}
+
 const sectionCardStyle: React.CSSProperties = {
   background:
     "radial-gradient(circle at top left, rgba(88, 182, 255, 0.08), transparent 28%), linear-gradient(180deg, rgba(4, 24, 49, 0.82) 0%, rgba(5, 22, 40, 0.76) 100%)",
@@ -164,10 +169,16 @@ export default function ChinaReport() {
       const chinaEast = getSection(sections, "CHINA (EAST)")
       const chinaNorth = getSection(sections, "CHINA (NORTH)")
       const chinaSouth = getSection(sections, "CHINA (SOUTH)")
+      const hongKongSingapore = getSection(sections, "HONG KONG / SINGAPORE")
+      const taiwan = getSection(sections, "TAIWAN")
+      const southKorea = getSection(sections, "SOUTH KOREA")
 
       return balanceRemainingSections(
-        sections,
-        [chinaEast ? [chinaEast] : [], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
+        withoutSections(sections, ["HONG KONG / SINGAPORE", "TAIWAN", "SOUTH KOREA"]),
+        [
+          [chinaEast, hongKongSingapore, taiwan].filter(Boolean) as ChinaReportSection[],
+          [chinaNorth, chinaSouth, southKorea].filter(Boolean) as ChinaReportSection[],
+        ],
         (section) => section.rows.length
       )
     },

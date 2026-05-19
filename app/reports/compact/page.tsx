@@ -102,6 +102,11 @@ function getSection(sections: ChinaReportSection[], title: string) {
   return sections.find((section) => section.title === title)
 }
 
+function withoutSections(sections: ChinaReportSection[], titles: string[]) {
+  const titleSet = new Set(titles)
+  return sections.filter((section) => !titleSet.has(section.title))
+}
+
 const compactExpandablePreviewRows: Record<string, string[]> = {
   ...defaultExpandablePreviewRows,
   TAIWAN: ["Kaohsiung", "Keelung"],
@@ -169,10 +174,15 @@ export default function CompactReport() {
       const chinaEast = getSection(sections, "CHINA (EAST)")
       const chinaNorth = getSection(sections, "CHINA (NORTH)")
       const chinaSouth = getSection(sections, "CHINA (SOUTH)")
+      const hongKongSingapore = getSection(sections, "HONG KONG / SINGAPORE")
+      const thailand = getSection(sections, "THAILAND")
 
       return balanceRemainingSections(
-        sections,
-        [chinaEast ? [chinaEast] : [], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
+        withoutSections(sections, ["HONG KONG / SINGAPORE", "THAILAND"]),
+        [
+          [chinaEast].filter(Boolean) as ChinaReportSection[],
+          [chinaNorth, chinaSouth, hongKongSingapore, thailand].filter(Boolean) as ChinaReportSection[],
+        ],
         (section) => section.rows.length
       )
     },
