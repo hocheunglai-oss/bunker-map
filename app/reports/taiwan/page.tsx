@@ -198,8 +198,8 @@ export default function TaiwanReport() {
   }, [isMobile])
 
   return (
-    <div style={pageStyle}>
-      <div style={shellStyle}>
+    <div className="taiwan-report-print-page report-print-page" style={pageStyle}>
+      <div className="taiwan-report-print-shell report-print-shell" style={shellStyle}>
         <div style={{ ...headerCardStyle, padding: isMobile ? "16px" : "24px", marginBottom: "18px", position: "relative", overflow: "hidden" }}>
           <div
             style={{
@@ -703,7 +703,7 @@ export default function TaiwanReport() {
           </div>
         )}
 
-        <div style={{ textAlign: "center", marginBottom: "24px" }}>
+        <div className="report-print-hidden" style={{ textAlign: "center", marginBottom: "24px" }}>
           <a
             href="/"
             style={{
@@ -720,7 +720,7 @@ export default function TaiwanReport() {
           </a>
         </div>
 
-        <div style={{ marginTop: "20px" }}>
+        <div className="report-print-hidden" style={{ marginTop: "20px" }}>
           <DisclaimerLink centered />
         </div>
       </div>
