@@ -5,7 +5,6 @@ import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
 const TIME_ZONE = "Asia/Hong_Kong"
-const IS_TEST_REMINDER = true
 
 function hasAccess(request: Request) {
   const secret = process.env.CRON_SECRET
@@ -27,13 +26,11 @@ function buildLinkReminderEmail() {
   const dateText = formatHongKongDate()
 
   return {
-    subject: `${IS_TEST_REMINDER ? "[TEST] " : ""}FC Event Calendar - ${dateText}`,
+    subject: `FC Event Calendar - ${dateText}`,
     html: `
       <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.5">
-        <h2 style="margin:0 0 12px">${IS_TEST_REMINDER ? "FC Event Calendar Test" : "FC Event Calendar"}</h2>
-        <p style="margin:0 0 16px">
-          ${IS_TEST_REMINDER ? "This is a test email for the daily event calendar reminder." : "Please check today&apos;s event calendar."}
-        </p>
+        <h2 style="margin:0 0 12px">FC Event Calendar</h2>
+        <p style="margin:0 0 16px">Please check today&apos;s event calendar.</p>
         <p style="margin:0 0 18px">
           <a href="${EVENT_CALENDAR_URL}" style="display:inline-block;padding:10px 14px;border-radius:8px;background:#0a73c9;color:#ffffff;text-decoration:none;font-weight:700">
             Open Event Calendar
