@@ -102,9 +102,18 @@ function getSection(sections: ChinaReportSection[], title: string) {
   return sections.find((section) => section.title === title)
 }
 
-function withoutSections(sections: ChinaReportSection[], titles: string[]) {
-  const titleSet = new Set(titles)
-  return sections.filter((section) => !titleSet.has(section.title))
+function moveHongKongSingaporeAboveThailand(columns: [ChinaReportSection[], ChinaReportSection[]]) {
+  return columns.map((columnSections) => {
+    const hongKongSingapore = columnSections.find((section) => section.title === "HONG KONG / SINGAPORE")
+    const thailandIndex = columnSections.findIndex((section) => section.title === "THAILAND")
+
+    if (!hongKongSingapore || thailandIndex < 0) return columnSections
+
+    const withoutHongKongSingapore = columnSections.filter((section) => section.title !== "HONG KONG / SINGAPORE")
+    const nextThailandIndex = withoutHongKongSingapore.findIndex((section) => section.title === "THAILAND")
+    withoutHongKongSingapore.splice(nextThailandIndex, 0, hongKongSingapore)
+    return withoutHongKongSingapore
+  }) as [ChinaReportSection[], ChinaReportSection[]]
 }
 
 const compactExpandablePreviewRows: Record<string, string[]> = {
@@ -174,16 +183,13 @@ export default function CompactReport() {
       const chinaEast = getSection(sections, "CHINA (EAST)")
       const chinaNorth = getSection(sections, "CHINA (NORTH)")
       const chinaSouth = getSection(sections, "CHINA (SOUTH)")
-      const hongKongSingapore = getSection(sections, "HONG KONG / SINGAPORE")
-      const thailand = getSection(sections, "THAILAND")
 
-      return balanceRemainingSections(
-        withoutSections(sections, ["HONG KONG / SINGAPORE", "THAILAND"]),
-        [
-          [chinaEast].filter(Boolean) as ChinaReportSection[],
-          [chinaNorth, chinaSouth, hongKongSingapore, thailand].filter(Boolean) as ChinaReportSection[],
-        ],
-        (section) => section.rows.length
+      return moveHongKongSingaporeAboveThailand(
+        balanceRemainingSections(
+          sections,
+          [chinaEast ? [chinaEast] : [], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
+          (section) => section.rows.length
+        )
       )
     },
     [sections]
