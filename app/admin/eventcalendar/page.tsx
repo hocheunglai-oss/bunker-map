@@ -11,6 +11,11 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting" | "Unclassified"
 type ViewMode = "upcoming" | "past"
 type ModalMode = "add" | "edit" | null
+type EmailPromptState = {
+  event: ManagedEvent
+  action: "created" | "updated"
+  status: "idle" | "sending" | "sent" | "failed"
+} | null
 type ManagedEvent = OfficeCalendarEvent & {
   eventType?: EventCategory
   uncertainPeople?: string[]
@@ -277,6 +282,7 @@ export default function EventCalendarPage() {
   const [draftPeopleText, setDraftPeopleText] = useState(defaultPeople.join("\n"))
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
+  const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
   const [syncStatus, setSyncStatus] = useState("Sync ready")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const loadedRef = useRef(false)
@@ -382,14 +388,15 @@ export default function EventCalendarPage() {
   }, [])
 
   async function sendEventEmail(event: ManagedEvent, action: "created" | "updated") {
-    try {
-      await fetch("/api/event-calendar/email-notify", {
+    const response = await fetch("/api/event-calendar/email-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, event, recipients: emailRecipientsText }),
       })
-    } catch {
-      // Email is secondary to saving the calendar edit.
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      throw new Error(payload?.message || "Email notification failed.")
     }
   }
 
@@ -436,8 +443,25 @@ export default function EventCalendarPage() {
       }
       return [nextEvent, ...current]
     })
-    void sendEventEmail(nextEvent, eventModalMode === "edit" ? "updated" : "created")
+    setEmailPrompt({
+      event: nextEvent,
+      action: eventModalMode === "edit" ? "updated" : "created",
+      status: "idle",
+    })
     setEventModalMode(null)
+  }
+
+  async function confirmEventEmailSend() {
+    if (!emailPrompt || emailPrompt.status === "sending") return
+    setEmailPrompt((current) => current && { ...current, status: "sending" })
+
+    try {
+      await sendEventEmail(emailPrompt.event, emailPrompt.action)
+      setEmailPrompt((current) => current && { ...current, status: "sent" })
+      window.setTimeout(() => setEmailPrompt(null), 900)
+    } catch {
+      setEmailPrompt((current) => current && { ...current, status: "failed" })
+    }
   }
 
   function togglePersonFilter(person: string) {
@@ -929,6 +953,106 @@ export default function EventCalendarPage() {
                   Save
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {emailPrompt && (
+        <div style={modalBackdropStyle}>
+          <div style={{ ...modalStyle, width: "min(430px, 100%)" }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
+            <p style={{ margin: "0 0 6px", color: "#d9eeff", fontSize: "14px", fontWeight: 800 }}>
+              {emailPrompt.event.title || "NEW EVENT"}
+            </p>
+            <p style={{ margin: "0 0 16px", color: "#a9c4dc", fontSize: "13px", fontWeight: 700 }}>
+              {formatEventRange(emailPrompt.event)}
+            </p>
+
+            {emailPrompt.status === "sending" && (
+              <div
+                style={{
+                  marginBottom: "16px",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(143, 215, 255, 0.28)",
+                  background: "rgba(143, 215, 255, 0.12)",
+                  color: "#d9eeff",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  padding: "11px 12px",
+                }}
+              >
+                Sending update...
+              </div>
+            )}
+
+            {emailPrompt.status === "sent" && (
+              <div
+                style={{
+                  marginBottom: "16px",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(73, 219, 165, 0.34)",
+                  background: "linear-gradient(180deg, rgba(73, 219, 165, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)",
+                  color: "#eafff4",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  padding: "11px 12px",
+                  transform: "scale(1.01)",
+                  transition: "transform 180ms ease",
+                }}
+              >
+                Sent
+              </div>
+            )}
+
+            {emailPrompt.status === "failed" && (
+              <div
+                style={{
+                  marginBottom: "16px",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(255, 105, 105, 0.42)",
+                  background: "rgba(255, 91, 91, 0.16)",
+                  color: "#ffd6d6",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  padding: "11px 12px",
+                }}
+              >
+                Could not send. Please check the email settings and try again.
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+              <button
+                type="button"
+                onClick={() => setEmailPrompt(null)}
+                disabled={emailPrompt.status === "sending"}
+                style={{
+                  ...buttonStyle,
+                  opacity: emailPrompt.status === "sending" ? 0.58 : 1,
+                  cursor: emailPrompt.status === "sending" ? "not-allowed" : "pointer",
+                }}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={confirmEventEmailSend}
+                disabled={emailPrompt.status === "sending" || emailPrompt.status === "sent"}
+                style={{
+                  ...buttonStyle,
+                  background:
+                    emailPrompt.status === "sent"
+                      ? "linear-gradient(180deg, rgba(73, 219, 165, 0.32) 0%, rgba(20, 130, 93, 0.16) 100%)"
+                      : buttonStyle.background,
+                  color: emailPrompt.status === "sent" ? "#eafff4" : buttonStyle.color,
+                  opacity: emailPrompt.status === "sending" ? 0.72 : 1,
+                  cursor:
+                    emailPrompt.status === "sending" || emailPrompt.status === "sent" ? "not-allowed" : "pointer",
+                }}
+              >
+                {emailPrompt.status === "sending" ? "Sending" : emailPrompt.status === "sent" ? "Sent" : "Yes, Send"}
+              </button>
             </div>
           </div>
         </div>
