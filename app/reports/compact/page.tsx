@@ -183,11 +183,12 @@ export default function CompactReport() {
       const chinaEast = getSection(sections, "CHINA (EAST)")
       const chinaNorth = getSection(sections, "CHINA (NORTH)")
       const chinaSouth = getSection(sections, "CHINA (SOUTH)")
+      const sriLanka = getSection(sections, "SRI LANKA")
 
       return moveHongKongSingaporeAboveThailand(
         balanceRemainingSections(
           sections,
-          [chinaEast ? [chinaEast] : [], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
+          [[chinaEast, sriLanka].filter(Boolean) as ChinaReportSection[], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
           (section) => section.rows.length
         )
       )
