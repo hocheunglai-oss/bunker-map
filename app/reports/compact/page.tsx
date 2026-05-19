@@ -235,8 +235,7 @@ export default function CompactReport() {
               gap: isMobile ? "10px" : "18px",
             }}
           >
-            <a
-              href="/"
+            <div
               style={{
                 width: isMobile ? "auto" : "100%",
                 maxWidth: isMobile ? "180px" : "220px",
@@ -253,7 +252,7 @@ export default function CompactReport() {
                 alt="Bunker map logo"
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "210px", opacity: 0.96 }}
               />
-            </a>
+            </div>
 
             <div
               style={{
