@@ -101,6 +101,7 @@ export function buildDailyReminderEmail(events: OfficeCalendarEvent[], dateText:
 
 export async function sendCalendarEmail(input: {
   to: string[]
+  cc?: string[]
   subject: string
   html: string
 }) {
@@ -117,6 +118,7 @@ export async function sendCalendarEmail(input: {
     body: JSON.stringify({
       from,
       to: input.to,
+      ...(input.cc?.length ? { cc: input.cc } : {}),
       subject: input.subject,
       html: input.html,
     }),

@@ -11,11 +11,25 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting" | "Unclassified"
 type ViewMode = "upcoming" | "past"
 type ModalMode = "add" | "edit" | null
+type RecurrentFrequency = "daily" | "weekly" | "monthly"
+type LeaveType = "Annual Leave" | "Sick Leave Notification (for medical treatment)" | "Compassionate Leave"
 type EmailPromptState = {
   event: ManagedEvent
   action: "created" | "updated"
   status: "idle" | "sending" | "sent" | "failed"
 } | null
+type LeaveRequestDraft = {
+  from: string
+  to: string
+  type: LeaveType
+  reason: string
+  person: string
+  status: "idle" | "sending" | "sent" | "failed"
+}
+type RecurrentDraft = ManagedEvent & {
+  frequency: RecurrentFrequency
+  count: number
+}
 type ManagedEvent = OfficeCalendarEvent & {
   eventType?: EventCategory
   uncertainPeople?: string[]
@@ -26,6 +40,11 @@ const PEOPLE_STORAGE_KEY = "bunker-map-office-calendar-people"
 const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipients"
 const CALENDAR_ID = "cosulich.uno@gmail.com"
 const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
+const leaveTypes: LeaveType[] = [
+  "Annual Leave",
+  "Sick Leave Notification (for medical treatment)",
+  "Compassionate Leave",
+]
 const categories: Array<"All" | EventCategory> = [
   "All",
   "Public Holiday",
@@ -251,6 +270,34 @@ function buildBlankEvent(todayKey: string): ManagedEvent {
   }
 }
 
+function buildBlankRecurrentEvent(todayKey: string): RecurrentDraft {
+  return {
+    ...buildBlankEvent(todayKey),
+    id: `recurrent-${Date.now()}`,
+    frequency: "weekly",
+    count: 4,
+  }
+}
+
+function buildBlankLeaveRequest(todayKey: string, people: string[]): LeaveRequestDraft {
+  return {
+    from: todayKey,
+    to: todayKey,
+    type: "Annual Leave",
+    reason: "",
+    person: people[0] || "",
+    status: "idle",
+  }
+}
+
+function addFrequency(dateKey: string, frequency: RecurrentFrequency, steps: number) {
+  const date = parseLocalDate(dateKey)
+  if (frequency === "daily") date.setDate(date.getDate() + steps)
+  if (frequency === "weekly") date.setDate(date.getDate() + steps * 7)
+  if (frequency === "monthly") date.setMonth(date.getMonth() + steps)
+  return toDateKey(date)
+}
+
 function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) {
   const seen = new Set(current.map((event) => `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`))
   const seenIds = new Set(current.map((event) => event.id))
@@ -277,9 +324,14 @@ export default function EventCalendarPage() {
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
+  const [recurrentModalOpen, setRecurrentModalOpen] = useState(false)
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false)
   const [peopleModalOpen, setPeopleModalOpen] = useState(false)
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<ManagedEvent>(() => buildBlankEvent(todayKey))
+  const [draftRecurrentEvent, setDraftRecurrentEvent] = useState<RecurrentDraft>(() => buildBlankRecurrentEvent(todayKey))
+  const [leaveRequestDraft, setLeaveRequestDraft] = useState<LeaveRequestDraft>(() => buildBlankLeaveRequest(todayKey, defaultPeople))
   const [draftPeopleText, setDraftPeopleText] = useState(defaultPeople.join("\n"))
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
@@ -290,6 +342,7 @@ export default function EventCalendarPage() {
   const loadedRef = useRef(false)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     try {
@@ -386,6 +439,7 @@ export default function EventCalendarPage() {
   useEffect(() => {
     return () => {
       if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
+      if (addMenuCloseTimerRef.current) clearTimeout(addMenuCloseTimerRef.current)
     }
   }, [])
 
@@ -416,7 +470,20 @@ export default function EventCalendarPage() {
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
+    setAddMenuOpen(false)
     setEventModalMode("add")
+  }
+
+  function openRecurrentModal() {
+    setDraftRecurrentEvent(buildBlankRecurrentEvent(todayKey))
+    setAddMenuOpen(false)
+    setRecurrentModalOpen(true)
+  }
+
+  function openLeaveModal() {
+    setLeaveRequestDraft(buildBlankLeaveRequest(todayKey, people))
+    setAddMenuOpen(false)
+    setLeaveModalOpen(true)
   }
 
   function openEditModal(event: ManagedEvent) {
@@ -463,6 +530,47 @@ export default function EventCalendarPage() {
       window.setTimeout(() => setEmailPrompt(null), 900)
     } catch {
       setEmailPrompt((current) => current && { ...current, status: "failed" })
+    }
+  }
+
+  function saveRecurrentEvents() {
+    const count = Math.max(1, Math.min(52, Number(draftRecurrentEvent.count) || 1))
+    const baseStart = draftRecurrentEvent.startDate
+    const baseEnd = draftRecurrentEvent.endDate >= draftRecurrentEvent.startDate
+      ? draftRecurrentEvent.endDate
+      : draftRecurrentEvent.startDate
+
+    const nextEvents = Array.from({ length: count }, (_, index) => ({
+      ...draftRecurrentEvent,
+      id: `recurrent-${Date.now()}-${index}`,
+      title: draftRecurrentEvent.title.trim() || "NEW EVENT",
+      people: normalizePeople(draftRecurrentEvent.people),
+      uncertainPeople: normalizePeople(draftRecurrentEvent.uncertainPeople || []),
+      startDate: addFrequency(baseStart, draftRecurrentEvent.frequency, index),
+      endDate: addFrequency(baseEnd, draftRecurrentEvent.frequency, index),
+      eventType: draftRecurrentEvent.eventType || "Unclassified",
+    }))
+
+    setEvents((current) => [...nextEvents, ...current])
+    setRecurrentModalOpen(false)
+  }
+
+  async function sendLeaveRequest() {
+    if (!leaveRequestDraft.person || leaveRequestDraft.status === "sending") return
+    setLeaveRequestDraft((current) => ({ ...current, status: "sending" }))
+
+    try {
+      const response = await fetch("/api/event-calendar/leave-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(leaveRequestDraft),
+      })
+
+      if (!response.ok) throw new Error("Leave request failed.")
+      setLeaveRequestDraft((current) => ({ ...current, status: "sent" }))
+      window.setTimeout(() => setLeaveModalOpen(false), 900)
+    } catch {
+      setLeaveRequestDraft((current) => ({ ...current, status: "failed" }))
     }
   }
 
@@ -514,6 +622,20 @@ export default function EventCalendarPage() {
     cancelToolsMenuClose()
     toolsMenuCloseTimerRef.current = setTimeout(() => {
       setToolsMenuOpen(false)
+    }, 650)
+  }
+
+  function cancelAddMenuClose() {
+    if (addMenuCloseTimerRef.current) {
+      clearTimeout(addMenuCloseTimerRef.current)
+      addMenuCloseTimerRef.current = null
+    }
+  }
+
+  function scheduleAddMenuClose() {
+    cancelAddMenuClose()
+    addMenuCloseTimerRef.current = setTimeout(() => {
+      setAddMenuOpen(false)
     }, 650)
   }
 
@@ -756,14 +878,49 @@ export default function EventCalendarPage() {
                   </button>
                 )
               })}
-              <button
-                type="button"
-                onClick={openAddModal}
-                aria-label="Add event"
-                style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}
+              <div
+                style={{ position: "relative" }}
+                onMouseEnter={cancelAddMenuClose}
+                onMouseLeave={scheduleAddMenuClose}
               >
-                +
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    cancelAddMenuClose()
+                    setAddMenuOpen((current) => !current)
+                  }}
+                  aria-label="Add"
+                  style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}
+                >
+                  +
+                </button>
+                {addMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "42px",
+                      right: 0,
+                      zIndex: 30,
+                      minWidth: "190px",
+                      padding: "7px",
+                      border: "1px solid rgba(210,236,255,0.18)",
+                      borderRadius: "14px",
+                      background: "linear-gradient(180deg, rgba(10, 35, 60, 0.98) 0%, rgba(6, 24, 42, 0.98) 100%)",
+                      boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+                    }}
+                  >
+                    <button type="button" onClick={openAddModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}>
+                      Add New Event
+                    </button>
+                    <button type="button" onClick={openRecurrentModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}>
+                      Add Recurrent Event
+                    </button>
+                    <button type="button" onClick={openLeaveModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start" }}>
+                      Send Leave Request
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>
@@ -810,11 +967,14 @@ export default function EventCalendarPage() {
                     minWidth: "34px",
                     border: active ? "1px solid rgba(143, 215, 255, 0.62)" : "1px solid rgba(5, 16, 28, 0.7)",
                     borderRadius: "999px",
-                    background: active ? "rgba(143, 215, 255, 0.28)" : "rgba(2, 10, 18, 0.76)",
-                    color: active ? "#edf7ff" : "#9fb3c5",
+                    background: active
+                      ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)"
+                      : "rgba(2, 10, 18, 0.76)",
+                    color: active ? "#031b36" : "#9fb3c5",
                     cursor: "pointer",
                     fontSize: "11px",
                     fontWeight: 900,
+                    boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : "none",
                     padding: "5px 9px",
                   }}
                 >
@@ -855,6 +1015,7 @@ export default function EventCalendarPage() {
                     style={{
                       background: `linear-gradient(90deg, ${categoryStyle.glow} 0%, ${categoryStyle.background} 100%)`,
                       opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
+                      boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
                     }}
                   >
                     <td
@@ -1045,6 +1206,251 @@ export default function EventCalendarPage() {
                   Save
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recurrentModalOpen && (
+        <div style={modalBackdropStyle}>
+          <div style={modalStyle}>
+            <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Recurrent Event</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                From
+                <input
+                  type="date"
+                  value={draftRecurrentEvent.startDate}
+                  onChange={(event) =>
+                    setDraftRecurrentEvent((current) => ({
+                      ...current,
+                      startDate: event.target.value,
+                      endDate: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                To
+                <input
+                  type="date"
+                  value={draftRecurrentEvent.endDate}
+                  onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, endDate: event.target.value }))}
+                  style={inputStyle}
+                />
+              </label>
+            </div>
+            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Event
+              <input
+                value={draftRecurrentEvent.title}
+                onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, title: event.target.value.toUpperCase() }))}
+                style={inputStyle}
+              />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: "10px", marginBottom: "10px" }}>
+              <div>
+                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+                  Repeat
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+                  {(["daily", "weekly", "monthly"] as RecurrentFrequency[]).map((frequency) => {
+                    const active = draftRecurrentEvent.frequency === frequency
+                    return (
+                      <button
+                        key={frequency}
+                        type="button"
+                        onClick={() => setDraftRecurrentEvent((current) => ({ ...current, frequency }))}
+                        style={{
+                          ...buttonStyle,
+                          background: active ? "rgba(143, 215, 255, 0.28)" : "rgba(2, 10, 18, 0.64)",
+                          color: active ? "#edf7ff" : "#8fa9bf",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {frequency}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                Times
+                <input
+                  type="number"
+                  min={1}
+                  max={52}
+                  value={draftRecurrentEvent.count}
+                  onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, count: Number(event.target.value) }))}
+                  style={inputStyle}
+                />
+              </label>
+            </div>
+            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+              Attending
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "16px" }}>
+              {people.map((person) => {
+                const attending = draftRecurrentEvent.people.includes(person)
+                return (
+                  <button
+                    key={person}
+                    type="button"
+                    onClick={() =>
+                      setDraftRecurrentEvent((current) => ({
+                        ...current,
+                        people: attending
+                          ? current.people.filter((item) => item !== person)
+                          : [...current.people, person],
+                      }))
+                    }
+                    style={{
+                      ...buttonStyle,
+                      background: attending ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)",
+                      color: attending ? "#edf7ff" : "#8fa9bf",
+                      minWidth: "42px",
+                    }}
+                  >
+                    {person}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+              <button type="button" onClick={() => setRecurrentModalOpen(false)} style={buttonStyle}>
+                Cancel
+              </button>
+              <button type="button" onClick={saveRecurrentEvents} style={buttonStyle}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {leaveModalOpen && (
+        <div style={modalBackdropStyle}>
+          <div style={{ ...modalStyle, width: "min(560px, 100%)" }}>
+            <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Leave Request</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                Leave Period From
+                <input
+                  type="date"
+                  value={leaveRequestDraft.from}
+                  onChange={(event) =>
+                    setLeaveRequestDraft((current) => ({ ...current, from: event.target.value, to: event.target.value }))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                To
+                <input
+                  type="date"
+                  value={leaveRequestDraft.to}
+                  onChange={(event) => setLeaveRequestDraft((current) => ({ ...current, to: event.target.value }))}
+                  style={inputStyle}
+                />
+              </label>
+            </div>
+            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+              Leave Type
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "12px" }}>
+              {leaveTypes.map((type) => {
+                const active = leaveRequestDraft.type === type
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setLeaveRequestDraft((current) => ({ ...current, type }))}
+                    style={{
+                      ...buttonStyle,
+                      background: active ? "rgba(255, 218, 97, 0.24)" : "rgba(2, 10, 18, 0.64)",
+                      color: active ? "#fff4bf" : "#8fa9bf",
+                    }}
+                  >
+                    {type}
+                  </button>
+                )
+              })}
+            </div>
+            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
+              Reason (Non Compulsory)
+              <textarea
+                value={leaveRequestDraft.reason}
+                onChange={(event) => setLeaveRequestDraft((current) => ({ ...current, reason: event.target.value }))}
+                style={{ ...inputStyle, minHeight: "92px", resize: "vertical", lineHeight: 1.45 }}
+              />
+            </label>
+            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+              Applicant
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "14px" }}>
+              {people.map((person) => {
+                const active = leaveRequestDraft.person === person
+                return (
+                  <button
+                    key={person}
+                    type="button"
+                    onClick={() => setLeaveRequestDraft((current) => ({ ...current, person }))}
+                    style={{
+                      ...buttonStyle,
+                      background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)",
+                      color: active ? "#edf7ff" : "#8fa9bf",
+                      minWidth: "42px",
+                    }}
+                  >
+                    {person}
+                  </button>
+                )
+              })}
+            </div>
+            {leaveRequestDraft.status !== "idle" && (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  borderRadius: "14px",
+                  border:
+                    leaveRequestDraft.status === "failed"
+                      ? "1px solid rgba(255, 105, 105, 0.42)"
+                      : "1px solid rgba(73, 219, 165, 0.34)",
+                  background:
+                    leaveRequestDraft.status === "failed"
+                      ? "rgba(255, 91, 91, 0.16)"
+                      : "rgba(73, 219, 165, 0.16)",
+                  color: leaveRequestDraft.status === "failed" ? "#ffd6d6" : "#eafff4",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  padding: "11px 12px",
+                }}
+              >
+                {leaveRequestDraft.status === "sending"
+                  ? "Sending leave request..."
+                  : leaveRequestDraft.status === "sent"
+                    ? "Sent"
+                    : "Could not send. Please check email settings and try again."}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+              <button
+                type="button"
+                onClick={() => setLeaveModalOpen(false)}
+                disabled={leaveRequestDraft.status === "sending"}
+                style={{ ...buttonStyle, opacity: leaveRequestDraft.status === "sending" ? 0.58 : 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={sendLeaveRequest}
+                disabled={leaveRequestDraft.status === "sending" || leaveRequestDraft.status === "sent"}
+                style={{ ...buttonStyle, opacity: leaveRequestDraft.status === "sending" ? 0.72 : 1 }}
+              >
+                {leaveRequestDraft.status === "sending" ? "Sending" : leaveRequestDraft.status === "sent" ? "Sent" : "Send"}
+              </button>
             </div>
           </div>
         </div>
