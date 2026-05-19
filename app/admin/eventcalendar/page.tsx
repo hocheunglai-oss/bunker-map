@@ -253,12 +253,14 @@ function buildBlankEvent(todayKey: string): ManagedEvent {
 
 function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) {
   const seen = new Set(current.map((event) => `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`))
+  const seenIds = new Set(current.map((event) => event.id))
   const nextEvents = [...current]
 
   for (const event of imported) {
     const key = `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`
-    if (seen.has(key)) continue
+    if (seen.has(key) || seenIds.has(event.id)) continue
     seen.add(key)
+    seenIds.add(event.id)
     nextEvents.push(event)
   }
 
@@ -284,6 +286,7 @@ export default function EventCalendarPage() {
   const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
   const [syncStatus, setSyncStatus] = useState("Sync ready")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
+  const [holidayImporting, setHolidayImporting] = useState(false)
   const loadedRef = useRef(false)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -534,8 +537,10 @@ export default function EventCalendarPage() {
   }
 
   async function importNextYearPublicHolidays() {
+    if (holidayImporting) return
     const nextYear = new Date().getFullYear() + 1
     setToolsMenuOpen(false)
+    setHolidayImporting(true)
     setHolidayImportStatus(`Importing ${nextYear} holidays`)
 
     try {
@@ -551,12 +556,16 @@ export default function EventCalendarPage() {
       setHolidayImportStatus(`${nextYear} holidays added`)
     } catch {
       setHolidayImportStatus(`${nextYear} holiday import pending`)
+    } finally {
+      setHolidayImporting(false)
     }
   }
 
   async function importNextYearHongKongHolidays() {
+    if (holidayImporting) return
     const nextYear = new Date().getFullYear() + 1
     setToolsMenuOpen(false)
+    setHolidayImporting(true)
     setHolidayImportStatus(`Importing ${nextYear} Hong Kong holidays`)
 
     try {
@@ -574,6 +583,8 @@ export default function EventCalendarPage() {
       setHolidayImportStatus(`${nextYear} Hong Kong holidays added`)
     } catch {
       setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
+    } finally {
+      setHolidayImporting(false)
     }
   }
 
@@ -690,14 +701,31 @@ export default function EventCalendarPage() {
                     <button
                       type="button"
                       onClick={importNextYearPublicHolidays}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal", marginBottom: "6px" }}
+                      disabled={holidayImporting}
+                      style={{
+                        ...buttonStyle,
+                        width: "100%",
+                        justifyContent: "flex-start",
+                        whiteSpace: "normal",
+                        marginBottom: "6px",
+                        opacity: holidayImporting ? 0.58 : 1,
+                        cursor: holidayImporting ? "not-allowed" : "pointer",
+                      }}
                     >
                       Add USA, Taiwan, Singapore Holidays
                     </button>
                     <button
                       type="button"
                       onClick={importNextYearHongKongHolidays}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", whiteSpace: "normal" }}
+                      disabled={holidayImporting}
+                      style={{
+                        ...buttonStyle,
+                        width: "100%",
+                        justifyContent: "flex-start",
+                        whiteSpace: "normal",
+                        opacity: holidayImporting ? 0.58 : 1,
+                        cursor: holidayImporting ? "not-allowed" : "pointer",
+                      }}
                     >
                       Add HK Holidays
                     </button>
