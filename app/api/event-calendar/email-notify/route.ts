@@ -32,7 +32,10 @@ export async function POST(request: Request) {
 
   const body = await request.json()
   const action = body.action === "updated" ? "updated" : "created"
-  const recipients = normalizeEmailList(body.recipients)
+  const requestRecipients = normalizeEmailList(body.recipients)
+  const recipients = requestRecipients.length
+    ? requestRecipients
+    : normalizeEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS)
 
   if (!isOfficeCalendarEvent(body.event)) {
     return NextResponse.json({ message: "No valid event supplied." }, { status: 400 })

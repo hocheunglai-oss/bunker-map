@@ -164,17 +164,6 @@ function normalizePeople(value: string[]) {
   return Array.from(new Set(value.map((item) => item.trim().toUpperCase()).filter(Boolean).filter((item) => item !== "??")))
 }
 
-function normalizeEmails(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,;]+/)
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean)
-    )
-  )
-}
-
 function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventCategory {
   if (event.eventType) return event.eventType
 
@@ -393,14 +382,11 @@ export default function EventCalendarPage() {
   }, [])
 
   async function sendEventEmail(event: ManagedEvent, action: "created" | "updated") {
-    const recipients = normalizeEmails(emailRecipientsText)
-    if (!recipients.length) return
-
     try {
       await fetch("/api/event-calendar/email-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, event, recipients }),
+        body: JSON.stringify({ action, event, recipients: emailRecipientsText }),
       })
     } catch {
       // Email is secondary to saving the calendar edit.
