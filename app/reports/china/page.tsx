@@ -68,19 +68,29 @@ function formatValue(value: number | null, fallback: string) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
-function balanceSectionsByRows(sections: ChinaReportSection[], rowCount: (section: ChinaReportSection) => number) {
-  const columns: [ChinaReportSection[], ChinaReportSection[]] = [[], []]
-  const counts = [0, 0]
+function balanceRemainingSections(
+  sections: ChinaReportSection[],
+  initialColumns: [ChinaReportSection[], ChinaReportSection[]],
+  rowCount: (section: ChinaReportSection) => number
+) {
+  const columns: [ChinaReportSection[], ChinaReportSection[]] = [[...initialColumns[0]], [...initialColumns[1]]]
+  const counts = columns.map((columnSections) =>
+    columnSections.reduce((sum, section) => sum + rowCount(section) + 1, 0)
+  )
+  const pinnedTitles = new Set(columns.flat().map((section) => section.title))
+  const remainingSections = sections.filter((section) => !pinnedTitles.has(section.title))
 
-  for (const section of [...sections].sort((a, b) => rowCount(b) - rowCount(a))) {
+  for (const section of [...remainingSections].sort((a, b) => rowCount(b) - rowCount(a))) {
     const columnIndex = counts[0] <= counts[1] ? 0 : 1
     columns[columnIndex].push(section)
     counts[columnIndex] += rowCount(section) + 1
   }
 
-  return columns.map((columnSections) =>
-    columnSections.sort((a, b) => sections.findIndex((section) => section.title === a.title) - sections.findIndex((section) => section.title === b.title))
-  ) as [ChinaReportSection[], ChinaReportSection[]]
+  return columns
+}
+
+function getSection(sections: ChinaReportSection[], title: string) {
+  return sections.find((section) => section.title === title)
 }
 
 const sectionCardStyle: React.CSSProperties = {
@@ -150,8 +160,18 @@ export default function ChinaReport() {
   )
 
   const [leftSections, rightSections] = useMemo(
-    () => balanceSectionsByRows(sections, (section) => visibleRows(section).length),
-    [sections, expandedSections]
+    () => {
+      const chinaEast = getSection(sections, "CHINA (EAST)")
+      const chinaNorth = getSection(sections, "CHINA (NORTH)")
+      const chinaSouth = getSection(sections, "CHINA (SOUTH)")
+
+      return balanceRemainingSections(
+        sections,
+        [chinaEast ? [chinaEast] : [], [chinaNorth, chinaSouth].filter(Boolean) as ChinaReportSection[]],
+        (section) => section.rows.length
+      )
+    },
+    [sections]
   )
 
   function toggleSection(title: string) {
