@@ -87,11 +87,11 @@ type ChangeLogEntry = {
   after: Contact | Company | null
 }
 
-const LAST_GOOGLE_SYNC_FAILED_KEY = "phonebook_last_google_sync_failed"
+const LAST_CONTACT_SYNC_FAILED_KEY = "phonebook_last_carddav_sync_failed"
 const CONTACT_ORDER_STORAGE_KEY = "phonebook_contact_order_by_company"
 const PHONEBOOK_CHANGE_LOG_KEY = "phonebook_change_log"
 
-type GoogleSyncFailure = {
+type ContactSyncFailure = {
   id: string
   label: string
 }
@@ -438,7 +438,7 @@ export default function PhonebookPage() {
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
-  const [googleSyncing, setGoogleSyncing] = useState(false)
+  const [contactSyncing, setContactSyncing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
@@ -753,9 +753,9 @@ export default function PhonebookPage() {
       setEditing(false)
       setCreatingContact(false)
       setContactModalOpen(false)
-      const synced = await syncGoogleContacts(false, [nextContact.id], {
+      const synced = await syncPhoneContacts(false, [nextContact.id], {
         successMessage: "Saved and synced.",
-        failureMessage: "Saved locally, but web Google sync failed.",
+        failureMessage: "Saved locally, but CardDAV sync failed.",
       })
       if (synced) setMessage("Saved and synced.")
       setSaving(false)
@@ -781,9 +781,9 @@ export default function PhonebookPage() {
     setContacts((prev) => prev.map((item) => (item.id === draft.id ? updatedContact : item)))
     setCurrent((prev) => (prev ? updatedContact : prev))
     setEditing(false)
-    const synced = await syncGoogleContacts(false, [draft.id], {
+    const synced = await syncPhoneContacts(false, [draft.id], {
       successMessage: "Saved and synced.",
-      failureMessage: "Saved locally, but web Google sync failed.",
+      failureMessage: "Saved locally, but CardDAV sync failed.",
     })
     if (synced) setMessage("Saved and synced.")
     setSaving(false)
@@ -846,7 +846,7 @@ export default function PhonebookPage() {
         setCompanyModalOpen(false)
       }
     }
-    await syncGoogleContacts(false, null, {
+    await syncPhoneContacts(false, null, {
       deleteContactIds: [deletingId],
       successMessage: deleteCompanyToo ? "Deleted contact and company, then synced." : "Deleted and synced.",
     })
@@ -1056,9 +1056,9 @@ export default function PhonebookPage() {
     }
 
     if (syncedContactIds.length > 0) {
-      const synced = await syncGoogleContacts(false, syncedContactIds, {
+      const synced = await syncPhoneContacts(false, syncedContactIds, {
         successMessage: "Saved and synced.",
-        failureMessage: "Saved locally, but web Google sync failed.",
+        failureMessage: "Saved locally, but CardDAV sync failed.",
       })
       if (synced) setMessage("Saved and synced.")
     }
@@ -1121,10 +1121,10 @@ export default function PhonebookPage() {
     setCompanyDraft(null)
     setCreatingCompany(false)
     if (companyContactIds.length > 0) {
-      await syncGoogleContacts(false, null, {
+      await syncPhoneContacts(false, null, {
         deleteContactIds: companyContactIds,
-        successMessage: "Company deleted and Google contacts updated.",
-        failureMessage: "Company deleted locally. Google sync needs to be run from your local setup.",
+        successMessage: "Company deleted and CardDAV contacts updated.",
+        failureMessage: "Company deleted locally, but CardDAV sync failed.",
       })
     } else {
       setMessage("Company deleted.")
@@ -1215,12 +1215,12 @@ export default function PhonebookPage() {
           if (error) throw error
           setContacts((prev) => prev.filter((item) => item.id !== entry.after!.id))
           if (selectedId === entry.after.id) setSelectedId("")
-          await syncGoogleContacts(false, null, { deleteContactIds: [entry.after.id], successMessage: "Undone and synced." })
+          await syncPhoneContacts(false, null, { deleteContactIds: [entry.after.id], successMessage: "Undone and synced." })
         } else if (entry.action === "delete" && entry.before) {
           const { data, error } = await supabase.from("phonebook_contacts").insert(entry.before).select("*").single()
           if (error || !data) throw error || new Error("Unable to restore contact.")
           setContacts((prev) => [data as Contact, ...prev])
-          await syncGoogleContacts(false, [data.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but web Google sync failed." })
+          await syncPhoneContacts(false, [data.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but CardDAV sync failed." })
         } else if (entry.action === "update" && entry.before && entry.after) {
           const { error } = await supabase.from("phonebook_contacts").update(entry.before).eq("id", entry.after.id)
           if (error) throw error
@@ -1229,7 +1229,7 @@ export default function PhonebookPage() {
             setCurrent(entry.before as Contact)
             setDraft(entry.before as Contact)
           }
-          await syncGoogleContacts(false, [entry.after.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but web Google sync failed." })
+          await syncPhoneContacts(false, [entry.after.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but CardDAV sync failed." })
         }
       } else {
         if (entry.action === "create" && entry.after) {
@@ -1266,9 +1266,9 @@ export default function PhonebookPage() {
                   : contact,
               ),
             )
-            await syncGoogleContacts(false, affected.map((contact) => contact.id), {
+            await syncPhoneContacts(false, affected.map((contact) => contact.id), {
               successMessage: "Undone and synced.",
-              failureMessage: "Undone locally, but web Google sync failed.",
+              failureMessage: "Undone locally, but CardDAV sync failed.",
             })
           }
         }
@@ -1326,9 +1326,9 @@ export default function PhonebookPage() {
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setDraft(nextDraft)
     setEditing(false)
-    const synced = await syncGoogleContacts(false, [draft.id], {
+    const synced = await syncPhoneContacts(false, [draft.id], {
       successMessage: "Archived and synced.",
-      failureMessage: "Archived locally, but web Google sync failed.",
+      failureMessage: "Archived locally, but CardDAV sync failed.",
     })
     if (synced) setMessage("Archived and synced.")
     setSaving(false)
@@ -1369,78 +1369,76 @@ export default function PhonebookPage() {
   }
 
   async function confirmAndRunFullRebuild() {
-    if (!confirm("Run Full Rebuild for Google Contacts? This can take a long time and replace the currently synced contacts.")) {
+    if (!confirm("Run Full Rebuild for CardDAV? This will replace Bunker Map contacts in the CardDAV address book.")) {
       return
     }
-    await syncGoogleContacts(true)
+    await syncPhoneContacts(true)
   }
 
-  async function syncGoogleContacts(
+  async function syncPhoneContacts(
     fullRebuild = false,
     contactIds: string[] | null = null,
     options?: {
       deleteContactIds?: string[]
       successMessage?: string
-      retryMissing?: boolean
       failureMessage?: string
       silentFailure?: boolean
     },
   ) {
-    setGoogleSyncing(true)
+    setContactSyncing(true)
     if (!options?.silentFailure) setMessage("")
     try {
-      if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !options?.retryMissing && !selectedCompany) {
+      if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !selectedCompany) {
         setMessage("Select a company first, or use Full Rebuild from the menu.")
         return false
       }
 
-      const response = await fetch("/api/phonebook/google-sync", {
+      const response = await fetch("/api/phonebook/carddav-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selectedCompany:
-            fullRebuild || contactIds?.length || options?.deleteContactIds?.length || options?.retryMissing
+            fullRebuild || contactIds?.length || options?.deleteContactIds?.length
               ? null
               : selectedCompany || null,
           fullRebuild,
           contactIds: contactIds?.length ? contactIds : null,
           deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
-          retryMissing: Boolean(options?.retryMissing),
         }),
       })
 
-      const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: GoogleSyncFailure[] }
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: ContactSyncFailure[] }
       if (!response.ok) {
         if (options?.failureMessage) {
           setMessage(payload.message ? `${options.failureMessage} ${payload.message}` : options.failureMessage)
         } else if (!options?.silentFailure) {
-          setMessage(payload.message || "Unable to sync Google Contacts.")
+          setMessage(payload.message || "Unable to sync CardDAV.")
         }
         return false
       }
 
       if (payload.failed) {
-        localStorage.setItem(LAST_GOOGLE_SYNC_FAILED_KEY, JSON.stringify(payload.failed))
+        localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(payload.failed))
       }
-      setMessage(options?.successMessage || payload.message || "Google Contacts synced.")
+      setMessage(options?.successMessage || payload.message || "CardDAV synced.")
       return true
     } catch (error) {
       if (options?.failureMessage) {
         const fallback = error instanceof Error ? error.message : ""
         setMessage(fallback ? `${options.failureMessage} ${fallback}` : options.failureMessage)
       } else if (!options?.silentFailure) {
-        setMessage("Unable to sync Google Contacts.")
+        setMessage("Unable to sync CardDAV.")
       }
       return false
     } finally {
-      setGoogleSyncing(false)
+      setContactSyncing(false)
       setMenuOpen(false)
     }
   }
 
-  async function retryFailedGoogleContacts() {
-    const raw = localStorage.getItem(LAST_GOOGLE_SYNC_FAILED_KEY)
-    const failedEntries = raw ? (JSON.parse(raw) as GoogleSyncFailure[]) : []
+  async function retryFailedPhoneContacts() {
+    const raw = localStorage.getItem(LAST_CONTACT_SYNC_FAILED_KEY)
+    const failedEntries = raw ? (JSON.parse(raw) as ContactSyncFailure[]) : []
     if (failedEntries.length > 0) {
       const ids = failedEntries.map((entry) => entry.id).filter(Boolean)
 
@@ -1450,14 +1448,12 @@ export default function PhonebookPage() {
         return
       }
 
-      await syncGoogleContacts(false, ids, { successMessage: "Retried failed Google contacts." })
+      await syncPhoneContacts(false, ids, { successMessage: "Retried failed CardDAV contacts." })
       return
     }
 
-    await syncGoogleContacts(false, null, {
-      retryMissing: true,
-      successMessage: "Retried missing Google contacts.",
-    })
+    setMessage("No failed CardDAV contacts to retry.")
+    setMenuOpen(false)
   }
 
   function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -1522,8 +1518,8 @@ export default function PhonebookPage() {
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
             <a href="/admin" style={buttonStyle}>Back To Admin</a>
             <button
-              onClick={() => void syncGoogleContacts(false)}
-              disabled={googleSyncing}
+              onClick={() => void syncPhoneContacts(false)}
+              disabled={contactSyncing}
               style={{
                 ...buttonStyle,
                 minWidth: "190px",
@@ -1532,7 +1528,7 @@ export default function PhonebookPage() {
                 border: "1px solid rgba(126, 180, 255, 0.28)",
               }}
             >
-              {googleSyncing ? "Syncing" : `Synced ${contacts.length} Contacts`}
+              {contactSyncing ? "Syncing" : `Synced ${contacts.length} Contacts`}
             </button>
             <button
               type="button"
@@ -1549,8 +1545,8 @@ export default function PhonebookPage() {
               <div style={menuPanelStyle} onMouseEnter={cancelMenuHide} onMouseLeave={scheduleMenuHide}>
                 <button
                   type="button"
-                  onClick={() => void retryFailedGoogleContacts()}
-                  disabled={googleSyncing}
+                  onClick={() => void retryFailedPhoneContacts()}
+                  disabled={contactSyncing}
                   style={buttonStyle}
                 >
                   Retry Failed
@@ -1558,7 +1554,7 @@ export default function PhonebookPage() {
                 <button
                   type="button"
                   onClick={() => void confirmAndRunFullRebuild()}
-                  disabled={googleSyncing}
+                  disabled={contactSyncing}
                   style={buttonStyle}
                 >
                   Full Rebuild
