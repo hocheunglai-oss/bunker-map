@@ -294,6 +294,7 @@ export async function POST(request: Request) {
       contactIds?: string[]
       deleteContactIds?: string[]
       cursor?: number
+      phase?: "delete" | "upload"
     }
 
     const deleteIds = Array.isArray(body.deleteContactIds) ? body.deleteContactIds.filter(Boolean) : []
@@ -315,10 +316,26 @@ export async function POST(request: Request) {
 
     const total = contacts.length
     const cursor = Number.isFinite(body.cursor) ? Math.max(0, Number(body.cursor)) : 0
+    const phase = body.fullRebuild ? (body.phase === "upload" ? "upload" : "delete") : "upload"
 
-    if (body.fullRebuild && cursor === 0) {
+    if (body.fullRebuild && phase === "delete") {
       const hrefs = await loadManagedCardHrefs()
-      for (const href of hrefs) await deleteCard(href)
+      const batch = hrefs.slice(cursor, cursor + FULL_REBUILD_BATCH_SIZE)
+      for (const href of batch) await deleteCard(href)
+
+      const deletedCount = Math.min(cursor + batch.length, hrefs.length)
+      const deleteDone = deletedCount >= hrefs.length
+      return NextResponse.json({
+        message: deleteDone
+          ? "Deleted existing CardDAV contacts. Starting upload..."
+          : `Deleting existing CardDAV contacts ${deletedCount}/${hrefs.length}...`,
+        failed: [],
+        total: deleteDone ? total : hrefs.length,
+        done: false,
+        nextCursor: deleteDone ? 0 : deletedCount,
+        syncedCount: 0,
+        phase: deleteDone ? "upload" : "delete",
+      })
     }
 
     if (body.fullRebuild) {
@@ -345,6 +362,7 @@ export async function POST(request: Request) {
       done: !body.fullRebuild || cursor + contacts.length >= total,
       nextCursor: body.fullRebuild && cursor + contacts.length < total ? cursor + contacts.length : null,
       syncedCount: synced,
+      phase: "upload",
     })
   } catch (error) {
     console.error("phonebook carddav sync failed", error)

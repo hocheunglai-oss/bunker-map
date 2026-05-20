@@ -103,6 +103,7 @@ type ContactSyncResponse = {
   done?: boolean
   nextCursor?: number | null
   syncedCount?: number
+  phase?: "delete" | "upload"
 }
 
 const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
@@ -1407,6 +1408,7 @@ export default function PhonebookPage() {
       const accumulatedFailed: ContactSyncFailure[] = []
       let cursor = 0
       let lastPayload: ContactSyncResponse = {}
+      let phase: "delete" | "upload" = fullRebuild ? "delete" : "upload"
 
       while (true) {
         const response = await fetch("/api/phonebook/carddav-sync", {
@@ -1421,6 +1423,7 @@ export default function PhonebookPage() {
             contactIds: contactIds?.length ? contactIds : null,
             deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
             cursor: fullRebuild ? cursor : null,
+            phase: fullRebuild ? phase : null,
           }),
         })
 
@@ -1445,14 +1448,20 @@ export default function PhonebookPage() {
 
         const total = payload.total ?? contacts.length
         const completed = Math.min(payload.nextCursor ?? total, total)
-        setContactSyncLabel(`Syncing ${completed}/${total}`)
-        setMessage(`Syncing CardDAV ${completed}/${total}...`)
+        if (payload.phase === "delete") {
+          setContactSyncLabel(`Deleting ${completed}/${total}`)
+          setMessage(payload.message || `Deleting existing CardDAV contacts ${completed}/${total}...`)
+        } else {
+          setContactSyncLabel(`Syncing ${completed}/${total}`)
+          setMessage(payload.message || `Syncing CardDAV ${completed}/${total}...`)
+        }
 
         if (payload.done || payload.nextCursor == null) {
           break
         }
 
         cursor = payload.nextCursor
+        phase = payload.phase === "upload" ? "upload" : "delete"
       }
 
       localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(accumulatedFailed.slice(0, 50)))
