@@ -25,6 +25,7 @@ type LeaveRequestDraft = {
   reason: string
   person: string
   status: "idle" | "sending" | "sent" | "failed"
+  error: string
 }
 type RecurrentDraft = ManagedEvent & {
   frequency: RecurrentFrequency
@@ -287,6 +288,7 @@ function buildBlankLeaveRequest(todayKey: string, people: string[]): LeaveReques
     reason: "",
     person: people[0] || "",
     status: "idle",
+    error: "",
   }
 }
 
@@ -557,7 +559,7 @@ export default function EventCalendarPage() {
 
   async function sendLeaveRequest() {
     if (!leaveRequestDraft.person || leaveRequestDraft.status === "sending") return
-    setLeaveRequestDraft((current) => ({ ...current, status: "sending" }))
+    setLeaveRequestDraft((current) => ({ ...current, status: "sending", error: "" }))
 
     try {
       const response = await fetch("/api/event-calendar/leave-request", {
@@ -566,11 +568,16 @@ export default function EventCalendarPage() {
         body: JSON.stringify(leaveRequestDraft),
       })
 
-      if (!response.ok) throw new Error("Leave request failed.")
-      setLeaveRequestDraft((current) => ({ ...current, status: "sent" }))
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(payload?.message || "Leave request failed.")
+      setLeaveRequestDraft((current) => ({ ...current, status: "sent", error: "" }))
       window.setTimeout(() => setLeaveModalOpen(false), 900)
-    } catch {
-      setLeaveRequestDraft((current) => ({ ...current, status: "failed" }))
+    } catch (error) {
+      setLeaveRequestDraft((current) => ({
+        ...current,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Leave request failed.",
+      }))
     }
   }
 
@@ -1431,7 +1438,7 @@ export default function EventCalendarPage() {
                   ? "Sending leave request..."
                   : leaveRequestDraft.status === "sent"
                     ? "Sent"
-                    : "Could not send. Please check email settings and try again."}
+                    : leaveRequestDraft.error || "Could not send. Please check email settings and try again."}
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>

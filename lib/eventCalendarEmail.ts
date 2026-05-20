@@ -136,7 +136,14 @@ export async function sendCalendarEmail(input: {
 
   if (!response.ok) {
     const message = await response.text()
-    throw new Error(message || "Email send failed.")
+    let detail = ""
+    try {
+      const payload = JSON.parse(message) as { message?: string; code?: string }
+      detail = payload.message || payload.code || ""
+    } catch {
+      detail = ""
+    }
+    throw new Error(detail || message || "Email send failed.")
   }
 
   return response.json()
