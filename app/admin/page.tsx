@@ -388,6 +388,7 @@ export default function AdminPage() {
               <div style={{ display: "grid", gap: "12px" }}>
                 {[
                   { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
+                  { label: "TASK CALENDAR", path: "/admin/taskcalendar" },
                 ].map((item) => (
                   <button
                     key={item.label}

@@ -3,6 +3,10 @@
     {
       "path": "/api/event-calendar/daily-reminder",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/task-calendar/daily-reminder",
+      "schedule": "30 3 * * *"
     }
   ]
 }
