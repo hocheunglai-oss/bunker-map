@@ -47,16 +47,6 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;")
 }
 
-function parseSender(value: string) {
-  const match = value.match(/^\s*(.*?)\s*<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>\s*$/)
-  if (match) return { name: match[1].replace(/^"|"$/g, "").trim() || undefined, email: match[2] }
-  return { email: value.trim() }
-}
-
-function formatBrevoRecipients(recipients: string[]) {
-  return recipients.map((email) => ({ email }))
-}
-
 export function buildChangedEventEmail(event: OfficeCalendarEvent, _action: "created" | "updated") {
   const people = event.people.length ? event.people.join(", ") : "No attendees selected"
 
@@ -115,22 +105,22 @@ export async function sendCalendarEmail(input: {
   subject: string
   html: string
 }) {
-  const apiKey = process.env.BREVO_API_KEY
-  if (!apiKey) throw new Error("BREVO_API_KEY is not configured.")
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.")
 
   const from = process.env.EVENT_CALENDAR_EMAIL_FROM || "FC Event Calendar <calendar@fcuno.com>"
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      "api-key": apiKey,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      sender: parseSender(from),
-      to: formatBrevoRecipients(input.to),
-      ...(input.cc?.length ? { cc: formatBrevoRecipients(input.cc) } : {}),
+      from,
+      to: input.to,
+      ...(input.cc?.length ? { cc: input.cc } : {}),
       subject: input.subject,
-      htmlContent: input.html,
+      html: input.html,
     }),
   })
 
