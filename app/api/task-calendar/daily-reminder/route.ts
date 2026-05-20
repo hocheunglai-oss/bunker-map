@@ -45,6 +45,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "Not authorized." }, { status: 401 })
   }
 
+  const { searchParams } = new URL(request.url)
+  const dryRun = searchParams.get("dryRun") === "1"
   const dueTasks = getDueTaskCalendarTasks()
   const sent: Array<{ id: string; subject: string; to: number; cc: number }> = []
   const skipped: Array<{ id: string; reason: string }> = []
@@ -60,6 +62,11 @@ export async function GET(request: Request) {
       }
 
       const email = buildTaskReminderEmail(task)
+      if (dryRun) {
+        sent.push({ id: task.id, subject: email.subject, to: to.length, cc: cc.length })
+        continue
+      }
+
       await sendCalendarEmail({
         to,
         cc,

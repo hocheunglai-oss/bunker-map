@@ -33,7 +33,7 @@ export const taskCalendarTasks: TaskCalendarTask[] = [
   { id: "task-bank-ubs", sourceRow: 9, scheduleType: "Monthly", daysOfMonth: [1, 16], notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (UBS - TD/TL/OD)", remark: "" },
   { id: "task-exchange-rate", sourceRow: 10, scheduleType: "Monthly", daysOfMonth: [1, 16], notify: ["LL"], cc: ["LC"], task: "FC Exchange Rate Table Update for A/C use & email to CC", remark: "" },
   { id: "task-expense-claim", sourceRow: 11, scheduleType: "Monthly", daysOfMonth: [1], notify: ["LL"], cc: ["VL"], task: "Expense Claim Submission", remark: "" },
-  { id: "task-payment-buyer", sourceRow: 12, scheduleType: "Weekly", dayOfWeek: 5, daysOfMonth: [], notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", remark: "" },
+  { id: "task-payment-buyer", sourceRow: 12, scheduleType: "Weekly", dayOfWeek: 3, daysOfMonth: [], notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", remark: "" },
   { id: "task-comp-fcbv", sourceRow: 13, scheduleType: "Monthly", daysOfMonth: [1], notify: ["SC", "OL"], cc: ["VL", "SC", "OL", "KZ", "CY", "MY"], task: "Unofficial Compensation Outstanding File to FCBV", remark: "" },
   { id: "task-mop-price", sourceRow: 14, scheduleType: "Monthly", daysOfMonth: [1], notify: ["LC", "LL"], cc: ["VL"], task: "Ask VL for MOP's price to issue invoice to customer", remark: "" },
   { id: "task-funding-fcbv", sourceRow: 15, scheduleType: "Yearly", daysOfMonth: [2], months: [2, 4, 6, 8, 10, 12], notify: ["LL", "LC", "OL"], cc: ["VL"], task: "Payment for Funding to FCBV", remark: "" },

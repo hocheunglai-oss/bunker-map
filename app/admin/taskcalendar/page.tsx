@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  getDueTaskCalendarTasks,
   getTaskScheduleText,
   monthNames,
   resolveTaskRecipients,
@@ -156,7 +155,6 @@ export default function TaskCalendarPage() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
   }, [tasks])
 
-  const dueTodayIds = useMemo(() => new Set(getDueTaskCalendarTasks(new Date(), tasks).map((task) => task.id)), [tasks])
   const visibleTasks = useMemo(
     () => tasks.filter((task) => selectedPerson === "All" || task.notify.includes(selectedPerson) || task.cc.includes(selectedPerson)),
     [selectedPerson, tasks]
@@ -261,7 +259,6 @@ export default function TaskCalendarPage() {
             </thead>
             <tbody>
               {visibleTasks.map((task) => {
-                const dueToday = dueTodayIds.has(task.id)
                 const to = resolveTaskRecipients(task.notify)
                 const cc = resolveTaskRecipients(task.cc)
                 return (
@@ -269,8 +266,7 @@ export default function TaskCalendarPage() {
                     key={task.id}
                     onDoubleClick={() => openEditModal(task)}
                     style={{
-                      background: dueToday ? "linear-gradient(90deg, rgba(73, 219, 165, 0.24), rgba(73, 219, 165, 0.08))" : "rgba(5, 19, 34, 0.28)",
-                      boxShadow: dueToday ? "inset 0 0 0 2px rgba(73, 219, 165, 0.42)" : "none",
+                      background: "rgba(5, 19, 34, 0.28)",
                       cursor: "pointer",
                     }}
                   >
