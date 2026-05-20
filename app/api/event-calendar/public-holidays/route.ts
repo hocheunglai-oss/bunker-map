@@ -79,7 +79,13 @@ export async function GET(request: Request) {
   try {
     for (const year of years) {
       for (const country of HOLIDAY_COUNTRIES.filter((item) => countries.includes(item.code))) {
-        const holidays = await fetchCountryHolidays(year, country.code)
+        let holidays: NagerHoliday[]
+
+        try {
+          holidays = await fetchCountryHolidays(year, country.code)
+        } catch {
+          continue
+        }
 
         for (const holiday of holidays) {
           if (!holiday.date) continue
@@ -93,7 +99,7 @@ export async function GET(request: Request) {
             endDate: holiday.date,
             title:
               titleStyle === "holiday-attendance"
-                ? `HOLIDAY ATTENDANCE - ${(holiday.localName || holiday.name || country.label).toUpperCase()}`
+                ? `HOLIDAY ATTENDANCE - ${(holiday.name || holiday.localName || country.label).toUpperCase()}`
                 : `PUBLIC HOLIDAY - ${country.label}`,
             people: [],
             tags: ["public-holiday", country.code],
