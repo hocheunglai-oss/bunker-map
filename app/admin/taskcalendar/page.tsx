@@ -155,11 +155,6 @@ export default function TaskCalendarPage() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
   }, [tasks])
 
-  const visibleTasks = useMemo(
-    () => tasks.filter((task) => selectedPerson === "All" || task.notify.includes(selectedPerson) || task.cc.includes(selectedPerson)),
-    [selectedPerson, tasks]
-  )
-
   function openAddModal() {
     setDraftTask(buildBlankTask())
     setModalOpen(true)
@@ -237,6 +232,7 @@ export default function TaskCalendarPage() {
                   ...buttonStyle,
                   background: active ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)" : buttonStyle.background,
                   color: active ? "#031b36" : buttonStyle.color,
+                  boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : buttonStyle.boxShadow,
                 }}
               >
                 {person}
@@ -258,16 +254,19 @@ export default function TaskCalendarPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleTasks.map((task) => {
+              {tasks.map((task) => {
                 const to = resolveTaskRecipients(task.notify)
                 const cc = resolveTaskRecipients(task.cc)
+                const rowHighlighted = selectedPerson !== "All" && (task.notify.includes(selectedPerson) || task.cc.includes(selectedPerson))
                 return (
                   <tr
                     key={task.id}
                     onDoubleClick={() => openEditModal(task)}
                     style={{
                       background: "rgba(5, 19, 34, 0.28)",
+                      boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
                       cursor: "pointer",
+                      opacity: selectedPerson !== "All" && !rowHighlighted ? 0.46 : 1,
                     }}
                   >
                     <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>***** {task.task}</td>
