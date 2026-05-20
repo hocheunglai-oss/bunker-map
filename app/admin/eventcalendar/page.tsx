@@ -39,6 +39,7 @@ type ManagedEvent = OfficeCalendarEvent & {
 const STORAGE_KEY = "bunker-map-office-calendar-events"
 const PEOPLE_STORAGE_KEY = "bunker-map-office-calendar-people"
 const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipients"
+const SHARED_STORE_KEY = "event-calendar"
 const CALENDAR_ID = "cosulich.uno@gmail.com"
 const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const leaveTypes: LeaveType[] = [
@@ -342,37 +343,90 @@ export default function EventCalendarPage() {
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
   const loadedRef = useRef(false)
+  const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY)
-      const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
-      const storedEmailRecipients = window.localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY)
-      if (stored) setEvents(normalizeStoredEvents(JSON.parse(stored)))
-      if (storedPeople) setPeople(normalizePeople(JSON.parse(storedPeople)))
-      if (storedEmailRecipients) setEmailRecipientsText(storedEmailRecipients)
-    } catch {
-      setEvents(normalizeStoredEvents(officeCalendarSeedEvents))
-      setPeople(defaultPeople)
-    } finally {
+    let cancelled = false
+
+    async function loadCalendarData() {
+      let fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
+      let fallbackPeople = defaultPeople
+      let fallbackEmailRecipients = ""
+
+      try {
+        const stored = window.localStorage.getItem(STORAGE_KEY)
+        const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
+        const storedEmailRecipients = window.localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY)
+        if (stored) fallbackEvents = normalizeStoredEvents(JSON.parse(stored))
+        if (storedPeople) fallbackPeople = normalizePeople(JSON.parse(storedPeople))
+        if (storedEmailRecipients) fallbackEmailRecipients = storedEmailRecipients
+      } catch {
+        fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
+        fallbackPeople = defaultPeople
+      }
+
+      try {
+        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        const data = await response.json()
+        const payload = data?.payload
+
+        if (response.ok && payload && typeof payload === "object") {
+          if (Array.isArray(payload.events)) fallbackEvents = normalizeStoredEvents(payload.events)
+          if (Array.isArray(payload.people)) fallbackPeople = normalizePeople(payload.people)
+          if (typeof payload.emailRecipientsText === "string") fallbackEmailRecipients = payload.emailRecipientsText
+        }
+      } catch {
+        // Local storage remains the fallback when the shared store is unavailable.
+      }
+
+      if (cancelled) return
+      setEvents(fallbackEvents)
+      setPeople(fallbackPeople)
+      setEmailRecipientsText(fallbackEmailRecipients)
       loadedRef.current = true
+    }
+
+    loadCalendarData()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
   useEffect(() => {
+    if (!loadedRef.current) return
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events))
   }, [events])
 
   useEffect(() => {
+    if (!loadedRef.current) return
     window.localStorage.setItem(PEOPLE_STORAGE_KEY, JSON.stringify(people))
   }, [people])
 
   useEffect(() => {
+    if (!loadedRef.current) return
     window.localStorage.setItem(EMAIL_RECIPIENTS_STORAGE_KEY, emailRecipientsText)
   }, [emailRecipientsText])
+
+  useEffect(() => {
+    if (!authenticated || !loadedRef.current) return
+    if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+
+    remoteSaveTimerRef.current = setTimeout(() => {
+      void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events, people, emailRecipientsText }),
+      })
+    }, 700)
+
+    return () => {
+      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+    }
+  }, [authenticated, emailRecipientsText, events, people])
 
   useEffect(() => {
     if (!authenticated || !loadedRef.current) return
@@ -440,6 +494,7 @@ export default function EventCalendarPage() {
 
   useEffect(() => {
     return () => {
+      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
       if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
       if (addMenuCloseTimerRef.current) clearTimeout(addMenuCloseTimerRef.current)
     }

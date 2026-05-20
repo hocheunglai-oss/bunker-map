@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   getTaskScheduleText,
@@ -14,6 +14,7 @@ import {
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const STORAGE_KEY = "bunker-map-task-calendar-tasks-v2"
+const SHARED_STORE_KEY = "task-calendar"
 const people = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const scheduleTypes: TaskScheduleType[] = ["Weekly", "Monthly", "Yearly"]
 
@@ -141,19 +142,71 @@ export default function TaskCalendarPage() {
   const [selectedPerson, setSelectedPerson] = useState("All")
   const [modalOpen, setModalOpen] = useState(false)
   const [draftTask, setDraftTask] = useState<TaskCalendarTask>(buildBlankTask)
+  const loadedRef = useRef(false)
+  const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY)
-      if (stored) setTasks(normalizeTasks(JSON.parse(stored)))
-    } catch {
-      setTasks(taskCalendarTasks)
+    let cancelled = false
+
+    async function loadTasks() {
+      let fallbackTasks = taskCalendarTasks
+
+      try {
+        const stored = window.localStorage.getItem(STORAGE_KEY)
+        if (stored) fallbackTasks = normalizeTasks(JSON.parse(stored))
+      } catch {
+        fallbackTasks = taskCalendarTasks
+      }
+
+      try {
+        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        const data = await response.json()
+        if (response.ok && Array.isArray(data?.payload?.tasks)) {
+          fallbackTasks = normalizeTasks(data.payload.tasks)
+        }
+      } catch {
+        // Local storage remains the fallback when the shared store is unavailable.
+      }
+
+      if (cancelled) return
+      setTasks(fallbackTasks)
+      loadedRef.current = true
+    }
+
+    loadTasks()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
   useEffect(() => {
+    if (!loadedRef.current) return
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
   }, [tasks])
+
+  useEffect(() => {
+    if (!authenticated || !loadedRef.current) return
+    if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+
+    remoteSaveTimerRef.current = setTimeout(() => {
+      void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks }),
+      })
+    }, 700)
+
+    return () => {
+      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+    }
+  }, [authenticated, tasks])
+
+  useEffect(() => {
+    return () => {
+      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+    }
+  }, [])
 
   function openAddModal() {
     setDraftTask(buildBlankTask())

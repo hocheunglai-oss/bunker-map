@@ -1,14 +1,30 @@
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
 import {
   getDueTaskCalendarTasks,
   getTaskScheduleText,
   resolveTaskRecipients,
   TaskCalendarTask,
+  taskCalendarTasks,
 } from "@/data/taskCalendar"
 import { sendCalendarEmail } from "@/lib/eventCalendarEmail"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
+const SHARED_STORE_KEY = "task-calendar"
+
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing environment variable: ${name}`)
+  return value
+}
+
+function getSupabaseClient() {
+  return createClient(
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  )
+}
 
 function hasAccess(request: Request) {
   const secret = process.env.CRON_SECRET
@@ -38,6 +54,40 @@ function buildTaskReminderEmail(task: TaskCalendarTask) {
   }
 }
 
+function normalizeStoredTasks(value: unknown) {
+  if (!Array.isArray(value)) return taskCalendarTasks
+
+  const tasks = value.filter((task): task is TaskCalendarTask => {
+    return (
+      task &&
+      typeof task === "object" &&
+      typeof task.id === "string" &&
+      typeof task.task === "string" &&
+      Array.isArray(task.daysOfMonth) &&
+      Array.isArray(task.notify) &&
+      Array.isArray(task.cc)
+    )
+  })
+
+  return tasks.length ? tasks : taskCalendarTasks
+}
+
+async function loadTaskCalendarTasks() {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase
+      .from("office_calendar_store")
+      .select("payload")
+      .eq("key", SHARED_STORE_KEY)
+      .maybeSingle()
+
+    if (error) throw error
+    return normalizeStoredTasks(data?.payload?.tasks)
+  } catch {
+    return taskCalendarTasks
+  }
+}
+
 export async function GET(request: Request) {
   const cookieStore = await cookies()
 
@@ -47,7 +97,8 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get("dryRun") === "1"
-  const dueTasks = getDueTaskCalendarTasks()
+  const storedTasks = await loadTaskCalendarTasks()
+  const dueTasks = getDueTaskCalendarTasks(new Date(), storedTasks)
   const sent: Array<{ id: string; subject: string; to: number; cc: number }> = []
   const skipped: Array<{ id: string; reason: string }> = []
 
