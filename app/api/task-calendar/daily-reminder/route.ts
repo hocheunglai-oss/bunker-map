@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import {
   getDueTaskCalendarTasks,
+  getTaskScheduleText,
   resolveTaskRecipients,
   TaskCalendarTask,
 } from "@/data/taskCalendar"
@@ -28,11 +29,9 @@ function buildTaskReminderEmail(task: TaskCalendarTask) {
   return {
     subject: `***** ${task.task}`,
     html: `
-      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
-        <p style="margin:0 0 8px"><strong>Task</strong><br />${escapeHtml(task.task)}</p>
-        <p style="margin:0 0 8px"><strong>Day of Month</strong><br />${task.dayOfMonth}</p>
-        <p style="margin:0 0 8px"><strong>Frequency</strong><br />${escapeHtml(task.frequency)}</p>
-        <p style="margin:0 0 8px"><strong>Relevant Company</strong><br />${escapeHtml(task.company || "-")}</p>
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
+          <p style="margin:0 0 8px"><strong>Task</strong><br />${escapeHtml(task.task)}</p>
+        <p style="margin:0 0 8px"><strong>Schedule</strong><br />${escapeHtml(getTaskScheduleText(task))}</p>
         <p style="margin:0"><strong>Remark</strong><br />${escapeHtml(task.remark || "-")}</p>
       </div>
     `,

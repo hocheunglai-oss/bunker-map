@@ -1,12 +1,15 @@
+export type TaskScheduleType = "Weekly" | "Monthly" | "Yearly"
+
 export type TaskCalendarTask = {
   id: string
   sourceRow: number
-  dayOfMonth: number
+  scheduleType: TaskScheduleType
+  dayOfWeek?: number
+  daysOfMonth: number[]
+  months?: number[]
   notify: string[]
   cc: string[]
   task: string
-  company: string
-  frequency: "1 Monthly" | "2 Monthly" | "4 Monthly" | "4 Yearly" | "6 Yearly"
   remark: string
 }
 
@@ -16,90 +19,60 @@ export const taskCalendarPeopleEmails: Record<string, string[]> = {
   SC: ["stanley@cosulich.com.hk"],
   VL: ["vincent@cosulich.com.hk"],
   OL: ["otto@cosulich.com.hk"],
-  BT: [
-    "vincent@cosulich.com.hk",
-    "stanley@cosulich.com.hk",
-    "otto@cosulich.com.hk",
-    "kelvin@cosulich.com.hk",
-    "chengyuan@cosulich.com.hk",
-    "mayshen@cosulich.com.hk",
-  ],
+  KZ: ["kelvin@cosulich.com.hk"],
+  CY: ["chengyuan@cosulich.com.hk"],
+  MY: ["mayshen@cosulich.com.hk"],
 }
+
+export const weekDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+export const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 export const taskCalendarTasks: TaskCalendarTask[] = [
-  { id: "task-7", sourceRow: 7, dayOfMonth: 1, notify: ["BT"], cc: [], task: "Unofficial Compensation Outststanding  File", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-8", sourceRow: 8, dayOfMonth: 1, notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (Intesa  - TD/TL)", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-9", sourceRow: 9, dayOfMonth: 1, notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (UBS - TD/TL/OD)", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-10", sourceRow: 10, dayOfMonth: 1, notify: ["LL"], cc: ["LC"], task: "FC Exchange Rate Table Update for A/C use & email to CC", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-11", sourceRow: 11, dayOfMonth: 1, notify: ["LL"], cc: ["VL"], task: "Expense Claim Submission", company: "-", frequency: "1 Monthly", remark: "" },
-  { id: "task-12", sourceRow: 12, dayOfMonth: 1, notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-13", sourceRow: 13, dayOfMonth: 1, notify: ["SC", "OL"], cc: ["BT"], task: "Unofficial Compensation Outststanding File to Fcbv", company: "Fcb", frequency: "1 Monthly", remark: "" },
-  { id: "task-14", sourceRow: 14, dayOfMonth: 1, notify: ["LC", "LL"], cc: ["VL"], task: "Ask VL for MOP's price to issue invoice to customer", company: "Fcb", frequency: "1 Monthly", remark: "" },
-  { id: "task-15", sourceRow: 15, dayOfMonth: 2, notify: ["LL", "LC", "OL"], cc: ["VL"], task: "Payment for Funding to FCBV (Feb/Apr/Jun/Aug/Oct/Dec)", company: "Fcb", frequency: "6 Yearly", remark: "" },
-  { id: "task-16", sourceRow: 16, dayOfMonth: 2, notify: ["LL", "LC", "VL"], cc: [], task: "Payment Reminder to CM/SINOTRANS GZ-GTL by Email & WeChat", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-17", sourceRow: 17, dayOfMonth: 8, notify: ["BT"], cc: [], task: "Unofficial Compensation Outststanding  File", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-18", sourceRow: 18, dayOfMonth: 8, notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-19", sourceRow: 19, dayOfMonth: 9, notify: ["LL", "LC", "VL"], cc: [], task: "Payment Reminder to CM/SINOTRANS GZ-GTL by Email & WeChat", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-20", sourceRow: 20, dayOfMonth: 11, notify: ["LL", "LC"], cc: [], task: "General Expense Payment", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-21", sourceRow: 21, dayOfMonth: 15, notify: ["BT"], cc: [], task: "Unofficial Compensation Outstanding  File", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-22", sourceRow: 22, dayOfMonth: 15, notify: ["VL"], cc: ["SC"], task: "Update Mobile Phonebook", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-23", sourceRow: 23, dayOfMonth: 15, notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-24", sourceRow: 24, dayOfMonth: 15, notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder for Misc Invoice", company: "Fcb", frequency: "1 Monthly", remark: "" },
-  { id: "task-25", sourceRow: 25, dayOfMonth: 16, notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (Intesa  - TD/TL)", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-26", sourceRow: 26, dayOfMonth: 16, notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (UBS - TD/TL/OD)", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-27", sourceRow: 27, dayOfMonth: 16, notify: ["LL"], cc: ["LC"], task: "FC Exchange Rate Table Update for A/C use & email to CC", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-28", sourceRow: 28, dayOfMonth: 16, notify: ["LL", "LC", "VL"], cc: [], task: "Payment Reminder to CM/SINOTRANS GZ-GTL by Email & WeChat", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-29", sourceRow: 29, dayOfMonth: 22, notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", company: "Fcb", frequency: "4 Monthly", remark: "" },
-  { id: "task-30", sourceRow: 30, dayOfMonth: 25, notify: ["LL"], cc: ["VL", "LC"], task: "Issue Office Sharing Expense Invoice to Express Global HK", company: "Fcb", frequency: "1 Monthly", remark: "" },
-  { id: "task-31", sourceRow: 31, dayOfMonth: 26, notify: ["LL", "LC"], cc: ["VL"], task: "MPF Upload to Manulife", company: "-", frequency: "1 Monthly", remark: "" },
-  { id: "task-32", sourceRow: 32, dayOfMonth: 26, notify: ["LL", "LC"], cc: [], task: "General Expense Payment", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-33", sourceRow: 33, dayOfMonth: 30, notify: ["VL"], cc: ["SC"], task: "Update Mobile Phonebook", company: "-", frequency: "2 Monthly", remark: "" },
-  { id: "task-34", sourceRow: 34, dayOfMonth: 30, notify: ["LL"], cc: ["LC"], task: "Staff Medical Expense Summary Update", company: "-", frequency: "1 Monthly", remark: "" },
-  { id: "task-35", sourceRow: 35, dayOfMonth: 30, notify: ["VL"], cc: ["SY"], task: "BC Administration (Mar/Jun/ Sep/ Dec)", company: "Fcb", frequency: "4 Yearly", remark: "" },
+  { id: "task-comp-file", sourceRow: 7, scheduleType: "Weekly", dayOfWeek: 5, daysOfMonth: [], notify: ["VL", "SC", "OL", "KZ", "CY", "MY"], cc: [], task: "Unofficial Compensation Outstanding File", remark: "" },
+  { id: "task-bank-intesa", sourceRow: 8, scheduleType: "Monthly", daysOfMonth: [1, 16], notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (Intesa - TD/TL)", remark: "" },
+  { id: "task-bank-ubs", sourceRow: 9, scheduleType: "Monthly", daysOfMonth: [1, 16], notify: ["LL"], cc: ["LC"], task: "FC Bank Interest Rate Table Update (UBS - TD/TL/OD)", remark: "" },
+  { id: "task-exchange-rate", sourceRow: 10, scheduleType: "Monthly", daysOfMonth: [1, 16], notify: ["LL"], cc: ["LC"], task: "FC Exchange Rate Table Update for A/C use & email to CC", remark: "" },
+  { id: "task-expense-claim", sourceRow: 11, scheduleType: "Monthly", daysOfMonth: [1], notify: ["LL"], cc: ["VL"], task: "Expense Claim Submission", remark: "" },
+  { id: "task-payment-buyer", sourceRow: 12, scheduleType: "Weekly", dayOfWeek: 5, daysOfMonth: [], notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder to Buyer (WED)", remark: "" },
+  { id: "task-comp-fcbv", sourceRow: 13, scheduleType: "Monthly", daysOfMonth: [1], notify: ["SC", "OL"], cc: ["VL", "SC", "OL", "KZ", "CY", "MY"], task: "Unofficial Compensation Outstanding File to FCBV", remark: "" },
+  { id: "task-mop-price", sourceRow: 14, scheduleType: "Monthly", daysOfMonth: [1], notify: ["LC", "LL"], cc: ["VL"], task: "Ask VL for MOP's price to issue invoice to customer", remark: "" },
+  { id: "task-funding-fcbv", sourceRow: 15, scheduleType: "Yearly", daysOfMonth: [2], months: [2, 4, 6, 8, 10, 12], notify: ["LL", "LC", "OL"], cc: ["VL"], task: "Payment for Funding to FCBV", remark: "" },
+  { id: "task-cm-sinotrans", sourceRow: 16, scheduleType: "Weekly", dayOfWeek: 6, daysOfMonth: [], notify: ["LL", "LC", "VL"], cc: [], task: "Payment Reminder to CM/SINOTRANS GZ-GTL by Email & WeChat", remark: "" },
+  { id: "task-general-expense", sourceRow: 20, scheduleType: "Monthly", daysOfMonth: [11, 26], notify: ["LL", "LC"], cc: [], task: "General Expense Payment", remark: "" },
+  { id: "task-phonebook", sourceRow: 22, scheduleType: "Monthly", daysOfMonth: [15, 30], notify: ["VL"], cc: ["SC"], task: "Update Mobile Phonebook", remark: "" },
+  { id: "task-misc-invoice", sourceRow: 24, scheduleType: "Monthly", daysOfMonth: [15], notify: ["LL", "LC"], cc: ["VL"], task: "Payment Reminder for Misc Invoice", remark: "" },
+  { id: "task-sharing-invoice", sourceRow: 30, scheduleType: "Monthly", daysOfMonth: [25], notify: ["LL"], cc: ["VL", "LC"], task: "Issue Office Sharing Expense Invoice to Express Global HK", remark: "" },
+  { id: "task-mpf", sourceRow: 31, scheduleType: "Monthly", daysOfMonth: [26], notify: ["LL", "LC"], cc: ["VL"], task: "MPF Upload to Manulife", remark: "" },
+  { id: "task-medical-summary", sourceRow: 34, scheduleType: "Monthly", daysOfMonth: [30], notify: ["LL"], cc: ["LC"], task: "Staff Medical Expense Summary Update", remark: "" },
+  { id: "task-bc-admin", sourceRow: 35, scheduleType: "Yearly", daysOfMonth: [30], months: [3, 6, 9, 12], notify: ["VL"], cc: [], task: "BC Administration", remark: "" },
 ]
-
-const monthMap: Record<string, number> = {
-  jan: 1,
-  feb: 2,
-  mar: 3,
-  apr: 4,
-  may: 5,
-  jun: 6,
-  jul: 7,
-  aug: 8,
-  sep: 9,
-  oct: 10,
-  nov: 11,
-  dec: 12,
-}
 
 function getDaysInMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
 }
 
-export function getTaskActiveMonths(task: TaskCalendarTask) {
-  if (!task.frequency.includes("Yearly")) return null
-  const matches = task.task.match(/\(([^)]*)\)/)?.[1] || ""
-  const months = matches
-    .split(/[\/,\s]+/)
-    .map((item) => monthMap[item.slice(0, 3).toLowerCase()])
-    .filter((item): item is number => Boolean(item))
-
-  return months.length ? months : null
+function isDayDue(daysOfMonth: number[], date: Date) {
+  const day = date.getDate()
+  const daysInMonth = getDaysInMonth(date)
+  return daysOfMonth.some((target) => day === target || (day === daysInMonth && target > daysInMonth))
 }
 
 export function isTaskDueOnDate(task: TaskCalendarTask, date = new Date()) {
-  const activeMonths = getTaskActiveMonths(task)
-  const month = date.getMonth() + 1
-  if (activeMonths && !activeMonths.includes(month)) return false
-
-  const day = date.getDate()
-  const daysInMonth = getDaysInMonth(date)
-  return day === task.dayOfMonth || (day === daysInMonth && task.dayOfMonth > daysInMonth)
+  if (task.scheduleType === "Weekly") return date.getDay() === task.dayOfWeek
+  if (task.scheduleType === "Yearly" && !(task.months || []).includes(date.getMonth() + 1)) return false
+  return isDayDue(task.daysOfMonth, date)
 }
 
-export function getDueTaskCalendarTasks(date = new Date()) {
-  return taskCalendarTasks.filter((task) => isTaskDueOnDate(task, date))
+export function getDueTaskCalendarTasks(date = new Date(), tasks = taskCalendarTasks) {
+  return tasks.filter((task) => isTaskDueOnDate(task, date))
+}
+
+export function getTaskScheduleText(task: TaskCalendarTask) {
+  if (task.scheduleType === "Weekly") return `Weekly on ${weekDays[task.dayOfWeek || 0]}`
+  const days = task.daysOfMonth.join(", ")
+  if (task.scheduleType === "Monthly") return `Monthly on day ${days}`
+  const months = (task.months || []).map((month) => monthNames[month - 1]).join(", ")
+  return `Yearly in ${months} on day ${days}`
 }
 
 export function resolveTaskRecipients(codes: string[]) {
