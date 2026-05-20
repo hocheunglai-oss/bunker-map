@@ -3,18 +3,18 @@ import { NextResponse } from "next/server"
 import { sendCalendarEmail } from "@/lib/eventCalendarEmail"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
-const LEAVE_TO = ["stanley@cosulich.com", "vincent@cosulich.com", "louisa@cosulich.com"]
-const LEAVE_CC = ["otto@cosulich.com", "kelvin@cosulich.com"]
+const LEAVE_TO = ["stanley@cosulich.com.hk", "vincent@cosulich.com.hk", "louisa@cosulich.com.hk"]
+const LEAVE_CC = ["otto@cosulich.com.hk", "kelvin@cosulich.com.hk"]
 const PEOPLE_EMAILS: Record<string, string> = {
-  VL: "vincent@cosulich.com",
-  SC: "stanley@cosulich.com",
-  OL: "otto@cosulich.com",
-  KZ: "kelvin@cosulich.com",
-  CY: "chengyuan@cosulich.com",
-  MY: "mayshen@cosulich.com",
-  DT: "diana@cosulich.com",
-  LC: "laureen@cosulich.com",
-  LL: "louisa@cosulich.com",
+  VL: "vincent@cosulich.com.hk",
+  SC: "stanley@cosulich.com.hk",
+  OL: "otto@cosulich.com.hk",
+  KZ: "kelvin@cosulich.com.hk",
+  CY: "chengyuan@cosulich.com.hk",
+  MY: "mayshen@cosulich.com.hk",
+  DT: "diana@cosulich.com.hk",
+  LC: "laureen@cosulich.com.hk",
+  LL: "louisa@cosulich.com.hk",
 }
 
 function escapeHtml(value: string) {
