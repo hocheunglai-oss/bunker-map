@@ -96,6 +96,15 @@ type ContactSyncFailure = {
   label: string
 }
 
+type ContactSyncResponse = {
+  message?: string
+  failed?: ContactSyncFailure[]
+  total?: number
+  done?: boolean
+  nextCursor?: number | null
+  syncedCount?: number
+}
+
 const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
 
 const COUNTRY_OPTIONS = [
@@ -439,6 +448,7 @@ export default function PhonebookPage() {
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
+  const [contactSyncLabel, setContactSyncLabel] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
@@ -1386,6 +1396,7 @@ export default function PhonebookPage() {
     },
   ) {
     setContactSyncing(true)
+    setContactSyncLabel(fullRebuild ? "Starting rebuild..." : "Syncing")
     if (!options?.silentFailure) setMessage("")
     try {
       if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !selectedCompany) {
@@ -1393,34 +1404,59 @@ export default function PhonebookPage() {
         return false
       }
 
-      const response = await fetch("/api/phonebook/carddav-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedCompany:
-            fullRebuild || contactIds?.length || options?.deleteContactIds?.length
-              ? null
-              : selectedCompany || null,
-          fullRebuild,
-          contactIds: contactIds?.length ? contactIds : null,
-          deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
-        }),
-      })
+      const accumulatedFailed: ContactSyncFailure[] = []
+      let cursor = 0
+      let lastPayload: ContactSyncResponse = {}
 
-      const payload = (await response.json().catch(() => ({}))) as { message?: string; failed?: ContactSyncFailure[] }
-      if (!response.ok) {
-        if (options?.failureMessage) {
-          setMessage(payload.message ? `${options.failureMessage} ${payload.message}` : options.failureMessage)
-        } else if (!options?.silentFailure) {
-          setMessage(payload.message || "Unable to sync CardDAV.")
+      while (true) {
+        const response = await fetch("/api/phonebook/carddav-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selectedCompany:
+              fullRebuild || contactIds?.length || options?.deleteContactIds?.length
+                ? null
+                : selectedCompany || null,
+            fullRebuild,
+            contactIds: contactIds?.length ? contactIds : null,
+            deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
+            cursor: fullRebuild ? cursor : null,
+          }),
+        })
+
+        const payload = (await response.json().catch(() => ({}))) as ContactSyncResponse
+        lastPayload = payload
+        if (!response.ok) {
+          if (options?.failureMessage) {
+            setMessage(payload.message ? `${options.failureMessage} ${payload.message}` : options.failureMessage)
+          } else if (!options?.silentFailure) {
+            setMessage(payload.message || "Unable to sync CardDAV.")
+          }
+          return false
         }
-        return false
+
+        if (payload.failed?.length) {
+          accumulatedFailed.push(...payload.failed)
+        }
+
+        if (!fullRebuild) {
+          break
+        }
+
+        const total = payload.total ?? contacts.length
+        const completed = Math.min(payload.nextCursor ?? total, total)
+        setContactSyncLabel(`Syncing ${completed}/${total}`)
+        setMessage(`Syncing CardDAV ${completed}/${total}...`)
+
+        if (payload.done || payload.nextCursor == null) {
+          break
+        }
+
+        cursor = payload.nextCursor
       }
 
-      if (payload.failed) {
-        localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(payload.failed))
-      }
-      setMessage(options?.successMessage || payload.message || "CardDAV synced.")
+      localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(accumulatedFailed.slice(0, 50)))
+      setMessage(options?.successMessage || lastPayload.message || "CardDAV synced.")
       return true
     } catch (error) {
       if (options?.failureMessage) {
@@ -1432,6 +1468,7 @@ export default function PhonebookPage() {
       return false
     } finally {
       setContactSyncing(false)
+      setContactSyncLabel("")
       setMenuOpen(false)
     }
   }
@@ -1528,7 +1565,7 @@ export default function PhonebookPage() {
                 border: "1px solid rgba(126, 180, 255, 0.28)",
               }}
             >
-              {contactSyncing ? "Syncing" : `Synced ${contacts.length} Contacts`}
+              {contactSyncing ? contactSyncLabel || "Syncing" : `Synced ${contacts.length} Contacts`}
             </button>
             <button
               type="button"

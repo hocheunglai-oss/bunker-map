@@ -4,6 +4,9 @@ import { createClient } from "@supabase/supabase-js"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const MANAGED_PREFIX = "bunker-map-"
+const FULL_REBUILD_BATCH_SIZE = 250
+
+export const maxDuration = 300
 
 type PhonebookContact = {
   id: string
@@ -290,6 +293,7 @@ export async function POST(request: Request) {
       fullRebuild?: boolean
       contactIds?: string[]
       deleteContactIds?: string[]
+      cursor?: number
     }
 
     const deleteIds = Array.isArray(body.deleteContactIds) ? body.deleteContactIds.filter(Boolean) : []
@@ -309,9 +313,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "No contacts to sync.", failed: [] }, { status: 400 })
     }
 
-    if (body.fullRebuild) {
+    const total = contacts.length
+    const cursor = Number.isFinite(body.cursor) ? Math.max(0, Number(body.cursor)) : 0
+
+    if (body.fullRebuild && cursor === 0) {
       const hrefs = await loadManagedCardHrefs()
       for (const href of hrefs) await deleteCard(href)
+    }
+
+    if (body.fullRebuild) {
+      contacts = contacts.slice(cursor, cursor + FULL_REBUILD_BATCH_SIZE)
     }
 
     const failed: Array<{ id: string; label: string }> = []
@@ -330,6 +341,10 @@ export async function POST(request: Request) {
         ? `Synced ${synced} contacts to CardDAV. Skipped ${failed.length} problematic contacts.`
         : `Synced ${synced} contacts to CardDAV.`,
       failed: failed.slice(0, 20),
+      total,
+      done: !body.fullRebuild || cursor + contacts.length >= total,
+      nextCursor: body.fullRebuild && cursor + contacts.length < total ? cursor + contacts.length : null,
+      syncedCount: synced,
     })
   } catch (error) {
     console.error("phonebook carddav sync failed", error)
