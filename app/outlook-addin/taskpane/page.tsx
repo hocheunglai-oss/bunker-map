@@ -57,6 +57,21 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
 }
 
+function normaliseTemplate(input: Partial<EmailTemplate>): EmailTemplate {
+  return {
+    id: String(input.id || ""),
+    title: String(input.title || "Untitled template"),
+    subject: String(input.subject || ""),
+    folder: String(input.folder || ""),
+    bodyHtml: String(input.bodyHtml || "<p></p>"),
+    bodyText: String(input.bodyText || ""),
+    tags: Array.isArray(input.tags) ? input.tags.map((value) => String(value)) : [],
+    placeholders: Array.isArray(input.placeholders)
+      ? input.placeholders.map((value) => String(value))
+      : [],
+  }
+}
+
 function buildFolderTree(templates: EmailTemplate[]) {
   const root: FolderNode = { name: "root", path: "", children: [], templates: [] }
 
@@ -157,8 +172,11 @@ export default function OutlookAddinTaskpanePage() {
         const response = await fetch("/api/email-templates", { cache: "no-store" })
         if (!response.ok) throw new Error("Could not load shared templates.")
         const data = await response.json()
-        setTemplates(Array.isArray(data.templates) ? data.templates : [])
-        setSelectedId((data.templates?.[0]?.id as string) || "")
+        const normalisedTemplates = Array.isArray(data.templates)
+          ? data.templates.map((template: Partial<EmailTemplate>) => normaliseTemplate(template))
+          : []
+        setTemplates(normalisedTemplates)
+        setSelectedId(normalisedTemplates[0]?.id || "")
         setMessage("")
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Could not load shared templates.")
