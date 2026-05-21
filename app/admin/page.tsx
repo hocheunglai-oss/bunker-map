@@ -389,6 +389,7 @@ export default function AdminPage() {
                 {[
                   { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
                   { label: "TASK CALENDAR", path: "/admin/taskcalendar" },
+                  { label: "EMAIL TEMPLATES", path: "/admin/emailtemplates" },
                 ].map((item) => (
                   <button
                     key={item.label}
