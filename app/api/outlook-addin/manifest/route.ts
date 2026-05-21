@@ -33,8 +33,8 @@ export async function GET(request: Request) {
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
-  <IconUrl DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
-  <HighResolutionIconUrl DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
+  <IconUrl DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
   <SupportUrl DefaultValue="${xmlEscape(baseUrl)}/admin/emailtemplates"/>
   <AppDomains>
     <AppDomain>${xmlEscape(baseUrl)}</AppDomain>
@@ -44,14 +44,13 @@ export async function GET(request: Request) {
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.5"/>
+      <Set Name="Mailbox" MinVersion="1.3"/>
     </Sets>
   </Requirements>
   <FormSettings>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
         <SourceLocation DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
-        <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -60,9 +59,9 @@ export async function GET(request: Request) {
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
   </Rule>
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
-  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Requirements>
-      <bt:Sets DefaultMinVersion="1.5">
+      <bt:Sets DefaultMinVersion="1.3">
         <bt:Set Name="Mailbox"/>
       </bt:Sets>
     </Requirements>
@@ -87,7 +86,6 @@ export async function GET(request: Request) {
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <SourceLocation resid="Taskpane.Url"/>
-                    <SupportsPinning>true</SupportsPinning>
                   </Action>
                 </Control>
               </Group>
@@ -98,9 +96,9 @@ export async function GET(request: Request) {
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16" DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
-        <bt:Image id="Icon.32" DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
-        <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
+        <bt:Image id="Icon.16" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-16.png"/>
+        <bt:Image id="Icon.32" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-32.png"/>
+        <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/commands"/>
@@ -114,6 +112,60 @@ export async function GET(request: Request) {
         <bt:String id="OpenPaneDescription" DefaultValue="Open the shared company template library and insert content into this email."/>
       </bt:LongStrings>
     </Resources>
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Requirements>
+        <bt:Sets DefaultMinVersion="1.5">
+          <bt:Set Name="Mailbox"/>
+        </bt:Sets>
+      </Requirements>
+      <Hosts>
+        <Host xsi:type="MailHost">
+          <DesktopFormFactor>
+            <FunctionFile resid="Commands.Url"/>
+            <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="SharedTemplatesGroup">
+                  <Label resid="GroupLabel"/>
+                  <Control xsi:type="Button" id="OpenTemplatesPaneButton">
+                    <Label resid="OpenPaneLabel"/>
+                    <Supertip>
+                      <Title resid="OpenPaneLabel"/>
+                      <Description resid="OpenPaneDescription"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16"/>
+                      <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="80" resid="Icon.80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url"/>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+          </DesktopFormFactor>
+        </Host>
+      </Hosts>
+      <Resources>
+        <bt:Images>
+          <bt:Image id="Icon.16" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-16.png"/>
+          <bt:Image id="Icon.32" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-32.png"/>
+          <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
+        </bt:Images>
+        <bt:Urls>
+          <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/commands"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
+        </bt:Urls>
+        <bt:ShortStrings>
+          <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
+          <bt:String id="OpenPaneLabel" DefaultValue="Insert Template"/>
+        </bt:ShortStrings>
+        <bt:LongStrings>
+          <bt:String id="OpenPaneDescription" DefaultValue="Open the shared company template library and insert content into this email."/>
+        </bt:LongStrings>
+      </Resources>
+    </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>`
 
