@@ -1,0 +1,438 @@
+import { cookies } from "next/headers"
+import { createClient } from "@supabase/supabase-js"
+import fs from "node:fs/promises"
+import path from "node:path"
+
+const ADMIN_COOKIE_NAME = "bunker_admin_auth"
+const LEGACY_STORE_KEY = "email-templates"
+const THUNDERBIRD_ROOT = "/Users/hocheunglai/Desktop/- Thunderbird Templates/Templates.sbd"
+
+export type EmailTemplate = {
+  id: string
+  title: string
+  subject: string
+  folder: string
+  sourcePath: string
+  from: string
+  to: string
+  cc: string
+  bcc: string
+  bodyHtml: string
+  bodyText: string
+  tags: string[]
+  slug: string
+  isActive: boolean
+  placeholders: string[]
+  updatedAt: string
+}
+
+export type EmailTemplateLibrary = {
+  templates: EmailTemplate[]
+  lastImportedAt: string | null
+  lastUpdatedAt: string | null
+}
+
+type ThunderbirdTemplate = Omit<EmailTemplate, "id" | "updatedAt" | "slug" | "isActive" | "placeholders">
+
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing environment variable: ${name}`)
+  return value
+}
+
+function getSupabaseClient() {
+  return createClient(
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  )
+}
+
+function createEmptyLibrary(): EmailTemplateLibrary {
+  return {
+    templates: [],
+    lastImportedAt: null,
+    lastUpdatedAt: null,
+  }
+}
+
+export async function requireAdminSession() {
+  const cookieStore = await cookies()
+  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
+    throw new Error("Unauthorized")
+  }
+}
+
+function slugify(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+}
+
+function normaliseNewlines(input: string) {
+  return input.replace(/\r\n/g, "\n")
+}
+
+function decodeHtmlEntities(text: string) {
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+}
+
+function getHeaderValue(headers: string, name: string) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const regex = new RegExp(`^${escapedName}:([\\s\\S]*?)(?:\\n[^ \\t]|$)`, "im")
+  const match = headers.match(regex)
+  if (!match) return ""
+
+  return decodeHtmlEntities(match[1].replace(/\n[ \t]+/g, " ").trim())
+}
+
+function extractBody(rawMessage: string) {
+  const normalised = normaliseNewlines(rawMessage)
+  const dividerIndex = normalised.indexOf("\n\n")
+
+  if (dividerIndex === -1) {
+    return { headers: normalised, body: "" }
+  }
+
+  return {
+    headers: normalised.slice(0, dividerIndex),
+    body: normalised.slice(dividerIndex + 2).trim(),
+  }
+}
+
+function htmlToText(html: string) {
+  return decodeHtmlEntities(
+    html
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<[^>]+>/g, "")
+      .trim()
+  )
+}
+
+function splitMboxMessages(rawFile: string) {
+  const normalised = normaliseNewlines(rawFile).trim()
+  if (!normalised) return []
+
+  const lines = normalised.split("\n")
+  const messages: string[] = []
+  let current: string[] = []
+
+  for (const line of lines) {
+    if (/^From - /.test(line) && current.length > 0) {
+      messages.push(current.join("\n"))
+      current = [line]
+      continue
+    }
+    current.push(line)
+  }
+
+  if (current.length > 0) messages.push(current.join("\n"))
+  return messages
+}
+
+async function walkTemplateFiles(directoryPath: string): Promise<string[]> {
+  const entries = await fs.readdir(directoryPath, { withFileTypes: true })
+  const files: string[] = []
+
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue
+    if (entry.name.endsWith(".msf")) continue
+    if (entry.name === "msgFilterRules.dat") continue
+
+    const fullPath = path.join(directoryPath, entry.name)
+
+    if (entry.isDirectory() && entry.name.endsWith(".sbd")) {
+      files.push(...(await walkTemplateFiles(fullPath)))
+      continue
+    }
+
+    if (entry.isFile()) files.push(fullPath)
+  }
+
+  return files
+}
+
+function buildFolderLabel(filePath: string) {
+  const relative = path.relative(THUNDERBIRD_ROOT, filePath)
+  return relative
+    .replace(/\.sbd/g, "")
+    .split(path.sep)
+    .slice(0, -1)
+    .join(" / ")
+}
+
+function buildTemplateId(template: ThunderbirdTemplate, sequence: number) {
+  const parts = [
+    template.folder || "root",
+    path.basename(template.sourcePath),
+    template.title || `template-${sequence + 1}`,
+    String(sequence + 1),
+  ]
+
+  return slugify(parts.join("-")) || `template-${sequence + 1}`
+}
+
+export function extractPlaceholders(...values: string[]) {
+  const found = new Set<string>()
+
+  for (const value of values) {
+    const matches = value.matchAll(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g)
+    for (const match of matches) {
+      const token = (match[1] || "").trim()
+      if (token) found.add(token)
+    }
+  }
+
+  return Array.from(found).sort((a, b) => a.localeCompare(b))
+}
+
+function normaliseTemplate(template: EmailTemplate): EmailTemplate {
+  return {
+    ...template,
+    placeholders: extractPlaceholders(template.subject || "", template.bodyHtml || "", template.bodyText || ""),
+    slug: template.slug || slugify(`${template.folder}-${template.title}`) || template.id,
+    isActive: template.isActive !== false,
+  }
+}
+
+function ensureUniqueSlugs(templates: EmailTemplate[]) {
+  const seen = new Map<string, number>()
+
+  return templates.map((template) => {
+    const baseSlug = template.slug || slugify(`${template.folder}-${template.title}`) || template.id
+    const seenCount = seen.get(baseSlug) || 0
+    seen.set(baseSlug, seenCount + 1)
+
+    return {
+      ...template,
+      slug: seenCount === 0 ? baseSlug : `${baseSlug}-${seenCount + 1}`,
+    }
+  })
+}
+
+function ensureUniqueIds(templates: EmailTemplate[]) {
+  const seen = new Map<string, number>()
+
+  return templates.map((template) => {
+    const baseId = template.id || slugify(`${template.folder}-${template.title}`) || `template-${Date.now()}`
+    const seenCount = seen.get(baseId) || 0
+    seen.set(baseId, seenCount + 1)
+
+    return {
+      ...template,
+      id: seenCount === 0 ? baseId : `${baseId}-${seenCount + 1}`,
+    }
+  })
+}
+
+async function loadLegacyLibrary(supabase: any): Promise<EmailTemplateLibrary> {
+  const legacyStore = (supabase as any).from("office_calendar_store")
+  const { data, error } = await legacyStore
+    .select("payload")
+    .eq("key", LEGACY_STORE_KEY)
+    .maybeSingle()
+
+  if (error) throw error
+
+  const payload = (((data as { payload?: unknown } | null)?.payload) || createEmptyLibrary()) as Partial<EmailTemplateLibrary>
+  const templates = Array.isArray(payload.templates)
+    ? payload.templates.map((template) => normaliseTemplate(template as EmailTemplate))
+    : []
+
+  return {
+    templates,
+    lastImportedAt: payload.lastImportedAt ?? null,
+    lastUpdatedAt: payload.lastUpdatedAt ?? null,
+  }
+}
+
+async function saveLegacyLibrary(supabase: any, library: EmailTemplateLibrary) {
+  const { error } = await (supabase as any).from("office_calendar_store").upsert({
+    key: LEGACY_STORE_KEY,
+    payload: library,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) throw error
+}
+
+export async function loadTemplateLibrary(): Promise<EmailTemplateLibrary> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("*")
+    .order("folder", { ascending: true })
+    .order("title", { ascending: true })
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      return loadLegacyLibrary(supabase)
+    }
+    throw error
+  }
+
+  if (!data || data.length === 0) {
+    return loadLegacyLibrary(supabase)
+  }
+
+  const templates = data.map((row) =>
+    normaliseTemplate({
+      id: row.id,
+      title: row.title || "",
+      subject: row.subject || "",
+      folder: row.folder || "",
+      sourcePath: row.source_path || "",
+      from: row.sender || "",
+      to: row.to_recipients || "",
+      cc: row.cc_recipients || "",
+      bcc: row.bcc_recipients || "",
+      bodyHtml: row.body_html || "",
+      bodyText: row.body_text || "",
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      slug: row.slug || "",
+      isActive: row.is_active !== false,
+      placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
+      updatedAt: row.updated_at || new Date().toISOString(),
+    })
+  )
+
+  const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(templates))
+
+  const lastImportedAt = uniqueTemplates.reduce<string | null>(
+    (latest, template) => (!latest || template.updatedAt > latest ? template.updatedAt : latest),
+    null
+  )
+
+  return {
+    templates: uniqueTemplates,
+    lastImportedAt,
+    lastUpdatedAt: lastImportedAt,
+  }
+}
+
+export async function saveTemplateLibrary(library: EmailTemplateLibrary) {
+  const supabase = getSupabaseClient()
+  const templates = ensureUniqueSlugs(ensureUniqueIds(library.templates.map((template) => normaliseTemplate(template))))
+
+  const { error: wipeError } = await supabase.from("email_templates").delete().neq("id", "")
+  if (wipeError) {
+    const message = String(wipeError.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      await saveLegacyLibrary(supabase, { ...library, templates })
+      return
+    }
+    throw wipeError
+  }
+
+  if (templates.length === 0) return
+
+  const { error } = await supabase.from("email_templates").insert(
+    templates.map((template) => ({
+      id: template.id,
+      title: template.title,
+      subject: template.subject,
+      folder: template.folder,
+      source_path: template.sourcePath,
+      sender: template.from,
+      to_recipients: template.to,
+      cc_recipients: template.cc,
+      bcc_recipients: template.bcc,
+      body_html: template.bodyHtml,
+      body_text: template.bodyText,
+      tags: template.tags,
+      slug: template.slug,
+      is_active: template.isActive,
+      placeholders: template.placeholders,
+      updated_at: template.updatedAt,
+    }))
+  )
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      await saveLegacyLibrary(supabase, { ...library, templates })
+      return
+    }
+    throw error
+  }
+}
+
+export async function importThunderbirdTemplates() {
+  const templateFiles = await walkTemplateFiles(THUNDERBIRD_ROOT)
+  const imported: EmailTemplate[] = []
+  let sequence = 0
+
+  for (const filePath of templateFiles) {
+    const rawFile = await fs.readFile(filePath, "utf8")
+    const messages = splitMboxMessages(rawFile)
+    const folder = buildFolderLabel(filePath)
+
+    for (const message of messages) {
+      const { headers, body } = extractBody(message)
+      const subject = getHeaderValue(headers, "Subject")
+      const title = subject || `${path.basename(filePath)} ${sequence + 1}`
+      const to = getHeaderValue(headers, "To")
+      const cc = getHeaderValue(headers, "Cc")
+      const bcc = getHeaderValue(headers, "Bcc") || getHeaderValue(headers, "BCC")
+      const from = getHeaderValue(headers, "From")
+      const bodyHtml = body
+      const bodyText = htmlToText(body)
+      const tags = folder.split(" / ").map((part) => part.trim()).filter(Boolean)
+
+      const template: ThunderbirdTemplate = {
+        title,
+        subject,
+        folder,
+        sourcePath: filePath,
+        from,
+        to,
+        cc,
+        bcc,
+        bodyHtml,
+        bodyText,
+        tags,
+      }
+
+      imported.push(
+        normaliseTemplate({
+          ...template,
+          id: buildTemplateId(template, sequence),
+          slug: slugify(`${folder}-${title}`) || `template-${sequence + 1}`,
+          isActive: true,
+          placeholders: [],
+          updatedAt: new Date().toISOString(),
+        })
+      )
+
+      sequence += 1
+    }
+  }
+
+  imported.sort((a, b) => {
+    const folderCompare = a.folder.localeCompare(b.folder)
+    if (folderCompare !== 0) return folderCompare
+    return a.title.localeCompare(b.title)
+  })
+
+  const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(imported))
+
+  const library: EmailTemplateLibrary = {
+    templates: uniqueTemplates,
+    lastImportedAt: new Date().toISOString(),
+    lastUpdatedAt: new Date().toISOString(),
+  }
+
+  await saveTemplateLibrary(library)
+  return library
+}
