@@ -32,7 +32,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <FormSettings>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${baseUrl}/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -85,8 +85,8 @@ const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <bt:Image id="Icon.80" DefaultValue="${baseUrl}/logo.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="${baseUrl}/outlook-addin/commands"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="${baseUrl}/outlook-addin/taskpane"/>
+        <bt:Url id="Commands.Url" DefaultValue="${baseUrl}/api/outlook-addin/commands"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
