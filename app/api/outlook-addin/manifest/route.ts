@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   <FormSettings>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${xmlEscape(baseUrl)}/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -103,8 +103,8 @@ export async function GET(request: Request) {
         <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/logo.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/outlook-addin/commands"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(baseUrl)}/outlook-addin/taskpane"/>
+        <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/commands"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
