@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server"
 import {
+  deleteEmailTemplate,
   EmailTemplate,
   importThunderbirdTemplates,
   loadTemplateLibrary,
   requireAdminSession,
+  saveEmailTemplate,
   saveTemplateLibrary,
 } from "@/lib/emailTemplates"
 
 type SavePayload = {
+  id?: string
+  template?: EmailTemplate
   templates?: EmailTemplate[]
 }
 
@@ -29,7 +33,7 @@ export async function POST(request: Request) {
   try {
     await requireAdminSession()
 
-    const { action, templates } = (await request.json()) as SavePayload & {
+    const { action, id, template, templates } = (await request.json()) as SavePayload & {
       action?: string
     }
     const now = new Date().toISOString()
@@ -51,6 +55,27 @@ export async function POST(request: Request) {
       await saveTemplateLibrary(nextLibrary)
 
       return NextResponse.json(nextLibrary)
+    }
+
+    if (action === "save-template") {
+      if (!template?.id) {
+        return NextResponse.json({ message: "Missing template." }, { status: 400 })
+      }
+
+      const savedTemplate = await saveEmailTemplate(template)
+      return NextResponse.json({
+        template: savedTemplate,
+        lastUpdatedAt: savedTemplate.updatedAt || now,
+      })
+    }
+
+    if (action === "delete-template") {
+      if (!id) {
+        return NextResponse.json({ message: "Missing template id." }, { status: 400 })
+      }
+
+      await deleteEmailTemplate(id)
+      return NextResponse.json({ id, lastUpdatedAt: now })
     }
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })

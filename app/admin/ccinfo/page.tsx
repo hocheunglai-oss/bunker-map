@@ -87,21 +87,21 @@ const CHANGE_LOG_STORAGE_KEY = "ccinfo_recent_changes_v1"
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "linear-gradient(180deg, #123f70 0%, #0d3158 34%, #08233f 100%)",
+  background: "var(--fc-admin-page-bg)",
   fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#edf7ff",
+  color: "var(--fc-admin-panel-text)",
 }
 
 const sidebarStyle: React.CSSProperties = {
   width: "280px",
   padding: "18px",
-  borderRight: "1px solid rgba(210, 236, 255, 0.1)",
-  background: "linear-gradient(180deg, rgba(20, 63, 106, 0.94) 0%, rgba(13, 45, 79, 0.92) 100%)",
+  borderRight: "1px solid var(--fc-admin-border-soft)",
+  background: "var(--fc-admin-panel-soft-bg)",
 }
 
 const panelStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(24, 76, 126, 0.88) 0%, rgba(12, 44, 77, 0.86) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.14)",
+  background: "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
   boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
@@ -109,9 +109,9 @@ const panelStyle: React.CSSProperties = {
 const buttonStyle: React.CSSProperties = {
   padding: "9px 12px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  border: "1px solid var(--fc-admin-button-border)",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   textDecoration: "none",
   fontSize: "12px",
   fontWeight: 700,
@@ -123,9 +123,9 @@ const searchInputStyle: React.CSSProperties = {
   width: "100%",
   padding: "16px 18px",
   borderRadius: "18px",
-  border: "1px solid rgba(210,236,255,0.18)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.06) 100%)",
-  color: "#edf7ff",
+  border: "1px solid var(--fc-input-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-tool-input-text)",
   fontSize: "16px",
   outline: "none",
   boxSizing: "border-box",
@@ -136,9 +136,9 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
   borderRadius: "14px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%)",
-  color: "#edf7ff",
+  border: "1px solid var(--fc-input-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-tool-input-text)",
   fontSize: "14px",
   outline: "none",
   boxSizing: "border-box",

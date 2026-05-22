@@ -235,6 +235,27 @@ function ensureUniqueIds(templates: EmailTemplate[]) {
   })
 }
 
+function templateToRow(template: EmailTemplate) {
+  return {
+    id: template.id,
+    title: template.title,
+    subject: template.subject,
+    folder: template.folder,
+    source_path: template.sourcePath,
+    sender: template.from,
+    to_recipients: template.to,
+    cc_recipients: template.cc,
+    bcc_recipients: template.bcc,
+    body_html: template.bodyHtml,
+    body_text: template.bodyText,
+    tags: template.tags,
+    slug: template.slug,
+    is_active: template.isActive,
+    placeholders: template.placeholders,
+    updated_at: template.updatedAt,
+  }
+}
+
 async function loadLegacyLibrary(supabase: any): Promise<EmailTemplateLibrary> {
   const legacyStore = (supabase as any).from("office_calendar_store")
   const { data, error } = await legacyStore
@@ -338,30 +359,60 @@ export async function saveTemplateLibrary(library: EmailTemplateLibrary) {
   if (templates.length === 0) return
 
   const { error } = await supabase.from("email_templates").insert(
-    templates.map((template) => ({
-      id: template.id,
-      title: template.title,
-      subject: template.subject,
-      folder: template.folder,
-      source_path: template.sourcePath,
-      sender: template.from,
-      to_recipients: template.to,
-      cc_recipients: template.cc,
-      bcc_recipients: template.bcc,
-      body_html: template.bodyHtml,
-      body_text: template.bodyText,
-      tags: template.tags,
-      slug: template.slug,
-      is_active: template.isActive,
-      placeholders: template.placeholders,
-      updated_at: template.updatedAt,
-    }))
+    templates.map((template) => templateToRow(template))
   )
 
   if (error) {
     const message = String(error.message || "")
     if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
       await saveLegacyLibrary(supabase, { ...library, templates })
+      return
+    }
+    throw error
+  }
+}
+
+export async function saveEmailTemplate(template: EmailTemplate) {
+  const supabase = getSupabaseClient()
+  const nextTemplate = normaliseTemplate(template)
+  const { error } = await supabase
+    .from("email_templates")
+    .upsert(templateToRow(nextTemplate), { onConflict: "id" })
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      const library = await loadLegacyLibrary(supabase)
+      const templates = library.templates.some((item) => item.id === nextTemplate.id)
+        ? library.templates.map((item) => (item.id === nextTemplate.id ? nextTemplate : item))
+        : [nextTemplate, ...library.templates]
+
+      await saveLegacyLibrary(supabase, {
+        ...library,
+        templates,
+        lastUpdatedAt: nextTemplate.updatedAt,
+      })
+      return nextTemplate
+    }
+    throw error
+  }
+
+  return nextTemplate
+}
+
+export async function deleteEmailTemplate(id: string) {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase.from("email_templates").delete().eq("id", id)
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      const library = await loadLegacyLibrary(supabase)
+      await saveLegacyLibrary(supabase, {
+        ...library,
+        templates: library.templates.filter((template) => template.id !== id),
+        lastUpdatedAt: new Date().toISOString(),
+      })
       return
     }
     throw error

@@ -236,13 +236,23 @@ export async function GET(request: Request) {
           return template.folder === folder || template.folder.indexOf(folder + " / ") === 0;
         }
 
+        function normaliseSearchText(value) {
+          return String(value || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .replace(/\\s+/g, " ")
+            .trim();
+        }
+
         function matchesQuery(template, query) {
-          if (!query) return true;
-          return [template.title, template.subject, template.folder, template.bodyText].join(" ").toLowerCase().indexOf(query) !== -1;
+          var tokens = normaliseSearchText(query).split(" ").filter(Boolean);
+          if (!tokens.length) return true;
+          var haystack = normaliseSearchText([template.title, template.subject, template.folder, template.bodyText].join(" "));
+          return tokens.every(function (token) { return haystack.indexOf(token) !== -1; });
         }
 
         function visibleTemplates() {
-          var query = state.query.trim().toLowerCase();
+          var query = state.query.trim();
           return state.templates.filter(function (template) {
             return query ? matchesQuery(template, query) : folderContains(template, state.selectedFolder);
           });
@@ -460,7 +470,7 @@ export async function GET(request: Request) {
         }
 
         els.search.addEventListener("input", function () {
-          state.query = els.search.value.trim().toLowerCase();
+          state.query = els.search.value.trim();
           state.selectedId = visibleTemplates()[0] ? visibleTemplates()[0].id : "";
           renderTemplates();
         });

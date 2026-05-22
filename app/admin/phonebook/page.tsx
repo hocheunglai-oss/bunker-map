@@ -166,22 +166,22 @@ const COUNTRY_OPTIONS = [
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
+  background: "var(--fc-admin-page-bg)",
   fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#edf7ff",
+  color: "var(--fc-admin-panel-text)",
   padding: "18px",
 }
 
 const panelStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.14)",
+  background: "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
   boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
 
 const lightBluePanelStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(26, 74, 120, 0.9) 0%, rgba(13, 50, 92, 0.86) 100%)",
-  border: "1px solid rgba(155, 210, 255, 0.18)",
+  background: "var(--fc-admin-panel-soft-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
   boxShadow: "0 18px 40px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
@@ -189,9 +189,9 @@ const lightBluePanelStyle: React.CSSProperties = {
 const buttonStyle: React.CSSProperties = {
   padding: "9px 12px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  border: "1px solid var(--fc-admin-button-border)",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   textDecoration: "none",
   fontSize: "12px",
   fontWeight: 700,
@@ -203,9 +203,9 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
   borderRadius: "14px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%)",
-  color: "#edf7ff",
+  border: "1px solid var(--fc-input-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-tool-input-text)",
   fontSize: "14px",
   outline: "none",
   boxSizing: "border-box",

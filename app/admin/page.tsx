@@ -11,38 +11,37 @@ const pageStyle: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   padding: "24px",
-  background:
-    "radial-gradient(circle at top, #114a80 0%, #0a2c4c 34%, #041629 100%)",
+  background: "var(--fc-admin-page-bg)",
+  color: "var(--fc-admin-panel-text)",
   fontFamily: "Arial, Helvetica, sans-serif",
 }
 
 const shellStyle: React.CSSProperties = {
-  width: "min(1540px, 100%)",
+  width: "min(1760px, 100%)",
   display: "grid",
-  gridTemplateColumns: "1.05fr 1fr 1fr 1fr",
+  gridTemplateColumns: "1.05fr repeat(4, 1fr)",
   gap: "18px",
 }
 
 const panelStyle: React.CSSProperties = {
   borderRadius: "28px",
   padding: "30px",
-  background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.22), transparent 34%), linear-gradient(180deg, rgba(6, 24, 44, 0.9) 0%, rgba(7, 27, 49, 0.82) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.24)",
+  background: "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   backdropFilter: "blur(18px)",
   WebkitBackdropFilter: "blur(18px)",
   boxShadow: "0 30px 96px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.06)",
-  color: "#edf7ff",
+  color: "var(--fc-admin-panel-text)",
 }
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-input-border)",
   borderRadius: "14px",
   fontSize: "15px",
-  background: "linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%)",
-  color: "#10243a",
+  background: "var(--fc-login-input-bg)",
+  color: "var(--fc-login-input-text)",
   outline: "none",
   boxShadow: "0 12px 28px rgba(4,16,29,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
 }
@@ -50,10 +49,10 @@ const inputStyle: React.CSSProperties = {
 const actionButtonStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 16px",
-  border: "1px solid rgba(210,236,255,0.18)",
+  border: "1px solid var(--fc-admin-button-border)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(82, 153, 230, 0.22) 0%, rgba(25, 79, 140, 0.12) 100%)",
-  color: "#d9eeff",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   cursor: "pointer",
   fontSize: "14px",
   fontWeight: 700,
@@ -72,8 +71,8 @@ const mutedTradingButtonStyle: React.CSSProperties = {
 
 const lockedPanelShellStyle: React.CSSProperties = {
   ...panelStyle,
-  background: "linear-gradient(180deg, rgba(33, 43, 54, 0.9) 0%, rgba(23, 31, 40, 0.86) 100%)",
-  border: "1px solid rgba(255,255,255,0.1)",
+  background: "var(--fc-admin-panel-soft-bg)",
+  border: "1px solid var(--fc-admin-border-soft)",
   boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
 }
 
@@ -158,7 +157,7 @@ export default function AdminPage() {
                   fontSize: "12px",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  color: "#8fd7ff",
+                  color: "var(--fc-admin-heading)",
                   fontWeight: 700,
                   textShadow: "0 10px 24px rgba(4,16,29,0.22)",
                 }}
@@ -179,7 +178,7 @@ export default function AdminPage() {
                   fontSize: "12px",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  color: "#8fd7ff",
+                  color: "var(--fc-admin-heading)",
                   fontWeight: 700,
                   textShadow: "0 10px 24px rgba(4,16,29,0.22)",
                 }}
@@ -246,7 +245,7 @@ export default function AdminPage() {
                   border: "1px solid rgba(210,236,255,0.16)",
                   borderRadius: "999px",
                   background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-                  color: "#d7e8ff",
+                  color: "var(--fc-admin-button-text)",
                   cursor: "pointer",
                   fontSize: "14px",
                   fontWeight: 700,
@@ -257,7 +256,7 @@ export default function AdminPage() {
               </button>
 
               {message && (
-                <p style={{ marginBottom: 0, marginTop: 16, color: "#ff8e8e", fontWeight: 700 }}>
+                <p style={{ marginBottom: 0, marginTop: 16, color: "var(--fc-error)", fontWeight: 700 }}>
                   {message}
                 </p>
               )}
@@ -280,7 +279,7 @@ export default function AdminPage() {
                   fontSize: "12px",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  color: "#8fd7ff",
+                  color: "var(--fc-admin-heading)",
                   marginBottom: "10px",
                   fontWeight: 700,
                 }}
@@ -301,9 +300,9 @@ export default function AdminPage() {
                     style={{
                       ...actionButtonStyle,
                       padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
-                      color: "#d9eeff",
-                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      background: "var(--fc-admin-button-bg)",
+                      color: "var(--fc-admin-button-text)",
+                      borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
                       boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
                     }}
@@ -332,7 +331,53 @@ export default function AdminPage() {
                   fontSize: "12px",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  color: "#8fd7ff",
+                  color: "var(--fc-admin-heading)",
+                  marginBottom: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                Trading Tools
+              </div>
+
+              <div style={{ display: "grid", gap: "12px" }}>
+                {[{ label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" }].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => router.push(item.path)}
+                    style={{
+                      ...actionButtonStyle,
+                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+                      background: "var(--fc-admin-button-bg)",
+                      color: "var(--fc-admin-button-text)",
+                      borderColor: "var(--fc-admin-button-border)",
+                      cursor: "pointer",
+                      boxShadow: "0 18px 40px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            ...(authenticated ? panelStyle : lockedPanelShellStyle),
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {authenticated ? (
+            <>
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "var(--fc-admin-heading)",
                   marginBottom: "10px",
                   fontWeight: 700,
                 }}
@@ -351,9 +396,9 @@ export default function AdminPage() {
                     style={{
                       ...actionButtonStyle,
                       padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
-                      color: "#d9eeff",
-                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      background: "var(--fc-admin-button-bg)",
+                      color: "var(--fc-admin-button-text)",
+                      borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
                       boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
                     }}
@@ -381,7 +426,7 @@ export default function AdminPage() {
                   fontSize: "12px",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  color: "#8fd7ff",
+                  color: "var(--fc-admin-heading)",
                   marginBottom: "10px",
                   fontWeight: 700,
                 }}
@@ -393,7 +438,6 @@ export default function AdminPage() {
                 {[
                   { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
                   { label: "TASK CALENDAR", path: "/admin/taskcalendar" },
-                  { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
                 ].map((item) => (
                   <button
                     key={item.label}
@@ -401,9 +445,9 @@ export default function AdminPage() {
                     style={{
                       ...actionButtonStyle,
                       padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "linear-gradient(180deg, rgba(82, 153, 230, 0.24) 0%, rgba(25, 79, 140, 0.14) 100%)",
-                      color: "#d9eeff",
-                      borderColor: "rgba(120, 188, 255, 0.26)",
+                      background: "var(--fc-admin-button-bg)",
+                      color: "var(--fc-admin-button-text)",
+                      borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
                       boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
                     }}

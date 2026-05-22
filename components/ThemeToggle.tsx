@@ -14,7 +14,10 @@ function resolveStoredTheme(): ThemeMode {
 }
 
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState<ThemeMode>("dark")
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof document === "undefined") return "dark"
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark"
+  })
 
   useEffect(() => {
     const next = resolveStoredTheme()

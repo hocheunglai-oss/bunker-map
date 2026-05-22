@@ -57,9 +57,8 @@ const categories: Array<"All" | EventCategory> = [
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.2), transparent 30%), radial-gradient(circle at bottom right, rgba(87, 227, 176, 0.12), transparent 28%), linear-gradient(180deg, #0a2c4c 0%, #06213b 42%, #041629 100%)",
-  color: "#edf7ff",
+  background: "var(--fc-admin-page-bg)",
+  color: "var(--fc-admin-panel-text)",
   fontFamily: "Arial, Helvetica, sans-serif",
   padding: "18px",
 }
@@ -71,9 +70,8 @@ const shellStyle: React.CSSProperties = {
 
 const panelStyle: React.CSSProperties = {
   overflow: "auto",
-  background:
-    "linear-gradient(180deg, rgba(235, 244, 250, 0.16) 0%, rgba(182, 205, 218, 0.08) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.18)",
+  background: "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
   padding: "12px",
   boxShadow: "0 30px 96px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.08)",
@@ -82,10 +80,10 @@ const panelStyle: React.CSSProperties = {
 }
 
 const buttonStyle: React.CSSProperties = {
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-button-border)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 800,
@@ -105,8 +103,8 @@ const thStyle: React.CSSProperties = {
   zIndex: 2,
   padding: "7px 7px",
   borderBottom: "1px solid rgba(210, 236, 255, 0.15)",
-  background: "linear-gradient(180deg, rgba(12, 40, 68, 0.98) 0%, rgba(8, 29, 50, 0.96) 100%)",
-  color: "#b9d6ed",
+  background: "var(--fc-table-head-bg)",
+  color: "var(--fc-table-head-text)",
   fontSize: "10px",
   fontWeight: 900,
   letterSpacing: "0.08em",
@@ -153,8 +151,8 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalStyle: React.CSSProperties = {
   width: "min(640px, 100%)",
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.18), transparent 34%), linear-gradient(180deg, rgba(14, 43, 70, 0.96) 0%, rgba(7, 26, 44, 0.94) 100%)",
-  border: "1px solid rgba(210,236,255,0.18)",
+    "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
   boxShadow: "0 30px 96px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.08)",
   padding: "18px",

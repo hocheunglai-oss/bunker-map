@@ -29,6 +29,13 @@ type TemplateLibraryResponse = {
   lastUpdatedAt: string | null
 }
 
+type SaveTemplateResponse = {
+  id?: string
+  template?: EmailTemplate
+  lastUpdatedAt?: string | null
+  message?: string
+}
+
 type FolderNode = {
   name: string
   path: string
@@ -50,7 +57,7 @@ const pageStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   minHeight: "34px",
-  border: "1px solid #b9c9d6",
+  border: "1px solid var(--fc-admin-button-border)",
   borderRadius: "7px",
   background: "var(--fc-panel-bg)",
   color: "var(--fc-text)",
@@ -62,19 +69,19 @@ const buttonStyle: React.CSSProperties = {
 
 const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "#0e629f",
-  background: "#0f6fac",
+  borderColor: "var(--fc-accent)",
+  background: "var(--fc-accent)",
   color: "#ffffff",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "#d5a4a4",
-  color: "#8a2424",
+  borderColor: "var(--fc-error)",
+  color: "var(--fc-error)",
 }
 
 const panelStyle: React.CSSProperties = {
-  border: "1px solid #d7e2ea",
+  border: "1px solid var(--fc-border)",
   borderRadius: "8px",
   background: "var(--fc-panel-bg)",
   overflow: "hidden",
@@ -87,7 +94,7 @@ const sectionHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: "8px",
   padding: "9px 10px",
-  borderBottom: "1px solid #e4ebf1",
+  borderBottom: "1px solid var(--fc-border-soft)",
   background: "var(--fc-panel-soft)",
 }
 
@@ -102,10 +109,10 @@ const sectionTitleStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   minHeight: "34px",
-  border: "1px solid #c4d0da",
+  border: "1px solid var(--fc-input-border)",
   borderRadius: "7px",
-  background: "var(--fc-panel-bg)",
-  color: "var(--fc-text)",
+  background: "var(--fc-input-bg)",
+  color: "var(--fc-input-text)",
   fontSize: "13px",
   outline: "none",
   padding: "0 10px",
@@ -163,6 +170,33 @@ function folderContains(template: EmailTemplate, folder: string) {
   return template.folder === folder || template.folder.startsWith(`${folder} / `)
 }
 
+function normaliseSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function matchesLooseSearch(template: EmailTemplate, query: string) {
+  const tokens = normaliseSearchText(query).split(" ").filter(Boolean)
+  if (tokens.length === 0) return true
+
+  const haystack = normaliseSearchText(
+    [
+      template.title,
+      template.subject,
+      template.folder,
+      template.bodyText,
+      template.to,
+      template.cc,
+      template.bcc,
+    ].join(" ")
+  )
+
+  return tokens.every((token) => haystack.includes(token))
+}
+
 function htmlToText(html: string) {
   if (typeof document === "undefined") return ""
   const div = document.createElement("div")
@@ -200,6 +234,7 @@ export default function EmailTemplatesAdminPage() {
   const { loading, authenticated } = useSimpleAdminAuth()
   const editorRef = useRef<HTMLDivElement | null>(null)
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingTemplateRef = useRef<EmailTemplate | null>(null)
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [selectedFolder, setSelectedFolder] = useState("")
   const [selectedId, setSelectedId] = useState("")
@@ -208,6 +243,7 @@ export default function EmailTemplatesAdminPage() {
   const [search, setSearch] = useState("")
   const [message, setMessage] = useState("")
   const [saveState, setSaveState] = useState<SaveState>("idle")
+  const [saveRevision, setSaveRevision] = useState(0)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
   useEffect(() => {
@@ -218,22 +254,8 @@ export default function EmailTemplatesAdminPage() {
   const folderCount = Math.max(Object.keys(folderTree.index).length - 1, 0)
 
   const visibleTemplates = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
     return templates.filter((template) => {
-      if (keyword) {
-        return [
-          template.title,
-          template.subject,
-          template.folder,
-          template.bodyText,
-          template.to,
-          template.cc,
-          template.bcc,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword)
-      }
+      if (search.trim()) return matchesLooseSearch(template, search)
 
       return folderContains(template, selectedFolder)
     })
@@ -265,7 +287,7 @@ export default function EmailTemplatesAdminPage() {
             ""
         )
         setLastUpdatedAt(data.lastUpdatedAt)
-        setSaveState("idle")
+        setSaveState("saved")
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Failed to load templates.")
       }
@@ -280,16 +302,18 @@ export default function EmailTemplatesAdminPage() {
   }, [selectedId])
 
   useEffect(() => {
+    if (!authenticated) return
     if (saveState !== "dirty") return
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     autosaveTimerRef.current = setTimeout(() => {
-      void saveTemplates(templates)
+      const template = pendingTemplateRef.current
+      if (template) void saveTemplate(template)
     }, 850)
 
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     }
-  }, [saveState, templates])
+  }, [authenticated, saveRevision, saveState])
 
   function expandFolderPath(folderPath: string, current: Record<string, boolean> = {}) {
     const next: Record<string, boolean> = { ...current, "": true }
@@ -301,26 +325,30 @@ export default function EmailTemplatesAdminPage() {
     return next
   }
 
-  function markDirty() {
+  function markDirty(template: EmailTemplate) {
+    pendingTemplateRef.current = template
     setSaveState("dirty")
+    setSaveRevision((current) => current + 1)
   }
 
   function updateSelectedTemplate(partial: Partial<EmailTemplate>) {
     if (!selectedTemplate) return
     const updatedAt = new Date().toISOString()
+    let nextTemplate: EmailTemplate | null = null
     setTemplates((current) =>
-      current.map((template) =>
-        template.id === selectedTemplate.id
-          ? {
-              ...template,
-              ...partial,
-              updatedAt,
-            }
-          : template
-      )
+      current.map((template) => {
+        if (template.id !== selectedTemplate.id) return template
+        const updatedTemplate = {
+          ...template,
+          ...partial,
+          updatedAt,
+        }
+        nextTemplate = updatedTemplate
+        return updatedTemplate
+      })
     )
     setLastUpdatedAt(updatedAt)
-    markDirty()
+    if (nextTemplate) markDirty(nextTemplate)
   }
 
   function handleEditorInput() {
@@ -338,13 +366,7 @@ export default function EmailTemplatesAdminPage() {
     handleEditorInput()
   }
 
-  function createLink() {
-    const url = window.prompt("Paste link URL")
-    if (!url) return
-    runEditorCommand("createLink", url)
-  }
-
-  async function saveTemplates(nextTemplates = templates) {
+  async function saveTemplate(template: EmailTemplate) {
     setSaveState("saving")
     setMessage("")
 
@@ -352,18 +374,46 @@ export default function EmailTemplatesAdminPage() {
       const response = await fetch("/api/admin/email-templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save", templates: nextTemplates }),
+        body: JSON.stringify({ action: "save-template", template }),
       })
 
-      if (!response.ok) throw new Error("Save failed.")
+      const data = (await response.json()) as SaveTemplateResponse
+      if (!response.ok) throw new Error(data.message || "Save failed.")
 
-      const data = (await response.json()) as TemplateLibraryResponse
-      setLastUpdatedAt(data.lastUpdatedAt || new Date().toISOString())
-      if (Array.isArray(data.templates)) setTemplates(data.templates)
+      const savedTemplate = data.template || template
+      pendingTemplateRef.current = null
+      setTemplates((current) =>
+        current.map((item) => (item.id === savedTemplate.id ? { ...item, ...savedTemplate } : item))
+      )
+      setLastUpdatedAt(data.lastUpdatedAt || savedTemplate.updatedAt || new Date().toISOString())
       setSaveState("saved")
     } catch (error) {
       setSaveState("failed")
       setMessage(error instanceof Error ? error.message : "Save failed.")
+    }
+  }
+
+  async function deleteTemplate(templateId: string) {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    pendingTemplateRef.current = null
+    setSaveState("saving")
+    setMessage("")
+
+    try {
+      const response = await fetch("/api/admin/email-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete-template", id: templateId }),
+      })
+
+      const data = (await response.json()) as SaveTemplateResponse
+      if (!response.ok) throw new Error(data.message || "Delete failed.")
+
+      setLastUpdatedAt(data.lastUpdatedAt || new Date().toISOString())
+      setSaveState("saved")
+    } catch (error) {
+      setSaveState("failed")
+      setMessage(error instanceof Error ? error.message : "Delete failed.")
     }
   }
 
@@ -376,15 +426,16 @@ export default function EmailTemplatesAdminPage() {
     setSelectedId(template.id)
     setSelectedFolder(folder)
     setExpandedFolders((current) => expandFolderPath(folder, current))
-    setSaveState("dirty")
+    markDirty(template)
   }
 
   function handleDeleteTemplate() {
     if (!selectedTemplate) return
+    const deletedId = selectedTemplate.id
     const nextTemplates = templates.filter((template) => template.id !== selectedTemplate.id)
     setTemplates(nextTemplates)
     setSelectedId(nextTemplates[0]?.id || "")
-    setSaveState("dirty")
+    void deleteTemplate(deletedId)
   }
 
   function moveSelectedToFolder(folderPath: string) {
@@ -425,8 +476,8 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "#dff0fb" : "transparent",
-            color: active ? "#0c4774" : "#203246",
+            background: active ? "var(--fc-row-active-bg)" : "transparent",
+            color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
           }}
@@ -449,8 +500,8 @@ export default function EmailTemplatesAdminPage() {
               minWidth: "24px",
               borderRadius: "999px",
               padding: "2px 6px",
-              background: active ? "#ffffff" : "#eef3f7",
-              color: active ? "#0c4774" : "#586a7b",
+              background: active ? "var(--fc-row-bg)" : "var(--fc-count-bg)",
+              color: active ? "var(--fc-row-active-text)" : "var(--fc-count-text)",
               fontSize: "11px",
               fontWeight: 800,
               textAlign: "center",
@@ -483,8 +534,8 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "#dff0fb" : "transparent",
-            color: active ? "#0c4774" : "#203246",
+            background: active ? "var(--fc-row-active-bg)" : "transparent",
+            color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
           }}
@@ -502,7 +553,7 @@ export default function EmailTemplatesAdminPage() {
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", fontWeight: 800 }}>
             {node.name}
           </span>
-          <span style={{ color: "#687a88", fontSize: "11px", fontWeight: 800 }}>{node.totalCount}</span>
+          <span style={{ color: "var(--fc-muted)", fontSize: "11px", fontWeight: 800 }}>{node.totalCount}</span>
         </button>
         {hasChildren && expandedFolders[node.path] ? node.children.map(renderFolderPickerNode) : null}
       </div>
@@ -561,7 +612,7 @@ export default function EmailTemplatesAdminPage() {
         <section style={panelStyle}>
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>Folders</div>
-            <span style={{ color: "#687a88", fontSize: "11px" }}>{folderCount} folders</span>
+            <span style={{ color: "var(--fc-muted)", fontSize: "11px" }}>{folderCount} folders</span>
           </div>
           <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
             <input
@@ -582,7 +633,7 @@ export default function EmailTemplatesAdminPage() {
         <section style={panelStyle}>
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>{search ? "Search Results" : selectedFolder || "All Templates"}</div>
-            <span style={{ color: "#687a88", fontSize: "11px" }}>{visibleTemplates.length}</span>
+            <span style={{ color: "var(--fc-muted)", fontSize: "11px" }}>{visibleTemplates.length}</span>
           </div>
           <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 88px)", overflow: "auto", padding: "6px" }}>
             {visibleTemplates.map((template) => {
@@ -597,10 +648,10 @@ export default function EmailTemplatesAdminPage() {
                     display: "block",
                     marginBottom: "6px",
                     padding: "10px",
-                    border: active ? "1px solid #2c86c6" : "1px solid #e2e9ef",
+                    border: active ? "1px solid var(--fc-accent)" : "1px solid var(--fc-row-border)",
                     borderRadius: "7px",
-                    background: active ? "#eef7ff" : "#ffffff",
-                    color: "#1b2d40",
+                    background: active ? "var(--fc-row-active-bg)" : "var(--fc-row-bg)",
+                    color: active ? "var(--fc-row-active-text)" : "var(--fc-row-text)",
                     cursor: "pointer",
                     textAlign: "left",
                   }}
@@ -618,7 +669,7 @@ export default function EmailTemplatesAdminPage() {
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>Template Editor</div>
             <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ color: saveState === "failed" ? "#a12a2a" : "#687a88", fontSize: "11px", fontWeight: 800 }}>
+              <span style={{ color: saveState === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "11px", fontWeight: 800 }}>
                 {saveState === "saving"
                   ? "Saving..."
                   : saveState === "saved"
@@ -631,7 +682,12 @@ export default function EmailTemplatesAdminPage() {
                           ? "Saved"
                           : "Saved"}
               </span>
-              <button type="button" onClick={() => saveTemplates()} style={primaryButtonStyle} disabled={!selectedTemplate || saveState === "saving"}>
+              <button
+                type="button"
+                onClick={() => selectedTemplate && saveTemplate(selectedTemplate)}
+                style={primaryButtonStyle}
+                disabled={!selectedTemplate || saveState === "saving"}
+              >
                 {saveState === "saving" || saveState === "dirty" ? "Saving" : saveState === "failed" ? "Retry Save" : "Saved"}
               </button>
               <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate}>
@@ -642,11 +698,11 @@ export default function EmailTemplatesAdminPage() {
 
           {selectedTemplate ? (
             <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
-              {message ? <div style={{ color: "#a12a2a", fontSize: "13px" }}>{message}</div> : null}
+              {message ? <div style={{ color: "var(--fc-error)", fontSize: "13px" }}>{message}</div> : null}
 
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Title</div>
+                  <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Title</div>
                   <input
                     value={selectedTemplate.title}
                     onChange={(event) => updateSelectedTemplate({ title: event.target.value })}
@@ -654,7 +710,7 @@ export default function EmailTemplatesAdminPage() {
                   />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Subject</div>
+                  <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Subject</div>
                   <input
                     value={selectedTemplate.subject}
                     onChange={(event) => updateSelectedTemplate({ subject: event.target.value })}
@@ -671,15 +727,15 @@ export default function EmailTemplatesAdminPage() {
                 }}
               >
                 <label>
-                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>To</div>
+                  <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>To</div>
                   <input value={selectedTemplate.to} onChange={(event) => updateSelectedTemplate({ to: event.target.value })} style={inputStyle} />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Cc</div>
+                  <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Cc</div>
                   <input value={selectedTemplate.cc} onChange={(event) => updateSelectedTemplate({ cc: event.target.value })} style={inputStyle} />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Bcc</div>
+                  <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Bcc</div>
                   <input value={selectedTemplate.bcc} onChange={(event) => updateSelectedTemplate({ bcc: event.target.value })} style={inputStyle} />
                 </label>
               </div>
@@ -691,14 +747,14 @@ export default function EmailTemplatesAdminPage() {
                   gap: "10px",
                   alignItems: "center",
                   padding: "9px 10px",
-                  border: "1px solid #dce6ee",
+                  border: "1px solid var(--fc-border-soft)",
                   borderRadius: "7px",
-                  background: "#fbfcfd",
+                  background: "var(--fc-panel-soft)",
                 }}
               >
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: "#526679", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Folder</div>
-                  <div style={{ marginTop: "3px", color: "#172534", fontSize: "13px", fontWeight: 800, overflowWrap: "anywhere" }}>
+                  <div style={{ color: "var(--fc-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Folder</div>
+                  <div style={{ marginTop: "3px", color: "var(--fc-text)", fontSize: "13px", fontWeight: 800, overflowWrap: "anywhere" }}>
                     {selectedTemplate.folder || "Unfiled"}
                   </div>
                 </div>
@@ -726,12 +782,6 @@ export default function EmailTemplatesAdminPage() {
                 <button type="button" onClick={() => runEditorCommand("italic")} style={buttonStyle}>I</button>
                 <button type="button" onClick={() => runEditorCommand("underline")} style={buttonStyle}>U</button>
                 <button type="button" onClick={() => runEditorCommand("strikeThrough")} style={buttonStyle}>S</button>
-                <button type="button" onClick={() => runEditorCommand("insertUnorderedList")} style={buttonStyle}>Bullets</button>
-                <button type="button" onClick={() => runEditorCommand("insertUnorderedList")} style={buttonStyle}>No Bullets</button>
-                <button type="button" onClick={() => runEditorCommand("insertOrderedList")} style={buttonStyle}>Numbered</button>
-                <button type="button" onClick={() => runEditorCommand("formatBlock", "blockquote")} style={buttonStyle}>Quote</button>
-                <button type="button" onClick={createLink} style={buttonStyle}>Link</button>
-                <button type="button" onClick={() => runEditorCommand("removeFormat")} style={buttonStyle}>Clear</button>
               </div>
 
               <div
@@ -744,10 +794,10 @@ export default function EmailTemplatesAdminPage() {
                   maxHeight: isMobile ? "none" : "calc(100vh - 360px)",
                   overflow: "auto",
                   padding: "16px",
-                  border: "1px solid #cbd8e2",
+                  border: "1px solid var(--fc-input-border)",
                   borderRadius: "8px",
-                  background: "#ffffff",
-                  color: "#172534",
+                  background: "var(--fc-editor-bg)",
+                  color: "var(--fc-editor-text)",
                   fontSize: "14px",
                   lineHeight: 1.55,
                   outline: "none",
@@ -755,7 +805,7 @@ export default function EmailTemplatesAdminPage() {
               />
             </div>
           ) : (
-            <div style={{ padding: "24px", color: "#617487" }}>Select or create a template.</div>
+            <div style={{ padding: "24px", color: "var(--fc-muted)" }}>Select or create a template.</div>
           )}
         </main>
       </div>
