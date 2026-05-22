@@ -49,41 +49,44 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "var(--fc-page-bg)",
-  color: "var(--fc-text)",
+  background: "var(--fc-admin-page-bg)",
+  color: "var(--fc-admin-panel-text)",
   fontFamily: "Arial, Helvetica, sans-serif",
-  padding: "14px",
+  padding: "18px",
 }
 
 const buttonStyle: React.CSSProperties = {
   minHeight: "34px",
   border: "1px solid var(--fc-admin-button-border)",
-  borderRadius: "7px",
-  background: "var(--fc-panel-bg)",
-  color: "var(--fc-text)",
+  borderRadius: "999px",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 800,
-  padding: "7px 10px",
+  padding: "8px 12px",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
 }
 
 const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "var(--fc-accent)",
-  background: "var(--fc-accent)",
-  color: "#ffffff",
+  borderColor: "rgba(73, 219, 165, 0.26)",
+  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
+  color: "#ddffef",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "var(--fc-error)",
-  color: "var(--fc-error)",
+  borderColor: "rgba(255, 120, 120, 0.22)",
+  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
+  color: "#ffd6db",
 }
 
 const panelStyle: React.CSSProperties = {
-  border: "1px solid var(--fc-border)",
-  borderRadius: "8px",
-  background: "var(--fc-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
+  borderRadius: "18px",
+  background: "var(--fc-admin-panel-bg)",
+  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
   overflow: "hidden",
 }
 
@@ -93,14 +96,14 @@ const sectionHeaderStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: "8px",
-  padding: "9px 10px",
-  borderBottom: "1px solid var(--fc-border-soft)",
-  background: "var(--fc-panel-soft)",
+  padding: "10px 12px",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
+  background: "var(--fc-admin-panel-soft-bg)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "var(--fc-muted)",
+  color: "var(--fc-admin-heading)",
   fontSize: "12px",
   fontWeight: 900,
   textTransform: "uppercase",
@@ -110,9 +113,9 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   minHeight: "34px",
   border: "1px solid var(--fc-input-border)",
-  borderRadius: "7px",
-  background: "var(--fc-input-bg)",
-  color: "var(--fc-input-text)",
+  borderRadius: "12px",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-tool-input-text)",
   fontSize: "13px",
   outline: "none",
   padding: "0 10px",
@@ -234,6 +237,7 @@ export default function EmailTemplatesAdminPage() {
   const { loading, authenticated } = useSimpleAdminAuth()
   const editorRef = useRef<HTMLDivElement | null>(null)
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dirtyVersionRef = useRef(0)
   const pendingTemplateRef = useRef<EmailTemplate | null>(null)
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [selectedFolder, setSelectedFolder] = useState("")
@@ -307,7 +311,7 @@ export default function EmailTemplatesAdminPage() {
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     autosaveTimerRef.current = setTimeout(() => {
       const template = pendingTemplateRef.current
-      if (template) void saveTemplate(template)
+      if (template) void saveTemplate(template, dirtyVersionRef.current)
     }, 850)
 
     return () => {
@@ -326,6 +330,7 @@ export default function EmailTemplatesAdminPage() {
   }
 
   function markDirty(template: EmailTemplate) {
+    dirtyVersionRef.current += 1
     pendingTemplateRef.current = template
     setSaveState("dirty")
     setSaveRevision((current) => current + 1)
@@ -334,29 +339,26 @@ export default function EmailTemplatesAdminPage() {
   function updateSelectedTemplate(partial: Partial<EmailTemplate>) {
     if (!selectedTemplate) return
     const updatedAt = new Date().toISOString()
-    let nextTemplate: EmailTemplate | null = null
+    const nextTemplate: EmailTemplate = {
+      ...selectedTemplate,
+      ...partial,
+      updatedAt,
+    }
     setTemplates((current) =>
-      current.map((template) => {
-        if (template.id !== selectedTemplate.id) return template
-        const updatedTemplate = {
-          ...template,
-          ...partial,
-          updatedAt,
-        }
-        nextTemplate = updatedTemplate
-        return updatedTemplate
-      })
+      current.map((template) => (template.id === selectedTemplate.id ? nextTemplate : template))
     )
     setLastUpdatedAt(updatedAt)
-    if (nextTemplate) markDirty(nextTemplate)
+    markDirty(nextTemplate)
   }
 
   function handleEditorInput() {
     if (!editorRef.current || !selectedTemplate) return
     const bodyHtml = editorRef.current.innerHTML
+    const bodyText = htmlToText(bodyHtml)
+    if (bodyHtml === selectedTemplate.bodyHtml && bodyText === selectedTemplate.bodyText) return
     updateSelectedTemplate({
       bodyHtml,
-      bodyText: htmlToText(bodyHtml),
+      bodyText,
     })
   }
 
@@ -366,7 +368,7 @@ export default function EmailTemplatesAdminPage() {
     handleEditorInput()
   }
 
-  async function saveTemplate(template: EmailTemplate) {
+  async function saveTemplate(template: EmailTemplate, version = dirtyVersionRef.current) {
     setSaveState("saving")
     setMessage("")
 
@@ -381,6 +383,12 @@ export default function EmailTemplatesAdminPage() {
       if (!response.ok) throw new Error(data.message || "Save failed.")
 
       const savedTemplate = data.template || template
+      if (dirtyVersionRef.current !== version) {
+        setSaveState("dirty")
+        setSaveRevision((current) => current + 1)
+        return
+      }
+
       pendingTemplateRef.current = null
       setTemplates((current) =>
         current.map((item) => (item.id === savedTemplate.id ? { ...item, ...savedTemplate } : item))
@@ -393,9 +401,16 @@ export default function EmailTemplatesAdminPage() {
     }
   }
 
+  function handleManualSave() {
+    const template = pendingTemplateRef.current || selectedTemplate
+    if (!template) return
+    void saveTemplate(template, dirtyVersionRef.current)
+  }
+
   async function deleteTemplate(templateId: string) {
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     pendingTemplateRef.current = null
+    dirtyVersionRef.current += 1
     setSaveState("saving")
     setMessage("")
 
@@ -675,7 +690,7 @@ export default function EmailTemplatesAdminPage() {
                   : saveState === "saved"
                     ? "Saved"
                     : saveState === "dirty"
-                      ? "Saving..."
+                      ? "Unsaved changes"
                       : saveState === "failed"
                         ? "Save failed"
                         : lastUpdatedAt
@@ -684,11 +699,11 @@ export default function EmailTemplatesAdminPage() {
               </span>
               <button
                 type="button"
-                onClick={() => selectedTemplate && saveTemplate(selectedTemplate)}
+                onClick={handleManualSave}
                 style={primaryButtonStyle}
                 disabled={!selectedTemplate || saveState === "saving"}
               >
-                {saveState === "saving" || saveState === "dirty" ? "Saving" : saveState === "failed" ? "Retry Save" : "Saved"}
+                {saveState === "saving" ? "Saving" : saveState === "dirty" ? "Save Now" : saveState === "failed" ? "Retry Save" : "Saved"}
               </button>
               <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate}>
                 Delete
@@ -789,6 +804,9 @@ export default function EmailTemplatesAdminPage() {
                 contentEditable
                 suppressContentEditableWarning
                 onInput={handleEditorInput}
+                onBlur={handleEditorInput}
+                onPaste={() => window.setTimeout(handleEditorInput, 0)}
+                onDrop={() => window.setTimeout(handleEditorInput, 0)}
                 style={{
                   minHeight: "420px",
                   maxHeight: isMobile ? "none" : "calc(100vh - 360px)",

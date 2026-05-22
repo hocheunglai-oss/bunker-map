@@ -1,124 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --fc-page-bg: #f3f6f8;
-  --fc-panel-bg: #ffffff;
-  --fc-panel-soft: #fbfcfd;
-  --fc-border: #d7e2ea;
-  --fc-border-soft: #e4ebf1;
-  --fc-text: #172534;
-  --fc-muted: #526679;
-  --fc-accent: #0f6fac;
-  --fc-admin-page-bg: #f3f6f8;
-  --fc-admin-panel-bg: #ffffff;
-  --fc-admin-panel-soft-bg: #fbfcfd;
-  --fc-admin-panel-text: #172534;
-  --fc-admin-muted: #526679;
-  --fc-admin-border: #d7e2ea;
-  --fc-admin-border-soft: #e4ebf1;
-  --fc-admin-button-bg: #ffffff;
-  --fc-admin-button-text: #172534;
-  --fc-admin-button-border: #b9c9d6;
-  --fc-admin-heading: #0f6fac;
-  --fc-input-bg: #ffffff;
-  --fc-input-text: #172534;
-  --fc-input-border: #c4d0da;
-  --fc-tool-input-bg: #ffffff;
-  --fc-tool-input-text: #172534;
-  --fc-login-input-bg: linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%);
-  --fc-login-input-text: #10243a;
-  --fc-row-bg: #ffffff;
-  --fc-row-text: #1b2d40;
-  --fc-row-border: #e2e9ef;
-  --fc-row-active-bg: #eef7ff;
-  --fc-row-active-text: #0c4774;
-  --fc-count-bg: #eef3f7;
-  --fc-count-text: #586a7b;
-  --fc-editor-bg: #ffffff;
-  --fc-editor-text: #172534;
-  --fc-error: #a12a2a;
-  --fc-success: #1d6a3b;
-  --fc-table-head-bg: #e7eef4;
-  --fc-table-head-text: #385064;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-:root[data-theme="light"] {
-  --background: #ffffff;
-  --foreground: #171717;
-  --fc-page-bg: #f3f6f8;
-  --fc-panel-bg: #ffffff;
-  --fc-panel-soft: #fbfcfd;
-  --fc-border: #d7e2ea;
-  --fc-border-soft: #e4ebf1;
-  --fc-text: #172534;
-  --fc-muted: #526679;
-  --fc-accent: #0f6fac;
-  --fc-admin-page-bg: #f3f6f8;
-  --fc-admin-panel-bg: #ffffff;
-  --fc-admin-panel-soft-bg: #fbfcfd;
-  --fc-admin-panel-text: #172534;
-  --fc-admin-muted: #526679;
-  --fc-admin-border: #d7e2ea;
-  --fc-admin-border-soft: #e4ebf1;
-  --fc-admin-button-bg: #ffffff;
-  --fc-admin-button-text: #172534;
-  --fc-admin-button-border: #b9c9d6;
-  --fc-admin-heading: #0f6fac;
-  --fc-input-bg: #ffffff;
-  --fc-input-text: #172534;
-  --fc-input-border: #c4d0da;
-  --fc-tool-input-bg: #ffffff;
-  --fc-tool-input-text: #172534;
-  --fc-login-input-bg: linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%);
-  --fc-login-input-text: #10243a;
-  --fc-row-bg: #ffffff;
-  --fc-row-text: #1b2d40;
-  --fc-row-border: #e2e9ef;
-  --fc-row-active-bg: #eef7ff;
-  --fc-row-active-text: #0c4774;
-  --fc-count-bg: #eef3f7;
-  --fc-count-text: #586a7b;
-  --fc-editor-bg: #ffffff;
-  --fc-editor-text: #172534;
-  --fc-error: #a12a2a;
-  --fc-success: #1d6a3b;
-  --fc-table-head-bg: #e7eef4;
-  --fc-table-head-text: #385064;
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-:root[data-theme="dark"] {
   --background: #071a2c;
   --foreground: #edf7ff;
-  --fc-page-bg: #071a2c;
-  --fc-panel-bg: rgba(7, 27, 49, 0.92);
-  --fc-panel-soft: rgba(11, 39, 69, 0.92);
-  --fc-border: rgba(143, 215, 255, 0.22);
-  --fc-border-soft: rgba(143, 215, 255, 0.16);
+  --fc-page-bg: radial-gradient(circle at top left, rgba(88, 182, 255, 0.2), transparent 30%), radial-gradient(circle at bottom right, rgba(87, 227, 176, 0.12), transparent 28%), linear-gradient(180deg, #0a2c4c 0%, #06213b 42%, #041629 100%);
+  --fc-panel-bg: linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%);
+  --fc-panel-soft: linear-gradient(180deg, rgba(26, 74, 120, 0.9) 0%, rgba(13, 50, 92, 0.86) 100%);
+  --fc-border: rgba(210, 236, 255, 0.18);
+  --fc-border-soft: rgba(210, 236, 255, 0.12);
   --fc-text: #edf7ff;
-  --fc-muted: #b7cde0;
-  --fc-accent: #58b6ff;
-  --fc-admin-page-bg: radial-gradient(circle at top left, rgba(88, 182, 255, 0.2), transparent 30%), radial-gradient(circle at bottom right, rgba(87, 227, 176, 0.12), transparent 28%), linear-gradient(180deg, #0a2c4c 0%, #06213b 42%, #041629 100%);
-  --fc-admin-panel-bg: linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%);
-  --fc-admin-panel-soft-bg: linear-gradient(180deg, rgba(26, 74, 120, 0.9) 0%, rgba(13, 50, 92, 0.86) 100%);
-  --fc-admin-panel-text: #edf7ff;
-  --fc-admin-muted: #b9d7ee;
-  --fc-admin-border: rgba(210, 236, 255, 0.18);
-  --fc-admin-border-soft: rgba(210, 236, 255, 0.12);
+  --fc-muted: #b9d7ee;
+  --fc-accent: #8fd7ff;
+  --fc-admin-page-bg: var(--fc-page-bg);
+  --fc-admin-panel-bg: var(--fc-panel-bg);
+  --fc-admin-panel-soft-bg: var(--fc-panel-soft);
+  --fc-admin-panel-text: var(--fc-text);
+  --fc-admin-muted: var(--fc-muted);
+  --fc-admin-border: var(--fc-border);
+  --fc-admin-border-soft: var(--fc-border-soft);
   --fc-admin-button-bg: linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%);
   --fc-admin-button-text: #d7e8ff;
   --fc-admin-button-border: rgba(210,236,255,0.16);
@@ -145,25 +44,17 @@ body {
   --fc-table-head-text: #b9d6ed;
 }
 
-.fc-theme-toggle {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 2147483000;
-  min-height: 30px;
-  border: 1px solid var(--fc-border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fc-panel-bg) 92%, transparent);
-  color: var(--fc-text);
-  cursor: pointer;
-  font: 800 11px/1 Arial, Helvetica, sans-serif;
-  letter-spacing: 0;
-  padding: 7px 10px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
-.fc-theme-toggle:hover {
-  border-color: var(--fc-accent);
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .glass-popup .leaflet-popup-content-wrapper {
