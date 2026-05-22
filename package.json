@@ -15,6 +15,7 @@
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
+    "import:thunderbird-addressbook": "node scripts/import-thunderbird-addressbook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs",
     "upload:company-files": "node scripts/upload-company-files-to-drive.mjs",

@@ -72,7 +72,7 @@ export async function GET(request: Request) {
       }
       .meta { color: #687a88; font-size: 11px; font-weight: 700; text-transform: none; }
       .folders { max-height: 35vh; overflow: auto; padding: 5px; }
-      .templates { max-height: 44vh; overflow: auto; padding: 5px; }
+      .templates { max-height: 54vh; overflow: auto; padding: 5px; }
       .folderRow {
         width: 100%;
         min-height: 28px;
@@ -102,10 +102,9 @@ export async function GET(request: Request) {
       .folderRow.active .count { background: #fff; color: #0c4774; }
       .templateRow {
         width: 100%;
-        display: grid;
-        gap: 3px;
+        display: block;
         margin-bottom: 5px;
-        padding: 9px;
+        padding: 8px 9px;
         border: 1px solid #e2e9ef;
         border-radius: 7px;
         background: #fff;
@@ -114,22 +113,7 @@ export async function GET(request: Request) {
         text-align: left;
       }
       .templateRow.active { border-color: #2c86c6; background: #eef7ff; }
-      .title { font-size: 13px; font-weight: 900; line-height: 1.3; overflow-wrap: anywhere; }
-      .subject { color: #526679; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
-      .path { color: #7c8b98; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .preview {
-        display: none;
-        max-height: 28vh;
-        overflow: auto;
-        padding: 9px;
-        border-top: 1px solid #e4ebf1;
-        color: #172534;
-        font-size: 12px;
-        line-height: 1.45;
-      }
-      .preview.visible { display: block; }
-      .preview img { max-width: 100%; height: auto; }
-      .preview table { max-width: 100%; }
+      .title { display: block; font-size: 13px; font-weight: 900; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .empty { padding: 14px 10px; color: #617487; font-size: 12px; line-height: 1.45; }
       .notice {
         min-height: 18px;
@@ -151,7 +135,6 @@ export async function GET(request: Request) {
       <section class="panel">
         <div class="panelHeader"><span id="listTitle">Templates</span><span id="listMeta" class="meta">0</span></div>
         <div id="templateList" class="templates"><div class="empty">Loading...</div></div>
-        <div id="preview" class="preview"></div>
       </section>
       <div id="notice" class="notice"></div>
     </div>
@@ -177,7 +160,6 @@ export async function GET(request: Request) {
           listTitle: document.getElementById("listTitle"),
           listMeta: document.getElementById("listMeta"),
           templateList: document.getElementById("templateList"),
-          preview: document.getElementById("preview"),
           notice: document.getElementById("notice")
         };
 
@@ -350,7 +332,6 @@ export async function GET(request: Request) {
 
           if (!visible.length) {
             els.templateList.innerHTML = '<div class="empty">No templates found.</div>';
-            renderPreview();
             return;
           }
 
@@ -367,26 +348,9 @@ export async function GET(request: Request) {
               insertSelectedTemplate();
             });
             row.innerHTML =
-              '<span class="title">' + escapeHtml(template.title || "Untitled template") + '</span>' +
-              '<span class="subject">' + escapeHtml(template.subject || "No subject") + '</span>' +
-              '<span class="path">' + escapeHtml(template.folder || "Unfiled") + '</span>';
+              '<span class="title">' + escapeHtml(template.title || "Untitled template") + '</span>';
             els.templateList.appendChild(row);
           });
-
-          renderPreview();
-        }
-
-        function renderPreview() {
-          var template = selectedTemplate();
-          if (!template) {
-            els.preview.className = "preview";
-            els.preview.innerHTML = "";
-            return;
-          }
-          els.preview.className = "preview visible";
-          els.preview.innerHTML =
-            '<div style="font-weight:800;margin-bottom:6px;">' + escapeHtml(template.subject || "(blank subject)") + '</div>' +
-            (template.bodyHtml || "<p></p>");
         }
 
         function render() {

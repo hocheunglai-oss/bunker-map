@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Analytics } from "@vercel/analytics/next"
+import ThemeToggle from "@/components/ThemeToggle"
 import "./globals.css"
 import "leaflet/dist/leaflet.css"
 
@@ -36,6 +37,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <ThemeToggle />
         <Analytics />
       </body>
     </html>

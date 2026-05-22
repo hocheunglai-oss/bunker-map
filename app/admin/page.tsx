@@ -337,13 +337,13 @@ export default function AdminPage() {
                   fontWeight: 700,
                 }}
               >
-                Trading Tools
+                Contact Tools
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
                 {[
                   { label: "PHONEBOOK", path: "/admin/phonebook" },
-                  { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
+                  { label: "EMAIL TEMPLATES", path: "/admin/emailtemplates" },
                 ].map((item) => (
                   <button
                     key={item.label}
@@ -393,7 +393,7 @@ export default function AdminPage() {
                 {[
                   { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
                   { label: "TASK CALENDAR", path: "/admin/taskcalendar" },
-                  { label: "EMAIL TEMPLATES", path: "/admin/emailtemplates" },
+                  { label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" },
                 ].map((item) => (
                   <button
                     key={item.label}

@@ -42,8 +42,8 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "#f3f6f8",
-  color: "#172534",
+  background: "var(--fc-page-bg)",
+  color: "var(--fc-text)",
   fontFamily: "Arial, Helvetica, sans-serif",
   padding: "14px",
 }
@@ -52,8 +52,8 @@ const buttonStyle: React.CSSProperties = {
   minHeight: "34px",
   border: "1px solid #b9c9d6",
   borderRadius: "7px",
-  background: "#ffffff",
-  color: "#203246",
+  background: "var(--fc-panel-bg)",
+  color: "var(--fc-text)",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 800,
@@ -76,7 +76,7 @@ const dangerButtonStyle: React.CSSProperties = {
 const panelStyle: React.CSSProperties = {
   border: "1px solid #d7e2ea",
   borderRadius: "8px",
-  background: "#ffffff",
+  background: "var(--fc-panel-bg)",
   overflow: "hidden",
 }
 
@@ -88,12 +88,12 @@ const sectionHeaderStyle: React.CSSProperties = {
   gap: "8px",
   padding: "9px 10px",
   borderBottom: "1px solid #e4ebf1",
-  background: "#fbfcfd",
+  background: "var(--fc-panel-soft)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "#435565",
+  color: "var(--fc-muted)",
   fontSize: "12px",
   fontWeight: 900,
   textTransform: "uppercase",
@@ -104,8 +104,8 @@ const inputStyle: React.CSSProperties = {
   minHeight: "34px",
   border: "1px solid #c4d0da",
   borderRadius: "7px",
-  background: "#ffffff",
-  color: "#172534",
+  background: "var(--fc-panel-bg)",
+  color: "var(--fc-text)",
   fontSize: "13px",
   outline: "none",
   padding: "0 10px",
@@ -199,10 +199,12 @@ export default function EmailTemplatesAdminPage() {
   const isMobile = useIsMobile()
   const { loading, authenticated } = useSimpleAdminAuth()
   const editorRef = useRef<HTMLDivElement | null>(null)
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [selectedFolder, setSelectedFolder] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ "": true })
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [message, setMessage] = useState("")
   const [saveState, setSaveState] = useState<SaveState>("idle")
@@ -277,6 +279,18 @@ export default function EmailTemplatesAdminPage() {
     editorRef.current.innerHTML = selectedTemplate.bodyHtml || "<p></p>"
   }, [selectedId])
 
+  useEffect(() => {
+    if (saveState !== "dirty") return
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    autosaveTimerRef.current = setTimeout(() => {
+      void saveTemplates(templates)
+    }, 850)
+
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    }
+  }, [saveState, templates])
+
   function expandFolderPath(folderPath: string, current: Record<string, boolean> = {}) {
     const next: Record<string, boolean> = { ...current, "": true }
     let cursor = ""
@@ -345,6 +359,7 @@ export default function EmailTemplatesAdminPage() {
 
       const data = (await response.json()) as TemplateLibraryResponse
       setLastUpdatedAt(data.lastUpdatedAt || new Date().toISOString())
+      if (Array.isArray(data.templates)) setTemplates(data.templates)
       setSaveState("saved")
     } catch (error) {
       setSaveState("failed")
@@ -372,12 +387,15 @@ export default function EmailTemplatesAdminPage() {
     setSaveState("dirty")
   }
 
-  function moveSelectedToCurrentFolder() {
-    if (!selectedTemplate || !selectedFolder) return
+  function moveSelectedToFolder(folderPath: string) {
+    if (!selectedTemplate) return
     updateSelectedTemplate({
-      folder: selectedFolder,
-      tags: getFolderParts(selectedFolder),
+      folder: folderPath || "Custom",
+      tags: getFolderParts(folderPath || "Custom"),
     })
+    setSelectedFolder(folderPath)
+    setExpandedFolders((current) => expandFolderPath(folderPath, current))
+    setFolderPickerOpen(false)
   }
 
   function selectFolder(folderPath: string) {
@@ -446,6 +464,51 @@ export default function EmailTemplatesAdminPage() {
     )
   }
 
+  function renderFolderPickerNode(node: FolderNode): React.ReactNode {
+    const hasChildren = node.children.length > 0
+    const active = selectedTemplate?.folder === node.path
+
+    return (
+      <div key={`picker-${node.path || "root"}`}>
+        <button
+          type="button"
+          onClick={() => moveSelectedToFolder(node.path)}
+          style={{
+            width: "100%",
+            minHeight: "30px",
+            display: "grid",
+            gridTemplateColumns: "18px minmax(0, 1fr) auto",
+            alignItems: "center",
+            gap: "4px",
+            paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
+            border: 0,
+            borderRadius: "6px",
+            background: active ? "#dff0fb" : "transparent",
+            color: active ? "#0c4774" : "#203246",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span
+            onClick={(event) => {
+              event.stopPropagation()
+              if (!hasChildren) return
+              setExpandedFolders((current) => ({ ...current, [node.path]: !current[node.path] }))
+            }}
+            style={{ textAlign: "center", fontSize: "12px" }}
+          >
+            {hasChildren ? (expandedFolders[node.path] ? "v" : ">") : ""}
+          </span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", fontWeight: 800 }}>
+            {node.name}
+          </span>
+          <span style={{ color: "#687a88", fontSize: "11px", fontWeight: 800 }}>{node.totalCount}</span>
+        </button>
+        {hasChildren && expandedFolders[node.path] ? node.children.map(renderFolderPickerNode) : null}
+      </div>
+    )
+  }
+
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   if (!authenticated) {
@@ -464,8 +527,31 @@ export default function EmailTemplatesAdminPage() {
 
   return (
     <div style={pageStyle}>
+      <header
+        style={{
+          maxWidth: "1560px",
+          margin: "0 auto 12px",
+          display: "flex",
+          alignItems: "end",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+            Contact Tools
+          </div>
+          <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>EMAIL TEMPLATES</h1>
+        </div>
+        <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+          Back To Admin
+        </button>
+      </header>
       <div
         style={{
+          maxWidth: "1560px",
+          margin: "0 auto",
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr" : "280px 320px minmax(0, 1fr)",
           gap: "10px",
@@ -508,8 +594,7 @@ export default function EmailTemplatesAdminPage() {
                   onClick={() => setSelectedId(template.id)}
                   style={{
                     width: "100%",
-                    display: "grid",
-                    gap: "4px",
+                    display: "block",
                     marginBottom: "6px",
                     padding: "10px",
                     border: active ? "1px solid #2c86c6" : "1px solid #e2e9ef",
@@ -520,14 +605,8 @@ export default function EmailTemplatesAdminPage() {
                     textAlign: "left",
                   }}
                 >
-                  <span style={{ fontSize: "13px", fontWeight: 900, overflowWrap: "anywhere" }}>
+                  <span style={{ display: "block", fontSize: "13px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {template.title || "Untitled template"}
-                  </span>
-                  <span style={{ fontSize: "12px", color: "#526679", overflowWrap: "anywhere" }}>
-                    {template.subject || "No subject"}
-                  </span>
-                  <span style={{ fontSize: "11px", color: "#7c8b98", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {template.folder || "Unfiled"}
                   </span>
                 </button>
               )
@@ -545,15 +624,15 @@ export default function EmailTemplatesAdminPage() {
                   : saveState === "saved"
                     ? "Saved"
                     : saveState === "dirty"
-                      ? "Unsaved"
+                      ? "Saving..."
                       : saveState === "failed"
                         ? "Save failed"
                         : lastUpdatedAt
-                          ? `Saved ${new Date(lastUpdatedAt).toLocaleTimeString()}`
-                          : ""}
+                          ? "Saved"
+                          : "Saved"}
               </span>
               <button type="button" onClick={() => saveTemplates()} style={primaryButtonStyle} disabled={!selectedTemplate || saveState === "saving"}>
-                Save template
+                {saveState === "saving" || saveState === "dirty" ? "Saving" : saveState === "failed" ? "Retry Save" : "Saved"}
               </button>
               <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate}>
                 Delete
@@ -623,16 +702,32 @@ export default function EmailTemplatesAdminPage() {
                     {selectedTemplate.folder || "Unfiled"}
                   </div>
                 </div>
-                <button type="button" onClick={moveSelectedToCurrentFolder} style={buttonStyle} disabled={!selectedFolder}>
-                  Move to selected folder
+                <button type="button" onClick={() => setFolderPickerOpen(true)} style={buttonStyle}>
+                  Change folder
                 </button>
               </div>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                <select onChange={(event) => runEditorCommand("fontName", event.target.value)} defaultValue="" style={buttonStyle}>
+                  <option value="" disabled>Font</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Times New Roman">Times</option>
+                  <option value="Courier New">Courier</option>
+                </select>
+                <select onChange={(event) => runEditorCommand("fontSize", event.target.value)} defaultValue="" style={buttonStyle}>
+                  <option value="" disabled>Size</option>
+                  <option value="2">Small</option>
+                  <option value="3">Normal</option>
+                  <option value="4">Large</option>
+                  <option value="5">Extra Large</option>
+                </select>
                 <button type="button" onClick={() => runEditorCommand("bold")} style={buttonStyle}>B</button>
                 <button type="button" onClick={() => runEditorCommand("italic")} style={buttonStyle}>I</button>
                 <button type="button" onClick={() => runEditorCommand("underline")} style={buttonStyle}>U</button>
+                <button type="button" onClick={() => runEditorCommand("strikeThrough")} style={buttonStyle}>S</button>
                 <button type="button" onClick={() => runEditorCommand("insertUnorderedList")} style={buttonStyle}>Bullets</button>
+                <button type="button" onClick={() => runEditorCommand("insertUnorderedList")} style={buttonStyle}>No Bullets</button>
                 <button type="button" onClick={() => runEditorCommand("insertOrderedList")} style={buttonStyle}>Numbered</button>
                 <button type="button" onClick={() => runEditorCommand("formatBlock", "blockquote")} style={buttonStyle}>Quote</button>
                 <button type="button" onClick={createLink} style={buttonStyle}>Link</button>
@@ -664,6 +759,29 @@ export default function EmailTemplatesAdminPage() {
           )}
         </main>
       </div>
+      {folderPickerOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 40,
+            display: "grid",
+            placeItems: "center",
+            padding: "18px",
+            background: "rgba(6, 18, 30, 0.48)",
+          }}
+        >
+          <div style={{ ...panelStyle, width: "min(560px, 100%)", maxHeight: "82vh", display: "grid" }}>
+            <div style={sectionHeaderStyle}>
+              <div style={sectionTitleStyle}>Select Folder</div>
+              <button type="button" onClick={() => setFolderPickerOpen(false)} style={buttonStyle}>Close</button>
+            </div>
+            <div style={{ padding: "8px", overflow: "auto" }}>{renderFolderPickerNode(folderTree.root)}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

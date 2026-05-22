@@ -3,6 +3,14 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --fc-page-bg: #f3f6f8;
+  --fc-panel-bg: #ffffff;
+  --fc-panel-soft: #fbfcfd;
+  --fc-border: #d7e2ea;
+  --fc-border-soft: #e4ebf1;
+  --fc-text: #172534;
+  --fc-muted: #526679;
+  --fc-accent: #0f6fac;
 }
 
 @theme inline {
@@ -23,6 +31,40 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --background: #071a2c;
+  --foreground: #edf7ff;
+  --fc-page-bg: #071a2c;
+  --fc-panel-bg: rgba(7, 27, 49, 0.92);
+  --fc-panel-soft: rgba(11, 39, 69, 0.92);
+  --fc-border: rgba(143, 215, 255, 0.22);
+  --fc-border-soft: rgba(143, 215, 255, 0.16);
+  --fc-text: #edf7ff;
+  --fc-muted: #b7cde0;
+  --fc-accent: #58b6ff;
+}
+
+.fc-theme-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483000;
+  min-height: 30px;
+  border: 1px solid var(--fc-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fc-panel-bg) 92%, transparent);
+  color: var(--fc-text);
+  cursor: pointer;
+  font: 800 11px/1 Arial, Helvetica, sans-serif;
+  letter-spacing: 0;
+  padding: 7px 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.fc-theme-toggle:hover {
+  border-color: var(--fc-accent);
 }
 
 .glass-popup .leaflet-popup-content-wrapper {
