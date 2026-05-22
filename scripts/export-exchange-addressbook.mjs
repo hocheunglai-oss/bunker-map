@@ -8,6 +8,7 @@ const CONTACTS_FILE = path.join(OUTPUT_DIR, "exchange-contacts.csv")
 const GROUPS_FILE = path.join(OUTPUT_DIR, "exchange-groups.csv")
 const MEMBERS_FILE = path.join(OUTPUT_DIR, "exchange-group-members.csv")
 const POWERSHELL_FILE = path.join(OUTPUT_DIR, "import-exchange-addressbook.ps1")
+const DEFAULT_INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
 
 function loadDotEnvLocal() {
   const file = path.join(process.cwd(), ".env.local")
@@ -84,6 +85,17 @@ function uniqueAlias(baseAlias, seenAliases) {
   return alias
 }
 
+function internalDomains() {
+  return String(process.env.EXCHANGE_INTERNAL_DOMAINS || DEFAULT_INTERNAL_DOMAINS.join(","))
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function emailDomain(email) {
+  return cleanText(email).toLowerCase().split("@").pop() || ""
+}
+
 function csvEscape(value) {
   const text = String(value ?? "")
   if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, "\"\"")}"`
@@ -116,6 +128,7 @@ function buildContactRows(contacts) {
   const seenAliases = new Set()
   const rows = []
   const contactById = new Map()
+  const internalDomainSet = new Set(internalDomains())
 
   for (const contact of contacts) {
     const email = cleanText(contact.primary_email).toLowerCase()
@@ -135,7 +148,7 @@ function buildContactRows(contacts) {
       Nickname: cleanText(contact.nickname),
     }
 
-    rows.push(row)
+    if (!internalDomainSet.has(emailDomain(email))) rows.push(row)
     seenEmails.add(email)
     contactById.set(contact.id, row)
   }
@@ -281,12 +294,13 @@ function writeExchangeFiles(outputDir, contactRows, groupRows, memberRows) {
 }
 
 function buildPilotRows(contactRows, groupRows, memberRows) {
+  const externalEmails = new Set(contactRows.map((contact) => contact.ExternalEmailAddress))
   const groupsWithExportedMembers = groupRows
     .map((group) => ({
       group,
       members: memberRows.filter((member) => member.GroupAlias === group.Alias),
     }))
-    .filter((item) => item.members.length > 0)
+    .filter((item) => item.members.some((member) => externalEmails.has(member.MemberEmail)))
 
   const pilot =
     groupsWithExportedMembers.find((item) => item.members.length >= 2) ||
