@@ -703,7 +703,12 @@ export async function GET(request: Request) {
 
           var selected = getSelectedTemplate();
           setPill(els.selectionStatus, selected ? "Selected" : "No selection", selected ? "ready" : "");
-          els.insertButton.disabled = !selected;
+          els.insertButton.disabled = !selected || !state.officeReady;
+          els.insertButton.textContent = !selected
+            ? "Select a template"
+            : state.officeReady
+              ? "Insert selected template"
+              : "Open new message to insert";
         }
 
         function renderFolderNode(node) {
@@ -923,7 +928,9 @@ export async function GET(request: Request) {
         function markOfficeReadyFromContext() {
           var office = window.Office;
           var item = office && office.context && office.context.mailbox && office.context.mailbox.item;
-          state.officeReady = Boolean(item && item.body && item.subject);
+          var canSetSubject = item && item.subject && typeof item.subject.setAsync === "function";
+          var canInsertBody = item && item.body && typeof item.body.setSelectedDataAsync === "function";
+          state.officeReady = Boolean(canSetSubject && canInsertBody);
           state.officeChecked = true;
           renderStatuses();
         }

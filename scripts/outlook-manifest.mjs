@@ -36,6 +36,12 @@ export function buildOutlookManifest(rawBaseUrl) {
     </Sets>
   </Requirements>
   <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
+        <RequestedHeight>450</RequestedHeight>
+      </DesktopSettings>
+    </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
         <SourceLocation DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
@@ -44,6 +50,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   </FormSettings>
   <Permissions>ReadWriteItem</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
   </Rule>
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
@@ -79,6 +86,28 @@ export function buildOutlookManifest(rawBaseUrl) {
               </Group>
             </OfficeTab>
           </ExtensionPoint>
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="SharedTemplatesReadGroup">
+                <Label resid="GroupLabel"/>
+                <Control xsi:type="Button" id="OpenTemplatesReadPaneButton">
+                  <Label resid="BrowsePaneLabel"/>
+                  <Supertip>
+                    <Title resid="BrowsePaneLabel"/>
+                    <Description resid="BrowsePaneDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
         </DesktopFormFactor>
       </Host>
     </Hosts>
@@ -95,9 +124,11 @@ export function buildOutlookManifest(rawBaseUrl) {
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
         <bt:String id="OpenPaneLabel" DefaultValue="Insert Template"/>
+        <bt:String id="BrowsePaneLabel" DefaultValue="Browse Templates"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="OpenPaneDescription" DefaultValue="Open the shared company template library and insert content into this email."/>
+        <bt:String id="BrowsePaneDescription" DefaultValue="Open the shared company template library. Start a new email to insert a template."/>
       </bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
@@ -129,12 +160,34 @@ export function buildOutlookManifest(rawBaseUrl) {
                       <SourceLocation resid="Taskpane.Url"/>
                     </Action>
                   </Control>
-                </Group>
-              </OfficeTab>
-            </ExtensionPoint>
-          </DesktopFormFactor>
-        </Host>
-      </Hosts>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="SharedTemplatesReadGroup">
+                <Label resid="GroupLabel"/>
+                <Control xsi:type="Button" id="OpenTemplatesReadPaneButton">
+                  <Label resid="BrowsePaneLabel"/>
+                  <Supertip>
+                    <Title resid="BrowsePaneLabel"/>
+                    <Description resid="BrowsePaneDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
       <Resources>
         <bt:Images>
           <bt:Image id="Icon.16" DefaultValue="${baseUrl}/outlook-template-icon-16.png"/>
@@ -148,9 +201,11 @@ export function buildOutlookManifest(rawBaseUrl) {
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
           <bt:String id="OpenPaneLabel" DefaultValue="Insert Template"/>
+          <bt:String id="BrowsePaneLabel" DefaultValue="Browse Templates"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="OpenPaneDescription" DefaultValue="Open the shared company template library and insert content into this email."/>
+          <bt:String id="BrowsePaneDescription" DefaultValue="Open the shared company template library. Start a new email to insert a template."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>
