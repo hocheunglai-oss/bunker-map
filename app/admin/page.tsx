@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -85,6 +85,10 @@ export default function AdminPage() {
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    document.title = "Admin - FC Uno"
+  }, [])
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()

@@ -983,6 +983,10 @@ export default function CountryCompanyInfoPage() {
   const [recordLoading, setRecordLoading] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
+
+  useEffect(() => {
+    document.title = "Country & Company Info - FC Uno"
+  }, [])
   const [matchCount, setMatchCount] = useState(0)
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)

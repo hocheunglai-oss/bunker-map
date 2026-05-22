@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -20,7 +20,6 @@ type EmailTemplate = {
   tags: string[]
   slug: string
   isActive: boolean
-  placeholders: string[]
   updatedAt: string
 }
 
@@ -30,59 +29,157 @@ type TemplateLibraryResponse = {
   lastUpdatedAt: string | null
 }
 
-const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  background: "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
-  fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#edf7ff",
-  padding: "18px",
+type FolderNode = {
+  name: string
+  path: string
+  depth: number
+  children: FolderNode[]
+  templates: EmailTemplate[]
+  totalCount: number
 }
 
-const panelStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.14)",
-  borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed"
+
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background: "#f3f6f8",
+  color: "#172534",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  padding: "14px",
 }
 
 const buttonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
-  fontSize: "12px",
-  fontWeight: 700,
+  minHeight: "34px",
+  border: "1px solid #b9c9d6",
+  borderRadius: "7px",
+  background: "#ffffff",
+  color: "#203246",
   cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 800,
+  padding: "7px 10px",
+}
+
+const primaryButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "#0e629f",
+  background: "#0f6fac",
+  color: "#ffffff",
+}
+
+const dangerButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "#d5a4a4",
+  color: "#8a2424",
+}
+
+const panelStyle: React.CSSProperties = {
+  border: "1px solid #d7e2ea",
+  borderRadius: "8px",
+  background: "#ffffff",
+  overflow: "hidden",
+}
+
+const sectionHeaderStyle: React.CSSProperties = {
+  minHeight: "38px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "8px",
+  padding: "9px 10px",
+  borderBottom: "1px solid #e4ebf1",
+  background: "#fbfcfd",
+}
+
+const sectionTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  color: "#435565",
+  fontSize: "12px",
+  fontWeight: 900,
+  textTransform: "uppercase",
 }
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "12px 14px",
-  borderRadius: "14px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%)",
-  color: "#edf7ff",
-  fontSize: "14px",
+  minHeight: "34px",
+  border: "1px solid #c4d0da",
+  borderRadius: "7px",
+  background: "#ffffff",
+  color: "#172534",
+  fontSize: "13px",
   outline: "none",
-  boxSizing: "border-box",
+  padding: "0 10px",
 }
 
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  minHeight: "120px",
-  resize: "vertical",
-  fontFamily: "Arial, Helvetica, sans-serif",
+function createFolderNode(name: string, folderPath: string, depth: number): FolderNode {
+  return {
+    name,
+    path: folderPath,
+    depth,
+    children: [],
+    templates: [],
+    totalCount: 0,
+  }
 }
 
-function createBlankTemplate(): EmailTemplate {
+function getFolderParts(folder: string) {
+  return (folder || "Unfiled")
+    .split(" / ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function buildFolderTree(templates: EmailTemplate[]) {
+  const root = createFolderNode("All templates", "", 0)
+  const index: Record<string, FolderNode> = { "": root }
+
+  templates.forEach((template) => {
+    let node = root
+    getFolderParts(template.folder).forEach((part, partIndex) => {
+      const nextPath = node.path ? `${node.path} / ${part}` : part
+      if (!index[nextPath]) {
+        index[nextPath] = createFolderNode(part, nextPath, partIndex + 1)
+        node.children.push(index[nextPath])
+      }
+      node = index[nextPath]
+    })
+    node.templates.push(template)
+  })
+
+  function sortAndCount(node: FolderNode): number {
+    node.children.sort((a, b) => a.name.localeCompare(b.name))
+    node.templates.sort((a, b) => a.title.localeCompare(b.title))
+    node.totalCount =
+      node.templates.length + node.children.reduce((sum, child) => sum + sortAndCount(child), 0)
+    return node.totalCount
+  }
+
+  sortAndCount(root)
+  return { root, index }
+}
+
+function folderContains(template: EmailTemplate, folder: string) {
+  if (!folder) return true
+  return template.folder === folder || template.folder.startsWith(`${folder} / `)
+}
+
+function htmlToText(html: string) {
+  if (typeof document === "undefined") return ""
+  const div = document.createElement("div")
+  div.innerHTML = html
+  return (div.textContent || "").trim()
+}
+
+function createBlankTemplate(folder: string): EmailTemplate {
   const now = new Date().toISOString()
+  const id = `manual-${Date.now()}`
+  const safeFolder = folder || "Custom"
 
   return {
-    id: `manual-${Date.now()}`,
+    id,
     title: "New template",
     subject: "",
-    folder: "Custom",
+    folder: safeFolder,
     sourcePath: "",
     from: "",
     to: "",
@@ -90,10 +187,9 @@ function createBlankTemplate(): EmailTemplate {
     bcc: "",
     bodyHtml: "<p></p>",
     bodyText: "",
-    tags: ["Custom"],
-    slug: `manual-${Date.now()}`,
+    tags: getFolderParts(safeFolder),
+    slug: id,
     isActive: true,
-    placeholders: [],
     updatedAt: now,
   }
 }
@@ -102,58 +198,72 @@ export default function EmailTemplatesAdminPage() {
   const router = useRouter()
   const isMobile = useIsMobile()
   const { loading, authenticated } = useSimpleAdminAuth()
+  const editorRef = useRef<HTMLDivElement | null>(null)
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [selectedId, setSelectedId] = useState<string>("")
+  const [selectedFolder, setSelectedFolder] = useState("")
+  const [selectedId, setSelectedId] = useState("")
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ "": true })
   const [search, setSearch] = useState("")
   const [message, setMessage] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [lastImportedAt, setLastImportedAt] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<SaveState>("idle")
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
-  const filteredTemplates = useMemo(() => {
+  useEffect(() => {
+    document.title = "Email Templates - FC Uno"
+  }, [])
+
+  const folderTree = useMemo(() => buildFolderTree(templates), [templates])
+  const folderCount = Math.max(Object.keys(folderTree.index).length - 1, 0)
+
+  const visibleTemplates = useMemo(() => {
     const keyword = search.trim().toLowerCase()
-
     return templates.filter((template) => {
-      if (!keyword) return true
+      if (keyword) {
+        return [
+          template.title,
+          template.subject,
+          template.folder,
+          template.bodyText,
+          template.to,
+          template.cc,
+          template.bcc,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword)
+      }
 
-      return [
-        template.title,
-        template.subject,
-        template.folder,
-        template.bodyText,
-        template.to,
-        template.cc,
-        template.bcc,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword)
+      return folderContains(template, selectedFolder)
     })
-  }, [search, templates])
+  }, [search, selectedFolder, templates])
 
-  const selectedTemplate =
-    filteredTemplates.find((template) => template.id === selectedId) ||
-    templates.find((template) => template.id === selectedId) ||
-    null
+  const selectedTemplate = templates.find((template) => template.id === selectedId) || null
 
   useEffect(() => {
     if (!authenticated) return
 
     async function loadTemplates() {
       try {
-        const response = await fetch("/api/admin/email-templates", {
-          cache: "no-store",
-        })
-
-        if (!response.ok) {
-          throw new Error("Failed to load templates.")
-        }
+        const response = await fetch("/api/admin/email-templates", { cache: "no-store" })
+        if (!response.ok) throw new Error("Failed to load templates.")
 
         const data = (await response.json()) as TemplateLibraryResponse
-        setTemplates(data.templates || [])
-        setLastImportedAt(data.lastImportedAt)
+        const loadedTemplates = data.templates || []
+        const built = buildFolderTree(loadedTemplates)
+        const preferredFolder = built.index["Outgoing / Bunker"]
+          ? "Outgoing / Bunker"
+          : Object.keys(built.index).find((folder) => folder) || ""
+
+        setTemplates(loadedTemplates)
+        setSelectedFolder(preferredFolder)
+        setExpandedFolders((current) => expandFolderPath(preferredFolder, current))
+        setSelectedId(
+          loadedTemplates.find((template) => folderContains(template, preferredFolder))?.id ||
+            loadedTemplates[0]?.id ||
+            ""
+        )
         setLastUpdatedAt(data.lastUpdatedAt)
-        setSelectedId((current) => current || data.templates?.[0]?.id || "")
+        setSaveState("idle")
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Failed to load templates.")
       }
@@ -162,125 +272,188 @@ export default function EmailTemplatesAdminPage() {
     loadTemplates()
   }, [authenticated])
 
-  function updateTemplate(nextPartial: Partial<EmailTemplate>) {
+  useEffect(() => {
+    if (!editorRef.current || !selectedTemplate) return
+    editorRef.current.innerHTML = selectedTemplate.bodyHtml || "<p></p>"
+  }, [selectedId])
+
+  function expandFolderPath(folderPath: string, current: Record<string, boolean> = {}) {
+    const next: Record<string, boolean> = { ...current, "": true }
+    let cursor = ""
+    getFolderParts(folderPath).forEach((part) => {
+      cursor = cursor ? `${cursor} / ${part}` : part
+      next[cursor] = true
+    })
+    return next
+  }
+
+  function markDirty() {
+    setSaveState("dirty")
+  }
+
+  function updateSelectedTemplate(partial: Partial<EmailTemplate>) {
     if (!selectedTemplate) return
-
-    const nextUpdatedAt = new Date().toISOString()
-
+    const updatedAt = new Date().toISOString()
     setTemplates((current) =>
       current.map((template) =>
         template.id === selectedTemplate.id
           ? {
               ...template,
-              ...nextPartial,
-              updatedAt: nextUpdatedAt,
+              ...partial,
+              updatedAt,
             }
           : template
       )
     )
-    setLastUpdatedAt(nextUpdatedAt)
+    setLastUpdatedAt(updatedAt)
+    markDirty()
   }
 
-  async function handleImport() {
-    setBusy(true)
+  function handleEditorInput() {
+    if (!editorRef.current || !selectedTemplate) return
+    const bodyHtml = editorRef.current.innerHTML
+    updateSelectedTemplate({
+      bodyHtml,
+      bodyText: htmlToText(bodyHtml),
+    })
+  }
+
+  function runEditorCommand(command: string, value?: string) {
+    editorRef.current?.focus()
+    document.execCommand(command, false, value)
+    handleEditorInput()
+  }
+
+  function createLink() {
+    const url = window.prompt("Paste link URL")
+    if (!url) return
+    runEditorCommand("createLink", url)
+  }
+
+  async function saveTemplates(nextTemplates = templates) {
+    setSaveState("saving")
     setMessage("")
 
     try {
       const response = await fetch("/api/admin/email-templates", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action: "import" }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", templates: nextTemplates }),
       })
 
-      if (!response.ok) {
-        throw new Error("Import failed.")
-      }
+      if (!response.ok) throw new Error("Save failed.")
 
       const data = (await response.json()) as TemplateLibraryResponse
-      setTemplates(data.templates || [])
-      setLastImportedAt(data.lastImportedAt)
-      setLastUpdatedAt(data.lastUpdatedAt)
-      setSelectedId(data.templates?.[0]?.id || "")
-      setMessage(`Imported ${data.templates.length} templates from Thunderbird.`)
+      setLastUpdatedAt(data.lastUpdatedAt || new Date().toISOString())
+      setSaveState("saved")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Import failed.")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleSave() {
-    setBusy(true)
-    setMessage("")
-
-    try {
-      const response = await fetch("/api/admin/email-templates", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action: "save", templates }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Save failed.")
-      }
-
-      const data = (await response.json()) as TemplateLibraryResponse
-      setLastUpdatedAt(data.lastUpdatedAt)
-      setMessage("Templates saved to the website library.")
-    } catch (error) {
+      setSaveState("failed")
       setMessage(error instanceof Error ? error.message : "Save failed.")
-    } finally {
-      setBusy(false)
     }
   }
 
-  function handleCreate() {
-    const template = createBlankTemplate()
-    setTemplates((current) => [template, ...current])
+  function handleCreateTemplate() {
+    const folder = selectedFolder || "Custom"
+    const template = createBlankTemplate(folder)
+    const nextTemplates = [template, ...templates]
+
+    setTemplates(nextTemplates)
     setSelectedId(template.id)
-    setLastUpdatedAt(template.updatedAt)
+    setSelectedFolder(folder)
+    setExpandedFolders((current) => expandFolderPath(folder, current))
+    setSaveState("dirty")
   }
 
-  function handleDuplicate() {
+  function handleDeleteTemplate() {
     if (!selectedTemplate) return
-
-    const duplicated: EmailTemplate = {
-      ...selectedTemplate,
-      id: `copy-${Date.now()}`,
-      title: `${selectedTemplate.title} Copy`,
-      updatedAt: new Date().toISOString(),
-    }
-
-    setTemplates((current) => [duplicated, ...current])
-    setSelectedId(duplicated.id)
-    setLastUpdatedAt(duplicated.updatedAt)
-  }
-
-  function handleDelete() {
-    if (!selectedTemplate) return
-
     const nextTemplates = templates.filter((template) => template.id !== selectedTemplate.id)
     setTemplates(nextTemplates)
     setSelectedId(nextTemplates[0]?.id || "")
-    setLastUpdatedAt(new Date().toISOString())
+    setSaveState("dirty")
   }
 
-  if (loading) {
-    return <p style={{ padding: "40px" }}>Loading...</p>
+  function moveSelectedToCurrentFolder() {
+    if (!selectedTemplate || !selectedFolder) return
+    updateSelectedTemplate({
+      folder: selectedFolder,
+      tags: getFolderParts(selectedFolder),
+    })
   }
+
+  function selectFolder(folderPath: string) {
+    setSearch("")
+    setSelectedFolder(folderPath)
+    setExpandedFolders((current) => expandFolderPath(folderPath, current))
+    const firstTemplate = templates.find((template) => folderContains(template, folderPath))
+    setSelectedId(firstTemplate?.id || "")
+  }
+
+  function renderFolderNode(node: FolderNode): React.ReactNode {
+    const hasChildren = node.children.length > 0
+    const active = selectedFolder === node.path && !search
+
+    return (
+      <div key={node.path || "root"}>
+        <button
+          type="button"
+          onClick={() => selectFolder(node.path)}
+          style={{
+            width: "100%",
+            minHeight: "30px",
+            display: "grid",
+            gridTemplateColumns: "18px minmax(0, 1fr) auto",
+            alignItems: "center",
+            gap: "4px",
+            paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
+            border: 0,
+            borderRadius: "6px",
+            background: active ? "#dff0fb" : "transparent",
+            color: active ? "#0c4774" : "#203246",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span
+            onClick={(event) => {
+              event.stopPropagation()
+              if (!hasChildren) return
+              setExpandedFolders((current) => ({ ...current, [node.path]: !current[node.path] }))
+            }}
+            style={{ textAlign: "center", fontSize: "12px" }}
+          >
+            {hasChildren ? (expandedFolders[node.path] ? "v" : ">") : ""}
+          </span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", fontWeight: 800 }}>
+            {node.name}
+          </span>
+          <span
+            style={{
+              minWidth: "24px",
+              borderRadius: "999px",
+              padding: "2px 6px",
+              background: active ? "#ffffff" : "#eef3f7",
+              color: active ? "#0c4774" : "#586a7b",
+              fontSize: "11px",
+              fontWeight: 800,
+              textAlign: "center",
+            }}
+          >
+            {node.totalCount}
+          </span>
+        </button>
+        {hasChildren && expandedFolders[node.path] ? node.children.map(renderFolderNode) : null}
+      </div>
+    )
+  }
+
+  if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <div style={{ ...panelStyle, padding: "24px", maxWidth: "520px", margin: "0 auto" }}>
+        <div style={{ ...panelStyle, padding: "22px", maxWidth: "520px", margin: "0 auto" }}>
           <h1 style={{ marginTop: 0 }}>Email Templates</h1>
-          <p style={{ color: "#c9e7ff", lineHeight: 1.6 }}>
-            Please log in from the admin homepage first, then come back here.
-          </p>
+          <p>Please log in from the admin homepage first.</p>
           <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
             Back to Admin
           </button>
@@ -294,241 +467,200 @@ export default function EmailTemplatesAdminPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "340px minmax(0, 1fr)",
-          gap: "18px",
+          gridTemplateColumns: isMobile ? "1fr" : "280px 320px minmax(0, 1fr)",
+          gap: "10px",
           alignItems: "start",
         }}
       >
-        <aside style={{ ...panelStyle, padding: "18px", position: isMobile ? "static" : "sticky", top: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
-                Office Tools
-              </div>
-              <h1 style={{ margin: "6px 0 0", fontSize: "28px" }}>Email Templates</h1>
-            </div>
-            <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
-              Back
-            </button>
+        <section style={panelStyle}>
+          <div style={sectionHeaderStyle}>
+            <div style={sectionTitleStyle}>Folders</div>
+            <span style={{ color: "#687a88", fontSize: "11px" }}>{folderCount} folders</span>
           </div>
-
-          <div style={{ display: "grid", gap: "10px", marginTop: "16px" }}>
-            <button type="button" onClick={handleImport} style={buttonStyle} disabled={busy}>
-              {busy ? "Working..." : "Import Thunderbird"}
-            </button>
-            <button type="button" onClick={handleSave} style={buttonStyle} disabled={busy}>
-              Save Website Library
-            </button>
-            <button type="button" onClick={handleCreate} style={buttonStyle}>
-              New Template
-            </button>
-          </div>
-
-          <div style={{ marginTop: "16px" }}>
+          <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search templates"
               style={inputStyle}
             />
+            <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle}>
+              New in selected folder
+            </button>
           </div>
-
-          <div style={{ marginTop: "16px", fontSize: "12px", color: "#bedfff", lineHeight: 1.6 }}>
-            <div>{templates.length} templates in library</div>
-            <div>Imported: {lastImportedAt ? new Date(lastImportedAt).toLocaleString() : "Not yet"}</div>
-            <div>Saved: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : "Not yet"}</div>
+          <div style={{ maxHeight: isMobile ? "320px" : "calc(100vh - 170px)", overflow: "auto", padding: "6px" }}>
+            {renderFolderNode(folderTree.root)}
           </div>
+        </section>
 
-          {message ? (
-            <p style={{ marginTop: "14px", fontSize: "13px", color: "#ffd89a", lineHeight: 1.5 }}>
-              {message}
-            </p>
-          ) : null}
-
-          <div style={{ display: "grid", gap: "10px", marginTop: "18px", maxHeight: isMobile ? "none" : "62vh", overflowY: "auto", paddingRight: "4px" }}>
-            {filteredTemplates.map((template) => {
+        <section style={panelStyle}>
+          <div style={sectionHeaderStyle}>
+            <div style={sectionTitleStyle}>{search ? "Search Results" : selectedFolder || "All Templates"}</div>
+            <span style={{ color: "#687a88", fontSize: "11px" }}>{visibleTemplates.length}</span>
+          </div>
+          <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 88px)", overflow: "auto", padding: "6px" }}>
+            {visibleTemplates.map((template) => {
               const active = template.id === selectedId
-
               return (
                 <button
                   key={template.id}
                   type="button"
                   onClick={() => setSelectedId(template.id)}
                   style={{
-                    textAlign: "left",
-                    padding: "12px",
-                    borderRadius: "14px",
-                    border: active ? "1px solid rgba(145, 215, 255, 0.42)" : "1px solid rgba(210,236,255,0.12)",
-                    background: active
-                      ? "linear-gradient(180deg, rgba(63, 137, 208, 0.28) 0%, rgba(15, 52, 92, 0.22) 100%)"
-                      : "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%)",
-                    color: "#edf7ff",
+                    width: "100%",
+                    display: "grid",
+                    gap: "4px",
+                    marginBottom: "6px",
+                    padding: "10px",
+                    border: active ? "1px solid #2c86c6" : "1px solid #e2e9ef",
+                    borderRadius: "7px",
+                    background: active ? "#eef7ff" : "#ffffff",
+                    color: "#1b2d40",
                     cursor: "pointer",
+                    textAlign: "left",
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: "13px" }}>{template.title || "Untitled template"}</div>
-                  <div style={{ fontSize: "11px", color: "#8fd7ff", marginTop: "4px" }}>{template.folder || "No folder"}</div>
-                  <div style={{ fontSize: "12px", color: "#cde7ff", marginTop: "6px", opacity: 0.9 }}>
+                  <span style={{ fontSize: "13px", fontWeight: 900, overflowWrap: "anywhere" }}>
+                    {template.title || "Untitled template"}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#526679", overflowWrap: "anywhere" }}>
                     {template.subject || "No subject"}
-                  </div>
+                  </span>
+                  <span style={{ fontSize: "11px", color: "#7c8b98", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {template.folder || "Unfiled"}
+                  </span>
                 </button>
               )
             })}
           </div>
-        </aside>
+        </section>
 
-        <main style={{ ...panelStyle, padding: "18px" }}>
+        <main style={panelStyle}>
+          <div style={sectionHeaderStyle}>
+            <div style={sectionTitleStyle}>Template Editor</div>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ color: saveState === "failed" ? "#a12a2a" : "#687a88", fontSize: "11px", fontWeight: 800 }}>
+                {saveState === "saving"
+                  ? "Saving..."
+                  : saveState === "saved"
+                    ? "Saved"
+                    : saveState === "dirty"
+                      ? "Unsaved"
+                      : saveState === "failed"
+                        ? "Save failed"
+                        : lastUpdatedAt
+                          ? `Saved ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+                          : ""}
+              </span>
+              <button type="button" onClick={() => saveTemplates()} style={primaryButtonStyle} disabled={!selectedTemplate || saveState === "saving"}>
+                Save template
+              </button>
+              <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate}>
+                Delete
+              </button>
+            </div>
+          </div>
+
           {selectedTemplate ? (
-            <div style={{ display: "grid", gap: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
-                    Template Editor
-                  </div>
-                  <div style={{ marginTop: "6px", color: "#c7e7ff", fontSize: "13px" }}>
-                    Source: {selectedTemplate.sourcePath || "Website only"}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                  <button type="button" onClick={handleDuplicate} style={buttonStyle}>
-                    Duplicate
-                  </button>
-                  <button type="button" onClick={handleDelete} style={buttonStyle}>
-                    Delete
-                  </button>
-                </div>
-              </div>
+            <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
+              {message ? <div style={{ color: "#a12a2a", fontSize: "13px" }}>{message}</div> : null}
 
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "14px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Title</div>
+                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Title</div>
                   <input
                     value={selectedTemplate.title}
-                    onChange={(event) => updateTemplate({ title: event.target.value })}
+                    onChange={(event) => updateSelectedTemplate({ title: event.target.value })}
                     style={inputStyle}
                   />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Folder</div>
+                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Subject</div>
                   <input
-                    value={selectedTemplate.folder}
-                    onChange={(event) =>
-                      updateTemplate({
-                        folder: event.target.value,
-                        tags: event.target.value
-                          .split("/")
-                          .map((value) => value.trim())
-                          .filter(Boolean),
-                      })
-                    }
+                    value={selectedTemplate.subject}
+                    onChange={(event) => updateSelectedTemplate({ subject: event.target.value })}
                     style={inputStyle}
                   />
                 </label>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#cde7ff", fontSize: "13px" }}>
-                <input
-                  id="template-active"
-                  type="checkbox"
-                  checked={selectedTemplate.isActive}
-                  onChange={(event) => updateTemplate({ isActive: event.target.checked })}
-                />
-                <label htmlFor="template-active">Available in Outlook add-in</label>
               </div>
 
               <div
                 style={{
-                  padding: "14px",
-                  borderRadius: "14px",
-                  border: "1px solid rgba(210,236,255,0.12)",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)",
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+                  gap: "10px",
                 }}
               >
-                <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "8px", fontWeight: 700 }}>
-                  Optional Placeholders
-                </div>
-                <div style={{ fontSize: "13px", color: "#cde7ff", lineHeight: 1.6 }}>
-                  {selectedTemplate.placeholders.length > 0
-                    ? selectedTemplate.placeholders.map((token) => `{{${token}}}`).join(", ")
-                    : "No placeholders detected in this template."}
-                </div>
-                <div style={{ fontSize: "12px", color: "#9ec8e6", marginTop: "8px", lineHeight: 1.6 }}>
-                  Add tokens like `{"{{vessel_name}}"}`, `{"{{port}}"}` or `{"{{eta}}"}` in subject/body. In Outlook, users can ignore them and insert the raw template, or fill only the fields they want.
-                </div>
-              </div>
-
-              <label>
-                <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Subject</div>
-                <input
-                  value={selectedTemplate.subject}
-                  onChange={(event) => updateTemplate({ subject: event.target.value })}
-                  style={inputStyle}
-                />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: "14px" }}>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>To</div>
-                  <input
-                    value={selectedTemplate.to}
-                    onChange={(event) => updateTemplate({ to: event.target.value })}
-                    style={inputStyle}
-                  />
+                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>To</div>
+                  <input value={selectedTemplate.to} onChange={(event) => updateSelectedTemplate({ to: event.target.value })} style={inputStyle} />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Cc</div>
-                  <input
-                    value={selectedTemplate.cc}
-                    onChange={(event) => updateTemplate({ cc: event.target.value })}
-                    style={inputStyle}
-                  />
+                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Cc</div>
+                  <input value={selectedTemplate.cc} onChange={(event) => updateSelectedTemplate({ cc: event.target.value })} style={inputStyle} />
                 </label>
                 <label>
-                  <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Bcc</div>
-                  <input
-                    value={selectedTemplate.bcc}
-                    onChange={(event) => updateTemplate({ bcc: event.target.value })}
-                    style={inputStyle}
-                  />
+                  <div style={{ fontSize: "12px", color: "#526679", marginBottom: "5px", fontWeight: 800 }}>Bcc</div>
+                  <input value={selectedTemplate.bcc} onChange={(event) => updateSelectedTemplate({ bcc: event.target.value })} style={inputStyle} />
                 </label>
               </div>
 
-              <label>
-                <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>HTML Body</div>
-                <textarea
-                  value={selectedTemplate.bodyHtml}
-                  onChange={(event) =>
-                    updateTemplate({
-                      bodyHtml: event.target.value,
-                      bodyText: event.target.value
-                        .replace(/<br\s*\/?>/gi, "\n")
-                        .replace(/<\/p>/gi, "\n\n")
-                        .replace(/<[^>]+>/g, "")
-                        .trim(),
-                    })
-                  }
-                  style={{ ...textareaStyle, minHeight: "320px", fontFamily: "Menlo, Monaco, Consolas, monospace" }}
-                />
-              </label>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  alignItems: "center",
+                  padding: "9px 10px",
+                  border: "1px solid #dce6ee",
+                  borderRadius: "7px",
+                  background: "#fbfcfd",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: "#526679", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Folder</div>
+                  <div style={{ marginTop: "3px", color: "#172534", fontSize: "13px", fontWeight: 800, overflowWrap: "anywhere" }}>
+                    {selectedTemplate.folder || "Unfiled"}
+                  </div>
+                </div>
+                <button type="button" onClick={moveSelectedToCurrentFolder} style={buttonStyle} disabled={!selectedFolder}>
+                  Move to selected folder
+                </button>
+              </div>
 
-              <label>
-                <div style={{ fontSize: "12px", color: "#8fd7ff", marginBottom: "6px", fontWeight: 700 }}>Preview</div>
-                <div
-                  style={{
-                    minHeight: "180px",
-                    padding: "18px",
-                    borderRadius: "16px",
-                    border: "1px solid rgba(210,236,255,0.14)",
-                    background: "rgba(255,255,255,0.97)",
-                    color: "#10243a",
-                    overflowX: "auto",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: selectedTemplate.bodyHtml || "<p></p>" }}
-                />
-              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                <button type="button" onClick={() => runEditorCommand("bold")} style={buttonStyle}>B</button>
+                <button type="button" onClick={() => runEditorCommand("italic")} style={buttonStyle}>I</button>
+                <button type="button" onClick={() => runEditorCommand("underline")} style={buttonStyle}>U</button>
+                <button type="button" onClick={() => runEditorCommand("insertUnorderedList")} style={buttonStyle}>Bullets</button>
+                <button type="button" onClick={() => runEditorCommand("insertOrderedList")} style={buttonStyle}>Numbered</button>
+                <button type="button" onClick={() => runEditorCommand("formatBlock", "blockquote")} style={buttonStyle}>Quote</button>
+                <button type="button" onClick={createLink} style={buttonStyle}>Link</button>
+                <button type="button" onClick={() => runEditorCommand("removeFormat")} style={buttonStyle}>Clear</button>
+              </div>
+
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={handleEditorInput}
+                style={{
+                  minHeight: "420px",
+                  maxHeight: isMobile ? "none" : "calc(100vh - 360px)",
+                  overflow: "auto",
+                  padding: "16px",
+                  border: "1px solid #cbd8e2",
+                  borderRadius: "8px",
+                  background: "#ffffff",
+                  color: "#172534",
+                  fontSize: "14px",
+                  lineHeight: 1.55,
+                  outline: "none",
+                }}
+              />
             </div>
           ) : (
-            <div style={{ color: "#c9e7ff" }}>Import or create a template to start editing.</div>
+            <div style={{ padding: "24px", color: "#617487" }}>Select or create a template.</div>
           )}
         </main>
       </div>

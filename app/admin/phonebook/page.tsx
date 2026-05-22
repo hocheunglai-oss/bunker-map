@@ -453,6 +453,10 @@ export default function PhonebookPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
+
+  useEffect(() => {
+    document.title = "Phonebook - FC Uno"
+  }, [])
   const [companySuggestOpen, setCompanySuggestOpen] = useState(false)
   const [draggingContactId, setDraggingContactId] = useState("")
   const [dragOverContactId, setDragOverContactId] = useState("")

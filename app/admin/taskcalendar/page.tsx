@@ -146,6 +146,10 @@ export default function TaskCalendarPage() {
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    document.title = "Task Calendar - FC Uno"
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
 
     async function loadTasks() {

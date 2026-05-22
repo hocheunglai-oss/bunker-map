@@ -118,6 +118,10 @@ export default function AdminPage() {
   const [reportDateOverrides, setReportDateOverrides] = useState<ReportDateOverrides>(emptyReportDateOverrides)
   const [reportDates, setReportDates] = useState<ReportDates>(emptyReportDates)
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
+
+  useEffect(() => {
+    document.title = "Price Setter - FC Uno"
+  }, [])
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
   const [reportFallbacks, setReportFallbacks] = useState<FallbackMap>({})

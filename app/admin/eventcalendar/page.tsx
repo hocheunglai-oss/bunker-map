@@ -333,6 +333,10 @@ export default function EventCalendarPage() {
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<ManagedEvent>(() => buildBlankEvent(todayKey))
+
+  useEffect(() => {
+    document.title = "Event Calendar - FC Uno"
+  }, [])
   const [draftRecurrentEvent, setDraftRecurrentEvent] = useState<RecurrentDraft>(() => buildBlankRecurrentEvent(todayKey))
   const [leaveRequestDraft, setLeaveRequestDraft] = useState<LeaveRequestDraft>(() => buildBlankLeaveRequest(todayKey, defaultPeople))
   const [draftPeopleText, setDraftPeopleText] = useState(defaultPeople.join("\n"))

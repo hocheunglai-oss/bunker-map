@@ -170,6 +170,7 @@ export async function GET(request: Request) {
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
               </Group>
@@ -192,6 +193,7 @@ export async function GET(request: Request) {
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <SourceLocation resid="Taskpane.Url"/>
+                    <SupportsPinning>true</SupportsPinning>
                   </Action>
                 </Control>
               </Group>

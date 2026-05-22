@@ -158,6 +158,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
               </Group>
@@ -180,6 +181,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <SourceLocation resid="Taskpane.Url"/>
+                    <SupportsPinning>true</SupportsPinning>
                   </Action>
                 </Control>
               </Group>
