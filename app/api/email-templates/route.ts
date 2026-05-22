@@ -24,13 +24,31 @@ export async function GET() {
       {
         headers: {
           "Cache-Control": "no-store, max-age=0",
+          "Access-Control-Allow-Origin": "*",
         },
       }
     )
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Failed to load templates." },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
     )
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+    },
+  })
 }

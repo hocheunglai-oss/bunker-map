@@ -151,7 +151,7 @@ async function walkTemplateFiles(directoryPath: string): Promise<string[]> {
 
     const fullPath = path.join(directoryPath, entry.name)
 
-    if (entry.isDirectory() && entry.name.endsWith(".sbd")) {
+    if (entry.isDirectory()) {
       files.push(...(await walkTemplateFiles(fullPath)))
       continue
     }
@@ -165,9 +165,9 @@ async function walkTemplateFiles(directoryPath: string): Promise<string[]> {
 function buildFolderLabel(filePath: string) {
   const relative = path.relative(THUNDERBIRD_ROOT, filePath)
   return relative
-    .replace(/\.sbd/g, "")
     .split(path.sep)
-    .slice(0, -1)
+    .map((part) => part.replace(/\.sbd$/i, ""))
+    .filter(Boolean)
     .join(" / ")
 }
 
