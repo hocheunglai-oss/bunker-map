@@ -56,7 +56,7 @@ function addOneHour(timeText: string) {
 
 function buildGoogleEvent(event: OfficeCalendarEvent) {
   const time = event.startDate === event.endDate ? extractTimeRange(event.title) : null
-  const summary = time ? event.title.replace(time.raw, "").replace(/^[-–\s]+/, "").trim() || event.title : event.title
+  const summary = "MARINE ENERGY"
   const description = [
     "Imported from Bunker Map Office Tools.",
     event.people.length ? `People: ${event.people.join(", ")}` : "",
@@ -87,7 +87,7 @@ function buildGoogleEvent(event: OfficeCalendarEvent) {
   }
 
   return {
-    summary: event.title,
+    summary,
     description,
     start: {
       date: event.startDate,

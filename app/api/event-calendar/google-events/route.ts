@@ -73,7 +73,6 @@ export async function GET(request: Request) {
   const calendarId = searchParams.get("calendarId")?.trim() || process.env.GOOGLE_MEETING_CALENDAR_ID || DEFAULT_CALENDAR_ID
   const now = new Date()
   const defaultTimeMin = new Date(now)
-  defaultTimeMin.setDate(defaultTimeMin.getDate() - 14)
   const defaultTimeMax = new Date(now)
   defaultTimeMax.setDate(defaultTimeMax.getDate() + 180)
 
@@ -95,12 +94,11 @@ export async function GET(request: Request) {
       return {
         id: event.id || "",
         calendarId,
-        title: event.summary || "(NO TITLE)",
+        title: event.extendedProperties?.private?.bunkerMapEventId ? "MARINE ENERGY" : event.summary || "(NO TITLE)",
         startDate: start.date,
         endDate: end.date || start.date,
         startTime: start.time,
         endTime: end.time,
-        location: event.location || "",
       }
     })
 

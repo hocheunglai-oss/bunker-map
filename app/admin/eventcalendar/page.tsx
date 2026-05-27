@@ -8,7 +8,7 @@ import {
 } from "@/data/eventCalendar"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
-type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting" | "Unclassified"
+type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
 type ViewMode = "upcoming" | "past" | "google"
 type ModalMode = "add" | "edit" | null
 type RecurrentFrequency = "daily" | "weekly" | "monthly"
@@ -21,7 +21,6 @@ type GoogleCalendarEvent = {
   endDate: string
   startTime: string
   endTime: string
-  location: string
 }
 type EmailPromptState = {
   event: ManagedEvent
@@ -61,7 +60,7 @@ const categories: Array<"All" | EventCategory> = [
   "All",
   "Public Holiday",
   "Leave or Travel",
-  "Meeting",
+  "Meeting Room",
   "Unclassified",
 ]
 
@@ -210,12 +209,14 @@ function normalizePeople(value: string[]) {
 }
 
 function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventCategory {
+  const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
+  if (storedEventType === "Meeting") return "Meeting Room"
   if (event.eventType) return event.eventType
 
   const title = event.title.toLowerCase()
   if (title.includes("public holiday") || title.includes("holiday attendance")) return "Public Holiday"
   if (title.includes("leave") || title.includes("trip") || title.includes("genoa") || title.includes("vietnam")) return "Leave or Travel"
-  if (title.includes("lunch") || title.includes("dinner") || title.includes("visit") || title.includes("meeting") || title.includes("call")) return "Meeting"
+  if (title.includes("lunch") || title.includes("dinner") || title.includes("visit") || title.includes("meeting") || title.includes("call")) return "Meeting Room"
   return "Unclassified"
 }
 
@@ -235,7 +236,7 @@ function getCategoryStyle(category: EventCategory) {
       color: "#fff4bf",
       glow: "rgba(255, 218, 97, 0.13)",
     },
-    Meeting: {
+    "Meeting Room": {
       background: "rgba(173, 126, 255, 0.22)",
       solid: "linear-gradient(180deg, rgba(164, 116, 255, 0.9) 0%, rgba(92, 62, 184, 0.88) 100%)",
       border: "rgba(181, 143, 255, 0.62)",
@@ -492,7 +493,7 @@ export default function EventCalendarPage() {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
 
     syncTimerRef.current = setTimeout(async () => {
-      const meetingEvents = events.filter((event) => inferCategory(event) === "Meeting")
+      const meetingEvents = events.filter((event) => inferCategory(event) === "Meeting Room")
       if (!meetingEvents.length) {
         setSyncStatus("No meetings to sync")
         return
@@ -529,22 +530,22 @@ export default function EventCalendarPage() {
     let cancelled = false
 
     async function loadGoogleCalendarEvents() {
-      setGoogleCalendarStatus("Loading Google Calendar")
+      setGoogleCalendarStatus("Loading Meeting Room")
 
       try {
         const response = await fetch(`/api/event-calendar/google-events?calendarId=${encodeURIComponent(CALENDAR_ID)}`)
         const payload = await response.json()
 
         if (!response.ok || !Array.isArray(payload.events)) {
-          setGoogleCalendarStatus(payload.message || "Google Calendar pending")
+          setGoogleCalendarStatus(payload.message || "Meeting Room pending")
           return
         }
 
         if (cancelled) return
         setGoogleCalendarEvents(payload.events)
-        setGoogleCalendarStatus(`${payload.events.length} Google Calendar events`)
+        setGoogleCalendarStatus(`${payload.events.length} Meeting Room events`)
       } catch {
-        if (!cancelled) setGoogleCalendarStatus("Google Calendar pending")
+        if (!cancelled) setGoogleCalendarStatus("Meeting Room pending")
       }
     }
 
@@ -983,7 +984,7 @@ export default function EventCalendarPage() {
                       padding: "7px 11px",
                     }}
                   >
-                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Google Calendar"}
+                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Meeting Room"}
                   </button>
                 )
               })}
@@ -1104,7 +1105,6 @@ export default function EventCalendarPage() {
                   <th style={{ ...thStyle, width: "150px" }}>Date</th>
                   <th style={{ ...thStyle, width: "120px" }}>Time</th>
                   <th style={thStyle}>Event</th>
-                  <th style={{ ...thStyle, width: "220px" }}>Location</th>
                 </tr>
               </thead>
               <tbody>
@@ -1122,12 +1122,11 @@ export default function EventCalendarPage() {
                       {formatGoogleEventTime(event)}
                     </td>
                     <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>{event.title}</td>
-                    <td style={{ ...tdStyle, color: "#a9c4dc", fontWeight: 800 }}>{event.location || "-"}</td>
                   </tr>
                 ))}
                 {!googleCalendarEvents.length && (
                   <tr>
-                    <td colSpan={4} style={{ ...tdStyle, height: "42px", color: "#a9c4dc", fontWeight: 900 }}>
+                    <td colSpan={3} style={{ ...tdStyle, height: "42px", color: "#a9c4dc", fontWeight: 900 }}>
                       {googleCalendarStatus}
                     </td>
                   </tr>
