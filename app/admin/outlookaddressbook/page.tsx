@@ -284,6 +284,12 @@ Import-Csv $ContactsCsv | ForEach-Object {
     New-MailContact -Name $_.DisplayName -DisplayName $_.DisplayName -ExternalEmailAddress $email -Alias $alias | Out-Null
     Write-Host "Created contact:" $_.DisplayName "<$email>"
   }
+
+  try {
+    Set-MailContact -Identity $email -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+  } catch {
+    Write-Warning ("Could not force address-list visibility for contact {0}: {1}" -f $email, $_.Exception.Message)
+  }
 }
 
 Write-Host "Creating or checking distribution groups..."
@@ -295,6 +301,12 @@ Import-Csv $GroupsCsv | ForEach-Object {
   } else {
     New-DistributionGroup -Name $_.GroupName -Alias $alias -Notes $_.Description | Out-Null
     Write-Host "Created group:" $_.GroupName
+  }
+
+  try {
+    Set-DistributionGroup -Identity $alias -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+  } catch {
+    Write-Warning ("Could not force address-list visibility for group {0}: {1}" -f $alias, $_.Exception.Message)
   }
 }
 
@@ -310,6 +322,21 @@ Import-Csv $MembersCsv | ForEach-Object {
       Write-Warning ("Could not add {0} to {1}: {2}" -f $_.MemberEmail, $_.GroupName, $_.Exception.Message)
     }
   }
+}
+
+Write-Host ""
+Write-Host "Verification sample:"
+$sampleContact = Import-Csv $ContactsCsv | Select-Object -First 1
+if ($sampleContact) {
+  Get-MailContact -Identity $sampleContact.ExternalEmailAddress |
+    Format-List DisplayName,ExternalEmailAddress,HiddenFromAddressListsEnabled
+}
+$sampleGroup = Import-Csv $GroupsCsv | Select-Object -First 1
+if ($sampleGroup) {
+  Get-DistributionGroup -Identity $sampleGroup.Alias |
+    Format-List DisplayName,PrimarySmtpAddress,HiddenFromAddressListsEnabled,RecipientTypeDetails
+  Write-Host "Group member count:"
+  (Get-DistributionGroupMember -Identity $sampleGroup.Alias).Count
 }
 
 Write-Host "Done."
