@@ -9,10 +9,20 @@ import {
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting" | "Unclassified"
-type ViewMode = "upcoming" | "past"
+type ViewMode = "upcoming" | "past" | "google"
 type ModalMode = "add" | "edit" | null
 type RecurrentFrequency = "daily" | "weekly" | "monthly"
 type LeaveType = "Annual Leave" | "Sick Leave Notification (for medical treatment)" | "Compassionate Leave"
+type GoogleCalendarEvent = {
+  id: string
+  calendarId: string
+  title: string
+  startDate: string
+  endDate: string
+  startTime: string
+  endTime: string
+  location: string
+}
 type EmailPromptState = {
   event: ManagedEvent
   action: "created" | "updated"
@@ -40,7 +50,7 @@ const STORAGE_KEY = "bunker-map-office-calendar-events"
 const PEOPLE_STORAGE_KEY = "bunker-map-office-calendar-people"
 const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipients"
 const SHARED_STORE_KEY = "event-calendar"
-const CALENDAR_ID = "cosulich.uno@gmail.com"
+const CALENDAR_ID = "fcb.bunker@gmail.com"
 const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const leaveTypes: LeaveType[] = [
   "Annual Leave",
@@ -181,6 +191,18 @@ function formatDate(value: string) {
 function formatEventRange(event: ManagedEvent) {
   if (event.startDate === event.endDate) return formatDate(event.startDate)
   return `${formatDate(event.startDate)} - ${formatDate(event.endDate)}`
+}
+
+function formatGoogleEventDate(event: GoogleCalendarEvent) {
+  if (!event.startDate) return "-"
+  if (!event.endDate || event.startDate === event.endDate) return formatDate(event.startDate)
+  return `${formatDate(event.startDate)} - ${formatDate(event.endDate)}`
+}
+
+function formatGoogleEventTime(event: GoogleCalendarEvent) {
+  if (!event.startTime && !event.endTime) return "All Day"
+  if (event.startTime && event.endTime) return `${event.startTime}-${event.endTime}`
+  return event.startTime || event.endTime || "-"
 }
 
 function normalizePeople(value: string[]) {
@@ -342,6 +364,8 @@ export default function EventCalendarPage() {
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
   const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
   const [syncStatus, setSyncStatus] = useState("Sync ready")
+  const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([])
+  const [googleCalendarStatus, setGoogleCalendarStatus] = useState("Calendar ready")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
   const loadedRef = useRef(false)
@@ -468,13 +492,19 @@ export default function EventCalendarPage() {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
 
     syncTimerRef.current = setTimeout(async () => {
+      const meetingEvents = events.filter((event) => inferCategory(event) === "Meeting")
+      if (!meetingEvents.length) {
+        setSyncStatus("No meetings to sync")
+        return
+      }
+
       setSyncStatus("Syncing Google")
 
       try {
         const response = await fetch("/api/event-calendar/google-sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendarId: CALENDAR_ID, events }),
+          body: JSON.stringify({ calendarId: CALENDAR_ID, events: meetingEvents }),
         })
         const payload = await response.json()
 
@@ -493,6 +523,37 @@ export default function EventCalendarPage() {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
     }
   }, [authenticated, events])
+
+  useEffect(() => {
+    if (!authenticated || viewMode !== "google") return
+    let cancelled = false
+
+    async function loadGoogleCalendarEvents() {
+      setGoogleCalendarStatus("Loading Google Calendar")
+
+      try {
+        const response = await fetch(`/api/event-calendar/google-events?calendarId=${encodeURIComponent(CALENDAR_ID)}`)
+        const payload = await response.json()
+
+        if (!response.ok || !Array.isArray(payload.events)) {
+          setGoogleCalendarStatus(payload.message || "Google Calendar pending")
+          return
+        }
+
+        if (cancelled) return
+        setGoogleCalendarEvents(payload.events)
+        setGoogleCalendarStatus(`${payload.events.length} Google Calendar events`)
+      } catch {
+        if (!cancelled) setGoogleCalendarStatus("Google Calendar pending")
+      }
+    }
+
+    loadGoogleCalendarEvents()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, viewMode])
 
   useEffect(() => {
     return () => {
@@ -516,6 +577,8 @@ export default function EventCalendarPage() {
   }
 
   const visibleEvents = useMemo(() => {
+    if (viewMode === "google") return []
+
     return events
       .filter((event) => (viewMode === "past" ? isPastEvent(event, todayKey) : !isPastEvent(event, todayKey)))
       .filter((event) => selectedCategory === "All" || inferCategory(event) === selectedCategory)
@@ -903,7 +966,7 @@ export default function EventCalendarPage() {
               <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "#edf7ff" }}>
                 Event Calendar
               </h1>
-              {(["upcoming", "past"] as ViewMode[]).map((mode) => {
+              {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
                 const active = viewMode === mode
                 return (
                   <button
@@ -920,7 +983,7 @@ export default function EventCalendarPage() {
                       padding: "7px 11px",
                     }}
                   >
-                    {mode === "upcoming" ? "Upcoming Events" : "Past Events"}
+                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Google Calendar"}
                   </button>
                 )
               })}
@@ -971,159 +1034,200 @@ export default function EventCalendarPage() {
           </div>
         </header>
 
-        <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {categories.map((category) => {
-              const style = category === "All" ? null : getCategoryStyle(category)
-              const active = selectedCategory === category
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => setSelectedCategory(category)}
-                  style={{
-                    border: `1px solid ${style?.border || "rgba(210,236,255,0.22)"}`,
-                    borderRadius: "999px",
-                    background: style?.solid || "linear-gradient(180deg, rgba(143, 215, 255, 0.5) 0%, rgba(42, 94, 132, 0.5) 100%)",
-                    boxShadow: active
-                      ? "0 0 0 2px rgba(255,255,255,0.2), 0 12px 26px rgba(0,0,0,0.18)"
-                      : "inset 0 1px 0 rgba(255,255,255,0.1)",
-                    color: "#ffffff",
-                    cursor: "pointer",
-                    fontSize: "11px",
-                    fontWeight: 900,
-                    opacity: active ? 1 : 0.72,
-                    padding: "7px 10px",
-                  }}
-                >
-                  {category}
-                </button>
-              )
-            })}
+        {viewMode !== "google" && (
+          <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              {categories.map((category) => {
+                const style = category === "All" ? null : getCategoryStyle(category)
+                const active = selectedCategory === category
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setSelectedCategory(category)}
+                    style={{
+                      border: `1px solid ${style?.border || "rgba(210,236,255,0.22)"}`,
+                      borderRadius: "999px",
+                      background: style?.solid || "linear-gradient(180deg, rgba(143, 215, 255, 0.5) 0%, rgba(42, 94, 132, 0.5) 100%)",
+                      boxShadow: active
+                        ? "0 0 0 2px rgba(255,255,255,0.2), 0 12px 26px rgba(0,0,0,0.18)"
+                        : "inset 0 1px 0 rgba(255,255,255,0.1)",
+                      color: "#ffffff",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                      fontWeight: 900,
+                      opacity: active ? 1 : 0.72,
+                      padding: "7px 10px",
+                    }}
+                  >
+                    {category}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {people.map((person) => {
+                const active = selectedPeople.includes(person)
+                return (
+                  <button
+                    key={person}
+                    type="button"
+                    onClick={() => togglePersonFilter(person)}
+                    style={{
+                      minWidth: "34px",
+                      border: active ? "1px solid rgba(143, 215, 255, 0.62)" : "1px solid rgba(5, 16, 28, 0.7)",
+                      borderRadius: "999px",
+                      background: active
+                        ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)"
+                        : "rgba(2, 10, 18, 0.76)",
+                      color: active ? "#031b36" : "#9fb3c5",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                      fontWeight: 900,
+                      boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : "none",
+                      padding: "5px 9px",
+                    }}
+                  >
+                    {person}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-            {people.map((person) => {
-              const active = selectedPeople.includes(person)
-              return (
-                <button
-                  key={person}
-                  type="button"
-                  onClick={() => togglePersonFilter(person)}
-                  style={{
-                    minWidth: "34px",
-                    border: active ? "1px solid rgba(143, 215, 255, 0.62)" : "1px solid rgba(5, 16, 28, 0.7)",
-                    borderRadius: "999px",
-                    background: active
-                      ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)"
-                      : "rgba(2, 10, 18, 0.76)",
-                    color: active ? "#031b36" : "#9fb3c5",
-                    cursor: "pointer",
-                    fontSize: "11px",
-                    fontWeight: 900,
-                    boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : "none",
-                    padding: "5px 9px",
-                  }}
-                >
-                  {person}
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        )}
 
         <div style={panelStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, width: "150px" }}>
-                  Date
-                </th>
-                <th style={thStyle}>
-                  Event
-                </th>
-                {people.map((person) => (
-                  <th key={person} style={{ ...thStyle, width: "38px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
-                    {person}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleEvents.map((event) => {
-                const category = inferCategory(event)
-                const categoryStyle = getCategoryStyle(category)
-                const rowHighlighted =
-                  selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
-
-                return (
+          {viewMode === "google" ? (
+            <table style={{ ...tableStyle, minWidth: "760px" }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, width: "150px" }}>Date</th>
+                  <th style={{ ...thStyle, width: "120px" }}>Time</th>
+                  <th style={thStyle}>Event</th>
+                  <th style={{ ...thStyle, width: "220px" }}>Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {googleCalendarEvents.map((event) => (
                   <tr
                     key={event.id}
                     style={{
-                      background: `linear-gradient(90deg, ${categoryStyle.glow} 0%, ${categoryStyle.background} 100%)`,
-                      opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
-                      boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
+                      background: "linear-gradient(90deg, rgba(173, 126, 255, 0.12) 0%, rgba(173, 126, 255, 0.2) 100%)",
                     }}
                   >
-                    <td
-                      onDoubleClick={() => openEditModal(event)}
+                    <td style={{ ...tdStyle, color: "#e5ddff", fontWeight: 900, whiteSpace: "nowrap", borderLeft: "4px solid rgba(181, 143, 255, 0.62)" }}>
+                      {formatGoogleEventDate(event)}
+                    </td>
+                    <td style={{ ...tdStyle, color: "#d9eeff", fontWeight: 900, whiteSpace: "nowrap" }}>
+                      {formatGoogleEventTime(event)}
+                    </td>
+                    <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>{event.title}</td>
+                    <td style={{ ...tdStyle, color: "#a9c4dc", fontWeight: 800 }}>{event.location || "-"}</td>
+                  </tr>
+                ))}
+                {!googleCalendarEvents.length && (
+                  <tr>
+                    <td colSpan={4} style={{ ...tdStyle, height: "42px", color: "#a9c4dc", fontWeight: 900 }}>
+                      {googleCalendarStatus}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, width: "150px" }}>
+                    Date
+                  </th>
+                  <th style={thStyle}>
+                    Event
+                  </th>
+                  {people.map((person) => (
+                    <th key={person} style={{ ...thStyle, width: "38px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
+                      {person}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEvents.map((event) => {
+                  const category = inferCategory(event)
+                  const categoryStyle = getCategoryStyle(category)
+                  const rowHighlighted =
+                    selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
+
+                  return (
+                    <tr
+                      key={event.id}
                       style={{
-                        ...tdStyle,
-                        color: categoryStyle.color,
-                        fontWeight: 900,
-                        whiteSpace: "nowrap",
-                        borderLeft: `4px solid ${categoryStyle.border}`,
+                        background: `linear-gradient(90deg, ${categoryStyle.glow} 0%, ${categoryStyle.background} 100%)`,
+                        opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
+                        boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
                       }}
                     >
-                      {formatEventRange(event)}
-                    </td>
-                    <td
-                      onDoubleClick={() => openEditModal(event)}
-                      style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}
-                    >
-                      {event.title}
-                    </td>
-                    {people.map((person) => {
-                      const attending = event.people.includes(person)
-                      const uncertain = (event.uncertainPeople || []).includes(person)
-                      const highlighted = selectedPeople.includes(person)
-                      return (
-                        <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
-                          <span
-                            title="Double-click the event row to edit attendance"
-                            style={{
-                              display: "inline-block",
-                              pointerEvents: "none",
-                              userSelect: "none",
-                              width: "28px",
-                              border: highlighted
-                                ? "1px solid rgba(143, 215, 255, 0.76)"
-                                : uncertain || attending
-                                  ? "1px solid rgba(255,255,255,0.16)"
-                                  : "1px solid transparent",
-                              borderRadius: "999px",
-                              background: attending
-                                ? "rgba(143, 215, 255, 0.2)"
-                                : uncertain
-                                  ? "rgba(255, 218, 97, 0.18)"
-                                  : "transparent",
-                              color: attending ? "#d9eeff" : uncertain ? "#ffe895" : "rgba(31, 45, 58, 0.58)",
-                              cursor: "default",
-                              fontSize: "10px",
-                              fontWeight: attending || uncertain ? 900 : 700,
-                              lineHeight: "12px",
-                              padding: "2px 0",
-                            }}
-                          >
-                            {uncertain ? "??" : person}
-                          </span>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      <td
+                        onDoubleClick={() => openEditModal(event)}
+                        style={{
+                          ...tdStyle,
+                          color: categoryStyle.color,
+                          fontWeight: 900,
+                          whiteSpace: "nowrap",
+                          borderLeft: `4px solid ${categoryStyle.border}`,
+                        }}
+                      >
+                        {formatEventRange(event)}
+                      </td>
+                      <td
+                        onDoubleClick={() => openEditModal(event)}
+                        style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}
+                      >
+                        {event.title}
+                      </td>
+                      {people.map((person) => {
+                        const attending = event.people.includes(person)
+                        const uncertain = (event.uncertainPeople || []).includes(person)
+                        const highlighted = selectedPeople.includes(person)
+                        return (
+                          <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
+                            <span
+                              title="Double-click the event row to edit attendance"
+                              style={{
+                                display: "inline-block",
+                                pointerEvents: "none",
+                                userSelect: "none",
+                                width: "28px",
+                                border: highlighted
+                                  ? "1px solid rgba(143, 215, 255, 0.76)"
+                                  : uncertain || attending
+                                    ? "1px solid rgba(255,255,255,0.16)"
+                                    : "1px solid transparent",
+                                borderRadius: "999px",
+                                background: attending
+                                  ? "rgba(143, 215, 255, 0.2)"
+                                  : uncertain
+                                    ? "rgba(255, 218, 97, 0.18)"
+                                    : "transparent",
+                                color: attending ? "#d9eeff" : uncertain ? "#ffe895" : "rgba(31, 45, 58, 0.58)",
+                                cursor: "default",
+                                fontSize: "10px",
+                                fontWeight: attending || uncertain ? 900 : 700,
+                                lineHeight: "12px",
+                                padding: "2px 0",
+                              }}
+                            >
+                              {uncertain ? "??" : person}
+                            </span>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

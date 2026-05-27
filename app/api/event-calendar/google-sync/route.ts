@@ -7,7 +7,7 @@ import { OfficeCalendarEvent } from "@/data/eventCalendar"
 
 const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
-const DEFAULT_CALENDAR_ID = "cosulich.uno@gmail.com"
+const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const TIME_ZONE = "Asia/Hong_Kong"
 
 function requireEnv(name: string) {
@@ -36,11 +36,15 @@ function addDays(dateText: string, days: number) {
   return date.toISOString().slice(0, 10)
 }
 
-function extractFirstTime(title: string) {
-  const match = title.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/)
+function extractTimeRange(title: string) {
+  const match = title.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s*[-–]\s*([01]?\d|2[0-3])[:.]([0-5]\d))?\b/)
   if (!match) return null
 
-  return `${match[1].padStart(2, "0")}:${match[2]}`
+  return {
+    start: `${match[1].padStart(2, "0")}:${match[2]}`,
+    end: match[3] && match[4] ? `${match[3].padStart(2, "0")}:${match[4]}` : null,
+    raw: match[0],
+  }
 }
 
 function addOneHour(timeText: string) {
@@ -51,7 +55,8 @@ function addOneHour(timeText: string) {
 }
 
 function buildGoogleEvent(event: OfficeCalendarEvent) {
-  const time = event.startDate === event.endDate ? extractFirstTime(event.title) : null
+  const time = event.startDate === event.endDate ? extractTimeRange(event.title) : null
+  const summary = time ? event.title.replace(time.raw, "").replace(/^[-–\s]+/, "").trim() || event.title : event.title
   const description = [
     "Imported from Bunker Map Office Tools.",
     event.people.length ? `People: ${event.people.join(", ")}` : "",
@@ -63,14 +68,14 @@ function buildGoogleEvent(event: OfficeCalendarEvent) {
 
   if (time) {
     return {
-      summary: event.title,
+      summary,
       description,
       start: {
-        dateTime: `${event.startDate}T${time}:00`,
+        dateTime: `${event.startDate}T${time.start}:00`,
         timeZone: TIME_ZONE,
       },
       end: {
-        dateTime: `${event.endDate}T${addOneHour(time)}:00`,
+        dateTime: `${event.endDate}T${time.end || addOneHour(time.start)}:00`,
         timeZone: TIME_ZONE,
       },
       extendedProperties: {
