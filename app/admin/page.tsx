@@ -388,6 +388,7 @@ export default function AdminPage() {
               <div style={{ display: "grid", gap: "12px" }}>
                 {[
                   { label: "PHONEBOOK", path: "/admin/phonebook" },
+                  { label: "OUTLOOK ADDRESS BOOK", path: "/admin/outlookaddressbook" },
                   { label: "EMAIL TEMPLATES", path: "/admin/emailtemplates" },
                 ].map((item) => (
                   <button
