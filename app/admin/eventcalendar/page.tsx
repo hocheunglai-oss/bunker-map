@@ -556,6 +556,9 @@ export default function EventCalendarPage() {
   }
 
   function saveDraftEvent() {
+    const action = eventModalMode === "edit" ? "save these changes" : "create this event"
+    if (!window.confirm(`Are you sure you want to ${action}?`)) return
+
     const nextEvent: ManagedEvent = {
       ...draftEvent,
       title: draftEvent.title.trim() || "NEW EVENT",
@@ -593,6 +596,8 @@ export default function EventCalendarPage() {
   }
 
   function saveRecurrentEvents() {
+    if (!window.confirm("Are you sure you want to create these recurrent events?")) return
+
     const count = Math.max(1, Math.min(52, Number(draftRecurrentEvent.count) || 1))
     const baseStart = draftRecurrentEvent.startDate
     const baseEnd = draftRecurrentEvent.endDate >= draftRecurrentEvent.startDate
@@ -776,6 +781,8 @@ export default function EventCalendarPage() {
 
   function deleteDraftEvent() {
     if (eventModalMode !== "edit") return
+    if (!window.confirm("Are you sure you want to delete this event?")) return
+
     setEvents((current) => current.filter((event) => event.id !== draftEvent.id))
     setEventModalMode(null)
   }
@@ -1106,10 +1113,10 @@ export default function EventCalendarPage() {
                       const highlighted = selectedPeople.includes(person)
                       return (
                         <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
-                          <button
-                            type="button"
-                            onClick={() => cycleAttendance(event.id, person)}
+                          <span
+                            title="Double-click the event row to edit attendance"
                             style={{
+                              display: "inline-block",
                               width: "28px",
                               border: highlighted
                                 ? "1px solid rgba(143, 215, 255, 0.76)"
@@ -1123,7 +1130,7 @@ export default function EventCalendarPage() {
                                   ? "rgba(255, 218, 97, 0.18)"
                                   : "transparent",
                               color: attending ? "#d9eeff" : uncertain ? "#ffe895" : "rgba(31, 45, 58, 0.58)",
-                              cursor: "pointer",
+                              cursor: "default",
                               fontSize: "10px",
                               fontWeight: attending || uncertain ? 900 : 700,
                               lineHeight: "12px",
@@ -1131,7 +1138,7 @@ export default function EventCalendarPage() {
                             }}
                           >
                             {uncertain ? "??" : person}
-                          </button>
+                          </span>
                         </td>
                       )
                     })}
