@@ -649,31 +649,6 @@ export default function EventCalendarPage() {
     )
   }
 
-  function cycleAttendance(eventId: string, person: string) {
-    setEvents((current) =>
-      current.map((event) => {
-        if (event.id !== eventId) return event
-        const attending = new Set(normalizePeople(event.people))
-        const uncertain = new Set(normalizePeople(event.uncertainPeople || []))
-
-        if (!attending.has(person) && !uncertain.has(person)) {
-          attending.add(person)
-        } else if (attending.has(person)) {
-          attending.delete(person)
-          uncertain.add(person)
-        } else {
-          uncertain.delete(person)
-        }
-
-        return {
-          ...event,
-          people: Array.from(attending),
-          uncertainPeople: Array.from(uncertain),
-        }
-      })
-    )
-  }
-
   function openPeopleModal() {
     setDraftPeopleText(people.join("\n"))
     setToolsMenuOpen(false)
@@ -1117,6 +1092,8 @@ export default function EventCalendarPage() {
                             title="Double-click the event row to edit attendance"
                             style={{
                               display: "inline-block",
+                              pointerEvents: "none",
+                              userSelect: "none",
                               width: "28px",
                               border: highlighted
                                 ? "1px solid rgba(143, 215, 255, 0.76)"
