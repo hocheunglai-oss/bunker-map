@@ -106,6 +106,21 @@ type ContactSyncResponse = {
   phase?: "delete" | "upload"
 }
 
+type PerfStats = {
+  sessionMs: number | null
+  companiesFetchMs: number | null
+  contactsFetchMs: number | null
+  normalizeCompaniesMs: number | null
+  normalizeContactsMs: number | null
+  localOrderLoadMs: number | null
+  localOrderBytes: number | null
+  changeLogLoadMs: number | null
+  changeLogBytes: number | null
+  companyCount: number
+  contactCount: number
+  userAgent: string
+}
+
 const TITLE_OPTIONS = ["MR", "MS", "CP"] as const
 
 const COUNTRY_OPTIONS = [
@@ -464,6 +479,21 @@ export default function PhonebookPage() {
   const [contactOrderByCompany, setContactOrderByCompany] = useState<Record<string, string[]>>({})
   const [changeLog, setChangeLog] = useState<ChangeLogEntry[]>([])
   const [undoingLogId, setUndoingLogId] = useState("")
+  const [showPerfDebug, setShowPerfDebug] = useState(false)
+  const [perfStats, setPerfStats] = useState<PerfStats>({
+    sessionMs: null,
+    companiesFetchMs: null,
+    contactsFetchMs: null,
+    normalizeCompaniesMs: null,
+    normalizeContactsMs: null,
+    localOrderLoadMs: null,
+    localOrderBytes: null,
+    changeLogLoadMs: null,
+    changeLogBytes: null,
+    companyCount: 0,
+    contactCount: 0,
+    userAgent: "",
+  })
   const menuHideTimerRef = useRef<number | null>(null)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
@@ -502,6 +532,7 @@ export default function PhonebookPage() {
     const allContacts: Contact[] = []
     const pageSize = 1000
     let from = 0
+    const startedAt = performance.now()
 
     while (true) {
       const result = await supabase
@@ -521,6 +552,11 @@ export default function PhonebookPage() {
       from += pageSize
     }
 
+    setPerfStats((prev) => ({
+      ...prev,
+      contactsFetchMs: Math.round(performance.now() - startedAt),
+      contactCount: allContacts.length,
+    }))
     return allContacts
   }
 
@@ -528,6 +564,7 @@ export default function PhonebookPage() {
     const allCompanies: Company[] = []
     const pageSize = 1000
     let from = 0
+    const startedAt = performance.now()
 
     while (true) {
       const result = await supabase
@@ -546,6 +583,11 @@ export default function PhonebookPage() {
       from += pageSize
     }
 
+    setPerfStats((prev) => ({
+      ...prev,
+      companiesFetchMs: Math.round(performance.now() - startedAt),
+      companyCount: allCompanies.length,
+    }))
     return allCompanies
   }
 
@@ -553,8 +595,17 @@ export default function PhonebookPage() {
     setLoading(true)
     try {
       const [companyData, contactData] = await Promise.all([loadCompanies(), loadContacts()])
-      setCompanies(normalizeLoadedCompanies(companyData))
-      setContacts(normalizeLoadedContacts(contactData))
+      const normalizeCompaniesStartedAt = performance.now()
+      const normalizedCompanies = normalizeLoadedCompanies(companyData)
+      const normalizeContactsStartedAt = performance.now()
+      const normalizedContacts = normalizeLoadedContacts(contactData)
+      setPerfStats((prev) => ({
+        ...prev,
+        normalizeCompaniesMs: Math.round(normalizeContactsStartedAt - normalizeCompaniesStartedAt),
+        normalizeContactsMs: Math.round(performance.now() - normalizeContactsStartedAt),
+      }))
+      setCompanies(normalizedCompanies)
+      setContacts(normalizedContacts)
     } catch {
       setMessage("Unable to load phonebook.")
     } finally {
@@ -566,6 +617,16 @@ export default function PhonebookPage() {
     if (adminLoading || !authenticated) return
     void loadAll()
   }, [adminLoading, authenticated])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    setShowPerfDebug(params.get("perf") === "1")
+    setPerfStats((prev) => ({
+      ...prev,
+      userAgent: window.navigator.userAgent,
+    }))
+  }, [])
 
   useEffect(() => {
     if (!selectedId) {
@@ -587,13 +648,24 @@ export default function PhonebookPage() {
   }, [copiedKey])
 
   useEffect(() => {
+    const startedAt = performance.now()
     try {
       const raw = localStorage.getItem(CONTACT_ORDER_STORAGE_KEY)
       if (!raw) return
       const parsed = JSON.parse(raw) as Record<string, string[]>
       setContactOrderByCompany(parsed)
+      setPerfStats((prev) => ({
+        ...prev,
+        localOrderLoadMs: Math.round(performance.now() - startedAt),
+        localOrderBytes: raw.length,
+      }))
     } catch {
       setContactOrderByCompany({})
+      setPerfStats((prev) => ({
+        ...prev,
+        localOrderLoadMs: Math.round(performance.now() - startedAt),
+        localOrderBytes: 0,
+      }))
     }
   }, [])
 
@@ -602,12 +674,23 @@ export default function PhonebookPage() {
   }, [contactOrderByCompany])
 
   useEffect(() => {
+    const startedAt = performance.now()
     try {
       const raw = localStorage.getItem(PHONEBOOK_CHANGE_LOG_KEY)
       if (!raw) return
       setChangeLog(JSON.parse(raw) as ChangeLogEntry[])
+      setPerfStats((prev) => ({
+        ...prev,
+        changeLogLoadMs: Math.round(performance.now() - startedAt),
+        changeLogBytes: raw.length,
+      }))
     } catch {
       setChangeLog([])
+      setPerfStats((prev) => ({
+        ...prev,
+        changeLogLoadMs: Math.round(performance.now() - startedAt),
+        changeLogBytes: 0,
+      }))
     }
   }, [])
 
@@ -1671,6 +1754,20 @@ export default function PhonebookPage() {
             </button>
           </div>
         </div>
+
+        {showPerfDebug ? (
+          <div style={{ ...panelStyle, padding: "14px 16px", display: "grid", gap: "8px" }}>
+            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>
+              Phonebook Perf Debug
+            </div>
+            <div style={{ fontSize: "13px", color: "#d8ecff", lineHeight: 1.6 }}>
+              {`companies=${perfStats.companyCount} contacts=${perfStats.contactCount} companiesFetchMs=${perfStats.companiesFetchMs ?? "-"} contactsFetchMs=${perfStats.contactsFetchMs ?? "-"} normalizeCompaniesMs=${perfStats.normalizeCompaniesMs ?? "-"} normalizeContactsMs=${perfStats.normalizeContactsMs ?? "-"} localOrderLoadMs=${perfStats.localOrderLoadMs ?? "-"} localOrderBytes=${perfStats.localOrderBytes ?? "-"} changeLogLoadMs=${perfStats.changeLogLoadMs ?? "-"} changeLogBytes=${perfStats.changeLogBytes ?? "-"}`}
+            </div>
+            <div style={{ fontSize: "11px", color: "#98c7ea", lineHeight: 1.5, wordBreak: "break-word" }}>
+              {perfStats.userAgent}
+            </div>
+          </div>
+        ) : null}
 
         <div
           style={{
