@@ -99,6 +99,8 @@ export async function GET(request: Request) {
         endDate: end.date || start.date,
         startTime: start.time,
         endTime: end.time,
+        sourceEventId: event.extendedProperties?.private?.bunkerMapEventId || "",
+        sourceTitle: event.description?.match(/Original event: (.+)/)?.[1] || "",
       }
     })
 

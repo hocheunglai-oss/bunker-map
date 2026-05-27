@@ -59,6 +59,7 @@ function buildGoogleEvent(event: OfficeCalendarEvent) {
   const summary = "MARINE ENERGY"
   const description = [
     "Imported from Bunker Map Office Tools.",
+    `Original event: ${event.title}`,
     event.people.length ? `People: ${event.people.join(", ")}` : "",
     event.tags.length ? `Tags: ${event.tags.join(", ")}` : "",
     event.sourceRow ? `Excel source row: ${event.sourceRow}` : "",

@@ -21,6 +21,8 @@ type GoogleCalendarEvent = {
   endDate: string
   startTime: string
   endTime: string
+  sourceEventId: string
+  sourceTitle: string
 }
 type EmailPromptState = {
   event: ManagedEvent
@@ -202,6 +204,32 @@ function formatGoogleEventTime(event: GoogleCalendarEvent) {
   if (!event.startTime && !event.endTime) return "All Day"
   if (event.startTime && event.endTime) return `${event.startTime}-${event.endTime}`
   return event.startTime || event.endTime || "-"
+}
+
+function getMeetingRoomStyle(event: GoogleCalendarEvent) {
+  const title = `${event.title} ${event.sourceTitle}`.toUpperCase()
+
+  if (title.includes("EXPRESS GLOBAL")) {
+    return {
+      background: "linear-gradient(90deg, rgba(76, 201, 240, 0.12) 0%, rgba(76, 201, 240, 0.24) 100%)",
+      border: "rgba(76, 201, 240, 0.72)",
+      color: "#d9f6ff",
+    }
+  }
+
+  if (title.includes("MARINE ENERGY")) {
+    return {
+      background: "linear-gradient(90deg, rgba(173, 126, 255, 0.12) 0%, rgba(173, 126, 255, 0.24) 100%)",
+      border: "rgba(181, 143, 255, 0.72)",
+      color: "#e5ddff",
+    }
+  }
+
+  return {
+    background: "linear-gradient(90deg, rgba(143, 215, 255, 0.1) 0%, rgba(143, 215, 255, 0.18) 100%)",
+    border: "rgba(143, 215, 255, 0.5)",
+    color: "#d9eeff",
+  }
 }
 
 function normalizePeople(value: string[]) {
@@ -1108,22 +1136,28 @@ export default function EventCalendarPage() {
                 </tr>
               </thead>
               <tbody>
-                {googleCalendarEvents.map((event) => (
-                  <tr
-                    key={event.id}
-                    style={{
-                      background: "linear-gradient(90deg, rgba(173, 126, 255, 0.12) 0%, rgba(173, 126, 255, 0.2) 100%)",
-                    }}
-                  >
-                    <td style={{ ...tdStyle, color: "#e5ddff", fontWeight: 900, whiteSpace: "nowrap", borderLeft: "4px solid rgba(181, 143, 255, 0.62)" }}>
-                      {formatGoogleEventDate(event)}
-                    </td>
-                    <td style={{ ...tdStyle, color: "#d9eeff", fontWeight: 900, whiteSpace: "nowrap" }}>
-                      {formatGoogleEventTime(event)}
-                    </td>
-                    <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>{event.title}</td>
-                  </tr>
-                ))}
+                {googleCalendarEvents.map((event) => {
+                  const meetingStyle = getMeetingRoomStyle(event)
+
+                  return (
+                    <tr key={event.id} style={{ background: meetingStyle.background }}>
+                      <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: 900, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
+                        {formatGoogleEventDate(event)}
+                      </td>
+                      <td style={{ ...tdStyle, color: "#d9eeff", fontWeight: 900, whiteSpace: "nowrap" }}>
+                        {formatGoogleEventTime(event)}
+                      </td>
+                      <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>
+                        {event.title}
+                        {event.sourceTitle && event.sourceTitle.toUpperCase() !== event.title.toUpperCase() && (
+                          <span style={{ color: "#8fa9bf", fontSize: "10px", fontWeight: 800, marginLeft: "8px" }}>
+                            {event.sourceTitle}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {!googleCalendarEvents.length && (
                   <tr>
                     <td colSpan={3} style={{ ...tdStyle, height: "42px", color: "#a9c4dc", fontWeight: 900 }}>
