@@ -36,6 +36,7 @@ type GroupMember = {
 }
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
+type ActiveView = "contacts" | "groups"
 
 const INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
 
@@ -350,6 +351,7 @@ export default function OutlookAddressBookPage() {
   const [contacts, setContacts] = useState<SharedContact[]>([])
   const [groups, setGroups] = useState<SharedGroup[]>([])
   const [members, setMembers] = useState<GroupMember[]>([])
+  const [activeView, setActiveView] = useState<ActiveView>("contacts")
   const [selectedContactId, setSelectedContactId] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState("")
   const [contactSearch, setContactSearch] = useState("")
@@ -410,6 +412,17 @@ export default function OutlookAddressBookPage() {
   )
 
   const exportRows = useMemo(() => buildExportRows(contacts, groups, members), [contacts, groups, members])
+  const activeSearch = activeView === "contacts" ? contactSearch : groupSearch
+  const selectedLabel =
+    activeView === "contacts"
+      ? selectedContact?.display_name || selectedContact?.primary_email || "No contact selected"
+      : selectedGroup?.name || "No group selected"
+  const syncStatusText =
+    saving === "saving"
+      ? "Saving to Supabase..."
+      : saving === "failed"
+        ? "Save failed"
+        : "Saved to Supabase. Exchange sync pending."
 
   async function loadAll() {
     setLoading(true)
@@ -536,6 +549,14 @@ export default function OutlookAddressBookPage() {
     setSaving("saved")
   }
 
+  function createSelected() {
+    if (activeView === "contacts") {
+      void createContact()
+      return
+    }
+    void createGroup()
+  }
+
   async function deleteContact() {
     if (!selectedContact) return
     if (!confirm(`Delete contact ${selectedContact.display_name}?`)) return
@@ -568,6 +589,16 @@ export default function OutlookAddressBookPage() {
     setGroups((current) => current.filter((group) => group.id !== selectedGroup.id))
     setSelectedGroupId(groups.find((group) => group.id !== selectedGroup.id)?.id || "")
     setSaving("saved")
+  }
+
+  function deleteSelected() {
+    if (activeView === "contacts") {
+      if (!selectedContact) return
+      void deleteContact()
+      return
+    }
+    if (!selectedGroup) return
+    void deleteGroup()
   }
 
   async function addMember(contact: SharedContact) {
@@ -628,52 +659,57 @@ export default function OutlookAddressBookPage() {
           <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK ADDRESS BOOK</h1>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={downloadExchangeFiles} style={primaryButtonStyle}>
-            Download Exchange Files
-          </button>
-          <button type="button" onClick={() => void loadAll()} style={buttonStyle}>
-            Refresh
-          </button>
           <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
             Back To Admin
           </button>
         </div>
       </header>
 
-      <div style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))", gap: "10px" }}>
-        <div style={{ ...panelStyle, padding: "12px" }}>
-          <div style={titleStyle}>Exchange Export Contacts</div>
-          <div style={{ marginTop: "6px", fontSize: "24px", fontWeight: 900 }}>{exportRows.contactRows.length}</div>
-        </div>
-        <div style={{ ...panelStyle, padding: "12px" }}>
-          <div style={titleStyle}>Distribution Groups</div>
-          <div style={{ marginTop: "6px", fontSize: "24px", fontWeight: 900 }}>{exportRows.groupRows.length}</div>
-        </div>
-        <div style={{ ...panelStyle, padding: "12px" }}>
-          <div style={titleStyle}>Group Members</div>
-          <div style={{ marginTop: "6px", fontSize: "24px", fontWeight: 900 }}>{exportRows.memberRows.length}</div>
-        </div>
-        <div style={{ ...panelStyle, padding: "12px" }}>
+      <section style={{ ...panelStyle, maxWidth: "1680px", margin: "0 auto 12px", padding: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+        <div>
           <div style={titleStyle}>Status</div>
-          <div style={{ marginTop: "6px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontWeight: 900 }}>
-            {saving === "saving" ? "Saving..." : saving === "failed" ? "Save failed" : "Saved"}
+          <div style={{ marginTop: "4px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "13px", fontWeight: 900 }}>
+            {syncStatusText}
           </div>
         </div>
-      </div>
+        <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
+          Exchange updates still require the PowerShell sync until Microsoft Graph sync is connected.
+        </div>
+      </section>
 
       {message ? <div style={{ maxWidth: "1680px", margin: "0 auto 12px", color: "var(--fc-error)", fontWeight: 800 }}>{message}</div> : null}
 
-      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "320px 320px minmax(0, 1fr)", gap: "10px", alignItems: "start" }}>
+      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "360px minmax(0, 1fr)", gap: "10px", alignItems: "start" }}>
         <section style={panelStyle}>
           <div style={headerStyle}>
-            <div style={titleStyle}>Contacts</div>
-            <button type="button" onClick={createContact} style={primaryButtonStyle}>New</button>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setActiveView("contacts")}
+                style={activeView === "contacts" ? primaryButtonStyle : buttonStyle}
+              >
+                Contacts
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView("groups")}
+                style={activeView === "groups" ? primaryButtonStyle : buttonStyle}
+              >
+                Groups
+              </button>
+            </div>
+            <button type="button" onClick={createSelected} style={primaryButtonStyle}>New</button>
           </div>
           <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
-            <input value={contactSearch} onChange={(event) => setContactSearch(event.target.value)} placeholder="Search contacts" style={inputStyle} />
+            <input
+              value={activeSearch}
+              onChange={(event) => activeView === "contacts" ? setContactSearch(event.target.value) : setGroupSearch(event.target.value)}
+              placeholder={activeView === "contacts" ? "Search contacts" : "Search groups"}
+              style={inputStyle}
+            />
           </div>
           <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 250px)", overflow: "auto", padding: "6px" }}>
-            {visibleContacts.map((contact) => {
+            {activeView === "contacts" ? visibleContacts.map((contact) => {
               const active = contact.id === selectedContactId
               return (
                 <button
@@ -697,20 +733,7 @@ export default function OutlookAddressBookPage() {
                   <span style={{ display: "block", marginTop: "2px", color: "var(--fc-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
                 </button>
               )
-            })}
-          </div>
-        </section>
-
-        <section style={panelStyle}>
-          <div style={headerStyle}>
-            <div style={titleStyle}>Groups</div>
-            <button type="button" onClick={createGroup} style={primaryButtonStyle}>New</button>
-          </div>
-          <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
-            <input value={groupSearch} onChange={(event) => setGroupSearch(event.target.value)} placeholder="Search groups" style={inputStyle} />
-          </div>
-          <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 250px)", overflow: "auto", padding: "6px" }}>
-            {visibleGroups.map((group) => {
+            }) : visibleGroups.map((group) => {
               const active = group.id === selectedGroupId
               const count = members.filter((member) => member.group_id === group.id).length
               return (
@@ -744,14 +767,17 @@ export default function OutlookAddressBookPage() {
 
         <main style={panelStyle}>
           <div style={headerStyle}>
-            <div style={titleStyle}>Editor</div>
+            <div style={titleStyle}>{activeView === "contacts" ? "Contact Editor" : "Group Editor"}</div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button type="button" onClick={deleteContact} style={dangerButtonStyle} disabled={!selectedContact}>Delete Contact</button>
-              <button type="button" onClick={deleteGroup} style={dangerButtonStyle} disabled={!selectedGroup}>Delete Group</button>
+              <span style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 900, alignSelf: "center", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {selectedLabel}
+              </span>
+              <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={activeView === "contacts" ? !selectedContact : !selectedGroup}>Delete</button>
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px", padding: "12px" }}>
-            <section style={{ display: "grid", gap: "10px" }}>
+          <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
+            {activeView === "contacts" ? (
+            <section style={{ display: "grid", gap: "10px", maxWidth: "760px" }}>
               <div style={titleStyle}>Contact Details</div>
               {selectedContact ? (
                 <>
@@ -768,7 +794,7 @@ export default function OutlookAddressBookPage() {
                 <div style={{ color: "var(--fc-muted)" }}>Select or create a contact.</div>
               )}
             </section>
-
+            ) : (
             <section style={{ display: "grid", gap: "10px" }}>
               <div style={titleStyle}>Group Details</div>
               {selectedGroup ? (
@@ -803,6 +829,7 @@ export default function OutlookAddressBookPage() {
                 <div style={{ color: "var(--fc-muted)" }}>Select or create a group.</div>
               )}
             </section>
+            )}
           </div>
         </main>
       </div>
