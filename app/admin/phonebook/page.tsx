@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -90,6 +90,8 @@ type ChangeLogEntry = {
 const LAST_CONTACT_SYNC_FAILED_KEY = "phonebook_last_carddav_sync_failed"
 const CONTACT_ORDER_STORAGE_KEY = "phonebook_contact_order_by_company"
 const PHONEBOOK_CHANGE_LOG_KEY = "phonebook_change_log"
+const MAX_RENDERED_COMPANIES = 300
+const MAX_RENDERED_CONTACTS = 400
 
 type ContactSyncFailure = {
   id: string
@@ -708,7 +710,8 @@ export default function PhonebookPage() {
     }
   }, [])
 
-  const queryTokens = useMemo(() => buildSearchTokens(query), [query])
+  const deferredQuery = useDeferredValue(query)
+  const queryTokens = useMemo(() => buildSearchTokens(deferredQuery), [deferredQuery])
   const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
   const companyById = useMemo(() => {
     return new Map(companies.map((company) => [company.id, company]))
@@ -738,6 +741,10 @@ export default function PhonebookPage() {
       return matchesCompanyName || companiesWithMatchingContacts.has(normalizeCompanyKey(company.name))
     })
   }, [companies, companiesWithMatchingContacts, queryTokens])
+  const visibleCompanies = useMemo(
+    () => (queryTokens.length === 0 ? filteredCompanies : filteredCompanies.slice(0, MAX_RENDERED_COMPANIES)),
+    [filteredCompanies, queryTokens],
+  )
 
   const companyNameSuggestions = useMemo(
     () =>
@@ -788,6 +795,10 @@ export default function PhonebookPage() {
     })
     return next
   }, [companyByNameKey, contactOrderByCompany, contacts, queryTokens, selectedCompany, selectedCompanyKey])
+  const visibleContacts = useMemo(
+    () => (selectedCompany || queryTokens.length === 0 ? filteredContacts : filteredContacts.slice(0, MAX_RENDERED_CONTACTS)),
+    [filteredContacts, queryTokens, selectedCompany],
+  )
 
   async function saveCurrent() {
     if (!draft) return
@@ -1592,44 +1603,44 @@ export default function PhonebookPage() {
   function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
-      const firstCompany = filteredCompanies[0]
+      const firstCompany = visibleCompanies[0]
       if (firstCompany) companyRefs.current[firstCompany.id]?.focus()
     }
   }
 
   function onCompanyKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, companyId: string) {
-    const index = filteredCompanies.findIndex((company) => company.id === companyId)
+    const index = visibleCompanies.findIndex((company) => company.id === companyId)
     if (event.key === "ArrowDown") {
       event.preventDefault()
-      const next = filteredCompanies[index + 1] || filteredCompanies[0]
+      const next = visibleCompanies[index + 1] || visibleCompanies[0]
       if (next) companyRefs.current[next.id]?.focus()
     } else if (event.key === "ArrowUp") {
       event.preventDefault()
-      const previous = filteredCompanies[index - 1] || filteredCompanies[filteredCompanies.length - 1]
+      const previous = visibleCompanies[index - 1] || visibleCompanies[visibleCompanies.length - 1]
       if (previous) companyRefs.current[previous.id]?.focus()
     } else if (event.key === "Enter") {
       event.preventDefault()
-      setSelectedCompany(filteredCompanies[index].name)
+      setSelectedCompany(visibleCompanies[index].name)
     } else if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
-      const firstContact = filteredContacts[0]
+      const firstContact = visibleContacts[0]
       if (firstContact) contactRefs.current[firstContact.id]?.focus()
     }
   }
 
   function onContactKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, contactId: string) {
-    const index = filteredContacts.findIndex((contact) => contact.id === contactId)
+    const index = visibleContacts.findIndex((contact) => contact.id === contactId)
     if (event.key === "ArrowDown") {
       event.preventDefault()
-      const next = filteredContacts[index + 1] || filteredContacts[0]
+      const next = visibleContacts[index + 1] || visibleContacts[0]
       if (next) contactRefs.current[next.id]?.focus()
     } else if (event.key === "ArrowUp") {
       event.preventDefault()
-      const previous = filteredContacts[index - 1] || filteredContacts[filteredContacts.length - 1]
+      const previous = visibleContacts[index - 1] || visibleContacts[visibleContacts.length - 1]
       if (previous) contactRefs.current[previous.id]?.focus()
     } else if (event.key === "Enter") {
       event.preventDefault()
-      setSelectedId(filteredContacts[index].id)
+      setSelectedId(visibleContacts[index].id)
     } else if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       editButtonRef.current?.focus()
@@ -1733,8 +1744,11 @@ export default function PhonebookPage() {
               ref={searchRef}
               value={query}
               onChange={(event) => {
-                setQuery(event.target.value)
-                if (selectedCompany) setSelectedCompany("")
+                const nextValue = event.target.value
+                startTransition(() => {
+                  setQuery(nextValue)
+                  if (selectedCompany) setSelectedCompany("")
+                })
               }}
               onFocus={() => {
                 setQuery("")
@@ -1817,8 +1831,13 @@ export default function PhonebookPage() {
                 </button>
               </div>
             </div>
+            {queryTokens.length > 0 && filteredCompanies.length > visibleCompanies.length ? (
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+                Showing first {visibleCompanies.length} of {filteredCompanies.length} companies. Refine search for a faster exact match.
+              </div>
+            ) : null}
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
-              {filteredCompanies.map((company) => (
+              {visibleCompanies.map((company) => (
                 <button
                   key={company.id}
                   ref={(node) => {
@@ -1880,8 +1899,13 @@ export default function PhonebookPage() {
                 New Contact
               </button>
             </div>
+            {!selectedCompany && queryTokens.length > 0 && filteredContacts.length > visibleContacts.length ? (
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+                Showing first {visibleContacts.length} of {filteredContacts.length} contacts. Refine search for a faster exact match.
+              </div>
+            ) : null}
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
-              {filteredContacts.map((contact) => (
+              {visibleContacts.map((contact) => (
                 <button
                   key={contact.id}
                   ref={(node) => {
