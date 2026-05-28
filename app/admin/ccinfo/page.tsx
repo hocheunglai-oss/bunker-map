@@ -29,6 +29,7 @@ type CompanyFileRecord = {
   drive_url: string | null
   drive_file_id?: string | null
   folder_path?: string | null
+  deleted_at?: string | null
   source?: "company" | "entry"
 }
 
@@ -39,6 +40,7 @@ type EntryFileRecord = {
   drive_url: string | null
   drive_file_id?: string | null
   folder_path?: string | null
+  deleted_at?: string | null
   source?: "entry"
 }
 
@@ -867,9 +869,10 @@ function SimpleTable({
 async function fetchEntryFiles(kind: RecordKind, id: string) {
   const withFolderPath = await supabase
     .from("cc_entry_files")
-    .select("id,file_name,file_type,drive_url,drive_file_id,folder_path")
+    .select("id,file_name,file_type,drive_url,drive_file_id,folder_path,deleted_at")
     .eq("entry_kind", kind)
     .eq("entry_id", id)
+    .is("deleted_at", null)
     .order("folder_path", { ascending: true })
     .order("file_name", { ascending: true })
 
@@ -883,9 +886,10 @@ async function fetchEntryFiles(kind: RecordKind, id: string) {
 
   const legacy = await supabase
     .from("cc_entry_files")
-    .select("id,file_name,file_type,drive_url,drive_file_id")
+    .select("id,file_name,file_type,drive_url,drive_file_id,deleted_at")
     .eq("entry_kind", kind)
     .eq("entry_id", id)
+    .is("deleted_at", null)
     .order("file_name", { ascending: true })
 
   return (((legacy.data as EntryFileRecord[]) || []).map((file) => ({
@@ -898,11 +902,43 @@ async function fetchEntryFiles(kind: RecordKind, id: string) {
 async function fetchCompanyFiles(id: string) {
   const legacy = await supabase
     .from("cc_company_files")
-    .select("id,file_name,file_type,drive_url,drive_file_id")
+    .select("id,file_name,file_type,drive_url,drive_file_id,deleted_at")
     .eq("company_id", id)
+    .is("deleted_at", null)
     .order("file_name", { ascending: true })
 
   return (((legacy.data as CompanyFileRecord[]) || []).map((file) => ({
+    ...file,
+    folder_path: "",
+    source: "company" as const,
+  })))
+}
+
+async function fetchDeletedEntryFiles(kind: RecordKind, id: string) {
+  const result = await supabase
+    .from("cc_entry_files")
+    .select("id,file_name,file_type,drive_url,drive_file_id,folder_path,deleted_at")
+    .eq("entry_kind", kind)
+    .eq("entry_id", id)
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false })
+
+  return (((result.data as EntryFileRecord[]) || []).map((file) => ({
+    ...file,
+    folder_path: file.folder_path || "",
+    source: "entry" as const,
+  })))
+}
+
+async function fetchDeletedCompanyFiles(id: string) {
+  const result = await supabase
+    .from("cc_company_files")
+    .select("id,file_name,file_type,drive_url,drive_file_id,deleted_at")
+    .eq("company_id", id)
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false })
+
+  return (((result.data as CompanyFileRecord[]) || []).map((file) => ({
     ...file,
     folder_path: "",
     source: "company" as const,
@@ -991,7 +1027,8 @@ export default function CountryCompanyInfoPage() {
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuCloseTimerRef = useRef<number | null>(null)
-  const [files, setFiles] = useState<CompanyFileRecord[]>([])
+  const [files, setFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
+  const [deletedFiles, setDeletedFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
   const [folders, setFolders] = useState<EntryFolderRecord[]>([])
   const [currentFolderPath, setCurrentFolderPath] = useState("")
   const [draggingFileId, setDraggingFileId] = useState("")
@@ -1675,16 +1712,19 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadCompany(id: string) {
-    const [{ data, error }, filesResult, manualFilesResult, foldersResult] = await Promise.all([
+    const [{ data, error }, filesResult, manualFilesResult, deletedLegacyFilesResult, deletedManualFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_companies").select("id,name,summary,notes,updated_at").eq("id", id).single(),
       fetchCompanyFiles(id),
       fetchEntryFiles("company", id),
+      fetchDeletedCompanyFiles(id),
+      fetchDeletedEntryFiles("company", id),
       fetchFolders("company", id),
     ])
     if (error || !data) throw error || new Error("Unable to load company")
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
     setFiles([...filesResult, ...manualFilesResult])
+    setDeletedFiles([...deletedLegacyFilesResult, ...deletedManualFilesResult].sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || "")))
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts([])
@@ -1710,9 +1750,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadCountry(id: string) {
-    const [{ data, error }, filesResult, foldersResult] = await Promise.all([
+    const [{ data, error }, filesResult, deletedFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", id).single(),
       fetchEntryFiles("country", id),
+      fetchDeletedEntryFiles("country", id),
       fetchFolders("country", id),
     ])
     if (error || !data) throw error || new Error("Unable to load country")
@@ -1725,6 +1766,7 @@ export default function CountryCompanyInfoPage() {
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry(data as CountryRecord)
     setFiles(filesResult)
+    setDeletedFiles(deletedFilesResult)
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts((portsResult.data as CountryPortListItem[]) || [])
@@ -1750,15 +1792,17 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadPort(id: string) {
-    const [{ data, error }, filesResult, foldersResult] = await Promise.all([
+    const [{ data, error }, filesResult, deletedFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name,updated_at").eq("id", id).single(),
       fetchEntryFiles("port", id),
+      fetchDeletedEntryFiles("port", id),
       fetchFolders("port", id),
     ])
     if (error || !data) throw error || new Error("Unable to load port")
     const port = data as PortRecord
     setCurrentRecord(port)
     setFiles(filesResult)
+    setDeletedFiles(deletedFilesResult)
     setFolders(foldersResult)
     setCurrentFolderPath("")
     setCurrentCountryPorts([])
@@ -2275,6 +2319,14 @@ export default function CountryCompanyInfoPage() {
     return fetchEntryFiles(kind, id)
   }
 
+  async function refreshDeletedFiles(kind: RecordKind, id: string) {
+    if (kind === "company") {
+      const [legacyFiles, manualFiles] = await Promise.all([fetchDeletedCompanyFiles(id), fetchDeletedEntryFiles("company", id)])
+      return [...legacyFiles, ...manualFiles].sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || ""))
+    }
+    return fetchDeletedEntryFiles(kind, id)
+  }
+
   async function uploadFiles(picked: File[]) {
     if (!selectedId || !selectedKind) {
       setMessage("Open a company, country, or port before uploading.")
@@ -2298,6 +2350,7 @@ export default function CountryCompanyInfoPage() {
       }
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
+      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
@@ -2346,13 +2399,39 @@ export default function CountryCompanyInfoPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || "Unable to delete file.")
       setFiles((prev) => prev.filter((item) => item.id !== file.id))
+      if (selectedId && selectedKind) {
+        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+      }
       if (selectedPreviewFile?.id === file.id) {
         setSelectedPreviewFile(null)
         setPreviewModalOpen(false)
       }
-      setMessage("Upload deleted.")
+      setMessage("File moved to Recently Deleted.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to delete file.")
+    }
+  }
+
+  async function restoreFile(file: CompanyFileRecord | EntryFileRecord) {
+    try {
+      const response = await fetch("/api/ccinfo/files", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "restore",
+          fileId: file.id,
+          source: file.source || "entry",
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to restore file.")
+      if (selectedId && selectedKind) {
+        setFiles(await refreshFiles(selectedKind, selectedId))
+        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+      }
+      setMessage("File restored.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to restore file.")
     }
   }
 
@@ -2376,6 +2455,7 @@ export default function CountryCompanyInfoPage() {
       if (!response.ok) throw new Error(data.message || "Unable to move file.")
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
+      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       setMessage("File moved.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to move file.")
@@ -2677,6 +2757,46 @@ export default function CountryCompanyInfoPage() {
           {uploadingFile ? "Uploading..." : "Upload File"}
         </button>
       </div>
+      {deletedFiles.length > 0 && (
+        <div style={{ display: "grid", gap: "8px", borderTop: "1px solid rgba(210,236,255,0.12)", paddingTop: "10px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffcf9f", fontWeight: 700 }}>
+            Recently Deleted
+          </div>
+          <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflowY: "auto", paddingRight: "2px" }}>
+            {deletedFiles.slice(0, 12).map((file) => (
+              <div
+                key={`deleted-${file.id}`}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0,1fr) auto",
+                  gap: "8px",
+                  alignItems: "center",
+                  padding: "7px 8px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(255, 180, 120, 0.18)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: "#e5f1fb", fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                    <HighlightedInlineText value={file.file_name} query={searchInPage} />
+                  </div>
+                  <div style={{ color: "#91badb", fontSize: "10px", marginTop: "3px" }}>
+                    {file.deleted_at ? `Deleted ${formatTimestamp(file.deleted_at) || file.deleted_at}` : "Deleted"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restoreFile(file)}
+                  style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
+                >
+                  Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   ) : null
   const filteredCountryOptions = countryOptions

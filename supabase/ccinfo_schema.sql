@@ -68,6 +68,7 @@ create table if not exists public.cc_company_files (
   drive_file_id text,
   drive_url text,
   original_path text,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -82,12 +83,19 @@ create table if not exists public.cc_entry_files (
   drive_file_id text,
   drive_url text,
   original_path text,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.cc_entry_files
 add column if not exists folder_path text default '';
+
+alter table public.cc_company_files
+add column if not exists deleted_at timestamptz;
+
+alter table public.cc_entry_files
+add column if not exists deleted_at timestamptz;
 
 create unique index if not exists cc_company_files_company_path_key
 on public.cc_company_files(company_id, original_path);

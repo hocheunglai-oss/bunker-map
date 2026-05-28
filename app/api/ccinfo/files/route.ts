@@ -173,21 +173,22 @@ export async function DELETE(request: Request) {
     if (fileId && source === "company") {
       const { data, error: readError } = await supabase
         .from("cc_company_files")
-        .select("id,drive_file_id")
+        .select("id")
         .eq("id", fileId)
         .single()
       if (readError) throw readError
 
-      await deleteDriveFileIfPresent(data?.drive_file_id)
-
-      const { error } = await supabase.from("cc_company_files").delete().eq("id", fileId)
+      const { error } = await supabase
+        .from("cc_company_files")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", data.id)
       if (error) throw error
       return NextResponse.json({ ok: true })
     }
 
     let { data, error: readError } = await supabase
       .from("cc_entry_files")
-      .select("id,drive_file_id")
+      .select("id")
       .eq("id", fileId)
       .maybeSingle()
     if (readError) throw readError
@@ -195,7 +196,7 @@ export async function DELETE(request: Request) {
     if (!data) {
       const fallbackLookup = await supabase
         .from("cc_entry_files")
-        .select("id,drive_file_id")
+        .select("id")
         .eq("drive_file_id", fileId)
         .maybeSingle()
       if (fallbackLookup.error) throw fallbackLookup.error
@@ -206,9 +207,10 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ message: "File not found." }, { status: 404 })
     }
 
-    await deleteDriveFileIfPresent(data.drive_file_id)
-
-    const { error } = await supabase.from("cc_entry_files").delete().eq("id", data.id)
+    const { error } = await supabase
+      .from("cc_entry_files")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", data.id)
     if (error) throw error
 
     return NextResponse.json({ ok: true })
@@ -229,12 +231,35 @@ export async function PATCH(request: Request) {
     const body = await request.json()
     const fileId = String(body.fileId || "")
     const source = String(body.source || "entry")
+    const action = String(body.action || "move")
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
     const entryName = String(body.entryName || "")
     const folderPath = String(body.folderPath || "").trim()
 
-    if (!fileId || !entryKind || !entryId || !entryName) {
+    if (!fileId) {
+      return NextResponse.json({ message: "Missing file details." }, { status: 400 })
+    }
+
+    if (action === "restore") {
+      if (source === "company") {
+        const { error } = await supabase
+          .from("cc_company_files")
+          .update({ deleted_at: null })
+          .eq("id", fileId)
+        if (error) throw error
+        return NextResponse.json({ ok: true })
+      }
+
+      const { error } = await supabase
+        .from("cc_entry_files")
+        .update({ deleted_at: null })
+        .eq("id", fileId)
+      if (error) throw error
+      return NextResponse.json({ ok: true })
+    }
+
+    if (!entryKind || !entryId || !entryName) {
       return NextResponse.json({ message: "Missing move details." }, { status: 400 })
     }
 
