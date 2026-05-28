@@ -198,6 +198,12 @@ function formatGoogleEventTime(event: GoogleCalendarEvent) {
   return event.startTime || event.endTime || "-"
 }
 
+function addDaysToKey(dateKey: string, days: number) {
+  const date = parseLocalDate(dateKey)
+  date.setDate(date.getDate() + days)
+  return toDateKey(date)
+}
+
 function getMeetingRoomStyle(event: GoogleCalendarEvent) {
   const title = `${event.title} ${event.sourceTitle}`.toUpperCase()
 
@@ -367,6 +373,7 @@ export default function EventCalendarPage() {
   const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
+  const tomorrowKey = addDaysToKey(todayKey, 1)
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
@@ -1169,9 +1176,18 @@ export default function EventCalendarPage() {
               <tbody>
                 {googleCalendarEvents.map((event) => {
                   const meetingStyle = getMeetingRoomStyle(event)
+                  const canEditMeetingRoom = event.title === "MARINE ENERGY" && Boolean(event.sourceEventId)
 
                   return (
-                    <tr key={event.id} style={{ background: meetingStyle.background }}>
+                    <tr
+                      key={event.id}
+                      onDoubleClick={() => {
+                        if (!canEditMeetingRoom) return
+                        const matchingEvent = events.find((item) => item.id === event.sourceEventId)
+                        if (matchingEvent) openEditModal(matchingEvent)
+                      }}
+                      style={{ background: meetingStyle.background, cursor: canEditMeetingRoom ? "pointer" : "default" }}
+                    >
                       <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: 900, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
                         {formatGoogleEventDate(event)}
                       </td>
@@ -1220,12 +1236,25 @@ export default function EventCalendarPage() {
                   const meetingRoomBooked = isMeetingRoomBooked(event)
                   const rowHighlighted =
                     selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
+                  const rowStartKey = event.startDate
+                  const isTodayEvent = rowStartKey === todayKey
+                  const isTomorrowEvent = rowStartKey === tomorrowKey
+                  const rowBackground = isTodayEvent
+                    ? "linear-gradient(90deg, rgba(255, 218, 97, 0.2) 0%, rgba(255, 218, 97, 0.32) 100%)"
+                    : isTomorrowEvent
+                      ? "linear-gradient(90deg, rgba(255, 167, 38, 0.18) 0%, rgba(255, 167, 38, 0.3) 100%)"
+                      : "linear-gradient(90deg, rgba(143, 215, 255, 0.16) 0%, rgba(143, 215, 255, 0.24) 100%)"
+                  const rowBorder = isTodayEvent
+                    ? "rgba(255, 218, 97, 0.76)"
+                    : isTomorrowEvent
+                      ? "rgba(255, 167, 38, 0.76)"
+                      : "rgba(143, 215, 255, 0.56)"
 
                   return (
                     <tr
                       key={event.id}
                       style={{
-                        background: "linear-gradient(90deg, rgba(143, 215, 255, 0.16) 0%, rgba(143, 215, 255, 0.24) 100%)",
+                        background: rowBackground,
                         opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
                         boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
                       }}
@@ -1237,7 +1266,7 @@ export default function EventCalendarPage() {
                           color: "#d9eeff",
                           fontWeight: 900,
                           whiteSpace: "nowrap",
-                          borderLeft: "4px solid rgba(143, 215, 255, 0.56)",
+                          borderLeft: `4px solid ${rowBorder}`,
                         }}
                       >
                         {formatEventRange(event)}
@@ -1260,7 +1289,7 @@ export default function EventCalendarPage() {
                         return (
                           <td
                             key={person}
-                            onClick={() => openEditModal(event)}
+                            onDoubleClick={() => openEditModal(event)}
                             style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px", cursor: "pointer" }}
                           >
                             <span
