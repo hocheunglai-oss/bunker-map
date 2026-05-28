@@ -502,6 +502,8 @@ export default function PhonebookPage() {
   const contactsRequestIdRef = useRef(0)
   const companyContactsCacheRef = useRef(new Map<string, Contact[]>())
   const searchContactsCacheRef = useRef(new Map<string, { contacts: Contact[]; limited: boolean }>())
+  const companyContactsInFlightRef = useRef(new Map<string, Promise<Contact[]>>())
+  const contactsWarmStartedRef = useRef(false)
   const deferredQuery = useDeferredValue(query)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
@@ -645,6 +647,10 @@ export default function PhonebookPage() {
   }
 
   async function loadCompanyContactsFromSupabase(companyName: string) {
+    const inFlight = companyContactsInFlightRef.current.get(companyName)
+    if (inFlight) return inFlight
+
+    const request = (async () => {
     const allContacts: Contact[] = []
     const pageSize = 1000
     let from = 0
@@ -669,6 +675,66 @@ export default function PhonebookPage() {
     }
 
     return allContacts
+    })()
+
+    companyContactsInFlightRef.current.set(companyName, request)
+    try {
+      return await request
+    } finally {
+      companyContactsInFlightRef.current.delete(companyName)
+    }
+  }
+
+  async function warmContactsCacheInBackground() {
+    if (contactsWarmStartedRef.current) return
+    contactsWarmStartedRef.current = true
+
+    const grouped = new Map<string, Contact[]>()
+    const pageSize = 1000
+    let from = 0
+
+    while (true) {
+      const result = await supabase
+        .from("phonebook_contacts")
+        .select("*")
+        .order("favorite", { ascending: false })
+        .order("full_name", { ascending: true })
+        .range(from, from + pageSize - 1)
+
+      if (result.error) {
+        break
+      }
+
+      const batch = normalizeLoadedContacts((result.data as Contact[]) || [])
+      for (const contact of batch) {
+        const companyName = normalizeCompanyName(contact.company)
+        const companyContacts = grouped.get(companyName)
+        if (companyContacts) {
+          companyContacts.push(contact)
+        } else {
+          grouped.set(companyName, [contact])
+        }
+      }
+
+      if (batch.length < pageSize) break
+      from += pageSize
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    }
+
+    for (const [companyName, companyContacts] of grouped.entries()) {
+      if (!companyContactsCacheRef.current.has(companyName)) {
+        companyContactsCacheRef.current.set(companyName, companyContacts)
+      }
+    }
+  }
+
+  function prefetchCompanyContacts(companyName: string) {
+    if (!companyName) return
+    if (companyContactsCacheRef.current.has(companyName)) return
+    if (companyContactsInFlightRef.current.has(companyName)) return
+    void loadCompanyContactsFromSupabase(companyName).then((contacts) => {
+      companyContactsCacheRef.current.set(companyName, contacts)
+    }).catch(() => {})
   }
 
   function clearContactCaches() {
@@ -699,6 +765,14 @@ export default function PhonebookPage() {
     if (adminLoading || !authenticated) return
     void loadAll()
   }, [adminLoading, authenticated])
+
+  useEffect(() => {
+    if (adminLoading || !authenticated || loading) return
+    const timer = window.setTimeout(() => {
+      void warmContactsCacheInBackground()
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [adminLoading, authenticated, loading])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1976,6 +2050,8 @@ export default function PhonebookPage() {
                   }}
                   type="button"
                   onClick={() => setSelectedCompany(company.name)}
+                  onMouseEnter={() => prefetchCompanyContacts(company.name)}
+                  onFocus={() => prefetchCompanyContacts(company.name)}
                   onDoubleClick={() => openCompanyModal(company)}
                   onKeyDown={(event) => onCompanyKeyDown(event, company.id)}
                   style={{
