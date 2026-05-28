@@ -45,13 +45,22 @@ type GraphStatus = {
   consentUrl: string
   limitation: string
 }
+type ExchangeSyncStatus = {
+  webhookConfigured: boolean
+  status: {
+    status: "not_configured" | "queued" | "running" | "completed" | "failed"
+    message: string
+    requestedAt: string | null
+    response?: unknown
+  }
+}
 
 const INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   color: "var(--fc-admin-panel-text)",
   padding: "18px",
 }
@@ -60,7 +69,7 @@ const panelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(0,0,0,0.04)",
   overflow: "hidden",
 }
 
@@ -93,21 +102,21 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 800,
   padding: "8px 12px",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "inset 0 1px 0 var(--fc-admin-border-soft), 0 10px 24px rgba(8,24,44,0.16)",
 }
 
 const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "rgba(73, 219, 165, 0.26)",
-  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-  color: "#ddffef",
+  borderColor: "var(--fc-admin-success-border)",
+  background: "var(--fc-admin-success-bg)",
+  color: "var(--fc-admin-success-text)",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "rgba(255, 120, 120, 0.22)",
-  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
-  color: "#ffd6db",
+  borderColor: "var(--fc-admin-danger-border)",
+  background: "var(--fc-admin-danger-bg)",
+  color: "var(--fc-admin-danger-text)",
 }
 
 const inputStyle: React.CSSProperties = {
@@ -371,6 +380,9 @@ export default function OutlookAddressBookPage() {
   const [graphStatus, setGraphStatus] = useState<GraphStatus | null>(null)
   const [graphSyncing, setGraphSyncing] = useState(false)
   const [graphMessage, setGraphMessage] = useState("")
+  const [exchangeSyncStatus, setExchangeSyncStatus] = useState<ExchangeSyncStatus | null>(null)
+  const [exchangeSyncing, setExchangeSyncing] = useState(false)
+  const [exchangeSyncMessage, setExchangeSyncMessage] = useState("")
 
   useEffect(() => {
     document.title = "Outlook Address Book - FC Uno"
@@ -380,6 +392,7 @@ export default function OutlookAddressBookPage() {
     if (!authenticated) return
     void loadAll()
     void loadGraphStatus()
+    void loadExchangeSyncStatus()
   }, [authenticated])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
@@ -425,16 +438,13 @@ export default function OutlookAddressBookPage() {
 
   const exportRows = useMemo(() => buildExportRows(contacts, groups, members), [contacts, groups, members])
   const activeSearch = activeView === "contacts" ? contactSearch : groupSearch
-  const selectedLabel =
-    activeView === "contacts"
-      ? selectedContact?.display_name || selectedContact?.primary_email || "No contact selected"
-      : selectedGroup?.name || "No group selected"
   const syncStatusText =
     saving === "saving"
       ? "Saving to Supabase..."
       : saving === "failed"
         ? "Save failed"
         : "Saved to Supabase. Exchange sync pending."
+  const exchangeStatusText = exchangeSyncStatus?.status.message || "Exchange sync worker is not connected yet."
 
   async function loadGraphStatus() {
     try {
@@ -444,6 +454,17 @@ export default function OutlookAddressBookPage() {
       setGraphStatus(data)
     } catch (error) {
       setGraphMessage(error instanceof Error ? error.message : "Could not load Microsoft Graph status.")
+    }
+  }
+
+  async function loadExchangeSyncStatus() {
+    try {
+      const response = await fetch("/api/outlook-addressbook/exchange-sync", { cache: "no-store" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Could not load Exchange sync status.")
+      setExchangeSyncStatus(data)
+    } catch (error) {
+      setExchangeSyncMessage(error instanceof Error ? error.message : "Could not load Exchange sync status.")
     }
   }
 
@@ -674,6 +695,22 @@ export default function OutlookAddressBookPage() {
     }
   }
 
+  async function syncExchange() {
+    setExchangeSyncing(true)
+    setExchangeSyncMessage("")
+    try {
+      const response = await fetch("/api/outlook-addressbook/exchange-sync", { method: "POST" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Could not queue Exchange sync.")
+      setExchangeSyncStatus({ webhookConfigured: true, status: data })
+      setExchangeSyncMessage(data.message || "Exchange sync queued.")
+    } catch (error) {
+      setExchangeSyncMessage(error instanceof Error ? error.message : "Could not queue Exchange sync.")
+    } finally {
+      setExchangeSyncing(false)
+    }
+  }
+
   if (authLoading || loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   if (!authenticated) {
@@ -807,10 +844,24 @@ export default function OutlookAddressBookPage() {
                   <div style={{ marginTop: "4px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-text)", fontSize: "14px", fontWeight: 900 }}>
                     {syncStatusText}
                   </div>
+                  <div style={{ marginTop: "4px", color: exchangeSyncStatus?.status.status === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
+                    {exchangeStatusText}
+                  </div>
                 </div>
-                <button type="button" onClick={checkGraphSync} style={buttonStyle} disabled={graphSyncing || !graphStatus?.consented}>
-                  {graphSyncing ? "Checking Graph" : "Check Graph"}
-                </button>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing || !exchangeSyncStatus?.webhookConfigured}>
+                    {exchangeSyncing ? "Syncing" : "Sync Exchange"}
+                  </button>
+                  <button type="button" onClick={checkGraphSync} style={buttonStyle} disabled={graphSyncing || !graphStatus?.consented}>
+                    {graphSyncing ? "Checking Graph" : "Check Graph"}
+                  </button>
+                </div>
+              </div>
+              {exchangeSyncMessage ? <div style={{ color: exchangeSyncMessage.includes("failed") || exchangeSyncMessage.includes("not") ? "var(--fc-error)" : "var(--fc-success)", fontSize: "12px", fontWeight: 800 }}>{exchangeSyncMessage}</div> : null}
+              <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800, lineHeight: 1.45 }}>
+                {exchangeSyncStatus?.webhookConfigured
+                  ? "Exchange sync webhook is connected. Press Sync Exchange after finishing edits."
+                  : "Exchange sync webhook is not connected yet. Add EXCHANGE_SYNC_WEBHOOK_URL in Vercel after creating the Azure Automation webhook."}
               </div>
               <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800, lineHeight: 1.45 }}>
                 {graphStatus?.consented
