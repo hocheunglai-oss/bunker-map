@@ -37,6 +37,14 @@ type GroupMember = {
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
 type ActiveView = "contacts" | "groups"
+type GraphStatus = {
+  configured: boolean
+  consented: boolean
+  tenantId: string
+  consentedAt: string
+  consentUrl: string
+  limitation: string
+}
 
 const INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
 
@@ -360,6 +368,9 @@ export default function OutlookAddressBookPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<SaveState>("idle")
   const [message, setMessage] = useState("")
+  const [graphStatus, setGraphStatus] = useState<GraphStatus | null>(null)
+  const [graphSyncing, setGraphSyncing] = useState(false)
+  const [graphMessage, setGraphMessage] = useState("")
 
   useEffect(() => {
     document.title = "Outlook Address Book - FC Uno"
@@ -368,6 +379,7 @@ export default function OutlookAddressBookPage() {
   useEffect(() => {
     if (!authenticated) return
     void loadAll()
+    void loadGraphStatus()
   }, [authenticated])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
@@ -423,6 +435,17 @@ export default function OutlookAddressBookPage() {
       : saving === "failed"
         ? "Save failed"
         : "Saved to Supabase. Exchange sync pending."
+
+  async function loadGraphStatus() {
+    try {
+      const response = await fetch("/api/outlook-addressbook/graph/status", { cache: "no-store" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Could not load Microsoft Graph status.")
+      setGraphStatus(data)
+    } catch (error) {
+      setGraphMessage(error instanceof Error ? error.message : "Could not load Microsoft Graph status.")
+    }
+  }
 
   async function loadAll() {
     setLoading(true)
@@ -635,6 +658,22 @@ export default function OutlookAddressBookPage() {
     downloadText("import-exchange-addressbook.ps1", powerShellContent(), "text/plain;charset=utf-8")
   }
 
+  async function checkGraphSync() {
+    setGraphSyncing(true)
+    setGraphMessage("")
+    try {
+      const response = await fetch("/api/outlook-addressbook/graph/sync", { method: "POST" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Microsoft Graph check failed.")
+      setGraphMessage(data.message || "Microsoft Graph check completed.")
+      void loadGraphStatus()
+    } catch (error) {
+      setGraphMessage(error instanceof Error ? error.message : "Microsoft Graph check failed.")
+    } finally {
+      setGraphSyncing(false)
+    }
+  }
+
   if (authLoading || loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   if (!authenticated) {
@@ -665,21 +704,9 @@ export default function OutlookAddressBookPage() {
         </div>
       </header>
 
-      <section style={{ ...panelStyle, maxWidth: "1680px", margin: "0 auto 12px", padding: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-        <div>
-          <div style={titleStyle}>Status</div>
-          <div style={{ marginTop: "4px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "13px", fontWeight: 900 }}>
-            {syncStatusText}
-          </div>
-        </div>
-        <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
-          Exchange updates still require the PowerShell sync until Microsoft Graph sync is connected.
-        </div>
-      </section>
-
       {message ? <div style={{ maxWidth: "1680px", margin: "0 auto 12px", color: "var(--fc-error)", fontWeight: 800 }}>{message}</div> : null}
 
-      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "360px minmax(0, 1fr)", gap: "10px", alignItems: "start" }}>
+      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(340px, 1fr) minmax(0, 2fr)", gap: "10px", alignItems: "start" }}>
         <section style={panelStyle}>
           <div style={headerStyle}>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -704,6 +731,7 @@ export default function OutlookAddressBookPage() {
             <input
               value={activeSearch}
               onChange={(event) => activeView === "contacts" ? setContactSearch(event.target.value) : setGroupSearch(event.target.value)}
+              onFocus={() => activeView === "contacts" ? setContactSearch("") : setGroupSearch("")}
               placeholder={activeView === "contacts" ? "Search contacts" : "Search groups"}
               style={inputStyle}
             />
@@ -730,7 +758,6 @@ export default function OutlookAddressBookPage() {
                   }}
                 >
                   <span style={{ display: "block", fontSize: "13px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
-                  <span style={{ display: "block", marginTop: "2px", color: "var(--fc-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
                 </button>
               )
             }) : visibleGroups.map((group) => {
@@ -769,13 +796,39 @@ export default function OutlookAddressBookPage() {
           <div style={headerStyle}>
             <div style={titleStyle}>{activeView === "contacts" ? "Contact Editor" : "Group Editor"}</div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <span style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 900, alignSelf: "center", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {selectedLabel}
-              </span>
               <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={activeView === "contacts" ? !selectedContact : !selectedGroup}>Delete</button>
             </div>
           </div>
           <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
+            <section style={{ border: "1px solid var(--fc-border-soft)", borderRadius: "14px", padding: "12px", background: "var(--fc-panel-soft)", display: "grid", gap: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={titleStyle}>Save & Exchange Sync</div>
+                  <div style={{ marginTop: "4px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-text)", fontSize: "14px", fontWeight: 900 }}>
+                    {syncStatusText}
+                  </div>
+                </div>
+                <button type="button" onClick={checkGraphSync} style={buttonStyle} disabled={graphSyncing || !graphStatus?.consented}>
+                  {graphSyncing ? "Checking Graph" : "Check Graph"}
+                </button>
+              </div>
+              <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800, lineHeight: 1.45 }}>
+                {graphStatus?.consented
+                  ? `Graph admin consent saved${graphStatus.tenantId ? ` for tenant ${graphStatus.tenantId}` : ""}.`
+                  : graphStatus?.configured
+                    ? "Graph is configured, but admin consent is not complete."
+                    : "Graph is not configured yet. Add MICROSOFT_GRAPH_CLIENT_ID, MICROSOFT_GRAPH_CLIENT_SECRET, and MICROSOFT_GRAPH_REDIRECT_BASE_URL in Vercel."}
+              </div>
+              <div style={{ color: "var(--fc-muted)", fontSize: "12px", lineHeight: 1.45 }}>
+                Microsoft Graph can verify/read GAL contacts, but Microsoft marks organizational contacts as read-only in Graph. Direct GAL write sync still needs Exchange PowerShell unless we switch to per-user mailbox contacts.
+              </div>
+              {graphMessage ? <div style={{ color: graphMessage.includes("failed") || graphMessage.includes("not") ? "var(--fc-error)" : "var(--fc-success)", fontSize: "12px", fontWeight: 800 }}>{graphMessage}</div> : null}
+              {graphStatus?.configured && !graphStatus.consented ? (
+                <a href={graphStatus.consentUrl} target="_blank" rel="noreferrer" style={{ ...primaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", width: "fit-content" }}>
+                  Grant Admin Consent
+                </a>
+              ) : null}
+            </section>
             {activeView === "contacts" ? (
             <section style={{ display: "grid", gap: "10px", maxWidth: "760px" }}>
               <div style={titleStyle}>Contact Details</div>
