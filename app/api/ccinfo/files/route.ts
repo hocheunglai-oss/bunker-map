@@ -92,15 +92,17 @@ function messageFromError(error: unknown) {
 
 async function deleteDriveFileIfPresent(driveFileId: string | null | undefined) {
   if (!driveFileId) return
-  const { drive } = await getDriveClient()
   try {
+    const { drive } = await getDriveClient()
     await drive.files.delete({
       fileId: driveFileId,
       supportsAllDrives: true,
     })
   } catch (error) {
-    const status = typeof error === "object" && error !== null && "code" in error ? Number((error as { code?: unknown }).code) : 0
-    if (status !== 404) throw error
+    console.warn("ccinfo drive delete skipped", {
+      driveFileId,
+      message: messageFromError(error),
+    })
   }
 }
 
