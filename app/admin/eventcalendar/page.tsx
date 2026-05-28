@@ -58,14 +58,6 @@ const leaveTypes: LeaveType[] = [
   "Sick Leave Notification (for medical treatment)",
   "Compassionate Leave",
 ]
-const categories: Array<"All" | EventCategory> = [
-  "All",
-  "Public Holiday",
-  "Leave or Travel",
-  "Meeting Room",
-  "Unclassified",
-]
-
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
@@ -244,42 +236,12 @@ function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventC
   const title = event.title.toLowerCase()
   if (title.includes("public holiday") || title.includes("holiday attendance")) return "Public Holiday"
   if (title.includes("leave") || title.includes("trip") || title.includes("genoa") || title.includes("vietnam")) return "Leave or Travel"
-  if (title.includes("lunch") || title.includes("dinner") || title.includes("visit") || title.includes("meeting") || title.includes("call")) return "Meeting Room"
   return "Unclassified"
 }
 
-function getCategoryStyle(category: EventCategory) {
-  const styles: Record<EventCategory, { background: string; solid: string; border: string; color: string; glow: string }> = {
-    "Public Holiday": {
-      background: "rgba(255, 91, 91, 0.24)",
-      solid: "linear-gradient(180deg, rgba(255, 91, 91, 0.9) 0%, rgba(177, 39, 56, 0.88) 100%)",
-      border: "rgba(255, 105, 105, 0.62)",
-      color: "#ffe3e3",
-      glow: "rgba(255, 78, 78, 0.13)",
-    },
-    "Leave or Travel": {
-      background: "rgba(255, 218, 97, 0.24)",
-      solid: "linear-gradient(180deg, rgba(255, 218, 97, 0.94) 0%, rgba(190, 142, 22, 0.9) 100%)",
-      border: "rgba(255, 218, 97, 0.62)",
-      color: "#fff4bf",
-      glow: "rgba(255, 218, 97, 0.13)",
-    },
-    "Meeting Room": {
-      background: "rgba(173, 126, 255, 0.22)",
-      solid: "linear-gradient(180deg, rgba(164, 116, 255, 0.9) 0%, rgba(92, 62, 184, 0.88) 100%)",
-      border: "rgba(181, 143, 255, 0.62)",
-      color: "#eadfff",
-      glow: "rgba(164, 116, 255, 0.12)",
-    },
-    Unclassified: {
-      background: "rgba(210, 224, 236, 0.11)",
-      solid: "linear-gradient(180deg, rgba(130, 151, 169, 0.78) 0%, rgba(72, 92, 109, 0.78) 100%)",
-      border: "rgba(210, 224, 236, 0.26)",
-      color: "#e1edf6",
-      glow: "rgba(210, 224, 236, 0.06)",
-    },
-  }
-  return styles[category]
+function isMeetingRoomBooked(event: Pick<ManagedEvent, "eventType">) {
+  const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
+  return storedEventType === "Meeting Room" || storedEventType === "Meeting"
 }
 
 function normalizeStoredEvents(value: unknown): ManagedEvent[] {
@@ -300,7 +262,7 @@ function normalizeStoredEvents(value: unknown): ManagedEvent[] {
     ...event,
     people: normalizePeople(event.people),
     uncertainPeople: normalizePeople(event.uncertainPeople || []),
-    eventType: event.eventType || inferCategory(event),
+    eventType: inferCategory(event),
   }))
 }
 
@@ -372,7 +334,6 @@ export default function EventCalendarPage() {
   const todayKey = toDateKey(new Date())
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
-  const [selectedCategory, setSelectedCategory] = useState<"All" | EventCategory>("All")
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
@@ -521,7 +482,7 @@ export default function EventCalendarPage() {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
 
     syncTimerRef.current = setTimeout(async () => {
-      const meetingEvents = events.filter((event) => inferCategory(event) === "Meeting Room")
+      const meetingEvents = events.filter((event) => isMeetingRoomBooked(event))
       if (!meetingEvents.length) {
         setSyncStatus("No meetings to sync")
         return
@@ -610,14 +571,13 @@ export default function EventCalendarPage() {
 
     return events
       .filter((event) => (viewMode === "past" ? isPastEvent(event, todayKey) : !isPastEvent(event, todayKey)))
-      .filter((event) => selectedCategory === "All" || inferCategory(event) === selectedCategory)
       .sort(
         (a, b) =>
           a.startDate.localeCompare(b.startDate) ||
           (a.sourceRow || Number.MAX_SAFE_INTEGER) - (b.sourceRow || Number.MAX_SAFE_INTEGER) ||
           a.title.localeCompare(b.title)
       )
-  }, [events, selectedCategory, todayKey, viewMode])
+  }, [events, todayKey, viewMode])
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
@@ -739,6 +699,34 @@ export default function EventCalendarPage() {
     setSelectedPeople((current) =>
       current.includes(person) ? current.filter((item) => item !== person) : [...current, person]
     )
+  }
+
+  function cycleDraftPerson(person: string) {
+    setDraftEvent((current) => {
+      const attending = current.people.includes(person)
+      const uncertain = (current.uncertainPeople || []).includes(person)
+
+      if (!attending && !uncertain) {
+        return {
+          ...current,
+          people: [...current.people, person],
+          uncertainPeople: (current.uncertainPeople || []).filter((item) => item !== person),
+        }
+      }
+
+      if (attending) {
+        return {
+          ...current,
+          people: current.people.filter((item) => item !== person),
+          uncertainPeople: [...(current.uncertainPeople || []), person],
+        }
+      }
+
+      return {
+        ...current,
+        uncertainPeople: (current.uncertainPeople || []).filter((item) => item !== person),
+      }
+    })
   }
 
   function openPeopleModal() {
@@ -1065,35 +1053,6 @@ export default function EventCalendarPage() {
 
         {viewMode !== "google" && (
           <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {categories.map((category) => {
-                const style = category === "All" ? null : getCategoryStyle(category)
-                const active = selectedCategory === category
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => setSelectedCategory(category)}
-                    style={{
-                      border: `1px solid ${style?.border || "rgba(210,236,255,0.22)"}`,
-                      borderRadius: "999px",
-                      background: style?.solid || "linear-gradient(180deg, rgba(143, 215, 255, 0.5) 0%, rgba(42, 94, 132, 0.5) 100%)",
-                      boxShadow: active
-                        ? "0 0 0 2px rgba(255,255,255,0.2), 0 12px 26px rgba(0,0,0,0.18)"
-                        : "inset 0 1px 0 rgba(255,255,255,0.1)",
-                      color: "#ffffff",
-                      cursor: "pointer",
-                      fontSize: "11px",
-                      fontWeight: 900,
-                      opacity: active ? 1 : 0.72,
-                      padding: "7px 10px",
-                    }}
-                  >
-                    {category}
-                  </button>
-                )
-              })}
-            </div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
               {people.map((person) => {
                 const active = selectedPeople.includes(person)
@@ -1186,8 +1145,7 @@ export default function EventCalendarPage() {
               </thead>
               <tbody>
                 {visibleEvents.map((event) => {
-                  const category = inferCategory(event)
-                  const categoryStyle = getCategoryStyle(category)
+                  const meetingRoomBooked = isMeetingRoomBooked(event)
                   const rowHighlighted =
                     selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
 
@@ -1195,7 +1153,7 @@ export default function EventCalendarPage() {
                     <tr
                       key={event.id}
                       style={{
-                        background: `linear-gradient(90deg, ${categoryStyle.glow} 0%, ${categoryStyle.background} 100%)`,
+                        background: "linear-gradient(90deg, rgba(143, 215, 255, 0.16) 0%, rgba(143, 215, 255, 0.24) 100%)",
                         opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
                         boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
                       }}
@@ -1204,10 +1162,10 @@ export default function EventCalendarPage() {
                         onDoubleClick={() => openEditModal(event)}
                         style={{
                           ...tdStyle,
-                          color: categoryStyle.color,
+                          color: "#d9eeff",
                           fontWeight: 900,
                           whiteSpace: "nowrap",
-                          borderLeft: `4px solid ${categoryStyle.border}`,
+                          borderLeft: "4px solid rgba(143, 215, 255, 0.56)",
                         }}
                       >
                         {formatEventRange(event)}
@@ -1217,13 +1175,22 @@ export default function EventCalendarPage() {
                         style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}
                       >
                         {event.title}
+                        {meetingRoomBooked && (
+                          <span style={{ color: "#8fd7ff", fontSize: "10px", fontWeight: 900, marginLeft: "8px" }}>
+                            MEETING ROOM BOOKED
+                          </span>
+                        )}
                       </td>
                       {people.map((person) => {
                         const attending = event.people.includes(person)
                         const uncertain = (event.uncertainPeople || []).includes(person)
                         const highlighted = selectedPeople.includes(person)
                         return (
-                          <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
+                          <td
+                            key={person}
+                            onClick={() => openEditModal(event)}
+                            style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px", cursor: "pointer" }}
+                          >
                             <span
                               title="Double-click the event row to edit attendance"
                               style={{
@@ -1304,66 +1271,53 @@ export default function EventCalendarPage() {
                 style={inputStyle}
               />
             </label>
-            <div style={{ marginBottom: "10px" }}>
-              <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
-                Event Type
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
-                {categories
-                  .filter((category): category is EventCategory => category !== "All")
-                  .map((category) => {
-                    const active = (draftEvent.eventType || "Unclassified") === category
-                    const categoryStyle = getCategoryStyle(category)
-
-                    return (
-                      <button
-                        key={category}
-                        type="button"
-                        onClick={() => setDraftEvent((current) => ({ ...current, eventType: category }))}
-                        style={{
-                          border: `1px solid ${active ? categoryStyle.border : "rgba(210,236,255,0.16)"}`,
-                          borderRadius: "999px",
-                          background: active ? categoryStyle.background : "rgba(2, 10, 18, 0.64)",
-                          color: active ? categoryStyle.color : "#8fa9bf",
-                          cursor: "pointer",
-                          fontSize: "11px",
-                          fontWeight: 900,
-                          padding: "8px 11px",
-                        }}
-                      >
-                        {category}
-                      </button>
-                    )
-                  })}
-              </div>
-            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "9px",
+                color: "#d9eeff",
+                fontSize: "12px",
+                fontWeight: 900,
+                marginBottom: "12px",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={isMeetingRoomBooked(draftEvent)}
+                onChange={(event) =>
+                  setDraftEvent((current) => ({
+                    ...current,
+                    eventType: event.target.checked ? "Meeting Room" : "Unclassified",
+                  }))
+                }
+              />
+              Book Meeting Room
+            </label>
             <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Attending
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "16px" }}>
               {people.map((person) => {
                 const attending = draftEvent.people.includes(person)
+                const uncertain = (draftEvent.uncertainPeople || []).includes(person)
                 return (
                   <button
                     key={person}
                     type="button"
-                    onClick={() =>
-                      setDraftEvent((current) => ({
-                        ...current,
-                        people: attending
-                          ? current.people.filter((item) => item !== person)
-                          : [...current.people, person],
-                        uncertainPeople: (current.uncertainPeople || []).filter((item) => item !== person),
-                      }))
-                    }
+                    onClick={() => cycleDraftPerson(person)}
                     style={{
                       ...buttonStyle,
-                      background: attending ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)",
-                      color: attending ? "#edf7ff" : "#8fa9bf",
+                      background: attending
+                        ? "rgba(143, 215, 255, 0.24)"
+                        : uncertain
+                          ? "rgba(255, 218, 97, 0.22)"
+                          : "rgba(2, 10, 18, 0.64)",
+                      color: attending ? "#edf7ff" : uncertain ? "#ffe895" : "#8fa9bf",
                       minWidth: "42px",
                     }}
                   >
-                    {person}
+                    {uncertain ? "??" : person}
                   </button>
                 )
               })}
