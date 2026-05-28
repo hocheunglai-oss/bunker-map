@@ -211,9 +211,9 @@ function getMeetingRoomStyle(event: GoogleCalendarEvent) {
 
   if (title.includes("MARINE ENERGY")) {
     return {
-      background: "linear-gradient(90deg, rgba(173, 126, 255, 0.12) 0%, rgba(173, 126, 255, 0.24) 100%)",
-      border: "rgba(181, 143, 255, 0.72)",
-      color: "#e5ddff",
+      background: "linear-gradient(90deg, rgba(255, 218, 97, 0.16) 0%, rgba(255, 218, 97, 0.3) 100%)",
+      border: "rgba(255, 218, 97, 0.76)",
+      color: "#fff4bf",
     }
   }
 
@@ -242,6 +242,41 @@ function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventC
 function isMeetingRoomBooked(event: Pick<ManagedEvent, "eventType">) {
   const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
   return storedEventType === "Meeting Room" || storedEventType === "Meeting"
+}
+
+function parseTimeToMinutes(timeText: string) {
+  const [hour, minute] = timeText.split(":").map(Number)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour * 60 + minute
+}
+
+function extractEventTimeRange(title: string) {
+  const match = title.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s*[-–]\s*([01]?\d|2[0-3])[:.]([0-5]\d))?\b/)
+  if (!match) return null
+
+  const start = `${match[1].padStart(2, "0")}:${match[2]}`
+  const startMinutes = parseTimeToMinutes(start)
+  if (startMinutes === null) return null
+
+  const end = match[3] && match[4] ? `${match[3].padStart(2, "0")}:${match[4]}` : ""
+  const endMinutes = end ? parseTimeToMinutes(end) : startMinutes + 60
+
+  return {
+    start,
+    end: end || `${String(Math.floor((startMinutes + 60) / 60)).padStart(2, "0")}:${String((startMinutes + 60) % 60).padStart(2, "0")}`,
+    startMinutes,
+    endMinutes: endMinutes === null ? startMinutes + 60 : endMinutes,
+  }
+}
+
+function getGoogleEventMinutes(event: GoogleCalendarEvent) {
+  const startMinutes = event.startTime ? parseTimeToMinutes(event.startTime) : 0
+  const endMinutes = event.endTime ? parseTimeToMinutes(event.endTime) : 24 * 60
+
+  return {
+    startMinutes: startMinutes ?? 0,
+    endMinutes: endMinutes ?? 24 * 60,
+  }
 }
 
 function normalizeStoredEvents(value: unknown): ManagedEvent[] {
@@ -607,7 +642,32 @@ export default function EventCalendarPage() {
     setEventModalMode("edit")
   }
 
-  function saveDraftEvent() {
+  async function findMeetingRoomConflicts(event: ManagedEvent) {
+    if (!isMeetingRoomBooked(event)) return []
+
+    const bookingTime = extractEventTimeRange(event.title)
+    if (!bookingTime) return []
+
+    try {
+      const response = await fetch(
+        `/api/event-calendar/google-events?calendarId=${encodeURIComponent(CALENDAR_ID)}&timeMin=${encodeURIComponent(`${event.startDate}T00:00:00+08:00`)}&timeMax=${encodeURIComponent(`${event.startDate}T23:59:59+08:00`)}`
+      )
+      const payload = await response.json()
+      if (!response.ok || !Array.isArray(payload.events)) return []
+
+      return (payload.events as GoogleCalendarEvent[]).filter((googleEvent) => {
+        if (googleEvent.sourceEventId && googleEvent.sourceEventId === event.id) return false
+        if (googleEvent.startDate !== event.startDate) return false
+
+        const googleTime = getGoogleEventMinutes(googleEvent)
+        return bookingTime.startMinutes < googleTime.endMinutes && bookingTime.endMinutes > googleTime.startMinutes
+      })
+    } catch {
+      return []
+    }
+  }
+
+  async function saveDraftEvent() {
     const action = eventModalMode === "edit" ? "save these changes" : "create this event"
     if (!window.confirm(`Are you sure you want to ${action}?`)) return
 
@@ -618,6 +678,18 @@ export default function EventCalendarPage() {
       uncertainPeople: normalizePeople(draftEvent.uncertainPeople || []),
       endDate: draftEvent.endDate >= draftEvent.startDate ? draftEvent.endDate : draftEvent.startDate,
       eventType: draftEvent.eventType || "Unclassified",
+    }
+
+    const conflicts = await findMeetingRoomConflicts(nextEvent)
+    if (conflicts.length) {
+      const conflictText = conflicts
+        .slice(0, 3)
+        .map((event) => `${formatGoogleEventTime(event)} ${event.title}`)
+        .join("\n")
+      const proceed = window.confirm(
+        `Meeting room booking conflict found:\n\n${conflictText}\n\nDo you still want to save this event?`
+      )
+      if (!proceed) return
     }
 
     setEvents((current) => {
@@ -1294,6 +1366,9 @@ export default function EventCalendarPage() {
               />
               Book Meeting Room
             </label>
+            <div style={{ color: "#8fa9bf", fontSize: "11px", fontWeight: 800, margin: "-7px 0 12px 24px" }}>
+              Default is 1 hour from start time. Please enter exact timing if required e.g. 14:30-16:00
+            </div>
             <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Attending
             </div>
