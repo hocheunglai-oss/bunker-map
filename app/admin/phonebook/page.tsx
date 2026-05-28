@@ -467,6 +467,8 @@ export default function PhonebookPage() {
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
+  const [contactsLoading, setContactsLoading] = useState(false)
+  const [searchResultsLimited, setSearchResultsLimited] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
   const [copiedKey, setCopiedKey] = useState("")
@@ -497,6 +499,8 @@ export default function PhonebookPage() {
     userAgent: "",
   })
   const menuHideTimerRef = useRef<number | null>(null)
+  const contactsRequestIdRef = useRef(0)
+  const deferredQuery = useDeferredValue(query)
 
   function normalizeLoadedContacts(contactData: Contact[]) {
     return contactData.map((contact) => ({
@@ -530,38 +534,6 @@ export default function PhonebookPage() {
     }))
   }
 
-  async function loadContacts() {
-    const allContacts: Contact[] = []
-    const pageSize = 1000
-    let from = 0
-    const startedAt = performance.now()
-
-    while (true) {
-      const result = await supabase
-        .from("phonebook_contacts")
-        .select("*")
-        .order("favorite", { ascending: false })
-        .order("full_name", { ascending: true })
-        .range(from, from + pageSize - 1)
-
-      if (result.error) {
-        throw result.error
-      }
-
-      const batch = (result.data as Contact[]) || []
-      allContacts.push(...batch)
-      if (batch.length < pageSize) break
-      from += pageSize
-    }
-
-    setPerfStats((prev) => ({
-      ...prev,
-      contactsFetchMs: Math.round(performance.now() - startedAt),
-      contactCount: allContacts.length,
-    }))
-    return allContacts
-  }
-
   async function loadCompanies() {
     const allCompanies: Company[] = []
     const pageSize = 1000
@@ -593,21 +565,90 @@ export default function PhonebookPage() {
     return allCompanies
   }
 
+  async function loadContactCount() {
+    const startedAt = performance.now()
+    const result = await supabase.from("phonebook_contacts").select("id", { count: "exact", head: true })
+    if (result.error) throw result.error
+    setPerfStats((prev) => ({
+      ...prev,
+      contactsFetchMs: Math.round(performance.now() - startedAt),
+      contactCount: result.count || 0,
+    }))
+    return result.count || 0
+  }
+
+  async function loadVisibleContacts(params: { company?: string; query?: string }) {
+    const startedAt = performance.now()
+    const search = new URLSearchParams()
+    if (params.company) search.set("company", params.company)
+    if (params.query) search.set("query", params.query)
+
+    const response = await fetch(`/api/phonebook/contacts?${search.toString()}`, {
+      cache: "no-store",
+    })
+    const payload = (await response.json().catch(() => ({}))) as {
+      contacts?: Contact[]
+      limited?: boolean
+      message?: string
+    }
+
+    if (!response.ok) {
+      throw new Error(payload.message || "Unable to load phonebook contacts.")
+    }
+
+    const normalizeStartedAt = performance.now()
+    const normalizedContacts = normalizeLoadedContacts(payload.contacts || [])
+    setPerfStats((prev) => ({
+      ...prev,
+      normalizeContactsMs: Math.round(performance.now() - normalizeStartedAt),
+      contactsFetchMs: Math.round(normalizeStartedAt - startedAt),
+    }))
+
+    return {
+      contacts: normalizedContacts,
+      limited: Boolean(payload.limited),
+    }
+  }
+
+  async function loadCompanyContactsFromSupabase(companyName: string) {
+    const allContacts: Contact[] = []
+    const pageSize = 1000
+    let from = 0
+
+    while (true) {
+      const result = await supabase
+        .from("phonebook_contacts")
+        .select("*")
+        .eq("company", companyName)
+        .order("favorite", { ascending: false })
+        .order("full_name", { ascending: true })
+        .range(from, from + pageSize - 1)
+
+      if (result.error) {
+        throw result.error
+      }
+
+      const batch = normalizeLoadedContacts((result.data as Contact[]) || [])
+      allContacts.push(...batch)
+      if (batch.length < pageSize) break
+      from += pageSize
+    }
+
+    return allContacts
+  }
+
   async function loadAll() {
     setLoading(true)
     try {
-      const [companyData, contactData] = await Promise.all([loadCompanies(), loadContacts()])
+      const [companyData] = await Promise.all([loadCompanies(), loadContactCount()])
       const normalizeCompaniesStartedAt = performance.now()
       const normalizedCompanies = normalizeLoadedCompanies(companyData)
-      const normalizeContactsStartedAt = performance.now()
-      const normalizedContacts = normalizeLoadedContacts(contactData)
       setPerfStats((prev) => ({
         ...prev,
-        normalizeCompaniesMs: Math.round(normalizeContactsStartedAt - normalizeCompaniesStartedAt),
-        normalizeContactsMs: Math.round(performance.now() - normalizeContactsStartedAt),
+        normalizeCompaniesMs: Math.round(performance.now() - normalizeCompaniesStartedAt),
       }))
       setCompanies(normalizedCompanies)
-      setContacts(normalizedContacts)
+      setContacts([])
     } catch {
       setMessage("Unable to load phonebook.")
     } finally {
@@ -619,6 +660,43 @@ export default function PhonebookPage() {
     if (adminLoading || !authenticated) return
     void loadAll()
   }, [adminLoading, authenticated])
+
+  useEffect(() => {
+    if (adminLoading || !authenticated) return
+
+    const activeQuery = deferredQuery.trim()
+    const requestId = ++contactsRequestIdRef.current
+
+    if (!selectedCompany && !activeQuery) {
+      setContacts([])
+      setSearchResultsLimited(false)
+      setContactsLoading(false)
+      return
+    }
+
+    setContactsLoading(true)
+
+    void (async () => {
+      try {
+        const payload = selectedCompany
+          ? await loadVisibleContacts({ company: selectedCompany })
+          : await loadVisibleContacts({ query: activeQuery })
+
+        if (contactsRequestIdRef.current !== requestId) return
+        setContacts(payload.contacts)
+        setSearchResultsLimited(payload.limited)
+      } catch (error) {
+        if (contactsRequestIdRef.current !== requestId) return
+        setContacts([])
+        setSearchResultsLimited(false)
+        setMessage(error instanceof Error ? error.message : "Unable to load phonebook contacts.")
+      } finally {
+        if (contactsRequestIdRef.current === requestId) {
+          setContactsLoading(false)
+        }
+      }
+    })()
+  }, [adminLoading, authenticated, deferredQuery, selectedCompany])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -710,14 +788,10 @@ export default function PhonebookPage() {
     }
   }, [])
 
-  const deferredQuery = useDeferredValue(query)
   const queryTokens = useMemo(() => buildSearchTokens(deferredQuery), [deferredQuery])
   const selectedCompanyKey = useMemo(() => normalizeCompanyKey(selectedCompany), [selectedCompany])
   const companyById = useMemo(() => {
     return new Map(companies.map((company) => [company.id, company]))
-  }, [companies])
-  const companyByNameKey = useMemo(() => {
-    return new Map(companies.map((company) => [normalizeCompanyKey(company.name), company]))
   }, [companies])
 
   const companiesWithMatchingContacts = useMemo(() => {
@@ -763,19 +837,7 @@ export default function PhonebookPage() {
   }, [companyNameSuggestions, draft?.company])
 
   const filteredContacts = useMemo(() => {
-    let next = contacts.filter((contact) => {
-      const matchesCompany = !selectedCompany || normalizeCompanyKey(contact.company) === selectedCompanyKey
-      const companyMatchText =
-        companyByNameKey.get(normalizeCompanyKey(contact.company))?.other_name?.toLowerCase() || ""
-      const haystack = [contact.search_text || "", companyMatchText].filter(Boolean).join(" ")
-      const matchesQuery =
-        selectedCompany
-          ? true
-          : queryTokens.length === 0 || queryTokens.every((token) => haystack.includes(token))
-      return matchesCompany && matchesQuery
-    })
-
-    next = [...next].sort((a, b) => {
+    const next = [...contacts].sort((a, b) => {
       if (selectedCompany) {
         const order = contactOrderByCompany[selectedCompanyKey] || []
         const aIndex = order.indexOf(a.id)
@@ -794,11 +856,8 @@ export default function PhonebookPage() {
       return (a.full_name || "").localeCompare(b.full_name || "")
     })
     return next
-  }, [companyByNameKey, contactOrderByCompany, contacts, queryTokens, selectedCompany, selectedCompanyKey])
-  const visibleContacts = useMemo(
-    () => (selectedCompany || queryTokens.length === 0 ? filteredContacts : filteredContacts.slice(0, MAX_RENDERED_CONTACTS)),
-    [filteredContacts, queryTokens, selectedCompany],
-  )
+  }, [contactOrderByCompany, contacts, selectedCompany, selectedCompanyKey])
+  const visibleContacts = useMemo(() => filteredContacts, [filteredContacts])
 
   async function saveCurrent() {
     if (!draft) return
@@ -902,9 +961,7 @@ export default function PhonebookPage() {
     if (!current) return
     if (!confirm(`Delete ${current.full_name}?`)) return
     const companyName = current.company || ""
-    const companyContacts = contacts.filter(
-      (item) => normalizeCompanyKey(item.company) === normalizeCompanyKey(companyName),
-    )
+    const companyContacts = companyName ? await loadCompanyContactsFromSupabase(companyName) : []
     const isLastCompanyContact = Boolean(companyName) && companyContacts.length === 1
     const matchingCompany = companies.find(
       (item) => normalizeCompanyKey(item.name) === normalizeCompanyKey(companyName),
@@ -1105,9 +1162,9 @@ export default function PhonebookPage() {
       return next.sort((a, b) => a.name.localeCompare(b.name))
     })
 
-    const affectedContacts = contacts.filter(
-      (contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(previousCompanyName),
-    )
+    const affectedContacts = !creatingCompany && previousCompanyName
+      ? await loadCompanyContactsFromSupabase(previousCompanyName)
+      : []
     let syncedContactIds = affectedContacts.map((contact) => contact.id)
 
     if (!creatingCompany && previousCompanyName !== payload.name && affectedContacts.length > 0) {
@@ -1130,12 +1187,15 @@ export default function PhonebookPage() {
         return
       }
 
-      setContacts((prev) =>
-        prev.map((contact) => {
+      setContacts((prev) => {
+        if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(previousCompanyName)) {
+          return prev
+        }
+        return prev.map((contact) => {
           const updated = nextContacts.find((item) => item.id === contact.id)
           return updated ? updated : contact
-        }),
-      )
+        })
+      })
       if (current && contactIds.includes(current.id)) {
         const updatedCurrent = nextContacts.find((contact) => contact.id === current.id) || null
         setCurrent(updatedCurrent)
@@ -1159,9 +1219,7 @@ export default function PhonebookPage() {
     setCreatingCompany(false)
 
     if (!creatingCompany && previousCompanyName === payload.name) {
-      syncedContactIds = contacts
-        .filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(payload.name))
-        .map((contact) => contact.id)
+      syncedContactIds = affectedContacts.map((contact) => contact.id)
     }
 
     if (syncedContactIds.length > 0) {
@@ -1177,9 +1235,7 @@ export default function PhonebookPage() {
     if (!companyDraft || creatingCompany) return
     if (!confirm(`Delete ${companyDraft.name || "this company"}?`)) return
     const companyNameToDelete = companyDraft.name
-    const companyContacts = contacts.filter(
-      (contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(companyNameToDelete),
-    )
+    const companyContacts = await loadCompanyContactsFromSupabase(companyNameToDelete)
     const companyContactIds = companyContacts.map((contact) => contact.id)
 
     if (
@@ -1359,7 +1415,7 @@ export default function PhonebookPage() {
             prev.map((item) => (item.id === afterCompany.id ? beforeCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
           )
           if (beforeCompany.name !== afterCompany.name) {
-            const affected = contacts.filter((contact) => normalizeCompanyKey(contact.company) === normalizeCompanyKey(afterCompany.name))
+            const affected = await loadCompanyContactsFromSupabase(afterCompany.name)
             for (const contact of affected) {
               const reverted = { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
               const { error: contactError } = await supabase
@@ -1368,13 +1424,16 @@ export default function PhonebookPage() {
                 .eq("id", contact.id)
               if (contactError) throw contactError
             }
-            setContacts((prev) =>
-              prev.map((contact) =>
+            setContacts((prev) => {
+              if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(afterCompany.name)) {
+                return prev
+              }
+              return prev.map((contact) =>
                 normalizeCompanyKey(contact.company) === normalizeCompanyKey(afterCompany.name)
                   ? { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
                   : contact,
-              ),
-            )
+              )
+            })
             await syncPhoneContacts(false, affected.map((contact) => contact.id), {
               successMessage: "Undone and synced.",
               failureMessage: "Undone locally, but CardDAV sync failed.",
@@ -1673,7 +1732,7 @@ export default function PhonebookPage() {
                 border: "1px solid rgba(126, 180, 255, 0.28)",
               }}
             >
-              {contactSyncing ? contactSyncLabel || "Syncing" : `Synced ${contacts.length} Contacts`}
+              {contactSyncing ? contactSyncLabel || "Syncing" : `Synced ${perfStats.contactCount} Contacts`}
             </button>
             <button
               type="button"
@@ -1899,9 +1958,19 @@ export default function PhonebookPage() {
                 New Contact
               </button>
             </div>
-            {!selectedCompany && queryTokens.length > 0 && filteredContacts.length > visibleContacts.length ? (
+            {contactsLoading ? (
               <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
-                Showing first {visibleContacts.length} of {filteredContacts.length} contacts. Refine search for a faster exact match.
+                Loading contacts...
+              </div>
+            ) : null}
+            {!selectedCompany && queryTokens.length === 0 ? (
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+                Select a company or search to load contacts.
+              </div>
+            ) : null}
+            {!selectedCompany && queryTokens.length > 0 && searchResultsLimited ? (
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+                Showing the first matching contacts. Refine search for a narrower result.
               </div>
             ) : null}
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
