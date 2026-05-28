@@ -37,14 +37,6 @@ type GroupMember = {
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
 type ActiveView = "contacts" | "groups"
-type GraphStatus = {
-  configured: boolean
-  consented: boolean
-  tenantId: string
-  consentedAt: string
-  consentUrl: string
-  limitation: string
-}
 type ExchangeSyncStatus = {
   webhookConfigured: boolean
   status: {
@@ -377,12 +369,8 @@ export default function OutlookAddressBookPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<SaveState>("idle")
   const [message, setMessage] = useState("")
-  const [graphStatus, setGraphStatus] = useState<GraphStatus | null>(null)
-  const [graphSyncing, setGraphSyncing] = useState(false)
-  const [graphMessage, setGraphMessage] = useState("")
   const [exchangeSyncStatus, setExchangeSyncStatus] = useState<ExchangeSyncStatus | null>(null)
   const [exchangeSyncing, setExchangeSyncing] = useState(false)
-  const [exchangeSyncMessage, setExchangeSyncMessage] = useState("")
 
   useEffect(() => {
     document.title = "Outlook Address Book - FC Uno"
@@ -391,9 +379,18 @@ export default function OutlookAddressBookPage() {
   useEffect(() => {
     if (!authenticated) return
     void loadAll()
-    void loadGraphStatus()
     void loadExchangeSyncStatus()
   }, [authenticated])
+
+  useEffect(() => {
+    if (!authenticated) return
+    const status = exchangeSyncStatus?.status.status
+    if (status !== "queued" && status !== "running") return
+    const timer = window.setInterval(() => {
+      void loadExchangeSyncStatus()
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [authenticated, exchangeSyncStatus?.status.status])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null
@@ -438,24 +435,37 @@ export default function OutlookAddressBookPage() {
 
   const exportRows = useMemo(() => buildExportRows(contacts, groups, members), [contacts, groups, members])
   const activeSearch = activeView === "contacts" ? contactSearch : groupSearch
-  const syncStatusText =
+  const exchangeState = exchangeSyncStatus?.status.status
+  const exchangeDisplayText =
     saving === "saving"
-      ? "Saving to Supabase..."
+      ? "Saving"
       : saving === "failed"
         ? "Save failed"
-        : "Saved to Supabase. Exchange sync pending."
-  const exchangeStatusText = exchangeSyncStatus?.status.message || "Exchange sync worker is not connected yet."
-
-  async function loadGraphStatus() {
-    try {
-      const response = await fetch("/api/outlook-addressbook/graph/status", { cache: "no-store" })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message || "Could not load Microsoft Graph status.")
-      setGraphStatus(data)
-    } catch (error) {
-      setGraphMessage(error instanceof Error ? error.message : "Could not load Microsoft Graph status.")
-    }
-  }
+        : exchangeSyncing || exchangeState === "queued" || exchangeState === "running"
+          ? "Syncing"
+          : exchangeState === "failed"
+            ? "Failed"
+            : exchangeState === "completed"
+              ? "Done"
+              : exchangeSyncStatus?.webhookConfigured
+                ? "Ready"
+                : "Setup needed"
+  const exchangeDisplayColor =
+    exchangeDisplayText === "Failed" || exchangeDisplayText === "Save failed" || exchangeDisplayText === "Setup needed"
+      ? "var(--fc-error)"
+      : exchangeDisplayText === "Done"
+        ? "var(--fc-success)"
+        : "var(--fc-text)"
+  const exchangeHelperText =
+    exchangeDisplayText === "Done"
+      ? "Exchange is up to date."
+      : exchangeDisplayText === "Syncing"
+        ? "Updating Exchange now."
+        : exchangeDisplayText === "Ready"
+          ? "Press Sync Exchange after editing."
+          : exchangeDisplayText === "Setup needed"
+            ? "Sync worker is not connected."
+            : "Please check the sync worker."
 
   async function loadExchangeSyncStatus() {
     try {
@@ -464,7 +474,7 @@ export default function OutlookAddressBookPage() {
       if (!response.ok) throw new Error(data.message || "Could not load Exchange sync status.")
       setExchangeSyncStatus(data)
     } catch (error) {
-      setExchangeSyncMessage(error instanceof Error ? error.message : "Could not load Exchange sync status.")
+      setMessage(error instanceof Error ? error.message : "Could not load Exchange sync status.")
     }
   }
 
@@ -679,33 +689,22 @@ export default function OutlookAddressBookPage() {
     downloadText("import-exchange-addressbook.ps1", powerShellContent(), "text/plain;charset=utf-8")
   }
 
-  async function checkGraphSync() {
-    setGraphSyncing(true)
-    setGraphMessage("")
-    try {
-      const response = await fetch("/api/outlook-addressbook/graph/sync", { method: "POST" })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message || "Microsoft Graph check failed.")
-      setGraphMessage(data.message || "Microsoft Graph check completed.")
-      void loadGraphStatus()
-    } catch (error) {
-      setGraphMessage(error instanceof Error ? error.message : "Microsoft Graph check failed.")
-    } finally {
-      setGraphSyncing(false)
-    }
-  }
-
   async function syncExchange() {
     setExchangeSyncing(true)
-    setExchangeSyncMessage("")
     try {
       const response = await fetch("/api/outlook-addressbook/exchange-sync", { method: "POST" })
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || "Could not queue Exchange sync.")
       setExchangeSyncStatus({ webhookConfigured: true, status: data })
-      setExchangeSyncMessage(data.message || "Exchange sync queued.")
     } catch (error) {
-      setExchangeSyncMessage(error instanceof Error ? error.message : "Could not queue Exchange sync.")
+      setExchangeSyncStatus({
+        webhookConfigured: Boolean(exchangeSyncStatus?.webhookConfigured),
+        status: {
+          status: "failed",
+          message: error instanceof Error ? error.message : "Could not queue Exchange sync.",
+          requestedAt: new Date().toISOString(),
+        },
+      })
     } finally {
       setExchangeSyncing(false)
     }
@@ -840,45 +839,20 @@ export default function OutlookAddressBookPage() {
             <section style={{ border: "1px solid var(--fc-border-soft)", borderRadius: "14px", padding: "12px", background: "var(--fc-panel-soft)", display: "grid", gap: "8px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                 <div>
-                  <div style={titleStyle}>Save & Exchange Sync</div>
-                  <div style={{ marginTop: "4px", color: saving === "failed" ? "var(--fc-error)" : "var(--fc-text)", fontSize: "14px", fontWeight: 900 }}>
-                    {syncStatusText}
+                  <div style={titleStyle}>Exchange Sync</div>
+                  <div style={{ marginTop: "4px", color: exchangeDisplayColor, fontSize: "18px", fontWeight: 900 }}>
+                    {exchangeDisplayText}
                   </div>
-                  <div style={{ marginTop: "4px", color: exchangeSyncStatus?.status.status === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
-                    {exchangeStatusText}
+                  <div style={{ marginTop: "4px", color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
+                    {exchangeHelperText}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                   <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing || !exchangeSyncStatus?.webhookConfigured}>
                     {exchangeSyncing ? "Syncing" : "Sync Exchange"}
                   </button>
-                  <button type="button" onClick={checkGraphSync} style={buttonStyle} disabled={graphSyncing || !graphStatus?.consented}>
-                    {graphSyncing ? "Checking Graph" : "Check Graph"}
-                  </button>
                 </div>
               </div>
-              {exchangeSyncMessage ? <div style={{ color: exchangeSyncMessage.includes("failed") || exchangeSyncMessage.includes("not") ? "var(--fc-error)" : "var(--fc-success)", fontSize: "12px", fontWeight: 800 }}>{exchangeSyncMessage}</div> : null}
-              <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800, lineHeight: 1.45 }}>
-                {exchangeSyncStatus?.webhookConfigured
-                  ? "Exchange sync webhook is connected. Press Sync Exchange after finishing edits."
-                  : "Exchange sync webhook is not connected yet. Add EXCHANGE_SYNC_WEBHOOK_URL in Vercel after creating the Azure Automation webhook."}
-              </div>
-              <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800, lineHeight: 1.45 }}>
-                {graphStatus?.consented
-                  ? `Graph admin consent saved${graphStatus.tenantId ? ` for tenant ${graphStatus.tenantId}` : ""}.`
-                  : graphStatus?.configured
-                    ? "Graph is configured, but admin consent is not complete."
-                    : "Graph is not configured yet. Add MICROSOFT_GRAPH_CLIENT_ID, MICROSOFT_GRAPH_CLIENT_SECRET, and MICROSOFT_GRAPH_REDIRECT_BASE_URL in Vercel."}
-              </div>
-              <div style={{ color: "var(--fc-muted)", fontSize: "12px", lineHeight: 1.45 }}>
-                Microsoft Graph can verify/read GAL contacts, but Microsoft marks organizational contacts as read-only in Graph. Direct GAL write sync still needs Exchange PowerShell unless we switch to per-user mailbox contacts.
-              </div>
-              {graphMessage ? <div style={{ color: graphMessage.includes("failed") || graphMessage.includes("not") ? "var(--fc-error)" : "var(--fc-success)", fontSize: "12px", fontWeight: 800 }}>{graphMessage}</div> : null}
-              {graphStatus?.configured && !graphStatus.consented ? (
-                <a href={graphStatus.consentUrl} target="_blank" rel="noreferrer" style={{ ...primaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", width: "fit-content" }}>
-                  Grant Admin Consent
-                </a>
-              ) : null}
             </section>
             {activeView === "contacts" ? (
             <section style={{ display: "grid", gap: "10px", maxWidth: "760px" }}>
