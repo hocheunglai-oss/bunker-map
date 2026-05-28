@@ -90,6 +90,20 @@ function messageFromError(error: unknown) {
   return [message, details, hint].filter(Boolean).join(" | ") || "Request failed."
 }
 
+async function deleteDriveFileIfPresent(driveFileId: string | null | undefined) {
+  if (!driveFileId) return
+  const { drive } = await getDriveClient()
+  try {
+    await drive.files.delete({
+      fileId: driveFileId,
+      supportsAllDrives: true,
+    })
+  } catch (error) {
+    const status = typeof error === "object" && error !== null && "code" in error ? Number((error as { code?: unknown }).code) : 0
+    if (status !== 404) throw error
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies()
@@ -162,35 +176,37 @@ export async function DELETE(request: Request) {
         .single()
       if (readError) throw readError
 
-      if (data?.drive_file_id) {
-        const { drive } = await getDriveClient()
-        await drive.files.delete({
-          fileId: data.drive_file_id,
-          supportsAllDrives: true,
-        })
-      }
+      await deleteDriveFileIfPresent(data?.drive_file_id)
 
       const { error } = await supabase.from("cc_company_files").delete().eq("id", fileId)
       if (error) throw error
       return NextResponse.json({ ok: true })
     }
 
-    const { data, error: readError } = await supabase
+    let { data, error: readError } = await supabase
       .from("cc_entry_files")
       .select("id,drive_file_id")
       .eq("id", fileId)
-      .single()
+      .maybeSingle()
     if (readError) throw readError
 
-    if (data?.drive_file_id) {
-      const { drive } = await getDriveClient()
-      await drive.files.delete({
-        fileId: data.drive_file_id,
-        supportsAllDrives: true,
-      })
+    if (!data) {
+      const fallbackLookup = await supabase
+        .from("cc_entry_files")
+        .select("id,drive_file_id")
+        .eq("drive_file_id", fileId)
+        .maybeSingle()
+      if (fallbackLookup.error) throw fallbackLookup.error
+      data = fallbackLookup.data
     }
 
-    const { error } = await supabase.from("cc_entry_files").delete().eq("id", fileId)
+    if (!data) {
+      return NextResponse.json({ message: "File not found." }, { status: 404 })
+    }
+
+    await deleteDriveFileIfPresent(data.drive_file_id)
+
+    const { error } = await supabase.from("cc_entry_files").delete().eq("id", data.id)
     if (error) throw error
 
     return NextResponse.json({ ok: true })

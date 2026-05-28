@@ -169,32 +169,37 @@ export async function POST(request: Request) {
 
     const url = uploaded.data.webViewLink || uploaded.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`
 
-    const { error } = await supabase.from("cc_entry_files").upsert(
-      {
-        entry_kind: entryKind,
-        entry_id: entryId,
-        folder_path: folderPath || "",
-        file_name: uploadFile.name,
-        file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
-        drive_file_id: fileId,
-        drive_url: url,
-        original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${uploadFile.name}`,
-      },
-      {
-        onConflict: "entry_kind,entry_id,original_path",
-      }
-    )
+    const { data: savedFile, error } = await supabase
+      .from("cc_entry_files")
+      .upsert(
+        {
+          entry_kind: entryKind,
+          entry_id: entryId,
+          folder_path: folderPath || "",
+          file_name: uploadFile.name,
+          file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
+          drive_file_id: fileId,
+          drive_url: url,
+          original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${uploadFile.name}`,
+        },
+        {
+          onConflict: "entry_kind,entry_id,original_path",
+        }
+      )
+      .select("id,folder_path,file_name,file_type,drive_file_id,drive_url")
+      .single()
 
-    if (error) throw error
+    if (error || !savedFile) throw error || new Error("Upload record could not be saved.")
 
     return NextResponse.json({
       file: {
-        id: fileId,
-        folder_path: folderPath || "",
-        file_name: uploadFile.name,
-        file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
-        drive_file_id: fileId,
-        drive_url: url,
+        id: savedFile.id,
+        folder_path: savedFile.folder_path || "",
+        file_name: savedFile.file_name,
+        file_type: savedFile.file_type,
+        drive_file_id: savedFile.drive_file_id,
+        drive_url: savedFile.drive_url,
+        source: "entry",
       },
     })
   } catch (error) {
