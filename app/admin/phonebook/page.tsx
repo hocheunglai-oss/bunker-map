@@ -189,7 +189,7 @@ const COUNTRY_OPTIONS = [
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   color: "var(--fc-admin-panel-text)",
   padding: "18px",
 }
@@ -198,14 +198,14 @@ const panelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
 }
 
 const lightBluePanelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-soft-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 18px 40px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #0000000f",
 }
 
 const buttonStyle: React.CSSProperties = {
@@ -217,7 +217,7 @@ const buttonStyle: React.CSSProperties = {
   textDecoration: "none",
   fontSize: "12px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
   cursor: "pointer",
 }
 
@@ -241,17 +241,17 @@ const detailInputStyle: React.CSSProperties = {
 
 const selectStyle: React.CSSProperties = {
   ...detailInputStyle,
-  background: "linear-gradient(180deg, rgba(248, 252, 255, 0.98) 0%, rgba(235, 244, 252, 0.96) 100%)",
-  color: "#10243a",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
 }
 
 const iconButtonStyle: React.CSSProperties = {
   width: "26px",
   height: "26px",
   borderRadius: "999px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%)",
-  color: "#d7e8ff",
+  border: "1px solid var(--fc-admin-border)",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -260,14 +260,13 @@ const iconButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: 0,
   lineHeight: 1,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 18px rgba(8,24,44,0.14)",
+  boxShadow: "none",
 }
 
 const modalOverlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(2, 10, 20, 0.62)",
-  backdropFilter: "blur(4px)",
+  background: "#1d1d1f",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -284,7 +283,7 @@ const modalCardStyle: React.CSSProperties = {
 }
 
 const sectionLabelStyle: React.CSSProperties = {
-  color: "#8fd7ff",
+  color: "var(--fc-admin-link)",
   fontSize: "11px",
   letterSpacing: "0.12em",
   textTransform: "uppercase",
@@ -316,8 +315,8 @@ const sidebarPanelStyle: React.CSSProperties = {
   ...panelStyle,
   padding: "0",
   display: "grid",
-  background: "linear-gradient(180deg, rgba(20, 66, 112, 0.92) 0%, rgba(10, 39, 74, 0.9) 100%)",
-  border: "1px solid rgba(126, 185, 255, 0.16)",
+  background: "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "20px",
   overflow: "hidden",
 }
@@ -325,11 +324,11 @@ const sidebarPanelStyle: React.CSSProperties = {
 const listRowStyle: React.CSSProperties = {
   width: "100%",
   border: "none",
-  background: "transparent",
-  borderBottom: "1px solid rgba(210,236,255,0.08)",
+  background: "#ffffff",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
   textAlign: "left",
   padding: "11px 14px",
-  color: "#edf7ff",
+  color: "var(--fc-admin-panel-text)",
   cursor: "pointer",
 }
 
@@ -1837,8 +1836,8 @@ export default function PhonebookPage() {
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Contact Tools</div>
-            <h1 style={{ margin: "4px 0 0", color: "#edf7ff", fontSize: "28px", letterSpacing: 0 }}>PHONEBOOK</h1>
+            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>Contact Tools</div>
+            <h1 style={{ margin: "4px 0 0", color: "var(--fc-admin-panel-text)", fontSize: "28px", letterSpacing: 0 }}>PHONEBOOK</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
             <a href="/admin" style={buttonStyle}>Back To Admin</a>
@@ -1848,9 +1847,9 @@ export default function PhonebookPage() {
               style={{
                 ...buttonStyle,
                 minWidth: "190px",
-                background: "linear-gradient(180deg, rgba(66, 133, 244, 0.34) 0%, rgba(52, 168, 83, 0.16) 100%)",
-                color: "#f4f8ff",
-                border: "1px solid rgba(126, 180, 255, 0.28)",
+                background: "var(--fc-admin-primary-button-bg)",
+                color: "var(--fc-admin-primary-button-text)",
+                border: "1px solid var(--fc-admin-selected-border)",
               }}
             >
               {contactSyncing ? contactSyncLabel || "Syncing" : `Synced ${perfStats.contactCount} Contacts`}
@@ -1885,17 +1884,17 @@ export default function PhonebookPage() {
                   Full Rebuild
                 </button>
                 <div style={{ display: "grid", gap: "8px" }}>
-                  <div style={{ color: "#bfe4ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>Log</div>
+                  <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>Log</div>
                   {changeLog.length === 0 ? (
-                    <div style={{ color: "#d0e8ff", fontSize: "12px", lineHeight: 1.5 }}>No recent changes yet.</div>
+                    <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", lineHeight: 1.5 }}>No recent changes yet.</div>
                   ) : (
                     <div style={{ display: "grid", gap: "8px" }}>
                       {changeLog.map((entry) => (
                         <div key={entry.id} style={{ ...panelStyle, padding: "10px 12px", borderRadius: "14px", boxShadow: "none" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "start" }}>
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: "12px", fontWeight: 800, color: "#eef7ff", textTransform: "uppercase" }}>{entry.label}</div>
-                              <div style={{ fontSize: "11px", color: "#9fd3ff", marginTop: "3px", textTransform: "uppercase" }}>
+                              <div style={{ fontSize: "12px", fontWeight: 800, color: "var(--fc-admin-panel-text)", textTransform: "uppercase" }}>{entry.label}</div>
+                              <div style={{ fontSize: "11px", color: "var(--fc-admin-muted)", marginTop: "3px", textTransform: "uppercase" }}>
                                 {entry.entityType} {entry.action}
                               </div>
                             </div>
@@ -1903,7 +1902,7 @@ export default function PhonebookPage() {
                               type="button"
                               onClick={() => void undoLogEntry(entry)}
                               disabled={undoingLogId === entry.id}
-                              style={{ ...buttonStyle, padding: "5px 9px", fontSize: "11px", background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" }}
+                              style={{ ...buttonStyle, padding: "5px 9px", fontSize: "11px", background: "var(--fc-admin-primary-button-bg)", color: "var(--fc-admin-primary-button-text)" }}
                             >
                               {undoingLogId === entry.id ? "Undoing..." : "Undo"}
                             </button>
@@ -1951,13 +1950,13 @@ export default function PhonebookPage() {
 
         {showPerfDebug ? (
           <div style={{ ...panelStyle, padding: "14px 16px", display: "grid", gap: "8px" }}>
-            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>
+            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>
               Phonebook Perf Debug
             </div>
-            <div style={{ fontSize: "13px", color: "#d8ecff", lineHeight: 1.6 }}>
+            <div style={{ fontSize: "13px", color: "var(--fc-admin-muted)", lineHeight: 1.6 }}>
               {`companies=${perfStats.companyCount} contacts=${perfStats.contactCount} companiesFetchMs=${perfStats.companiesFetchMs ?? "-"} contactsFetchMs=${perfStats.contactsFetchMs ?? "-"} normalizeCompaniesMs=${perfStats.normalizeCompaniesMs ?? "-"} normalizeContactsMs=${perfStats.normalizeContactsMs ?? "-"} localOrderLoadMs=${perfStats.localOrderLoadMs ?? "-"} localOrderBytes=${perfStats.localOrderBytes ?? "-"} changeLogLoadMs=${perfStats.changeLogLoadMs ?? "-"} changeLogBytes=${perfStats.changeLogBytes ?? "-"}`}
             </div>
-            <div style={{ fontSize: "11px", color: "#98c7ea", lineHeight: 1.5, wordBreak: "break-word" }}>
+            <div style={{ fontSize: "11px", color: "var(--fc-admin-muted)", lineHeight: 1.5, wordBreak: "break-word" }}>
               {perfStats.userAgent}
             </div>
           </div>
@@ -1979,9 +1978,9 @@ export default function PhonebookPage() {
                 zIndex: 2,
                 display: "grid",
                 gap: "8px",
-                background: "linear-gradient(180deg, rgba(12, 49, 88, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                background: "var(--fc-admin-panel-soft-bg)",
                 padding: "12px",
-                borderBottom: "1px solid rgba(210,236,255,0.08)",
+                borderBottom: "1px solid var(--fc-admin-border-soft)",
               }}
             >
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "8px" }}>
@@ -1992,7 +1991,8 @@ export default function PhonebookPage() {
                     ...buttonStyle,
                     width: "100%",
                     textAlign: "left",
-                    background: !selectedCompany ? "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)" : buttonStyle.background,
+                    background: !selectedCompany ? "var(--fc-admin-primary-button-bg)" : buttonStyle.background,
+                    color: !selectedCompany ? "var(--fc-admin-primary-button-text)" : buttonStyle.color,
                   }}
                 >
                   All Companies
@@ -2001,9 +2001,9 @@ export default function PhonebookPage() {
                   onClick={() => void addCompany()}
                   style={{
                     ...buttonStyle,
-                    background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
-                    color: "#e8f4ff",
-                    border: "1px solid rgba(108, 185, 255, 0.24)",
+                    background: "var(--fc-admin-primary-button-bg)",
+                    color: "var(--fc-admin-primary-button-text)",
+                    border: "1px solid var(--fc-admin-selected-border)",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -2012,11 +2012,11 @@ export default function PhonebookPage() {
               </div>
             </div>
             {queryTokens.length > 0 && filteredCompanies.length > visibleCompanies.length ? (
-              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
                 Showing first {visibleCompanies.length} of {filteredCompanies.length} companies. Refine search for a faster exact match.
               </div>
             ) : null}
-            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
+            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "var(--fc-admin-panel-bg)" }}>
               {visibleCompanies.map((company) => (
                 <button
                   key={company.id}
@@ -2031,19 +2031,19 @@ export default function PhonebookPage() {
                     ...listRowStyle,
                     background:
                       selectedCompany === company.name
-                        ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)"
-                        : "transparent",
+                        ? "var(--fc-admin-selected-bg)"
+                        : "#ffffff",
                   }}
                 >
                   <span style={{ whiteSpace: "normal", lineHeight: 1.2, textAlign: "left", display: "block" }}>
                     <div style={{ textTransform: "uppercase", fontWeight: 800, fontSize: "14px" }}>{company.name || "No Company"}</div>
                     {company.other_name ? (
-                      <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 500, marginTop: "4px" }}>
+                      <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 500, marginTop: "4px" }}>
                         {company.other_name}
                       </div>
                     ) : null}
                     {formatCompanyPhoneLine(company) ? (
-                      <div style={{ color: "#bcdcff", fontSize: "11px", marginTop: "4px" }}>
+                      <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "4px" }}>
                         {formatCompanyPhoneLine(company)}
                       </div>
                     ) : null}
@@ -2061,9 +2061,9 @@ export default function PhonebookPage() {
                 zIndex: 2,
                 display: "grid",
                 gap: "8px",
-                background: "linear-gradient(180deg, rgba(12, 49, 88, 0.98) 0%, rgba(8, 34, 62, 0.98) 100%)",
+                background: "var(--fc-admin-panel-soft-bg)",
                 padding: "12px",
-                borderBottom: "1px solid rgba(210,236,255,0.08)",
+                borderBottom: "1px solid var(--fc-admin-border-soft)",
               }}
             >
               <button
@@ -2071,30 +2071,30 @@ export default function PhonebookPage() {
                 style={{
                   ...buttonStyle,
                   width: "100%",
-                  background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
-                  color: "#e8f4ff",
-                  border: "1px solid rgba(108, 185, 255, 0.24)",
+                  background: "var(--fc-admin-primary-button-bg)",
+                  color: "var(--fc-admin-primary-button-text)",
+                  border: "1px solid var(--fc-admin-selected-border)",
                 }}
               >
                 New Contact
               </button>
             </div>
             {contactsLoading ? (
-              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
                 Loading contacts...
               </div>
             ) : null}
             {!selectedCompany && queryTokens.length === 0 ? (
-              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
                 Select a company or search to load contacts.
               </div>
             ) : null}
             {!selectedCompany && queryTokens.length > 0 && searchResultsLimited ? (
-              <div style={{ padding: "10px 14px", fontSize: "12px", color: "#9fcaea", borderBottom: "1px solid rgba(210,236,255,0.08)" }}>
+              <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
                 Showing the first matching contacts. Refine search for a narrower result.
               </div>
             ) : null}
-            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "linear-gradient(180deg, rgba(15, 58, 102, 0.68) 0%, rgba(9, 36, 67, 0.78) 100%)" }}>
+            <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "var(--fc-admin-panel-bg)" }}>
               {visibleContacts.map((contact) => (
                 <button
                   key={contact.id}
@@ -2132,16 +2132,16 @@ export default function PhonebookPage() {
                   }}
                   style={{
                     ...listRowStyle,
-                    background: selectedId === contact.id ? "linear-gradient(180deg, rgba(76, 164, 255, 0.2) 0%, rgba(31, 82, 143, 0.12) 100%)" : "transparent",
+                    background: selectedId === contact.id ? "var(--fc-admin-selected-bg)" : "#ffffff",
                     minHeight: "58px",
                     opacity: draggingContactId === contact.id ? 0.72 : 1,
                     borderTop:
                       dragOverContactId === contact.id && dragInsertPosition === "before"
-                        ? "2px solid rgba(143, 215, 255, 0.95)"
+                        ? "2px solid var(--fc-admin-selected-border)"
                         : listRowStyle.borderTop,
                     borderBottom:
                       dragOverContactId === contact.id && dragInsertPosition === "after"
-                        ? "2px solid rgba(143, 215, 255, 0.95)"
+                        ? "2px solid var(--fc-admin-selected-border)"
                         : listRowStyle.borderBottom,
                   }}
                 >
@@ -2149,21 +2149,21 @@ export default function PhonebookPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                       <div style={{ fontWeight: 800, fontSize: "14px", minWidth: 0, textTransform: "uppercase" }}>{contact.full_name || "(No Name)"}</div>
                       {contact.name_remark ? (
-                        <span style={{ color: "#ffb15c", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, whiteSpace: "nowrap" }}>
+                        <span style={{ color: "var(--fc-admin-warning-text)", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, whiteSpace: "nowrap" }}>
                           {contact.name_remark}
                         </span>
                       ) : null}
                       {contact.tel_ext ? (
-                        <span style={{ color: "#8ff0c8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                        <span style={{ color: "var(--fc-admin-success-text)", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>
                           EXT {contact.tel_ext}
                         </span>
                       ) : null}
                     </div>
                     <div style={{ width: "58px", display: "flex", justifyContent: "flex-end", flex: "0 0 58px" }}>
-                      {selectedCompany ? <span style={{ color: "#8fd7ff", fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>↕</span> : null}
+                      {selectedCompany ? <span style={{ color: "var(--fc-admin-link)", fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>↕</span> : null}
                     </div>
                   </div>
-                  <div style={{ color: "#8fd7ff", fontSize: "12px", textTransform: "uppercase" }}>{normalizeCompanyName(contact.company)}</div>
+                  <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", textTransform: "uppercase" }}>{normalizeCompanyName(contact.company)}</div>
                 </button>
               ))}
             </div>
@@ -2175,17 +2175,17 @@ export default function PhonebookPage() {
                 <div style={{ display: "grid", gap: "10px" }}>
                   {editing ? (
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                      <button onClick={() => void saveCurrent()} disabled={saving} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
+                      <button onClick={() => void saveCurrent()} disabled={saving} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
                         {saving ? "Saving..." : "Save"}
                       </button>
                       <button
                         onClick={() => void archiveCurrentContact()}
                         disabled={saving}
-                        style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 175, 64, 0.3) 0%, rgba(180, 97, 10, 0.14) 100%)", color: "#fff0cb", border: "1px solid rgba(255, 176, 89, 0.24)" }}
+                        style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}
                       >
                         Archive
                       </button>
-                      <button onClick={() => void deleteCurrent()} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}>
+                      <button onClick={() => void deleteCurrent()} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>
                         Delete
                       </button>
                       <button onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px" }}>Cancel</button>
@@ -2193,7 +2193,7 @@ export default function PhonebookPage() {
                   ) : null}
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                   <div>
-                    <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
+                    <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
                     {editing ? (
                       <input value={draft?.full_name || ""} onChange={(event) => updateCapsField("full_name", event.target.value)} style={detailInputStyle} />
                     ) : (
@@ -2211,9 +2211,9 @@ export default function PhonebookPage() {
                         }
                         style={{
                           ...buttonStyle,
-                          background: "linear-gradient(180deg, rgba(76, 164, 255, 0.34) 0%, rgba(31, 82, 143, 0.18) 100%)",
-                          color: "#e8f4ff",
-                          border: "1px solid rgba(108, 185, 255, 0.24)",
+                          background: "var(--fc-admin-primary-button-bg)",
+                          color: "var(--fc-admin-primary-button-text)",
+                          border: "1px solid var(--fc-admin-selected-border)",
                         }}
                       >
                         {copiedKey === "contact-all" ? "Copied" : "Copy Contact"}
@@ -2227,9 +2227,9 @@ export default function PhonebookPage() {
                         disabled={!current}
                         style={{
                           ...buttonStyle,
-                          background: "linear-gradient(180deg, rgba(255, 210, 86, 0.36) 0%, rgba(191, 136, 16, 0.18) 100%)",
-                          color: "#fff2bc",
-                          border: "1px solid rgba(255, 211, 110, 0.34)",
+                          background: "var(--fc-admin-warning-bg)",
+                          color: "var(--fc-admin-warning-text)",
+                          border: "1px solid var(--fc-admin-warning-border)",
                         }}
                       >
                         Edit
@@ -2240,7 +2240,7 @@ export default function PhonebookPage() {
                 </div>
 
                 <div>
-                  <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
+                  <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                   {editing ? (
                     <div style={{ position: "relative" }}>
                       <input
@@ -2266,8 +2266,8 @@ export default function PhonebookPage() {
                             maxHeight: "180px",
                             overflowY: "auto",
                             borderRadius: "10px",
-                            border: "1px solid rgba(210,236,255,0.14)",
-                            background: "linear-gradient(180deg, rgba(18, 59, 99, 0.98) 0%, rgba(8, 32, 56, 0.98) 100%)",
+                            border: "1px solid var(--fc-admin-border-soft)",
+                            background: "var(--fc-admin-panel-bg)",
                             padding: "4px",
                             display: "grid",
                             gap: "3px",
@@ -2286,9 +2286,9 @@ export default function PhonebookPage() {
                                 textAlign: "left",
                                 padding: "6px 8px",
                                 borderRadius: "8px",
-                                border: "1px solid rgba(210,236,255,0.08)",
-                                background: "rgba(255,255,255,0.04)",
-                                color: "#eaf5ff",
+                                border: "1px solid var(--fc-admin-border-soft)",
+                                background: "var(--fc-admin-panel-soft-bg)",
+                                color: "var(--fc-admin-panel-text)",
                                 fontSize: "12px",
                                 cursor: "pointer",
                               }}
@@ -2313,7 +2313,7 @@ export default function PhonebookPage() {
                       >
                         {copiedKey === "company" ? "✓" : "⧉"}
                       </button>
-                      {copiedKey === "company" ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
+                      {copiedKey === "company" ? <span style={{ color: "var(--fc-admin-success-text)", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                     </div>
                   ) : null}
                 </div>
@@ -2354,7 +2354,7 @@ export default function PhonebookPage() {
                           {displayed.name_remark ? (
                             <div>
                               <div style={sectionLabelStyle}>Label</div>
-                              <div style={{ fontSize: "15px", lineHeight: 1.5, padding: "2px 0", color: "#ffd166", textTransform: "uppercase", fontWeight: 700 }}>{displayed.name_remark}</div>
+                              <div style={{ fontSize: "15px", lineHeight: 1.5, padding: "2px 0", color: "var(--fc-admin-warning-text)", textTransform: "uppercase", fontWeight: 700 }}>{displayed.name_remark}</div>
                             </div>
                           ) : null}
                         </>
@@ -2398,7 +2398,7 @@ export default function PhonebookPage() {
                                 >
                                   {copiedKey === field ? "✓" : "⧉"}
                                 </button>
-                                {copiedKey === field ? <span style={{ color: "#8ff0c8", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
+                                {copiedKey === field ? <span style={{ color: "var(--fc-admin-success-text)", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                               </div>
                             )}
                           </div>
@@ -2410,13 +2410,13 @@ export default function PhonebookPage() {
                 </div>
               </>
             ) : (
-              <div style={{ color: "#9dc0da", fontSize: "14px", lineHeight: 1.6 }}>Select a contact to view details.</div>
+              <div style={{ color: "var(--fc-admin-muted)", fontSize: "14px", lineHeight: 1.6 }}>Select a contact to view details.</div>
             )}
           </section>
         </div>
 
         {message && (
-          <div style={{ color: message.startsWith("Unable") ? "#ffb0b0" : "#8ff0c8", fontWeight: 700 }}>
+          <div style={{ color: message.startsWith("Unable") ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)", fontWeight: 700 }}>
             {message}
           </div>
         )}
@@ -2427,7 +2427,7 @@ export default function PhonebookPage() {
           <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
               <div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
+                <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                 <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15 }}>{companyDraft.name || "(No Name)"}</div>
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -2436,9 +2436,9 @@ export default function PhonebookPage() {
                   disabled={companySaving}
                   style={{
                     ...buttonStyle,
-                    background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-                    color: "#ddffef",
-                    border: "1px solid rgba(73, 219, 165, 0.26)",
+                    background: "var(--fc-admin-success-bg)",
+                    color: "var(--fc-admin-success-text)",
+                    border: "1px solid var(--fc-admin-success-border)",
                     minWidth: "84px",
                   }}
                 >
@@ -2449,9 +2449,9 @@ export default function PhonebookPage() {
                     onClick={() => void deleteCompany()}
                     style={{
                       ...buttonStyle,
-                      background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
-                      color: "#ffd6db",
-                      border: "1px solid rgba(255, 120, 120, 0.22)",
+                      background: "var(--fc-admin-danger-bg)",
+                      color: "var(--fc-admin-danger-text)",
+                      border: "1px solid var(--fc-admin-danger-border)",
                       minWidth: "84px",
                     }}
                   >
@@ -2480,7 +2480,7 @@ export default function PhonebookPage() {
                     <textarea
                       value={companyDraft.address || ""}
                       onChange={(event) => updateCompanyDraftField("address", event.target.value)}
-                      style={{ ...detailInputStyle, minHeight: "90px", resize: "vertical", fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1.5 }}
+                      style={{ ...detailInputStyle, minHeight: "90px", resize: "vertical", fontFamily: "var(--fc-admin-font)", lineHeight: 1.5 }}
                     />
                   </div>
                   <div>
@@ -2532,7 +2532,7 @@ export default function PhonebookPage() {
           <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
               <div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Contact</div>
+                <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Contact</div>
                 <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15 }}>{draft.full_name || "(NO NAME)"}</div>
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -2541,9 +2541,9 @@ export default function PhonebookPage() {
                   disabled={saving}
                   style={{
                     ...buttonStyle,
-                    background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-                    color: "#ddffef",
-                    border: "1px solid rgba(73, 219, 165, 0.26)",
+                    background: "var(--fc-admin-success-bg)",
+                    color: "var(--fc-admin-success-text)",
+                    border: "1px solid var(--fc-admin-success-border)",
                     minWidth: "84px",
                   }}
                 >

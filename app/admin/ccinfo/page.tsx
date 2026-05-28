@@ -90,7 +90,7 @@ const CHANGE_LOG_STORAGE_KEY = "ccinfo_recent_changes_v1"
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   color: "var(--fc-admin-panel-text)",
 }
 
@@ -105,7 +105,7 @@ const panelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
 }
 
 const buttonStyle: React.CSSProperties = {
@@ -117,7 +117,7 @@ const buttonStyle: React.CSSProperties = {
   textDecoration: "none",
   fontSize: "12px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
   cursor: "pointer",
 }
 
@@ -131,7 +131,7 @@ const searchInputStyle: React.CSSProperties = {
   fontSize: "16px",
   outline: "none",
   boxSizing: "border-box",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "none",
 }
 
 const inputStyle: React.CSSProperties = {
@@ -153,7 +153,7 @@ const textareaStyle: React.CSSProperties = {
   minHeight: "220px",
   resize: "vertical",
   lineHeight: 1.55,
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
 }
 
 const compactFileBadgeStyle: React.CSSProperties = {
@@ -163,9 +163,9 @@ const compactFileBadgeStyle: React.CSSProperties = {
   minWidth: "36px",
   height: "20px",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(112, 120, 132, 0.28) 0%, rgba(62, 69, 79, 0.18) 100%)",
-  border: "1px solid rgba(190, 198, 208, 0.18)",
-  color: "#e1e6eb",
+  background: "var(--fc-admin-button-bg)",
+  border: "1px solid var(--fc-admin-button-border)",
+  color: "var(--fc-admin-muted)",
   fontSize: "9px",
   fontWeight: 800,
   letterSpacing: "0.04em",
@@ -197,7 +197,7 @@ function highlightTextHtml(text: string, query: string) {
   return escaped
     .replace(
       regex,
-      `<mark data-search-match="true" style="background: rgba(255, 226, 94, 0.34); color: #fff6bf; padding: 0 2px; border-radius: 4px;">$1</mark>`,
+      `<mark data-search-match="true" style="background: #fff3b0; color: var(--fc-admin-warning-text); padding: 0 2px; border-radius: 4px;">$1</mark>`,
     )
     .replace(/\n/g, "<br />")
 }
@@ -447,11 +447,11 @@ function folderDepth(folderPath: string) {
 function getFileTypeLabel(name: string, fileType?: string | null) {
   const ext = (name.split(".").pop() || "").toLowerCase()
   const normalized = (fileType || "").toLowerCase()
-  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { color: "#188038", label: "XLS" }
-  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "#1a73e8", label: "DOC" }
-  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { color: "#d93025", label: "IMG" }
-  if (ext === "pdf" || normalized.includes("pdf")) return { color: "#c5221f", label: "PDF" }
-  return { color: "#5f6368", label: "FILE" }
+  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { color: "var(--fc-admin-success-text)", label: "XLS" }
+  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "var(--fc-admin-link)", label: "DOC" }
+  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { color: "var(--fc-admin-danger-text)", label: "IMG" }
+  if (ext === "pdf" || normalized.includes("pdf")) return { color: "var(--fc-admin-danger-text)", label: "PDF" }
+  return { color: "var(--fc-admin-muted)", label: "FILE" }
 }
 
 function FolderIcon() {
@@ -461,8 +461,8 @@ function FolderIcon() {
         ...fileIconStyle,
         position: "relative",
         borderRadius: "4px",
-        background: "linear-gradient(180deg, #fbbc04 0%, #f6a800 100%)",
-        boxShadow: "inset 0 -1px 0 rgba(92,55,0,0.2)",
+        background: "var(--fc-admin-warning-bg)",
+        boxShadow: "none",
       }}
     >
       <span
@@ -473,7 +473,7 @@ function FolderIcon() {
           width: "11px",
           height: "6px",
           borderRadius: "3px 3px 0 0",
-          background: "#fdd663",
+          background: "var(--fc-admin-warning-text)",
         }}
       />
     </span>
@@ -491,7 +491,7 @@ function DriveFileIcon({ color, label }: { color: string; label: string }) {
         fontSize: "6px",
         fontWeight: 900,
         letterSpacing: "0.02em",
-        boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.18)",
+        boxShadow: "none",
       }}
     >
       {label}
@@ -542,13 +542,13 @@ function HoverableTextBlock({
         overflowWrap: "anywhere",
         wordBreak: "break-word",
         position: "relative",
-        color: "#edf7ff",
+        color: "var(--fc-admin-panel-text)",
         fontSize: "14px",
         lineHeight: 1.55,
         padding: "10px 12px",
-        border: "1px solid rgba(143, 215, 255, 0.22)",
+        border: "1px solid var(--fc-admin-selected-border)",
         borderRadius: "14px",
-        background: hoveredLine !== null ? "rgba(185, 224, 255, 0.055)" : "rgba(255,255,255,0.018)",
+        background: hoveredLine !== null ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
       onMouseLeave={() => setHoveredLine(null)}
@@ -564,12 +564,12 @@ function HoverableTextBlock({
             maxWidth: "220px",
             padding: "6px 9px",
             borderRadius: "8px",
-            background: "rgba(7, 20, 35, 0.92)",
-            border: "1px solid rgba(160, 210, 245, 0.18)",
-            color: "#eaf7ff",
+            background: "var(--fc-admin-panel-bg)",
+            border: "1px solid var(--fc-admin-border)",
+            color: "var(--fc-admin-panel-text)",
             fontSize: "10px",
             fontWeight: 700,
-            boxShadow: "0 14px 30px rgba(0,0,0,0.22)",
+            boxShadow: "0 12px 28px #00000010",
             pointerEvents: "none",
             zIndex: 3,
           }}
@@ -591,8 +591,8 @@ function HoverableTextBlock({
               borderRadius: "6px",
               padding: "0 2px",
               margin: "0 -2px",
-              background: hoveredLine === index ? "rgba(185, 224, 255, 0.09)" : "transparent",
-              boxShadow: hoveredLine === index ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
+              background: hoveredLine === index ? "var(--fc-admin-selected-bg)" : "#ffffff",
+              boxShadow: hoveredLine === index ? "inset 0 0 0 1px var(--fc-admin-selected-border)" : "none",
               transition: "background 120ms ease, box-shadow 120ms ease",
             }}
           >
@@ -653,8 +653,8 @@ function BlockTextBlock({
             height: "16px",
             borderRadius: 0,
             border: "none",
-            background: hoveredInsertIndex === index ? "linear-gradient(90deg, rgba(143, 215, 255, 0.42) 0%, rgba(143, 215, 255, 0.42) 45%, transparent 45%, transparent 55%, rgba(143, 215, 255, 0.42) 55%, rgba(143, 215, 255, 0.42) 100%) center/100% 1px no-repeat" : "transparent",
-            color: "#bfe6ff",
+            background: hoveredInsertIndex === index ? "var(--fc-admin-selected-border)" : "#ffffff",
+            color: "var(--fc-admin-link)",
             fontSize: "13px",
             lineHeight: "13px",
             opacity: hoveredInsertIndex === index ? 1 : 0,
@@ -676,13 +676,13 @@ function BlockTextBlock({
         overflowWrap: "anywhere",
         wordBreak: "break-word",
         position: "relative",
-        color: "#edf7ff",
+        color: "var(--fc-admin-panel-text)",
         fontSize: "14px",
         lineHeight: 1.55,
         padding: "10px 12px",
-        border: "1px solid rgba(143, 215, 255, 0.22)",
+        border: "1px solid var(--fc-admin-selected-border)",
         borderRadius: "14px",
-        background: hoveredBlockId ? "rgba(185, 224, 255, 0.055)" : "rgba(255,255,255,0.018)",
+        background: hoveredBlockId ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
       }}
       onMouseLeave={() => setHoveredBlockId("")}
       onDoubleClick={onDoubleClick}
@@ -712,21 +712,21 @@ function BlockTextBlock({
               padding: "3px 2px",
               margin: "1px -2px",
               position: "relative",
-              background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "rgba(185, 224, 255, 0.09)" : "transparent",
-              boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "0 0 0 1px rgba(172, 218, 255, 0.12)" : "none",
+              background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "var(--fc-admin-selected-bg)" : "#ffffff",
+              boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "inset 0 0 0 1px var(--fc-admin-selected-border)" : "none",
             }}
           >
             {editingBlockId === block.id ? (
               <div style={{ display: "grid", gap: "8px", padding: "0" }}>
                 <div style={{ display: "flex", gap: "7px", alignItems: "center", justifyContent: "flex-end", position: "sticky", top: "8px", zIndex: 4 }}>
-                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
                   <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2 }}>Cancel</button>
                   <button
                     type="button"
                     onClick={() => {
                       if (confirm("Delete this line?")) onBlockDelete?.(block.id)
                     }}
-                    style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db" }}
+                    style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)" }}
                   >
                     X
                   </button>
@@ -734,13 +734,13 @@ function BlockTextBlock({
                 <AutoSizeTextarea
                   value={block.content}
                   onChange={(event) => onBlockChange?.(block.id, event.target.value)}
-                  style={{ ...textareaStyle, minHeight: "1.55em", maxHeight: "62vh", padding: "0 2px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", lineHeight: 1.55 }}
+                  style={{ ...textareaStyle, minHeight: "1.55em", maxHeight: "62vh", padding: "0 2px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", lineHeight: 1.55 }}
                 />
               </div>
             ) : (
               <>
             {hoveredBlockId === block.id && hoveredInsertIndex === null && stamp ? (
-              <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "rgba(7, 20, 35, 0.92)", color: "#eaf7ff", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
+              <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "var(--fc-admin-panel-bg)", color: "var(--fc-admin-panel-text)", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
                 {stamp}
               </span>
             ) : null}
@@ -823,12 +823,12 @@ function SimpleTable({
           {rows.map((row, rowIndex) => (
             <tr key={`table-row-${rowIndex}`}>
               {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid rgba(143, 215, 255, 0.18)", padding: 0, background: rowIndex === 0 ? "rgba(143, 215, 255, 0.08)" : "rgba(255,255,255,0.018)" }}>
+                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)" }}>
                   <input
                     value={row[columnIndex] || ""}
                     disabled={readOnly || !editing}
                     onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                    style={{ width: "100%", border: "none", background: "transparent", color: "#edf7ff", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
+                    style={{ width: "100%", border: "none", background: "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
                   />
                 </td>
               ))}
@@ -843,12 +843,12 @@ function SimpleTable({
           <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
           <button type="button" onClick={deleteRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
           <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
-          <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+          <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
           <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
           </div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {Array.from({ length: columnCount }).map((_, index) => (
-              <label key={`width-${index}`} style={{ display: "grid", gap: "3px", color: "#9ec7e7", fontSize: "10px", fontWeight: 700 }}>
+              <label key={`width-${index}`} style={{ display: "grid", gap: "3px", color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 700 }}>
                 COL {index + 1}
                 <input type="range" min="8" max="80" value={widths[index]} onChange={(event) => setWidth(index, Number(event.target.value))} />
               </label>
@@ -2551,15 +2551,15 @@ export default function CountryCompanyInfoPage() {
       ? "Port Information"
       : "General Information"
   const mainInfoTabLabel = selectedKind === "port" ? "PORT INFORMATION" : "GENERAL INFORMATION"
-  const fixedTabBackground = "linear-gradient(180deg, rgba(54, 118, 176, 0.22) 0%, rgba(22, 70, 114, 0.14) 100%)"
-  const fixedTabActiveBackground = "linear-gradient(180deg, rgba(70, 142, 204, 0.34) 0%, rgba(30, 88, 142, 0.2) 100%)"
-  const userTabBackground = "linear-gradient(180deg, rgba(86, 164, 255, 0.22) 0%, rgba(32, 106, 194, 0.12) 100%)"
-  const userTabActiveBackground = "linear-gradient(180deg, rgba(86, 164, 255, 0.42) 0%, rgba(32, 106, 194, 0.24) 100%)"
+  const fixedTabBackground = "var(--fc-admin-button-bg)"
+  const fixedTabActiveBackground = "var(--fc-admin-selected-bg)"
+  const userTabBackground = "var(--fc-admin-button-bg)"
+  const userTabActiveBackground = "var(--fc-admin-selected-bg)"
   const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
   const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
   const fileSection = !initialMode ? (
     <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
-      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
         Files
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
@@ -2582,15 +2582,15 @@ export default function CountryCompanyInfoPage() {
             ...buttonStyle,
             padding: "5px 8px",
             fontSize: "10px",
-            background: "transparent",
+            background: "#ffffff",
             border: "none",
             boxShadow: "none",
-            color: currentFolderPath ? "#b8d2e8" : "#edf7ff",
+            color: currentFolderPath ? "var(--fc-admin-muted)" : "var(--fc-admin-panel-text)",
           }}
         >
           HOME
         </button>
-        {breadcrumbSegments.length > 0 && <span style={{ color: "#91badb", fontSize: "11px" }}>&gt;</span>}
+        {breadcrumbSegments.length > 0 && <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>&gt;</span>}
         {breadcrumbSegments.map((segment, index) => {
           const path = breadcrumbSegments.slice(0, index + 1).join("/")
           const active = path === currentFolderPath
@@ -2603,22 +2603,22 @@ export default function CountryCompanyInfoPage() {
                 ...buttonStyle,
                 padding: "5px 8px",
                 fontSize: "10px",
-                background: "transparent",
+                background: "#ffffff",
                 border: "none",
                 boxShadow: "none",
-                color: active ? "#edf7ff" : "#b8d2e8",
+                color: active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
               }}
             >
               {segment}
             </button>
-            {index < breadcrumbSegments.length - 1 ? <span style={{ color: "#91badb", fontSize: "11px" }}>&gt;</span> : null}
+            {index < breadcrumbSegments.length - 1 ? <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>&gt;</span> : null}
             </div>
           )
         })}
       </div>
       <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "240px" : "56vh", overflowY: "auto", paddingRight: "2px" }}>
         {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
-          <div style={{ color: "#9ebad1", fontSize: "12px" }}>No linked files yet.</div>
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No linked files yet.</div>
         ) : (
           <>
             {visibleFolders.map((folder) => (
@@ -2652,13 +2652,13 @@ export default function CountryCompanyInfoPage() {
                 borderRadius: "10px",
                 border:
                   dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
-                    ? "1px solid rgba(117, 226, 165, 0.34)"
-                    : "1px solid rgba(210,236,255,0.08)",
+                    ? "1px solid var(--fc-admin-success-border)"
+                    : "1px solid var(--fc-admin-border-soft)",
                 background:
                   dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
-                    ? "linear-gradient(180deg, rgba(95, 188, 138, 0.24) 0%, rgba(20, 98, 61, 0.12) 100%)"
-                    : "rgba(255,255,255,0.03)",
-                color: "#e5f1fb",
+                    ? "var(--fc-admin-success-bg)"
+                    : "var(--fc-tool-input-bg)",
+                color: "var(--fc-admin-panel-text)",
                 cursor: "pointer",
                 textAlign: "left",
                 }}
@@ -2693,8 +2693,8 @@ export default function CountryCompanyInfoPage() {
                   alignItems: "center",
                   padding: "7px 8px",
                   borderRadius: "10px",
-                  border: active ? "1px solid rgba(112, 199, 255, 0.32)" : "1px solid rgba(210,236,255,0.08)",
-                  background: active ? "linear-gradient(180deg, rgba(78, 154, 237, 0.18) 0%, rgba(20, 55, 102, 0.18) 100%)" : "rgba(255,255,255,0.03)",
+                  border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid var(--fc-admin-border-soft)",
+                  background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-tool-input-bg)",
                   opacity: draggingFileId === file.id ? 0.6 : 1,
                   cursor: file.source === "company" ? "default" : "grab",
                 }}
@@ -2708,8 +2708,8 @@ export default function CountryCompanyInfoPage() {
                   }}
                   style={{
                     border: "none",
-                    background: "transparent",
-                    color: "#e5f1fb",
+                    background: "#ffffff",
+                    color: "var(--fc-admin-panel-text)",
                     cursor: "pointer",
                     textAlign: "left",
                     padding: 0,
@@ -2724,7 +2724,7 @@ export default function CountryCompanyInfoPage() {
                   <button
                     type="button"
                     onClick={() => void deleteFile(file)}
-                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
                   >
                     Delete
                   </button>
@@ -2733,7 +2733,7 @@ export default function CountryCompanyInfoPage() {
                   <button
                     type="button"
                     onClick={() => void deleteFile(file)}
-                    style={{ ...buttonStyle, gridColumn: "2", justifySelf: "start", padding: "4px 7px", fontSize: "10px", background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                    style={{ ...buttonStyle, gridColumn: "2", justifySelf: "start", padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
                   >
                     Delete
                   </button>
@@ -2758,8 +2758,8 @@ export default function CountryCompanyInfoPage() {
         </button>
       </div>
       {deletedFiles.length > 0 && (
-        <div style={{ display: "grid", gap: "8px", borderTop: "1px solid rgba(210,236,255,0.12)", paddingTop: "10px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffcf9f", fontWeight: 700 }}>
+        <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "10px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-warning-text)", fontWeight: 700 }}>
             Recently Deleted
           </div>
           <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflowY: "auto", paddingRight: "2px" }}>
@@ -2773,15 +2773,15 @@ export default function CountryCompanyInfoPage() {
                   alignItems: "center",
                   padding: "7px 8px",
                   borderRadius: "10px",
-                  border: "1px solid rgba(255, 180, 120, 0.18)",
-                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid var(--fc-admin-warning-border)",
+                  background: "var(--fc-tool-input-bg)",
                 }}
               >
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: "#e5f1fb", fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                  <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
                     <HighlightedInlineText value={file.file_name} query={searchInPage} />
                   </div>
-                  <div style={{ color: "#91badb", fontSize: "10px", marginTop: "3px" }}>
+                  <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "3px" }}>
                     {file.deleted_at ? `Deleted ${formatTimestamp(file.deleted_at) || file.deleted_at}` : "Deleted"}
                   </div>
                 </div>
@@ -2818,7 +2818,7 @@ export default function CountryCompanyInfoPage() {
         {!isMobile && (
           <aside style={{ ...sidebarStyle, height: "100vh", overflow: "hidden" }}>
             <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 36px)" }}>
-              <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "12px" }}>
+              <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "12px" }}>
                 Country And Company Info
               </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
@@ -2835,9 +2835,9 @@ export default function CountryCompanyInfoPage() {
                       height: "42px",
                       padding: 0,
                       borderRadius: "50%",
-                      background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
-                      color: "#e7f3ff",
-                      border: "1px solid rgba(108, 185, 255, 0.24)",
+                      background: "var(--fc-admin-selected-bg)",
+                      color: "var(--fc-admin-panel-text)",
+                      border: "1px solid var(--fc-admin-selected-border)",
                       fontSize: "22px",
                       fontWeight: 700,
                       lineHeight: 1,
@@ -2871,13 +2871,13 @@ export default function CountryCompanyInfoPage() {
 
               {!initialMode && (
                 <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
-                  <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+                  <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
                     Search In Page
                   </div>
                   <input value={searchInPage} onChange={(e) => setSearchInPage(e.target.value)} onKeyDown={handleSearchInPageKeyDown} disabled={initialMode} placeholder={initialMode ? "Open an entry first" : ""} style={{ ...inputStyle, opacity: initialMode ? 0.58 : 1 }} />
                   {searchInPage.trim() && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                      <div style={{ color: "#b7d7f3", fontSize: "13px", fontWeight: 700 }}>
+                      <div style={{ color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
                         {matchCount === 0 ? "0/0" : `${Math.min(matchIndex + 1, matchCount)}/${matchCount}`}
                       </div>
                       <div style={{ display: "flex", gap: "6px" }}>
@@ -2886,14 +2886,14 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
-                  <div style={{ display: "grid", gap: "6px", borderTop: "1px solid rgba(210,236,255,0.1)", paddingTop: "8px" }}>
-                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>Recent Changes</div>
-                      {changeLog.length === 0 && <div style={{ color: "#91badb", fontSize: "11px" }}>No recent changes yet.</div>}
+                  <div style={{ display: "grid", gap: "6px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "8px" }}>
+                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>Recent Changes</div>
+                      {changeLog.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
                       {changeLog.map((entry) => (
-                        <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "rgba(255,255,255,0.04)" }}>
+                        <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "var(--fc-admin-panel-soft-bg)" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "#eaf7ff", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</div>
-                            <div style={{ color: "#91badb", fontSize: "10px", marginTop: "2px" }}>{formatTimestamp(entry.at)}</div>
+                            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</div>
+                            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>{formatTimestamp(entry.at)}</div>
                           </div>
                         </div>
                       ))}
@@ -2911,9 +2911,9 @@ export default function CountryCompanyInfoPage() {
                       height: "42px",
                       padding: 0,
                       borderRadius: "50%",
-                      background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
-                      color: "#e7f3ff",
-                      border: "1px solid rgba(108, 185, 255, 0.24)",
+                      background: "var(--fc-admin-selected-bg)",
+                      color: "var(--fc-admin-panel-text)",
+                      border: "1px solid var(--fc-admin-selected-border)",
                       fontSize: "22px",
                       fontWeight: 700,
                       lineHeight: 1,
@@ -2948,7 +2948,7 @@ export default function CountryCompanyInfoPage() {
           </aside>
         )}
 
-        <main style={{ padding: isMobile ? "12px" : "0 22px 22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "rgba(175,205,230,0.35) transparent" }}>
+        <main style={{ padding: isMobile ? "12px" : "0 22px 22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "#b9cde6 #f5f5f7" }}>
           <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
             <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: 0, zIndex: 10, minWidth: 0, borderTopLeftRadius: isMobile ? "18px" : 0, borderTopRightRadius: isMobile ? "18px" : 0 }}>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr) 42px" : "1fr", gap: "8px", alignItems: "center" }}>
@@ -2960,7 +2960,7 @@ export default function CountryCompanyInfoPage() {
                   }}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
-                  placeholder="Search company, country or port..."
+                  placeholder={isMobile ? "Search..." : "Search company, country or port..."}
                   style={searchInputStyle}
                 />
                 {isMobile && (
@@ -2972,9 +2972,9 @@ export default function CountryCompanyInfoPage() {
                       height: "42px",
                       padding: 0,
                       borderRadius: "50%",
-                      background: "linear-gradient(180deg, rgba(86, 164, 255, 0.38) 0%, rgba(32, 106, 194, 0.2) 100%)",
-                      color: "#e7f3ff",
-                      border: "1px solid rgba(108, 185, 255, 0.24)",
+                      background: "var(--fc-admin-selected-bg)",
+                      color: "var(--fc-admin-panel-text)",
+                      border: "1px solid var(--fc-admin-selected-border)",
                       fontSize: "22px",
                       fontWeight: 700,
                       lineHeight: 1,
@@ -3010,14 +3010,14 @@ export default function CountryCompanyInfoPage() {
                         textAlign: "left",
                         padding: "6px 8px",
                         borderRadius: "12px",
-                        border: index === activeSuggestion ? "1px solid rgba(73, 219, 165, 0.26)" : "1px solid rgba(210,236,255,0.08)",
-                        background: index === activeSuggestion ? "linear-gradient(180deg, rgba(56, 214, 154, 0.16) 0%, rgba(20, 130, 93, 0.08) 100%)" : "transparent",
-                        color: "#edf7ff",
+                        border: index === activeSuggestion ? "1px solid var(--fc-admin-success-border)" : "1px solid var(--fc-admin-border-soft)",
+                        background: index === activeSuggestion ? "var(--fc-admin-selected-bg)" : "#ffffff",
+                        color: "var(--fc-admin-panel-text)",
                         cursor: "pointer",
                       }}
                     >
                       <div style={{ fontWeight: 700 }}>{item.name}</div>
-                      <div style={{ color: "#8fc2e8", fontSize: "11px", marginTop: "1px" }}>
+                      <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "1px" }}>
                         {kindLabel(item.kind)}{item.kind === "port" && item.country_name ? ` • ${item.country_name}` : ""}
                       </div>
                     </button>
@@ -3028,7 +3028,7 @@ export default function CountryCompanyInfoPage() {
 
             <div style={{ ...panelStyle, padding: isMobile ? "12px" : "16px", display: "grid", gap: "12px", minWidth: 0 }}>
               {initialMode ? (
-                <div style={{ minHeight: isMobile ? "unset" : "calc(100vh - 180px)", display: "grid", placeItems: "center", color: "#93b9d6", textAlign: "center", padding: "20px" }}>
+                <div style={{ minHeight: isMobile ? "unset" : "calc(100vh - 180px)", display: "grid", placeItems: "center", color: "var(--fc-admin-muted)", textAlign: "center", padding: "20px" }}>
                   <div>
                       <div style={{ fontSize: "14px", lineHeight: 1.6 }}>Search a company, country, or port to open the entry.</div>
                   </div>
@@ -3052,7 +3052,7 @@ export default function CountryCompanyInfoPage() {
                       )}
                       <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
                       <div style={{ marginBottom: "10px" }}>
-                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "8px" }}>Search In Page</div>
+                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "8px" }}>Search In Page</div>
                         <input value={searchInPage} onChange={(e) => setSearchInPage(e.target.value)} onKeyDown={handleSearchInPageKeyDown} style={inputStyle} />
                       </div>
                     </div>
@@ -3060,7 +3060,7 @@ export default function CountryCompanyInfoPage() {
 
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
                     <div>
-                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>{mainLabel}</div>
+                      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "6px" }}>{mainLabel}</div>
                       <input
                         value={currentRecord.name}
                         readOnly
@@ -3075,14 +3075,14 @@ export default function CountryCompanyInfoPage() {
                             if (currentCountry.id) void openCountryInline(currentCountry.id)
                           }}
                           disabled={!currentCountry.id}
-                          style={{ border: "none", background: "transparent", color: currentCountry.id ? "#bfe6ff" : "#91badb", padding: "7px 0 0", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, cursor: currentCountry.id ? "pointer" : "default" }}
+                          style={{ border: "none", background: "#ffffff", color: currentCountry.id ? "var(--fc-admin-link)" : "var(--fc-admin-muted)", padding: "7px 0 0", fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, cursor: currentCountry.id ? "pointer" : "default" }}
                         >
                           COUNTRY: {currentCountry.name}
                         </button>
                       ) : null}
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}>
+                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
                         {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
                       </button>
                     </div>
@@ -3091,7 +3091,7 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "port" && false && (
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px minmax(0, 1fr)", gap: "10px", alignItems: "end" }}>
                       <div style={{ position: "relative" }}>
-                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "6px" }}>Country</div>
+                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "6px" }}>Country</div>
                         <input
                           value={currentCountry.name}
                           onFocus={() => setCountryDropdownOpen(true)}
@@ -3112,7 +3112,7 @@ export default function CountryCompanyInfoPage() {
                         {countryDropdownOpen && (
                           <div style={{ ...panelStyle, position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: "6px", display: "grid", gap: "4px", maxHeight: "260px", overflowY: "auto" }}>
                             {filteredCountryOptions.length === 0 ? (
-                              <div style={{ padding: "8px", color: "#91badb", fontSize: "12px" }}>No matching country</div>
+                              <div style={{ padding: "8px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching country</div>
                             ) : (
                               filteredCountryOptions.map((country) => (
                                 <button
@@ -3123,7 +3123,7 @@ export default function CountryCompanyInfoPage() {
                                     setCurrentCountry((prev) => ({ ...prev, id: country.id, name: country.name }))
                                     setCountryDropdownOpen(false)
                                   }}
-                                  style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === currentCountry.id ? "linear-gradient(180deg, rgba(56, 214, 154, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)" : "rgba(255,255,255,0.04)" }}
+                                  style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === currentCountry.id ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)" }}
                                 >
                                   {country.name}
                                 </button>
@@ -3135,24 +3135,24 @@ export default function CountryCompanyInfoPage() {
                     </div>
                   )}
 
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(210,236,255,0.12)", paddingBottom: "8px" }}>
-                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "general" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid var(--fc-admin-border-soft)", paddingBottom: "8px" }}>
+                    <button type="button" onClick={() => setActiveInfoTab("general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "var(--fc-admin-muted)", outline: activeInfoTab === "general" ? "2px solid var(--fc-admin-link)" : "none", outlineOffset: "1px" }}>
                       {mainInfoTabLabel}
                     </button>
                     {selectedKind === "port" && (
                       <>
-                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "country-general" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
+                        <button type="button" onClick={() => setActiveInfoTab("country-general")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "var(--fc-admin-muted)", outline: activeInfoTab === "country-general" ? "2px solid var(--fc-admin-link)" : "none", outlineOffset: "1px" }}>
                           GENERAL INFORMATION
                         </button>
                         {countryTabs.map((tab, index) => (
-                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#a9cdea", outline: activeInfoTab === `country-section-${index}` ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
+                          <button key={`country-tab-${index}`} type="button" onClick={() => setActiveInfoTab(`country-section-${index}`)} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "var(--fc-admin-muted)", outline: activeInfoTab === `country-section-${index}` ? "2px solid var(--fc-admin-link)" : "none", outlineOffset: "1px" }}>
                             {(tab.title || `TAB ${index + 1}`).toUpperCase()}
                           </button>
                         ))}
                       </>
                     )}
                     {selectedKind === "country" && (
-                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "#b9d7ee", outline: activeInfoTab === "ports" ? "2px solid #bfe6ff" : "none", outlineOffset: "1px" }}>
+                      <button type="button" onClick={() => setActiveInfoTab("ports")} style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", background: fixedTabBackground, color: "var(--fc-admin-muted)", outline: activeInfoTab === "ports" ? "2px solid var(--fc-admin-link)" : "none", outlineOffset: "1px" }}>
                         PORTS
                       </button>
                     )}
@@ -3189,9 +3189,9 @@ export default function CountryCompanyInfoPage() {
                           ...buttonStyle,
                           borderRadius: "12px 12px 0 0",
                           background: userTabBackground,
-                          outline: activeInfoTab === `section-${index}` ? "2px solid #bfe6ff" : "none",
+                          outline: activeInfoTab === `section-${index}` ? "2px solid var(--fc-admin-link)" : "none",
                           outlineOffset: "1px",
-                          boxShadow: dropTabIndex === index ? `${dropTabSide === "left" ? "inset 3px 0 0 #bfe6ff" : "inset -3px 0 0 #bfe6ff"}, ${buttonStyle.boxShadow}` : buttonStyle.boxShadow,
+                          boxShadow: dropTabIndex === index ? `${dropTabSide === "left" ? "inset 3px 0 0 var(--fc-admin-link)" : "inset -3px 0 0 var(--fc-admin-link)"}, ${buttonStyle.boxShadow}` : buttonStyle.boxShadow,
                           transform: draggingTabIndex === index ? "translateY(2px) scale(0.98)" : dropTabIndex === index ? "translateY(-2px)" : "none",
                           opacity: draggingTabIndex === index ? 0.62 : 1,
                           transition: "transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease",
@@ -3209,7 +3209,7 @@ export default function CountryCompanyInfoPage() {
                             void deleteHighlightCard(index)
                           }}
                           title="Delete tab"
-                          style={{ border: "none", width: "17px", height: "17px", borderRadius: "999px", background: "rgba(255,255,255,0.1)", color: "#d7e8ff", fontSize: "12px", lineHeight: "15px", cursor: "pointer", padding: 0 }}
+                          style={{ border: "none", width: "17px", height: "17px", borderRadius: "999px", background: "var(--fc-admin-button-bg)", color: "var(--fc-admin-button-text)", fontSize: "12px", lineHeight: "15px", cursor: "pointer", padding: 0 }}
                         >
                           ×
                         </button>
@@ -3223,7 +3223,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", padding: "6px 12px", background: "rgba(255,255,255,0.05)", color: "#d7e8ff", border: "1px solid rgba(210,236,255,0.16)" }}
+                      style={{ ...buttonStyle, borderRadius: "12px 12px 0 0", padding: "6px 12px", background: "var(--fc-admin-panel-soft-bg)", color: "var(--fc-admin-button-text)", border: "1px solid var(--fc-admin-border)" }}
                     >
                       +
                     </button>
@@ -3231,7 +3231,7 @@ export default function CountryCompanyInfoPage() {
 
                   {activeInfoTab === "general" && (
                   <div>
-                    {recordLoading && <div style={{ color: "#9ebad1", marginBottom: "8px" }}>Loading...</div>}
+                    {recordLoading && <div style={{ color: "var(--fc-admin-muted)", marginBottom: "8px" }}>Loading...</div>}
                     <BlockTextBlock
                       blocks={mainInfoBlocks.length ? mainInfoBlocks : textToBlocks(currentRecord.notes || "", mainInfoLineUpdates, currentRecord.updated_at)}
                       fallbackUpdatedAt={currentRecord.updated_at}
@@ -3248,9 +3248,9 @@ export default function CountryCompanyInfoPage() {
                     {mainSections.length > 0 && (
                       <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                         {mainSections.map((section, sectionIndex) => (
-                          <div key={`main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                          <div key={`main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px 12px" }}>
                             <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                              <button type="button" onDoubleClick={() => renameMainSection(sectionIndex)} style={{ border: "none", background: "transparent", color: "#bfe6ff", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}>
+                              <button type="button" onDoubleClick={() => renameMainSection(sectionIndex)} style={{ border: "none", background: "#ffffff", color: "var(--fc-admin-link)", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}>
                                 <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                               </button>
                               <div style={{ display: "flex", gap: "5px" }}>
@@ -3305,7 +3305,7 @@ export default function CountryCompanyInfoPage() {
                           {(highlight.sections || []).length > 0 && (
                             <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                               {(highlight.sections || []).map((section, sectionIndex) => (
-                                <div key={`nested-section-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
+                                <div key={`nested-section-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px 12px" }}>
                                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
                                     <button
                                       type="button"
@@ -3313,7 +3313,7 @@ export default function CountryCompanyInfoPage() {
                                         event.stopPropagation()
                                         renameNestedSection(index, sectionIndex)
                                       }}
-                                      style={{ border: "none", background: "transparent", color: "#bfe6ff", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}
+                                      style={{ border: "none", background: "#ffffff", color: "var(--fc-admin-link)", textAlign: "left", padding: 0, fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800, cursor: "text" }}
                                       title="Double click to rename section"
                                     >
                                       <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
@@ -3363,8 +3363,8 @@ export default function CountryCompanyInfoPage() {
                       {countrySections.length > 0 && (
                         <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                           {countrySections.map((section, sectionIndex) => (
-                            <div key={`country-main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
-                              <div style={{ color: "#bfe6ff", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
+                            <div key={`country-main-section-${sectionIndex}`} style={{ borderRadius: "14px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px 12px" }}>
+                              <div style={{ color: "var(--fc-admin-link)", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
                                 <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                               </div>
                               <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
@@ -3383,8 +3383,8 @@ export default function CountryCompanyInfoPage() {
                           {(tab.sections || []).length > 0 && (
                             <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                               {(tab.sections || []).map((section, sectionIndex) => (
-                                <div key={`country-nested-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "rgba(255,255,255,0.018)", padding: "10px 12px" }}>
-                                  <div style={{ color: "#bfe6ff", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
+                                <div key={`country-nested-${index}-${sectionIndex}`} style={{ borderRadius: "14px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px 12px" }}>
+                                  <div style={{ color: "var(--fc-admin-link)", padding: "0 0 8px", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>
                                     <HighlightedInlineText value={section.title || `SECTION ${sectionIndex + 1}`} query={searchInPage} />
                                   </div>
                                   <BlockTextBlock blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentCountry.updated_at)} fallbackUpdatedAt={currentCountry.updated_at} minHeight="calc(1em + 28px)" query={searchInPage} />
@@ -3400,7 +3400,7 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "port" && false && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>{countryInformationLabel}</div>
+                        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>{countryInformationLabel}</div>
                         {countryInfoEditing && (
                           <button
                             type="button"
@@ -3408,7 +3408,7 @@ export default function CountryCompanyInfoPage() {
                               setCountryInfoEditing(false)
                               void saveRecord()
                             }}
-                            style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}
+                            style={{ ...buttonStyle, marginLeft: "auto", padding: "4px 10px", fontSize: "11px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}
                           >
                             Finish Editing
                           </button>
@@ -3436,32 +3436,32 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "country" && activeInfoTab === "ports" && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                        <button onClick={openAddPortForCurrentCountry} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>
+                        <button onClick={openAddPortForCurrentCountry} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}>
                           Add Port
                         </button>
                       </div>
-                      <div style={{ ...panelStyle, padding: 0, background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
+                      <div style={{ ...panelStyle, padding: 0, background: "var(--fc-tool-input-bg)", overflow: "hidden" }}>
                         {currentCountryPorts.length === 0 ? (
-                          <div style={{ color: "#9ebad1", padding: "12px" }}>No ports linked yet.</div>
+                          <div style={{ color: "var(--fc-admin-muted)", padding: "12px" }}>No ports linked yet.</div>
                         ) : isMobile ? (
                           <div style={{ display: "grid", gap: "8px", padding: "10px" }}>
                             {currentCountryPorts.map((port) => (
-                              <div key={port.id} style={{ borderBottom: "1px solid rgba(210,236,255,0.08)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
+                              <div key={port.id} style={{ borderBottom: "1px solid var(--fc-admin-border-soft)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
                                 {editingCountryPortId === port.id ? (
                                   <>
                                     <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
-                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", fontSize: "12px" }} />
+                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", fontSize: "12px" }} />
                                     <div style={{ display: "flex", gap: "8px" }}>
-                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
                                       <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
                                     </div>
                                   </>
                                 ) : (
                                   <>
-                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "#bfe6ff", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
+                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
                                       <HighlightedInlineText value={port.name} query={searchInPage} />
                                     </a>
-                                    <div onDoubleClick={() => startCountryPortEditing(port)} style={{ color: "#e8f2fb", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
+                                    <div onDoubleClick={() => startCountryPortEditing(port)} style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
                                       <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
                                     </div>
                                   </>
@@ -3474,28 +3474,28 @@ export default function CountryCompanyInfoPage() {
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                               <thead>
                                 <tr>
-                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.14)", color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Port</th>
-                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.14)", color: "#8fd7ff", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Information</th>
+                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Port</th>
+                                  <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase" }}>Information</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {currentCountryPorts.map((port) => (
                                   <tr key={port.id}>
-                                    <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
+                                    <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
                                       {editingCountryPortId === port.id ? (
                                         <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }} />
                                       ) : (
-                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "#bfe6ff", fontWeight: 700, textDecoration: "none" }}>
+                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 700, textDecoration: "none" }}>
                                         <HighlightedInlineText value={port.name} query={searchInPage} />
                                         </a>
                                       )}
                                     </td>
-                                    <td onDoubleClick={() => startCountryPortEditing(port)} style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid rgba(210,236,255,0.08)", color: "#e8f2fb", lineHeight: 1.45, whiteSpace: "pre-wrap", cursor: "text" }}>
+                                    <td onDoubleClick={() => startCountryPortEditing(port)} style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "pre-wrap", cursor: "text" }}>
                                       {editingCountryPortId === port.id ? (
                                         <div style={{ display: "grid", gap: "8px" }}>
-                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "rgba(143, 215, 255, 0.08)", fontSize: "12px" }} />
+                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", fontSize: "12px" }} />
                                           <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef" }}>Save</button>
+                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
                                             <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
                                           </div>
                                         </div>
@@ -3526,7 +3526,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}
+                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}
                     >
                       Add Section
                     </button>
@@ -3542,7 +3542,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "linear-gradient(180deg, rgba(255, 151, 67, 0.46) 0%, rgba(191, 92, 16, 0.22) 100%)", color: "#ffe0c2", border: "1px solid rgba(255, 166, 77, 0.38)" }}
+                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}
                     >
                       Add Table
                     </button>
@@ -3562,7 +3562,7 @@ export default function CountryCompanyInfoPage() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(1, 8, 18, 0.74)",
+            background: "#1d1d1f",
             display: "grid",
             placeItems: "center",
             padding: "22px",
@@ -3584,8 +3584,8 @@ export default function CountryCompanyInfoPage() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>File Preview</div>
-                <div style={{ fontWeight: 700, color: "#edf7ff", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPreviewFile.file_name}</div>
+                <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>File Preview</div>
+                <div style={{ fontWeight: 700, color: "var(--fc-admin-panel-text)", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPreviewFile.file_name}</div>
               </div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 {selectedPreviewFile.drive_url && (
@@ -3598,7 +3598,7 @@ export default function CountryCompanyInfoPage() {
                 </button>
               </div>
             </div>
-            <div style={{ borderRadius: "16px", overflow: "hidden", border: "1px solid rgba(210,236,255,0.12)", background: "rgba(2, 10, 20, 0.34)" }}>
+            <div style={{ borderRadius: "16px", overflow: "hidden", border: "1px solid var(--fc-admin-border-soft)", background: "#ffffff" }}>
               <iframe src={previewUrl} title={selectedPreviewFile.file_name} style={{ width: "100%", height: "100%", border: 0 }} />
             </div>
           </div>
@@ -3609,7 +3609,7 @@ export default function CountryCompanyInfoPage() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(1, 8, 18, 0.58)",
+            background: "#1d1d1f",
             display: "grid",
             placeItems: "center",
             padding: "20px",
@@ -3630,11 +3630,11 @@ export default function CountryCompanyInfoPage() {
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-warning-text)", fontWeight: 800 }}>
               {highlightModalMode === "tab" ? "Add Tab" : highlightModalMode === "table" ? "Add Table" : "Add Section"}
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : highlightModalMode === "table" ? "Table Name" : "Section Name"}</div>
+              <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>{highlightModalMode === "tab" ? "Tab Name" : highlightModalMode === "table" ? "Table Name" : "Section Name"}</div>
               <input
                 ref={highlightTitleInputRef}
                 value={highlightDraft.title}
@@ -3665,9 +3665,9 @@ export default function CountryCompanyInfoPage() {
                 onClick={saveHighlightCard}
                 style={{
                   ...buttonStyle,
-                  background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)",
-                  color: "#fff2bc",
-                  border: "1px solid rgba(255, 211, 110, 0.34)",
+                  background: "var(--fc-admin-warning-bg)",
+                  color: "var(--fc-admin-warning-text)",
+                  border: "1px solid var(--fc-admin-warning-border)",
                 }}
               >
                 Add
@@ -3678,15 +3678,15 @@ export default function CountryCompanyInfoPage() {
       )}
       {recordModalOpen && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(1, 8, 18, 0.58)", display: "grid", placeItems: "center", padding: "20px", zIndex: 42 }}
+          style={{ position: "fixed", inset: 0, background: "#1d1d1f", display: "grid", placeItems: "center", padding: "20px", zIndex: 42 }}
           onClick={() => setRecordModalOpen(false)}
         >
           <div style={{ ...panelStyle, width: "min(520px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
-            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 800 }}>
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>
               Edit {mainLabel}
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>{mainLabel}</div>
+              <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>{mainLabel}</div>
               <input
                 value={recordNameDraft}
                 onChange={(event) => setRecordNameDraft(event.target.value.toUpperCase())}
@@ -3706,7 +3706,7 @@ export default function CountryCompanyInfoPage() {
                 type="button"
                 onClick={() => void deleteRecord()}
                 disabled={!selectedId}
-                style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255, 120, 120, 0.22)" }}
+                style={{ ...buttonStyle, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
               >
                 {recordDeleteLabel}
               </button>
@@ -3716,7 +3716,7 @@ export default function CountryCompanyInfoPage() {
                   type="button"
                   onClick={() => void saveRecordNameFromModal()}
                   disabled={saving || !recordNameDraft.trim()}
-                  style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)", color: "#ddffef", border: "1px solid rgba(73, 219, 165, 0.26)" }}
+                  style={{ ...buttonStyle, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}
                 >
                   {saving ? "Saving" : "Save"}
                 </button>
@@ -3727,20 +3727,20 @@ export default function CountryCompanyInfoPage() {
       )}
       {addPortModalOpen && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(1, 8, 18, 0.58)", display: "grid", placeItems: "center", padding: "20px", zIndex: 40 }}
+          style={{ position: "fixed", inset: 0, background: "#1d1d1f", display: "grid", placeItems: "center", padding: "20px", zIndex: 40 }}
           onClick={() => {
             setAddPortModalOpen(false)
             setAddPortDraft({ name: "", notes: "", countryId: "", countryName: "" })
           }}
         >
           <div style={{ ...panelStyle, width: "min(580px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
-            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#ffe08a", fontWeight: 800 }}>Add Port</div>
+            <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-warning-text)", fontWeight: 800 }}>Add Port</div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port</div>
+              <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>Port</div>
               <input ref={addPortNameInputRef} value={addPortDraft.name} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
             </div>
             <div style={{ position: "relative" }}>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Country</div>
+              <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>Country</div>
               <input
                 value={addPortDraft.countryName}
                 onFocus={() => setCountryDropdownOpen(true)}
@@ -3752,7 +3752,7 @@ export default function CountryCompanyInfoPage() {
               {countryDropdownOpen && (
                 <div style={{ ...panelStyle, position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 60, padding: "6px", display: "grid", gap: "4px", maxHeight: "240px", overflowY: "auto" }}>
                   {filteredAddPortCountryOptions.length === 0 ? (
-                    <div style={{ padding: "8px", color: "#91badb", fontSize: "12px" }}>No matching country</div>
+                    <div style={{ padding: "8px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching country</div>
                   ) : (
                     filteredAddPortCountryOptions.map((country) => (
                       <button
@@ -3763,7 +3763,7 @@ export default function CountryCompanyInfoPage() {
                           setAddPortDraft((prev) => ({ ...prev, countryId: country.id, countryName: country.name }))
                           setCountryDropdownOpen(false)
                         }}
-                        style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === addPortDraft.countryId ? "linear-gradient(180deg, rgba(56, 214, 154, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)" : "rgba(255,255,255,0.04)" }}
+                        style={{ ...buttonStyle, borderRadius: "10px", padding: "7px 9px", textAlign: "left", background: country.id === addPortDraft.countryId ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)" }}
                       >
                         {country.name}
                       </button>
@@ -3773,12 +3773,12 @@ export default function CountryCompanyInfoPage() {
               )}
             </div>
             <div>
-              <div style={{ fontSize: "12px", color: "#b9d7ee", marginBottom: "6px" }}>Port Information</div>
+              <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>Port Information</div>
               <textarea value={addPortDraft.notes} onChange={(event) => setAddPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "180px" }} />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
               <button type="button" onClick={() => setAddPortModalOpen(false)} style={buttonStyle}>Cancel</button>
-              <button type="button" onClick={() => void addPort()} style={{ ...buttonStyle, background: "linear-gradient(180deg, rgba(255, 210, 86, 0.42) 0%, rgba(191, 136, 16, 0.2) 100%)", color: "#fff2bc", border: "1px solid rgba(255, 211, 110, 0.34)" }}>Save Port</button>
+              <button type="button" onClick={() => void addPort()} style={{ ...buttonStyle, background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}>Save Port</button>
             </div>
           </div>
         </div>

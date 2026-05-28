@@ -62,7 +62,7 @@ const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
   color: "var(--fc-admin-panel-text)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   padding: "18px",
 }
 
@@ -77,9 +77,7 @@ const panelStyle: React.CSSProperties = {
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
   padding: "12px",
-  boxShadow: "0 30px 96px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.08)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
+  boxShadow: "0 16px 36px #00000012",
 }
 
 const buttonStyle: React.CSSProperties = {
@@ -91,7 +89,7 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 800,
   padding: "8px 12px",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
 }
 
 const tableStyle: React.CSSProperties = {
@@ -105,7 +103,7 @@ const thStyle: React.CSSProperties = {
   top: 0,
   zIndex: 2,
   padding: "7px 7px",
-  borderBottom: "1px solid rgba(210, 236, 255, 0.15)",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
   background: "var(--fc-table-head-bg)",
   color: "var(--fc-table-head-text)",
   fontSize: "10px",
@@ -118,7 +116,7 @@ const thStyle: React.CSSProperties = {
 const tdStyle: React.CSSProperties = {
   height: "18px",
   padding: "1px 7px",
-  borderBottom: "1px solid rgba(255,255,255,0.08)",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
   fontSize: "11px",
   lineHeight: "16px",
   verticalAlign: "middle",
@@ -128,11 +126,11 @@ const tdStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   height: "34px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "10px",
-  background: "linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%)",
-  color: "#10243a",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
+  fontFamily: "var(--fc-admin-font)",
   fontSize: "13px",
   outline: "none",
   padding: "7px 10px",
@@ -142,9 +140,7 @@ const inputStyle: React.CSSProperties = {
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(2, 10, 18, 0.64)",
-  backdropFilter: "blur(8px)",
-  WebkitBackdropFilter: "blur(8px)",
+  background: "#1d1d1f",
   display: "grid",
   placeItems: "center",
   padding: "20px",
@@ -157,7 +153,7 @@ const modalStyle: React.CSSProperties = {
     "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
-  boxShadow: "0 30px 96px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.08)",
+  boxShadow: "0 18px 42px #0000001f",
   padding: "18px",
 }
 
@@ -209,24 +205,24 @@ function getMeetingRoomStyle(event: GoogleCalendarEvent) {
 
   if (title.includes("EXPRESS GLOBAL")) {
     return {
-      background: "linear-gradient(90deg, rgba(76, 201, 240, 0.12) 0%, rgba(76, 201, 240, 0.24) 100%)",
-      border: "rgba(76, 201, 240, 0.72)",
-      color: "#d9f6ff",
+      background: "#e8f7ff",
+      border: "#4cc9f0",
+      color: "var(--fc-admin-panel-text)",
     }
   }
 
   if (title.includes("MARINE ENERGY")) {
     return {
-      background: "linear-gradient(90deg, rgba(255, 218, 97, 0.16) 0%, rgba(255, 218, 97, 0.3) 100%)",
-      border: "rgba(255, 218, 97, 0.76)",
-      color: "#fff4bf",
+      background: "#fff8e5",
+      border: "#f7b500",
+      color: "var(--fc-admin-warning-text)",
     }
   }
 
   return {
-    background: "linear-gradient(90deg, rgba(143, 215, 255, 0.1) 0%, rgba(143, 215, 255, 0.18) 100%)",
-    border: "rgba(143, 215, 255, 0.5)",
-    color: "#d9eeff",
+    background: "var(--fc-admin-selected-bg)",
+    border: "var(--fc-admin-selected-border)",
+    color: "var(--fc-admin-panel-text)",
   }
 }
 
@@ -927,7 +923,7 @@ export default function EventCalendarPage() {
     return (
       <div style={{ ...pageStyle, display: "grid", placeItems: "center" }}>
         <div style={modalStyle}>
-          <h1 style={{ margin: "0 0 12px", fontSize: "24px", color: "#edf7ff" }}>Event Calendar</h1>
+          <h1 style={{ margin: "0 0 12px", fontSize: "24px", color: "var(--fc-admin-panel-text)" }}>Event Calendar</h1>
           <button onClick={() => router.push("/admin")} style={buttonStyle}>
             Go To Admin
           </button>
@@ -952,7 +948,7 @@ export default function EventCalendarPage() {
           <div>
             <div
               style={{
-                color: "#8fd7ff",
+                color: "var(--fc-admin-link)",
                 fontSize: "12px",
                 fontWeight: 800,
                 letterSpacing: "0.16em",
@@ -1005,10 +1001,10 @@ export default function EventCalendarPage() {
                       zIndex: 30,
                       minWidth: "220px",
                       padding: "7px",
-                      border: "1px solid rgba(210,236,255,0.18)",
+                      border: "1px solid var(--fc-admin-border)",
                       borderRadius: "14px",
-                      background: "linear-gradient(180deg, rgba(10, 35, 60, 0.98) 0%, rgba(6, 24, 42, 0.98) 100%)",
-                      boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+                      background: "var(--fc-admin-panel-bg)",
+                      boxShadow: "0 16px 36px #00000018",
                     }}
                   >
                     <button
@@ -1059,7 +1055,7 @@ export default function EventCalendarPage() {
                   </div>
                 )}
               </div>
-              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "#edf7ff" }}>
+              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>
                 Event Calendar
               </h1>
               {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
@@ -1072,10 +1068,10 @@ export default function EventCalendarPage() {
                     style={{
                       ...buttonStyle,
                       background: active
-                        ? "linear-gradient(180deg, rgba(73, 219, 165, 0.32) 0%, rgba(20, 130, 93, 0.16) 100%)"
+                        ? "var(--fc-admin-primary-button-bg)"
                         : buttonStyle.background,
-                      color: active ? "#eafff4" : buttonStyle.color,
-                      borderColor: active ? "rgba(73, 219, 165, 0.34)" : "rgba(210,236,255,0.16)",
+                      color: active ? "var(--fc-admin-primary-button-text)" : buttonStyle.color,
+                      borderColor: active ? "var(--fc-admin-primary-button-bg)" : "var(--fc-admin-border)",
                       padding: "7px 11px",
                     }}
                   >
@@ -1108,10 +1104,10 @@ export default function EventCalendarPage() {
                       zIndex: 30,
                       minWidth: "190px",
                       padding: "7px",
-                      border: "1px solid rgba(210,236,255,0.18)",
+                      border: "1px solid var(--fc-admin-border)",
                       borderRadius: "14px",
-                      background: "linear-gradient(180deg, rgba(10, 35, 60, 0.98) 0%, rgba(6, 24, 42, 0.98) 100%)",
-                      boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+                      background: "var(--fc-admin-panel-bg)",
+                      boxShadow: "0 16px 36px #00000018",
                     }}
                   >
                     <button type="button" onClick={openAddModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}>
@@ -1142,16 +1138,16 @@ export default function EventCalendarPage() {
                     onClick={() => togglePersonFilter(person)}
                     style={{
                       minWidth: "34px",
-                      border: active ? "1px solid rgba(143, 215, 255, 0.62)" : "1px solid rgba(5, 16, 28, 0.7)",
+                      border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid var(--fc-admin-button-border)",
                       borderRadius: "999px",
                       background: active
-                        ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)"
-                        : "rgba(2, 10, 18, 0.76)",
-                      color: active ? "#031b36" : "#9fb3c5",
+                        ? "var(--fc-admin-selected-bg)"
+                        : "var(--fc-admin-button-bg)",
+                      color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
                       cursor: "pointer",
                       fontSize: "11px",
                       fontWeight: 900,
-                      boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : "none",
+                      boxShadow: "none",
                       padding: "5px 9px",
                     }}
                   >
@@ -1191,13 +1187,13 @@ export default function EventCalendarPage() {
                       <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: 900, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
                         {formatGoogleEventDate(event)}
                       </td>
-                      <td style={{ ...tdStyle, color: "#d9eeff", fontWeight: 900, whiteSpace: "nowrap" }}>
+                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900, whiteSpace: "nowrap" }}>
                         {formatGoogleEventTime(event)}
                       </td>
-                      <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>
+                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}>
                         {event.title}
                         {event.sourceTitle && event.sourceTitle.toUpperCase() !== event.title.toUpperCase() && (
-                          <span style={{ color: "#8fa9bf", fontSize: "10px", fontWeight: 800, marginLeft: "8px" }}>
+                          <span style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, marginLeft: "8px" }}>
                             {event.sourceTitle}
                           </span>
                         )}
@@ -1207,7 +1203,7 @@ export default function EventCalendarPage() {
                 })}
                 {!googleCalendarEvents.length && (
                   <tr>
-                    <td colSpan={3} style={{ ...tdStyle, height: "42px", color: "#a9c4dc", fontWeight: 900 }}>
+                    <td colSpan={3} style={{ ...tdStyle, height: "42px", color: "var(--fc-admin-muted)", fontWeight: 900 }}>
                       {googleCalendarStatus}
                     </td>
                   </tr>
@@ -1240,15 +1236,15 @@ export default function EventCalendarPage() {
                   const isTodayEvent = rowStartKey === todayKey
                   const isTomorrowEvent = rowStartKey === tomorrowKey
                   const rowBackground = isTodayEvent
-                    ? "linear-gradient(90deg, rgba(255, 218, 97, 0.2) 0%, rgba(255, 218, 97, 0.32) 100%)"
+                    ? "#fff8e5"
                     : isTomorrowEvent
-                      ? "linear-gradient(90deg, rgba(255, 167, 38, 0.18) 0%, rgba(255, 167, 38, 0.3) 100%)"
-                      : "linear-gradient(90deg, rgba(143, 215, 255, 0.16) 0%, rgba(143, 215, 255, 0.24) 100%)"
+                      ? "#fff2d6"
+                      : "var(--fc-admin-selected-bg)"
                   const rowBorder = isTodayEvent
-                    ? "rgba(255, 218, 97, 0.76)"
+                    ? "#f7b500"
                     : isTomorrowEvent
-                      ? "rgba(255, 167, 38, 0.76)"
-                      : "rgba(143, 215, 255, 0.56)"
+                      ? "#ff9500"
+                      : "var(--fc-admin-selected-border)"
 
                   return (
                     <tr
@@ -1256,14 +1252,14 @@ export default function EventCalendarPage() {
                       style={{
                         background: rowBackground,
                         opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
-                        boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
+                        boxShadow: rowHighlighted ? "inset 0 0 0 2px var(--fc-admin-selected-border)" : "none",
                       }}
                     >
                       <td
                         onDoubleClick={() => openEditModal(event)}
                         style={{
                           ...tdStyle,
-                          color: "#d9eeff",
+                          color: "var(--fc-admin-panel-text)",
                           fontWeight: 900,
                           whiteSpace: "nowrap",
                           borderLeft: `4px solid ${rowBorder}`,
@@ -1273,11 +1269,11 @@ export default function EventCalendarPage() {
                       </td>
                       <td
                         onDoubleClick={() => openEditModal(event)}
-                        style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}
+                        style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}
                       >
                         {event.title}
                         {meetingRoomBooked && (
-                          <span style={{ color: "#8fd7ff", fontSize: "10px", fontWeight: 900, marginLeft: "8px" }}>
+                          <span style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, marginLeft: "8px" }}>
                             MEETING ROOM BOOKED
                           </span>
                         )}
@@ -1300,17 +1296,17 @@ export default function EventCalendarPage() {
                                 userSelect: "none",
                                 width: "28px",
                                 border: highlighted
-                                  ? "1px solid rgba(143, 215, 255, 0.76)"
+                                  ? "1px solid var(--fc-admin-selected-border)"
                                   : uncertain || attending
-                                    ? "1px solid rgba(255,255,255,0.16)"
-                                    : "1px solid transparent",
+                                    ? "1px solid var(--fc-admin-border-soft)"
+                                    : "1px solid #00000000",
                                 borderRadius: "999px",
                                 background: attending
-                                  ? "rgba(143, 215, 255, 0.2)"
+                                  ? "var(--fc-admin-selected-bg)"
                                   : uncertain
-                                    ? "rgba(255, 218, 97, 0.18)"
-                                    : "transparent",
-                                color: attending ? "#d9eeff" : uncertain ? "#ffe895" : "rgba(31, 45, 58, 0.58)",
+                                    ? "#fff8e5"
+                                    : "#ffffff",
+                                color: attending ? "var(--fc-admin-panel-text)" : uncertain ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
                                 cursor: "default",
                                 fontSize: "10px",
                                 fontWeight: attending || uncertain ? 900 : 700,
@@ -1339,7 +1335,7 @@ export default function EventCalendarPage() {
               {eventModalMode === "add" ? "New Event" : "Edit Event"}
             </h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
                   type="date"
@@ -1354,7 +1350,7 @@ export default function EventCalendarPage() {
                   style={inputStyle}
                 />
               </label>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 To
                 <input
                   type="date"
@@ -1364,7 +1360,7 @@ export default function EventCalendarPage() {
                 />
               </label>
             </div>
-            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
+            <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
               Event
               <input
                 value={draftEvent.title}
@@ -1377,7 +1373,7 @@ export default function EventCalendarPage() {
                 display: "flex",
                 alignItems: "center",
                 gap: "9px",
-                color: "#d9eeff",
+                color: "var(--fc-admin-panel-text)",
                 fontSize: "12px",
                 fontWeight: 900,
                 marginBottom: "12px",
@@ -1395,10 +1391,10 @@ export default function EventCalendarPage() {
               />
               Book Meeting Room
             </label>
-            <div style={{ color: "#8fa9bf", fontSize: "11px", fontWeight: 800, margin: "-7px 0 12px 24px" }}>
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 800, margin: "-7px 0 12px 24px" }}>
               Default is 1 hour from start time. Please enter exact timing if required e.g. 14:30-16:00
             </div>
-            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Attending
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "16px" }}>
@@ -1413,11 +1409,11 @@ export default function EventCalendarPage() {
                     style={{
                       ...buttonStyle,
                       background: attending
-                        ? "rgba(143, 215, 255, 0.24)"
+                        ? "var(--fc-admin-selected-bg)"
                         : uncertain
-                          ? "rgba(255, 218, 97, 0.22)"
-                          : "rgba(2, 10, 18, 0.64)",
-                      color: attending ? "#edf7ff" : uncertain ? "#ffe895" : "#8fa9bf",
+                          ? "#fff8e5"
+                          : "var(--fc-admin-button-bg)",
+                      color: attending ? "var(--fc-admin-selected-text)" : uncertain ? "var(--fc-admin-warning-text)" : "var(--fc-admin-button-text)",
                       minWidth: "42px",
                     }}
                   >
@@ -1433,9 +1429,9 @@ export default function EventCalendarPage() {
                   onClick={deleteDraftEvent}
                   style={{
                     ...buttonStyle,
-                    borderColor: "rgba(255, 105, 105, 0.48)",
-                    background: "linear-gradient(180deg, rgba(255, 91, 91, 0.26) 0%, rgba(177, 39, 56, 0.16) 100%)",
-                    color: "#ffd6d6",
+                    borderColor: "var(--fc-admin-danger-border)",
+                    background: "var(--fc-admin-danger-bg)",
+                    color: "var(--fc-admin-danger-text)",
                   }}
                 >
                   Delete Event
@@ -1459,7 +1455,7 @@ export default function EventCalendarPage() {
           <div style={modalStyle}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Recurrent Event</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
                   type="date"
@@ -1474,7 +1470,7 @@ export default function EventCalendarPage() {
                   style={inputStyle}
                 />
               </label>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 To
                 <input
                   type="date"
@@ -1484,7 +1480,7 @@ export default function EventCalendarPage() {
                 />
               </label>
             </div>
-            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
+            <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
               Event
               <input
                 value={draftRecurrentEvent.title}
@@ -1494,7 +1490,7 @@ export default function EventCalendarPage() {
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: "10px", marginBottom: "10px" }}>
               <div>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+                <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
                   Repeat
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
@@ -1507,8 +1503,8 @@ export default function EventCalendarPage() {
                         onClick={() => setDraftRecurrentEvent((current) => ({ ...current, frequency }))}
                         style={{
                           ...buttonStyle,
-                          background: active ? "rgba(143, 215, 255, 0.28)" : "rgba(2, 10, 18, 0.64)",
-                          color: active ? "#edf7ff" : "#8fa9bf",
+                          background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
+                          color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
                           textTransform: "capitalize",
                         }}
                       >
@@ -1518,7 +1514,7 @@ export default function EventCalendarPage() {
                   })}
                 </div>
               </div>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Times
                 <input
                   type="number"
@@ -1530,7 +1526,7 @@ export default function EventCalendarPage() {
                 />
               </label>
             </div>
-            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Attending
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "16px" }}>
@@ -1550,8 +1546,8 @@ export default function EventCalendarPage() {
                     }
                     style={{
                       ...buttonStyle,
-                      background: attending ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)",
-                      color: attending ? "#edf7ff" : "#8fa9bf",
+                      background: attending ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
+                      color: attending ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
                       minWidth: "42px",
                     }}
                   >
@@ -1577,7 +1573,7 @@ export default function EventCalendarPage() {
           <div style={{ ...modalStyle, width: "min(560px, 100%)" }}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Leave Request</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Leave Period From
                 <input
                   type="date"
@@ -1588,7 +1584,7 @@ export default function EventCalendarPage() {
                   style={inputStyle}
                 />
               </label>
-              <label style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 To
                 <input
                   type="date"
@@ -1598,7 +1594,7 @@ export default function EventCalendarPage() {
                 />
               </label>
             </div>
-            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Leave Type
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "12px" }}>
@@ -1611,8 +1607,8 @@ export default function EventCalendarPage() {
                     onClick={() => setLeaveRequestDraft((current) => ({ ...current, type }))}
                     style={{
                       ...buttonStyle,
-                      background: active ? "rgba(255, 218, 97, 0.24)" : "rgba(2, 10, 18, 0.64)",
-                      color: active ? "#fff4bf" : "#8fa9bf",
+                      background: active ? "#fff8e5" : "var(--fc-admin-button-bg)",
+                      color: active ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
                     }}
                   >
                     {type}
@@ -1620,7 +1616,7 @@ export default function EventCalendarPage() {
                 )
               })}
             </div>
-            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
+            <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
               Reason (Non Compulsory)
               <textarea
                 value={leaveRequestDraft.reason}
@@ -1628,7 +1624,7 @@ export default function EventCalendarPage() {
                 style={{ ...inputStyle, minHeight: "92px", resize: "vertical", lineHeight: 1.45 }}
               />
             </label>
-            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Applicant
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "14px" }}>
@@ -1641,8 +1637,8 @@ export default function EventCalendarPage() {
                     onClick={() => setLeaveRequestDraft((current) => ({ ...current, person }))}
                     style={{
                       ...buttonStyle,
-                      background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)",
-                      color: active ? "#edf7ff" : "#8fa9bf",
+                      background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
+                      color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
                       minWidth: "42px",
                     }}
                   >
@@ -1658,13 +1654,13 @@ export default function EventCalendarPage() {
                   borderRadius: "14px",
                   border:
                     leaveRequestDraft.status === "failed"
-                      ? "1px solid rgba(255, 105, 105, 0.42)"
-                      : "1px solid rgba(73, 219, 165, 0.34)",
+                      ? "1px solid var(--fc-admin-danger-border)"
+                      : "1px solid var(--fc-admin-success-border)",
                   background:
                     leaveRequestDraft.status === "failed"
-                      ? "rgba(255, 91, 91, 0.16)"
-                      : "rgba(73, 219, 165, 0.16)",
-                  color: leaveRequestDraft.status === "failed" ? "#ffd6d6" : "#eafff4",
+                      ? "var(--fc-admin-danger-bg)"
+                      : "var(--fc-admin-success-bg)",
+                  color: leaveRequestDraft.status === "failed" ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)",
                   fontSize: "13px",
                   fontWeight: 900,
                   padding: "11px 12px",
@@ -1703,10 +1699,10 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={{ ...modalStyle, width: "min(430px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
-            <p style={{ margin: "0 0 6px", color: "#d9eeff", fontSize: "14px", fontWeight: 800 }}>
+            <p style={{ margin: "0 0 6px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 800 }}>
               {emailPrompt.event.title || "NEW EVENT"}
             </p>
-            <p style={{ margin: "0 0 16px", color: "#a9c4dc", fontSize: "13px", fontWeight: 700 }}>
+            <p style={{ margin: "0 0 16px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               {formatEventRange(emailPrompt.event)}
             </p>
 
@@ -1715,9 +1711,9 @@ export default function EventCalendarPage() {
                 style={{
                   marginBottom: "16px",
                   borderRadius: "14px",
-                  border: "1px solid rgba(143, 215, 255, 0.28)",
-                  background: "rgba(143, 215, 255, 0.12)",
-                  color: "#d9eeff",
+                  border: "1px solid var(--fc-admin-selected-border)",
+                  background: "var(--fc-admin-selected-bg)",
+                  color: "var(--fc-admin-panel-text)",
                   fontSize: "13px",
                   fontWeight: 900,
                   padding: "11px 12px",
@@ -1732,9 +1728,9 @@ export default function EventCalendarPage() {
                 style={{
                   marginBottom: "16px",
                   borderRadius: "14px",
-                  border: "1px solid rgba(73, 219, 165, 0.34)",
-                  background: "linear-gradient(180deg, rgba(73, 219, 165, 0.24) 0%, rgba(20, 130, 93, 0.12) 100%)",
-                  color: "#eafff4",
+                  border: "1px solid var(--fc-admin-success-border)",
+                  background: "var(--fc-admin-success-bg)",
+                  color: "var(--fc-admin-success-text)",
                   fontSize: "13px",
                   fontWeight: 900,
                   padding: "11px 12px",
@@ -1751,9 +1747,9 @@ export default function EventCalendarPage() {
                 style={{
                   marginBottom: "16px",
                   borderRadius: "14px",
-                  border: "1px solid rgba(255, 105, 105, 0.42)",
-                  background: "rgba(255, 91, 91, 0.16)",
-                  color: "#ffd6d6",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  background: "var(--fc-admin-danger-bg)",
+                  color: "var(--fc-admin-danger-text)",
                   fontSize: "13px",
                   fontWeight: 900,
                   padding: "11px 12px",
@@ -1784,9 +1780,9 @@ export default function EventCalendarPage() {
                   ...buttonStyle,
                   background:
                     emailPrompt.status === "sent"
-                      ? "linear-gradient(180deg, rgba(73, 219, 165, 0.32) 0%, rgba(20, 130, 93, 0.16) 100%)"
+                      ? "var(--fc-admin-success-bg)"
                       : buttonStyle.background,
-                  color: emailPrompt.status === "sent" ? "#eafff4" : buttonStyle.color,
+                  color: emailPrompt.status === "sent" ? "var(--fc-admin-success-text)" : buttonStyle.color,
                   opacity: emailPrompt.status === "sending" ? 0.72 : 1,
                   cursor:
                     emailPrompt.status === "sending" || emailPrompt.status === "sent" ? "not-allowed" : "pointer",
@@ -1803,7 +1799,7 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={{ ...modalStyle, width: "min(460px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>People Columns</h2>
-            <p style={{ margin: "0 0 12px", color: "#a9c4dc", fontSize: "13px", fontWeight: 700 }}>
+            <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One person per line. Reorder the lines to reorder the columns.
             </p>
             <textarea
@@ -1832,7 +1828,7 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Email Reminders</h2>
-            <p style={{ margin: "0 0 12px", color: "#a9c4dc", fontSize: "13px", fontWeight: 700 }}>
+            <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One email per line. New and edited events will be emailed to this list from the configured fcuno.com sender.
             </p>
             <textarea

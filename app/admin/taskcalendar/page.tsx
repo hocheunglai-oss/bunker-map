@@ -22,7 +22,7 @@ const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
   color: "var(--fc-admin-panel-text)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   padding: "18px",
 }
 const shellStyle: React.CSSProperties = { width: "min(1320px, 100%)", margin: "0 auto" }
@@ -35,7 +35,7 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 800,
   padding: "8px 12px",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
 }
 const panelStyle: React.CSSProperties = {
   overflow: "auto",
@@ -43,7 +43,7 @@ const panelStyle: React.CSSProperties = {
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
   padding: "12px",
-  boxShadow: "0 30px 96px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.08)",
+  boxShadow: "0 16px 36px #00000012",
 }
 const tableStyle: React.CSSProperties = { borderCollapse: "collapse", width: "100%", minWidth: "1120px" }
 const thStyle: React.CSSProperties = {
@@ -51,7 +51,7 @@ const thStyle: React.CSSProperties = {
   top: 0,
   zIndex: 2,
   padding: "7px",
-  borderBottom: "1px solid rgba(210, 236, 255, 0.15)",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
   background: "var(--fc-table-head-bg)",
   color: "var(--fc-table-head-text)",
   fontSize: "10px",
@@ -62,7 +62,7 @@ const thStyle: React.CSSProperties = {
 }
 const tdStyle: React.CSSProperties = {
   padding: "4px 7px",
-  borderBottom: "1px solid rgba(255,255,255,0.08)",
+  borderBottom: "1px solid var(--fc-admin-border-soft)",
   fontSize: "12px",
   lineHeight: "16px",
   verticalAlign: "middle",
@@ -70,11 +70,11 @@ const tdStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   minHeight: "34px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "10px",
-  background: "linear-gradient(180deg, rgba(246,251,255,0.98) 0%, rgba(232,243,252,0.95) 100%)",
-  color: "#10243a",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
+  fontFamily: "var(--fc-admin-font)",
   fontSize: "13px",
   outline: "none",
   padding: "7px 10px",
@@ -83,9 +83,7 @@ const inputStyle: React.CSSProperties = {
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(2, 10, 18, 0.64)",
-  backdropFilter: "blur(8px)",
-  WebkitBackdropFilter: "blur(8px)",
+  background: "#1d1d1f",
   display: "grid",
   placeItems: "center",
   padding: "20px",
@@ -96,7 +94,7 @@ const modalStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "22px",
-  boxShadow: "0 30px 96px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.08)",
+  boxShadow: "0 18px 42px #0000001f",
   padding: "18px",
 }
 
@@ -266,12 +264,12 @@ export default function TaskCalendarPage() {
     <div style={pageStyle}>
       <div style={shellStyle}>
         <header style={{ marginBottom: "12px" }}>
-          <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>Office Tools</div>
+          <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>Office Tools</div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
             <button type="button" onClick={() => router.push("/admin")} style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>Back</button>
-            <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "#edf7ff" }}>Task Calendar</h1>
+            <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>Task Calendar</h1>
             <button type="button" onClick={openAddModal} aria-label="Add task" style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}>+</button>
-            <span style={{ color: "#a9c4dc", fontSize: "13px", fontWeight: 800 }}>{tasks.length} recurring reminders</span>
+            <span style={{ color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>{tasks.length} recurring reminders</span>
           </div>
         </header>
 
@@ -285,9 +283,9 @@ export default function TaskCalendarPage() {
                 onClick={() => setSelectedPerson(person)}
                 style={{
                   ...buttonStyle,
-                  background: active ? "linear-gradient(180deg, rgba(143, 215, 255, 0.96) 0%, rgba(40, 128, 190, 0.9) 100%)" : buttonStyle.background,
-                  color: active ? "#031b36" : buttonStyle.color,
-                  boxShadow: active ? "0 0 0 2px rgba(255,255,255,0.26), 0 8px 20px rgba(35, 165, 255, 0.28)" : buttonStyle.boxShadow,
+                  background: active ? "var(--fc-admin-selected-bg)" : buttonStyle.background,
+                  color: active ? "var(--fc-admin-selected-text)" : buttonStyle.color,
+                  boxShadow: "none",
                 }}
               >
                 {person}
@@ -318,13 +316,13 @@ export default function TaskCalendarPage() {
                     key={task.id}
                     onDoubleClick={() => openEditModal(task)}
                     style={{
-                      background: "rgba(5, 19, 34, 0.28)",
-                      boxShadow: rowHighlighted ? "inset 0 0 0 2px rgba(143, 215, 255, 0.78)" : "none",
+                      background: rowHighlighted ? "var(--fc-admin-selected-bg)" : "var(--fc-row-bg)",
+                      boxShadow: rowHighlighted ? "inset 0 0 0 2px var(--fc-admin-selected-border)" : "none",
                       cursor: "pointer",
                       opacity: selectedPerson !== "All" && !rowHighlighted ? 0.46 : 1,
                     }}
                   >
-                    <td style={{ ...tdStyle, color: "#edf7ff", fontWeight: 900 }}>***** {task.task}</td>
+                    <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}>***** {task.task}</td>
                     <td style={tdStyle}>{getTaskScheduleText(task)}</td>
                     {people.map((person) => {
                       const notify = task.notify.includes(person)
@@ -336,8 +334,8 @@ export default function TaskCalendarPage() {
                             placeItems: "center",
                             width: "28px",
                             borderRadius: "999px",
-                            background: notify ? "rgba(143, 215, 255, 0.24)" : copied ? "rgba(255, 218, 97, 0.2)" : "transparent",
-                            color: notify ? "#d9eeff" : copied ? "#ffe895" : "rgba(31, 45, 58, 0.48)",
+                            background: notify ? "var(--fc-admin-selected-bg)" : copied ? "#fff8e5" : "#ffffff",
+                            color: notify ? "var(--fc-admin-panel-text)" : copied ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
                             fontSize: "10px",
                             fontWeight: notify || copied ? 900 : 700,
                           }}>{notify ? "TO" : copied ? "CC" : person}</span>
@@ -345,8 +343,8 @@ export default function TaskCalendarPage() {
                       )
                     })}
                     <td style={tdStyle}>
-                      <span style={{ color: to.length ? "#bfffe5" : "#ffd6d6", fontWeight: 900 }}>TO {to.length}</span>
-                      <span style={{ color: "#a9c4dc", fontWeight: 900 }}> / CC {cc.length}</span>
+                      <span style={{ color: to.length ? "var(--fc-admin-success-text)" : "var(--fc-admin-danger-text)", fontWeight: 900 }}>TO {to.length}</span>
+                      <span style={{ color: "var(--fc-admin-muted)", fontWeight: 900 }}> / CC {cc.length}</span>
                     </td>
                   </tr>
                 )
@@ -360,11 +358,11 @@ export default function TaskCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>{draftTask.sourceRow ? "Edit Task" : "New Task"}</h2>
-            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
+            <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
               Task
               <input value={draftTask.task} onChange={(event) => setDraftTask((current) => ({ ...current, task: event.target.value }))} style={inputStyle} />
             </label>
-            <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Schedule</div>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Schedule</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "12px" }}>
               {scheduleTypes.map((scheduleType) => {
                 const active = draftTask.scheduleType === scheduleType
@@ -373,7 +371,7 @@ export default function TaskCalendarPage() {
                     key={scheduleType}
                     type="button"
                     onClick={() => setDraftTask((current) => ({ ...current, scheduleType }))}
-                    style={{ ...buttonStyle, background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)" }}
+                    style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}
                   >
                     {scheduleType}
                   </button>
@@ -385,7 +383,7 @@ export default function TaskCalendarPage() {
                 {weekDays.map((day, index) => {
                   const active = draftTask.dayOfWeek === index
                   return (
-                    <button key={day} type="button" onClick={() => setDraftTask((current) => ({ ...current, dayOfWeek: index }))} style={{ ...buttonStyle, background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)" }}>
+                    <button key={day} type="button" onClick={() => setDraftTask((current) => ({ ...current, dayOfWeek: index }))} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
                       {day.slice(0, 3)}
                     </button>
                   )
@@ -393,7 +391,7 @@ export default function TaskCalendarPage() {
               </div>
             )}
             {(draftTask.scheduleType === "Monthly" || draftTask.scheduleType === "Yearly") && (
-              <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
+              <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
                 Day Of Month
                 <input
                   value={draftTask.daysOfMonth.join(", ")}
@@ -408,7 +406,7 @@ export default function TaskCalendarPage() {
                   const value = index + 1
                   const active = (draftTask.months || []).includes(value)
                   return (
-                    <button key={month} type="button" onClick={() => toggleDraftMonth(value)} style={{ ...buttonStyle, background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)" }}>
+                    <button key={month} type="button" onClick={() => toggleDraftMonth(value)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
                       {month}
                     </button>
                   )
@@ -417,12 +415,12 @@ export default function TaskCalendarPage() {
             )}
             {(["notify", "cc"] as const).map((field) => (
               <div key={field} style={{ marginBottom: "12px" }}>
-                <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>{field === "notify" ? "Notify To" : "CC Copy"}</div>
+                <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>{field === "notify" ? "Notify To" : "CC Copy"}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
                   {people.map((person) => {
                     const active = draftTask[field].includes(person)
                     return (
-                      <button key={person} type="button" onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "rgba(143, 215, 255, 0.24)" : "rgba(2, 10, 18, 0.64)", color: active ? "#edf7ff" : "#8fa9bf", minWidth: "42px" }}>
+                      <button key={person} type="button" onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)", color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)", minWidth: "42px" }}>
                         {person}
                       </button>
                     )
@@ -430,12 +428,12 @@ export default function TaskCalendarPage() {
                 </div>
               </div>
             ))}
-            <label style={{ display: "block", color: "#8fd7ff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "14px" }}>
+            <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "14px" }}>
               Remark
               <input value={draftTask.remark} onChange={(event) => setDraftTask((current) => ({ ...current, remark: event.target.value }))} style={inputStyle} />
             </label>
             <div style={{ display: "flex", justifyContent: "space-between", gap: "9px" }}>
-              <button type="button" onClick={deleteDraftTask} style={{ ...buttonStyle, borderColor: "rgba(255, 105, 105, 0.48)", color: "#ffd6d6" }}>Delete</button>
+              <button type="button" onClick={deleteDraftTask} style={{ ...buttonStyle, borderColor: "var(--fc-admin-danger-border)", color: "var(--fc-admin-danger-text)" }}>Delete</button>
               <div style={{ display: "flex", gap: "9px" }}>
                 <button type="button" onClick={() => setModalOpen(false)} style={buttonStyle}>Cancel</button>
                 <button type="button" onClick={saveDraftTask} style={buttonStyle}>Save</button>

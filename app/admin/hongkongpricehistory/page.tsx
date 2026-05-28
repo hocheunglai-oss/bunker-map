@@ -54,40 +54,38 @@ function average(values: Array<number | null>) {
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   background:
-    "linear-gradient(180deg, #0a2c4c 0%, #06213b 32%, #041629 100%)",
+    "var(--fc-admin-page-bg)",
   padding: "24px",
-  fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#edf7ff",
+  fontFamily: "var(--fc-admin-font)",
+  color: "var(--fc-admin-panel-text)",
 }
 
 const outerPanelStyle: React.CSSProperties = {
   maxWidth: "920px",
   margin: "0 auto",
   background:
-    "linear-gradient(180deg, rgba(6, 24, 44, 0.62) 0%, rgba(7, 27, 49, 0.54) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.16)",
+    "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "24px",
   padding: "22px",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
-  boxShadow: "0 24px 70px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
+  boxShadow: "0 18px 42px #00000012",
 }
 
 const sectionCardStyle: React.CSSProperties = {
   background:
-    "linear-gradient(180deg, rgba(14, 43, 70, 0.88) 0%, rgba(7, 26, 44, 0.86) 100%)",
-  border: "1px solid rgba(210, 236, 255, 0.14)",
+    "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border-soft)",
   borderRadius: "22px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
 }
 
 const controlStyle: React.CSSProperties = {
   padding: "9px 12px",
   borderRadius: "12px",
-  border: "1px solid rgba(210,236,255,0.16)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.05) 100%)",
-  color: "#edf7ff",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  border: "1px solid var(--fc-admin-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
+  boxShadow: "none",
 }
 
 const secondaryButtonStyle: React.CSSProperties = {
@@ -96,14 +94,14 @@ const secondaryButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   textDecoration: "none",
   fontSize: "13px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "none",
 }
 
 export default function HongKongPriceHistoryPage() {
@@ -405,10 +403,8 @@ export default function HongKongPriceHistoryPage() {
             zIndex: 20,
             margin: "-22px -22px 20px",
             padding: "18px 22px 14px",
-            background: "linear-gradient(180deg, rgba(6, 24, 44, 0.62) 0%, rgba(7, 27, 49, 0.54) 100%)",
-            backdropFilter: "blur(18px)",
-            WebkitBackdropFilter: "blur(18px)",
-            borderBottom: "1px solid rgba(210, 236, 255, 0.16)",
+            background: "var(--fc-admin-panel-bg)",
+            borderBottom: "1px solid var(--fc-admin-border)",
             borderTopLeftRadius: "24px",
             borderTopRightRadius: "24px",
             display: "flex",
@@ -443,9 +439,9 @@ export default function HongKongPriceHistoryPage() {
               rel="noopener noreferrer"
               style={{
                 ...secondaryButtonStyle,
-                border: "1px solid rgba(255, 145, 86, 0.24)",
-                background: "linear-gradient(180deg, rgba(255, 128, 64, 0.26) 0%, rgba(201, 88, 22, 0.14) 100%)",
-                color: "#ffd2b2",
+                border: "1px solid var(--fc-admin-warning-border)",
+                background: "var(--fc-admin-warning-bg)",
+                color: "var(--fc-admin-warning-text)",
               }}
             >
               Check
@@ -456,13 +452,13 @@ export default function HongKongPriceHistoryPage() {
               disabled={publishing}
               style={{
                 ...secondaryButtonStyle,
-                border: published ? "1px solid rgba(210,236,255,0.16)" : "1px solid rgba(80, 170, 255, 0.18)",
+                border: published ? "1px solid var(--fc-admin-border)" : "1px solid var(--fc-admin-selected-border)",
                 background: published
                   ? secondaryButtonStyle.background
-                  : "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                color: published ? "#d7e8ff" : "#e2f3ff",
+                  : "var(--fc-admin-primary-button-bg)",
+                color: published ? "var(--fc-admin-button-text)" : "var(--fc-admin-primary-button-text)",
                 cursor: "pointer",
-                boxShadow: published ? secondaryButtonStyle.boxShadow : "inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(80,170,255,0.06)",
+                boxShadow: "none",
               }}
             >
               {publishing ? "Publishing..." : published ? "Published" : "Publish"}
@@ -474,9 +470,9 @@ export default function HongKongPriceHistoryPage() {
               style={{
                 ...secondaryButtonStyle,
                 cursor: "pointer",
-                background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-                border: "1px solid rgba(255, 120, 120, 0.16)",
-                color: "#ffd4d8",
+                background: "var(--fc-admin-danger-bg)",
+                border: "1px solid var(--fc-admin-danger-border)",
+                color: "var(--fc-admin-danger-text)",
               }}
             >
               {showDeleteButtons ? "Hide Delete" : "Show Delete"}
@@ -486,15 +482,15 @@ export default function HongKongPriceHistoryPage() {
 
         <div style={{ ...sectionCardStyle, padding: "16px", marginBottom: "14px" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "end", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "end" }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>Year</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "end", width: "100%" }}>
+              <label style={{ display: "flex", flex: "1 1 160px", minWidth: 0, flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>Year</span>
                 <select
                   value={selectedYear}
                   onChange={(event) => setSelectedYear(event.target.value)}
                   style={{
                     ...controlStyle,
-                    minWidth: "160px",
+                    width: "100%",
                   }}
                 >
                   <option value="all">All years</option>
@@ -504,14 +500,14 @@ export default function HongKongPriceHistoryPage() {
                 </select>
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>Month</span>
+              <label style={{ display: "flex", flex: "1 1 160px", minWidth: 0, flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>Month</span>
                 <select
                   value={selectedMonth}
                   onChange={(event) => setSelectedMonth(event.target.value)}
                   style={{
                     ...controlStyle,
-                    minWidth: "160px",
+                    width: "100%",
                   }}
                 >
                   <option value="all">All months</option>
@@ -529,26 +525,28 @@ export default function HongKongPriceHistoryPage() {
               <div
                 style={{
                   minHeight: "58px",
-                  minWidth: "280px",
+                  flex: "2 1 280px",
+                  minWidth: 0,
                   padding: "10px 12px",
                   borderRadius: "16px",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)",
-                  border: "1px solid rgba(210,236,255,0.14)",
+                  background: "var(--fc-admin-panel-soft-bg)",
+                  border: "1px solid var(--fc-admin-border-soft)",
                   fontSize: "13px",
                   display: "flex",
                   flexDirection: "column",
                   justifyContent: "center",
                   gap: "4px",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                  overflowWrap: "anywhere",
+                  boxShadow: "none",
                 }}
               >
-                <strong style={{ color: "#dff3ff" }}>Monthly Average</strong>
+                <strong style={{ color: "var(--fc-admin-panel-text)" }}>Monthly Average</strong>
                 {showMonthlyAverage && monthlyAverage ? (
-                  <span style={{ color: "#edf7ff" }}>
+                  <span style={{ color: "var(--fc-admin-panel-text)" }}>
                     HSFO: {monthlyAverage.hsfo ?? "-"} | VLSFO: {monthlyAverage.vlsfo ?? "-"} | MGO: {monthlyAverage.mgo ?? "-"}
                   </span>
                 ) : (
-                  <span style={{ color: "#9db9cf" }}>Select both year and month to show data.</span>
+                  <span style={{ color: "var(--fc-admin-muted)" }}>Select both year and month to show data.</span>
                 )}
               </div>
             </div>
@@ -564,7 +562,7 @@ export default function HongKongPriceHistoryPage() {
               { label: "MGO", value: formMgo, setter: setFormMgo, type: "text", width: "90px" },
             ].map((field) => (
               <label key={field.label} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 700, color: "#dff3ff" }}>{field.label}</span>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>{field.label}</span>
                 <input
                   type={field.type}
                   value={field.value}
@@ -583,12 +581,12 @@ export default function HongKongPriceHistoryPage() {
               style={{
                 ...secondaryButtonStyle,
                 background: saving || !formDate
-                  ? "linear-gradient(180deg, rgba(236, 193, 79, 0.16) 0%, rgba(176, 132, 26, 0.08) 100%)"
-                  : "linear-gradient(180deg, rgba(236, 193, 79, 0.28) 0%, rgba(176, 132, 26, 0.14) 100%)",
-                color: saving || !formDate ? "#f3dfac" : "#ffe7a6",
+                  ? "var(--fc-admin-warning-bg)"
+                  : "var(--fc-admin-warning-bg)",
+                color: saving || !formDate ? "var(--fc-admin-warning-text)" : "var(--fc-admin-warning-text)",
                 border: saving || !formDate
-                  ? "1px solid rgba(236, 193, 79, 0.16)"
-                  : "1px solid rgba(236, 193, 79, 0.24)",
+                  ? "1px solid var(--fc-admin-warning-border)"
+                  : "1px solid var(--fc-admin-warning-border)",
                 cursor: saving ? "wait" : "pointer",
                 height: "42px",
               }}
@@ -601,13 +599,13 @@ export default function HongKongPriceHistoryPage() {
               disabled={saving}
               style={{
                 ...secondaryButtonStyle,
-                background: "linear-gradient(180deg, rgba(56, 214, 154, 0.26) 0%, rgba(20, 130, 93, 0.12) 100%)",
-                color: "#ddffef",
-                border: "1px solid rgba(73, 219, 165, 0.22)",
+                background: "var(--fc-admin-success-bg)",
+                color: "var(--fc-admin-success-text)",
+                border: "1px solid var(--fc-admin-success-border)",
                 cursor: saving ? "wait" : "pointer",
                 height: "42px",
                 textDecoration: "none",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(73,219,165,0.04)",
+                boxShadow: "none",
               }}
             >
               {saving ? "Saving..." : "Add As Latest"}
@@ -617,12 +615,12 @@ export default function HongKongPriceHistoryPage() {
 
         <div style={{ ...sectionCardStyle, overflow: "hidden" }}>
           {loading ? (
-            <p style={{ margin: 0, padding: "14px", color: "#dff3ff" }}>Loading history...</p>
+            <p style={{ margin: 0, padding: "14px", color: "var(--fc-admin-panel-text)" }}>Loading history...</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ background: "rgba(7, 31, 54, 0.88)", color: "white" }}>
+                  <tr style={{ background: "var(--fc-table-head-bg)", color: "var(--fc-admin-panel-text)" }}>
                     {["Date", "HSFO", "VLSFO", "MGO", ...(showDeleteButtons ? ["Delete"] : [])].map((label) => (
                       <th
                         key={label}
@@ -644,30 +642,30 @@ export default function HongKongPriceHistoryPage() {
                     <tr
                       key={row.id}
                       style={{
-                        background: index % 2 === 0 ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)",
+                        background: index % 2 === 0 ? "var(--fc-admin-panel-soft-bg)" : "var(--fc-admin-panel-bg)",
                       }}
                     >
-                      <td style={{ padding: "8px 12px", fontSize: "13px", whiteSpace: "nowrap", color: "#edf7ff" }}>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", whiteSpace: "nowrap", color: "var(--fc-admin-panel-text)" }}>
                         {dateFormatter.format(new Date(row.recorded_at))}
                       </td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.hsfo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.vlsfo ?? "-"}</td>
-                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "#edf7ff" }}>{row.mgo ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>{row.hsfo ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>{row.vlsfo ?? "-"}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>{row.mgo ?? "-"}</td>
                       {showDeleteButtons && (
                         <td style={{ padding: "8px 12px" }}>
                           <button
                             onClick={() => deleteHistoryRow(row)}
                             disabled={deletingId === row.id}
                             style={{
-                              background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-                              color: "#ffd4d8",
-                              border: "1px solid rgba(255, 120, 120, 0.16)",
+                              background: "var(--fc-admin-danger-bg)",
+                              color: "var(--fc-admin-danger-text)",
+                              border: "1px solid var(--fc-admin-danger-border)",
                               borderRadius: "999px",
                               padding: "7px 12px",
                               cursor: "pointer",
                               fontSize: "12px",
                               fontWeight: 700,
-                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                              boxShadow: "none",
                             }}
                           >
                             {deletingId === row.id ? "Deleting..." : "Delete"}
@@ -678,7 +676,7 @@ export default function HongKongPriceHistoryPage() {
                   ))}
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={showDeleteButtons ? 5 : 4} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#dff3ff" }}>
+                      <td colSpan={showDeleteButtons ? 5 : 4} style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>
                         No history records found for the current filters.
                       </td>
                     </tr>

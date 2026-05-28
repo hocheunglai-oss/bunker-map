@@ -130,18 +130,18 @@ export default function AdminPage() {
   const today = new Date().toDateString()
 
   const th: React.CSSProperties = {
-    borderBottom: "1px solid rgba(255,255,255,0.12)",
+    borderBottom: "1px solid var(--fc-admin-border-soft)",
     padding: "7px 5px",
     fontSize: "10px",
     letterSpacing: "0.08em",
     textTransform: "uppercase",
-    color: "#b9d6ed",
+    color: "var(--fc-admin-muted)",
     textAlign: "left",
     whiteSpace: "nowrap",
   }
 
   const td: React.CSSProperties = {
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    borderBottom: "1px solid var(--fc-admin-border-soft)",
     padding: "2px 5px",
     verticalAlign: "middle",
   }
@@ -730,23 +730,21 @@ export default function AdminPage() {
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at top, #114a80 0%, #0a2c4c 34%, #041629 100%)",
+          "var(--fc-admin-page-bg)",
         padding: "24px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-        color: "#edf7ff",
+        fontFamily: "var(--fc-admin-font)",
+        color: "var(--fc-admin-panel-text)",
       }}
     >
       <div
         style={{
           maxWidth: "1480px",
           margin: "0 auto",
-          background: "rgba(6, 24, 44, 0.68)",
-          border: "1px solid rgba(210, 236, 255, 0.16)",
+          background: "var(--fc-admin-panel-bg)",
+          border: "1px solid var(--fc-admin-border)",
           borderRadius: "24px",
           padding: "22px",
-          backdropFilter: "blur(18px)",
-          WebkitBackdropFilter: "blur(18px)",
-          boxShadow: "0 24px 80px rgba(0, 0, 0, 0.24)",
+          boxShadow: "0 18px 42px #00000012",
         }}
       >
         <div
@@ -756,10 +754,8 @@ export default function AdminPage() {
             zIndex: 20,
             margin: "-22px -22px 16px",
             padding: "18px 22px 14px",
-            background: "rgba(6, 24, 44, 0.92)",
-            backdropFilter: "blur(18px)",
-            WebkitBackdropFilter: "blur(18px)",
-            borderBottom: "1px solid rgba(210, 236, 255, 0.14)",
+            background: "var(--fc-admin-panel-bg)",
+            borderBottom: "1px solid var(--fc-admin-border-soft)",
             borderTopLeftRadius: "24px",
             borderTopRightRadius: "24px",
           }}
@@ -805,9 +801,9 @@ export default function AdminPage() {
                 disabled={publishingChina}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                  border: "1px solid rgba(80, 170, 255, 0.18)",
-                  color: "#e2f3ff",
+                  background: "var(--fc-admin-primary-button-bg)",
+                  border: "1px solid var(--fc-admin-selected-border)",
+                  color: "var(--fc-admin-primary-button-text)",
                 }}
               >
                 {publishingChina ? "Publishing China..." : publishedChina ? "Published China" : "Publish China"}
@@ -819,9 +815,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                  border: "1px solid rgba(255, 120, 120, 0.16)",
-                  color: "#ffd4d8",
+                  background: "var(--fc-admin-danger-bg)",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  color: "var(--fc-admin-danger-text)",
                 }}
               >
                 Check China
@@ -831,9 +827,9 @@ export default function AdminPage() {
                 disabled={publishingCompact}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                  border: "1px solid rgba(80, 170, 255, 0.18)",
-                  color: "#e2f3ff",
+                  background: "var(--fc-admin-primary-button-bg)",
+                  border: "1px solid var(--fc-admin-selected-border)",
+                  color: "var(--fc-admin-primary-button-text)",
                 }}
               >
                 {publishingCompact ? "Publishing Compact..." : publishedCompact ? "Published Compact" : "Publish Compact"}
@@ -845,9 +841,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                  border: "1px solid rgba(255, 120, 120, 0.16)",
-                  color: "#ffd4d8",
+                  background: "var(--fc-admin-danger-bg)",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  color: "var(--fc-admin-danger-text)",
                 }}
               >
                 Check Compact
@@ -865,9 +861,9 @@ export default function AdminPage() {
                       minWidth: "210px",
                       padding: "8px",
                       borderRadius: "16px",
-                      background: "linear-gradient(180deg, rgba(12, 40, 66, 0.96) 0%, rgba(6, 24, 44, 0.96) 100%)",
-                      border: "1px solid rgba(210,236,255,0.14)",
-                      boxShadow: "0 22px 40px rgba(0,0,0,0.22)",
+                      background: "var(--fc-admin-panel-soft-bg)",
+                      border: "1px solid var(--fc-admin-border-soft)",
+                      boxShadow: "0 16px 36px #00000018",
                       display: "grid",
                       gap: "6px",
                       zIndex: 30,
@@ -917,9 +913,9 @@ export default function AdminPage() {
                 disabled={publishingTaiwan}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                  border: "1px solid rgba(80, 170, 255, 0.18)",
-                  color: "#e2f3ff",
+                  background: "var(--fc-admin-primary-button-bg)",
+                  border: "1px solid var(--fc-admin-selected-border)",
+                  color: "var(--fc-admin-primary-button-text)",
                 }}
               >
                 {publishingTaiwan ? "Publishing Taiwan..." : publishedTaiwan ? "Published Taiwan" : "Publish Taiwan"}
@@ -931,9 +927,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                  border: "1px solid rgba(255, 120, 120, 0.16)",
-                  color: "#ffd4d8",
+                  background: "var(--fc-admin-danger-bg)",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  color: "var(--fc-admin-danger-text)",
                 }}
               >
                 Check Taiwan
@@ -943,9 +939,9 @@ export default function AdminPage() {
                 disabled={publishingHongKong}
                 style={{
                   ...toolbarButtonStyle,
-                  background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                  border: "1px solid rgba(80, 170, 255, 0.18)",
-                  color: "#e2f3ff",
+                  background: "var(--fc-admin-primary-button-bg)",
+                  border: "1px solid var(--fc-admin-selected-border)",
+                  color: "var(--fc-admin-primary-button-text)",
                 }}
               >
                 {publishingHongKong ? "Publishing HK..." : publishedHongKong ? "Published HK" : "Publish HK"}
@@ -957,9 +953,9 @@ export default function AdminPage() {
                 style={{
                   ...toolbarButtonStyle,
                   textDecoration: "none",
-                  background: "linear-gradient(180deg, rgba(210, 74, 74, 0.18) 0%, rgba(170, 47, 53, 0.1) 100%)",
-                  border: "1px solid rgba(255, 120, 120, 0.16)",
-                  color: "#ffd4d8",
+                  background: "var(--fc-admin-danger-bg)",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  color: "var(--fc-admin-danger-text)",
                 }}
               >
                 Check HK
@@ -984,10 +980,10 @@ export default function AdminPage() {
                   style={{
                     ...tabButtonStyle,
                     background:
-                      selectedPortGroup === group ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
+                      selectedPortGroup === group ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
                     borderColor:
-                      selectedPortGroup === group ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.06)",
-                    color: selectedPortGroup === group ? "#edf7ff" : "#b9d6ed",
+                      selectedPortGroup === group ? "var(--fc-admin-selected-border)" : "var(--fc-admin-button-border)",
+                    color: selectedPortGroup === group ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
                   }}
                 >
                   {getDisplayGroupLabel(group)}
@@ -997,11 +993,11 @@ export default function AdminPage() {
                 onClick={() => setHideTertiary((prev) => !prev)}
                 style={{
                   ...tabButtonStyle,
-                  background: hideTertiary ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
+                  background: hideTertiary ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
                   borderColor: hideTertiary
-                    ? "rgba(143,215,255,0.38)"
-                    : "rgba(255,255,255,0.06)",
-                  color: hideTertiary ? "#edf7ff" : "#b9d6ed",
+                    ? "var(--fc-admin-selected-border)"
+                    : "var(--fc-admin-button-border)",
+                  color: hideTertiary ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
                 }}
               >
                 Hide Tertiary
@@ -1024,10 +1020,10 @@ export default function AdminPage() {
                   style={{
                     ...tabButtonStyle,
                     background:
-                      selectedTab === tab.label ? "rgba(143,215,255,0.18)" : "rgba(255,255,255,0.04)",
+                      selectedTab === tab.label ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
                     borderColor:
-                      selectedTab === tab.label ? "rgba(143,215,255,0.38)" : "rgba(255,255,255,0.06)",
-                    color: selectedTab === tab.label ? "#edf7ff" : "#b9d6ed",
+                      selectedTab === tab.label ? "var(--fc-admin-selected-border)" : "var(--fc-admin-button-border)",
+                    color: selectedTab === tab.label ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
                   }}
                 >
                   {getDisplayTabLabel(tab.label)}
@@ -1108,8 +1104,8 @@ export default function AdminPage() {
                 const isFormulaPort = isFormulaStylePort(port)
                 const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
                 const rowTint = isFormulaPort
-                  ? "rgba(24, 74, 128, 0.34)"
-                  : "rgba(14, 52, 96, 0.34)"
+                  ? "#eef6ff"
+                  : "#ffffff"
 
                 return (
                   <tr
@@ -1120,7 +1116,7 @@ export default function AdminPage() {
                     onDragOver={(event) => event.preventDefault()}
                     style={{ background: rowTint }}
                   >
-                    <td style={{ ...td, color: "#8fb7d5", fontSize: "11px" }}>⇅</td>
+                    <td style={{ ...td, color: "var(--fc-admin-muted)", fontSize: "11px" }}>⇅</td>
                     <td style={td}>
                       <span
                         style={{
@@ -1129,14 +1125,12 @@ export default function AdminPage() {
                           height: "11px",
                           borderRadius: "50%",
                           background: updated
-                            ? "radial-gradient(circle at 30% 30%, rgba(214,255,238,0.95) 0%, rgba(92,237,177,0.95) 34%, rgba(28,154,110,0.98) 100%)"
-                            : "radial-gradient(circle at 30% 30%, rgba(255,225,230,0.95) 0%, rgba(255,126,143,0.95) 34%, rgba(191,56,75,0.98) 100%)",
+                            ? "var(--fc-admin-success-bg)"
+                            : "var(--fc-admin-danger-bg)",
                           border: updated
-                            ? "1px solid rgba(109, 241, 191, 0.45)"
-                            : "1px solid rgba(255, 136, 150, 0.42)",
-                          boxShadow: updated
-                            ? "0 0 0 2px rgba(56, 211, 159, 0.14), 0 0 14px rgba(56, 211, 159, 0.18)"
-                            : "0 0 0 2px rgba(224, 90, 90, 0.14), 0 0 14px rgba(224, 90, 90, 0.18)",
+                            ? "1px solid var(--fc-admin-success-border)"
+                            : "1px solid var(--fc-admin-danger-border)",
+                          boxShadow: "none",
                         }}
                       />
                     </td>
@@ -1210,7 +1204,7 @@ export default function AdminPage() {
                       </td>
                     ))}
 
-                    <td style={{ ...td, fontSize: "12px", whiteSpace: "nowrap", color: "#c4dff2" }}>
+                    <td style={{ ...td, fontSize: "12px", whiteSpace: "nowrap", color: "var(--fc-admin-muted)" }}>
                       {port.updated_at
                         ? new Date(port.updated_at).toLocaleDateString("en-GB")
                         : "-"}
@@ -1222,16 +1216,14 @@ export default function AdminPage() {
                         disabled={isSaving}
                         style={{
                           ...saveButtonStyle,
-                          color: isSaved ? "#e5eef7" : "#ddffef",
+                          color: isSaved ? "var(--fc-admin-muted)" : "var(--fc-admin-success-text)",
                           border: isSaved
-                            ? "1px solid rgba(196, 212, 231, 0.24)"
-                            : "1px solid rgba(73, 219, 165, 0.32)",
+                            ? "1px solid var(--fc-admin-border)"
+                            : "1px solid var(--fc-admin-success-border)",
                           background: isSaved
-                            ? "linear-gradient(180deg, rgba(171, 187, 204, 0.2) 0%, rgba(98, 112, 128, 0.12) 100%)"
-                            : "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-                          boxShadow: isSaved
-                            ? "inset 0 1px 0 rgba(255,255,255,0.1), 0 10px 24px rgba(8,24,44,0.16)"
-                            : "inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 24px rgba(20,130,93,0.18), 0 0 0 1px rgba(37,211,102,0.08)",
+                            ? "var(--fc-admin-button-bg)"
+                            : "var(--fc-admin-success-bg)",
+                          boxShadow: "none",
                         }}
                       >
                         {isSaving ? "Saving..." : isSaved ? "Saved" : "Save"}
@@ -1253,23 +1245,23 @@ export default function AdminPage() {
         </div>
         <aside
           style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(210,236,255,0.14)",
+            background: "var(--fc-admin-panel-soft-bg)",
+            border: "1px solid var(--fc-admin-border-soft)",
             borderRadius: "18px",
             padding: "14px",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+            boxShadow: "none",
             display: "grid",
             gap: "10px",
             position: isMobile ? "static" : "sticky",
             top: isMobile ? undefined : "122px",
           }}
         >
-          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
             Log
           </div>
           <div style={{ display: "grid", gap: "8px", maxHeight: isMobile ? "none" : "70vh", overflowY: "auto", paddingRight: "4px" }}>
             {activityLogs.length === 0 ? (
-              <div style={{ color: "#a7c3d9", fontSize: "12px", lineHeight: 1.5 }}>
+              <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", lineHeight: 1.5 }}>
                 No activity yet. Saves, publishes, new ports, and formula changes will appear here.
               </div>
             ) : (
@@ -1279,12 +1271,12 @@ export default function AdminPage() {
                   style={{
                     padding: "10px 12px",
                     borderRadius: "14px",
-                    background: "linear-gradient(180deg, rgba(20, 60, 96, 0.44) 0%, rgba(8, 28, 44, 0.34) 100%)",
-                    border: "1px solid rgba(210,236,255,0.08)",
+                    background: "var(--fc-admin-panel-bg)",
+                    border: "1px solid var(--fc-admin-border-soft)",
                   }}
                 >
-                  <div style={{ color: "#edf7ff", fontSize: "12px", lineHeight: 1.45 }}>{log.message}</div>
-                  <div style={{ marginTop: "4px", color: "#8fb7d5", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                  <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.45 }}>{log.message}</div>
+                  <div style={{ marginTop: "4px", color: "var(--fc-admin-muted)", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                     {log.timestamp}
                   </div>
                 </div>
@@ -1297,11 +1289,11 @@ export default function AdminPage() {
         <section
           style={{
             marginTop: "16px",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(210,236,255,0.14)",
+            background: "var(--fc-admin-panel-soft-bg)",
+            border: "1px solid var(--fc-admin-border-soft)",
             borderRadius: "18px",
             padding: "14px",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+            boxShadow: "none",
           }}
         >
           <div
@@ -1314,10 +1306,10 @@ export default function AdminPage() {
               marginBottom: "12px",
             }}
           >
-            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>
+            <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
               Report Dates
             </div>
-            <div style={{ color: "#a7c3d9", fontSize: "12px" }}>
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>
               Leave blank to use the automatic publish date.
             </div>
           </div>
@@ -1337,14 +1329,14 @@ export default function AdminPage() {
                   gap: "8px",
                   padding: "12px",
                   borderRadius: "14px",
-                  background: "linear-gradient(180deg, rgba(20, 60, 96, 0.44) 0%, rgba(8, 28, 44, 0.34) 100%)",
-                  border: "1px solid rgba(210,236,255,0.08)",
+                  background: "var(--fc-admin-panel-bg)",
+                  border: "1px solid var(--fc-admin-border-soft)",
                 }}
               >
-                <span style={{ color: "#edf7ff", fontSize: "13px", fontWeight: 800 }}>
+                <span style={{ color: "var(--fc-admin-panel-text)", fontSize: "13px", fontWeight: 800 }}>
                   {item.label}
                 </span>
-                <span style={{ color: "#a7c3d9", fontSize: "12px" }}>
+                <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>
                   Current: {reportDates[item.key] || "-"}
                 </span>
                 <input
@@ -1366,19 +1358,19 @@ export default function AdminPage() {
         <section
           style={{
             marginTop: "16px",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(210,236,255,0.14)",
+            background: "var(--fc-admin-panel-soft-bg)",
+            border: "1px solid var(--fc-admin-border-soft)",
             borderRadius: "18px",
             padding: "14px",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+            boxShadow: "none",
           }}
         >
-          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700, marginBottom: "10px" }}>
+          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "10px" }}>
             Missing Value Overrides
           </div>
 
           {missingFuelMatrix.length === 0 ? (
-            <div style={{ color: "#a7c3d9", fontSize: "12px" }}>No missing price/formula fields right now.</div>
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No missing price/formula fields right now.</div>
           ) : (
             <div
               style={{
@@ -1401,10 +1393,10 @@ export default function AdminPage() {
                           padding: "2px 2px",
                         }}
                       >
-                        <div style={{ fontSize: "11px", fontWeight: 800, color: "#8fd7ff", letterSpacing: "0.1em", textTransform: "uppercase" }}>{item.group}</div>
-                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>HSFO</div>
-                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>VLSFO</div>
-                        <div style={{ color: "#8fd7ff", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>MGO</div>
+                        <div style={{ fontSize: "11px", fontWeight: 800, color: "var(--fc-admin-link)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{item.group}</div>
+                        <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>HSFO</div>
+                        <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>VLSFO</div>
+                        <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>MGO</div>
                       </div>
                     )}
                     <div
@@ -1415,19 +1407,19 @@ export default function AdminPage() {
                         gap: "8px",
                         padding: "8px 10px",
                         borderRadius: "12px",
-                        border: "1px solid rgba(210,236,255,0.1)",
-                        background: "rgba(255,255,255,0.02)",
+                        border: "1px solid var(--fc-admin-border-soft)",
+                        background: "var(--fc-admin-panel-bg)",
                       }}
                     >
-                      <div style={{ color: "#edf7ff", fontSize: "12px", fontWeight: 700 }}>{item.port}</div>
+                      <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 700 }}>{item.port}</div>
                       {(["hsfo", "vlsfo", "mgo"] as const).map((fuel) => {
                         if (!item.missing[fuel]) {
-                          return <div key={fuel} style={{ textAlign: "center", color: "#6d8ca8", fontSize: "12px" }}>-</div>
+                          return <div key={fuel} style={{ textAlign: "center", color: "var(--fc-admin-muted)", fontSize: "12px" }}>-</div>
                         }
                         const mapKey = buildFallbackKey(item.port, fuel)
                         const current = reportFallbacks[mapKey] ?? "-"
                         const selectColor =
-                          current === "NA" ? "#ff8d8d" : current === "SE" ? "#ffd166" : "#edf7ff"
+                          current === "NA" ? "var(--fc-admin-danger-text)" : current === "SE" ? "var(--fc-admin-warning-text)" : "var(--fc-admin-panel-text)"
                         return (
                           <select
                             key={fuel}
@@ -1466,9 +1458,9 @@ export default function AdminPage() {
 const compactInputStyle: React.CSSProperties = {
   padding: "4px 6px",
   borderRadius: "8px",
-  border: "1px solid rgba(173, 216, 255, 0.16)",
-  background: "rgba(255,255,255,0.03)",
-  color: "#edf7ff",
+  border: "1px solid var(--fc-admin-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
   fontSize: "12px",
   outline: "none",
   lineHeight: 1.2,
@@ -1480,53 +1472,53 @@ const toolbarButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   padding: "6px 12px",
   minWidth: "118px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
   lineHeight: 1.1,
   textAlign: "center",
   whiteSpace: "nowrap",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "none",
 }
 
 const tabButtonStyle: React.CSSProperties = {
   padding: "7px 11px",
-  border: "1px solid rgba(210,236,255,0.14)",
+  border: "1px solid var(--fc-admin-border-soft)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%)",
+  background: "var(--fc-admin-button-bg)",
   cursor: "pointer",
   fontSize: "11px",
   fontWeight: 700,
   letterSpacing: "0.02em",
-  color: "#d7e8ff",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  color: "var(--fc-admin-button-text)",
+  boxShadow: "none",
 }
 
 const saveButtonStyle: React.CSSProperties = {
   minWidth: "84px",
-  color: "#ddffef",
+  color: "var(--fc-admin-success-text)",
   padding: "6px 12px",
-  border: "1px solid rgba(73, 219, 165, 0.32)",
+  border: "1px solid var(--fc-admin-success-border)",
   borderRadius: "999px",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
-  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 24px rgba(20,130,93,0.18), 0 0 0 1px rgba(37,211,102,0.08)",
+  background: "var(--fc-admin-success-bg)",
+  boxShadow: "none",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-  color: "#ffd4d8",
+  background: "var(--fc-admin-danger-bg)",
+  color: "var(--fc-admin-danger-text)",
   padding: "6px 12px",
-  border: "1px solid rgba(255, 120, 120, 0.16)",
+  border: "1px solid var(--fc-admin-danger-border)",
   borderRadius: "999px",
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "none",
 }

@@ -13,7 +13,7 @@ type CompanyRow = {
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   color: "var(--fc-admin-panel-text)",
   padding: "18px",
 }
@@ -22,7 +22,7 @@ const panelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
 }
 
 const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: "12px" }
@@ -52,7 +52,7 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 700,
 }
 const navLinkStyle: React.CSSProperties = { ...buttonStyle, padding: "8px 12px", fontSize: "12px", fontWeight: 800 }
-const activeNavLinkStyle: React.CSSProperties = { ...navLinkStyle, background: "linear-gradient(180deg, rgba(143,215,255,0.28) 0%, rgba(54,123,184,0.16) 100%)", color: "#ffffff", border: "1px solid rgba(143,215,255,0.32)" }
+const activeNavLinkStyle: React.CSSProperties = { ...navLinkStyle, background: "var(--fc-admin-selected-bg)", color: "var(--fc-admin-selected-text)", border: "1px solid var(--fc-admin-selected-border)" }
 
 export default function CompanyIndexPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
@@ -105,12 +105,12 @@ export default function CompanyIndexPage() {
       <div style={{ maxWidth: "1480px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#8fd7ff", fontWeight: 700 }}>Country And Company Info</div>
+            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>Country And Company Info</div>
             <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Company Index</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <a href="/admin/ccinfo" style={buttonStyle}>Back</a>
-            <div style={{ color: "#8fd7ff", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
           </div>
         </div>
 
@@ -130,7 +130,7 @@ export default function CompanyIndexPage() {
         </div>
 
         <section style={{ ...panelStyle, overflow: "hidden" }}>
-          {loading && <div style={{ padding: "10px 12px", color: "#8fd7ff", fontSize: "12px", fontWeight: 700 }}>Loading results...</div>}
+          {loading && <div style={{ padding: "10px 12px", color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 700 }}>Loading results...</div>}
           <div style={{ overflowX: "auto" }}>
             <table style={tableStyle}>
               <thead>
@@ -146,14 +146,14 @@ export default function CompanyIndexPage() {
                     <td style={{ ...tdStyle, whiteSpace: "nowrap", fontWeight: 700 }}>
                       <a
                         href={`/admin/ccinfo?kind=company&id=${row.id}`}
-                        style={{ color: "#bfe6ff", textDecoration: "none" }}
+                        style={{ color: "var(--fc-admin-link)", textDecoration: "none" }}
                       >
                         {row.name}
                       </a>
                     </td>
                     <td style={{ ...tdStyle, minWidth: "760px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "0" }}>{(row.notes || "No info").replace(/\s+/g, " ")}</td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
-                      <button onClick={() => void deleteCompany(row)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "linear-gradient(180deg, rgba(230,57,70,0.24) 0%, rgba(170,47,53,0.12) 100%)", color: "#ffd6db", border: "1px solid rgba(255,120,120,0.24)" }}>Delete</button>
+                      <button onClick={() => void deleteCompany(row)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -163,7 +163,7 @@ export default function CompanyIndexPage() {
         </section>
         <div style={{ display: "flex", justifyContent: "center", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
           <button onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page <= 1} style={{ ...buttonStyle, opacity: page <= 1 ? 0.5 : 1 }}>Previous</button>
-          <div style={{ color: "#8fd7ff", fontSize: "12px", fontWeight: 800, letterSpacing: "0.08em" }}>Page {page} / {totalPages}</div>
+          <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.08em" }}>Page {page} / {totalPages}</div>
           <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} style={{ ...buttonStyle, opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
         </div>
       </div>

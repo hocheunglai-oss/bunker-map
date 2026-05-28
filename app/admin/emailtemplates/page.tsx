@@ -51,7 +51,7 @@ const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "var(--fc-admin-page-bg)",
   color: "var(--fc-admin-panel-text)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   padding: "18px",
 }
 
@@ -65,28 +65,28 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 800,
   padding: "8px 12px",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
 }
 
 const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "rgba(73, 219, 165, 0.26)",
-  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-  color: "#ddffef",
+  borderColor: "var(--fc-admin-success-border)",
+  background: "var(--fc-admin-success-bg)",
+  color: "var(--fc-admin-success-text)",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "rgba(255, 120, 120, 0.22)",
-  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
-  color: "#ffd6db",
+  borderColor: "var(--fc-admin-danger-border)",
+  background: "var(--fc-admin-danger-bg)",
+  color: "var(--fc-admin-danger-text)",
 }
 
 const panelStyle: React.CSSProperties = {
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
   background: "var(--fc-admin-panel-bg)",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
   overflow: "hidden",
 }
 
@@ -491,7 +491,7 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "var(--fc-row-active-bg)" : "transparent",
+            background: active ? "var(--fc-row-active-bg)" : "#ffffff",
             color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
@@ -549,7 +549,7 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "var(--fc-row-active-bg)" : "transparent",
+            background: active ? "var(--fc-row-active-bg)" : "#ffffff",
             color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
@@ -781,7 +781,7 @@ export default function EmailTemplatesAdminPage() {
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 <select onChange={(event) => runEditorCommand("fontName", event.target.value)} defaultValue="" style={buttonStyle}>
                   <option value="" disabled>Font</option>
-                  <option value="Arial">Arial</option>
+                  <option value="Roboto">Roboto</option>
                   <option value="Calibri">Calibri</option>
                   <option value="Times New Roman">Times</option>
                   <option value="Courier New">Courier</option>
@@ -838,7 +838,7 @@ export default function EmailTemplatesAdminPage() {
             display: "grid",
             placeItems: "center",
             padding: "18px",
-            background: "rgba(6, 18, 30, 0.48)",
+            background: "#1d1d1f",
           }}
         >
           <div style={{ ...panelStyle, width: "min(560px, 100%)", maxHeight: "82vh", display: "grid" }}>

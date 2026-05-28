@@ -13,7 +13,7 @@ const pageStyle: React.CSSProperties = {
   padding: "24px",
   background: "var(--fc-admin-page-bg)",
   color: "var(--fc-admin-panel-text)",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
 }
 
 const shellStyle: React.CSSProperties = {
@@ -28,9 +28,7 @@ const panelStyle: React.CSSProperties = {
   padding: "30px",
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
-  boxShadow: "0 30px 96px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.06)",
+  boxShadow: "0 18px 42px #00000014",
   color: "var(--fc-admin-panel-text)",
 }
 
@@ -43,7 +41,7 @@ const inputStyle: React.CSSProperties = {
   background: "var(--fc-login-input-bg)",
   color: "var(--fc-login-input-text)",
   outline: "none",
-  boxShadow: "0 12px 28px rgba(4,16,29,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
+  boxShadow: "none",
 }
 
 const actionButtonStyle: React.CSSProperties = {
@@ -58,22 +56,22 @@ const actionButtonStyle: React.CSSProperties = {
   fontWeight: 700,
   textAlign: "center",
   transition: "transform 0.16s ease, background 0.16s ease, border-color 0.16s ease",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 12px 28px rgba(8,24,44,0.18), 0 0 0 1px rgba(90,169,255,0.08)",
+  boxShadow: "none",
 }
 
 const mutedTradingButtonStyle: React.CSSProperties = {
   ...actionButtonStyle,
-  background: "linear-gradient(180deg, rgba(134, 141, 151, 0.22) 0%, rgba(72, 78, 88, 0.12) 100%)",
-  color: "#bcc5ce",
-  borderColor: "rgba(190, 198, 208, 0.18)",
-  boxShadow: "0 18px 40px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(180,190,200,0.06)",
+  background: "var(--fc-admin-panel-soft-bg)",
+  color: "var(--fc-admin-muted)",
+  borderColor: "var(--fc-admin-border)",
+  boxShadow: "none",
 }
 
 const lockedPanelShellStyle: React.CSSProperties = {
   ...panelStyle,
   background: "var(--fc-admin-panel-soft-bg)",
   border: "1px solid var(--fc-admin-border-soft)",
-  boxShadow: "0 30px 96px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+  boxShadow: "0 18px 42px #00000010",
 }
 
 export default function AdminPage() {
@@ -159,7 +157,6 @@ export default function AdminPage() {
                   textTransform: "uppercase",
                   color: "var(--fc-admin-heading)",
                   fontWeight: 700,
-                  textShadow: "0 10px 24px rgba(4,16,29,0.22)",
                 }}
               >
                 Username
@@ -180,7 +177,6 @@ export default function AdminPage() {
                   textTransform: "uppercase",
                   color: "var(--fc-admin-heading)",
                   fontWeight: 700,
-                  textShadow: "0 10px 24px rgba(4,16,29,0.22)",
                 }}
               >
                 Password
@@ -201,14 +197,14 @@ export default function AdminPage() {
                 style={{
                   width: "100%",
                   padding: "14px 16px",
-                  border: "1px solid rgba(255, 120, 120, 0.28)",
+                  border: "1px solid var(--fc-admin-danger-border)",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(230, 57, 70, 0.24) 0%, rgba(170, 47, 53, 0.12) 100%)",
-                  color: "#ffd6db",
+                  background: "var(--fc-admin-danger-bg)",
+                  color: "var(--fc-admin-danger-text)",
                   cursor: "pointer",
                   fontSize: "15px",
                   fontWeight: 800,
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12), inset 0 0 18px rgba(230,57,70,0.08), 0 16px 34px rgba(0,0,0,0.16)",
+                  boxShadow: "none",
                   marginBottom: "12px",
                 }}
                 >
@@ -221,14 +217,14 @@ export default function AdminPage() {
                 style={{
                   width: "100%",
                   padding: "14px 16px",
-                  border: "1px solid rgba(73, 219, 165, 0.34)",
+                  border: "1px solid var(--fc-admin-success-border)",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)",
-                  color: "#eafff4",
+                  background: "var(--fc-admin-success-bg)",
+                  color: "var(--fc-admin-success-text)",
                   cursor: "pointer",
                   fontSize: "15px",
                   fontWeight: 800,
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 18px rgba(37,211,102,0.08), 0 18px 38px rgba(0,0,0,0.16)",
+                  boxShadow: "none",
                   marginBottom: "12px",
                 }}
                 >
@@ -242,14 +238,14 @@ export default function AdminPage() {
                 style={{
                   width: "100%",
                   padding: "12px 16px",
-                  border: "1px solid rgba(210,236,255,0.16)",
+                  border: "1px solid var(--fc-admin-border)",
                   borderRadius: "999px",
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
+                  background: "var(--fc-admin-button-bg)",
                   color: "var(--fc-admin-button-text)",
                   cursor: "pointer",
                   fontSize: "14px",
                   fontWeight: 700,
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+                  boxShadow: "none",
                 }}
               >
                 Back To Bunker Map
@@ -304,7 +300,7 @@ export default function AdminPage() {
                       color: "var(--fc-admin-button-text)",
                       borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
-                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                      boxShadow: "none",
                     }}
                   >
                     {item.label}
@@ -351,7 +347,7 @@ export default function AdminPage() {
                       color: "var(--fc-admin-button-text)",
                       borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
-                      boxShadow: "0 18px 40px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                      boxShadow: "none",
                     }}
                   >
                     {item.label}
@@ -401,7 +397,7 @@ export default function AdminPage() {
                       color: "var(--fc-admin-button-text)",
                       borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
-                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                      boxShadow: "none",
                     }}
                   >
                     {item.label}
@@ -450,7 +446,7 @@ export default function AdminPage() {
                       color: "var(--fc-admin-button-text)",
                       borderColor: "var(--fc-admin-button-border)",
                       cursor: "pointer",
-                      boxShadow: "0 18px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(90,169,255,0.1)",
+                      boxShadow: "none",
                     }}
                   >
                     {item.label}

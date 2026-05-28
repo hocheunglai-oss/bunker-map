@@ -61,7 +61,7 @@ const panelStyle: React.CSSProperties = {
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
   borderRadius: "18px",
-  boxShadow: "0 20px 44px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(0,0,0,0.04)",
+  boxShadow: "0 12px 28px #00000010",
   overflow: "hidden",
 }
 
@@ -94,7 +94,7 @@ const buttonStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 800,
   padding: "8px 12px",
-  boxShadow: "inset 0 1px 0 var(--fc-admin-border-soft), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
 }
 
 const primaryButtonStyle: React.CSSProperties = {

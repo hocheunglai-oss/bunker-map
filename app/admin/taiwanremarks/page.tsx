@@ -11,25 +11,25 @@ function createEmptyMemo() {
 const pillButtonStyle: React.CSSProperties = {
   padding: "9px 14px",
   minWidth: "110px",
-  border: "1px solid rgba(210,236,255,0.16)",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "999px",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-  color: "#d7e8ff",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
   textDecoration: "none",
   fontSize: "13px",
   fontWeight: 700,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(8,24,44,0.16)",
+  boxShadow: "none",
 }
 
 const memoCardStyle: React.CSSProperties = {
   background:
-    "radial-gradient(circle at top left, rgba(88, 182, 255, 0.14), transparent 32%), linear-gradient(180deg, rgba(14, 43, 70, 0.94) 0%, rgba(7, 26, 44, 0.9) 100%)",
-  border: "1px solid rgba(173, 216, 255, 0.14)",
+    "var(--fc-admin-panel-bg)",
+  border: "1px solid var(--fc-admin-border-soft)",
   borderRadius: "22px",
   padding: "18px",
   display: "grid",
   gap: "14px",
-  boxShadow: "0 18px 40px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  boxShadow: "0 12px 28px #00000010",
 }
 
 const textareaStyle: React.CSSProperties = {
@@ -39,14 +39,14 @@ const textareaStyle: React.CSSProperties = {
   fontSize: "15px",
   lineHeight: 1.6,
   borderRadius: "16px",
-  border: "1px solid rgba(173, 216, 255, 0.18)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.04) 100%)",
-  color: "#edf7ff",
+  border: "1px solid var(--fc-admin-border)",
+  background: "var(--fc-tool-input-bg)",
+  color: "var(--fc-admin-panel-text)",
   resize: "vertical",
   outline: "none",
-  fontFamily: "Arial, Helvetica, sans-serif",
+  fontFamily: "var(--fc-admin-font)",
   boxSizing: "border-box",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+  boxShadow: "none",
 }
 
 export default function AdminRemarks() {
@@ -157,23 +157,21 @@ export default function AdminRemarks() {
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at top, #114a80 0%, #0a2c4c 34%, #041629 100%)",
+          "var(--fc-admin-page-bg)",
         padding: "24px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-        color: "#edf7ff",
+        fontFamily: "var(--fc-admin-font)",
+        color: "var(--fc-admin-panel-text)",
       }}
     >
       <div
         style={{
           maxWidth: "980px",
           margin: "0 auto",
-          background: "rgba(6, 24, 44, 0.68)",
-          border: "1px solid rgba(210, 236, 255, 0.16)",
+          background: "var(--fc-admin-panel-bg)",
+          border: "1px solid var(--fc-admin-border)",
           borderRadius: "24px",
           padding: "22px",
-          backdropFilter: "blur(18px)",
-          WebkitBackdropFilter: "blur(18px)",
-          boxShadow: "0 24px 80px rgba(0, 0, 0, 0.24)",
+          boxShadow: "0 18px 42px #00000012",
         }}
       >
         <div
@@ -183,10 +181,8 @@ export default function AdminRemarks() {
             zIndex: 20,
             margin: "-22px -22px 20px",
             padding: "18px 22px 14px",
-            background: "rgba(6, 24, 44, 0.92)",
-            backdropFilter: "blur(18px)",
-            WebkitBackdropFilter: "blur(18px)",
-            borderBottom: "1px solid rgba(210, 236, 255, 0.14)",
+            background: "var(--fc-admin-panel-bg)",
+            borderBottom: "1px solid var(--fc-admin-border-soft)",
             borderTopLeftRadius: "24px",
             borderTopRightRadius: "24px",
             display: "flex",
@@ -219,9 +215,9 @@ export default function AdminRemarks() {
               onClick={addMemo}
               style={{
                 ...pillButtonStyle,
-                background: "linear-gradient(180deg, rgba(72, 170, 255, 0.34) 0%, rgba(20, 112, 196, 0.18) 100%)",
-                border: "1px solid rgba(80, 170, 255, 0.2)",
-                color: "#e2f3ff",
+                background: "var(--fc-admin-primary-button-bg)",
+                border: "1px solid var(--fc-admin-selected-border)",
+                color: "var(--fc-admin-primary-button-text)",
                 cursor: "pointer",
               }}
               aria-label="Add remark"
@@ -235,11 +231,11 @@ export default function AdminRemarks() {
               style={{
                 ...pillButtonStyle,
                 background: isDirty || noticeDirty
-                  ? "linear-gradient(180deg, rgba(56, 214, 154, 0.34) 0%, rgba(20, 130, 93, 0.16) 100%)"
-                  : "linear-gradient(180deg, rgba(56, 214, 154, 0.2) 0%, rgba(20, 130, 93, 0.1) 100%)",
-                color: "#ddffef",
+                  ? "var(--fc-admin-success-bg)"
+                  : "var(--fc-admin-success-bg)",
+                color: "var(--fc-admin-success-text)",
                 textTransform: "uppercase",
-                border: isDirty || noticeDirty ? "1px solid rgba(73, 219, 165, 0.32)" : "1px solid rgba(73, 219, 165, 0.22)",
+                border: isDirty || noticeDirty ? "1px solid var(--fc-admin-success-border)" : "1px solid var(--fc-admin-success-border)",
                 cursor: saving ? "wait" : "pointer",
               }}
             >
@@ -252,9 +248,9 @@ export default function AdminRemarks() {
           <div
             style={{
               ...memoCardStyle,
-              border: "1px solid rgba(255, 178, 84, 0.28)",
+              border: "1px solid var(--fc-admin-warning-border)",
               background:
-                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.2), transparent 34%), linear-gradient(180deg, rgba(70, 42, 16, 0.86) 0%, rgba(34, 24, 14, 0.72) 100%)",
+                "var(--fc-admin-warning-bg)",
             }}
           >
             <div
@@ -269,7 +265,7 @@ export default function AdminRemarks() {
               <div>
                 <div
                   style={{
-                    color: "#ffd59a",
+                    color: "var(--fc-admin-warning-text)",
                     fontSize: "12px",
                     fontWeight: 800,
                     letterSpacing: "0.14em",
@@ -278,7 +274,7 @@ export default function AdminRemarks() {
                 >
                   Special Notice
                 </div>
-                <div style={{ marginTop: "4px", color: "#f8d9b2", fontSize: "12px" }}>
+                <div style={{ marginTop: "4px", color: "var(--fc-admin-warning-text)", fontSize: "12px" }}>
                   Appears only when text is entered.
                 </div>
               </div>
@@ -288,9 +284,9 @@ export default function AdminRemarks() {
                 style={{
                   ...pillButtonStyle,
                   padding: "8px 12px",
-                  border: "1px solid rgba(255, 178, 84, 0.22)",
-                  background: "linear-gradient(180deg, rgba(255, 178, 84, 0.18) 0%, rgba(255, 126, 64, 0.1) 100%)",
-                  color: "#ffe2bd",
+                  border: "1px solid var(--fc-admin-warning-border)",
+                  background: "var(--fc-admin-warning-bg)",
+                  color: "var(--fc-admin-warning-text)",
                   cursor: "pointer",
                 }}
               >
@@ -301,8 +297,8 @@ export default function AdminRemarks() {
             <textarea
               style={{
                 ...textareaStyle,
-                border: "1px solid rgba(255, 178, 84, 0.28)",
-                background: "linear-gradient(180deg, rgba(255, 178, 84, 0.1) 0%, rgba(255,255,255,0.035) 100%)",
+                border: "1px solid var(--fc-admin-warning-border)",
+                background: "var(--fc-admin-warning-bg)",
               }}
               value={specialNotice}
               onChange={(e) => updateSpecialNotice(e.target.value)}
@@ -338,12 +334,12 @@ export default function AdminRemarks() {
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "linear-gradient(180deg, rgba(88, 182, 255, 0.24) 0%, rgba(28, 102, 168, 0.14) 100%)",
-                      border: "1px solid rgba(141, 207, 255, 0.22)",
-                      color: "#dff3ff",
+                      background: "var(--fc-admin-selected-bg)",
+                      border: "1px solid var(--fc-admin-selected-border)",
+                      color: "var(--fc-admin-panel-text)",
                       fontSize: "12px",
                       fontWeight: 800,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                      boxShadow: "inset 0 1px 0 var(--fc-admin-border-soft)",
                     }}
                   >
                     {index + 1}
@@ -355,9 +351,9 @@ export default function AdminRemarks() {
                   style={{
                     ...pillButtonStyle,
                     padding: "8px 12px",
-                    border: "1px solid rgba(255, 120, 120, 0.18)",
-                    background: "linear-gradient(180deg, rgba(230, 57, 70, 0.18) 0%, rgba(230, 57, 70, 0.1) 100%)",
-                    color: "#ffd4d8",
+                    border: "1px solid var(--fc-admin-danger-border)",
+                    background: "var(--fc-admin-danger-bg)",
+                    color: "var(--fc-admin-danger-text)",
                     cursor: "pointer",
                   }}
                 >
@@ -379,7 +375,7 @@ export default function AdminRemarks() {
               style={{
                 margin: 0,
                 fontWeight: 600,
-                color: message.includes("Error") ? "#ff8c8c" : "#79e6b3",
+                color: message.includes("Error") ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)",
               }}
             >
               {message}
