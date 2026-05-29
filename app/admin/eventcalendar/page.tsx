@@ -208,20 +208,15 @@ function formatGoogleEventTime(event: GoogleCalendarEvent) {
   return event.startTime || event.endTime || "-"
 }
 
-function addDaysToKey(dateKey: string, days: number) {
-  const date = parseLocalDate(dateKey)
-  date.setDate(date.getDate() + days)
-  return toDateKey(date)
-}
-
 function getMeetingRoomStyle(event: GoogleCalendarEvent) {
   const title = `${event.title} ${event.sourceTitle}`.toUpperCase()
 
   if (title.includes("EXPRESS GLOBAL")) {
     return {
-      background: "#e8f7ff",
-      border: "#4cc9f0",
+      background: "var(--fc-row-bg)",
+      border: "var(--fc-row-border)",
       color: "var(--fc-admin-panel-text)",
+      fontWeight: 500,
     }
   }
 
@@ -230,6 +225,7 @@ function getMeetingRoomStyle(event: GoogleCalendarEvent) {
       background: "#fff8e5",
       border: "#f7b500",
       color: "var(--fc-admin-warning-text)",
+      fontWeight: 900,
     }
   }
 
@@ -237,6 +233,7 @@ function getMeetingRoomStyle(event: GoogleCalendarEvent) {
     background: "var(--fc-admin-selected-bg)",
     border: "var(--fc-admin-selected-border)",
     color: "var(--fc-admin-panel-text)",
+    fontWeight: 900,
   }
 }
 
@@ -383,8 +380,6 @@ export default function EventCalendarPage() {
   const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
-  const tomorrowKey = addDaysToKey(todayKey, 1)
-  const nextDayKey = addDaysToKey(todayKey, 2)
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
@@ -536,10 +531,6 @@ export default function EventCalendarPage() {
 
     syncTimerRef.current = setTimeout(async () => {
       const meetingEvents = events.filter((event) => isMeetingRoomBooked(event))
-      if (!meetingEvents.length) {
-        setSyncStatus("No meetings to sync")
-        return
-      }
 
       setSyncStatus("Syncing Google")
 
@@ -547,7 +538,7 @@ export default function EventCalendarPage() {
         const response = await fetch("/api/event-calendar/google-sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendarId: CALENDAR_ID, events: meetingEvents }),
+          body: JSON.stringify({ calendarId: CALENDAR_ID, events: meetingEvents, activeEventIds: meetingEvents.map((event) => event.id) }),
         })
         const payload = await response.json()
 
@@ -556,7 +547,12 @@ export default function EventCalendarPage() {
           return
         }
 
-        setSyncStatus(`Synced ${payload.updated + payload.inserted} events`)
+        setSyncStatus(`Synced ${payload.updated + payload.inserted} events${payload.deleted ? `, removed ${payload.deleted}` : ""}`)
+        if (viewMode === "google") {
+          setGoogleCalendarEvents((current) =>
+            current.filter((event) => !event.sourceEventId || meetingEvents.some((item) => item.id === event.sourceEventId))
+          )
+        }
       } catch {
         setSyncStatus("Google sync pending")
       }
@@ -565,7 +561,7 @@ export default function EventCalendarPage() {
     return () => {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
     }
-  }, [authenticated, events])
+  }, [authenticated, events, viewMode])
 
   useEffect(() => {
     if (!authenticated || viewMode !== "google") return
@@ -631,6 +627,11 @@ export default function EventCalendarPage() {
           a.title.localeCompare(b.title)
       )
   }, [events, todayKey, viewMode])
+
+  const nextUpcomingDateKey = useMemo(() => {
+    if (viewMode !== "upcoming") return ""
+    return visibleEvents.find((event) => event.startDate > todayKey)?.startDate || ""
+  }, [todayKey, viewMode, visibleEvents])
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
@@ -1199,13 +1200,13 @@ export default function EventCalendarPage() {
                       }}
                       style={{ background: meetingStyle.background, cursor: canEditMeetingRoom ? "pointer" : "default" }}
                     >
-                      <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: 900, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
+                      <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: meetingStyle.fontWeight, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
                         {formatGoogleEventDate(event)}
                       </td>
-                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900, whiteSpace: "nowrap" }}>
+                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: meetingStyle.fontWeight, whiteSpace: "nowrap" }}>
                         {formatGoogleEventTime(event)}
                       </td>
-                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}>
+                      <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: meetingStyle.fontWeight }}>
                         {event.title}
                         {event.sourceTitle && event.sourceTitle.toUpperCase() !== event.title.toUpperCase() && (
                           <span style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, marginLeft: "8px" }}>
@@ -1248,18 +1249,17 @@ export default function EventCalendarPage() {
                   const rowHighlighted =
                     selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
                   const rowStartKey = event.startDate
-                  const isTomorrowEvent = rowStartKey === tomorrowKey
-                  const isNextDayEvent = rowStartKey === nextDayKey
-                  const rowEmphasis = isTomorrowEvent || isNextDayEvent
-                  const rowBackground = isTomorrowEvent
+                  const isTodayEvent = rowStartKey === todayKey
+                  const isNextUpcomingEvent = !isTodayEvent && rowStartKey === nextUpcomingDateKey
+                  const rowBackground = isTodayEvent
                     ? "#fff8e5"
-                    : isNextDayEvent
-                      ? "#fff2d6"
+                    : isNextUpcomingEvent
+                      ? "#fffced"
                       : "var(--fc-row-bg)"
-                  const rowBorder = isTomorrowEvent
+                  const rowBorder = isTodayEvent
                     ? "#f7b500"
-                    : isNextDayEvent
-                      ? "#ff9500"
+                    : isNextUpcomingEvent
+                      ? "#f4d35e"
                       : "var(--fc-row-border)"
 
                   return (
@@ -1276,7 +1276,7 @@ export default function EventCalendarPage() {
                         style={{
                           ...tdStyle,
                           color: "var(--fc-admin-panel-text)",
-                          fontWeight: rowEmphasis ? 900 : 500,
+                          fontWeight: isTodayEvent ? 900 : 500,
                           whiteSpace: "nowrap",
                           borderLeft: `4px solid ${rowBorder}`,
                         }}
@@ -1285,7 +1285,7 @@ export default function EventCalendarPage() {
                       </td>
                       <td
                         onDoubleClick={() => openEditModal(event)}
-                        style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: rowEmphasis ? 900 : 500 }}
+                        style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: isTodayEvent ? 900 : 500 }}
                       >
                         {event.title}
                         {meetingRoomBooked && (

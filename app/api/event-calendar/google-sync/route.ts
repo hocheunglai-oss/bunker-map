@@ -131,20 +131,23 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const events = Array.isArray(body.events) ? body.events.filter(isOfficeCalendarEvent) : []
+  const events: OfficeCalendarEvent[] = Array.isArray(body.events) ? body.events.filter(isOfficeCalendarEvent) : []
+  const activeEventIdValues: unknown[] = Array.isArray(body.activeEventIds) ? body.activeEventIds : events.map((event) => event.id)
+  const activeEventIds = new Set(
+    activeEventIdValues
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      .map((id) => id.trim())
+  )
   const calendarId =
     typeof body.calendarId === "string" && body.calendarId.trim()
       ? body.calendarId.trim()
       : process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
 
-  if (!events.length) {
-    return NextResponse.json({ message: "No valid events to sync." }, { status: 400 })
-  }
-
   try {
     const calendar = await getCalendarClient()
     let inserted = 0
     let updated = 0
+    let deleted = 0
     const failed: Array<{ id: string; title: string; message: string }> = []
 
     for (const event of events) {
@@ -181,11 +184,39 @@ export async function POST(request: Request) {
       }
     }
 
+    try {
+      const managedEvents = await calendar.events.list({
+        calendarId,
+        timeMin: `${addDays(new Date().toISOString().slice(0, 10), -30)}T00:00:00+08:00`,
+        timeMax: `${addDays(new Date().toISOString().slice(0, 10), 365)}T23:59:59+08:00`,
+        maxResults: 2500,
+        singleEvents: true,
+      })
+
+      for (const googleEvent of managedEvents.data.items || []) {
+        const sourceEventId = googleEvent.extendedProperties?.private?.bunkerMapEventId
+        if (!sourceEventId || activeEventIds.has(sourceEventId) || !googleEvent.id) continue
+
+        await calendar.events.delete({
+          calendarId,
+          eventId: googleEvent.id,
+        })
+        deleted += 1
+      }
+    } catch (error) {
+      failed.push({
+        id: "google-calendar-reconcile",
+        title: "Meeting room cleanup",
+        message: error instanceof Error ? error.message : "Unknown Google Calendar cleanup error.",
+      })
+    }
+
     return NextResponse.json({
       success: failed.length === 0,
       calendarId,
       inserted,
       updated,
+      deleted,
       failed,
     })
   } catch (error) {
