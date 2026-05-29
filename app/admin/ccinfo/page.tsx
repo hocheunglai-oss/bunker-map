@@ -2388,6 +2388,30 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  async function deleteFolder(folder: EntryFolderRecord) {
+    const folderPath = joinFolderPath(folder.folder_path, folder.name)
+    const hasNestedFolders = folders.some((item) => joinFolderPath(item.folder_path, item.name).startsWith(`${folderPath}/`))
+    const hasNestedFiles = files.some((item) => (item.folder_path || "").startsWith(folderPath))
+    if (hasNestedFolders || hasNestedFiles) {
+      setMessage("Move or delete files and subfolders inside this folder first.")
+      return
+    }
+    if (!confirm(`Delete folder ${folder.name}?`)) return
+    try {
+      const params = new URLSearchParams({ folderId: folder.id })
+      const response = await fetch(`/api/ccinfo/files?${params.toString()}`, { method: "DELETE" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to delete folder.")
+      setFolders((prev) => prev.filter((item) => item.id !== folder.id))
+      if (currentFolderPath === folderPath) {
+        setCurrentFolderPath(folder.folder_path || "")
+      }
+      setMessage("Folder deleted.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete folder.")
+    }
+  }
+
   async function deleteFile(file: CompanyFileRecord | EntryFileRecord) {
     if (!confirm(`Delete ${file.file_name}?`)) return
     try {
@@ -2621,60 +2645,77 @@ export default function CountryCompanyInfoPage() {
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No linked files yet.</div>
         ) : (
           <>
-            {visibleFolders.map((folder) => (
-              <button
-              key={folder.id}
-              type="button"
-              onClick={() => setCurrentFolderPath(joinFolderPath(folder.folder_path, folder.name))}
-              onDragOver={(event) => {
-                if (!draggingFileId) return
-                event.preventDefault()
-                setDropFolderPath(joinFolderPath(folder.folder_path, folder.name))
-              }}
-              onDragLeave={() => {
-                if (dropFolderPath === joinFolderPath(folder.folder_path, folder.name)) {
-                  setDropFolderPath("")
-                }
-              }}
-              onDrop={(event) => {
-                if (!draggingFileId) return
-                event.preventDefault()
-                const fileId = event.dataTransfer.getData("text/plain")
-                const file = files.find((item) => item.id === fileId)
-                if (file) void moveFileToFolder(file, joinFolderPath(folder.folder_path, folder.name))
-              }}
-              style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr)",
-                gap: "8px",
-                alignItems: "center",
-                padding: "7px 8px",
-                borderRadius: "10px",
-                border:
-                  dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
-                    ? "1px solid var(--fc-admin-success-border)"
-                    : "1px solid var(--fc-admin-border-soft)",
-                background:
-                  dropFolderPath === joinFolderPath(folder.folder_path, folder.name)
-                    ? "var(--fc-admin-success-bg)"
-                    : "var(--fc-tool-input-bg)",
-                color: "var(--fc-admin-panel-text)",
-                cursor: "pointer",
-                textAlign: "left",
-                }}
-              >
-                <FolderIcon />
-                <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
-                  <HighlightedInlineText value={folder.name} query={searchInPage} />
-                </span>
-              </button>
-            ))}
+            {visibleFolders.map((folder) => {
+              const folderPath = joinFolderPath(folder.folder_path, folder.name)
+              return (
+                <div
+                  key={folder.id}
+                  onClick={() => setCurrentFolderPath(folderPath)}
+                  onDoubleClick={() => setCurrentFolderPath(folderPath)}
+                  onDragOver={(event) => {
+                    if (!draggingFileId) return
+                    event.preventDefault()
+                    setDropFolderPath(folderPath)
+                  }}
+                  onDragLeave={() => {
+                    if (dropFolderPath === folderPath) {
+                      setDropFolderPath("")
+                    }
+                  }}
+                  onDrop={(event) => {
+                    if (!draggingFileId) return
+                    event.preventDefault()
+                    const fileId = event.dataTransfer.getData("text/plain")
+                    const file = files.find((item) => item.id === fileId)
+                    if (file) void moveFileToFolder(file, folderPath)
+                  }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr) auto",
+                    gap: "8px",
+                    alignItems: "center",
+                    padding: "7px 8px",
+                    borderRadius: "10px",
+                    border:
+                      dropFolderPath === folderPath
+                        ? "1px solid var(--fc-admin-success-border)"
+                        : "1px solid var(--fc-admin-border-soft)",
+                    background:
+                      dropFolderPath === folderPath
+                        ? "var(--fc-admin-success-bg)"
+                        : "var(--fc-tool-input-bg)",
+                    color: "var(--fc-admin-panel-text)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FolderIcon />
+                  <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                    <HighlightedInlineText value={folder.name} query={searchInPage} />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void deleteFolder(folder)
+                    }}
+                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )
+            })}
             {visibleFiles.map((file) => {
             const active = selectedPreviewFile?.id === file.id
             const fileTypeVisual = getFileTypeLabel(file.file_name, file.file_type)
             return (
               <div
                 key={file.id}
+                onClick={() => setSelectedPreviewFile(file)}
+                onDoubleClick={() => {
+                  setSelectedPreviewFile(file)
+                  setPreviewModalOpen(true)
+                }}
                 draggable={file.source !== "company"}
                 onDragStart={(event) => {
                   if (file.source === "company") return
@@ -2704,7 +2745,6 @@ export default function CountryCompanyInfoPage() {
                   type="button"
                   onClick={() => {
                     setSelectedPreviewFile(file)
-                    setPreviewModalOpen(true)
                   }}
                   style={{
                     border: "none",
@@ -2744,11 +2784,24 @@ export default function CountryCompanyInfoPage() {
           </>
         )}
       </div>
-      {selectedPreviewFile?.drive_url && (
-        <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
+      <a
+        href={selectedPreviewFile?.drive_url || "#"}
+        target={selectedPreviewFile?.drive_url ? "_blank" : undefined}
+        rel={selectedPreviewFile?.drive_url ? "noreferrer" : undefined}
+        onClick={(event) => {
+          if (!selectedPreviewFile?.drive_url) event.preventDefault()
+        }}
+        aria-disabled={selectedPreviewFile?.drive_url ? undefined : true}
+        style={{
+          ...buttonStyle,
+          display: "block",
+          textAlign: "center",
+          opacity: selectedPreviewFile?.drive_url ? 1 : 0.55,
+          pointerEvents: "auto",
+        }}
+      >
           Open In Drive
-        </a>
-      )}
+      </a>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
         <button onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
           New Folder
