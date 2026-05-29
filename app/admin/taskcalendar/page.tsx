@@ -98,6 +98,20 @@ const modalStyle: React.CSSProperties = {
   padding: "18px",
 }
 
+const primaryActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "var(--fc-admin-primary-button-bg)",
+  background: "var(--fc-admin-primary-button-bg)",
+  color: "var(--fc-admin-primary-button-text)",
+}
+
+const dangerActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "var(--fc-admin-danger-border)",
+  background: "var(--fc-admin-danger-bg)",
+  color: "var(--fc-admin-danger-text)",
+}
+
 function buildBlankTask(): TaskCalendarTask {
   return {
     id: `task-custom-${Date.now()}`,
@@ -327,6 +341,7 @@ export default function TaskCalendarPage() {
                     {people.map((person) => {
                       const notify = task.notify.includes(person)
                       const copied = task.cc.includes(person)
+                      const personBackground = notify ? "#ffffff" : copied ? "#fff8e5" : rowHighlighted ? "var(--fc-admin-selected-bg)" : "var(--fc-row-bg)"
                       return (
                         <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
                           <span style={{
@@ -334,10 +349,10 @@ export default function TaskCalendarPage() {
                             placeItems: "center",
                             width: "28px",
                             borderRadius: "999px",
-                            background: notify ? "var(--fc-admin-selected-bg)" : copied ? "#fff8e5" : "#ffffff",
+                            background: personBackground,
                             color: notify ? "var(--fc-admin-panel-text)" : copied ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
                             fontSize: "10px",
-                            fontWeight: notify || copied ? 900 : 700,
+                            fontWeight: notify || copied ? 900 : 500,
                           }}>{notify ? "TO" : copied ? "CC" : person}</span>
                         </td>
                       )
@@ -433,10 +448,10 @@ export default function TaskCalendarPage() {
               <input value={draftTask.remark} onChange={(event) => setDraftTask((current) => ({ ...current, remark: event.target.value }))} style={inputStyle} />
             </label>
             <div style={{ display: "flex", justifyContent: "space-between", gap: "9px" }}>
-              <button type="button" onClick={deleteDraftTask} style={{ ...buttonStyle, borderColor: "var(--fc-admin-danger-border)", color: "var(--fc-admin-danger-text)" }}>Delete</button>
+              <button type="button" onClick={deleteDraftTask} style={dangerActionButtonStyle}>Delete</button>
               <div style={{ display: "flex", gap: "9px" }}>
                 <button type="button" onClick={() => setModalOpen(false)} style={buttonStyle}>Cancel</button>
-                <button type="button" onClick={saveDraftTask} style={buttonStyle}>Save</button>
+                <button type="button" onClick={saveDraftTask} style={primaryActionButtonStyle}>Save</button>
               </div>
             </div>
           </div>

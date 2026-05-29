@@ -157,6 +157,20 @@ const modalStyle: React.CSSProperties = {
   padding: "18px",
 }
 
+const primaryActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "var(--fc-admin-primary-button-bg)",
+  background: "var(--fc-admin-primary-button-bg)",
+  color: "var(--fc-admin-primary-button-text)",
+}
+
+const dangerActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  borderColor: "var(--fc-admin-danger-border)",
+  background: "var(--fc-admin-danger-bg)",
+  color: "var(--fc-admin-danger-text)",
+}
+
 function parseLocalDate(value: string) {
   const [year, month, day] = value.split("-").map(Number)
   return new Date(year, month - 1, day)
@@ -370,6 +384,7 @@ export default function EventCalendarPage() {
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
   const tomorrowKey = addDaysToKey(todayKey, 1)
+  const nextDayKey = addDaysToKey(todayKey, 2)
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
@@ -1233,18 +1248,19 @@ export default function EventCalendarPage() {
                   const rowHighlighted =
                     selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
                   const rowStartKey = event.startDate
-                  const isTodayEvent = rowStartKey === todayKey
                   const isTomorrowEvent = rowStartKey === tomorrowKey
-                  const rowBackground = isTodayEvent
+                  const isNextDayEvent = rowStartKey === nextDayKey
+                  const rowEmphasis = isTomorrowEvent || isNextDayEvent
+                  const rowBackground = isTomorrowEvent
                     ? "#fff8e5"
-                    : isTomorrowEvent
+                    : isNextDayEvent
                       ? "#fff2d6"
-                      : "var(--fc-admin-selected-bg)"
-                  const rowBorder = isTodayEvent
+                      : "var(--fc-row-bg)"
+                  const rowBorder = isTomorrowEvent
                     ? "#f7b500"
-                    : isTomorrowEvent
+                    : isNextDayEvent
                       ? "#ff9500"
-                      : "var(--fc-admin-selected-border)"
+                      : "var(--fc-row-border)"
 
                   return (
                     <tr
@@ -1260,7 +1276,7 @@ export default function EventCalendarPage() {
                         style={{
                           ...tdStyle,
                           color: "var(--fc-admin-panel-text)",
-                          fontWeight: 900,
+                          fontWeight: rowEmphasis ? 900 : 500,
                           whiteSpace: "nowrap",
                           borderLeft: `4px solid ${rowBorder}`,
                         }}
@@ -1269,7 +1285,7 @@ export default function EventCalendarPage() {
                       </td>
                       <td
                         onDoubleClick={() => openEditModal(event)}
-                        style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}
+                        style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: rowEmphasis ? 900 : 500 }}
                       >
                         {event.title}
                         {meetingRoomBooked && (
@@ -1302,14 +1318,14 @@ export default function EventCalendarPage() {
                                     : "1px solid #00000000",
                                 borderRadius: "999px",
                                 background: attending
-                                  ? "var(--fc-admin-selected-bg)"
+                                  ? "#ffffff"
                                   : uncertain
                                     ? "#fff8e5"
-                                    : "#ffffff",
+                                    : rowBackground,
                                 color: attending ? "var(--fc-admin-panel-text)" : uncertain ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
                                 cursor: "default",
                                 fontSize: "10px",
-                                fontWeight: attending || uncertain ? 900 : 700,
+                                fontWeight: attending || uncertain ? 900 : 500,
                                 lineHeight: "12px",
                                 padding: "2px 0",
                               }}
@@ -1427,12 +1443,7 @@ export default function EventCalendarPage() {
                 <button
                   type="button"
                   onClick={deleteDraftEvent}
-                  style={{
-                    ...buttonStyle,
-                    borderColor: "var(--fc-admin-danger-border)",
-                    background: "var(--fc-admin-danger-bg)",
-                    color: "var(--fc-admin-danger-text)",
-                  }}
+                  style={dangerActionButtonStyle}
                 >
                   Delete Event
                 </button>
@@ -1441,7 +1452,7 @@ export default function EventCalendarPage() {
                 <button type="button" onClick={() => setEventModalMode(null)} style={buttonStyle}>
                   Cancel
                 </button>
-                <button type="button" onClick={saveDraftEvent} style={buttonStyle}>
+                <button type="button" onClick={saveDraftEvent} style={primaryActionButtonStyle}>
                   Save
                 </button>
               </div>
@@ -1560,7 +1571,7 @@ export default function EventCalendarPage() {
               <button type="button" onClick={() => setRecurrentModalOpen(false)} style={buttonStyle}>
                 Cancel
               </button>
-              <button type="button" onClick={saveRecurrentEvents} style={buttonStyle}>
+              <button type="button" onClick={saveRecurrentEvents} style={primaryActionButtonStyle}>
                 Save
               </button>
             </div>
@@ -1686,7 +1697,7 @@ export default function EventCalendarPage() {
                 type="button"
                 onClick={sendLeaveRequest}
                 disabled={leaveRequestDraft.status === "sending" || leaveRequestDraft.status === "sent"}
-                style={{ ...buttonStyle, opacity: leaveRequestDraft.status === "sending" ? 0.72 : 1 }}
+                style={{ ...primaryActionButtonStyle, opacity: leaveRequestDraft.status === "sending" ? 0.72 : 1 }}
               >
                 {leaveRequestDraft.status === "sending" ? "Sending" : leaveRequestDraft.status === "sent" ? "Sent" : "Send"}
               </button>
@@ -1781,8 +1792,12 @@ export default function EventCalendarPage() {
                   background:
                     emailPrompt.status === "sent"
                       ? "var(--fc-admin-success-bg)"
-                      : buttonStyle.background,
-                  color: emailPrompt.status === "sent" ? "var(--fc-admin-success-text)" : buttonStyle.color,
+                      : "var(--fc-admin-primary-button-bg)",
+                  borderColor:
+                    emailPrompt.status === "sent"
+                      ? "var(--fc-admin-success-border)"
+                      : "var(--fc-admin-primary-button-bg)",
+                  color: emailPrompt.status === "sent" ? "var(--fc-admin-success-text)" : "var(--fc-admin-primary-button-text)",
                   opacity: emailPrompt.status === "sending" ? 0.72 : 1,
                   cursor:
                     emailPrompt.status === "sending" || emailPrompt.status === "sent" ? "not-allowed" : "pointer",
