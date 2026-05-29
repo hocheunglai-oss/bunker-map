@@ -19,7 +19,8 @@ function buildBaseUrl(request: Request) {
 
 export async function GET(request: Request) {
   const baseUrl = buildBaseUrl(request)
-  const templatesUrl = `${baseUrl}/api/email-templates`
+  const templateIndexUrl = `${baseUrl}/api/email-templates?mode=index`
+  const templateDetailUrl = `${baseUrl}/api/email-templates`
 
   const html = `<!doctype html>
 <html lang="en">
@@ -70,16 +71,21 @@ export async function GET(request: Request) {
         font-weight: 900;
         text-transform: uppercase;
       }
-      .meta { color: #687a88; font-size: 11px; font-weight: 700; text-transform: none; }
       .folders { max-height: 35vh; overflow: auto; padding: 5px; }
       .templates { max-height: 54vh; overflow: auto; padding: 5px; }
+      .folderNode { position: relative; }
+      .folderChildren {
+        margin-left: 9px;
+        padding-left: 8px;
+        border-left: 1px solid #d9e5ee;
+      }
       .folderRow {
         width: 100%;
         min-height: 28px;
         display: grid;
-        grid-template-columns: 16px minmax(0, 1fr) auto;
+        grid-template-columns: 16px minmax(0, 1fr);
         align-items: center;
-        gap: 4px;
+        gap: 5px;
         border: 0;
         border-radius: 6px;
         background: transparent;
@@ -88,21 +94,28 @@ export async function GET(request: Request) {
         text-align: left;
       }
       .folderRow.active { background: #dff0fb; color: #0c4774; }
-      .folderName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; }
-      .count {
-        min-width: 22px;
-        border-radius: 999px;
-        padding: 2px 6px;
-        background: #eef3f7;
-        color: #586a7b;
-        font-size: 11px;
-        font-weight: 800;
+      .folderToggle {
+        color: #6a7f91;
+        font-size: 12px;
+        font-weight: 900;
         text-align: center;
       }
-      .folderRow.active .count { background: #fff; color: #0c4774; }
+      .folderName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; }
+      .templateGridHeader {
+        display: none;
+        gap: 8px;
+        padding: 0 9px 5px;
+        color: #6a7a89;
+        font-size: 10px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
       .templateRow {
         width: 100%;
-        display: block;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
         margin-bottom: 5px;
         padding: 8px 9px;
         border: 1px solid #e2e9ef;
@@ -113,7 +126,22 @@ export async function GET(request: Request) {
         text-align: left;
       }
       .templateRow.active { border-color: #2c86c6; background: #eef7ff; }
-      .title { display: block; font-size: 13px; font-weight: 900; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .recipient {
+        display: none;
+        min-width: 0;
+        color: #536676;
+        font-size: 12px;
+        font-weight: 800;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .title { min-width: 0; display: block; font-size: 13px; font-weight: 900; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      @media (min-width: 520px) {
+        .templateGridHeader { display: grid; grid-template-columns: minmax(92px, 34%) minmax(0, 1fr); }
+        .templateRow { grid-template-columns: minmax(92px, 34%) minmax(0, 1fr); }
+        .recipient { display: block; }
+      }
       .empty { padding: 14px 10px; color: #617487; font-size: 12px; line-height: 1.45; }
       .notice {
         min-height: 18px;
@@ -129,11 +157,11 @@ export async function GET(request: Request) {
     <div class="app">
       <input id="searchInput" class="search" type="search" placeholder="Search templates" autocomplete="off" />
       <section class="panel">
-        <div class="panelHeader"><span>Folders</span><span id="folderMeta" class="meta">0</span></div>
+        <div class="panelHeader"><span>Folders</span></div>
         <div id="folderTree" class="folders"><div class="empty">Loading...</div></div>
       </section>
       <section class="panel">
-        <div class="panelHeader"><span id="listTitle">Templates</span><span id="listMeta" class="meta">0</span></div>
+        <div class="panelHeader"><span id="listTitle">Templates</span></div>
         <div id="templateList" class="templates"><div class="empty">Loading...</div></div>
       </section>
       <div id="notice" class="notice"></div>
@@ -141,9 +169,12 @@ export async function GET(request: Request) {
 
     <script>
       (function () {
-        var TEMPLATE_API_URL = ${JSON.stringify(templatesUrl)};
+        var TEMPLATE_INDEX_URL = ${JSON.stringify(templateIndexUrl)};
+        var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
+        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v2";
         var state = {
           templates: [],
+          detailCache: {},
           folderRoot: null,
           folderIndex: {},
           expanded: { "": true },
@@ -155,10 +186,8 @@ export async function GET(request: Request) {
 
         var els = {
           search: document.getElementById("searchInput"),
-          folderMeta: document.getElementById("folderMeta"),
           folderTree: document.getElementById("folderTree"),
           listTitle: document.getElementById("listTitle"),
-          listMeta: document.getElementById("listMeta"),
           templateList: document.getElementById("templateList"),
           notice: document.getElementById("notice")
         };
@@ -189,6 +218,28 @@ export async function GET(request: Request) {
             bodyHtml: String(input && input.bodyHtml || "<p></p>"),
             bodyText: String(input && input.bodyText || "")
           };
+        }
+
+        function compactRecipients(value) {
+          var parts = String(value || "")
+            .replace(/\\r?\\n/g, ",")
+            .split(/[;,]/)
+            .map(function (part) { return part.trim(); })
+            .filter(Boolean)
+            .map(function (part) {
+              var bracket = part.match(/^(.*?)<([^>]+)>$/);
+              var label = bracket ? bracket[1].replace(/^"|"$/g, "").trim() : part;
+              return label || (bracket ? bracket[2].trim() : part);
+            })
+            .slice(0, 2);
+          return parts.join(", ");
+        }
+
+        function recipientSummary(template) {
+          if (template.to) return "To: " + compactRecipients(template.to);
+          if (template.cc) return "Cc: " + compactRecipients(template.cc);
+          if (template.bcc) return "Bcc: " + compactRecipients(template.bcc);
+          return "-";
         }
 
         function folderParts(folder) {
@@ -247,19 +298,15 @@ export async function GET(request: Request) {
         function matchesQuery(template, query) {
           var tokens = normaliseSearchText(query).split(" ").filter(Boolean);
           if (!tokens.length) return true;
-          var haystack = normaliseSearchText([template.title, template.subject, template.folder, template.bodyText].join(" "));
+          var haystack = normaliseSearchText([template.title, template.subject, template.folder, template.to, template.cc, template.bcc].join(" "));
           return tokens.every(function (token) { return haystack.indexOf(token) !== -1; });
         }
 
         function visibleTemplates() {
           var query = state.query.trim();
           return state.templates.filter(function (template) {
-            return query ? matchesQuery(template, query) : folderContains(template, state.selectedFolder);
+            return matchesQuery(template, query) && folderContains(template, state.selectedFolder);
           });
-        }
-
-        function selectedTemplate() {
-          return state.templates.find(function (template) { return template.id === state.selectedId; }) || null;
         }
 
         function expandPath(path) {
@@ -284,15 +331,12 @@ export async function GET(request: Request) {
           var row = document.createElement("button");
           var arrow = document.createElement("span");
           var name = document.createElement("span");
-          var count = document.createElement("span");
           var hasChildren = node.children.length > 0;
 
+          container.className = "folderNode";
           row.type = "button";
-          row.className = "folderRow" + (state.selectedFolder === node.path && !state.query ? " active" : "");
-          row.style.paddingLeft = Math.min(node.depth * 13, 65) + "px";
+          row.className = "folderRow" + (state.selectedFolder === node.path ? " active" : "");
           row.addEventListener("click", function () {
-            state.query = "";
-            els.search.value = "";
             state.selectedFolder = node.path;
             expandPath(node.path);
             var visible = visibleTemplates();
@@ -300,7 +344,8 @@ export async function GET(request: Request) {
             render();
           });
 
-          arrow.textContent = hasChildren ? (state.expanded[node.path] ? "v" : ">") : "";
+          arrow.className = "folderToggle";
+          arrow.textContent = hasChildren ? (state.expanded[node.path] || state.query ? "-" : "+") : "";
           arrow.addEventListener("click", function (event) {
             event.stopPropagation();
             if (!hasChildren) return;
@@ -309,15 +354,15 @@ export async function GET(request: Request) {
           });
           name.className = "folderName";
           name.textContent = node.name;
-          count.className = "count";
-          count.textContent = String(node.totalCount);
           row.appendChild(arrow);
           row.appendChild(name);
-          row.appendChild(count);
           container.appendChild(row);
 
-          if (hasChildren && state.expanded[node.path]) {
-            node.children.forEach(function (child) { container.appendChild(renderFolderNode(child)); });
+          if (hasChildren && (state.expanded[node.path] || state.query)) {
+            var children = document.createElement("div");
+            children.className = "folderChildren";
+            node.children.forEach(function (child) { children.appendChild(renderFolderNode(child)); });
+            container.appendChild(children);
           }
 
           return container;
@@ -325,9 +370,15 @@ export async function GET(request: Request) {
 
         function renderFolders() {
           if (!state.folderRoot) return;
+          var tree = state.query ? buildFolderTree(state.templates.filter(function (template) {
+            return matchesQuery(template, state.query);
+          })).root : state.folderRoot;
           els.folderTree.innerHTML = "";
-          els.folderTree.appendChild(renderFolderNode(state.folderRoot));
-          els.folderMeta.textContent = String(Math.max(Object.keys(state.folderIndex).length - 1, 0));
+          if (!tree.totalCount) {
+            els.folderTree.innerHTML = '<div class="empty">No matching folders.</div>';
+            return;
+          }
+          els.folderTree.appendChild(renderFolderNode(tree));
         }
 
         function renderTemplates() {
@@ -337,7 +388,6 @@ export async function GET(request: Request) {
           }
 
           els.listTitle.textContent = state.query ? "Search results" : (state.selectedFolder || "All templates");
-          els.listMeta.textContent = String(visible.length);
           els.templateList.innerHTML = "";
 
           if (!visible.length) {
@@ -345,8 +395,14 @@ export async function GET(request: Request) {
             return;
           }
 
+          var header = document.createElement("div");
+          header.className = "templateGridHeader";
+          header.innerHTML = "<span>Recipient</span><span>Subject</span>";
+          els.templateList.appendChild(header);
+
           visible.forEach(function (template) {
             var row = document.createElement("button");
+            var subject = template.subject || template.title || "Untitled template";
             row.type = "button";
             row.className = "templateRow" + (template.id === state.selectedId ? " active" : "");
             row.addEventListener("click", function () {
@@ -358,7 +414,8 @@ export async function GET(request: Request) {
               insertSelectedTemplate();
             });
             row.innerHTML =
-              '<span class="title">' + escapeHtml(template.title || "Untitled template") + '</span>';
+              '<span class="recipient">' + escapeHtml(recipientSummary(template)) + '</span>' +
+              '<span class="title">' + escapeHtml(subject) + '</span>';
             els.templateList.appendChild(row);
           });
         }
@@ -417,20 +474,36 @@ export async function GET(request: Request) {
           }
         }
 
+        async function loadTemplateDetail(id) {
+          if (!id) return null;
+          var indexTemplate = state.templates.find(function (template) { return template.id === id; }) || null;
+          var cacheKey = id + ":" + (indexTemplate && indexTemplate.updatedAt || "");
+          if (state.detailCache[cacheKey]) return state.detailCache[cacheKey];
+
+          var response = await fetch(TEMPLATE_DETAIL_URL + "?id=" + encodeURIComponent(id), { cache: "no-cache" });
+          if (!response.ok) throw new Error("Template detail returned " + response.status + ".");
+          var data = await response.json();
+          var template = normaliseTemplate(Object.assign({}, indexTemplate || {}, data.template || {}));
+          state.detailCache[cacheKey] = template;
+          return template;
+        }
+
         async function insertSelectedTemplate() {
           markComposeReady();
-          var template = selectedTemplate();
           var office = window.Office;
           var item = office && office.context && office.context.mailbox && office.context.mailbox.item;
 
-          if (!template) return;
+          if (!state.selectedId) return;
           if (!state.composeReady) {
             notice("Open New mail, then double click a template to insert.", "error");
             return;
           }
 
-          notice("Inserting...", "");
+          notice("Loading template...", "");
           try {
+            var template = await loadTemplateDetail(state.selectedId);
+            if (!template) throw new Error("Template not found.");
+            notice("Inserting...", "");
             await officeAsync(function (done) { item.subject.setAsync(template.subject || "", done); });
             await addRecipients(item.to, template.to);
             await addRecipients(item.cc, template.cc);
@@ -449,30 +522,71 @@ export async function GET(request: Request) {
         }
 
         async function loadTemplates() {
-          try {
-            var response = await fetch(TEMPLATE_API_URL, { cache: "no-store" });
-            if (!response.ok) throw new Error("Template API returned " + response.status + ".");
-            var data = await response.json();
+          function applyTemplateIndex(data, keepSelection) {
+            var previousFolder = state.selectedFolder;
+            var previousId = state.selectedId;
             state.templates = Array.isArray(data.templates) ? data.templates.map(normaliseTemplate) : [];
             state.templates.sort(function (a, b) { return a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title); });
             var built = buildFolderTree(state.templates);
             state.folderRoot = built.root;
             state.folderIndex = built.index;
-            state.selectedFolder = chooseInitialFolder();
+            if (keepSelection && state.folderIndex[previousFolder]) {
+              state.selectedFolder = previousFolder;
+            } else {
+              state.selectedFolder = chooseInitialFolder();
+            }
             expandPath(state.selectedFolder);
-            state.selectedId = visibleTemplates()[0] ? visibleTemplates()[0].id : "";
-            notice("", "");
+            var visible = visibleTemplates();
+            state.selectedId = keepSelection && visible.some(function (template) { return template.id === previousId; })
+              ? previousId
+              : (visible[0] ? visible[0].id : "");
             render();
+          }
+
+          function loadCachedIndex() {
+            try {
+              var cached = window.localStorage && window.localStorage.getItem(INDEX_CACHE_KEY);
+              if (!cached) return false;
+              var data = JSON.parse(cached);
+              if (!data || !Array.isArray(data.templates)) return false;
+              applyTemplateIndex(data, false);
+              return true;
+            } catch (error) {
+              return false;
+            }
+          }
+
+          function saveCachedIndex(data) {
+            try {
+              if (window.localStorage) window.localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify(data));
+            } catch (error) {
+              return;
+            }
+          }
+
+          var hadCache = loadCachedIndex();
+          try {
+            var response = await fetch(TEMPLATE_INDEX_URL, { cache: "no-cache" });
+            if (!response.ok) throw new Error("Template API returned " + response.status + ".");
+            var data = await response.json();
+            saveCachedIndex(data);
+            applyTemplateIndex(data, hadCache);
+            notice("", "");
           } catch (error) {
-            els.folderTree.innerHTML = '<div class="empty">Could not load folders.</div>';
-            els.templateList.innerHTML = '<div class="empty">' + escapeHtml(error && error.message ? error.message : "Could not load templates.") + '</div>';
+            if (!hadCache) {
+              els.folderTree.innerHTML = '<div class="empty">Could not load folders.</div>';
+              els.templateList.innerHTML = '<div class="empty">' + escapeHtml(error && error.message ? error.message : "Could not load templates.") + '</div>';
+            } else {
+              notice("Using saved template index. Refresh later for latest edits.", "error");
+            }
           }
         }
 
         els.search.addEventListener("input", function () {
           state.query = els.search.value.trim();
+          state.selectedFolder = "";
           state.selectedId = visibleTemplates()[0] ? visibleTemplates()[0].id : "";
-          renderTemplates();
+          render();
         });
 
         if (window.Office && typeof window.Office.onReady === "function") {

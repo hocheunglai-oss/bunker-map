@@ -1,19 +1,70 @@
 import { NextResponse } from "next/server"
-import { loadTemplateLibrary } from "@/lib/emailTemplates"
+import { loadEmailTemplate, loadTemplateIndex, loadTemplateLibrary } from "@/lib/emailTemplates"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-export async function GET() {
+function sortByFolderAndTitle<T extends { folder?: string; title?: string }>(templates: T[]) {
+  return templates.sort((a, b) => {
+    const folderCompare = (a.folder || "").localeCompare(b.folder || "")
+    if (folderCompare !== 0) return folderCompare
+    return (a.title || "").localeCompare(b.title || "")
+  })
+}
+
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get("id")
+    const mode = searchParams.get("mode") || searchParams.get("view")
+
+    if (id) {
+      const template = await loadEmailTemplate(id)
+      if (!template || template.isActive === false) {
+        return NextResponse.json(
+          { message: "Template not found." },
+          {
+            status: 404,
+            headers: {
+              "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        )
+      }
+
+      return NextResponse.json(
+        { template },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=120, stale-while-revalidate=600",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      )
+    }
+
+    if (mode === "index" || mode === "compact") {
+      const library = await loadTemplateIndex()
+      const templates = sortByFolderAndTitle(library.templates.filter((template) => template.isActive !== false))
+
+      return NextResponse.json(
+        {
+          templates,
+          lastImportedAt: library.lastImportedAt,
+          lastUpdatedAt: library.lastUpdatedAt,
+        },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      )
+    }
+
     const library = await loadTemplateLibrary()
-    const templates = library.templates
-      .filter((template) => template.isActive !== false)
-      .sort((a, b) => {
-        const folderCompare = (a.folder || "").localeCompare(b.folder || "")
-        if (folderCompare !== 0) return folderCompare
-        return (a.title || "").localeCompare(b.title || "")
-      })
+    const templates = sortByFolderAndTitle(library.templates.filter((template) => template.isActive !== false))
 
     return NextResponse.json(
       {
@@ -23,7 +74,7 @@ export async function GET() {
       },
       {
         headers: {
-          "Cache-Control": "no-store, max-age=0",
+          "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
           "Access-Control-Allow-Origin": "*",
         },
       }

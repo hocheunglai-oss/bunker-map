@@ -32,6 +32,11 @@ export type EmailTemplateLibrary = {
   lastUpdatedAt: string | null
 }
 
+export type EmailTemplateIndexItem = Pick<
+  EmailTemplate,
+  "id" | "title" | "subject" | "folder" | "to" | "cc" | "bcc" | "isActive" | "updatedAt"
+>
+
 type ThunderbirdTemplate = Omit<EmailTemplate, "id" | "updatedAt" | "slug" | "isActive" | "placeholders">
 
 function requireEnv(name: string) {
@@ -256,6 +261,55 @@ function templateToRow(template: EmailTemplate) {
   }
 }
 
+function rowToTemplate(row: any): EmailTemplate {
+  return normaliseTemplate({
+    id: row.id,
+    title: row.title || "",
+    subject: row.subject || "",
+    folder: row.folder || "",
+    sourcePath: row.source_path || "",
+    from: row.sender || "",
+    to: row.to_recipients || "",
+    cc: row.cc_recipients || "",
+    bcc: row.bcc_recipients || "",
+    bodyHtml: row.body_html || "",
+    bodyText: row.body_text || "",
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    slug: row.slug || "",
+    isActive: row.is_active !== false,
+    placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
+    updatedAt: row.updated_at || new Date().toISOString(),
+  })
+}
+
+function rowToTemplateIndexItem(row: any): EmailTemplateIndexItem {
+  return {
+    id: row.id,
+    title: row.title || "",
+    subject: row.subject || "",
+    folder: row.folder || "",
+    to: row.to_recipients || "",
+    cc: row.cc_recipients || "",
+    bcc: row.bcc_recipients || "",
+    isActive: row.is_active !== false,
+    updatedAt: row.updated_at || new Date().toISOString(),
+  }
+}
+
+function templateToIndexItem(template: EmailTemplate): EmailTemplateIndexItem {
+  return {
+    id: template.id,
+    title: template.title,
+    subject: template.subject,
+    folder: template.folder,
+    to: template.to,
+    cc: template.cc,
+    bcc: template.bcc,
+    isActive: template.isActive,
+    updatedAt: template.updatedAt,
+  }
+}
+
 async function loadLegacyLibrary(supabase: any): Promise<EmailTemplateLibrary> {
   const legacyStore = (supabase as any).from("office_calendar_store")
   const { data, error } = await legacyStore
@@ -307,26 +361,7 @@ export async function loadTemplateLibrary(): Promise<EmailTemplateLibrary> {
     return loadLegacyLibrary(supabase)
   }
 
-  const templates = data.map((row) =>
-    normaliseTemplate({
-      id: row.id,
-      title: row.title || "",
-      subject: row.subject || "",
-      folder: row.folder || "",
-      sourcePath: row.source_path || "",
-      from: row.sender || "",
-      to: row.to_recipients || "",
-      cc: row.cc_recipients || "",
-      bcc: row.bcc_recipients || "",
-      bodyHtml: row.body_html || "",
-      bodyText: row.body_text || "",
-      tags: Array.isArray(row.tags) ? row.tags : [],
-      slug: row.slug || "",
-      isActive: row.is_active !== false,
-      placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
-      updatedAt: row.updated_at || new Date().toISOString(),
-    })
-  )
+  const templates = data.map(rowToTemplate)
 
   const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(templates))
 
@@ -340,6 +375,63 @@ export async function loadTemplateLibrary(): Promise<EmailTemplateLibrary> {
     lastImportedAt,
     lastUpdatedAt: lastImportedAt,
   }
+}
+
+export async function loadTemplateIndex(): Promise<{
+  templates: EmailTemplateIndexItem[]
+  lastImportedAt: string | null
+  lastUpdatedAt: string | null
+}> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("id,title,subject,folder,to_recipients,cc_recipients,bcc_recipients,is_active,updated_at")
+    .order("folder", { ascending: true })
+    .order("title", { ascending: true })
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      const library = await loadLegacyLibrary(supabase)
+      const templates = library.templates.map(templateToIndexItem)
+      return { templates, lastImportedAt: library.lastImportedAt, lastUpdatedAt: library.lastUpdatedAt }
+    }
+    throw error
+  }
+
+  if (!data || data.length === 0) {
+    const library = await loadLegacyLibrary(supabase)
+    const templates = library.templates.map(templateToIndexItem)
+    return { templates, lastImportedAt: library.lastImportedAt, lastUpdatedAt: library.lastUpdatedAt }
+  }
+
+  const templates = data.map(rowToTemplateIndexItem)
+  const lastUpdatedAt = templates.reduce<string | null>(
+    (latest, template) => (!latest || template.updatedAt > latest ? template.updatedAt : latest),
+    null
+  )
+
+  return { templates, lastImportedAt: lastUpdatedAt, lastUpdatedAt }
+}
+
+export async function loadEmailTemplate(id: string): Promise<EmailTemplate | null> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      const library = await loadLegacyLibrary(supabase)
+      return library.templates.find((template) => template.id === id) || null
+    }
+    throw error
+  }
+
+  return data ? rowToTemplate(data) : null
 }
 
 export async function saveTemplateLibrary(library: EmailTemplateLibrary) {
