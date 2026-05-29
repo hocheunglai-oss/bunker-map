@@ -48,6 +48,7 @@ type ExchangeSyncStatus = {
 }
 
 const INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
+const EXCHANGE_SYNC_TIMEOUT_MS = 10 * 60 * 1000
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -373,6 +374,7 @@ export default function OutlookAddressBookPage() {
   const [exchangeSyncing, setExchangeSyncing] = useState(false)
   const [exchangeButtonLabel, setExchangeButtonLabel] = useState("Sync Exchange")
   const [exchangeDebug, setExchangeDebug] = useState("")
+  const [exchangeSyncStartedAt, setExchangeSyncStartedAt] = useState<string | null>(null)
 
   useEffect(() => {
     document.title = "Outlook Address Book - FC Uno"
@@ -401,11 +403,24 @@ export default function OutlookAddressBookPage() {
       return
     }
     if (status !== "queued" && status !== "running") return
-    const timer = window.setInterval(() => {
+    const requestedAt = exchangeSyncStatus?.status.requestedAt || exchangeSyncStartedAt
+    const requestedAtMs = requestedAt ? Date.parse(requestedAt) : NaN
+    if (Number.isFinite(requestedAtMs) && Date.now() - requestedAtMs > EXCHANGE_SYNC_TIMEOUT_MS) {
+      setExchangeSyncing(false)
+      setExchangeButtonLabel("Sync Exchange")
+      setExchangeDebug(
+        formatExchangeDebug(
+          exchangeSyncStatus?.status,
+          "Exchange sync did not finish."
+        ) + "\n\nThe worker did not report completion within 10 minutes. Check Azure Automation > Runbooks > Sync-FCUno-OutlookAddressBook > Jobs for the exact job error, then press Sync Exchange again."
+      )
+      return
+    }
+    const timer = window.setTimeout(() => {
       void loadExchangeSyncStatus()
     }, 5000)
-    return () => window.clearInterval(timer)
-  }, [authenticated, exchangeSyncStatus, exchangeSyncing])
+    return () => window.clearTimeout(timer)
+  }, [authenticated, exchangeSyncStatus, exchangeSyncing, exchangeSyncStartedAt])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null
@@ -464,6 +479,7 @@ export default function OutlookAddressBookPage() {
 
   function markExchangeNeedsSync() {
     if (!exchangeSyncing) setExchangeButtonLabel("Sync Exchange")
+    setExchangeSyncStartedAt(null)
     setExchangeDebug("")
   }
 
@@ -698,9 +714,21 @@ export default function OutlookAddressBookPage() {
   }
 
   async function syncExchange() {
+    const missingEmailExamples = contacts
+      .filter((contact) => cleanText(contact.display_name) && !cleanText(contact.primary_email))
+      .slice(0, 3)
+      .map((contact) => contact.display_name)
+    if (missingEmailExamples.length > 0) {
+      setExchangeDebug(
+        `Some contacts have no email address, so Exchange cannot create them. Example: ${missingEmailExamples.join(", ")}`
+      )
+    } else {
+      setExchangeDebug("")
+    }
+    const startedAt = new Date().toISOString()
+    setExchangeSyncStartedAt(startedAt)
     setExchangeSyncing(true)
     setExchangeButtonLabel("Syncing")
-    setExchangeDebug("")
     try {
       const response = await fetch("/api/outlook-addressbook/exchange-sync", { method: "POST" })
       const data = await response.json()
@@ -708,6 +736,7 @@ export default function OutlookAddressBookPage() {
         throw new Error(`HTTP ${response.status}: ${data.message || "Could not queue Exchange sync."}`)
       }
       setExchangeSyncStatus({ webhookConfigured: true, status: data })
+      setExchangeSyncStartedAt(data.requestedAt || startedAt)
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Could not queue Exchange sync."
       setExchangeSyncStatus({
@@ -721,6 +750,7 @@ export default function OutlookAddressBookPage() {
       setExchangeDebug(messageText)
       setExchangeButtonLabel("Sync Exchange")
       setExchangeSyncing(false)
+      setExchangeSyncStartedAt(null)
     } finally {
     }
   }

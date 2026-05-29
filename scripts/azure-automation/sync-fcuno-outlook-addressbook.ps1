@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 
 function Get-AutomationSetting($Name) {
   $value = Get-AutomationVariable -Name $Name -ErrorAction SilentlyContinue
@@ -32,6 +33,27 @@ function Invoke-SupabaseRest($Method, $Path, $Body = $null) {
 function Clean-Text($Value) {
   if ($null -eq $Value) { return "" }
   return ([string]$Value -replace "\s+", " ").Trim()
+}
+
+function Normalize-Email($Value) {
+  $text = (Clean-Text $Value).ToLower()
+  $text = $text -replace "^[Ss][Mm][Tt][Pp]:", ""
+  return $text
+}
+
+function Get-RecipientEmail($Recipient) {
+  if ($null -eq $Recipient) { return "" }
+  $candidates = @(
+    $Recipient.ExternalEmailAddress,
+    $Recipient.PrimarySmtpAddress,
+    $Recipient.WindowsEmailAddress,
+    $Recipient.UserPrincipalName
+  )
+  foreach ($candidate in $candidates) {
+    $email = Normalize-Email $candidate
+    if ($email -match "@") { return $email }
+  }
+  return ""
 }
 
 function Get-ExchangeAlias($Value, $Fallback) {
@@ -190,16 +212,36 @@ try {
   $members = Load-AllRows "shared_addressbook_group_members" "source_book"
   $exchangeRows = Build-ExchangeRows $contacts $groups $members
 
+  $desiredContactEmails = @{}
+  foreach ($contact in $exchangeRows.Contacts) {
+    $desiredContactEmails[(Normalize-Email $contact.ExternalEmailAddress)] = $true
+  }
+
+  $desiredGroupAliases = @{}
+  $desiredMembersByGroup = @{}
+  foreach ($group in $exchangeRows.Groups) {
+    $alias = (Clean-Text $group.Alias).ToLower()
+    $desiredGroupAliases[$alias] = $true
+    $desiredMembersByGroup[$alias] = @{}
+  }
+  foreach ($member in $exchangeRows.Members) {
+    $alias = (Clean-Text $member.GroupAlias).ToLower()
+    if (-not $desiredMembersByGroup.ContainsKey($alias)) {
+      $desiredMembersByGroup[$alias] = @{}
+    }
+    $desiredMembersByGroup[$alias][(Normalize-Email $member.MemberEmail)] = $true
+  }
+
   $createdContacts = 0
   $updatedContacts = 0
   foreach ($contact in $exchangeRows.Contacts) {
     $existing = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
     if ($existing) {
-      Set-MailContact -Identity $existing.Identity -DisplayName $contact.DisplayName -FirstName $contact.FirstName -LastName $contact.LastName -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-MailContact -Identity $existing.Identity -DisplayName $contact.DisplayName -FirstName $contact.FirstName -LastName $contact.LastName -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $updatedContacts += 1
     } else {
       New-MailContact -Name $contact.DisplayName -DisplayName $contact.DisplayName -ExternalEmailAddress $contact.ExternalEmailAddress -Alias $contact.Alias | Out-Null
-      Set-MailContact -Identity $contact.ExternalEmailAddress -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-MailContact -Identity $contact.ExternalEmailAddress -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $createdContacts += 1
     }
   }
@@ -209,11 +251,11 @@ try {
   foreach ($group in $exchangeRows.Groups) {
     $existing = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
     if ($existing) {
-      Set-DistributionGroup -Identity $group.Alias -DisplayName $group.GroupName -Notes $group.Description -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-DistributionGroup -Identity $group.Alias -DisplayName $group.GroupName -Notes $group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $updatedGroups += 1
     } else {
       New-DistributionGroup -Name $group.GroupName -Alias $group.Alias -Notes $group.Description | Out-Null
-      Set-DistributionGroup -Identity $group.Alias -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-DistributionGroup -Identity $group.Alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $createdGroups += 1
     }
   }
@@ -230,6 +272,53 @@ try {
     }
   }
 
+  $removedMembers = 0
+  foreach ($group in $exchangeRows.Groups) {
+    $groupAlias = (Clean-Text $group.Alias).ToLower()
+    $desiredMembers = $desiredMembersByGroup[$groupAlias]
+    if (-not $desiredMembers) { $desiredMembers = @{} }
+    $currentMembers = @(Get-DistributionGroupMember -Identity $group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    foreach ($currentMember in $currentMembers) {
+      $currentEmail = Get-RecipientEmail $currentMember
+      if ($currentEmail -and -not $desiredMembers.ContainsKey($currentEmail)) {
+        try {
+          Remove-DistributionGroupMember -Identity $group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
+          $removedMembers += 1
+        } catch {
+          Write-Warning ("Could not remove {0} from {1}: {2}" -f $currentEmail, $group.GroupName, $_.Exception.Message)
+        }
+      }
+    }
+  }
+
+  $removedGroups = 0
+  $managedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
+  foreach ($managedGroup in $managedGroups) {
+    $alias = (Clean-Text $managedGroup.Alias).ToLower()
+    if ($alias -and -not $desiredGroupAliases.ContainsKey($alias)) {
+      try {
+        Remove-DistributionGroup -Identity $managedGroup.Identity -Confirm:$false -ErrorAction Stop
+        $removedGroups += 1
+      } catch {
+        Write-Warning ("Could not remove group {0}: {1}" -f $managedGroup.DisplayName, $_.Exception.Message)
+      }
+    }
+  }
+
+  $removedContacts = 0
+  $managedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
+  foreach ($managedContact in $managedContacts) {
+    $email = Get-RecipientEmail $managedContact
+    if ($email -and -not $desiredContactEmails.ContainsKey($email)) {
+      try {
+        Remove-MailContact -Identity $managedContact.Identity -Confirm:$false -ErrorAction Stop
+        $removedContacts += 1
+      } catch {
+        Write-Warning ("Could not remove contact {0}: {1}" -f $managedContact.DisplayName, $_.Exception.Message)
+      }
+    }
+  }
+
   $details = @{
     contacts = $exchangeRows.Contacts.Count
     groups = $exchangeRows.Groups.Count
@@ -239,6 +328,9 @@ try {
     createdGroups = $createdGroups
     updatedGroups = $updatedGroups
     addedMembers = $addedMembers
+    removedMembers = $removedMembers
+    removedGroups = $removedGroups
+    removedContacts = $removedContacts
   }
   Save-SyncStatus "completed" "Exchange sync completed." $details
 } catch {
