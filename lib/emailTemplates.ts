@@ -187,6 +187,60 @@ function buildTemplateId(template: ThunderbirdTemplate, sequence: number) {
   return slugify(parts.join("-")) || `template-${sequence + 1}`
 }
 
+function normaliseTemplateFolderParts(folder: string) {
+  return (folder || "")
+    .split(" / ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function shouldSkipImportedFolder(folder: string) {
+  const parts = normaliseTemplateFolderParts(folder)
+  if (folder.startsWith("Internal / Outgoing")) return true
+
+  return parts.some((part) => {
+    if (["Drafts", "Trash", "Unsent Messages", "!Retired"].includes(part)) return true
+    return /\((backup|temp)\)/i.test(part)
+  })
+}
+
+function normaliseDedupValue(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function templateDedupKey(template: Pick<EmailTemplate, "subject" | "to" | "cc" | "bcc" | "bodyHtml">) {
+  return [template.subject, template.to, template.cc, template.bcc, template.bodyHtml]
+    .map(normaliseDedupValue)
+    .join("\u0001")
+}
+
+function templateFolderPreference(template: Pick<EmailTemplate, "folder">) {
+  const folder = template.folder || ""
+  const depthPenalty = normaliseTemplateFolderParts(folder).length
+  let score = 100 - depthPenalty
+  if (folder.startsWith("Outgoing")) score += 40
+  if (folder.startsWith("Internal")) score += 20
+  if (folder.startsWith("FCBV")) score += 10
+  return score
+}
+
+function deduplicateTemplatesByContent(templates: EmailTemplate[]) {
+  const byKey = new Map<string, EmailTemplate>()
+
+  for (const template of templates) {
+    const key = templateDedupKey(template)
+    const existing = byKey.get(key)
+    if (!existing || templateFolderPreference(template) > templateFolderPreference(existing)) {
+      byKey.set(key, template)
+    }
+  }
+
+  return Array.from(byKey.values())
+}
+
 export function extractPlaceholders(...values: string[]) {
   const found = new Set<string>()
 
@@ -520,6 +574,7 @@ export async function importThunderbirdTemplates() {
     const rawFile = await fs.readFile(filePath, "utf8")
     const messages = splitMboxMessages(rawFile)
     const folder = buildFolderLabel(filePath)
+    if (shouldSkipImportedFolder(folder)) continue
 
     for (const message of messages) {
       const { headers, body } = extractBody(message)
@@ -562,13 +617,15 @@ export async function importThunderbirdTemplates() {
     }
   }
 
-  imported.sort((a, b) => {
+  const deduplicated = deduplicateTemplatesByContent(imported)
+
+  deduplicated.sort((a, b) => {
     const folderCompare = a.folder.localeCompare(b.folder)
     if (folderCompare !== 0) return folderCompare
     return a.title.localeCompare(b.title)
   })
 
-  const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(imported))
+  const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(deduplicated))
 
   const library: EmailTemplateLibrary = {
     templates: uniqueTemplates,

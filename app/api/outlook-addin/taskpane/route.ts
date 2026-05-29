@@ -429,8 +429,8 @@ export async function GET(request: Request) {
           var office = window.Office;
           var item = office && office.context && office.context.mailbox && office.context.mailbox.item;
           var canSetSubject = item && item.subject && typeof item.subject.setAsync === "function";
-          var canInsertBody = item && item.body && typeof item.body.setSelectedDataAsync === "function";
-          state.composeReady = Boolean(canSetSubject && canInsertBody);
+          var canReplaceBody = item && item.body && typeof item.body.setAsync === "function";
+          state.composeReady = Boolean(canSetSubject && canReplaceBody);
         }
 
         function officeAsync(call) {
@@ -462,16 +462,14 @@ export async function GET(request: Request) {
             .filter(Boolean);
         }
 
-        async function addRecipients(recipientApi, value) {
+        async function setRecipients(recipientApi, value) {
           var recipients = parseRecipients(value);
-          if (!recipients.length || !recipientApi) return;
-          if (typeof recipientApi.addAsync === "function") {
-            await officeAsync(function (done) { recipientApi.addAsync(recipients, done); });
-            return;
-          }
+          if (!recipientApi) return;
           if (typeof recipientApi.setAsync === "function") {
             await officeAsync(function (done) { recipientApi.setAsync(recipients, done); });
+            return;
           }
+          throw new Error("This Outlook client cannot replace recipients.");
         }
 
         async function loadTemplateDetail(id) {
@@ -505,15 +503,19 @@ export async function GET(request: Request) {
             if (!template) throw new Error("Template not found.");
             notice("Inserting...", "");
             await officeAsync(function (done) { item.subject.setAsync(template.subject || "", done); });
-            await addRecipients(item.to, template.to);
-            await addRecipients(item.cc, template.cc);
-            await addRecipients(item.bcc, template.bcc);
+            await setRecipients(item.to, template.to);
+            await setRecipients(item.cc, template.cc);
+            await setRecipients(item.bcc, template.bcc);
             var bodyType = await officeAsync(function (done) { item.body.getTypeAsync(done); });
             var isHtml = bodyType === office.MailboxEnums.BodyType.Html;
+            var bodyOptions = {
+              coercionType: isHtml ? office.CoercionType.Html : office.CoercionType.Text
+            };
+            if (office.MailboxEnums && office.MailboxEnums.BodyMode && office.MailboxEnums.BodyMode.HostConfig) {
+              bodyOptions.bodyMode = office.MailboxEnums.BodyMode.HostConfig;
+            }
             await officeAsync(function (done) {
-              item.body.setSelectedDataAsync(isHtml ? template.bodyHtml : template.bodyText, {
-                coercionType: isHtml ? office.CoercionType.Html : office.CoercionType.Text
-              }, done);
+              item.body.setAsync(isHtml ? template.bodyHtml : template.bodyText, bodyOptions, done);
             });
             notice("Inserted.", "success");
           } catch (error) {

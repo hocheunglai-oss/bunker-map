@@ -113,6 +113,58 @@ function buildFolderLabel(filePath) {
     .join(" / ")
 }
 
+function normaliseTemplateFolderParts(folder) {
+  return String(folder || "")
+    .split(" / ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function shouldSkipImportedFolder(folder) {
+  const parts = normaliseTemplateFolderParts(folder)
+  if (String(folder || "").startsWith("Internal / Outgoing")) return true
+
+  return parts.some((part) => {
+    if (["Drafts", "Trash", "Unsent Messages", "!Retired"].includes(part)) return true
+    return /\((backup|temp)\)/i.test(part)
+  })
+}
+
+function normaliseDedupValue(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function templateDedupKey(template) {
+  return [template.subject, template.to, template.cc, template.bcc, template.bodyHtml]
+    .map(normaliseDedupValue)
+    .join("\u0001")
+}
+
+function templateFolderPreference(template) {
+  const folder = template.folder || ""
+  const depthPenalty = normaliseTemplateFolderParts(folder).length
+  let score = 100 - depthPenalty
+  if (folder.startsWith("Outgoing")) score += 40
+  if (folder.startsWith("Internal")) score += 20
+  if (folder.startsWith("FCBV")) score += 10
+  return score
+}
+
+function deduplicateTemplatesByContent(templates) {
+  const byKey = new Map()
+  for (const template of templates) {
+    const key = templateDedupKey(template)
+    const existing = byKey.get(key)
+    if (!existing || templateFolderPreference(template) > templateFolderPreference(existing)) {
+      byKey.set(key, template)
+    }
+  }
+  return Array.from(byKey.values())
+}
+
 function ensureUniqueSlugs(templates) {
   const seen = new Map()
   return templates.map((template) => {
@@ -142,11 +194,21 @@ function ensureUniqueIds(templates) {
 async function buildTemplates() {
   const templateFiles = await walkTemplateFiles(THUNDERBIRD_ROOT)
   const templates = []
+  const stats = {
+    sourceMessages: 0,
+    skippedByFolder: 0,
+    removedAsExactDuplicates: 0,
+  }
   let sequence = 0
   for (const filePath of templateFiles) {
     const rawFile = await fs.readFile(filePath, "utf8")
     const messages = splitMboxMessages(rawFile)
     const folder = buildFolderLabel(filePath)
+    stats.sourceMessages += messages.length
+    if (shouldSkipImportedFolder(folder)) {
+      stats.skippedByFolder += messages.length
+      continue
+    }
     for (const message of messages) {
       const { headers, body } = extractBody(message)
       const subject = getHeaderValue(headers, "Subject")
@@ -174,8 +236,13 @@ async function buildTemplates() {
       sequence += 1
     }
   }
-  templates.sort((a, b) => a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title))
-  return ensureUniqueSlugs(ensureUniqueIds(templates))
+  const deduplicated = deduplicateTemplatesByContent(templates)
+  stats.removedAsExactDuplicates = templates.length - deduplicated.length
+  deduplicated.sort((a, b) => a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title))
+  return {
+    templates: ensureUniqueSlugs(ensureUniqueIds(deduplicated)),
+    stats,
+  }
 }
 
 async function tryDedicatedTable(templates) {
@@ -212,7 +279,7 @@ async function tryDedicatedTable(templates) {
     updated_at: template.updatedAt,
   }))
 
-  const batchSize = 100
+  const batchSize = 25
   for (let index = 0; index < rows.length; index += batchSize) {
     const batch = rows.slice(index, index + batchSize)
     const insert = await fetch(`${SUPABASE_URL}/rest/v1/email_templates`, {
@@ -221,6 +288,7 @@ async function tryDedicatedTable(templates) {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         "Content-Type": "application/json",
+        Prefer: "return=minimal",
       },
       body: JSON.stringify(batch),
     })
@@ -260,7 +328,7 @@ async function saveLegacyStore(templates) {
   return payload
 }
 
-const templates = await buildTemplates()
+const { templates, stats } = await buildTemplates()
 const usedDedicatedTable = await tryDedicatedTable(templates)
 const payload = usedDedicatedTable
   ? {
@@ -275,6 +343,9 @@ await fs.writeFile(MANIFEST_PATH, buildOutlookManifest(BASE_URL), "utf8")
 
 console.log(JSON.stringify({
   templates: templates.length,
+  sourceMessages: stats.sourceMessages,
+  skippedByFolder: stats.skippedByFolder,
+  removedAsExactDuplicates: stats.removedAsExactDuplicates,
   usedDedicatedTable,
   manifestPath: MANIFEST_PATH,
   manifestBaseUrl: BASE_URL,
