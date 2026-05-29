@@ -171,7 +171,7 @@ export async function GET(request: Request) {
       (function () {
         var TEMPLATE_INDEX_URL = ${JSON.stringify(templateIndexUrl)};
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
-        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v2";
+        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v3";
         var state = {
           templates: [],
           detailCache: {},
