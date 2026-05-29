@@ -102,9 +102,15 @@ export async function POST() {
     }
 
     if (!response.ok) {
+      const helpText =
+        response.status === 404
+          ? "Azure Automation webhook returned HTTP 404. The webhook URL in Vercel is no longer valid, points to a missing webhook/runbook/account, or was copied incorrectly. Create a new Azure webhook, update EXCHANGE_SYNC_WEBHOOK_URL in Vercel, then redeploy."
+          : response.status === 400
+            ? "Azure Automation webhook returned HTTP 400. The webhook may be disabled, expired, or using an invalid token. Create a new Azure webhook, update EXCHANGE_SYNC_WEBHOOK_URL in Vercel, then redeploy."
+            : `Exchange sync worker returned HTTP ${response.status}.`
       const failedStatus: ExchangeSyncStatus = {
         status: "failed",
-        message: `Exchange sync worker returned HTTP ${response.status}.`,
+        message: helpText,
         requestedAt,
         response: responseBody,
       }
