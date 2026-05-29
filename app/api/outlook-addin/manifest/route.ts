@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 
+const ADDIN_ASSET_VERSION = "2026-05-29-templates-v2"
+
 function xmlEscape(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -22,13 +24,15 @@ function buildBaseUrl(request: Request) {
 
 export async function GET(request: Request) {
   const baseUrl = buildBaseUrl(request)
+  const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${ADDIN_ASSET_VERSION}`
+  const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${ADDIN_ASSET_VERSION}`
   const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.0.1.0</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
@@ -50,13 +54,13 @@ export async function GET(request: Request) {
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${xmlEscape(taskpaneUrl)}"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${xmlEscape(taskpaneUrl)}"/>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -130,8 +134,8 @@ export async function GET(request: Request) {
         <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/commands"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
+        <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(commandsUrl)}"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(taskpaneUrl)}"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
@@ -209,8 +213,8 @@ export async function GET(request: Request) {
           <bt:Image id="Icon.80" DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/commands"/>
-          <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(baseUrl)}/api/outlook-addin/taskpane"/>
+          <bt:Url id="Commands.Url" DefaultValue="${xmlEscape(commandsUrl)}"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="${xmlEscape(taskpaneUrl)}"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
@@ -230,6 +234,7 @@ export async function GET(request: Request) {
     headers: {
       "Content-Type": "application/xml; charset=utf-8",
       "Content-Disposition": "attachment; filename=\"fratelli-cosulich-templates-manifest.xml\"",
+      "Cache-Control": "no-store, max-age=0",
     },
   })
 }
