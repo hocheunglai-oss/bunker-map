@@ -1,9 +1,8 @@
-import { cookies } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { requireAdminSession as requireSharedAdminSession } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const LEGACY_STORE_KEY = "email-templates"
 const THUNDERBIRD_ROOT = "/Users/hocheunglai/Desktop/- Thunderbird Templates/Templates.sbd"
 
@@ -61,10 +60,7 @@ function createEmptyLibrary(): EmailTemplateLibrary {
 }
 
 export async function requireAdminSession() {
-  const cookieStore = await cookies()
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    throw new Error("Unauthorized")
-  }
+  return requireSharedAdminSession()
 }
 
 function slugify(input: string) {
