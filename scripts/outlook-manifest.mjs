@@ -9,6 +9,9 @@ function xmlEscape(value) {
 
 export function buildOutlookManifest(rawBaseUrl) {
   const baseUrl = xmlEscape(String(rawBaseUrl || "https://fcuno.com").replace(/\/$/, ""))
+  const assetVersion = "2026-06-01-templates-v4"
+  const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${assetVersion}`
+  const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${assetVersion}`
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
@@ -16,7 +19,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.0.3.0</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
@@ -38,13 +41,13 @@ export function buildOutlookManifest(rawBaseUrl) {
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${taskpaneUrl}"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
+        <SourceLocation DefaultValue="${taskpaneUrl}"/>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -118,8 +121,8 @@ export function buildOutlookManifest(rawBaseUrl) {
         <bt:Image id="Icon.80" DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="${baseUrl}/api/outlook-addin/commands"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
+        <bt:Url id="Commands.Url" DefaultValue="${commandsUrl}"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="${taskpaneUrl}"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
@@ -197,8 +200,8 @@ export function buildOutlookManifest(rawBaseUrl) {
           <bt:Image id="Icon.80" DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="${baseUrl}/api/outlook-addin/commands"/>
-          <bt:Url id="Taskpane.Url" DefaultValue="${baseUrl}/api/outlook-addin/taskpane"/>
+          <bt:Url id="Commands.Url" DefaultValue="${commandsUrl}"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="${taskpaneUrl}"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>

@@ -90,12 +90,35 @@ function decodeHtmlEntities(text: string) {
 }
 
 function getHeaderValue(headers: string, name: string) {
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const regex = new RegExp(`^${escapedName}:([\\s\\S]*?)(?:\\n[^ \\t]|$)`, "im")
-  const match = headers.match(regex)
-  if (!match) return ""
+  const target = name.toLowerCase()
+  let currentName = ""
+  let currentValue: string[] = []
 
-  return decodeHtmlEntities(match[1].replace(/\n[ \t]+/g, " ").trim())
+  function flush() {
+    if (currentName.toLowerCase() !== target) return ""
+    return decodeHtmlEntities(currentValue.join(" ").replace(/\s+/g, " ").trim())
+  }
+
+  for (const line of normaliseNewlines(headers).split("\n")) {
+    if (/^[ \t]/.test(line) && currentName) {
+      currentValue.push(line.trim())
+      continue
+    }
+
+    const value = flush()
+    if (value) return value
+
+    const colonIndex = line.indexOf(":")
+    if (colonIndex <= 0) {
+      currentName = ""
+      currentValue = []
+      continue
+    }
+    currentName = line.slice(0, colonIndex).trim()
+    currentValue = [line.slice(colonIndex + 1).trim()]
+  }
+
+  return flush()
 }
 
 function extractBody(rawMessage: string) {
@@ -153,6 +176,7 @@ async function walkTemplateFiles(directoryPath: string): Promise<string[]> {
     if (entry.name.startsWith(".")) continue
     if (entry.name.endsWith(".msf")) continue
     if (entry.name === "msgFilterRules.dat") continue
+    if (/^nstmp/i.test(entry.name)) continue
 
     const fullPath = path.join(directoryPath, entry.name)
 
@@ -200,6 +224,7 @@ function shouldSkipImportedFolder(folder: string) {
 
   return parts.some((part) => {
     if (["Drafts", "Trash", "Unsent Messages", "!Retired"].includes(part)) return true
+    if (/^nstmp/i.test(part)) return true
     return /\((backup|temp)\)/i.test(part)
   })
 }

@@ -171,7 +171,7 @@ export async function GET(request: Request) {
       (function () {
         var TEMPLATE_INDEX_URL = ${JSON.stringify(templateIndexUrl)};
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
-        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v3";
+        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v4";
         var state = {
           templates: [],
           detailCache: {},
@@ -220,17 +220,41 @@ export async function GET(request: Request) {
           };
         }
 
+        function stripOuterQuotes(value) {
+          return String(value || "").trim().replace(/^"+|"+$/g, "");
+        }
+
+        function splitRecipientText(value) {
+          var text = String(value || "").replace(/\\r?\\n/g, " ");
+          var parts = [];
+          var current = "";
+          var inQuote = false;
+          var angleDepth = 0;
+
+          for (var i = 0; i < text.length; i += 1) {
+            var char = text.charAt(i);
+            if (char === '"' && text.charAt(i - 1) !== "\\\\") inQuote = !inQuote;
+            if (!inQuote && char === "<") angleDepth += 1;
+            if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1;
+            if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
+              if (current.trim()) parts.push(current.trim());
+              current = "";
+              continue;
+            }
+            current += char;
+          }
+          if (current.trim()) parts.push(current.trim());
+          return parts;
+        }
+
         function compactRecipients(value) {
-          var parts = String(value || "")
-            .replace(/\\r?\\n/g, ",")
-            .split(/[;,]/)
-            .map(function (part) { return part.trim(); })
-            .filter(Boolean)
+          var parts = splitRecipientText(value)
             .map(function (part) {
               var bracket = part.match(/^(.*?)<([^>]+)>$/);
-              var label = bracket ? bracket[1].replace(/^"|"$/g, "").trim() : part;
-              return label || (bracket ? bracket[2].trim() : part);
+              var label = bracket ? stripOuterQuotes(bracket[1]) : stripOuterQuotes(part);
+              return label || (bracket ? stripOuterQuotes(bracket[2]) : stripOuterQuotes(part));
             })
+            .filter(Boolean)
             .slice(0, 2);
           return parts.join(", ");
         }
@@ -447,17 +471,14 @@ export async function GET(request: Request) {
         }
 
         function parseRecipients(value) {
-          return String(value || "")
-            .replace(/\\r?\\n/g, ",")
-            .split(/[;,]/)
-            .map(function (part) { return part.trim(); })
-            .filter(Boolean)
+          return splitRecipientText(value)
             .map(function (part) {
               var bracket = part.match(/^(.*?)<([^>]+)>$/);
-              var email = bracket ? bracket[2].trim() : part;
-              var name = bracket ? bracket[1].replace(/^"|"$/g, "").trim() : "";
-              if (!/@/.test(email)) return null;
-              return name ? { displayName: name, emailAddress: email } : { emailAddress: email };
+              var address = stripOuterQuotes(bracket ? bracket[2] : part);
+              var name = stripOuterQuotes(bracket ? bracket[1] : "");
+              if (!address) return null;
+              if (!/@/.test(address)) return address;
+              return name ? { displayName: name, emailAddress: address } : { emailAddress: address };
             })
             .filter(Boolean);
         }
