@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { canAccessAdminPage, getAdminPagesByGroup, isAdminRole } from "@/lib/adminPages"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 
@@ -17,9 +18,9 @@ const pageStyle: React.CSSProperties = {
 }
 
 const shellStyle: React.CSSProperties = {
-  width: "min(1760px, 100%)",
+  width: "min(1380px, 100%)",
   display: "grid",
-  gridTemplateColumns: "1.05fr repeat(4, 1fr)",
+  gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
   gap: "18px",
 }
 
@@ -59,14 +60,6 @@ const actionButtonStyle: React.CSSProperties = {
   boxShadow: "none",
 }
 
-const mutedTradingButtonStyle: React.CSSProperties = {
-  ...actionButtonStyle,
-  background: "var(--fc-admin-panel-soft-bg)",
-  color: "var(--fc-admin-muted)",
-  borderColor: "var(--fc-admin-border)",
-  boxShadow: "none",
-}
-
 const lockedPanelShellStyle: React.CSSProperties = {
   ...panelStyle,
   background: "var(--fc-admin-panel-soft-bg)",
@@ -77,7 +70,7 @@ const lockedPanelShellStyle: React.CSSProperties = {
 export default function AdminPage() {
   const isMobile = useIsMobile()
   const router = useRouter()
-  const { loading, authenticated } = useSimpleAdminAuth()
+  const { loading, authenticated, displayName, permissions, role } = useSimpleAdminAuth()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -108,6 +101,18 @@ export default function AdminPage() {
       return
     }
 
+    if (data.user?.username) {
+      window.localStorage.setItem(
+        "bunker_admin_actor",
+        JSON.stringify({
+          username: data.user.username,
+          displayName: data.user.displayName || data.user.username,
+          role: data.user.role || null,
+          permissions: data.user.permissions || {},
+        })
+      )
+    }
+
     window.location.reload()
   }
 
@@ -116,10 +121,47 @@ export default function AdminPage() {
       method: "POST",
     })
 
+    window.localStorage.removeItem("bunker_admin_actor")
     window.location.reload()
   }
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
+
+  function visiblePages(group: "reports" | "trading" | "contacts" | "office" | "management") {
+    return getAdminPagesByGroup(group).filter(
+      (page) => isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view")
+    )
+  }
+
+  function renderToolButtons(group: "reports" | "trading" | "contacts" | "office" | "management") {
+    const pages = visiblePages(group)
+
+    if (pages.length === 0) {
+      return (
+        <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", textAlign: "center" }}>
+          No tools assigned.
+        </p>
+      )
+    }
+
+    return pages.map((item) => (
+      <button
+        key={item.label}
+        onClick={() => router.push(item.path)}
+        style={{
+          ...actionButtonStyle,
+          padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
+          background: "var(--fc-admin-button-bg)",
+          color: "var(--fc-admin-button-text)",
+          borderColor: "var(--fc-admin-button-border)",
+          cursor: "pointer",
+          boxShadow: "none",
+        }}
+      >
+        {item.label}
+      </button>
+    ))
+  }
 
   return (
     <div style={pageStyle}>
@@ -130,7 +172,13 @@ export default function AdminPage() {
           gap: isMobile ? "14px" : "18px",
         }}
       >
-        <form onSubmit={handleLogin} style={panelStyle}>
+        <form
+          onSubmit={handleLogin}
+          style={{
+            ...panelStyle,
+            ...(isMobile ? {} : { gridColumn: "1", gridRow: "1" }),
+          }}
+        >
           <div
             style={{
               display: "flex",
@@ -190,6 +238,20 @@ export default function AdminPage() {
             </label>
 
             <div style={{ marginTop: "auto" }}>
+              {authenticated && displayName ? (
+                <p
+                  style={{
+                    margin: "0 0 12px",
+                    color: "var(--fc-admin-muted)",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    textAlign: "center",
+                  }}
+                >
+                  Signed in as {displayName}
+                </p>
+              ) : null}
+
               {authenticated ? (
                 <button
                   type="button"
@@ -265,6 +327,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
+            ...(isMobile ? {} : { gridColumn: "1 / span 2", gridRow: "2" }),
           }}
         >
           {authenticated ? (
@@ -284,28 +347,7 @@ export default function AdminPage() {
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
-                {[
-                  { label: "CHINA AND COMPACT", path: "/admin/pricesetter" },
-                  { label: "HONG KONG", path: "/admin/hongkongpricehistory" },
-                  { label: "TAIWAN", path: "/admin/taiwanpricehistory" },
-                  { label: "TAIWAN REMARKS", path: "/admin/taiwanremarks" },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => router.push(item.path)}
-                    style={{
-                      ...actionButtonStyle,
-                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "var(--fc-admin-button-bg)",
-                      color: "var(--fc-admin-button-text)",
-                      borderColor: "var(--fc-admin-button-border)",
-                      cursor: "pointer",
-                      boxShadow: "none",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                {renderToolButtons("reports")}
               </div>
             </>
           ) : null}
@@ -317,6 +359,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
+            ...(isMobile ? {} : { gridColumn: "2", gridRow: "1" }),
           }}
         >
           {authenticated ? (
@@ -336,23 +379,7 @@ export default function AdminPage() {
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
-                {[{ label: "COUNTRY AND COMPANY INFO", path: "/admin/ccinfo" }].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => router.push(item.path)}
-                    style={{
-                      ...actionButtonStyle,
-                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "var(--fc-admin-button-bg)",
-                      color: "var(--fc-admin-button-text)",
-                      borderColor: "var(--fc-admin-button-border)",
-                      cursor: "pointer",
-                      boxShadow: "none",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                {renderToolButtons("trading")}
               </div>
             </>
           ) : null}
@@ -363,6 +390,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
+            ...(isMobile ? {} : { gridColumn: "4", gridRow: "1" }),
           }}
         >
           {authenticated ? (
@@ -382,27 +410,7 @@ export default function AdminPage() {
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
-                {[
-                  { label: "PHONEBOOK", path: "/admin/phonebook" },
-                  { label: "OUTLOOK ADDRESS BOOK", path: "/admin/outlookaddressbook" },
-                  { label: "EMAIL TEMPLATES", path: "/admin/emailtemplates" },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => router.push(item.path)}
-                    style={{
-                      ...actionButtonStyle,
-                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "var(--fc-admin-button-bg)",
-                      color: "var(--fc-admin-button-text)",
-                      borderColor: "var(--fc-admin-button-border)",
-                      cursor: "pointer",
-                      boxShadow: "none",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                {renderToolButtons("contacts")}
               </div>
             </>
           ) : null}
@@ -413,6 +421,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
+            ...(isMobile ? {} : { gridColumn: "3", gridRow: "1" }),
           }}
         >
           {authenticated ? (
@@ -432,26 +441,38 @@ export default function AdminPage() {
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
-                {[
-                  { label: "EVENT CALENDAR", path: "/admin/eventcalendar" },
-                  { label: "TASK CALENDAR", path: "/admin/taskcalendar" },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => router.push(item.path)}
-                    style={{
-                      ...actionButtonStyle,
-                      padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-                      background: "var(--fc-admin-button-bg)",
-                      color: "var(--fc-admin-button-text)",
-                      borderColor: "var(--fc-admin-button-border)",
-                      cursor: "pointer",
-                      boxShadow: "none",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                {renderToolButtons("office")}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            ...(authenticated ? panelStyle : lockedPanelShellStyle),
+            display: "flex",
+            flexDirection: "column",
+            ...(isMobile ? {} : { gridColumn: "3 / span 2", gridRow: "2" }),
+          }}
+        >
+          {authenticated ? (
+            <>
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "var(--fc-admin-heading)",
+                  marginBottom: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                Management Tools
+              </div>
+
+              <div style={{ display: "grid", gap: "12px" }}>
+                {renderToolButtons("management")}
               </div>
             </>
           ) : null}

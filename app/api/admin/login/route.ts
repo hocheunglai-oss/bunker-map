@@ -1,37 +1,40 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
-
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
-const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+import { setAdminSession, validateAdminCredentials } from "@/lib/adminAuth"
 
 export async function POST(request: Request) {
   const { username, password } = await request.json()
 
-  const expectedUsername = process.env.ADMIN_USERNAME || "admin"
-  const expectedPassword = process.env.ADMIN_PASSWORD
+  let user = null
 
-  if (!expectedPassword) {
+  try {
+    user = await validateAdminCredentials(username || "", password || "")
+  } catch (error) {
     return NextResponse.json(
-      { success: false, message: "Admin password is not configured." },
+      {
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Admin password is not configured.",
+      },
       { status: 500 }
     )
   }
 
-  if (username !== expectedUsername || password !== expectedPassword) {
+  if (!user) {
     return NextResponse.json(
       { success: false, message: "Invalid username or password." },
       { status: 401 }
     )
   }
 
-  const cookieStore = await cookies()
-  cookieStore.set(ADMIN_COOKIE_NAME, "1", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: ADMIN_COOKIE_MAX_AGE,
-  })
+  await setAdminSession(user)
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({
+    success: true,
+    user: {
+      username: user.username,
+      displayName: user.displayName || user.username,
+      role: user.role || null,
+      permissions: user.permissions,
+    },
+  })
 }

@@ -1,17 +1,8 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
-
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
+import { clearAdminSession } from "@/lib/adminAuth"
 
 export async function POST() {
-  const cookieStore = await cookies()
-  cookieStore.set(ADMIN_COOKIE_NAME, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 0,
-  })
+  await clearAdminSession()
 
   return NextResponse.json({ success: true })
 }
