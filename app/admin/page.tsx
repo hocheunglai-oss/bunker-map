@@ -327,7 +327,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "1 / span 2", gridRow: "2" }),
+            ...(isMobile ? {} : { gridColumn: "1", gridRow: "2" }),
           }}
         >
           {authenticated ? (
@@ -452,7 +452,7 @@ export default function AdminPage() {
             ...(authenticated ? panelStyle : lockedPanelShellStyle),
             display: "flex",
             flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "3 / span 2", gridRow: "2" }),
+            ...(isMobile ? {} : { gridColumn: "2", gridRow: "2" }),
           }}
         >
           {authenticated ? (

@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
+  ADMIN_ROLE_IDS,
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
   getFullAdminPagePermissions,
   isAdminRole,
+  normaliseAdminRole,
   normaliseAdminPagePermissions,
+  type AdminRoleId,
   type AdminPageDefinition,
   type AdminPagePermission,
   type AdminPagePermissionMap,
@@ -27,19 +30,23 @@ type ManagedAdminUser = {
 type UsersResponse = {
   users: ManagedAdminUser[]
   pages: AdminPageDefinition[]
+  roleDefaults: ManagedAdminRoleDefault[]
   message?: string
+}
+
+type ManagedAdminRoleDefault = {
+  role: AdminRoleId
+  permissions: AdminPagePermissionMap
+  updatedAt: string | null
 }
 
 type DraftUser = {
   id?: string
   username: string
   displayName: string
-  role: string
+  role: AdminRoleId
   password: string
-  permissions: AdminPagePermissionMap
 }
-
-const emptyPermissions = normaliseAdminPagePermissions(null, "view")
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -120,9 +127,8 @@ function createDraftUser(): DraftUser {
   return {
     username: "",
     displayName: "",
-    role: "user",
+    role: "AC",
     password: "",
-    permissions: emptyPermissions,
   }
 }
 
@@ -131,9 +137,8 @@ function userToDraft(user: ManagedAdminUser): DraftUser {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
-    role: user.role,
+    role: normaliseAdminRole(user.role),
     password: "",
-    permissions: normaliseAdminPagePermissions(user.permissions, "view"),
   }
 }
 
@@ -150,15 +155,29 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
+function getDefaultPermissionsForRole(
+  role: AdminRoleId,
+  roleDefaults: ManagedAdminRoleDefault[],
+  pages: AdminPageDefinition[]
+) {
+  if (isAdminRole(role)) return getFullAdminPagePermissions(pages)
+
+  const roleDefault = roleDefaults.find((item) => item.role === role)
+  return normaliseAdminPagePermissions(roleDefault?.permissions, "view", pages)
+}
+
 export default function UserManagementPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions, role, username } = useSimpleAdminAuth()
   const [users, setUsers] = useState<ManagedAdminUser[]>([])
   const [pages, setPages] = useState<AdminPageDefinition[]>([])
+  const [roleDefaults, setRoleDefaults] = useState<ManagedAdminRoleDefault[]>([])
+  const [selectedRole, setSelectedRole] = useState<AdminRoleId>("AC")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftUser>(createDraftUser)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [savingRoleDefault, setSavingRoleDefault] = useState(false)
   const [message, setMessage] = useState("")
 
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "user-management", "edit")
@@ -166,8 +185,8 @@ export default function UserManagementPage() {
     () => users.find((user) => user.id === selectedId) || null,
     [selectedId, users]
   )
-  const draftIsAdmin = isAdminRole(draft.role)
-  const effectivePermissions = draftIsAdmin ? getFullAdminPagePermissions() : draft.permissions
+  const selectedRoleIsAdmin = isAdminRole(selectedRole)
+  const roleDefaultPermissions = getDefaultPermissionsForRole(selectedRole, roleDefaults, pages)
 
   const groupedPages = useMemo(() => {
     return pages.reduce<Record<string, AdminPageDefinition[]>>((groups, page) => {
@@ -194,6 +213,7 @@ export default function UserManagementPage() {
 
       setUsers(data.users || [])
       setPages(data.pages || [])
+      setRoleDefaults(data.roleDefaults || [])
 
       setSelectedId((currentSelectedId) => {
         const desiredSelectedId =
@@ -245,24 +265,32 @@ export default function UserManagementPage() {
     }))
   }
 
-  function updatePermission(pageId: string, permission: AdminPagePermission) {
+  function updateDraftRole(nextRole: AdminRoleId) {
     setDraft((current) => ({
       ...current,
-      permissions: {
-        ...current.permissions,
-        [pageId]: permission,
-      },
+      role: nextRole,
     }))
+    setSelectedRole(nextRole)
   }
 
-  function getDraftPermissionsForSave() {
-    const base = draftIsAdmin ? getFullAdminPagePermissions() : { ...draft.permissions }
+  function updateRolePermission(pageId: string, permission: AdminPagePermission) {
+    setRoleDefaults((current) => {
+      const existing = current.find((roleDefault) => roleDefault.role === selectedRole)
+      const nextRoleDefault: ManagedAdminRoleDefault = {
+        role: selectedRole,
+        updatedAt: existing?.updatedAt || null,
+        permissions: {
+          ...roleDefaultPermissions,
+          [pageId]: permission,
+        },
+      }
 
-    pages.forEach((page) => {
-      base[page.id] = draftIsAdmin ? "edit" : base[page.id] || "view"
+      return existing
+        ? current.map((roleDefault) =>
+            roleDefault.role === selectedRole ? nextRoleDefault : roleDefault
+          )
+        : [...current, nextRoleDefault]
     })
-
-    return base
   }
 
   async function saveUser() {
@@ -278,8 +306,11 @@ export default function UserManagementPage() {
         body: JSON.stringify({
           action: "save",
           user: {
-            ...draft,
-            permissions: getDraftPermissionsForSave(),
+            id: draft.id,
+            username: draft.username,
+            displayName: draft.displayName,
+            role: draft.role,
+            password: draft.password,
           },
         }),
       })
@@ -298,6 +329,46 @@ export default function UserManagementPage() {
       setMessage("Failed to save user.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function saveRoleDefault() {
+    setSavingRoleDefault(true)
+    setMessage("")
+
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save-role-default",
+          roleDefault: {
+            role: selectedRole,
+            permissions: roleDefaultPermissions,
+          },
+        }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        setMessage(data.message || "Failed to save role defaults.")
+        return
+      }
+
+      setMessage(`${selectedRole} defaults saved.`)
+      setRoleDefaults((current) => {
+        const next = data.roleDefault as ManagedAdminRoleDefault
+        const exists = current.some((roleDefault) => roleDefault.role === next.role)
+        return exists
+          ? current.map((roleDefault) => (roleDefault.role === next.role ? next : roleDefault))
+          : [...current, next]
+      })
+    } catch {
+      setMessage("Failed to save role defaults.")
+    } finally {
+      setSavingRoleDefault(false)
     }
   }
 
@@ -344,7 +415,7 @@ export default function UserManagementPage() {
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+        <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
           Go To Admin
         </button>
       </div>
@@ -372,7 +443,7 @@ export default function UserManagementPage() {
             </p>
           </div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
               Back
             </button>
           </div>
@@ -498,29 +569,45 @@ export default function UserManagementPage() {
 
               <label style={labelStyle}>
                 Role
-                <input
+                <select
                   value={draft.role}
-                  onChange={(event) => updateDraft("role", event.target.value)}
+                  onChange={(event) => updateDraftRole(normaliseAdminRole(event.target.value))}
                   disabled={!canEdit}
-                  placeholder="admin, user, accounts, operations..."
                   style={inputStyle}
-                />
+                >
+                  {ADMIN_ROLE_IDS.map((roleId) => (
+                    <option key={roleId} value={roleId}>
+                      {roleId}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {["admin", "user"].map((preset) => (
+                {ADMIN_ROLE_IDS.map((roleId) => (
                   <button
-                    key={preset}
+                    key={roleId}
                     type="button"
-                    onClick={() => updateDraft("role", preset)}
+                    onClick={() => updateDraftRole(roleId)}
                     disabled={!canEdit}
                     style={{
                       ...buttonStyle,
                       minHeight: "30px",
-                      textTransform: "capitalize",
+                      background:
+                        draft.role === roleId
+                          ? "var(--fc-admin-selected-bg)"
+                          : buttonStyle.background,
+                      color:
+                        draft.role === roleId
+                          ? "var(--fc-admin-selected-text)"
+                          : buttonStyle.color,
+                      borderColor:
+                        draft.role === roleId
+                          ? "var(--fc-admin-selected-border)"
+                          : "var(--fc-admin-button-border)",
                     }}
                   >
-                    {preset}
+                    {roleId}
                   </button>
                 ))}
               </div>
@@ -565,13 +652,50 @@ export default function UserManagementPage() {
           <div style={panelStyle}>
             <div style={sectionHeaderStyle}>
               <strong style={{ color: "var(--fc-admin-heading)", fontSize: "13px" }}>
-                Permissions
+                Role Defaults
               </strong>
               <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-                {draftIsAdmin ? "Full Access" : "Page Access"}
+                {selectedRoleIsAdmin ? "Full Access" : `${selectedRole} Defaults`}
               </span>
             </div>
             <div style={{ display: "grid", gap: "14px", padding: "12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {ADMIN_ROLE_IDS.map((roleId) => (
+                    <button
+                      key={roleId}
+                      type="button"
+                      onClick={() => setSelectedRole(roleId)}
+                      style={{
+                        ...buttonStyle,
+                        background:
+                          selectedRole === roleId
+                            ? "var(--fc-admin-selected-bg)"
+                            : buttonStyle.background,
+                        color:
+                          selectedRole === roleId
+                            ? "var(--fc-admin-selected-text)"
+                            : buttonStyle.color,
+                        borderColor:
+                          selectedRole === roleId
+                            ? "var(--fc-admin-selected-border)"
+                            : "var(--fc-admin-button-border)",
+                      }}
+                    >
+                      {roleId}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={saveRoleDefault}
+                  disabled={!canEdit || savingRoleDefault || selectedRoleIsAdmin}
+                  style={primaryButtonStyle}
+                >
+                  {savingRoleDefault ? "Saving..." : "Save Defaults"}
+                </button>
+              </div>
+
               {Object.entries(groupedPages).map(([group, groupPages]) => (
                 <div key={group}>
                   <div
@@ -588,7 +712,7 @@ export default function UserManagementPage() {
 
                   <div style={{ display: "grid", gap: "8px" }}>
                     {groupPages.map((page) => {
-                      const permission = effectivePermissions[page.id] || (draftIsAdmin ? "edit" : "view")
+                      const permission = roleDefaultPermissions[page.id] || (selectedRoleIsAdmin ? "edit" : "view")
 
                       return (
                         <div
@@ -624,8 +748,8 @@ export default function UserManagementPage() {
                                 <button
                                   key={option}
                                   type="button"
-                                  onClick={() => updatePermission(page.id, option)}
-                                  disabled={!canEdit || draftIsAdmin}
+                                  onClick={() => updateRolePermission(page.id, option)}
+                                  disabled={!canEdit || selectedRoleIsAdmin}
                                   style={{
                                     minHeight: "30px",
                                     border: active
@@ -638,7 +762,7 @@ export default function UserManagementPage() {
                                     color: active
                                       ? "var(--fc-admin-selected-text)"
                                       : "var(--fc-admin-button-text)",
-                                    cursor: canEdit && !draftIsAdmin ? "pointer" : "not-allowed",
+                                    cursor: canEdit && !selectedRoleIsAdmin ? "pointer" : "not-allowed",
                                     fontSize: "11px",
                                     fontWeight: 900,
                                   }}

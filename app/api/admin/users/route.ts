@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import {
   deleteManagedAdminUser,
+  listManagedAdminRoleDefaults,
   listManagedAdminUsers,
+  saveManagedAdminRoleDefault,
   saveManagedAdminUser,
 } from "@/lib/adminUsers"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
@@ -17,6 +19,10 @@ type UserActionPayload = {
     password?: string
     permissions?: Record<string, "none" | "view" | "edit">
   }
+  roleDefault?: {
+    role?: string
+    permissions?: Record<string, "none" | "view" | "edit">
+  }
   id?: string
 }
 
@@ -29,14 +35,14 @@ function errorResponse(error: unknown, fallback: string) {
 export async function GET() {
   try {
     await requireAdminPagePermission("user-management", "view")
-    const [users, pages] = await Promise.all([
-      listManagedAdminUsers(),
-      getDiscoveredAdminPages(),
-    ])
+    const pages = await getDiscoveredAdminPages()
+    const roleDefaults = await listManagedAdminRoleDefaults(pages)
+    const users = await listManagedAdminUsers(roleDefaults, pages)
 
     return NextResponse.json({
       users,
       pages,
+      roleDefaults,
     })
   } catch (error) {
     return errorResponse(error, "Failed to load admin users.")
@@ -85,6 +91,24 @@ export async function POST(request: Request) {
       )
 
       return NextResponse.json({ success: true, user })
+    }
+
+    if (payload.action === "save-role-default") {
+      if (!payload.roleDefault?.role) {
+        return NextResponse.json({ message: "Role is required." }, { status: 400 })
+      }
+
+      const pages = await getDiscoveredAdminPages()
+      const roleDefault = await saveManagedAdminRoleDefault(
+        {
+          role: payload.roleDefault.role,
+          permissions: payload.roleDefault.permissions,
+        },
+        session,
+        pages
+      )
+
+      return NextResponse.json({ success: true, roleDefault })
     }
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })

@@ -160,6 +160,38 @@ body {
   color: #86868b;
 }
 
+.fc-admin-scope .fc-admin-nav-button,
+.fc-admin-scope .fc-admin-menu-button {
+  min-height: 36px !important;
+  height: 36px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  border: 1px solid var(--fc-admin-button-border) !important;
+  border-radius: 999px !important;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
+  cursor: pointer !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  padding: 0 14px !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+}
+
+.fc-admin-scope .fc-admin-menu-button {
+  width: 36px !important;
+  min-width: 36px !important;
+  padding: 0 !important;
+}
+
+.fc-admin-scope .fc-admin-menu-button > span {
+  pointer-events: none;
+}
+
 .glass-popup .leaflet-popup-content-wrapper {
   background:
     radial-gradient(circle at top left, rgba(88, 182, 255, 0.22), transparent 34%),

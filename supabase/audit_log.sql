@@ -423,7 +423,8 @@ begin
     'shared_addressbook_group_members',
     'office_calendar_store',
     'email_templates',
-    'admin_users'
+    'admin_users',
+    'admin_role_defaults'
   ]
   loop
     table_reg := to_regclass('public.' || table_name);

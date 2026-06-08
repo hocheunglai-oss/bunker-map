@@ -14,10 +14,11 @@ For editable users and page permissions, run `supabase/admin_users.sql` and set
 `SUPABASE_SERVICE_ROLE_KEY` in the server environment. The user-management screen is
 available at `/admin/usermanagement`.
 
-Database users store a salted `scrypt` password hash, a free-form role name,
-and a JSON permission map. The role name `admin` is special: it always receives
-edit access. Other role names default to view access when a new admin page is
-discovered. Permissions are page-based:
+Database users store a salted `scrypt` password hash and one of four role
+groups: `ADMIN`, `AC`, `BT`, or `VN`. Role defaults live in
+`public.admin_role_defaults`. `ADMIN` always receives edit access. `AC`, `BT`,
+and `VN` default to view access when a new admin page is discovered, and their
+defaults can be changed in `/admin/usermanagement`. Permissions are page-based:
 
 - `none`: page is hidden and blocked by the admin route guard
 - `view`: page can be opened, but browser-side Supabase writes are blocked
@@ -27,8 +28,8 @@ For multiple named users, set `ADMIN_USERS` instead. It can be JSON:
 
 ```json
 [
-  { "username": "alice", "password": "change-me", "displayName": "Alice", "role": "admin" },
-  { "username": "ben", "password": "change-me", "displayName": "Ben", "role": "editor" }
+  { "username": "alice", "password": "change-me", "displayName": "Alice", "role": "ADMIN" },
+  { "username": "ben", "password": "change-me", "displayName": "Ben", "role": "AC" }
 ]
 ```
 

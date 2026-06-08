@@ -1840,7 +1840,7 @@ export default function PhonebookPage() {
             <h1 style={{ margin: "4px 0 0", color: "var(--fc-admin-panel-text)", fontSize: "28px", letterSpacing: 0 }}>PHONEBOOK</h1>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
-            <a href="/admin" style={buttonStyle}>Back To Admin</a>
+            <a href="/admin" className="fc-admin-nav-button" style={buttonStyle}>Back To Admin</a>
             <button
               onClick={() => void syncPhoneContacts(false)}
               disabled={contactSyncing}
@@ -1861,6 +1861,7 @@ export default function PhonebookPage() {
                 setMenuOpen((prev) => !prev)
               }}
               onMouseEnter={cancelMenuHide}
+              className="fc-admin-menu-button"
               style={buttonStyle}
             >
               ☰

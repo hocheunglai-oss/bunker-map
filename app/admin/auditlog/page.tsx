@@ -333,7 +333,7 @@ export default function AuditLogPage() {
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+        <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
           Go To Admin
         </button>
       </div>
@@ -361,11 +361,8 @@ export default function AuditLogPage() {
             </p>
           </div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
               Back
-            </button>
-            <button type="button" onClick={loadLogs} disabled={loading} style={buttonStyle}>
-              {loading ? "Refreshing..." : "Refresh"}
             </button>
           </div>
         </div>

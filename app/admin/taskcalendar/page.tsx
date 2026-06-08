@@ -272,7 +272,7 @@ export default function TaskCalendarPage() {
   }
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (!authenticated) return <div style={pageStyle}><button onClick={() => router.push("/admin")} style={buttonStyle}>Go To Admin</button></div>
+  if (!authenticated) return <div style={pageStyle}><button onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>Go To Admin</button></div>
 
   return (
     <div style={pageStyle}>
@@ -280,7 +280,7 @@ export default function TaskCalendarPage() {
         <header style={{ marginBottom: "12px" }}>
           <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>Office Tools</div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
-            <button type="button" onClick={() => router.push("/admin")} style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>Back</button>
+            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>Back</button>
             <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>Task Calendar</h1>
             <button type="button" onClick={openAddModal} aria-label="Add task" style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}>+</button>
             <span style={{ color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>{tasks.length} recurring reminders</span>
