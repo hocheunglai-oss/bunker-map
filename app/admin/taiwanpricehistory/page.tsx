@@ -517,7 +517,7 @@ export default function TaiwanPriceHistoryPage() {
           </h1>
 
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <a href="/admin" style={secondaryButtonStyle}>
+            <a href="/admin" className="fc-admin-nav-button" style={secondaryButtonStyle}>
               ← Back To Admin
             </a>
 

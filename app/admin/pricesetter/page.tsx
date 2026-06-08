@@ -793,7 +793,7 @@ export default function AdminPage() {
                 alignItems: "center",
               }}
             >
-              <a href="/admin" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
+              <a href="/admin" className="fc-admin-nav-button" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
                 ← Back To Admin
               </a>
               <button
@@ -849,7 +849,7 @@ export default function AdminPage() {
                 Check Compact
               </a>
               <div style={{ position: "relative" }}>
-                <button onClick={() => setToolsMenuOpen((prev) => !prev)} style={{ ...toolbarButtonStyle, minWidth: "52px", paddingLeft: "12px", paddingRight: "12px" }}>
+                <button onClick={() => setToolsMenuOpen((prev) => !prev)} className="fc-admin-menu-button" style={{ ...toolbarButtonStyle, minWidth: "52px", paddingLeft: "12px", paddingRight: "12px" }}>
                   ☰
                 </button>
                 {toolsMenuOpen && (

@@ -2,6 +2,10 @@ export type AdminPagePermission = "none" | "view" | "edit"
 
 export type AdminPagePermissionMap = Record<string, AdminPagePermission>
 
+export const ADMIN_ROLE_IDS = ["ADMIN", "AC", "BT", "VN"] as const
+
+export type AdminRoleId = (typeof ADMIN_ROLE_IDS)[number]
+
 export type AdminPageDefinition = {
   id: string
   label: string
@@ -100,12 +104,22 @@ const ADMIN_PERMISSION_RANK: Record<AdminPagePermission, number> = {
   edit: 2,
 }
 
-export function isAdminRole(role: string | null | undefined) {
-  return (role || "").trim().toLowerCase() === "admin"
+export function normaliseAdminRole(role: string | null | undefined): AdminRoleId {
+  const normalised = (role || "").trim().toUpperCase()
+  if (normalised === "ADMIN") return "ADMIN"
+  if (normalised === "BT") return "BT"
+  if (normalised === "VN") return "VN"
+  return "AC"
 }
 
-export function getFullAdminPagePermissions(): AdminPagePermissionMap {
-  return ADMIN_PAGE_DEFINITIONS.reduce<AdminPagePermissionMap>((permissions, page) => {
+export function isAdminRole(role: string | null | undefined) {
+  return normaliseAdminRole(role) === "ADMIN"
+}
+
+export function getFullAdminPagePermissions(
+  pages: AdminPageDefinition[] = ADMIN_PAGE_DEFINITIONS
+): AdminPagePermissionMap {
+  return pages.reduce<AdminPagePermissionMap>((permissions, page) => {
     permissions[page.id] = "edit"
     return permissions
   }, {})
@@ -113,14 +127,15 @@ export function getFullAdminPagePermissions(): AdminPagePermissionMap {
 
 export function normaliseAdminPagePermissions(
   permissions: unknown,
-  fallback: AdminPagePermission = "none"
+  fallback: AdminPagePermission = "none",
+  pages: AdminPageDefinition[] = ADMIN_PAGE_DEFINITIONS
 ): AdminPagePermissionMap {
   const source =
     permissions && typeof permissions === "object"
       ? (permissions as Record<string, unknown>)
       : {}
 
-  const next = ADMIN_PAGE_DEFINITIONS.reduce<AdminPagePermissionMap>((pagePermissions, page) => {
+  const next = pages.reduce<AdminPagePermissionMap>((pagePermissions, page) => {
     const value = source[page.id]
     pagePermissions[page.id] =
       value === "edit" || value === "view" || value === "none" ? value : fallback

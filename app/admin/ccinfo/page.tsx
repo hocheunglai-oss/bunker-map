@@ -2876,12 +2876,13 @@ export default function CountryCompanyInfoPage() {
               </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 42px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
-                <a href="/admin" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
+                <a href="/admin" className="fc-admin-nav-button" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
                   ← Back To Admin
                 </a>
                 <div style={{ position: "relative" }}>
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
+                    className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
                       width: "42px",
@@ -2958,6 +2959,7 @@ export default function CountryCompanyInfoPage() {
                 <div style={{ position: "relative" }}>
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
+                    className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
                       width: "42px",
@@ -3019,6 +3021,7 @@ export default function CountryCompanyInfoPage() {
                 {isMobile && (
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
+                    className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
                       width: "42px",

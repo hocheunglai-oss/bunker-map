@@ -940,7 +940,7 @@ export default function EventCalendarPage() {
       <div style={{ ...pageStyle, display: "grid", placeItems: "center" }}>
         <div style={modalStyle}>
           <h1 style={{ margin: "0 0 12px", fontSize: "24px", color: "var(--fc-admin-panel-text)" }}>Event Calendar</h1>
-          <button onClick={() => router.push("/admin")} style={buttonStyle}>
+          <button onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Go To Admin
           </button>
         </div>
@@ -977,6 +977,7 @@ export default function EventCalendarPage() {
               <button
                 type="button"
                 onClick={() => router.push("/admin")}
+                className="fc-admin-nav-button"
                 style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}
               >
                 Back
@@ -993,6 +994,7 @@ export default function EventCalendarPage() {
                     setToolsMenuOpen((current) => !current)
                   }}
                   aria-label="Event calendar menu"
+                  className="fc-admin-menu-button"
                   style={{
                     ...buttonStyle,
                     width: "36px",

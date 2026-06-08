@@ -2,8 +2,12 @@ import { createClient } from "@supabase/supabase-js"
 import { promisify } from "node:util"
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto"
 import {
+  ADMIN_ROLE_IDS,
+  type AdminPageDefinition,
+  type AdminRoleId,
   getFullAdminPagePermissions,
   isAdminRole,
+  normaliseAdminRole,
   normaliseAdminPagePermissions,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
@@ -18,6 +22,12 @@ type AdminUserRow = {
   password_hash: string
   permissions: Record<string, unknown> | null
   created_at: string
+  updated_at: string
+}
+
+type AdminRoleDefaultRow = {
+  role: string
+  permissions: Record<string, unknown> | null
   updated_at: string
 }
 
@@ -36,6 +46,12 @@ export type ManagedAdminUser = {
   updatedAt: string
 }
 
+export type ManagedAdminRoleDefault = {
+  role: AdminRoleId
+  permissions: AdminPagePermissionMap
+  updatedAt: string | null
+}
+
 export type AuthenticatedAdminUser = {
   username: string
   displayName: string
@@ -50,6 +66,11 @@ export type SaveAdminUserInput = {
   displayName?: string
   role?: string
   password?: string
+  permissions?: AdminPagePermissionMap
+}
+
+export type SaveAdminRoleDefaultInput = {
+  role: string
   permissions?: AdminPagePermissionMap
 }
 
@@ -81,16 +102,80 @@ function normaliseUsername(username: string) {
   return username.trim()
 }
 
-function normaliseRole(role?: string) {
-  return role?.trim() || "user"
+function getDefaultPermissionsForRole(
+  role: string | null | undefined,
+  pages?: AdminPageDefinition[]
+) {
+  return isAdminRole(role)
+    ? getFullAdminPagePermissions(pages)
+    : normaliseAdminPagePermissions(null, "view", pages)
 }
 
-function mapAdminUser(row: AdminUserRow): ManagedAdminUser {
-  const role = normaliseRole(row.role)
-  const permissions =
-    isAdminRole(role)
-      ? getFullAdminPagePermissions()
-      : normaliseAdminPagePermissions(row.permissions, "view")
+function mapRoleDefault(
+  role: string,
+  row: AdminRoleDefaultRow | null | undefined,
+  pages?: AdminPageDefinition[]
+): ManagedAdminRoleDefault {
+  const roleId = normaliseAdminRole(role)
+  const permissions = row?.permissions
+    ? normaliseAdminPagePermissions(
+        row.permissions,
+        isAdminRole(roleId) ? "edit" : "view",
+        pages
+      )
+    : getDefaultPermissionsForRole(roleId, pages)
+
+  return {
+    role: roleId,
+    permissions: isAdminRole(roleId) ? getFullAdminPagePermissions(pages) : permissions,
+    updatedAt: row?.updated_at || null,
+  }
+}
+
+function getRoleDefaultMap(roleDefaults: ManagedAdminRoleDefault[]) {
+  return roleDefaults.reduce<Record<string, AdminPagePermissionMap>>((defaults, roleDefault) => {
+    defaults[roleDefault.role] = roleDefault.permissions
+    return defaults
+  }, {})
+}
+
+function getGeneratedRoleDefaults(pages?: AdminPageDefinition[]) {
+  return ADMIN_ROLE_IDS.map((roleId) => mapRoleDefault(roleId, null, pages))
+}
+
+function getExplicitPermissions(permissions: unknown) {
+  if (!permissions || typeof permissions !== "object") return {}
+
+  return Object.entries(permissions as Record<string, unknown>).reduce<AdminPagePermissionMap>(
+    (next, [pageId, permission]) => {
+      if (permission === "edit" || permission === "view" || permission === "none") {
+        next[pageId] = permission
+      }
+      return next
+    },
+    {}
+  )
+}
+
+function mapAdminUser(
+  row: AdminUserRow,
+  roleDefaults: ManagedAdminRoleDefault[] = [],
+  pages?: AdminPageDefinition[]
+): ManagedAdminUser {
+  const role = normaliseAdminRole(row.role)
+  const defaultPermissions =
+    getRoleDefaultMap(roleDefaults)[role] || getDefaultPermissionsForRole(role, pages)
+  const overridePermissions = getExplicitPermissions(row.permissions)
+  const permissions = isAdminRole(role)
+    ? getFullAdminPagePermissions(pages)
+    : normaliseAdminPagePermissions(
+        {
+          ...defaultPermissions,
+          ...overridePermissions,
+        },
+        "view",
+        pages
+      )
 
   return {
     id: row.id,
@@ -125,10 +210,11 @@ function getFriendlyUserManagementError(error: unknown) {
 
   if (
     message.includes("admin_users") ||
+    message.includes("admin_role_defaults") ||
     message.includes("Could not find the table") ||
     message.includes("schema cache")
   ) {
-    return new Error("Admin users table is not set up. Run supabase/admin_users.sql.")
+    return new Error("Admin users tables are not set up. Run supabase/admin_users.sql.")
   }
 
   return error
@@ -151,7 +237,8 @@ export async function validateDatabaseAdminUser(username: string, password: stri
     const passwordMatches = await verifyPassword(password, row.password_hash)
     if (!passwordMatches) return null
 
-    const user = mapAdminUser(row)
+    const roleDefaults = await listManagedAdminRoleDefaults()
+    const user = mapAdminUser(row, roleDefaults)
     return {
       username: user.username,
       displayName: user.displayName,
@@ -177,7 +264,8 @@ export async function getDatabaseAdminUserByUsername(username: string) {
 
     if (error || !data) return null
 
-    const user = mapAdminUser(data as AdminUserRow)
+    const roleDefaults = await listManagedAdminRoleDefaults()
+    const user = mapAdminUser(data as AdminUserRow, roleDefaults)
     return {
       username: user.username,
       displayName: user.displayName,
@@ -190,7 +278,75 @@ export async function getDatabaseAdminUserByUsername(username: string) {
   }
 }
 
-export async function listManagedAdminUsers() {
+export async function listManagedAdminRoleDefaults(pages?: AdminPageDefinition[]) {
+  try {
+    const supabase = getServiceClient()
+    const { data, error } = await supabase
+      .from("admin_role_defaults")
+      .select("*")
+      .in("role", ADMIN_ROLE_IDS)
+      .order("role", { ascending: true })
+
+    if (error) throw error
+
+    const rowsByRole = new Map(
+      ((data || []) as unknown as AdminRoleDefaultRow[]).map((row) => [
+        normaliseAdminRole(row.role),
+        row,
+      ])
+    )
+
+    return ADMIN_ROLE_IDS.map((roleId) => mapRoleDefault(roleId, rowsByRole.get(roleId), pages))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (
+      message.includes("admin_role_defaults") ||
+      message.includes("Could not find the table") ||
+      message.includes("schema cache")
+    ) {
+      return getGeneratedRoleDefaults(pages)
+    }
+
+    throw getFriendlyUserManagementError(error)
+  }
+}
+
+export async function saveManagedAdminRoleDefault(
+  input: SaveAdminRoleDefaultInput,
+  actor?: AdminActor,
+  pages?: AdminPageDefinition[]
+) {
+  const role = normaliseAdminRole(input.role)
+  const permissions = isAdminRole(role)
+    ? getFullAdminPagePermissions(pages)
+    : normaliseAdminPagePermissions(input.permissions, "view", pages)
+
+  try {
+    const supabase = getServiceClient(actor)
+    const { data, error } = await supabase
+      .from("admin_role_defaults")
+      .upsert(
+        {
+          role,
+          permissions,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "role" }
+      )
+      .select("*")
+      .single()
+
+    if (error) throw error
+    return mapRoleDefault(role, data as AdminRoleDefaultRow, pages)
+  } catch (error) {
+    throw getFriendlyUserManagementError(error)
+  }
+}
+
+export async function listManagedAdminUsers(
+  roleDefaults?: ManagedAdminRoleDefault[],
+  pages?: AdminPageDefinition[]
+) {
   try {
     const supabase = getServiceClient()
     const { data, error } = await supabase
@@ -200,7 +356,9 @@ export async function listManagedAdminUsers() {
 
     if (error) throw error
 
-    return ((data || []) as unknown as AdminUserRow[]).map(mapAdminUser)
+    return ((data || []) as unknown as AdminUserRow[]).map((row) =>
+      mapAdminUser(row, roleDefaults, pages)
+    )
   } catch (error) {
     throw getFriendlyUserManagementError(error)
   }
@@ -210,11 +368,10 @@ export async function saveManagedAdminUser(input: SaveAdminUserInput, actor?: Ad
   const username = normaliseUsername(input.username)
   if (!username) throw new Error("Username is required.")
 
-  const role = normaliseRole(input.role)
-  const permissions =
-    isAdminRole(role)
-      ? getFullAdminPagePermissions()
-      : normaliseAdminPagePermissions(input.permissions, "view")
+  const role = normaliseAdminRole(input.role)
+  const permissions = input.permissions
+    ? normaliseAdminPagePermissions(input.permissions, "none")
+    : {}
 
   try {
     const supabase = getServiceClient(actor)

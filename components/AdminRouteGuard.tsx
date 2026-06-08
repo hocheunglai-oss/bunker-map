@@ -59,7 +59,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
           <p style={{ margin: "0 0 18px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
             Your account does not have access to this admin page.
           </p>
-          <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+          <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Go To Admin
           </button>
         </div>

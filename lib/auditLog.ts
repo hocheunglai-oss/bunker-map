@@ -60,6 +60,7 @@ export const AUDITED_TABLES = [
   "office_calendar_store",
   "email_templates",
   "admin_users",
+  "admin_role_defaults",
 ]
 
 const AUDIT_SELECT = [

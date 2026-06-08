@@ -3,6 +3,7 @@ import {
   canAccessAdminPage,
   getFullAdminPagePermissions,
   isAdminRole,
+  normaliseAdminRole,
   normaliseAdminPagePermissions,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
@@ -48,7 +49,7 @@ function parseAdminUsersFromJson(raw: string): ConfiguredAdminUser[] {
 
   if (Array.isArray(parsed)) {
     return parsed.filter(isConfiguredAdminUser).map((user) => {
-      const role = user.role || "user"
+      const role = normaliseAdminRole(user.role)
       return {
         ...user,
         username: normaliseUsername(user.username),
@@ -69,7 +70,7 @@ function parseAdminUsersFromJson(raw: string): ConfiguredAdminUser[] {
         users.push({
           username: normaliseUsername(username),
           password: config,
-          role: "admin",
+          role: "ADMIN",
           permissions: getFullAdminPagePermissions(),
         })
         return
@@ -80,7 +81,7 @@ function parseAdminUsersFromJson(raw: string): ConfiguredAdminUser[] {
       const record = config as Record<string, unknown>
       if (typeof record.password !== "string") return
 
-      const role = typeof record.role === "string" ? record.role : "user"
+      const role = normaliseAdminRole(typeof record.role === "string" ? record.role : undefined)
       users.push({
         username: normaliseUsername(username),
         password: record.password,
@@ -88,9 +89,9 @@ function parseAdminUsersFromJson(raw: string): ConfiguredAdminUser[] {
           typeof record.displayName === "string" ? record.displayName : undefined,
         role,
         permissions:
-              isAdminRole(role)
-                ? getFullAdminPagePermissions()
-                : normaliseAdminPagePermissions(record.permissions, "view"),
+          isAdminRole(role)
+            ? getFullAdminPagePermissions()
+            : normaliseAdminPagePermissions(record.permissions, "view"),
       })
     })
 
@@ -118,7 +119,7 @@ function parseAdminUsersFromPairs(raw: string): ConfiguredAdminUser[] {
       users.push({
         username,
         password,
-        role: "admin",
+        role: "ADMIN",
         permissions: getFullAdminPagePermissions(),
       })
     })
@@ -144,7 +145,7 @@ export function getConfiguredAdminUsers(): ConfiguredAdminUser[] {
         username: legacyUsername,
         password: legacyPassword,
         displayName: legacyUsername,
-        role: "admin",
+        role: "ADMIN",
         permissions: getFullAdminPagePermissions(),
       })
     }
@@ -154,7 +155,7 @@ export function getConfiguredAdminUsers(): ConfiguredAdminUser[] {
 }
 
 function normaliseConfiguredAdminUser(user: ConfiguredAdminUser) {
-  const role = user.role || "user"
+  const role = normaliseAdminRole(user.role)
 
   return {
     username: user.username,
@@ -259,7 +260,7 @@ export async function getAdminSession(): Promise<AdminSession> {
     : {
         username,
         displayName: username,
-        role: "admin",
+        role: "ADMIN",
         permissions: getFullAdminPagePermissions(),
       }
 

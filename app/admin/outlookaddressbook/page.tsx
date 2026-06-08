@@ -733,7 +733,7 @@ export default function OutlookAddressBookPage() {
         <section style={{ ...panelStyle, padding: "24px", maxWidth: "560px", margin: "0 auto" }}>
           <h1 style={{ marginTop: 0 }}>Outlook Address Book</h1>
           <p>Please log in from the admin homepage first.</p>
-          <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+          <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Back to Admin
           </button>
         </section>
@@ -749,7 +749,7 @@ export default function OutlookAddressBookPage() {
           <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK ADDRESS BOOK</h1>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
+          <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Back To Admin
           </button>
         </div>
@@ -881,11 +881,11 @@ export default function OutlookAddressBookPage() {
                   <label><div style={fieldLabelStyle}>Nickname / Alias Seed</div><input value={selectedGroup.nickname || ""} onChange={(event) => void saveGroup({ nickname: event.target.value })} style={inputStyle} /></label>
                   <label><div style={fieldLabelStyle}>Description</div><input value={selectedGroup.description || ""} onChange={(event) => void saveGroup({ description: event.target.value })} style={inputStyle} /></label>
                   <label><div style={fieldLabelStyle}>Source Book</div><input value={selectedGroup.source_book || ""} onChange={(event) => void saveGroup({ source_book: event.target.value })} style={inputStyle} /></label>
-                  <div style={{ border: "1px solid var(--fc-border-soft)", borderRadius: "12px", padding: "10px", background: "var(--fc-panel-soft)" }}>
+                  <div style={{ border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", padding: "10px", background: "var(--fc-admin-panel-soft-bg)", color: "var(--fc-admin-panel-text)" }}>
                     <div style={{ ...titleStyle, marginBottom: "8px" }}>Members</div>
                     <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflow: "auto" }}>
                       {selectedGroupMembers.map((contact) => (
-                        <div key={contact.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center", color: "var(--fc-text)", fontSize: "12px" }}>
+                        <div key={contact.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center", color: "var(--fc-admin-panel-text)", fontSize: "12px" }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name} · {contact.primary_email}</span>
                           <button type="button" onClick={() => void removeMember(contact.id)} style={dangerButtonStyle}>Remove</button>
                         </div>

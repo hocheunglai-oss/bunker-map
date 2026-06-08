@@ -206,6 +206,7 @@ export default function AdminRemarks() {
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <a
               href="/admin"
+              className="fc-admin-nav-button"
               style={pillButtonStyle}
             >
               ← Back To Admin
