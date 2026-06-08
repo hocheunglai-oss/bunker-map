@@ -21,6 +21,7 @@ export async function GET(request: Request) {
   const baseUrl = buildBaseUrl(request)
   const templateIndexUrl = `${baseUrl}/api/email-templates?mode=index`
   const templateDetailUrl = `${baseUrl}/api/email-templates`
+  const recipientMapUrl = `${baseUrl}/api/outlook-addin/recipient-map`
 
   const html = `<!doctype html>
 <html lang="en">
@@ -171,10 +172,15 @@ export async function GET(request: Request) {
       (function () {
         var TEMPLATE_INDEX_URL = ${JSON.stringify(templateIndexUrl)};
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
-        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v4";
+        var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
+        var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v5";
+        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v1";
         var state = {
           templates: [],
           detailCache: {},
+          recipientMap: {},
+          recipientMapLoaded: false,
+          recipientMapPromise: null,
           folderRoot: null,
           folderIndex: {},
           expanded: { "": true },
@@ -470,6 +476,77 @@ export async function GET(request: Request) {
           });
         }
 
+        function normaliseRecipientKey(value) {
+          return stripOuterQuotes(value)
+            .toLowerCase()
+            .replace(/&/g, " and ")
+            .replace(/[^a-z0-9@._-]+/g, " ")
+            .replace(/\\s+/g, " ")
+            .trim();
+        }
+
+        function applyRecipientMap(data) {
+          state.recipientMap = data && data.recipientMap && typeof data.recipientMap === "object"
+            ? data.recipientMap
+            : {};
+          state.recipientMapLoaded = true;
+        }
+
+        function loadCachedRecipientMap() {
+          try {
+            var cached = window.localStorage && window.localStorage.getItem(RECIPIENT_MAP_CACHE_KEY);
+            if (!cached) return false;
+            var data = JSON.parse(cached);
+            if (!data || !data.recipientMap || typeof data.recipientMap !== "object") return false;
+            applyRecipientMap(data);
+            return true;
+          } catch (error) {
+            return false;
+          }
+        }
+
+        function saveCachedRecipientMap(data) {
+          try {
+            if (window.localStorage) window.localStorage.setItem(RECIPIENT_MAP_CACHE_KEY, JSON.stringify(data));
+          } catch (error) {
+            return;
+          }
+        }
+
+        async function loadRecipientMap() {
+          if (state.recipientMapLoaded) return state.recipientMap;
+          if (state.recipientMapPromise) return state.recipientMapPromise;
+
+          var hadCache = loadCachedRecipientMap();
+          state.recipientMapPromise = fetch(RECIPIENT_MAP_URL, { cache: "no-cache" })
+            .then(function (response) {
+              if (!response.ok) throw new Error("Recipient map returned " + response.status + ".");
+              return response.json();
+            })
+            .then(function (data) {
+              saveCachedRecipientMap(data);
+              applyRecipientMap(data);
+              return state.recipientMap;
+            })
+            .catch(function (error) {
+              if (!hadCache) {
+                state.recipientMap = {};
+                state.recipientMapLoaded = true;
+              }
+              return state.recipientMap;
+            })
+            .finally(function () {
+              state.recipientMapPromise = null;
+            });
+
+          return state.recipientMapPromise;
+        }
+
+        function resolveRecipientAlias(value) {
+          var key = normaliseRecipientKey(value);
+          return key ? state.recipientMap[key] || "" : "";
+        }
+
         function parseRecipients(value) {
           return splitRecipientText(value)
             .map(function (part) {
@@ -477,7 +554,10 @@ export async function GET(request: Request) {
               var address = stripOuterQuotes(bracket ? bracket[2] : part);
               var name = stripOuterQuotes(bracket ? bracket[1] : "");
               if (!address) return null;
-              if (!/@/.test(address)) return address;
+              if (!/@/.test(address)) {
+                var resolved = resolveRecipientAlias(address) || resolveRecipientAlias(name);
+                return resolved || address;
+              }
               return name ? { displayName: name, emailAddress: address } : { emailAddress: address };
             })
             .filter(Boolean);
@@ -523,6 +603,7 @@ export async function GET(request: Request) {
             var template = await loadTemplateDetail(state.selectedId);
             if (!template) throw new Error("Template not found.");
             notice("Inserting...", "");
+            await loadRecipientMap();
             await officeAsync(function (done) { item.subject.setAsync(template.subject || "", done); });
             await setRecipients(item.to, template.to);
             await setRecipients(item.cc, template.cc);
@@ -619,6 +700,7 @@ export async function GET(request: Request) {
         }
 
         loadTemplates();
+        loadRecipientMap();
       })();
     </script>
   </body>

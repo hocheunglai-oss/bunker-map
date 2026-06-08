@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const ADDIN_ASSET_VERSION = "2026-06-01-templates-v4"
+const ADDIN_ASSET_VERSION = "2026-06-08-recipient-map-v1"
 
 function xmlEscape(value: string) {
   return value
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.3.0</Version>
+  <Version>1.0.4.0</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>

@@ -16,6 +16,7 @@
     "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
     "import:phonebook": "node scripts/import-phonebook.mjs",
     "import:thunderbird-addressbook": "node scripts/import-thunderbird-addressbook.mjs",
+    "audit:email-templates": "node scripts/audit-email-template-integrity.mjs",
     "export:exchange-addressbook": "node scripts/export-exchange-addressbook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs",
