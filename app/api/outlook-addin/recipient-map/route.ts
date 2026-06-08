@@ -22,6 +22,13 @@ type SharedGroup = {
   member_count: number | null
 }
 
+type RecipientMapEntry = {
+  displayName: string
+  emailAddress: string
+}
+
+const DEFAULT_GROUP_SMTP_DOMAIN = "cosulich.com.hk"
+
 function requireEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing environment variable: ${name}`)
@@ -95,14 +102,31 @@ function uniqueAlias(baseAlias: string, seenAliases: Set<string>) {
   return alias
 }
 
-function addLookup(lookup: Record<string, string>, value: unknown, resolvedRecipient: string) {
+function outlookGroupSmtpDomain() {
+  const configured = process.env.OUTLOOK_ADDIN_GROUP_DOMAIN || process.env.EXCHANGE_ADDRESSBOOK_DOMAIN
+  if (configured) return cleanText(configured).toLowerCase()
+
+  const internalDomains = String(process.env.EXCHANGE_INTERNAL_DOMAINS || "")
+    .split(",")
+    .map((domain) => cleanText(domain).toLowerCase())
+    .filter(Boolean)
+
+  return internalDomains[0] || DEFAULT_GROUP_SMTP_DOMAIN
+}
+
+function groupSmtpAddress(alias: string, domain: string) {
+  return `${alias}@${domain}`.toLowerCase()
+}
+
+function addLookup(lookup: Record<string, RecipientMapEntry>, value: unknown, resolvedRecipient: RecipientMapEntry) {
   const key = normaliseRecipientKey(value)
-  if (!key || !resolvedRecipient) return
+  if (!key || !resolvedRecipient.emailAddress) return
   if (!lookup[key]) lookup[key] = resolvedRecipient
 }
 
-function addGroupLookups(lookup: Record<string, string>, groups: SharedGroup[]) {
+function addGroupLookups(lookup: Record<string, RecipientMapEntry>, groups: SharedGroup[]) {
   const seenAliases = new Set<string>()
+  const smtpDomain = outlookGroupSmtpDomain()
 
   groups
     .filter((group) => Number(group.member_count || 0) > 0)
@@ -111,25 +135,34 @@ function addGroupLookups(lookup: Record<string, string>, groups: SharedGroup[]) 
       if (!name) return
       const aliasSeed = cleanText(group.nickname || name)
       const alias = uniqueAlias(exchangeAlias(aliasSeed, `group-${index + 1}`), seenAliases)
-      addLookup(lookup, name, alias)
-      addLookup(lookup, group.nickname, alias)
-      addLookup(lookup, group.source_uid, alias)
-      addLookup(lookup, alias, alias)
+      const resolvedRecipient = {
+        displayName: name,
+        emailAddress: groupSmtpAddress(alias, smtpDomain),
+      }
+      addLookup(lookup, name, resolvedRecipient)
+      addLookup(lookup, group.nickname, resolvedRecipient)
+      addLookup(lookup, group.source_uid, resolvedRecipient)
+      addLookup(lookup, alias, resolvedRecipient)
+      addLookup(lookup, resolvedRecipient.emailAddress, resolvedRecipient)
     })
 }
 
-function addContactLookups(lookup: Record<string, string>, contacts: SharedContact[]) {
+function addContactLookups(lookup: Record<string, RecipientMapEntry>, contacts: SharedContact[]) {
   const seenEmails = new Set<string>()
 
   contacts.forEach((contact) => {
     const email = cleanText(contact.primary_email).toLowerCase()
     if (!email || seenEmails.has(email)) return
     seenEmails.add(email)
+    const resolvedRecipient = {
+      displayName: cleanText(contact.display_name || contact.nickname || email),
+      emailAddress: email,
+    }
 
-    addLookup(lookup, contact.display_name, email)
-    addLookup(lookup, contact.nickname, email)
-    addLookup(lookup, contact.source_card, email)
-    addLookup(lookup, email, email)
+    addLookup(lookup, contact.display_name, resolvedRecipient)
+    addLookup(lookup, contact.nickname, resolvedRecipient)
+    addLookup(lookup, contact.source_card, resolvedRecipient)
+    addLookup(lookup, email, resolvedRecipient)
   })
 }
 
@@ -141,7 +174,7 @@ export async function GET() {
       loadAll<SharedGroup>(supabase, "shared_addressbook_groups", "name"),
     ])
 
-    const recipientMap: Record<string, string> = {}
+    const recipientMap: Record<string, RecipientMapEntry> = {}
     addGroupLookups(recipientMap, groups)
     addContactLookups(recipientMap, contacts)
 

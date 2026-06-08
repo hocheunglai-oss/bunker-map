@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v5";
-        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v1";
+        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v2";
         var state = {
           templates: [],
           detailCache: {},
@@ -542,7 +542,7 @@ export async function GET(request: Request) {
           return state.recipientMapPromise;
         }
 
-        function resolveRecipientAlias(value) {
+        function resolveRecipient(value) {
           var key = normaliseRecipientKey(value);
           return key ? state.recipientMap[key] || "" : "";
         }
@@ -555,7 +555,16 @@ export async function GET(request: Request) {
               var name = stripOuterQuotes(bracket ? bracket[1] : "");
               if (!address) return null;
               if (!/@/.test(address)) {
-                var resolved = resolveRecipientAlias(address) || resolveRecipientAlias(name);
+                var resolved = resolveRecipient(address) || resolveRecipient(name);
+                if (resolved && typeof resolved === "object" && resolved.emailAddress) {
+                  return {
+                    displayName: resolved.displayName || name || address,
+                    emailAddress: resolved.emailAddress
+                  };
+                }
+                if (typeof resolved === "string" && /@/.test(resolved)) {
+                  return { displayName: name || address, emailAddress: resolved };
+                }
                 return resolved || address;
               }
               return name ? { displayName: name, emailAddress: address } : { emailAddress: address };
