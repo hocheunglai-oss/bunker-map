@@ -74,7 +74,10 @@ export function getAuditChangeSummary(log: AuditDisplayLog) {
 
   if (log.tableName === "cc_company_files" || log.tableName === "cc_entry_files") {
     if (log.changedFields.includes("deleted_at")) {
-      return after.deleted_at ? "Moved file to Recently Deleted" : "Restored deleted file"
+      const fileName = textValue(row.file_name)
+      return after.deleted_at
+        ? `Deleted document ${fileName}`.trim()
+        : `Restored document ${fileName}`.trim()
     }
     if (log.changedFields.includes("file_name")) {
       return `Renamed file from ${textValue(before.file_name) || "blank"} to ${textValue(after.file_name) || "blank"}`

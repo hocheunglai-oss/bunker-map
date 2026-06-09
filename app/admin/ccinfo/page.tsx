@@ -56,6 +56,10 @@ type FilePanelEditTarget =
   | { type: "file"; item: CompanyFileRecord | EntryFileRecord }
   | { type: "folder"; item: EntryFolderRecord }
 
+type CcinfoActivityItem =
+  | { type: "audit"; id: string; occurredAt: string; subject: string; summary: string; actorName: string | null; undone: boolean; canUndo: boolean; log: AuditLogRecord }
+  | { type: "deleted-file"; id: string; occurredAt: string; subject: string; summary: string; actorName: string | null; undone: false; canUndo: true; file: CompanyFileRecord | EntryFileRecord }
+
 type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
 
 type AuditLogRecord = {
@@ -131,6 +135,31 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 700,
   boxShadow: "none",
   cursor: "pointer",
+}
+
+const menuButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  width: "54px",
+  height: "36px",
+  padding: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "999px",
+  background: "var(--fc-admin-selected-bg)",
+  color: "var(--fc-admin-panel-text)",
+  border: "1px solid var(--fc-admin-selected-border)",
+  lineHeight: 1,
+}
+
+function MenuGlyph() {
+  return (
+    <span aria-hidden="true" style={{ display: "grid", gap: "3px", width: "18px" }}>
+      {[0, 1, 2].map((index) => (
+        <span key={index} style={{ display: "block", height: "2px", borderRadius: "999px", background: "currentColor" }} />
+      ))}
+    </span>
+  )
 }
 
 const searchInputStyle: React.CSSProperties = {
@@ -462,6 +491,21 @@ function joinFolderPath(folderPath: string, name: string) {
 
 function folderDepth(folderPath: string) {
   return folderPath.split("/").filter(Boolean).length
+}
+
+function rebaseFolderPath(currentPath: string, sourcePath: string, targetParentPath: string) {
+  const folderName = sourcePath.split("/").filter(Boolean).pop() || sourcePath
+  const nextRoot = [targetParentPath, folderName].filter(Boolean).join("/")
+  if (currentPath === sourcePath) return nextRoot
+  if (currentPath.startsWith(`${sourcePath}/`)) return `${nextRoot}${currentPath.slice(sourcePath.length)}`
+  return currentPath
+}
+
+function canMoveFolderToPath(sourcePath: string, targetParentPath: string) {
+  const currentParentPath = sourcePath.split("/").filter(Boolean).slice(0, -1).join("/")
+  if (!sourcePath || currentParentPath === targetParentPath) return false
+  if (targetParentPath === sourcePath || targetParentPath.startsWith(`${sourcePath}/`)) return false
+  return true
 }
 
 function deriveFolderPathFromOriginalPath(originalPath?: string | null) {
@@ -820,6 +864,7 @@ function SimpleTable({
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
   const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
   const [selectedRow, setSelectedRow] = useState(0)
+  const [editingCell, setEditingCell] = useState<{ row: number; column: number } | null>(null)
   const tableRef = useRef<HTMLTableElement | null>(null)
   const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
@@ -827,6 +872,7 @@ function SimpleTable({
     setDraftWidths(columnWidths || [])
     setDraftRowUpdates(rowUpdates || [])
     setSelectedRow((current) => Math.min(current, Math.max((table.length || 2) - 1, 0)))
+    setEditingCell(null)
   }, [table, columnWidths, rowUpdates])
   useEffect(() => {
     function handleMove(event: MouseEvent) {
@@ -858,10 +904,11 @@ function SimpleTable({
   const activeRow = Math.min(selectedRow, rows.length - 1)
   const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
   const selectedRowUpdatedAt = displayRowUpdates[activeRow] || ""
-  const beginEditing = () => {
+  const beginEditing = (cell?: { row: number; column: number }) => {
     setDraftRows(rows.map((row) => [...row]))
     setDraftWidths(widths)
     setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
+    setEditingCell(cell || null)
     setEditing(true)
   }
   const updateRowTimestamp = (rowIndex: number, source: string[] = draftRowUpdates) => {
@@ -887,6 +934,7 @@ function SimpleTable({
     setDraftWidths(widths)
     setDraftRowUpdates(nextUpdates)
     setSelectedRow(insertAt)
+    setEditingCell({ row: insertAt, column: 0 })
     setEditing(true)
   }
   const addColumn = () => {
@@ -918,6 +966,11 @@ function SimpleTable({
   }
   const save = () => {
     onSave?.(draftRows, widths, draftRowUpdates)
+    setEditingCell(null)
+    setEditing(false)
+  }
+  const cancel = () => {
+    setEditingCell(null)
     setEditing(false)
   }
   return (
@@ -934,19 +987,50 @@ function SimpleTable({
                 <tr
                   key={`table-row-${rowIndex}`}
                   onClick={() => setSelectedRow(rowIndex)}
-                  onDoubleClick={() => {
-                    if (!readOnly) beginEditing()
-                  }}
                   style={{ background: isSelected ? "#e7f2ff" : "transparent" }}
                 >
                   {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                    <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: isSelected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
-                      <input
-                        value={row[columnIndex] || ""}
-                        disabled={readOnly || !editing}
-                        onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                        style={{ width: "100%", border: "none", background: "transparent", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
-                      />
+                    <td
+                      key={`table-cell-${rowIndex}-${columnIndex}`}
+                      onDoubleClick={() => {
+                        if (!readOnly) beginEditing({ row: rowIndex, column: columnIndex })
+                      }}
+                      style={{
+                        border: "1px solid var(--fc-admin-selected-border)",
+                        padding: editing ? 0 : "7px 8px",
+                        background: isSelected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
+                        position: "relative",
+                        cursor: readOnly ? "default" : "text",
+                      }}
+                    >
+                      {editing ? (
+                        <input
+                          value={row[columnIndex] || ""}
+                          autoFocus={editingCell?.row === rowIndex && editingCell?.column === columnIndex}
+                          onFocus={(event) => {
+                            if (editingCell?.row === rowIndex && editingCell?.column === columnIndex) {
+                              event.currentTarget.select()
+                            }
+                          }}
+                          onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
+                          style={{
+                            width: "100%",
+                            border: "none",
+                            background: editingCell?.row === rowIndex && editingCell?.column === columnIndex ? "#ffffffcc" : "transparent",
+                            color: "var(--fc-admin-panel-text)",
+                            padding: "7px 8px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                            fontSize: "12px",
+                            fontWeight: rowIndex === 0 ? 800 : 500,
+                            boxShadow: editingCell?.row === rowIndex && editingCell?.column === columnIndex ? "inset 0 -2px 0 var(--fc-admin-link)" : "none",
+                          }}
+                        />
+                      ) : (
+                        <span style={{ display: "block", minHeight: "17px", whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontWeight: rowIndex === 0 ? 800 : 500 }}>
+                          {row[columnIndex] || ""}
+                        </span>
+                      )}
                       {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
                         <span
                           onMouseDown={(event) => {
@@ -989,17 +1073,16 @@ function SimpleTable({
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
-            <button type="button" onClick={() => addRowNearSelection("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Above</button>
-            <button type="button" onClick={() => addRowNearSelection("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Below</button>
-            <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Edit</button>
-            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>Delete</button>
+            <button type="button" onClick={() => addRowNearSelection("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Above</button>
+            <button type="button" onClick={() => addRowNearSelection("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Below</button>
+            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>Delete Row</button>
             <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>+ Col</button>
             <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>- Col</button>
           </div>
           {editing ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
               <button type="button" onClick={save} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-              <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
+              <button type="button" onClick={cancel} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
             </div>
           ) : (
             <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Copy Table</button>
@@ -1176,7 +1259,8 @@ export default function CountryCompanyInfoPage() {
   const [folders, setFolders] = useState<EntryFolderRecord[]>([])
   const [currentFolderPath, setCurrentFolderPath] = useState("")
   const [draggingFileId, setDraggingFileId] = useState("")
-  const [dropFolderPath, setDropFolderPath] = useState("")
+  const [draggingFolderPath, setDraggingFolderPath] = useState("")
+  const [dropFolderPath, setDropFolderPath] = useState<string | null>(null)
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
   const [countryOptions, setCountryOptions] = useState<Array<{ id: string; name: string }>>([])
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false)
@@ -1371,6 +1455,46 @@ export default function CountryCompanyInfoPage() {
     [currentFolderPath, files],
   )
   const breadcrumbSegments = useMemo(() => currentFolderPath.split("/").filter(Boolean), [currentFolderPath])
+  const activityItems = useMemo<CcinfoActivityItem[]>(() => {
+    const auditedDeletedFileIds = new Set(
+      recentAuditLogs
+        .filter((log) => (
+          (log.tableName === "cc_company_files" || log.tableName === "cc_entry_files") &&
+          log.changedFields.includes("deleted_at") &&
+          Boolean(log.afterRow?.deleted_at)
+        ))
+        .map((log) => `${log.tableName}:${String(log.recordPk.id || log.afterRow?.id || "")}`)
+        .filter((value) => !value.endsWith(":")),
+    )
+    const auditItems = recentAuditLogs.map((log) => ({
+      type: "audit" as const,
+      id: log.id,
+      occurredAt: log.occurredAt,
+      subject: getAuditSubject(log),
+      summary: getAuditChangeSummary(log),
+      actorName: log.actorName,
+      undone: Boolean(log.undoneAt),
+      canUndo: !log.undoOfLogId && !log.undoneAt,
+      log,
+    }))
+    const deletedItems = deletedFiles
+      .filter((file) => !auditedDeletedFileIds.has(`${file.source === "company" ? "cc_company_files" : "cc_entry_files"}:${file.id}`))
+      .map((file) => ({
+        type: "deleted-file" as const,
+        id: file.id,
+        occurredAt: file.deleted_at || "",
+        subject: (currentRecord.name || "CURRENT RECORD").toUpperCase(),
+        summary: `Deleted document ${file.file_name}`,
+        actorName: null,
+        undone: false as const,
+        canUndo: true as const,
+        file,
+      }))
+
+    return [...auditItems, ...deletedItems]
+      .sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
+      .slice(0, 80)
+  }, [currentRecord.name, deletedFiles, recentAuditLogs])
 
   useEffect(() => {
     const parser = new DOMParser()
@@ -1858,7 +1982,8 @@ export default function CountryCompanyInfoPage() {
     setFolders([])
     setCurrentFolderPath("")
     setDraggingFileId("")
-    setDropFolderPath("")
+    setDraggingFolderPath("")
+    setDropFolderPath(null)
     setCurrentCountryPorts([])
     setHighlights([])
     setMainInfoLineUpdates({})
@@ -2777,6 +2902,73 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  async function undoDeletedFile(file: CompanyFileRecord | EntryFileRecord) {
+    const actionId = `deleted-file:${file.id}`
+    setAuditActionId(actionId)
+    try {
+      await restoreFile(file)
+    } finally {
+      setAuditActionId("")
+    }
+  }
+
+  function folderHasFileSource(folderPath: string, source: "company" | "entry") {
+    return files.some((file) => {
+      const fileFolderPath = file.folder_path || ""
+      return file.source === source && (fileFolderPath === folderPath || fileFolderPath.startsWith(`${folderPath}/`))
+    })
+  }
+
+  function folderMoveSources(folder: EntryFolderRecord) {
+    const folderPath = joinFolderPath(folder.folder_path, folder.name)
+    const sources: Array<"company" | "entry"> = []
+    if (selectedKind === "company" && folderHasFileSource(folderPath, "company")) sources.push("company")
+    if (!folder.id.startsWith("virtual:") || folderHasFileSource(folderPath, "entry")) sources.push("entry")
+    return sources
+  }
+
+  async function moveFolderToPath(folder: EntryFolderRecord, targetFolderPath: string) {
+    if (!selectedId || !selectedKind) return
+    const folderPath = joinFolderPath(folder.folder_path, folder.name)
+    if (!canMoveFolderToPath(folderPath, targetFolderPath)) return
+    try {
+      const sources = folderMoveSources(folder)
+      for (const source of sources) {
+        const response = await fetch("/api/ccinfo/files", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "moveFolder",
+            folderId: folder.id,
+            source,
+            entryKind: selectedKind,
+            entryId: selectedId,
+            entryName: currentRecord.name || "Untitled",
+            folderPath,
+            targetFolderPath,
+          }),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.message || "Unable to move folder.")
+      }
+      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+      const refreshedFolders = mergeFolderRecords((await fetchFolders(selectedKind, selectedId)).filter((item) => !item.id.startsWith("virtual:")), refreshedFiles)
+      setFiles(refreshedFiles)
+      setFolders(refreshedFolders)
+      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+      if (currentFolderPath === folderPath || currentFolderPath.startsWith(`${folderPath}/`)) {
+        setCurrentFolderPath(rebaseFolderPath(currentFolderPath, folderPath, targetFolderPath))
+      }
+      void loadRecentAuditLogs()
+      setMessage("Folder moved.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to move folder.")
+    } finally {
+      setDraggingFolderPath("")
+      setDropFolderPath(null)
+    }
+  }
+
   async function moveFileToFolder(file: CompanyFileRecord | EntryFileRecord, targetFolderPath: string) {
     if (!selectedId || !selectedKind) return
     if ((file.folder_path || "") === targetFolderPath) return
@@ -2805,7 +2997,7 @@ export default function CountryCompanyInfoPage() {
       setMessage(error instanceof Error ? error.message : "Unable to move file.")
     } finally {
       setDraggingFileId("")
-      setDropFolderPath("")
+      setDropFolderPath(null)
     }
   }
 
@@ -2901,6 +3093,41 @@ export default function CountryCompanyInfoPage() {
   const userTabActiveBackground = "var(--fc-admin-selected-bg)"
   const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
   const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
+  const draggingFolder = draggingFolderPath ? folders.find((folder) => joinFolderPath(folder.folder_path, folder.name) === draggingFolderPath) : null
+  const canDropOnFolderPath = (targetFolderPath: string) => Boolean(draggingFileId) || Boolean(draggingFolderPath && canMoveFolderToPath(draggingFolderPath, targetFolderPath))
+  const handleFolderPathDragOver = (event: React.DragEvent, targetFolderPath: string) => {
+    if (!canDropOnFolderPath(targetFolderPath)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "move"
+    setDropFolderPath(targetFolderPath)
+  }
+  const handleFolderPathDrop = (event: React.DragEvent, targetFolderPath: string) => {
+    if (!canDropOnFolderPath(targetFolderPath)) return
+    event.preventDefault()
+    const fileId = event.dataTransfer.getData("application/x-ccinfo-file") || event.dataTransfer.getData("text/plain")
+    if (draggingFileId || fileId) {
+      const file = files.find((item) => item.id === (fileId || draggingFileId))
+      if (file) void moveFileToFolder(file, targetFolderPath)
+      return
+    }
+    if (draggingFolder) void moveFolderToPath(draggingFolder, targetFolderPath)
+  }
+  const clearFolderDropTarget = (targetFolderPath: string) => {
+    if (dropFolderPath === targetFolderPath) setDropFolderPath(null)
+  }
+  const folderDropButtonStyle = (targetFolderPath: string, active: boolean): React.CSSProperties => {
+    const isDropTarget = dropFolderPath === targetFolderPath && canDropOnFolderPath(targetFolderPath)
+    return {
+      ...buttonStyle,
+      padding: "5px 8px",
+      fontSize: "10px",
+      background: isDropTarget ? "var(--fc-admin-success-bg)" : "#ffffff",
+      border: isDropTarget ? "1px dashed var(--fc-admin-success-border)" : "none",
+      boxShadow: isDropTarget ? "0 0 0 3px #2f9e4430" : "none",
+      color: isDropTarget || active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
+      transform: isDropTarget ? "translateY(-1px)" : "none",
+    }
+  }
   const fileSection = !initialMode ? (
     <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
       <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
@@ -2910,27 +3137,10 @@ export default function CountryCompanyInfoPage() {
         <button
           type="button"
           onClick={() => setCurrentFolderPath("")}
-          onDragOver={(event) => {
-            if (!draggingFileId) return
-            event.preventDefault()
-            setDropFolderPath("")
-          }}
-          onDrop={(event) => {
-            if (!draggingFileId) return
-            event.preventDefault()
-            const fileId = event.dataTransfer.getData("text/plain")
-            const file = files.find((item) => item.id === fileId)
-            if (file) void moveFileToFolder(file, "")
-          }}
-          style={{
-            ...buttonStyle,
-            padding: "5px 8px",
-            fontSize: "10px",
-            background: "#ffffff",
-            border: "none",
-            boxShadow: "none",
-            color: currentFolderPath ? "var(--fc-admin-muted)" : "var(--fc-admin-panel-text)",
-          }}
+          onDragOver={(event) => handleFolderPathDragOver(event, "")}
+          onDragLeave={() => clearFolderDropTarget("")}
+          onDrop={(event) => handleFolderPathDrop(event, "")}
+          style={folderDropButtonStyle("", !currentFolderPath)}
         >
           HOME
         </button>
@@ -2943,15 +3153,10 @@ export default function CountryCompanyInfoPage() {
             <button
               type="button"
               onClick={() => setCurrentFolderPath(path)}
-              style={{
-                ...buttonStyle,
-                padding: "5px 8px",
-                fontSize: "10px",
-                background: "#ffffff",
-                border: "none",
-                boxShadow: "none",
-                color: active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
-              }}
+              onDragOver={(event) => handleFolderPathDragOver(event, path)}
+              onDragLeave={() => clearFolderDropTarget(path)}
+              onDrop={(event) => handleFolderPathDrop(event, path)}
+              style={folderDropButtonStyle(path, active)}
             >
               {segment}
             </button>
@@ -2972,23 +3177,19 @@ export default function CountryCompanyInfoPage() {
                   key={folder.id}
                   onClick={() => setCurrentFolderPath(folderPath)}
                   onDoubleClick={() => setCurrentFolderPath(folderPath)}
-                  onDragOver={(event) => {
-                    if (!draggingFileId) return
-                    event.preventDefault()
-                    setDropFolderPath(folderPath)
+                  draggable
+                  onDragStart={(event) => {
+                    setDraggingFolderPath(folderPath)
+                    event.dataTransfer.setData("application/x-ccinfo-folder", folderPath)
+                    event.dataTransfer.effectAllowed = "move"
                   }}
-                  onDragLeave={() => {
-                    if (dropFolderPath === folderPath) {
-                      setDropFolderPath("")
-                    }
+                  onDragEnd={() => {
+                    setDraggingFolderPath("")
+                    setDropFolderPath(null)
                   }}
-                  onDrop={(event) => {
-                    if (!draggingFileId) return
-                    event.preventDefault()
-                    const fileId = event.dataTransfer.getData("text/plain")
-                    const file = files.find((item) => item.id === fileId)
-                    if (file) void moveFileToFolder(file, folderPath)
-                  }}
+                  onDragOver={(event) => handleFolderPathDragOver(event, folderPath)}
+                  onDragLeave={() => clearFolderDropTarget(folderPath)}
+                  onDrop={(event) => handleFolderPathDrop(event, folderPath)}
                   style={{
                     display: "grid",
                     gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr) auto",
@@ -2997,15 +3198,18 @@ export default function CountryCompanyInfoPage() {
                     padding: "7px 8px",
                     borderRadius: "10px",
                     border:
-                      dropFolderPath === folderPath
-                        ? "1px solid var(--fc-admin-success-border)"
+                      dropFolderPath === folderPath && canDropOnFolderPath(folderPath)
+                        ? "1px dashed var(--fc-admin-success-border)"
                         : "1px solid var(--fc-admin-border-soft)",
                     background:
-                      dropFolderPath === folderPath
+                      dropFolderPath === folderPath && canDropOnFolderPath(folderPath)
                         ? "var(--fc-admin-success-bg)"
                         : "var(--fc-tool-input-bg)",
                     color: "var(--fc-admin-panel-text)",
                     cursor: "pointer",
+                    boxShadow: dropFolderPath === folderPath && canDropOnFolderPath(folderPath) ? "0 0 0 3px #2f9e4430" : "none",
+                    opacity: draggingFolderPath === folderPath ? 0.62 : 1,
+                    transform: dropFolderPath === folderPath && canDropOnFolderPath(folderPath) ? "translateY(-1px)" : "none",
                   }}
                 >
                   <FolderIcon />
@@ -3039,12 +3243,13 @@ export default function CountryCompanyInfoPage() {
                 draggable
                 onDragStart={(event) => {
                   setDraggingFileId(file.id)
+                  event.dataTransfer.setData("application/x-ccinfo-file", file.id)
                   event.dataTransfer.setData("text/plain", file.id)
                   event.dataTransfer.effectAllowed = "move"
                 }}
                 onDragEnd={() => {
                   setDraggingFileId("")
-                  setDropFolderPath("")
+                  setDropFolderPath(null)
                 }}
                 style={{
                   display: "grid",
@@ -3154,7 +3359,7 @@ export default function CountryCompanyInfoPage() {
                 Country And Company Info
               </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 74px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 54px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
                 <a href="/admin" className="fc-admin-nav-button" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
                   Back
                 </a>
@@ -3162,21 +3367,10 @@ export default function CountryCompanyInfoPage() {
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
                     className="fc-admin-menu-button"
-                    style={{
-                      ...buttonStyle,
-                      width: "74px",
-                      height: "42px",
-                      padding: "0 14px",
-                      borderRadius: "999px",
-                      background: "var(--fc-admin-selected-bg)",
-                      color: "var(--fc-admin-panel-text)",
-                      border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "12px",
-                      fontWeight: 900,
-                      lineHeight: 1,
-                    }}
+                    aria-label="Open menu"
+                    style={menuButtonStyle}
                   >
-                    Menu
+                    <MenuGlyph />
                   </button>
                   {menuOpen && (
                     <div
@@ -3225,56 +3419,46 @@ export default function CountryCompanyInfoPage() {
                       <a href="/admin/auditlog?table=ccinfo" style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, textDecoration: "none" }}>Audit Log</a>
                     </div>
 
-                    {deletedFiles.length > 0 && (
-                      <div style={{ display: "grid", gap: "6px" }}>
-                        <div style={{ color: "var(--fc-admin-warning-text)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Recently Deleted</div>
-                        {deletedFiles.slice(0, 8).map((file) => (
-                          <div key={`deleted-${file.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", border: "1px solid var(--fc-admin-warning-border)", background: "var(--fc-tool-input-bg)" }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {currentRecord.name || "CURRENT RECORD"}
-                              </div>
-                              <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {file.file_name}
-                              </div>
-                              <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>
-                                {file.deleted_at ? `Deleted ${formatTimestamp(file.deleted_at) || file.deleted_at}` : "Deleted"}
-                              </div>
-                            </div>
-                            <button type="button" onClick={() => void restoreFile(file)} style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}>Restore</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
                     <div style={{ display: "grid", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "2px" }}>
                       {auditLoading && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Loading changes...</div>}
-                      {!auditLoading && recentAuditLogs.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
-                      {recentAuditLogs.map((entry) => (
-                        <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "var(--fc-admin-panel-soft-bg)" }}>
+                      {!auditLoading && activityItems.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
+                      {activityItems.map((entry) => {
+                        const actionId = entry.type === "audit" ? entry.id : `deleted-file:${entry.id}`
+                        const actionBusy = auditActionId === actionId || (entry.type === "audit" && auditActionId === entry.id)
+                        return (
+                        <div key={`${entry.type}-${entry.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: entry.type === "deleted-file" ? "var(--fc-tool-input-bg)" : "var(--fc-admin-panel-soft-bg)", border: entry.type === "deleted-file" ? "1px solid var(--fc-admin-warning-border)" : "1px solid transparent" }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {getAuditSubject(entry)}
+                              {entry.subject}
                             </div>
                             <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {getAuditChangeSummary(entry)}
+                              {entry.summary}
                             </div>
                             <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>
-                              {formatTimestamp(entry.occurredAt)}{entry.actorName ? ` · ${entry.actorName}` : ""}{entry.undoneAt ? " · undone" : ""}
+                              {formatTimestamp(entry.occurredAt)}{entry.actorName ? ` · ${entry.actorName}` : ""}{entry.undone ? " · undone" : ""}
                             </div>
                           </div>
-                          {!entry.undoOfLogId && !entry.undoneAt ? (
+                          {entry.canUndo ? (
                             <button
                               type="button"
-                              onClick={() => void undoAuditEntry(entry.id)}
-                              disabled={auditActionId === entry.id}
-                              style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", opacity: auditActionId === entry.id ? 0.6 : 1 }}
+                              aria-label="Undo change"
+                              title="Undo change"
+                              onClick={() => {
+                                if (entry.type === "audit") {
+                                  void undoAuditEntry(entry.id)
+                                } else {
+                                  void undoDeletedFile(entry.file)
+                                }
+                              }}
+                              disabled={actionBusy}
+                              style={{ ...buttonStyle, width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "14px", opacity: actionBusy ? 0.6 : 1 }}
                             >
-                              {auditActionId === entry.id ? "Undoing..." : "Undo"}
+                              {actionBusy ? "..." : "↶"}
                             </button>
                           ) : null}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -3285,21 +3469,10 @@ export default function CountryCompanyInfoPage() {
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
                     className="fc-admin-menu-button"
-                    style={{
-                      ...buttonStyle,
-                      width: "74px",
-                      height: "42px",
-                      padding: "0 14px",
-                      borderRadius: "999px",
-                      background: "var(--fc-admin-selected-bg)",
-                      color: "var(--fc-admin-panel-text)",
-                      border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "12px",
-                      fontWeight: 900,
-                      lineHeight: 1,
-                    }}
+                    aria-label="Open menu"
+                    style={menuButtonStyle}
                   >
-                    Menu
+                    <MenuGlyph />
                   </button>
                   {menuOpen && (
                     <div
@@ -3331,7 +3504,7 @@ export default function CountryCompanyInfoPage() {
         <main style={{ padding: isMobile ? "12px" : "0 22px 22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "#b9cde6 #f5f5f7" }}>
           <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
             <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: 0, zIndex: 10, minWidth: 0, borderTopLeftRadius: isMobile ? "18px" : 0, borderTopRightRadius: isMobile ? "18px" : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr) 42px" : "1fr", gap: "8px", alignItems: "center" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr) 54px" : "1fr", gap: "8px", alignItems: "center" }}>
                 <input
                   value={query}
                   onClick={() => {
@@ -3347,21 +3520,10 @@ export default function CountryCompanyInfoPage() {
                   <button
                     onClick={() => setMenuOpen((prev) => !prev)}
                     className="fc-admin-menu-button"
-                    style={{
-                      ...buttonStyle,
-                      width: "74px",
-                      height: "42px",
-                      padding: "0 14px",
-                      borderRadius: "999px",
-                      background: "var(--fc-admin-selected-bg)",
-                      color: "var(--fc-admin-panel-text)",
-                      border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "12px",
-                      fontWeight: 900,
-                      lineHeight: 1,
-                    }}
+                    aria-label="Open menu"
+                    style={menuButtonStyle}
                   >
-                    Menu
+                    <MenuGlyph />
                   </button>
                 )}
               </div>

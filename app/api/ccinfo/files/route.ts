@@ -149,6 +149,21 @@ function setFolderPathInOriginalPath(originalPath: string | null | undefined, fo
   return `${entryKind}/${entryName}/${suffix}`
 }
 
+function rebaseFolderPath(currentPath: string, sourcePath: string, targetParentPath: string) {
+  const folderName = sourcePath.split("/").filter(Boolean).pop() || sourcePath
+  const nextRoot = [targetParentPath, folderName].filter(Boolean).join("/")
+  if (currentPath === sourcePath) return nextRoot
+  if (currentPath.startsWith(`${sourcePath}/`)) return `${nextRoot}${currentPath.slice(sourcePath.length)}`
+  return currentPath
+}
+
+function canMoveFolderToPath(sourcePath: string, targetParentPath: string) {
+  const currentParentPath = sourcePath.split("/").filter(Boolean).slice(0, -1).join("/")
+  if (!sourcePath || currentParentPath === targetParentPath) return false
+  if (targetParentPath === sourcePath || targetParentPath.startsWith(`${sourcePath}/`)) return false
+  return true
+}
+
 function renameOriginalPathBasename(originalPath: string | null | undefined, nextName: string, entryKind = "company", entryName = "Untitled") {
   const folderPath = deriveFolderPathFromOriginalPath(originalPath)
   return setFolderPathInOriginalPath(originalPath, folderPath, nextName, entryKind, entryName)
@@ -285,6 +300,7 @@ export async function PATCH(request: Request) {
     const entryId = String(body.entryId || "")
     const entryName = String(body.entryName || "")
     const folderPath = String(body.folderPath || "").trim()
+    const targetFolderPath = String(body.targetFolderPath || "").trim()
     const name = String(body.name || "").trim()
 
     if (action === "restore") {
@@ -386,6 +402,81 @@ export async function PATCH(request: Request) {
       }
 
       return NextResponse.json({ message: "Only imported company folders can be deleted with contents." }, { status: 400 })
+    }
+
+    if (action === "moveFolder") {
+      if (!entryKind || !entryId || !folderPath) {
+        return NextResponse.json({ message: "Missing folder move details." }, { status: 400 })
+      }
+
+      if (!canMoveFolderToPath(folderPath, targetFolderPath)) {
+        return NextResponse.json({ ok: true, skipped: true })
+      }
+
+      if (source === "company") {
+        const { data: companyFiles, error: fileReadError } = await supabase
+          .from("cc_company_files")
+          .select("id,file_name,original_path")
+          .eq("company_id", entryId)
+          .is("deleted_at", null)
+        if (fileReadError) throw fileReadError
+
+        for (const file of companyFiles || []) {
+          const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
+          if (currentPath !== folderPath && !currentPath.startsWith(`${folderPath}/`)) continue
+          const nextFolderPath = rebaseFolderPath(currentPath, folderPath, targetFolderPath)
+          const { error } = await supabase
+            .from("cc_company_files")
+            .update({ original_path: setFolderPathInOriginalPath(file.original_path, nextFolderPath, file.file_name, "company", entryName) })
+            .eq("id", file.id)
+          if (error) throw error
+        }
+
+        return NextResponse.json({ ok: true })
+      }
+
+      const { data: folderRows, error: folderReadError } = await supabase
+        .from("cc_entry_folders")
+        .select("id,folder_path,name")
+        .eq("entry_kind", entryKind)
+        .eq("entry_id", entryId)
+      if (folderReadError) throw folderReadError
+
+      for (const folder of folderRows || []) {
+        const currentFullPath = [folder.folder_path, folder.name].filter(Boolean).join("/")
+        if (currentFullPath !== folderPath && !currentFullPath.startsWith(`${folderPath}/`)) continue
+        const nextFullPath = rebaseFolderPath(currentFullPath, folderPath, targetFolderPath)
+        const segments = nextFullPath.split("/").filter(Boolean)
+        const nextName = segments.pop() || folder.name
+        const nextParentPath = segments.join("/")
+        const { error } = await supabase
+          .from("cc_entry_folders")
+          .update({ folder_path: nextParentPath, name: nextName })
+          .eq("id", folder.id)
+        if (error) throw error
+      }
+
+      const { data: affectedFiles, error: fileReadError } = await supabase
+        .from("cc_entry_files")
+        .select("id,folder_path,file_name")
+        .eq("entry_kind", entryKind)
+        .eq("entry_id", entryId)
+        .or(`folder_path.eq.${folderPath},folder_path.like.${folderPath}/%`)
+      if (fileReadError) throw fileReadError
+
+      for (const file of affectedFiles || []) {
+        const nextFolderPath = rebaseFolderPath(String(file.folder_path || ""), folderPath, targetFolderPath)
+        const { error } = await supabase
+          .from("cc_entry_files")
+          .update({
+            folder_path: nextFolderPath,
+            original_path: `${entryKind}/${entryName}/${nextFolderPath ? `${nextFolderPath}/` : ""}${file.file_name}`,
+          })
+          .eq("id", file.id)
+        if (error) throw error
+      }
+
+      return NextResponse.json({ ok: true })
     }
 
     if (action === "renameFolder") {
