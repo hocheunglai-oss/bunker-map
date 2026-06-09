@@ -34,6 +34,7 @@ if (!oauthClientId || !oauthClientSecret || !driveCompanyFolderId) {
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 const folderCache = new Map()
+const forceUpload = process.env.FORCE_COMPANY_FILE_UPLOAD === "1"
 
 async function loadEnv(filePath) {
   const raw = await fsPromises.readFile(filePath, "utf8")
@@ -118,6 +119,10 @@ function formatName(folderName) {
   )
 }
 
+function nameKey(value) {
+  return normalizeWhitespace(value).toUpperCase()
+}
+
 async function safeReaddir(dirPath, options = { withFileTypes: true }) {
   try {
     return await fsPromises.readdir(dirPath, options)
@@ -149,47 +154,76 @@ async function fetchCompanies() {
   return rows
 }
 
+async function fetchExistingCompanyFiles() {
+  const batchSize = 1000
+  let from = 0
+  const rows = []
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("cc_company_files")
+      .select("id,company_id,original_path,drive_file_id,drive_url")
+      .range(from, from + batchSize - 1)
+
+    if (error) throw error
+
+    const batch = data || []
+    rows.push(...batch)
+    if (batch.length < batchSize) break
+    from += batchSize
+  }
+
+  return new Map(rows.map((row) => [`${row.company_id}:${row.original_path}`, row]))
+}
+
 async function ensureDriveFolder(drive, parentId, name) {
   const cacheKey = `${parentId}:${name}`
   if (folderCache.has(cacheKey)) return folderCache.get(cacheKey)
 
-  const q = [
-    "trashed = false",
-    "mimeType = 'application/vnd.google-apps.folder'",
-    `name = '${name.replace(/'/g, "\\'")}'`,
-    `'${parentId}' in parents`,
-  ].join(" and ")
+  const promise = (async () => {
+    const q = [
+      "trashed = false",
+      "mimeType = 'application/vnd.google-apps.folder'",
+      `name = '${name.replace(/'/g, "\\'")}'`,
+      `'${parentId}' in parents`,
+    ].join(" and ")
 
-  const listResponse = await drive.files.list({
-    q,
-    fields: "files(id,name)",
-    includeItemsFromAllDrives: true,
-    supportsAllDrives: true,
-    corpora: driveSharedDriveId ? "drive" : undefined,
-    driveId: driveSharedDriveId || undefined,
-  })
+    const listResponse = await drive.files.list({
+      q,
+      fields: "files(id,name)",
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+      corpora: driveSharedDriveId ? "drive" : undefined,
+      driveId: driveSharedDriveId || undefined,
+    })
 
-  const existing = listResponse.data.files?.[0]
-  if (existing?.id) {
-    folderCache.set(cacheKey, existing.id)
-    return existing.id
+    const existing = listResponse.data.files?.[0]
+    if (existing?.id) return existing.id
+
+    const createResponse = await drive.files.create({
+      requestBody: {
+        name,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentId],
+      },
+      fields: "id",
+      supportsAllDrives: true,
+    })
+
+    const newId = createResponse.data.id
+    if (!newId) throw new Error(`Unable to create folder ${name}`)
+    return newId
+  })()
+
+  folderCache.set(cacheKey, promise)
+  try {
+    const folderId = await promise
+    folderCache.set(cacheKey, Promise.resolve(folderId))
+    return folderId
+  } catch (error) {
+    folderCache.delete(cacheKey)
+    throw error
   }
-
-  const createResponse = await drive.files.create({
-    requestBody: {
-      name,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [parentId],
-    },
-    fields: "id",
-    supportsAllDrives: true,
-  })
-
-  const newId = createResponse.data.id
-  if (!newId) throw new Error(`Unable to create folder ${name}`)
-
-  folderCache.set(cacheKey, newId)
-  return newId
 }
 
 function getMimeType(filePath) {
@@ -287,12 +321,17 @@ async function collectFiles(rootDir) {
   async function walk(currentDir) {
     const entries = await safeReaddir(currentDir)
     for (const entry of entries) {
-      if (entry.name.startsWith("._") || entry.name === ".DS_Store") continue
+      if (shouldSkipEntry(entry.name)) continue
       const fullPath = path.join(currentDir, entry.name)
       if (entry.isDirectory()) {
         await walk(fullPath)
       } else {
-        files.push(fullPath)
+        try {
+          await fsPromises.access(fullPath)
+          files.push(fullPath)
+        } catch {
+          console.warn(`Skipping unreadable local file: ${fullPath}`)
+        }
       }
     }
   }
@@ -301,11 +340,23 @@ async function collectFiles(rootDir) {
   return files.sort((a, b) => a.localeCompare(b))
 }
 
+function shouldSkipEntry(name) {
+  const lower = name.toLowerCase()
+  return (
+    name.startsWith("._") ||
+    name.startsWith("~$") ||
+    name === ".DS_Store" ||
+    lower === "thumbs.db" ||
+    lower.endsWith(".tmp")
+  )
+}
+
 async function main() {
   const drive = await createDriveClient()
   console.log("Loading company records...")
   const companies = await fetchCompanies()
-  const companyIdByName = new Map(companies.map((item) => [item.name, item.id]))
+  const companyIdByName = new Map(companies.map((item) => [nameKey(item.name), item.id]))
+  const existingFiles = await fetchExistingCompanyFiles()
 
   const entries = (await safeReaddir(COMPANY_ROOT))
     .filter((entry) => entry.isDirectory())
@@ -313,25 +364,54 @@ async function main() {
 
   let uploadedCount = 0
   let linkedCount = 0
+  let skippedCount = 0
+  let failedCount = 0
+  const pendingFiles = []
 
   for (const entry of entries) {
     const companyDir = path.join(COMPANY_ROOT, entry.name)
     const companyName = formatName(entry.name)
-    const companyId = companyIdByName.get(companyName)
+    const companyId = companyIdByName.get(nameKey(companyName))
 
     if (!companyId) {
       console.log(`Skipping ${companyName}: no matching cc_companies record`)
       continue
     }
 
-    console.log(`Uploading ${companyName}...`)
     const files = await collectFiles(companyDir)
-    const companyFolderId = await ensureDriveFolder(drive, driveCompanyFolderId, entry.name)
 
     for (const filePath of files) {
-      const relative = path.relative(companyDir, filePath)
-      const parentSegments = path.dirname(relative) === "." ? [] : path.dirname(relative).split(path.sep)
+      const existingKey = `${companyId}:${filePath}`
+      const existing = existingFiles.get(existingKey)
 
+      if (!forceUpload && existing?.drive_file_id && existing?.drive_url) {
+        skippedCount += 1
+        if (skippedCount % 100 === 0) {
+          console.log(`Skipped ${skippedCount} already linked files`)
+        }
+        continue
+      }
+
+      pendingFiles.push({ companyDir, companyName, companyId, entryName: entry.name, filePath, existingKey, existing })
+    }
+  }
+
+  pendingFiles.sort((a, b) => {
+    const aPriority = ["SGS", "TAIMIN PETROLEUM"].includes(nameKey(a.companyName)) ? 0 : 1
+    const bPriority = ["SGS", "TAIMIN PETROLEUM"].includes(nameKey(b.companyName)) ? 0 : 1
+    if (aPriority !== bPriority) return aPriority - bPriority
+    return a.companyName.localeCompare(b.companyName) || a.filePath.localeCompare(b.filePath)
+  })
+
+  console.log(`Queued ${pendingFiles.length} missing file${pendingFiles.length === 1 ? "" : "s"} for upload.`)
+
+  async function uploadPendingFile(task) {
+    const { companyDir, companyName, companyId, entryName, filePath, existingKey, existing } = task
+    const relative = path.relative(companyDir, filePath)
+    const parentSegments = path.dirname(relative) === "." ? [] : path.dirname(relative).split(path.sep)
+
+    try {
+      const companyFolderId = await ensureDriveFolder(drive, driveCompanyFolderId, entryName)
       let parentId = companyFolderId
       for (const segment of parentSegments) {
         parentId = await ensureDriveFolder(drive, parentId, segment)
@@ -348,15 +428,38 @@ async function main() {
         drive_url: url,
         original_path: filePath,
       })
+      existingFiles.set(existingKey, {
+        id: existing?.id,
+        company_id: companyId,
+        original_path: filePath,
+        drive_file_id: fileId,
+        drive_url: url,
+      })
       linkedCount += 1
 
-      if (uploadedCount % 25 === 0) {
-        console.log(`Uploaded ${uploadedCount} files / linked ${linkedCount}`)
+      if (uploadedCount % 25 === 0 || uploadedCount === pendingFiles.length) {
+        console.log(`Uploaded ${uploadedCount}/${pendingFiles.length} files / linked ${linkedCount} (${companyName})`)
       }
+    } catch (error) {
+      failedCount += 1
+      console.warn(`Failed to upload ${filePath}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  console.log(`Done. Uploaded ${uploadedCount} files and linked ${linkedCount}.`)
+  const concurrency = Number(process.env.COMPANY_FILE_UPLOAD_CONCURRENCY || 8)
+  let nextIndex = 0
+
+  async function worker() {
+    while (nextIndex < pendingFiles.length) {
+      const task = pendingFiles[nextIndex]
+      nextIndex += 1
+      await uploadPendingFile(task)
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => worker()))
+
+  console.log(`Done. Uploaded ${uploadedCount} files, linked ${linkedCount}, skipped ${skippedCount}, failed ${failedCount}.`)
 }
 
 main().catch((error) => {

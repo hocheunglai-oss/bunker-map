@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { getAuditChangeSummary, getAuditSubject } from "@/lib/auditDisplay"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
@@ -142,28 +143,6 @@ function formatPrimaryKey(recordPk: Record<string, unknown>) {
   return entries.map(([key, value]) => `${key}: ${stringifyValue(value, 80)}`).join(", ")
 }
 
-function getRecordLabel(log: AuditLogRecord) {
-  const row = log.afterRow || log.beforeRow || {}
-  const preferredKeys = [
-    "name",
-    "full_name",
-    "display_name",
-    "title",
-    "subject",
-    "file_name",
-    "key",
-    "source_key",
-    "id",
-  ]
-
-  for (const key of preferredKeys) {
-    const value = row[key]
-    if (typeof value === "string" && value.trim()) return value
-  }
-
-  return formatPrimaryKey(log.recordPk)
-}
-
 function operationStyle(operation: AuditOperation): React.CSSProperties {
   const colors: Record<AuditOperation, { bg: string; text: string; border: string }> = {
     INSERT: { bg: "#e9f8ee", text: "#146b2f", border: "#b7dfc4" },
@@ -286,6 +265,9 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     document.title = "Audit Log - FC Uno"
+    const params = new URLSearchParams(window.location.search)
+    const table = params.get("table")
+    if (table) setTableName(table)
   }, [])
 
   useEffect(() => {
@@ -334,7 +316,7 @@ export default function AuditLogPage() {
     return (
       <div style={pageStyle}>
         <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-          Go To Admin
+          Back
         </button>
       </div>
     )
@@ -384,6 +366,7 @@ export default function AuditLogPage() {
                 style={inputStyle}
               >
                 <option value="all">All tables</option>
+                <option value="ccinfo">CCINFO</option>
                 {tables.map((table) => (
                   <option key={table} value={table}>
                     {table}
@@ -461,8 +444,8 @@ export default function AuditLogPage() {
                     <th style={thStyle}>User</th>
                     <th style={thStyle}>Action</th>
                     <th style={thStyle}>Table</th>
-                    <th style={thStyle}>Record</th>
-                    <th style={thStyle}>Fields</th>
+                    <th style={thStyle}>Subject</th>
+                    <th style={thStyle}>Change</th>
                     <th style={thStyle}></th>
                   </tr>
                 </thead>
@@ -499,11 +482,9 @@ export default function AuditLogPage() {
                           ) : null}
                         </td>
                         <td style={tdStyle}>{log.tableName}</td>
-                        <td style={{ ...tdStyle, maxWidth: "240px" }}>{getRecordLabel(log)}</td>
+                        <td style={{ ...tdStyle, maxWidth: "240px", fontWeight: 900 }}>{getAuditSubject(log)}</td>
                         <td style={{ ...tdStyle, maxWidth: "220px" }}>
-                          {log.operation === "UPDATE" && log.changedFields.length > 0
-                            ? log.changedFields.join(", ")
-                            : formatPrimaryKey(log.recordPk)}
+                          {getAuditChangeSummary(log)}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
                           <button
@@ -549,9 +530,15 @@ export default function AuditLogPage() {
               <div style={{ padding: "12px", display: "grid", gap: "12px" }}>
                 <div style={{ display: "grid", gap: "8px", fontSize: "13px" }}>
                   <div>
-                    <strong>Record</strong>
+                    <strong>Subject</strong>
                     <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px" }}>
-                      {getRecordLabel(selectedLog)}
+                      {getAuditSubject(selectedLog)}
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Change</strong>
+                    <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px" }}>
+                      {getAuditChangeSummary(selectedLog)}
                     </div>
                   </div>
                   <div>

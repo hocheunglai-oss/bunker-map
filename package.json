@@ -20,6 +20,7 @@
     "export:exchange-addressbook": "node scripts/export-exchange-addressbook.mjs",
     "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs",
+    "audit:ccinfo-company-files": "node scripts/audit-ccinfo-company-files.mjs",
     "upload:company-files": "node scripts/upload-company-files-to-drive.mjs",
     "import:pcinfo": "node scripts/import-pcinfo.mjs",
     "import:japan": "node scripts/import-japan-curated.mjs"

@@ -63,6 +63,15 @@ export const AUDITED_TABLES = [
   "admin_role_defaults",
 ]
 
+const CCINFO_AUDITED_TABLES = [
+  "cc_companies",
+  "cc_countries",
+  "cc_ports",
+  "cc_company_files",
+  "cc_entry_files",
+  "cc_entry_folders",
+]
+
 const AUDIT_SELECT = [
   "id",
   "occurred_at",
@@ -131,7 +140,9 @@ export async function listAuditLogs(options: {
     .order("occurred_at", { ascending: false })
     .limit(limit)
 
-  if (options.tableName && options.tableName !== "all") {
+  if (options.tableName === "ccinfo") {
+    query = query.in("table_name", CCINFO_AUDITED_TABLES)
+  } else if (options.tableName && options.tableName !== "all") {
     query = query.eq("table_name", options.tableName)
   }
 

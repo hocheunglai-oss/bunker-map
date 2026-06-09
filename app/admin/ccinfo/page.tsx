@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { getAuditChangeSummary, getAuditSubject, isCcinfoAuditLog } from "@/lib/auditDisplay"
 
 type RecordKind = "company" | "country" | "port"
 
@@ -50,6 +51,10 @@ type EntryFolderRecord = {
   folder_path: string
   name: string
 }
+
+type FilePanelEditTarget =
+  | { type: "file"; item: CompanyFileRecord | EntryFileRecord }
+  | { type: "folder"; item: EntryFolderRecord }
 
 type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
 
@@ -228,6 +233,7 @@ type HighlightCard = {
   sections?: HighlightCard[]
   table?: string[][]
   column_widths?: number[]
+  table_row_updates?: string[]
 }
 
 type SummaryMeta = {
@@ -297,6 +303,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
+            table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -305,6 +312,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
                   table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
                   column_widths: Array.isArray(section?.column_widths) ? section.column_widths as number[] : undefined,
+                  table_row_updates: Array.isArray(section?.table_row_updates) ? section.table_row_updates as string[] : undefined,
                 }))
               : [],
           }))
@@ -331,6 +339,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
+            table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -339,6 +348,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                   blocks: normalizeBlocks(section?.blocks, typeof section?.info === "string" ? section.info : "", section?.line_updates && typeof section.line_updates === "object" ? section.line_updates : {}),
                   table: Array.isArray(section?.table) ? section.table as string[][] : undefined,
                   column_widths: Array.isArray(section?.column_widths) ? section.column_widths as number[] : undefined,
+                  table_row_updates: Array.isArray(section?.table_row_updates) ? section.table_row_updates as string[] : undefined,
                 }))
               : [],
           }))
@@ -378,6 +388,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           blocks: item.blocks || textToBlocks(item.info, item.line_updates || {}),
           table: item.table,
           column_widths: item.column_widths,
+          table_row_updates: item.table_row_updates,
           sections: (item.sections || []).map((section) => ({
             title: section.title.trim(),
             info: section.info.trim(),
@@ -385,6 +396,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
             blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
             table: section.table,
             column_widths: section.column_widths,
+            table_row_updates: section.table_row_updates,
           })),
         }))
         .filter((item) => item.title || item.info),
@@ -397,6 +409,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
         blocks: section.blocks || textToBlocks(section.info, section.line_updates || {}),
         table: section.table,
         column_widths: section.column_widths,
+        table_row_updates: section.table_row_updates,
       })),
     },
   )
@@ -792,23 +805,29 @@ function BlockTextBlock({
 function SimpleTable({
   table,
   columnWidths,
+  rowUpdates,
   onSave,
   readOnly = false,
 }: {
   table: string[][]
   columnWidths?: number[]
-  onSave?: (table: string[][], columnWidths: number[]) => void
+  rowUpdates?: string[]
+  onSave?: (table: string[][], columnWidths: number[], rowUpdates: string[]) => void
   readOnly?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
+  const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
+  const [selectedRow, setSelectedRow] = useState(0)
   const tableRef = useRef<HTMLTableElement | null>(null)
   const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
     setDraftRows(table.length ? table : [["", ""], ["", ""]])
     setDraftWidths(columnWidths || [])
-  }, [table, columnWidths])
+    setDraftRowUpdates(rowUpdates || [])
+    setSelectedRow((current) => Math.min(current, Math.max((table.length || 2) - 1, 0)))
+  }, [table, columnWidths, rowUpdates])
   useEffect(() => {
     function handleMove(event: MouseEvent) {
       const state = dragStateRef.current
@@ -836,106 +855,155 @@ function SimpleTable({
   const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
   const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
+  const activeRow = Math.min(selectedRow, rows.length - 1)
+  const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
+  const selectedRowUpdatedAt = displayRowUpdates[activeRow] || ""
+  const beginEditing = () => {
+    setDraftRows(rows.map((row) => [...row]))
+    setDraftWidths(widths)
+    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
+    setEditing(true)
+  }
+  const updateRowTimestamp = (rowIndex: number, source: string[] = draftRowUpdates) => {
+    const nextUpdates = [...source]
+    nextUpdates[rowIndex] = new Date().toISOString()
+    setDraftRowUpdates(nextUpdates)
+    return nextUpdates
+  }
   const updateCell = (rowIndex: number, columnIndex: number, value: string) => {
     const next = rows.map((row) => [...row])
     while (next[rowIndex].length < columnCount) next[rowIndex].push("")
     next[rowIndex][columnIndex] = value
     setDraftRows(next)
+    updateRowTimestamp(rowIndex)
   }
-  const addRow = () => setDraftRows([...rows, Array.from({ length: columnCount }, () => "")])
+  const addRowNearSelection = (placement: "above" | "below") => {
+    const nextRows = rows.map((row) => [...row])
+    const insertAt = placement === "above" ? activeRow : activeRow + 1
+    nextRows.splice(insertAt, 0, Array.from({ length: columnCount }, () => ""))
+    const nextUpdates = [...displayRowUpdates]
+    nextUpdates.splice(insertAt, 0, new Date().toISOString())
+    setDraftRows(nextRows)
+    setDraftWidths(widths)
+    setDraftRowUpdates(nextUpdates)
+    setSelectedRow(insertAt)
+    setEditing(true)
+  }
   const addColumn = () => {
     const nextCount = columnCount + 1
     setDraftRows(rows.map((row) => [...row, ""]))
     setDraftWidths(Array.from({ length: nextCount }).map((_, index) => draftWidths[index] || Math.round(100 / nextCount)))
+    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
+    setEditing(true)
   }
-  const deleteRow = () => {
+  const deleteSelectedRow = () => {
     if (rows.length <= 1) return
-    setDraftRows(rows.slice(0, -1))
+    const nextRows = rows.filter((_, index) => index !== activeRow)
+    const nextUpdates = displayRowUpdates.filter((_, index) => index !== activeRow)
+    setDraftRows(nextRows)
+    setDraftRowUpdates(nextUpdates)
+    setSelectedRow(Math.max(0, Math.min(activeRow, nextRows.length - 1)))
+    setEditing(true)
   }
   const deleteColumn = () => {
     if (columnCount <= 1) return
     setDraftRows(rows.map((row) => row.slice(0, -1)))
     setDraftWidths(draftWidths.slice(0, -1))
-  }
-  const setWidth = (index: number, value: number) => {
-    setDraftWidths((prev) => {
-      const next = [...prev]
-      next[index] = value
-      return next
-    })
+    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
+    setEditing(true)
   }
   const copyTable = async () => {
     const text = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").join("\t")).join("\n")
     await navigator.clipboard?.writeText(text)
   }
   const save = () => {
-    onSave?.(draftRows, widths)
+    onSave?.(draftRows, widths, draftRowUpdates)
     setEditing(false)
   }
   return (
-    <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
-      <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
-        <colgroup>
-          {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
-        </colgroup>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={`table-row-${rowIndex}`}>
-              {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
-                  <input
-                    value={row[columnIndex] || ""}
-                    disabled={readOnly || !editing}
-                    onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                    style={{ width: "100%", border: "none", background: "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
-                  />
-                  {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
-                    <span
-                      onMouseDown={(event) => {
-                        if (!tableRef.current) return
-                        dragStateRef.current = {
-                          startX: event.clientX,
-                          startWidths: [...widths],
-                          index: columnIndex,
-                          tableWidth: tableRef.current.getBoundingClientRect().width,
-                        }
-                        event.preventDefault()
-                      }}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        right: "-3px",
-                        width: "6px",
-                        height: "100%",
-                        cursor: "col-resize",
-                        background: "transparent",
-                        zIndex: 2,
-                      }}
-                    />
-                  ) : null}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!readOnly && editing && (
-        <div style={{ display: "grid", gap: "8px" }}>
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button type="button" onClick={addRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Row</button>
-          <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
-          <button type="button" onClick={deleteRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
-          <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
-          <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-          <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
+    <div style={{ display: "grid", gridTemplateColumns: readOnly ? "minmax(0,1fr)" : "minmax(0,1fr) minmax(180px, 220px)", gap: "10px", alignItems: "start" }}>
+      <div style={{ overflowX: "auto" }}>
+        <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+          <colgroup>
+            {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
+          </colgroup>
+          <tbody>
+            {rows.map((row, rowIndex) => {
+              const isSelected = rowIndex === activeRow
+              return (
+                <tr
+                  key={`table-row-${rowIndex}`}
+                  onClick={() => setSelectedRow(rowIndex)}
+                  onDoubleClick={() => {
+                    if (!readOnly) beginEditing()
+                  }}
+                  style={{ background: isSelected ? "#e7f2ff" : "transparent" }}
+                >
+                  {Array.from({ length: columnCount }).map((_, columnIndex) => (
+                    <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: isSelected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
+                      <input
+                        value={row[columnIndex] || ""}
+                        disabled={readOnly || !editing}
+                        onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
+                        style={{ width: "100%", border: "none", background: "transparent", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
+                      />
+                      {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
+                        <span
+                          onMouseDown={(event) => {
+                            if (!tableRef.current) return
+                            dragStateRef.current = {
+                              startX: event.clientX,
+                              startWidths: [...widths],
+                              index: columnIndex,
+                              tableWidth: tableRef.current.getBoundingClientRect().width,
+                            }
+                            event.preventDefault()
+                          }}
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            right: "-3px",
+                            width: "6px",
+                            height: "100%",
+                            cursor: "col-resize",
+                            background: "transparent",
+                            zIndex: 2,
+                          }}
+                        />
+                      ) : null}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!readOnly && (
+        <div style={{ display: "grid", gap: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px" }}>
+          <div>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>Selected Row</div>
+            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 800, marginTop: "3px" }}>Row {activeRow + 1}</div>
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "3px" }}>
+              {selectedRowUpdatedAt ? `Updated ${formatTimestamp(selectedRowUpdatedAt) || selectedRowUpdatedAt}` : "No row update recorded"}
+            </div>
           </div>
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Drag the header borders to resize columns.</div>
-        </div>
-      )}
-      {!readOnly && !editing && (
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setEditing(true)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
-          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Copy Table</button>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
+            <button type="button" onClick={() => addRowNearSelection("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Above</button>
+            <button type="button" onClick={() => addRowNearSelection("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Below</button>
+            <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Edit</button>
+            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>Delete</button>
+            <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>+ Col</button>
+            <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>- Col</button>
+          </div>
+          {editing ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
+              <button type="button" onClick={save} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
+              <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Copy Table</button>
+          )}
         </div>
       )}
     </div>
@@ -1116,6 +1184,8 @@ export default function CountryCompanyInfoPage() {
   const [uploadingFile, setUploadingFile] = useState(false)
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<EntryFileRecord | CompanyFileRecord | null>(null)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
+  const [filePanelEditTarget, setFilePanelEditTarget] = useState<FilePanelEditTarget | null>(null)
+  const [filePanelNameDraft, setFilePanelNameDraft] = useState("")
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [highlightModalMode, setHighlightModalMode] = useState<"tab" | "section" | "table">("section")
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
@@ -1269,12 +1339,12 @@ export default function CountryCompanyInfoPage() {
   }, [searchInPage, selectedId, selectedKind])
 
   useEffect(() => {
-    if (!selectedId || !selectedKind || !authenticated) {
+    if (!authenticated) {
       setRecentAuditLogs([])
       return
     }
-    void loadRecentAuditLogs(selectedKind, selectedId)
-  }, [selectedId, selectedKind, authenticated])
+    void loadRecentAuditLogs()
+  }, [authenticated])
 
   const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
   const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
@@ -1347,16 +1417,15 @@ export default function CountryCompanyInfoPage() {
     setCountryOptions(((data as Array<{ id: string; name: string }>) || []).map((item) => ({ id: item.id, name: item.name.toUpperCase() })))
   }
 
-  async function loadRecentAuditLogs(kind: RecordKind, id: string) {
+  async function loadRecentAuditLogs() {
     setAuditLoading(true)
     try {
-      const tableName = kind === "company" ? "cc_companies" : kind === "country" ? "cc_countries" : "cc_ports"
-      const response = await fetch(`/api/admin/audit-logs?table=${tableName}&limit=120`)
+      const response = await fetch("/api/admin/audit-logs?table=ccinfo&limit=300")
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message || "Unable to load audit logs.")
       const logs = ((payload.logs || []) as AuditLogRecord[])
-        .filter((log) => String(log.recordPk?.id || "") === id)
-        .slice(0, 12)
+        .filter((log) => isCcinfoAuditLog(log))
+        .slice(0, 60)
       setRecentAuditLogs(logs)
     } catch (error) {
       setRecentAuditLogs([])
@@ -1378,7 +1447,7 @@ export default function CountryCompanyInfoPage() {
       if (!response.ok) throw new Error(payload.message || "Unable to undo change.")
       if (selectedKind && selectedId) {
         await loadSelected(selectedKind, selectedId)
-        await loadRecentAuditLogs(selectedKind, selectedId)
+        await loadRecentAuditLogs()
       }
       setMessage("Undo complete.")
     } catch (error) {
@@ -1684,16 +1753,16 @@ export default function CountryCompanyInfoPage() {
     await persistMainSections(mainSections)
   }
 
-  function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[]) {
-    const nextSections = mainSections.map((section, index) => (index === sectionIndex ? { ...section, table, column_widths: columnWidths } : section))
+  function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
+    const nextSections = mainSections.map((section, index) => (index === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section))
     setMainSections(nextSections)
     void persistMainSections(nextSections)
   }
 
-  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[]) {
+  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
     const nextHighlights = highlights.map((tab, index) => {
       if (index !== tabIndex) return tab
-      return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table, column_widths: columnWidths } : section)) }
+      return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section)) }
     })
     setHighlights(nextHighlights)
     void persistHighlights(nextHighlights)
@@ -1808,6 +1877,8 @@ export default function CountryCompanyInfoPage() {
     setEditingCountryBlockId("")
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setFilePanelEditTarget(null)
+    setFilePanelNameDraft("")
     setRecordModalOpen(false)
     setSearchInPage("")
     setActiveInfoTab("general")
@@ -1848,6 +1919,8 @@ export default function CountryCompanyInfoPage() {
     setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setFilePanelEditTarget(null)
+    setFilePanelNameDraft("")
     setRecordModalOpen(false)
     setActiveInfoTab("general")
   }
@@ -1890,6 +1963,8 @@ export default function CountryCompanyInfoPage() {
     setEditingMainSectionBlock(null)
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setFilePanelEditTarget(null)
+    setFilePanelNameDraft("")
     setRecordModalOpen(false)
     setActiveInfoTab("general")
   }
@@ -1924,6 +1999,8 @@ export default function CountryCompanyInfoPage() {
     setEditingCountryBlockId("")
     setSelectedPreviewFile(null)
     setPreviewModalOpen(false)
+    setFilePanelEditTarget(null)
+    setFilePanelNameDraft("")
     setRecordModalOpen(false)
     setActiveInfoTab("general")
 
@@ -2241,7 +2318,7 @@ export default function CountryCompanyInfoPage() {
     const firstBlock = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
     if ((highlightModalMode === "section" || highlightModalMode === "table") && activeInfoTab === "general") {
       const nextSection: HighlightCard = highlightModalMode === "table"
-        ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]] }
+        ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]], table_row_updates: [new Date().toISOString(), new Date().toISOString()] }
         : { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }
       const nextSections = [...mainSections, nextSection]
       setMainSections(nextSections)
@@ -2262,7 +2339,7 @@ export default function CountryCompanyInfoPage() {
       const nextHighlights = highlights.map((item, itemIndex) => {
         if (itemIndex !== tabIndex) return item
         const nextSection: HighlightCard = highlightModalMode === "table"
-          ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]] }
+          ? { title: normalizeSectionTitle(highlightDraft.title || "TABLE"), info: "", blocks: [], table: [["", ""], ["", ""]], table_row_updates: [new Date().toISOString(), new Date().toISOString()] }
           : { title: normalizeSectionTitle(highlightDraft.title), info: "", blocks: [firstBlock] }
         return {
           ...item,
@@ -2458,6 +2535,7 @@ export default function CountryCompanyInfoPage() {
       const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
+      void loadRecentAuditLogs()
       setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
@@ -2486,19 +2564,59 @@ export default function CountryCompanyInfoPage() {
       const nextFolder = data.folder as EntryFolderRecord
       setFolders((prev) => mergeFolderRecords([...prev.filter((folder) => !folder.id.startsWith("virtual:")), nextFolder], files))
       setCurrentFolderPath(joinFolderPath(nextFolder.folder_path, nextFolder.name))
+      void loadRecentAuditLogs()
       setMessage("Folder created.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create folder.")
     }
   }
 
-  async function renameFolder(folder: EntryFolderRecord) {
-    if (folder.id.startsWith("virtual:")) {
-      setMessage("Imported company folders cannot be renamed here yet.")
-      return
+  function openFilePanelEditor(target: FilePanelEditTarget) {
+    setFilePanelEditTarget(target)
+    setFilePanelNameDraft(target.type === "folder" ? target.item.name : target.item.file_name)
+  }
+
+  async function renameFile(file: CompanyFileRecord | EntryFileRecord, nextNameInput?: string) {
+    const nextName = (nextNameInput ?? window.prompt("File name", file.file_name) ?? "").trim()
+    if (!nextName || nextName === file.file_name) return
+    try {
+      const response = await fetch("/api/ccinfo/files", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "renameFile",
+          fileId: file.id,
+          source: file.source || "entry",
+          name: nextName,
+          entryKind: selectedKind,
+          entryId: selectedId,
+          entryName: currentRecord.name || "Untitled",
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to rename file.")
+      if (selectedId && selectedKind) {
+        const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+        setFiles(refreshedFiles)
+        setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")), refreshedFiles))
+        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+        setSelectedPreviewFile((current) => {
+          if (current?.id !== file.id) return current
+          return refreshedFiles.find((item) => item.id === file.id) || null
+        })
+      }
+      setFilePanelEditTarget(null)
+      void loadRecentAuditLogs()
+      setMessage("File renamed.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to rename file.")
     }
-    const nextName = window.prompt("Folder name", folder.name)?.trim()
+  }
+
+  async function renameFolder(folder: EntryFolderRecord, nextNameInput?: string) {
+    const nextName = (nextNameInput ?? window.prompt("Folder name", folder.name) ?? "").trim()
     if (!nextName || nextName === folder.name) return
+    const folderPath = joinFolderPath(folder.folder_path, folder.name)
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "PATCH",
@@ -2506,9 +2624,12 @@ export default function CountryCompanyInfoPage() {
         body: JSON.stringify({
           action: "renameFolder",
           folderId: folder.id,
+          source: folder.id.startsWith("virtual:") ? "company" : "entry",
+          folderPath,
           name: nextName,
           entryKind: selectedKind,
           entryId: selectedId,
+          entryName: currentRecord.name || "Untitled",
         }),
       })
       const data = await response.json()
@@ -2516,9 +2637,10 @@ export default function CountryCompanyInfoPage() {
       const refreshedFiles = selectedId && selectedKind ? await refreshFiles(selectedKind, selectedId) : files
       setFiles(refreshedFiles)
       setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")).map((item) => item.id === folder.id ? { ...item, name: nextName } : item), refreshedFiles))
-      const previousPath = joinFolderPath(folder.folder_path, folder.name)
       const nextPath = joinFolderPath(folder.folder_path, nextName)
-      if (currentFolderPath === previousPath) setCurrentFolderPath(nextPath)
+      if (currentFolderPath === folderPath) setCurrentFolderPath(nextPath)
+      setFilePanelEditTarget(null)
+      void loadRecentAuditLogs()
       setMessage("Folder renamed.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to rename folder.")
@@ -2527,6 +2649,40 @@ export default function CountryCompanyInfoPage() {
 
   async function deleteFolder(folder: EntryFolderRecord) {
     const folderPath = joinFolderPath(folder.folder_path, folder.name)
+    if (folder.id.startsWith("virtual:")) {
+      if (!confirm(`Move all files inside ${folder.name} to Recently Deleted?`)) return
+      try {
+        const response = await fetch("/api/ccinfo/files", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "deleteFolderContents",
+            source: "company",
+            entryKind: selectedKind,
+            entryId: selectedId,
+            folderPath,
+          }),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.message || "Unable to delete folder contents.")
+        if (selectedId && selectedKind) {
+          const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+          setFiles(refreshedFiles)
+          setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")), refreshedFiles))
+          setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+        }
+        if (currentFolderPath === folderPath || currentFolderPath.startsWith(`${folderPath}/`)) {
+          setCurrentFolderPath(folder.folder_path || "")
+        }
+        setFilePanelEditTarget(null)
+        void loadRecentAuditLogs()
+        setMessage("Folder contents moved to Recently Deleted.")
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Unable to delete folder contents.")
+      }
+      return
+    }
+
     const hasNestedFolders = folders.some((item) => joinFolderPath(item.folder_path, item.name).startsWith(`${folderPath}/`))
     const hasNestedFiles = files.some((item) => (item.folder_path || "").startsWith(folderPath))
     if (hasNestedFolders || hasNestedFiles) {
@@ -2543,6 +2699,8 @@ export default function CountryCompanyInfoPage() {
       if (currentFolderPath === folderPath) {
         setCurrentFolderPath(folder.folder_path || "")
       }
+      setFilePanelEditTarget(null)
+      void loadRecentAuditLogs()
       setMessage("Folder deleted.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to delete folder.")
@@ -2567,10 +2725,30 @@ export default function CountryCompanyInfoPage() {
         setSelectedPreviewFile(null)
         setPreviewModalOpen(false)
       }
+      setFilePanelEditTarget(null)
+      void loadRecentAuditLogs()
       setMessage("File moved to Recently Deleted.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to delete file.")
     }
+  }
+
+  async function saveFilePanelEdit() {
+    if (!filePanelEditTarget) return
+    if (filePanelEditTarget.type === "folder") {
+      await renameFolder(filePanelEditTarget.item, filePanelNameDraft)
+      return
+    }
+    await renameFile(filePanelEditTarget.item, filePanelNameDraft)
+  }
+
+  async function deleteFilePanelTarget() {
+    if (!filePanelEditTarget) return
+    if (filePanelEditTarget.type === "folder") {
+      await deleteFolder(filePanelEditTarget.item)
+      return
+    }
+    await deleteFile(filePanelEditTarget.item)
   }
 
   async function restoreFile(file: CompanyFileRecord | EntryFileRecord) {
@@ -2592,6 +2770,7 @@ export default function CountryCompanyInfoPage() {
         setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
         setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       }
+      void loadRecentAuditLogs()
       setMessage("File restored.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to restore file.")
@@ -2620,6 +2799,7 @@ export default function CountryCompanyInfoPage() {
       setFiles(refreshedFiles)
       setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
       setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+      void loadRecentAuditLogs()
       setMessage("File moved.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to move file.")
@@ -2832,28 +3012,16 @@ export default function CountryCompanyInfoPage() {
                   <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
                     <HighlightedInlineText value={folder.name} query={searchInPage} />
                   </span>
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void renameFolder(folder)
-                      }}
-                      style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void deleteFolder(folder)
-                      }}
-                      style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openFilePanelEditor({ type: "folder", item: folder })
+                    }}
+                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
+                  >
+                    Edit
+                  </button>
                 </div>
               )
             })}
@@ -2868,9 +3036,8 @@ export default function CountryCompanyInfoPage() {
                   setSelectedPreviewFile(file)
                   setPreviewModalOpen(true)
                 }}
-                draggable={file.source !== "company"}
+                draggable
                 onDragStart={(event) => {
-                  if (file.source === "company") return
                   setDraggingFileId(file.id)
                   event.dataTransfer.setData("text/plain", file.id)
                   event.dataTransfer.effectAllowed = "move"
@@ -2889,7 +3056,7 @@ export default function CountryCompanyInfoPage() {
                   border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid var(--fc-admin-border-soft)",
                   background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-tool-input-bg)",
                   opacity: draggingFileId === file.id ? 0.6 : 1,
-                  cursor: file.source === "company" ? "default" : "grab",
+                  cursor: "grab",
                 }}
               >
                 <DriveFileIcon color={fileTypeVisual.color} label={fileTypeVisual.label} />
@@ -2915,19 +3082,19 @@ export default function CountryCompanyInfoPage() {
                 {!isMobile && (
                   <button
                     type="button"
-                    onClick={() => void deleteFile(file)}
-                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+                    onClick={() => openFilePanelEditor({ type: "file", item: file })}
+                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
                   >
-                    Delete
+                    Edit
                   </button>
                 )}
                 {isMobile && (
                   <button
                     type="button"
-                    onClick={() => void deleteFile(file)}
-                    style={{ ...buttonStyle, gridColumn: "2", justifySelf: "start", padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+                    onClick={() => openFilePanelEditor({ type: "file", item: file })}
+                    style={{ ...buttonStyle, gridColumn: "2", justifySelf: "start", padding: "4px 7px", fontSize: "10px" }}
                   >
-                    Delete
+                    Edit
                   </button>
                 )}
               </div>
@@ -2962,46 +3129,6 @@ export default function CountryCompanyInfoPage() {
           {uploadingFile ? "Uploading..." : "Upload File"}
         </button>
       </div>
-      {deletedFiles.length > 0 && (
-        <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "10px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-warning-text)", fontWeight: 700 }}>
-            Recently Deleted
-          </div>
-          <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflowY: "auto", paddingRight: "2px" }}>
-            {deletedFiles.slice(0, 12).map((file) => (
-              <div
-                key={`deleted-${file.id}`}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0,1fr) auto",
-                  gap: "8px",
-                  alignItems: "center",
-                  padding: "7px 8px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--fc-admin-warning-border)",
-                  background: "var(--fc-tool-input-bg)",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
-                    <HighlightedInlineText value={file.file_name} query={searchInPage} />
-                  </div>
-                  <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "3px" }}>
-                    {file.deleted_at ? `Deleted ${formatTimestamp(file.deleted_at) || file.deleted_at}` : "Deleted"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void restoreFile(file)}
-                  style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
-                >
-                  Restore
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   ) : null
   const filteredCountryOptions = countryOptions
@@ -3027,7 +3154,7 @@ export default function CountryCompanyInfoPage() {
                 Country And Company Info
               </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 42px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 74px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
                 <a href="/admin" className="fc-admin-nav-button" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
                   Back
                 </a>
@@ -3037,19 +3164,19 @@ export default function CountryCompanyInfoPage() {
                     className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
-                      width: "42px",
+                      width: "74px",
                       height: "42px",
-                      padding: 0,
-                      borderRadius: "50%",
+                      padding: "0 14px",
+                      borderRadius: "999px",
                       background: "var(--fc-admin-selected-bg)",
                       color: "var(--fc-admin-panel-text)",
                       border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "22px",
-                      fontWeight: 700,
+                      fontSize: "12px",
+                      fontWeight: 900,
                       lineHeight: 1,
                     }}
                   >
-                    ≡
+                    Menu
                   </button>
                   {menuOpen && (
                     <div
@@ -3092,15 +3219,45 @@ export default function CountryCompanyInfoPage() {
                       </div>
                     </div>
                   )}
-                  <div style={{ display: "grid", gap: "6px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "8px" }}>
-                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>Recent Changes</div>
+                  <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>CCINFO Activity</div>
+                      <a href="/admin/auditlog?table=ccinfo" style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, textDecoration: "none" }}>Audit Log</a>
+                    </div>
+
+                    {deletedFiles.length > 0 && (
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <div style={{ color: "var(--fc-admin-warning-text)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Recently Deleted</div>
+                        {deletedFiles.slice(0, 8).map((file) => (
+                          <div key={`deleted-${file.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", border: "1px solid var(--fc-admin-warning-border)", background: "var(--fc-tool-input-bg)" }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {currentRecord.name || "CURRENT RECORD"}
+                              </div>
+                              <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {file.file_name}
+                              </div>
+                              <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>
+                                {file.deleted_at ? `Deleted ${formatTimestamp(file.deleted_at) || file.deleted_at}` : "Deleted"}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => void restoreFile(file)} style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}>Restore</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "grid", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "2px" }}>
                       {auditLoading && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Loading changes...</div>}
                       {!auditLoading && recentAuditLogs.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
                       {recentAuditLogs.map((entry) => (
                         <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "var(--fc-admin-panel-soft-bg)" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {entry.operation} {entry.changedFields.length ? entry.changedFields.join(", ") : "record"}
+                            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {getAuditSubject(entry)}
+                            </div>
+                            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {getAuditChangeSummary(entry)}
                             </div>
                             <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>
                               {formatTimestamp(entry.occurredAt)}{entry.actorName ? ` · ${entry.actorName}` : ""}{entry.undoneAt ? " · undone" : ""}
@@ -3118,6 +3275,7 @@ export default function CountryCompanyInfoPage() {
                           ) : null}
                         </div>
                       ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -3129,19 +3287,19 @@ export default function CountryCompanyInfoPage() {
                     className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
-                      width: "42px",
+                      width: "74px",
                       height: "42px",
-                      padding: 0,
-                      borderRadius: "50%",
+                      padding: "0 14px",
+                      borderRadius: "999px",
                       background: "var(--fc-admin-selected-bg)",
                       color: "var(--fc-admin-panel-text)",
                       border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "22px",
-                      fontWeight: 700,
+                      fontSize: "12px",
+                      fontWeight: 900,
                       lineHeight: 1,
                     }}
                   >
-                    ≡
+                    Menu
                   </button>
                   {menuOpen && (
                     <div
@@ -3191,19 +3349,19 @@ export default function CountryCompanyInfoPage() {
                     className="fc-admin-menu-button"
                     style={{
                       ...buttonStyle,
-                      width: "42px",
+                      width: "74px",
                       height: "42px",
-                      padding: 0,
-                      borderRadius: "50%",
+                      padding: "0 14px",
+                      borderRadius: "999px",
                       background: "var(--fc-admin-selected-bg)",
                       color: "var(--fc-admin-panel-text)",
                       border: "1px solid var(--fc-admin-selected-border)",
-                      fontSize: "22px",
-                      fontWeight: 700,
+                      fontSize: "12px",
+                      fontWeight: 900,
                       lineHeight: 1,
                     }}
                   >
-                    ≡
+                    Menu
                   </button>
                 )}
               </div>
@@ -3484,7 +3642,7 @@ export default function CountryCompanyInfoPage() {
                             </div>
                             <div>
                               {section.table ? (
-                                <SimpleTable table={section.table} columnWidths={section.column_widths} onSave={(table, widths) => updateMainSectionTable(sectionIndex, table, widths)} />
+                                <SimpleTable table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateMainSectionTable(sectionIndex, table, widths, rowUpdates)} />
                               ) : (
                                 <BlockTextBlock
                                   blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
@@ -3549,7 +3707,7 @@ export default function CountryCompanyInfoPage() {
                                   </div>
                                   <div>
                                     {section.table ? (
-                                      <SimpleTable table={section.table} columnWidths={section.column_widths} onSave={(table, widths) => updateNestedSectionTable(index, sectionIndex, table, widths)} />
+                                      <SimpleTable table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateNestedSectionTable(index, sectionIndex, table, widths, rowUpdates)} />
                                     ) : (
                                       <BlockTextBlock
                                         blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
@@ -3780,6 +3938,48 @@ export default function CountryCompanyInfoPage() {
         </main>
         {!isMobile && <aside style={{ ...sidebarStyle, width: "320px", height: "100vh", overflow: "hidden" }}>{fileSection}</aside>}
       </div>
+      {filePanelEditTarget && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "#1d1d1f", display: "grid", placeItems: "center", padding: "20px", zIndex: 46 }}
+          onClick={() => setFilePanelEditTarget(null)}
+        >
+          <div
+            style={{ ...panelStyle, width: "min(480px, 100%)", padding: "18px", display: "grid", gap: "14px" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div>
+              <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 900 }}>
+                {filePanelEditTarget.type === "folder" ? "Folder" : "File"}
+              </div>
+              <h2 style={{ margin: "5px 0 0", color: "var(--fc-admin-heading)", fontSize: "20px" }}>Edit</h2>
+            </div>
+            <label style={{ display: "grid", gap: "6px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>
+              Name
+              <input
+                value={filePanelNameDraft}
+                onChange={(event) => setFilePanelNameDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void saveFilePanelEdit()
+                  if (event.key === "Escape") setFilePanelEditTarget(null)
+                }}
+                style={inputStyle}
+                autoFocus
+              />
+            </label>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <button type="button" onClick={() => void deleteFilePanelTarget()} style={{ ...buttonStyle, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>
+                Delete
+              </button>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => setFilePanelEditTarget(null)} style={buttonStyle}>Cancel</button>
+                <button type="button" onClick={() => void saveFilePanelEdit()} style={{ ...buttonStyle, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
+                  Rename
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {previewModalOpen && selectedPreviewFile && previewUrl && (
         <div
           style={{

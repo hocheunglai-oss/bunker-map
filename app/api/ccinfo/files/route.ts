@@ -106,6 +106,54 @@ async function deleteDriveFileIfPresent(driveFileId: string | null | undefined) 
   }
 }
 
+async function renameDriveFileIfPresent(driveFileId: string | null | undefined, name: string) {
+  if (!driveFileId) return
+  try {
+    const { drive } = await getDriveClient()
+    await drive.files.update({
+      fileId: driveFileId,
+      requestBody: { name },
+      supportsAllDrives: true,
+    })
+  } catch (error) {
+    console.warn("ccinfo drive rename skipped", {
+      driveFileId,
+      message: messageFromError(error),
+    })
+  }
+}
+
+function deriveFolderPathFromOriginalPath(originalPath?: string | null) {
+  if (!originalPath) return ""
+  const normalized = originalPath.replace(/\\/g, "/")
+  const archiveMatch = normalized.match(/- Company Information\/[^/]+\/(.+)$/)
+  if (archiveMatch?.[1]) {
+    const segments = archiveMatch[1].split("/").filter(Boolean)
+    return segments.slice(0, -1).join("/")
+  }
+  const genericMatch = normalized.match(/company\/[^/]+\/(.+)$/i)
+  if (genericMatch?.[1]) {
+    const segments = genericMatch[1].split("/").filter(Boolean)
+    return segments.slice(0, -1).join("/")
+  }
+  return ""
+}
+
+function setFolderPathInOriginalPath(originalPath: string | null | undefined, folderPath: string, fileName: string, entryKind = "company", entryName = "Untitled") {
+  const normalized = (originalPath || "").replace(/\\/g, "/")
+  const suffix = `${folderPath ? `${folderPath}/` : ""}${fileName}`
+  const archiveMatch = normalized.match(/^(.*- Company Information\/[^/]+)(?:\/.*)?$/)
+  if (archiveMatch?.[1]) return `${archiveMatch[1]}/${suffix}`
+  const genericMatch = normalized.match(new RegExp(`^(${entryKind.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\/[^/]+)(?:\\/.*)?$`, "i"))
+  if (genericMatch?.[1]) return `${genericMatch[1]}/${suffix}`
+  return `${entryKind}/${entryName}/${suffix}`
+}
+
+function renameOriginalPathBasename(originalPath: string | null | undefined, nextName: string, entryKind = "company", entryName = "Untitled") {
+  const folderPath = deriveFolderPathFromOriginalPath(originalPath)
+  return setFolderPathInOriginalPath(originalPath, folderPath, nextName, entryKind, entryName)
+}
+
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies()
@@ -260,8 +308,120 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
+    if (action === "renameFile") {
+      if (!fileId || !name) {
+        return NextResponse.json({ message: "Missing file rename details." }, { status: 400 })
+      }
+
+      if (source === "company") {
+        const { data: fileRow, error: readError } = await supabase
+          .from("cc_company_files")
+          .select("id,file_name,drive_file_id,original_path")
+          .eq("id", fileId)
+          .single()
+        if (readError || !fileRow) throw readError || new Error("Unable to load file.")
+
+        await renameDriveFileIfPresent(fileRow.drive_file_id, name)
+        const { error } = await supabase
+          .from("cc_company_files")
+          .update({
+            file_name: name,
+            file_type: path.extname(name).slice(1).toLowerCase() || "file",
+            original_path: renameOriginalPathBasename(fileRow.original_path, name, "company", entryName),
+          })
+          .eq("id", fileId)
+        if (error) throw error
+        return NextResponse.json({ ok: true })
+      }
+
+      const { data: fileRow, error: readError } = await supabase
+        .from("cc_entry_files")
+        .select("id,file_name,drive_file_id,original_path,folder_path")
+        .eq("id", fileId)
+        .single()
+      if (readError || !fileRow) throw readError || new Error("Unable to load file.")
+
+      await renameDriveFileIfPresent(fileRow.drive_file_id, name)
+      const { error } = await supabase
+        .from("cc_entry_files")
+        .update({
+          file_name: name,
+          file_type: path.extname(name).slice(1).toLowerCase() || "file",
+          original_path: `${entryKind}/${entryName}/${fileRow.folder_path ? `${fileRow.folder_path}/` : ""}${name}`,
+        })
+        .eq("id", fileId)
+      if (error) throw error
+      return NextResponse.json({ ok: true })
+    }
+
+    if (action === "deleteFolderContents") {
+      if (!entryId || !folderPath) {
+        return NextResponse.json({ message: "Missing folder delete details." }, { status: 400 })
+      }
+
+      if (source === "company") {
+        const { data: companyFiles, error: fileReadError } = await supabase
+          .from("cc_company_files")
+          .select("id,original_path")
+          .eq("company_id", entryId)
+          .is("deleted_at", null)
+        if (fileReadError) throw fileReadError
+
+        const ids = (companyFiles || [])
+          .filter((file) => {
+            const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
+            return currentPath === folderPath || currentPath.startsWith(`${folderPath}/`)
+          })
+          .map((file) => file.id)
+
+        if (ids.length > 0) {
+          const { error } = await supabase
+            .from("cc_company_files")
+            .update({ deleted_at: new Date().toISOString() })
+            .in("id", ids)
+          if (error) throw error
+        }
+
+        return NextResponse.json({ ok: true, count: ids.length })
+      }
+
+      return NextResponse.json({ message: "Only imported company folders can be deleted with contents." }, { status: 400 })
+    }
+
     if (action === "renameFolder") {
-      if (!folderId || !name || !entryKind || !entryId) {
+      if (!name || !entryKind || !entryId) {
+        return NextResponse.json({ message: "Missing folder rename details." }, { status: 400 })
+      }
+
+      if (source === "company") {
+        if (!folderPath) {
+          return NextResponse.json({ message: "Missing imported folder path." }, { status: 400 })
+        }
+
+        const parentPath = folderPath.split("/").slice(0, -1).join("/")
+        const newFullPath = [parentPath, name].filter(Boolean).join("/")
+        const { data: companyFiles, error: fileReadError } = await supabase
+          .from("cc_company_files")
+          .select("id,file_name,original_path")
+          .eq("company_id", entryId)
+          .is("deleted_at", null)
+        if (fileReadError) throw fileReadError
+
+        for (const file of companyFiles || []) {
+          const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
+          if (currentPath !== folderPath && !currentPath.startsWith(`${folderPath}/`)) continue
+          const nextFolderPath = currentPath.replace(folderPath, newFullPath)
+          const { error } = await supabase
+            .from("cc_company_files")
+            .update({ original_path: setFolderPathInOriginalPath(file.original_path, nextFolderPath, file.file_name, "company", entryName) })
+            .eq("id", file.id)
+          if (error) throw error
+        }
+
+        return NextResponse.json({ ok: true })
+      }
+
+      if (!folderId) {
         return NextResponse.json({ message: "Missing folder rename details." }, { status: 400 })
       }
 
@@ -325,7 +485,21 @@ export async function PATCH(request: Request) {
     }
 
     if (source === "company") {
-      return NextResponse.json({ message: "Legacy company files cannot be moved into folders yet." }, { status: 400 })
+      const { data: fileRow, error: readError } = await supabase
+        .from("cc_company_files")
+        .select("id,file_name,original_path")
+        .eq("id", fileId)
+        .single()
+      if (readError || !fileRow) throw readError || new Error("Unable to load file.")
+
+      const { error } = await supabase
+        .from("cc_company_files")
+        .update({
+          original_path: setFolderPathInOriginalPath(fileRow.original_path, folderPath, fileRow.file_name, entryKind, entryName),
+        })
+        .eq("id", fileId)
+      if (error) throw error
+      return NextResponse.json({ ok: true })
     }
 
     const { data: fileRow, error: readError } = await supabase
