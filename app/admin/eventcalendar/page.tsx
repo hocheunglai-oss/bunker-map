@@ -1031,6 +1031,30 @@ export default function EventCalendarPage() {
               >
                 Back
               </button>
+              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>
+                EVENT CALENDAR
+              </h1>
+              {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
+                const active = viewMode === mode
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    style={{
+                      ...buttonStyle,
+                      background: active
+                        ? "var(--fc-admin-primary-button-bg)"
+                        : buttonStyle.background,
+                      color: active ? "var(--fc-admin-primary-button-text)" : buttonStyle.color,
+                      borderColor: active ? "var(--fc-admin-primary-button-bg)" : "var(--fc-admin-border)",
+                      padding: "7px 11px",
+                    }}
+                  >
+                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Meeting Room"}
+                  </button>
+                )
+              })}
               <div
                 style={{ position: "relative" }}
                 onMouseEnter={cancelToolsMenuClose}
@@ -1046,9 +1070,9 @@ export default function EventCalendarPage() {
                   className="fc-admin-menu-button"
                   style={{
                     ...buttonStyle,
-                    minWidth: "44px",
+                    minWidth: "54px",
                     height: "36px",
-                    padding: "0 12px",
+                    padding: "0 16px",
                     display: "inline-grid",
                     placeItems: "center",
                   }}
@@ -1064,7 +1088,7 @@ export default function EventCalendarPage() {
                     style={{
                       position: "absolute",
                       top: "42px",
-                      left: 0,
+                      right: 0,
                       zIndex: 30,
                       minWidth: "220px",
                       padding: "7px",
@@ -1122,30 +1146,6 @@ export default function EventCalendarPage() {
                   </div>
                 )}
               </div>
-              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>
-                Event Calendar
-              </h1>
-              {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
-                const active = viewMode === mode
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    style={{
-                      ...buttonStyle,
-                      background: active
-                        ? "var(--fc-admin-primary-button-bg)"
-                        : buttonStyle.background,
-                      color: active ? "var(--fc-admin-primary-button-text)" : buttonStyle.color,
-                      borderColor: active ? "var(--fc-admin-primary-button-bg)" : "var(--fc-admin-border)",
-                      padding: "7px 11px",
-                    }}
-                  >
-                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Meeting Room"}
-                  </button>
-                )
-              })}
               <div
                 style={{ position: "relative" }}
                 onMouseEnter={cancelAddMenuClose}
@@ -1158,7 +1158,7 @@ export default function EventCalendarPage() {
                     setAddMenuOpen((current) => !current)
                   }}
                   aria-label="Add"
-                  style={{ ...buttonStyle, minWidth: "44px", height: "34px", padding: "0 12px", fontSize: "22px" }}
+                  style={{ ...buttonStyle, minWidth: "54px", height: "36px", padding: "0 16px", fontSize: "20px", fontWeight: 400 }}
                 >
                   +
                 </button>
@@ -1372,10 +1372,14 @@ export default function EventCalendarPage() {
                                   : uncertain
                                     ? "#fff8e5"
                                     : rowBackground,
-                                color: attending ? "var(--fc-admin-panel-text)" : uncertain ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
+                                color: attending
+                                  ? "var(--fc-admin-panel-text)"
+                                  : uncertain
+                                    ? "var(--fc-admin-warning-text)"
+                                    : "color-mix(in srgb, var(--fc-row-bg) 78%, var(--fc-admin-panel-text) 22%)",
                                 cursor: "default",
                                 fontSize: "10px",
-                                fontWeight: attending || uncertain ? 900 : 500,
+                                fontWeight: attending || uncertain ? 900 : 400,
                                 lineHeight: "12px",
                                 padding: "2px 0",
                               }}
