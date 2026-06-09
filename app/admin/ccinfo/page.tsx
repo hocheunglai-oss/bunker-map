@@ -560,8 +560,12 @@ function mergeFolderRecords(realFolders: EntryFolderRecord[], files: Array<Compa
 function getFileTypeLabel(name: string, fileType?: string | null) {
   const ext = (name.split(".").pop() || "").toLowerCase()
   const normalized = (fileType || "").toLowerCase()
-  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "var(--fc-admin-link)", label: "DOC" }
-  return { color: "var(--fc-admin-muted)", label: "FILE" }
+  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet") || normalized.includes("excel")) return { color: "#0f9d58", label: "XLS" }
+  if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "#4285f4", label: "DOC" }
+  if (ext === "pdf" || normalized.includes("pdf")) return { color: "#db4437", label: "PDF" }
+  if (ext === "ppt" || ext === "pptx" || normalized.includes("presentation")) return { color: "#f4b400", label: "PPT" }
+  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { color: "#a142f4", label: "IMG" }
+  return { color: "#5f6368", label: "FILE" }
 }
 
 function FolderIcon() {
@@ -591,20 +595,56 @@ function FolderIcon() {
 }
 
 function DriveFileIcon({ color, label }: { color: string; label: string }) {
+  const isSheet = label === "XLS"
+  const isGeneric = label === "FILE"
   return (
     <span
       style={{
-        ...fileIconStyle,
-        borderRadius: "3px",
+        width: "26px",
+        height: "34px",
+        display: "inline-grid",
+        placeItems: "center",
+        position: "relative",
+        borderRadius: "5px",
         background: color,
         color: "#fff",
-        fontSize: "6px",
+        fontSize: "7px",
         fontWeight: 900,
-        letterSpacing: "0.02em",
-        boxShadow: "none",
+        letterSpacing: "0.01em",
+        boxShadow: "0 1px 2px #00000018",
+        overflow: "hidden",
       }}
+      title={label}
     >
-      {label}
+      <span
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          borderTop: "8px solid #ffffffcc",
+          borderLeft: "8px solid #00000020",
+        }}
+      />
+      <span style={{ display: "grid", gap: "2px", width: "14px", marginTop: isGeneric ? 0 : "-3px" }}>
+        {isSheet ? (
+          <>
+            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
+            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
+            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
+          </>
+        ) : (
+          <>
+            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc" }} />
+            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc", width: "80%" }} />
+            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc", width: "62%" }} />
+          </>
+        )}
+      </span>
+      <span style={{ position: "absolute", left: "3px", right: "3px", bottom: "3px", textAlign: "center", fontSize: label.length > 3 ? "5px" : "6px", lineHeight: 1 }}>
+        {label}
+      </span>
     </span>
   )
 }
@@ -774,11 +814,11 @@ function BlockTextBlock({
         wordBreak: "break-word",
         position: "relative",
         color: "var(--fc-admin-panel-text)",
-        fontSize: "14px",
-        lineHeight: 1.35,
-        padding: "8px 10px",
+        fontSize: "13px",
+        lineHeight: 1.28,
+        padding: "5px 8px",
         border: "1px solid var(--fc-admin-selected-border)",
-        borderRadius: "14px",
+        borderRadius: "12px",
         background: "var(--fc-admin-panel-soft-bg)",
       }}
       onDoubleClick={onDoubleClick}
@@ -801,8 +841,8 @@ function BlockTextBlock({
             style={{
               minHeight: "1.35em",
               borderRadius: "9px",
-              padding: editing ? "1px 2px" : "3px 5px",
-              margin: "1px 0",
+              padding: editing ? "1px 2px" : "2px 4px",
+              margin: 0,
               position: "relative",
               background: selected ? "#e7f2ff" : "transparent",
               boxShadow: editing ? "inset 0 -2px 0 var(--fc-admin-link)" : "none",
@@ -838,9 +878,9 @@ function BlockTextBlock({
   if (!showControls) return textBox
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(150px, 180px)", gap: "8px", alignItems: "start" }}>
+    <div style={{ position: "relative" }}>
       {textBox}
-      <div style={{ display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "9px" }}>
+      <div style={{ position: "absolute", top: "6px", right: "6px", width: "174px", display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", padding: "9px", boxShadow: "0 12px 26px #00000018", zIndex: 6 }}>
         <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>
           {selectedStamp ? `Updated ${selectedStamp}` : "No update recorded"}
         </div>
@@ -891,12 +931,14 @@ function SimpleTable({
   const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
   const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
+  const [selectedCell, setSelectedCell] = useState({ row: 0, column: 0 })
   const tableRef = useRef<HTMLTableElement | null>(null)
   const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
     setDraftRows(table.length ? table : [["", ""], ["", ""]])
     setDraftWidths(columnWidths || [])
     setDraftRowUpdates(rowUpdates || [])
+    setSelectedCell({ row: 0, column: 0 })
   }, [table, columnWidths, rowUpdates])
   useEffect(() => {
     function handleMove(event: MouseEvent) {
@@ -926,10 +968,19 @@ function SimpleTable({
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
   const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
   const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
+  const activeRow = Math.min(selectedCell.row, Math.max(rows.length - 1, 0))
+  const activeColumn = Math.min(selectedCell.column, Math.max(columnCount - 1, 0))
+  const normalizeWidths = (nextWidths: number[]) => {
+    const safeWidths = nextWidths.map((width) => Math.max(6, Number.isFinite(width) ? width : 0))
+    const total = safeWidths.reduce((sum, width) => sum + width, 0)
+    if (!total) return Array.from({ length: Math.max(nextWidths.length, 1) }).map(() => Math.round(100 / Math.max(nextWidths.length, 1)))
+    return safeWidths.map((width) => Number((width / total * 100).toFixed(2)))
+  }
   const beginEditing = () => {
     setDraftRows(rows.map((row) => [...row]))
     setDraftWidths(widths)
     setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
+    setSelectedCell({ row: activeRow, column: activeColumn })
     setEditing(true)
   }
   const updateRowTimestamp = (rowIndex: number, source: string[] = draftRowUpdates) => {
@@ -943,30 +994,55 @@ function SimpleTable({
     while (next[rowIndex].length < columnCount) next[rowIndex].push("")
     next[rowIndex][columnIndex] = value
     setDraftRows(next)
+    setSelectedCell({ row: rowIndex, column: columnIndex })
     updateRowTimestamp(rowIndex)
   }
-  const addRow = () => {
-    setDraftRows([...rows, Array.from({ length: columnCount }, () => "")])
-    setDraftRowUpdates([...displayRowUpdates, new Date().toISOString()])
+  const insertRow = (placement: "above" | "below") => {
+    const insertAt = placement === "above" ? activeRow : activeRow + 1
+    const nextRows = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || ""))
+    nextRows.splice(insertAt, 0, Array.from({ length: columnCount }, () => ""))
+    const nextUpdates = [...displayRowUpdates]
+    nextUpdates.splice(insertAt, 0, new Date().toISOString())
+    setDraftRows(nextRows)
+    setDraftRowUpdates(nextUpdates)
+    setSelectedCell({ row: insertAt, column: activeColumn })
   }
-  const addColumn = () => {
+  const insertColumn = (placement: "left" | "right") => {
     const nextCount = columnCount + 1
-    setDraftRows(rows.map((row) => [...row, ""]))
-    setDraftWidths(Array.from({ length: nextCount }).map((_, index) => draftWidths[index] || Math.round(100 / nextCount)))
+    const insertAt = placement === "left" ? activeColumn : activeColumn + 1
+    setDraftRows(rows.map((row) => {
+      const nextRow = Array.from({ length: columnCount }).map((_, index) => row[index] || "")
+      nextRow.splice(insertAt, 0, "")
+      return nextRow
+    }))
+    const nextWidths = [...widths]
+    const currentWidth = nextWidths[activeColumn] || Math.round(100 / columnCount)
+    const splitWidth = Math.max(6, currentWidth / 2)
+    nextWidths[activeColumn] = splitWidth
+    nextWidths.splice(insertAt, 0, splitWidth)
+    setDraftWidths(normalizeWidths(nextWidths.slice(0, nextCount)))
     setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setEditing(true)
+    setSelectedCell({ row: activeRow, column: insertAt })
   }
   const deleteSelectedRow = () => {
     if (rows.length <= 1) return
-    setDraftRows(rows.slice(0, -1))
-    setDraftRowUpdates(displayRowUpdates.slice(0, -1))
+    const nextRows = rows.filter((_, index) => index !== activeRow)
+    setDraftRows(nextRows)
+    setDraftRowUpdates(displayRowUpdates.filter((_, index) => index !== activeRow))
+    setSelectedCell({ row: Math.max(0, Math.min(activeRow, nextRows.length - 1)), column: activeColumn })
   }
   const deleteColumn = () => {
     if (columnCount <= 1) return
-    setDraftRows(rows.map((row) => row.slice(0, -1)))
-    setDraftWidths(draftWidths.slice(0, -1))
+    const nextCount = columnCount - 1
+    setDraftRows(rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").filter((_, index) => index !== activeColumn)))
+    const nextWidths = [...widths]
+    const removedWidth = nextWidths[activeColumn] || 0
+    nextWidths.splice(activeColumn, 1)
+    const absorbIndex = Math.max(0, Math.min(activeColumn, nextWidths.length - 1))
+    nextWidths[absorbIndex] = (nextWidths[absorbIndex] || 0) + removedWidth
+    setDraftWidths(normalizeWidths(nextWidths.slice(0, nextCount)))
     setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setEditing(true)
+    setSelectedCell({ row: activeRow, column: Math.max(0, Math.min(activeColumn, nextCount - 1)) })
   }
   const copyTable = async () => {
     const text = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").join("\t")).join("\n")
@@ -985,13 +1061,16 @@ function SimpleTable({
         <tbody>
           {rows.map((row, rowIndex) => (
             <tr key={`table-row-${rowIndex}`}>
-              {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
+              {Array.from({ length: columnCount }).map((_, columnIndex) => {
+                const selected = editing && rowIndex === activeRow && columnIndex === activeColumn
+                return (
+                <td key={`table-cell-${rowIndex}-${columnIndex}`} onClick={() => setSelectedCell({ row: rowIndex, column: columnIndex })} style={{ border: selected ? "1px solid var(--fc-admin-link)" : "1px solid var(--fc-admin-selected-border)", padding: 0, background: selected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
                   <input
                     value={row[columnIndex] || ""}
                     disabled={readOnly || !editing}
+                    onFocus={() => setSelectedCell({ row: rowIndex, column: columnIndex })}
                     onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                    style={{ width: "100%", border: "none", background: "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
+                    style={{ width: "100%", border: "none", background: selected ? "#e7f2ff" : "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
                   />
                       {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
                         <span
@@ -1018,7 +1097,8 @@ function SimpleTable({
                         />
                       ) : null}
                 </td>
-              ))}
+                )
+              })}
             </tr>
           ))}
         </tbody>
@@ -1026,8 +1106,10 @@ function SimpleTable({
       {!readOnly && editing && (
         <div style={{ display: "grid", gap: "8px" }}>
           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-            <button type="button" onClick={addRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Row</button>
-            <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
+            <button type="button" onClick={() => insertRow("above")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Row Above</button>
+            <button type="button" onClick={() => insertRow("below")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Row Below</button>
+            <button type="button" onClick={() => insertColumn("left")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Col Left</button>
+            <button type="button" onClick={() => insertColumn("right")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Col Right</button>
             <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
             <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
             <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
@@ -3232,7 +3314,7 @@ export default function CountryCompanyInfoPage() {
                   }}
                   style={{
                     border: "none",
-                    background: "#ffffff",
+                    background: "transparent",
                     color: "var(--fc-admin-panel-text)",
                     cursor: "pointer",
                     textAlign: "left",
@@ -3382,9 +3464,9 @@ export default function CountryCompanyInfoPage() {
                         disabled={auditLoading}
                         aria-label="Refresh recent changes"
                         title="Refresh recent changes"
-                        style={{ ...buttonStyle, width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "13px", opacity: auditLoading ? 0.55 : 1 }}
+                        style={{ ...buttonStyle, minHeight: "28px", padding: "4px 10px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", opacity: auditLoading ? 0.55 : 1 }}
                       >
-                        {auditLoading ? "..." : "⟳"}
+                        {auditLoading ? "Refreshing..." : "Refresh"}
                       </button>
                     </div>
 
