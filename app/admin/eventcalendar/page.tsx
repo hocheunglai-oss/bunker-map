@@ -395,6 +395,7 @@ export default function EventCalendarPage() {
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
   const [recurrentModalOpen, setRecurrentModalOpen] = useState(false)
@@ -1070,9 +1071,9 @@ export default function EventCalendarPage() {
                   className="fc-admin-menu-button"
                   style={{
                     ...buttonStyle,
-                    minWidth: "60px",
+                    minWidth: "54px",
                     height: "36px",
-                    padding: "0 18px",
+                    padding: "0 16px",
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1245,12 +1246,17 @@ export default function EventCalendarPage() {
                   return (
                     <tr
                       key={event.id}
+                      onClick={() => setSelectedRowId(`google:${event.id}`)}
                       onDoubleClick={() => {
                         if (!canEditMeetingRoom) return
                         const matchingEvent = events.find((item) => item.id === event.sourceEventId)
                         if (matchingEvent) openEditModal(matchingEvent)
                       }}
-                      style={{ background: meetingStyle.background, cursor: canEditMeetingRoom ? "pointer" : "default" }}
+                      style={{
+                        background: selectedRowId === `google:${event.id}` ? "#eaf4ff" : meetingStyle.background,
+                        cursor: canEditMeetingRoom ? "pointer" : "default",
+                        boxShadow: selectedRowId === `google:${event.id}` ? "inset 0 0 0 1px #cfe4ff" : "none",
+                      }}
                     >
                       <td style={{ ...tdStyle, color: meetingStyle.color, fontWeight: meetingStyle.fontWeight, whiteSpace: "nowrap", borderLeft: `4px solid ${meetingStyle.border}` }}>
                         {formatGoogleEventDate(event)}
@@ -1312,14 +1318,22 @@ export default function EventCalendarPage() {
                     : isTomorrowEvent
                       ? "#ff9f1c"
                       : "var(--fc-row-border)"
+                  const rowSelected = selectedRowId === `event:${event.id}`
+                  const rowDisplayBackground = rowSelected ? "#eaf4ff" : rowBackground
+                  const rowDisplayBorder = rowSelected ? "#cfe4ff" : rowBorder
 
                   return (
                     <tr
                       key={event.id}
+                      onClick={() => setSelectedRowId(`event:${event.id}`)}
                       style={{
-                        background: rowBackground,
+                        background: rowDisplayBackground,
                         opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
-                        boxShadow: rowHighlighted ? "inset 0 0 0 2px var(--fc-admin-selected-border)" : "none",
+                        boxShadow: rowHighlighted
+                          ? "inset 0 0 0 2px var(--fc-admin-selected-border)"
+                          : rowSelected
+                            ? "inset 0 0 0 1px #cfe4ff"
+                            : "none",
                       }}
                     >
                       <td
@@ -1329,7 +1343,7 @@ export default function EventCalendarPage() {
                           color: "var(--fc-admin-panel-text)",
                           fontWeight: isTodayEvent ? 900 : 500,
                           whiteSpace: "nowrap",
-                          borderLeft: `4px solid ${rowBorder}`,
+                          borderLeft: `4px solid ${rowDisplayBorder}`,
                         }}
                       >
                         {formatEventRange(event)}
@@ -1372,7 +1386,7 @@ export default function EventCalendarPage() {
                                   ? "#ffffff"
                                   : uncertain
                                     ? "#fff8e5"
-                                    : rowBackground,
+                                    : rowDisplayBackground,
                                 color: attending
                                   ? "var(--fc-admin-panel-text)"
                                   : uncertain
