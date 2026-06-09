@@ -726,38 +726,34 @@ function BlockTextBlock({
   onInsertBlock?: (index: number) => void
   query?: string
 }) {
-  const [hoveredBlockId, setHoveredBlockId] = useState("")
-  const [hoveredInsertIndex, setHoveredInsertIndex] = useState<number | null>(null)
-  const insertButton = (index: number) =>
-    onInsertBlock ? (
-      <div
-        onMouseEnter={() => setHoveredInsertIndex(index)}
-        onMouseLeave={() => setHoveredInsertIndex(null)}
-        style={{ height: "18px", display: "grid", placeItems: "center", margin: "2px 0", position: "relative" }}
-      >
-        <button
-          type="button"
-          onClick={() => onInsertBlock(index)}
-          style={{
-            width: "100%",
-            height: "16px",
-            borderRadius: 0,
-            border: "none",
-            background: hoveredInsertIndex === index ? "var(--fc-admin-selected-border)" : "#ffffff",
-            color: "var(--fc-admin-link)",
-            fontSize: "13px",
-            lineHeight: "13px",
-            opacity: hoveredInsertIndex === index ? 1 : 0,
-            cursor: "pointer",
-            transition: "opacity 120ms ease, background 120ms ease",
-          }}
-          aria-label="Add line here"
-        >
-          +
-        </button>
-      </div>
-    ) : null
-  return (
+  const editable = Boolean(onBlockDoubleClick || onInsertBlock || onBlockSave || onBlockCancel || onBlockDelete)
+  const [selectedBlockId, setSelectedBlockId] = useState(blocks[0]?.id || "")
+  const selectedIndex = blocks.findIndex((block) => block.id === selectedBlockId)
+  const activeIndex = selectedIndex >= 0 ? selectedIndex : 0
+  const selectedBlock = blocks[activeIndex]
+  const selectedStamp = formatTimestamp(selectedBlock?.updated_at) || formatTimestamp(fallbackUpdatedAt)
+
+  useEffect(() => {
+    if (!blocks.length) {
+      setSelectedBlockId("")
+      return
+    }
+    if (editingBlockId && blocks.some((block) => block.id === editingBlockId)) {
+      setSelectedBlockId(editingBlockId)
+      return
+    }
+    if (!blocks.some((block) => block.id === selectedBlockId)) {
+      setSelectedBlockId(blocks[0].id)
+    }
+  }, [blocks, editingBlockId, selectedBlockId])
+
+  const insertNearSelected = (placement: "above" | "below") => {
+    if (!onInsertBlock) return
+    const insertAt = blocks.length === 0 ? 0 : placement === "above" ? activeIndex : activeIndex + 1
+    onInsertBlock(insertAt)
+  }
+
+  const textBox = (
     <div
       style={{
         minHeight,
@@ -774,74 +770,101 @@ function BlockTextBlock({
         borderRadius: "14px",
         background: "var(--fc-admin-panel-soft-bg)",
       }}
-      onMouseLeave={() => setHoveredBlockId("")}
       onDoubleClick={onDoubleClick}
       title={onDoubleClick ? "Double click to edit" : undefined}
     >
-      {blocks.length === 0 ? <>{insertButton(0)}<div style={{ minHeight: "1.55em" }}>&nbsp;</div></> : null}
+      {blocks.length === 0 ? <div style={{ minHeight: "1.55em", color: "var(--fc-admin-muted)" }}>Double click or use Add Below to start.</div> : null}
       {blocks.map((block, index) => {
-        const stamp = formatTimestamp(block.updated_at) || formatTimestamp(fallbackUpdatedAt)
+        const selected = block.id === selectedBlockId
+        const editing = editingBlockId === block.id
         return (
-          <div key={block.id}>
-          {insertButton(index)}
           <div
-            onMouseMove={() => {
-              if (hoveredInsertIndex === null) setHoveredBlockId(block.id)
-            }}
-            onMouseLeave={() => {
-              setHoveredBlockId((current) => (current === block.id ? "" : current))
-            }}
+            key={block.id}
+            onClick={() => setSelectedBlockId(block.id)}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
               event.stopPropagation()
+              setSelectedBlockId(block.id)
               onBlockDoubleClick(block)
             }}
             style={{
               minHeight: "1.35em",
-              borderRadius: "6px",
-              padding: "2px 1px",
-              margin: 0,
+              borderRadius: "9px",
+              padding: editing ? "1px 2px" : "3px 5px",
+              margin: "1px 0",
               position: "relative",
-              background: "transparent",
-              boxShadow: "none",
+              background: selected ? "#e7f2ff" : "transparent",
+              boxShadow: editing ? "inset 0 -2px 0 var(--fc-admin-link)" : "none",
+              cursor: onBlockDoubleClick ? "text" : "default",
+              transition: "background 120ms ease, box-shadow 120ms ease",
             }}
           >
-            {editingBlockId === block.id ? (
-              <div style={{ display: "grid", gap: "8px", padding: "0" }}>
-                <div style={{ display: "flex", gap: "7px", alignItems: "center", justifyContent: "flex-end", position: "sticky", top: "8px", zIndex: 4 }}>
-                  <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-                  <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2 }}>Cancel</button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (confirm("Delete this line?")) onBlockDelete?.(block.id)
-                    }}
-                    style={{ ...buttonStyle, padding: "6px 12px", fontSize: "12px", lineHeight: 1.2, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)" }}
-                  >
-                    X
-                  </button>
-                </div>
-                <AutoSizeTextarea
-                  value={block.content}
-                  onChange={(event) => onBlockChange?.(block.id, event.target.value)}
-                  style={{ ...textareaStyle, minHeight: "1.55em", maxHeight: "62vh", padding: "0 2px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", lineHeight: 1.55 }}
-                />
-              </div>
+            {editing ? (
+              <AutoSizeTextarea
+                value={block.content}
+                onChange={(event) => onBlockChange?.(block.id, event.target.value)}
+                style={{
+                  ...textareaStyle,
+                  minHeight: "1.45em",
+                  maxHeight: "62vh",
+                  padding: "1px 2px",
+                  border: "none",
+                  borderRadius: "6px",
+                  background: "transparent",
+                  lineHeight: 1.45,
+                  boxShadow: "none",
+                }}
+              />
             ) : (
-              <>
-            {false && hoveredBlockId === block.id && hoveredInsertIndex === null && stamp ? (
-              <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "var(--fc-admin-panel-bg)", color: "var(--fc-admin-panel-text)", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
-                {stamp}
-              </span>
-            ) : null}
-            {block.content ? <HighlightedInlineText value={block.content} query={query || ""} /> : "\u00a0"}
-              </>
+              block.content ? <HighlightedInlineText value={block.content} query={query || ""} /> : "\u00a0"
             )}
-          </div>
-          {index === blocks.length - 1 ? insertButton(index + 1) : null}
           </div>
         )
       })}
+    </div>
+  )
+
+  if (!editable) return textBox
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(168px, 210px)", gap: "10px", alignItems: "start" }}>
+      {textBox}
+      <div style={{ display: "grid", gap: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px" }}>
+        <div>
+          <div style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>Selected Row</div>
+          <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 800, marginTop: "3px" }}>
+            {selectedBlock ? `Row ${activeIndex + 1}` : "No row selected"}
+          </div>
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "3px" }}>
+            {selectedStamp ? `Updated ${selectedStamp}` : "No row update recorded"}
+          </div>
+        </div>
+        {onInsertBlock ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
+            <button type="button" onClick={() => insertNearSelected("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Above</button>
+            <button type="button" onClick={() => insertNearSelected("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Below</button>
+          </div>
+        ) : null}
+        {editingBlockId ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
+            <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
+            <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
+            {selectedBlock && onBlockDelete ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm("Delete this row?")) onBlockDelete(selectedBlock.id)
+                }}
+                style={{ ...buttonStyle, gridColumn: "1 / -1", padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+              >
+                Delete Row
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>Double click text to edit.</div>
+        )}
+      </div>
     </div>
   )
 }
@@ -863,16 +886,12 @@ function SimpleTable({
   const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
   const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
-  const [selectedRow, setSelectedRow] = useState(0)
-  const [editingCell, setEditingCell] = useState<{ row: number; column: number } | null>(null)
   const tableRef = useRef<HTMLTableElement | null>(null)
   const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
     setDraftRows(table.length ? table : [["", ""], ["", ""]])
     setDraftWidths(columnWidths || [])
     setDraftRowUpdates(rowUpdates || [])
-    setSelectedRow((current) => Math.min(current, Math.max((table.length || 2) - 1, 0)))
-    setEditingCell(null)
   }, [table, columnWidths, rowUpdates])
   useEffect(() => {
     function handleMove(event: MouseEvent) {
@@ -901,14 +920,11 @@ function SimpleTable({
   const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
   const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
-  const activeRow = Math.min(selectedRow, rows.length - 1)
   const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
-  const selectedRowUpdatedAt = displayRowUpdates[activeRow] || ""
-  const beginEditing = (cell?: { row: number; column: number }) => {
+  const beginEditing = () => {
     setDraftRows(rows.map((row) => [...row]))
     setDraftWidths(widths)
     setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setEditingCell(cell || null)
     setEditing(true)
   }
   const updateRowTimestamp = (rowIndex: number, source: string[] = draftRowUpdates) => {
@@ -924,18 +940,9 @@ function SimpleTable({
     setDraftRows(next)
     updateRowTimestamp(rowIndex)
   }
-  const addRowNearSelection = (placement: "above" | "below") => {
-    const nextRows = rows.map((row) => [...row])
-    const insertAt = placement === "above" ? activeRow : activeRow + 1
-    nextRows.splice(insertAt, 0, Array.from({ length: columnCount }, () => ""))
-    const nextUpdates = [...displayRowUpdates]
-    nextUpdates.splice(insertAt, 0, new Date().toISOString())
-    setDraftRows(nextRows)
-    setDraftWidths(widths)
-    setDraftRowUpdates(nextUpdates)
-    setSelectedRow(insertAt)
-    setEditingCell({ row: insertAt, column: 0 })
-    setEditing(true)
+  const addRow = () => {
+    setDraftRows([...rows, Array.from({ length: columnCount }, () => "")])
+    setDraftRowUpdates([...displayRowUpdates, new Date().toISOString()])
   }
   const addColumn = () => {
     const nextCount = columnCount + 1
@@ -946,12 +953,8 @@ function SimpleTable({
   }
   const deleteSelectedRow = () => {
     if (rows.length <= 1) return
-    const nextRows = rows.filter((_, index) => index !== activeRow)
-    const nextUpdates = displayRowUpdates.filter((_, index) => index !== activeRow)
-    setDraftRows(nextRows)
-    setDraftRowUpdates(nextUpdates)
-    setSelectedRow(Math.max(0, Math.min(activeRow, nextRows.length - 1)))
-    setEditing(true)
+    setDraftRows(rows.slice(0, -1))
+    setDraftRowUpdates(displayRowUpdates.slice(0, -1))
   }
   const deleteColumn = () => {
     if (columnCount <= 1) return
@@ -966,71 +969,25 @@ function SimpleTable({
   }
   const save = () => {
     onSave?.(draftRows, widths, draftRowUpdates)
-    setEditingCell(null)
-    setEditing(false)
-  }
-  const cancel = () => {
-    setEditingCell(null)
     setEditing(false)
   }
   return (
-    <div style={{ display: "grid", gridTemplateColumns: readOnly ? "minmax(0,1fr)" : "minmax(0,1fr) minmax(180px, 220px)", gap: "10px", alignItems: "start" }}>
-      <div style={{ overflowX: "auto" }}>
-        <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
-          <colgroup>
-            {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
-          </colgroup>
-          <tbody>
-            {rows.map((row, rowIndex) => {
-              const isSelected = rowIndex === activeRow
-              return (
-                <tr
-                  key={`table-row-${rowIndex}`}
-                  onClick={() => setSelectedRow(rowIndex)}
-                  style={{ background: isSelected ? "#e7f2ff" : "transparent" }}
-                >
-                  {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                    <td
-                      key={`table-cell-${rowIndex}-${columnIndex}`}
-                      onDoubleClick={() => {
-                        if (!readOnly) beginEditing({ row: rowIndex, column: columnIndex })
-                      }}
-                      style={{
-                        border: "1px solid var(--fc-admin-selected-border)",
-                        padding: editing ? 0 : "7px 8px",
-                        background: isSelected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
-                        position: "relative",
-                        cursor: readOnly ? "default" : "text",
-                      }}
-                    >
-                      {editing ? (
-                        <input
-                          value={row[columnIndex] || ""}
-                          autoFocus={editingCell?.row === rowIndex && editingCell?.column === columnIndex}
-                          onFocus={(event) => {
-                            if (editingCell?.row === rowIndex && editingCell?.column === columnIndex) {
-                              event.currentTarget.select()
-                            }
-                          }}
-                          onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                          style={{
-                            width: "100%",
-                            border: "none",
-                            background: editingCell?.row === rowIndex && editingCell?.column === columnIndex ? "#ffffffcc" : "transparent",
-                            color: "var(--fc-admin-panel-text)",
-                            padding: "7px 8px",
-                            outline: "none",
-                            boxSizing: "border-box",
-                            fontSize: "12px",
-                            fontWeight: rowIndex === 0 ? 800 : 500,
-                            boxShadow: editingCell?.row === rowIndex && editingCell?.column === columnIndex ? "inset 0 -2px 0 var(--fc-admin-link)" : "none",
-                          }}
-                        />
-                      ) : (
-                        <span style={{ display: "block", minHeight: "17px", whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontWeight: rowIndex === 0 ? 800 : 500 }}>
-                          {row[columnIndex] || ""}
-                        </span>
-                      )}
+    <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
+      <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+        <colgroup>
+          {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
+        </colgroup>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`table-row-${rowIndex}`}>
+              {Array.from({ length: columnCount }).map((_, columnIndex) => (
+                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
+                  <input
+                    value={row[columnIndex] || ""}
+                    disabled={readOnly || !editing}
+                    onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
+                    style={{ width: "100%", border: "none", background: "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
+                  />
                       {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
                         <span
                           onMouseDown={(event) => {
@@ -1055,38 +1012,29 @@ function SimpleTable({
                           }}
                         />
                       ) : null}
-                    </td>
-                  ))}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      {!readOnly && (
-        <div style={{ display: "grid", gap: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px" }}>
-          <div>
-            <div style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>Selected Row</div>
-            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 800, marginTop: "3px" }}>Row {activeRow + 1}</div>
-            <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "3px" }}>
-              {selectedRowUpdatedAt ? `Updated ${formatTimestamp(selectedRowUpdatedAt) || selectedRowUpdatedAt}` : "No row update recorded"}
-            </div>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!readOnly && editing && (
+        <div style={{ display: "grid", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <button type="button" onClick={addRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Row</button>
+            <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Add Column</button>
+            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
+            <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
+            <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
+            <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
-            <button type="button" onClick={() => addRowNearSelection("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Above</button>
-            <button type="button" onClick={() => addRowNearSelection("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Below</button>
-            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}>Delete Row</button>
-            <button type="button" onClick={addColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>+ Col</button>
-            <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>- Col</button>
-          </div>
-          {editing ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
-              <button type="button" onClick={save} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-              <button type="button" onClick={cancel} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
-            </div>
-          ) : (
-            <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Copy Table</button>
-          )}
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Drag the header borders to resize columns.</div>
+        </div>
+      )}
+      {!readOnly && !editing && (
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
+          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Copy Table</button>
         </div>
       )}
     </div>
