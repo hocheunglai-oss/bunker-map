@@ -560,10 +560,7 @@ function mergeFolderRecords(realFolders: EntryFolderRecord[], files: Array<Compa
 function getFileTypeLabel(name: string, fileType?: string | null) {
   const ext = (name.split(".").pop() || "").toLowerCase()
   const normalized = (fileType || "").toLowerCase()
-  if (ext === "xls" || ext === "xlsx" || normalized.includes("sheet")) return { color: "var(--fc-admin-success-text)", label: "XLS" }
   if (ext === "doc" || ext === "docx" || normalized.includes("word")) return { color: "var(--fc-admin-link)", label: "DOC" }
-  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || normalized.startsWith("image/")) return { color: "var(--fc-admin-danger-text)", label: "IMG" }
-  if (ext === "pdf" || normalized.includes("pdf")) return { color: "var(--fc-admin-danger-text)", label: "PDF" }
   return { color: "var(--fc-admin-muted)", label: "FILE" }
 }
 
@@ -727,31 +724,45 @@ function BlockTextBlock({
   query?: string
 }) {
   const editable = Boolean(onBlockDoubleClick || onInsertBlock || onBlockSave || onBlockCancel || onBlockDelete)
-  const [selectedBlockId, setSelectedBlockId] = useState(blocks[0]?.id || "")
+  const instanceIdRef = useRef(`ccinfo-text-${Math.random().toString(36).slice(2)}`)
+  const [selectedBlockId, setSelectedBlockId] = useState("")
   const selectedIndex = blocks.findIndex((block) => block.id === selectedBlockId)
-  const activeIndex = selectedIndex >= 0 ? selectedIndex : 0
-  const selectedBlock = blocks[activeIndex]
-  const selectedStamp = formatTimestamp(selectedBlock?.updated_at) || formatTimestamp(fallbackUpdatedAt)
+  const selectedBlock = selectedIndex >= 0 ? blocks[selectedIndex] : undefined
+  const selectedStamp = selectedBlock ? (formatTimestamp(selectedBlock.updated_at) || formatTimestamp(fallbackUpdatedAt)) : ""
 
   useEffect(() => {
-    if (!blocks.length) {
-      setSelectedBlockId("")
-      return
+    function handleExternalSelection(event: Event) {
+      const detail = (event as CustomEvent<{ instanceId?: string }>).detail
+      if (detail?.instanceId !== instanceIdRef.current && !editingBlockId) {
+        setSelectedBlockId("")
+      }
     }
+    window.addEventListener("ccinfo-text-block-selected", handleExternalSelection)
+    return () => window.removeEventListener("ccinfo-text-block-selected", handleExternalSelection)
+  }, [editingBlockId])
+
+  useEffect(() => {
     if (editingBlockId && blocks.some((block) => block.id === editingBlockId)) {
       setSelectedBlockId(editingBlockId)
       return
     }
-    if (!blocks.some((block) => block.id === selectedBlockId)) {
-      setSelectedBlockId(blocks[0].id)
+    if (!blocks.length || !blocks.some((block) => block.id === selectedBlockId)) {
+      setSelectedBlockId("")
     }
   }, [blocks, editingBlockId, selectedBlockId])
 
+  function selectBlock(blockId: string) {
+    setSelectedBlockId(blockId)
+    window.dispatchEvent(new CustomEvent("ccinfo-text-block-selected", { detail: { instanceId: instanceIdRef.current } }))
+  }
+
   const insertNearSelected = (placement: "above" | "below") => {
     if (!onInsertBlock) return
+    const activeIndex = selectedIndex >= 0 ? selectedIndex : blocks.length - 1
     const insertAt = blocks.length === 0 ? 0 : placement === "above" ? activeIndex : activeIndex + 1
     onInsertBlock(insertAt)
   }
+  const showControls = editable && (Boolean(selectedBlock) || Boolean(editingBlockId) || blocks.length === 0)
 
   const textBox = (
     <div
@@ -780,11 +791,11 @@ function BlockTextBlock({
         return (
           <div
             key={block.id}
-            onClick={() => setSelectedBlockId(block.id)}
+            onClick={() => selectBlock(block.id)}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
               event.stopPropagation()
-              setSelectedBlockId(block.id)
+              selectBlock(block.id)
               onBlockDoubleClick(block)
             }}
             style={{
@@ -824,20 +835,14 @@ function BlockTextBlock({
     </div>
   )
 
-  if (!editable) return textBox
+  if (!showControls) return textBox
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(168px, 210px)", gap: "10px", alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(150px, 180px)", gap: "8px", alignItems: "start" }}>
       {textBox}
-      <div style={{ display: "grid", gap: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "10px" }}>
-        <div>
-          <div style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>Selected Row</div>
-          <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 800, marginTop: "3px" }}>
-            {selectedBlock ? `Row ${activeIndex + 1}` : "No row selected"}
-          </div>
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", marginTop: "3px" }}>
-            {selectedStamp ? `Updated ${selectedStamp}` : "No row update recorded"}
-          </div>
+      <div style={{ display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)", padding: "9px" }}>
+        <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>
+          {selectedStamp ? `Updated ${selectedStamp}` : "No update recorded"}
         </div>
         {onInsertBlock ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
@@ -1504,6 +1509,13 @@ export default function CountryCompanyInfoPage() {
       setMessage(error instanceof Error ? error.message : "Unable to load audit logs.")
     } finally {
       setAuditLoading(false)
+    }
+  }
+
+  async function refreshRecentChanges() {
+    await loadRecentAuditLogs()
+    if (selectedKind && selectedId) {
+      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
     }
   }
 
@@ -3363,11 +3375,20 @@ export default function CountryCompanyInfoPage() {
                   )}
                   <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "10px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>CCINFO Activity</div>
-                      <a href="/admin/auditlog?table=ccinfo" style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, textDecoration: "none" }}>Audit Log</a>
+                      <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>Recent Changes</div>
+                      <button
+                        type="button"
+                        onClick={() => void refreshRecentChanges()}
+                        disabled={auditLoading}
+                        aria-label="Refresh recent changes"
+                        title="Refresh recent changes"
+                        style={{ ...buttonStyle, width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "13px", opacity: auditLoading ? 0.55 : 1 }}
+                      >
+                        {auditLoading ? "..." : "⟳"}
+                      </button>
                     </div>
 
-                    <div style={{ display: "grid", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "2px" }}>
+                    <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "260px" : "calc(100vh - 310px)", overflowY: "auto", paddingRight: "2px" }}>
                       {auditLoading && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Loading changes...</div>}
                       {!auditLoading && activityItems.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
                       {activityItems.map((entry) => {
@@ -3401,7 +3422,7 @@ export default function CountryCompanyInfoPage() {
                               disabled={actionBusy}
                               style={{ ...buttonStyle, width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "14px", opacity: actionBusy ? 0.6 : 1 }}
                             >
-                              {actionBusy ? "..." : "↶"}
+                              {actionBusy ? "..." : "↩"}
                             </button>
                           ) : null}
                         </div>
