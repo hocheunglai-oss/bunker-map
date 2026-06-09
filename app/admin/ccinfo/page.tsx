@@ -600,15 +600,15 @@ function DriveFileIcon({ color, label }: { color: string; label: string }) {
   return (
     <span
       style={{
-        width: "26px",
-        height: "34px",
+        width: "24px",
+        height: "20px",
         display: "inline-grid",
         placeItems: "center",
         position: "relative",
-        borderRadius: "5px",
+        borderRadius: "4px",
         background: color,
         color: "#fff",
-        fontSize: "7px",
+        fontSize: "6px",
         fontWeight: 900,
         letterSpacing: "0.01em",
         boxShadow: "0 1px 2px #00000018",
@@ -623,26 +623,26 @@ function DriveFileIcon({ color, label }: { color: string; label: string }) {
           right: 0,
           width: 0,
           height: 0,
-          borderTop: "8px solid #ffffffcc",
-          borderLeft: "8px solid #00000020",
+          borderTop: "6px solid #ffffffcc",
+          borderLeft: "6px solid #00000020",
         }}
       />
-      <span style={{ display: "grid", gap: "2px", width: "14px", marginTop: isGeneric ? 0 : "-3px" }}>
+      <span style={{ display: "grid", gap: "1px", width: "12px", marginTop: isGeneric ? "-1px" : "-4px" }}>
         {isSheet ? (
           <>
-            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
-            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
-            <span style={{ height: "2px", background: "#ffffffcc", boxShadow: "6px 0 0 #ffffffcc" }} />
+            <span style={{ height: "1px", background: "#ffffffcc", boxShadow: "5px 0 0 #ffffffcc" }} />
+            <span style={{ height: "1px", background: "#ffffffcc", boxShadow: "5px 0 0 #ffffffcc" }} />
+            <span style={{ height: "1px", background: "#ffffffcc", boxShadow: "5px 0 0 #ffffffcc" }} />
           </>
         ) : (
           <>
-            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc" }} />
-            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc", width: "80%" }} />
-            <span style={{ height: "2px", borderRadius: "999px", background: "#ffffffcc", width: "62%" }} />
+            <span style={{ height: "1px", borderRadius: "999px", background: "#ffffffcc" }} />
+            <span style={{ height: "1px", borderRadius: "999px", background: "#ffffffcc", width: "80%" }} />
+            <span style={{ height: "1px", borderRadius: "999px", background: "#ffffffcc", width: "62%" }} />
           </>
         )}
       </span>
-      <span style={{ position: "absolute", left: "3px", right: "3px", bottom: "3px", textAlign: "center", fontSize: label.length > 3 ? "5px" : "6px", lineHeight: 1 }}>
+      <span style={{ position: "absolute", left: "3px", right: "3px", bottom: "2px", textAlign: "center", fontSize: label.length > 3 ? "5px" : "6px", lineHeight: 1 }}>
         {label}
       </span>
     </span>
@@ -765,7 +765,9 @@ function BlockTextBlock({
 }) {
   const editable = Boolean(onBlockDoubleClick || onInsertBlock || onBlockSave || onBlockCancel || onBlockDelete)
   const instanceIdRef = useRef(`ccinfo-text-${Math.random().toString(36).slice(2)}`)
+  const blockNodeRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [selectedBlockId, setSelectedBlockId] = useState("")
+  const [actionPanelTop, setActionPanelTop] = useState(6)
   const selectedIndex = blocks.findIndex((block) => block.id === selectedBlockId)
   const selectedBlock = selectedIndex >= 0 ? blocks[selectedIndex] : undefined
   const selectedStamp = selectedBlock ? (formatTimestamp(selectedBlock.updated_at) || formatTimestamp(fallbackUpdatedAt)) : ""
@@ -795,6 +797,15 @@ function BlockTextBlock({
     setSelectedBlockId(blockId)
     window.dispatchEvent(new CustomEvent("ccinfo-text-block-selected", { detail: { instanceId: instanceIdRef.current } }))
   }
+
+  useLayoutEffect(() => {
+    const node = selectedBlockId ? blockNodeRefs.current[selectedBlockId] : null
+    if (!node) {
+      setActionPanelTop(6)
+      return
+    }
+    setActionPanelTop(Math.max(6, node.offsetTop))
+  }, [selectedBlockId, blocks])
 
   const insertNearSelected = (placement: "above" | "below") => {
     if (!onInsertBlock) return
@@ -831,6 +842,9 @@ function BlockTextBlock({
         return (
           <div
             key={block.id}
+            ref={(node) => {
+              blockNodeRefs.current[block.id] = node
+            }}
             onClick={() => selectBlock(block.id)}
             onDoubleClick={(event) => {
               if (!onBlockDoubleClick) return
@@ -854,6 +868,7 @@ function BlockTextBlock({
               <AutoSizeTextarea
                 value={block.content}
                 onChange={(event) => onBlockChange?.(block.id, event.target.value)}
+                autoFocus
                 style={{
                   ...textareaStyle,
                   minHeight: "1.45em",
@@ -880,7 +895,7 @@ function BlockTextBlock({
   return (
     <div style={{ position: "relative" }}>
       {textBox}
-      <div style={{ position: "absolute", top: "6px", right: "6px", width: "174px", display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", padding: "9px", boxShadow: "0 12px 26px #00000018", zIndex: 6 }}>
+      <div style={{ position: "absolute", top: `${actionPanelTop}px`, right: "6px", width: "174px", display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", padding: "9px", boxShadow: "0 12px 26px #00000018", zIndex: 6 }}>
         <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>
           {selectedStamp ? `Updated ${selectedStamp}` : "No update recorded"}
         </div>
@@ -932,6 +947,7 @@ function SimpleTable({
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
   const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
   const [selectedCell, setSelectedCell] = useState({ row: 0, column: 0 })
+  const [copied, setCopied] = useState(false)
   const tableRef = useRef<HTMLTableElement | null>(null)
   const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
@@ -1047,6 +1063,37 @@ function SimpleTable({
   const copyTable = async () => {
     const text = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").join("\t")).join("\n")
     await navigator.clipboard?.writeText(text)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
+  const pasteTable = async () => {
+    const text = await navigator.clipboard?.readText()
+    if (!text?.trim()) return
+    const incomingRows = text
+      .trimEnd()
+      .split(/\r?\n/)
+      .map((line) => line.split("\t"))
+    const nextRows = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || ""))
+    const requiredRows = activeRow + incomingRows.length
+    const requiredColumns = activeColumn + Math.max(...incomingRows.map((row) => row.length))
+    while (nextRows.length < requiredRows) nextRows.push(Array.from({ length: Math.max(columnCount, requiredColumns) }, () => ""))
+    const nextColumnCount = Math.max(columnCount, requiredColumns)
+    const now = new Date().toISOString()
+    const nextUpdates = displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => "")
+    for (let rowIndex = 0; rowIndex < nextRows.length; rowIndex += 1) {
+      while (nextRows[rowIndex].length < nextColumnCount) nextRows[rowIndex].push("")
+    }
+    incomingRows.forEach((incomingRow, rowOffset) => {
+      const targetRow = activeRow + rowOffset
+      incomingRow.forEach((cell, columnOffset) => {
+        nextRows[targetRow][activeColumn + columnOffset] = cell
+      })
+      nextUpdates[targetRow] = now
+    })
+    setDraftRows(nextRows)
+    setDraftWidths(normalizeWidths(Array.from({ length: nextColumnCount }).map((_, index) => widths[index] || Math.round(100 / nextColumnCount))))
+    setDraftRowUpdates(nextUpdates)
+    setSelectedCell({ row: activeRow, column: activeColumn })
   }
   const save = () => {
     onSave?.(draftRows, widths, draftRowUpdates)
@@ -1112,6 +1159,7 @@ function SimpleTable({
             <button type="button" onClick={() => insertColumn("right")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Col Right</button>
             <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
             <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
+            <button type="button" onClick={() => void pasteTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Paste</button>
             <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
             <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
           </div>
@@ -1121,7 +1169,7 @@ function SimpleTable({
       {!readOnly && !editing && (
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
-          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Copy Table</button>
+          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: copied ? "var(--fc-admin-success-bg)" : buttonStyle.background, color: copied ? "var(--fc-admin-success-text)" : buttonStyle.color }}>{copied ? "Copied" : "Copy Table"}</button>
         </div>
       )}
     </div>
@@ -1226,12 +1274,14 @@ function AutoSizeTextarea({
   onBlur,
   style,
   title,
+  autoFocus,
 }: {
   value: string
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
   onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void
   style?: React.CSSProperties
   title?: string
+  autoFocus?: boolean
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -1254,6 +1304,7 @@ function AutoSizeTextarea({
       onChange={onChange}
       onBlur={onBlur}
       title={title}
+      autoFocus={autoFocus}
       rows={1}
       style={{
         ...style,
@@ -1339,6 +1390,8 @@ export default function CountryCompanyInfoPage() {
   const [auditActionId, setAuditActionId] = useState("")
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
+  const mainSectionEditStartRef = useRef<Record<number, HighlightCard>>({})
+  const nestedSectionEditStartRef = useRef<Record<string, HighlightCard>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
   const recordAutoSaveTimerRef = useRef<number | null>(null)
 
@@ -1763,6 +1816,8 @@ export default function CountryCompanyInfoPage() {
     const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
     const blocks = [...sourceBlocks]
     blocks.splice(blockIndex, 0, block)
+    const snapshotKey = `${tabIndex}:${sectionIndex}`
+    nestedSectionEditStartRef.current[snapshotKey] = { ...section, blocks: sourceBlocks.map((item) => ({ ...item })), info: blocksToText(sourceBlocks), line_updates: { ...(section.line_updates || {}) } }
     setHighlights((prev) =>
       prev.map((item, itemIndex) => {
         if (itemIndex !== tabIndex) return item
@@ -1794,6 +1849,8 @@ export default function CountryCompanyInfoPage() {
     const section = highlights[tabIndex]?.sections?.[sectionIndex]
     if (!section) return
     const blocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    const snapshotKey = `${tabIndex}:${sectionIndex}`
+    nestedSectionEditStartRef.current[snapshotKey] = { ...section, blocks: blocks.map((item) => ({ ...item })), info: blocksToText(blocks), line_updates: { ...(section.line_updates || {}) } }
     setHighlights((prev) =>
       prev.map((item, itemIndex) => {
         if (itemIndex !== tabIndex) return item
@@ -1807,11 +1864,30 @@ export default function CountryCompanyInfoPage() {
 
 
   async function finishNestedSectionEditing() {
+    if (editingNestedSectionBlock) {
+      delete nestedSectionEditStartRef.current[`${editingNestedSectionBlock.tabIndex}:${editingNestedSectionBlock.sectionIndex}`]
+    }
     setEditingNestedSectionBlock(null)
     await persistHighlights(highlights)
   }
 
   function cancelNestedSectionEditing() {
+    if (editingNestedSectionBlock) {
+      const { tabIndex, sectionIndex } = editingNestedSectionBlock
+      const snapshotKey = `${tabIndex}:${sectionIndex}`
+      const before = nestedSectionEditStartRef.current[snapshotKey]
+      if (before) {
+        setHighlights((prev) =>
+          prev.map((item, itemIndex) => {
+            if (itemIndex !== tabIndex) return item
+            const sections = [...(item.sections || [])]
+            sections[sectionIndex] = { ...before, blocks: before.blocks?.map((block) => ({ ...block })) }
+            return { ...item, sections }
+          }),
+        )
+      }
+      delete nestedSectionEditStartRef.current[snapshotKey]
+    }
     setEditingNestedSectionBlock(null)
   }
 
@@ -1828,6 +1904,7 @@ export default function CountryCompanyInfoPage() {
     })
     setHighlights(nextHighlights)
     setEditingNestedSectionBlock(null)
+    delete nestedSectionEditStartRef.current[`${tabIndex}:${sectionIndex}`]
     try {
       await persistHighlights(nextHighlights)
       setMessage("Section saved.")
@@ -1899,6 +1976,7 @@ export default function CountryCompanyInfoPage() {
     const section = mainSections[sectionIndex]
     if (!section) return
     const blocks = section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)
+    mainSectionEditStartRef.current[sectionIndex] = { ...section, blocks: blocks.map((item) => ({ ...item })), info: blocksToText(blocks), line_updates: { ...(section.line_updates || {}) } }
     setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...section, blocks, info: blocksToText(blocks) } : item)))
     setEditingMainSectionBlock({ sectionIndex, blockId: block.id })
   }
@@ -1910,13 +1988,26 @@ export default function CountryCompanyInfoPage() {
     const block = { id: newBlockId(), content: "", updated_at: new Date().toISOString() }
     const blocks = [...sourceBlocks]
     blocks.splice(blockIndex, 0, block)
+    mainSectionEditStartRef.current[sectionIndex] = { ...section, blocks: sourceBlocks.map((item) => ({ ...item })), info: blocksToText(sourceBlocks), line_updates: { ...(section.line_updates || {}) } }
     setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...section, blocks, info: blocksToText(blocks) } : item)))
     setEditingMainSectionBlock({ sectionIndex, blockId: block.id })
   }
 
   async function finishMainSectionEditing() {
+    if (editingMainSectionBlock) {
+      delete mainSectionEditStartRef.current[editingMainSectionBlock.sectionIndex]
+    }
     setEditingMainSectionBlock(null)
     await persistMainSections(mainSections)
+  }
+
+  function cancelMainSectionEditing(sectionIndex: number) {
+    const before = mainSectionEditStartRef.current[sectionIndex]
+    if (before) {
+      setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...before, blocks: before.blocks?.map((block) => ({ ...block })) } : item)))
+    }
+    delete mainSectionEditStartRef.current[sectionIndex]
+    setEditingMainSectionBlock(null)
   }
 
   function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
@@ -1943,6 +2034,7 @@ export default function CountryCompanyInfoPage() {
     })
     setMainSections(nextSections)
     setEditingMainSectionBlock(null)
+    delete mainSectionEditStartRef.current[sectionIndex]
     try {
       await persistMainSections(nextSections)
       setMessage("Section saved.")
@@ -3280,6 +3372,10 @@ export default function CountryCompanyInfoPage() {
                 onClick={() => setSelectedPreviewFile(file)}
                 onDoubleClick={() => {
                   setSelectedPreviewFile(file)
+                  if (file.drive_url) {
+                    window.open(file.drive_url, "_blank", "noopener,noreferrer")
+                    return
+                  }
                   setPreviewModalOpen(true)
                 }}
                 draggable
@@ -3866,7 +3962,7 @@ export default function CountryCompanyInfoPage() {
                                   onBlockDoubleClick={(block) => startMainSectionBlockEditing(sectionIndex, block)}
                                   onBlockChange={(blockId, value) => updateMainSectionBlock(sectionIndex, blockId, value)}
                                   onBlockSave={() => void finishMainSectionEditing()}
-                                  onBlockCancel={() => setEditingMainSectionBlock(null)}
+                                  onBlockCancel={() => cancelMainSectionEditing(sectionIndex)}
                                   onBlockDelete={(blockId) => void deleteMainSectionBlock(sectionIndex, blockId)}
                                   onInsertBlock={(blockIndex) => insertMainSectionBlock(sectionIndex, blockIndex)}
                                 />
