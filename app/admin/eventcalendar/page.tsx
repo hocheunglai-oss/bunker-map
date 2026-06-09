@@ -1004,8 +1004,8 @@ export default function EventCalendarPage() {
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "end",
-            gap: "14px",
+            alignItems: "center",
+            gap: "12px",
             flexWrap: "wrap",
             marginBottom: "12px",
           }}
@@ -1031,7 +1031,7 @@ export default function EventCalendarPage() {
               >
                 Back
               </button>
-              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>
+              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: "36px", color: "var(--fc-admin-panel-text)" }}>
                 EVENT CALENDAR
               </h1>
               {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
@@ -1070,11 +1070,12 @@ export default function EventCalendarPage() {
                   className="fc-admin-menu-button"
                   style={{
                     ...buttonStyle,
-                    minWidth: "54px",
+                    minWidth: "60px",
                     height: "36px",
-                    padding: "0 16px",
-                    display: "inline-grid",
-                    placeItems: "center",
+                    padding: "0 18px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
                   <span style={{ display: "grid", gap: "4px", width: "16px" }} aria-hidden="true">
