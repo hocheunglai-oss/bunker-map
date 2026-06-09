@@ -209,7 +209,7 @@ export default function AdminRemarks() {
               className="fc-admin-nav-button"
               style={pillButtonStyle}
             >
-              ← Back To Admin
+              Back
             </a>
 
             <button

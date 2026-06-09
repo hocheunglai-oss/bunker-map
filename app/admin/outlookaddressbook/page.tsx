@@ -764,7 +764,7 @@ export default function OutlookAddressBookPage() {
           <h1 style={{ marginTop: 0 }}>Outlook Address Book</h1>
           <p>Please log in from the admin homepage first.</p>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Back to Admin
+            Back
           </button>
         </section>
       </div>
@@ -780,7 +780,7 @@ export default function OutlookAddressBookPage() {
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Back To Admin
+            Back
           </button>
         </div>
       </header>

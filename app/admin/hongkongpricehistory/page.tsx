@@ -431,7 +431,7 @@ export default function HongKongPriceHistoryPage() {
               className="fc-admin-nav-button"
               style={secondaryButtonStyle}
             >
-              ← Back To Admin
+              Back
             </a>
 
             <a

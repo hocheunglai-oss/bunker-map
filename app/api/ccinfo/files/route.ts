@@ -230,18 +230,19 @@ export async function PATCH(request: Request) {
     const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
     const body = await request.json()
     const fileId = String(body.fileId || "")
+    const folderId = String(body.folderId || "")
     const source = String(body.source || "entry")
     const action = String(body.action || "move")
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
     const entryName = String(body.entryName || "")
     const folderPath = String(body.folderPath || "").trim()
-
-    if (!fileId) {
-      return NextResponse.json({ message: "Missing file details." }, { status: 400 })
-    }
+    const name = String(body.name || "").trim()
 
     if (action === "restore") {
+      if (!fileId) {
+        return NextResponse.json({ message: "Missing file details." }, { status: 400 })
+      }
       if (source === "company") {
         const { error } = await supabase
           .from("cc_company_files")
@@ -257,6 +258,66 @@ export async function PATCH(request: Request) {
         .eq("id", fileId)
       if (error) throw error
       return NextResponse.json({ ok: true })
+    }
+
+    if (action === "renameFolder") {
+      if (!folderId || !name || !entryKind || !entryId) {
+        return NextResponse.json({ message: "Missing folder rename details." }, { status: 400 })
+      }
+
+      const { data: folderRow, error: folderReadError } = await supabase
+        .from("cc_entry_folders")
+        .select("id,folder_path,name")
+        .eq("id", folderId)
+        .single()
+      if (folderReadError || !folderRow) throw folderReadError || new Error("Unable to load folder.")
+
+      const oldFullPath = [folderRow.folder_path, folderRow.name].filter(Boolean).join("/")
+      const newFullPath = [folderRow.folder_path, name].filter(Boolean).join("/")
+
+      const { error: folderUpdateError } = await supabase
+        .from("cc_entry_folders")
+        .update({ name })
+        .eq("id", folderId)
+      if (folderUpdateError) throw folderUpdateError
+
+      const { data: nestedFolders, error: nestedFolderError } = await supabase
+        .from("cc_entry_folders")
+        .select("id,folder_path")
+        .eq("entry_kind", entryKind)
+        .eq("entry_id", entryId)
+        .like("folder_path", `${oldFullPath}/%`)
+      if (nestedFolderError) throw nestedFolderError
+
+      for (const nested of nestedFolders || []) {
+        const nextFolderPath = String(nested.folder_path || "").replace(oldFullPath, newFullPath)
+        const { error } = await supabase.from("cc_entry_folders").update({ folder_path: nextFolderPath }).eq("id", nested.id)
+        if (error) throw error
+      }
+
+      const { data: affectedFiles, error: fileReadError } = await supabase
+        .from("cc_entry_files")
+        .select("id,folder_path,original_path,file_name")
+        .eq("entry_kind", entryKind)
+        .eq("entry_id", entryId)
+        .or(`folder_path.eq.${oldFullPath},folder_path.like.${oldFullPath}/%`)
+      if (fileReadError) throw fileReadError
+
+      for (const file of affectedFiles || []) {
+        const nextFolderPath = String(file.folder_path || "").replace(oldFullPath, newFullPath)
+        const nextOriginalPath = `${entryKind}/${entryName}/${nextFolderPath ? `${nextFolderPath}/` : ""}${file.file_name}`
+        const { error } = await supabase
+          .from("cc_entry_files")
+          .update({ folder_path: nextFolderPath, original_path: nextOriginalPath })
+          .eq("id", file.id)
+        if (error) throw error
+      }
+
+      return NextResponse.json({ ok: true })
+    }
+
+    if (!fileId) {
+      return NextResponse.json({ message: "Missing file details." }, { status: 400 })
     }
 
     if (!entryKind || !entryId || !entryName) {

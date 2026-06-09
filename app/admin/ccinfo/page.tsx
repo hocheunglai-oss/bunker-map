@@ -29,6 +29,7 @@ type CompanyFileRecord = {
   drive_url: string | null
   drive_file_id?: string | null
   folder_path?: string | null
+  original_path?: string | null
   deleted_at?: string | null
   source?: "company" | "entry"
 }
@@ -48,6 +49,27 @@ type EntryFolderRecord = {
   id: string
   folder_path: string
   name: string
+}
+
+type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
+
+type AuditLogRecord = {
+  id: string
+  occurredAt: string
+  actorId: string | null
+  actorName: string | null
+  actorSource: string
+  tableSchema: string
+  tableName: string
+  operation: AuditOperation
+  recordPk: Record<string, unknown>
+  changedFields: string[]
+  beforeRow: Record<string, unknown> | null
+  afterRow: Record<string, unknown> | null
+  requestContext: Record<string, unknown>
+  undoOfLogId: string | null
+  undoneAt: string | null
+  undoneByLogId: string | null
 }
 
 type CountryRecord = BaseRecord & {
@@ -71,21 +93,6 @@ type InfoBlock = {
   content: string
   updated_at: string
 }
-
-type ChangeLogItem = {
-  id: string
-  label: string
-  at: string
-  entryKind: RecordKind
-  entryId: string
-  field: "notes" | "section"
-  before: string
-  after: string
-  sectionIndex?: number
-  sectionTitle?: string
-}
-
-const CHANGE_LOG_STORAGE_KEY = "ccinfo_recent_changes_v1"
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -152,7 +159,7 @@ const textareaStyle: React.CSSProperties = {
   ...inputStyle,
   minHeight: "220px",
   resize: "vertical",
-  lineHeight: 1.55,
+  lineHeight: 1.35,
   fontFamily: "var(--fc-admin-font)",
 }
 
@@ -197,7 +204,7 @@ function highlightTextHtml(text: string, query: string) {
   return escaped
     .replace(
       regex,
-      `<mark data-search-match="true" style="background: #fff3b0; color: var(--fc-admin-warning-text); padding: 0 2px; border-radius: 4px;">$1</mark>`,
+      `<mark data-search-match="true" style="background: rgba(255, 243, 176, 0.55); color: inherit; padding: 0 1px; border-radius: 3px;">$1</mark>`,
     )
     .replace(/\n/g, "<br />")
 }
@@ -444,6 +451,55 @@ function folderDepth(folderPath: string) {
   return folderPath.split("/").filter(Boolean).length
 }
 
+function deriveFolderPathFromOriginalPath(originalPath?: string | null) {
+  if (!originalPath) return ""
+  const normalized = originalPath.replace(/\\/g, "/")
+  const companyRootMatch = normalized.match(/- Company Information\/[^/]+\/(.+)$/)
+  if (companyRootMatch?.[1]) {
+    const relative = companyRootMatch[1]
+    const segments = relative.split("/").filter(Boolean)
+    return segments.slice(0, -1).join("/")
+  }
+  const genericMatch = normalized.match(/company\/[^/]+\/(.+)$/)
+  if (genericMatch?.[1]) {
+    const relative = genericMatch[1]
+    const segments = relative.split("/").filter(Boolean)
+    return segments.slice(0, -1).join("/")
+  }
+  return ""
+}
+
+function deriveVirtualFoldersFromFiles(files: Array<CompanyFileRecord | EntryFileRecord>) {
+  const seen = new Map<string, EntryFolderRecord>()
+  for (const file of files) {
+    const folderPath = (file.folder_path || "").trim()
+    if (!folderPath) continue
+    const segments = folderPath.split("/").filter(Boolean)
+    let parent = ""
+    for (const segment of segments) {
+      const id = `virtual:${joinFolderPath(parent, segment)}`
+      if (!seen.has(id)) {
+        seen.set(id, { id, folder_path: parent, name: segment })
+      }
+      parent = joinFolderPath(parent, segment)
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) => joinFolderPath(a.folder_path, a.name).localeCompare(joinFolderPath(b.folder_path, b.name)))
+}
+
+function mergeFolderRecords(realFolders: EntryFolderRecord[], files: Array<CompanyFileRecord | EntryFileRecord>) {
+  const virtualFolders = deriveVirtualFoldersFromFiles(files)
+  const seen = new Set<string>()
+  const merged: EntryFolderRecord[] = []
+  for (const folder of [...realFolders, ...virtualFolders]) {
+    const key = joinFolderPath(folder.folder_path, folder.name)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(folder)
+  }
+  return merged.sort((a, b) => joinFolderPath(a.folder_path, a.name).localeCompare(joinFolderPath(b.folder_path, b.name)))
+}
+
 function getFileTypeLabel(name: string, fileType?: string | null) {
   const ext = (name.split(".").pop() || "").toLowerCase()
   const normalized = (fileType || "").toLowerCase()
@@ -544,55 +600,32 @@ function HoverableTextBlock({
         position: "relative",
         color: "var(--fc-admin-panel-text)",
         fontSize: "14px",
-        lineHeight: 1.55,
-        padding: "10px 12px",
+        lineHeight: 1.35,
+        padding: "8px 10px",
         border: "1px solid var(--fc-admin-selected-border)",
         borderRadius: "14px",
-        background: hoveredLine !== null ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
+        background: "var(--fc-admin-panel-soft-bg)",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
       onMouseLeave={() => setHoveredLine(null)}
       onDoubleClick={onDoubleClick}
       title={onDoubleClick ? "Double click to edit" : undefined}
     >
-      {hoveredLine !== null && (formatTimestamp(updates[lineKeys[hoveredLine]]) || formatTimestamp(updates[String(hoveredLine)]) || fallback) && (
-        <div
-          style={{
-            position: "absolute",
-            right: "12px",
-            top: `${12 + hoveredLine * 22}px`,
-            maxWidth: "220px",
-            padding: "6px 9px",
-            borderRadius: "8px",
-            background: "var(--fc-admin-panel-bg)",
-            border: "1px solid var(--fc-admin-border)",
-            color: "var(--fc-admin-panel-text)",
-            fontSize: "10px",
-            fontWeight: 700,
-            boxShadow: "0 12px 28px #00000010",
-            pointerEvents: "none",
-            zIndex: 3,
-          }}
-        >
-          {formatTimestamp(updates[lineKeys[hoveredLine]]) || formatTimestamp(updates[String(hoveredLine)]) || fallback}
-        </div>
-      )}
       {lines.map((line, index) => {
-        const stamp = formatTimestamp(updates[lineKeys[index]]) || formatTimestamp(updates[String(index)]) || fallback
         return (
           <div
             key={`hover-line-${index}`}
             onMouseEnter={() => setHoveredLine(index)}
             style={{
-              minHeight: "1.55em",
-              cursor: stamp ? "default" : "default",
+              minHeight: "1.35em",
+              cursor: "default",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
               borderRadius: "6px",
-              padding: "0 2px",
-              margin: "0 -2px",
-              background: hoveredLine === index ? "var(--fc-admin-selected-bg)" : "#ffffff",
-              boxShadow: hoveredLine === index ? "inset 0 0 0 1px var(--fc-admin-selected-border)" : "none",
+              padding: "0 1px",
+              margin: 0,
+              background: "transparent",
+              boxShadow: "none",
               transition: "background 120ms ease, box-shadow 120ms ease",
             }}
           >
@@ -678,11 +711,11 @@ function BlockTextBlock({
         position: "relative",
         color: "var(--fc-admin-panel-text)",
         fontSize: "14px",
-        lineHeight: 1.55,
-        padding: "10px 12px",
+        lineHeight: 1.35,
+        padding: "8px 10px",
         border: "1px solid var(--fc-admin-selected-border)",
         borderRadius: "14px",
-        background: hoveredBlockId ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)",
+        background: "var(--fc-admin-panel-soft-bg)",
       }}
       onMouseLeave={() => setHoveredBlockId("")}
       onDoubleClick={onDoubleClick}
@@ -707,13 +740,13 @@ function BlockTextBlock({
               onBlockDoubleClick(block)
             }}
             style={{
-              minHeight: "1.55em",
+              minHeight: "1.35em",
               borderRadius: "6px",
-              padding: "3px 2px",
-              margin: "1px -2px",
+              padding: "2px 1px",
+              margin: 0,
               position: "relative",
-              background: hoveredBlockId === block.id && hoveredInsertIndex === null ? "var(--fc-admin-selected-bg)" : "#ffffff",
-              boxShadow: hoveredBlockId === block.id && hoveredInsertIndex === null ? "inset 0 0 0 1px var(--fc-admin-selected-border)" : "none",
+              background: "transparent",
+              boxShadow: "none",
             }}
           >
             {editingBlockId === block.id ? (
@@ -739,7 +772,7 @@ function BlockTextBlock({
               </div>
             ) : (
               <>
-            {hoveredBlockId === block.id && hoveredInsertIndex === null && stamp ? (
+            {false && hoveredBlockId === block.id && hoveredInsertIndex === null && stamp ? (
               <span style={{ position: "absolute", right: 0, top: "-26px", padding: "5px 8px", borderRadius: "8px", background: "var(--fc-admin-panel-bg)", color: "var(--fc-admin-panel-text)", fontSize: "10px", fontWeight: 700, zIndex: 3 }}>
                 {stamp}
               </span>
@@ -770,10 +803,36 @@ function SimpleTable({
   const [editing, setEditing] = useState(false)
   const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
   const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
+  const tableRef = useRef<HTMLTableElement | null>(null)
+  const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
   useEffect(() => {
     setDraftRows(table.length ? table : [["", ""], ["", ""]])
     setDraftWidths(columnWidths || [])
   }, [table, columnWidths])
+  useEffect(() => {
+    function handleMove(event: MouseEvent) {
+      const state = dragStateRef.current
+      if (!state) return
+      const deltaPercent = (event.clientX - state.startX) / Math.max(state.tableWidth, 1) * 100
+      const next = [...state.startWidths]
+      const current = next[state.index] || 0
+      const neighbor = next[state.index + 1] || 0
+      const currentNext = Math.max(8, Math.min(current + deltaPercent, current + neighbor - 8))
+      const neighborNext = current + neighbor - currentNext
+      next[state.index] = Math.round(currentNext)
+      next[state.index + 1] = Math.round(neighborNext)
+      setDraftWidths(next)
+    }
+    function handleUp() {
+      dragStateRef.current = null
+    }
+    window.addEventListener("mousemove", handleMove)
+    window.addEventListener("mouseup", handleUp)
+    return () => {
+      window.removeEventListener("mousemove", handleMove)
+      window.removeEventListener("mouseup", handleUp)
+    }
+  }, [])
   const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
   const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
@@ -815,7 +874,7 @@ function SimpleTable({
   }
   return (
     <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+      <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
         <colgroup>
           {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
         </colgroup>
@@ -823,13 +882,37 @@ function SimpleTable({
           {rows.map((row, rowIndex) => (
             <tr key={`table-row-${rowIndex}`}>
               {Array.from({ length: columnCount }).map((_, columnIndex) => (
-                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)" }}>
+                <td key={`table-cell-${rowIndex}-${columnIndex}`} style={{ border: "1px solid var(--fc-admin-selected-border)", padding: 0, background: rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
                   <input
                     value={row[columnIndex] || ""}
                     disabled={readOnly || !editing}
                     onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
                     style={{ width: "100%", border: "none", background: "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
                   />
+                  {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
+                    <span
+                      onMouseDown={(event) => {
+                        if (!tableRef.current) return
+                        dragStateRef.current = {
+                          startX: event.clientX,
+                          startWidths: [...widths],
+                          index: columnIndex,
+                          tableWidth: tableRef.current.getBoundingClientRect().width,
+                        }
+                        event.preventDefault()
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        right: "-3px",
+                        width: "6px",
+                        height: "100%",
+                        cursor: "col-resize",
+                        background: "transparent",
+                        zIndex: 2,
+                      }}
+                    />
+                  ) : null}
                 </td>
               ))}
             </tr>
@@ -846,14 +929,7 @@ function SimpleTable({
           <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
           <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
           </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {Array.from({ length: columnCount }).map((_, index) => (
-              <label key={`width-${index}`} style={{ display: "grid", gap: "3px", color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 700 }}>
-                COL {index + 1}
-                <input type="range" min="8" max="80" value={widths[index]} onChange={(event) => setWidth(index, Number(event.target.value))} />
-              </label>
-            ))}
-          </div>
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Drag the header borders to resize columns.</div>
         </div>
       )}
       {!readOnly && !editing && (
@@ -902,14 +978,14 @@ async function fetchEntryFiles(kind: RecordKind, id: string) {
 async function fetchCompanyFiles(id: string) {
   const legacy = await supabase
     .from("cc_company_files")
-    .select("id,file_name,file_type,drive_url,drive_file_id,deleted_at")
+    .select("id,file_name,file_type,drive_url,drive_file_id,original_path,deleted_at")
     .eq("company_id", id)
     .is("deleted_at", null)
     .order("file_name", { ascending: true })
 
   return (((legacy.data as CompanyFileRecord[]) || []).map((file) => ({
     ...file,
-    folder_path: "",
+    folder_path: deriveFolderPathFromOriginalPath(file.original_path),
     source: "company" as const,
   })))
 }
@@ -933,14 +1009,14 @@ async function fetchDeletedEntryFiles(kind: RecordKind, id: string) {
 async function fetchDeletedCompanyFiles(id: string) {
   const result = await supabase
     .from("cc_company_files")
-    .select("id,file_name,file_type,drive_url,drive_file_id,deleted_at")
+    .select("id,file_name,file_type,drive_url,drive_file_id,original_path,deleted_at")
     .eq("company_id", id)
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false })
 
   return (((result.data as CompanyFileRecord[]) || []).map((file) => ({
     ...file,
-    folder_path: "",
+    folder_path: deriveFolderPathFromOriginalPath(file.original_path),
     source: "company" as const,
   })))
 }
@@ -1069,7 +1145,9 @@ export default function CountryCompanyInfoPage() {
   const [editingNestedSectionBlock, setEditingNestedSectionBlock] = useState<{ tabIndex: number; sectionIndex: number; blockId: string } | null>(null)
   const [editingMainSectionBlock, setEditingMainSectionBlock] = useState<{ sectionIndex: number; blockId: string } | null>(null)
   const [editingCountryBlockId, setEditingCountryBlockId] = useState("")
-  const [changeLog, setChangeLog] = useState<ChangeLogItem[]>([])
+  const [recentAuditLogs, setRecentAuditLogs] = useState<AuditLogRecord[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditActionId, setAuditActionId] = useState("")
   const mainEditStartRef = useRef<{ notes: string; updates: Record<string, string>; blocks: InfoBlock[] } | null>(null)
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const sectionSaveTimerRef = useRef<number | null>(null)
@@ -1092,21 +1170,6 @@ export default function CountryCompanyInfoPage() {
   const filteredAddPortCountryOptions = countryOptions
     .filter((country) => country.name.includes(addPortDraft.countryName.trim().toUpperCase()))
     .slice(0, 12)
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    try {
-      const stored = window.localStorage.getItem(CHANGE_LOG_STORAGE_KEY)
-      if (stored) setChangeLog(JSON.parse(stored).slice(0, 10))
-    } catch {
-      setChangeLog([])
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    window.localStorage.setItem(CHANGE_LOG_STORAGE_KEY, JSON.stringify(changeLog.slice(0, 10)))
-  }, [changeLog])
 
   useEffect(() => {
     if (!highlightModalOpen) return
@@ -1205,6 +1268,14 @@ export default function CountryCompanyInfoPage() {
     setMatchIndex(0)
   }, [searchInPage, selectedId, selectedKind])
 
+  useEffect(() => {
+    if (!selectedId || !selectedKind || !authenticated) {
+      setRecentAuditLogs([])
+      return
+    }
+    void loadRecentAuditLogs(selectedKind, selectedId)
+  }, [selectedId, selectedKind, authenticated])
+
   const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
   const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
   const highlightedSectionHtml = useMemo(
@@ -1244,6 +1315,25 @@ export default function CountryCompanyInfoPage() {
     setMatchCount(mainMatches.length + countryMatches.length + sectionMatches.length + fileMatches.length)
   }, [displayedInfoHtml, displayedCountryInfoHtml, highlightedSectionHtml, highlightedFileHtml, searchInPage, selectedKind])
 
+  useEffect(() => {
+    const marks = Array.from(document.querySelectorAll('mark[data-search-match="true"]')) as HTMLElement[]
+    marks.forEach((mark, index) => {
+      if (index === matchIndex && searchInPage.trim()) {
+        mark.style.background = "rgba(255, 204, 102, 0.95)"
+        mark.style.outline = "2px solid rgba(196, 116, 0, 0.35)"
+        mark.style.scrollMarginBlock = "160px"
+      } else {
+        mark.style.background = "rgba(255, 243, 176, 0.55)"
+        mark.style.outline = "none"
+      }
+    })
+    if (!marks.length || !searchInPage.trim()) return
+    const active = marks[Math.min(matchIndex, marks.length - 1)]
+    if (active) {
+      active.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" })
+    }
+  }, [matchIndex, matchCount, searchInPage, activeInfoTab, selectedId])
+
   function goToPreviousMatch() {
     setMatchIndex((prev) => (matchCount ? (prev - 1 + matchCount) % matchCount : 0))
   }
@@ -1257,38 +1347,50 @@ export default function CountryCompanyInfoPage() {
     setCountryOptions(((data as Array<{ id: string; name: string }>) || []).map((item) => ({ id: item.id, name: item.name.toUpperCase() })))
   }
 
-  function addChangeLog(item: Omit<ChangeLogItem, "id" | "at">) {
-    setChangeLog((prev) => [{ ...item, id: `${Date.now()}-${Math.random()}`, at: new Date().toISOString() }, ...prev].slice(0, 10))
-  }
-
-  function addSimpleChangeLog(label: string) {
-    if (!selectedKind || !selectedId) return
-    addChangeLog({
-      label,
-      entryKind: selectedKind,
-      entryId: selectedId,
-      field: "notes",
-      before: currentRecord.notes || "",
-      after: currentRecord.notes || "",
-    })
-  }
-
-  async function undoChangeLogItem(entry: ChangeLogItem) {
-    const table = entry.entryKind === "company" ? "cc_companies" : entry.entryKind === "country" ? "cc_countries" : "cc_ports"
-    if (entry.field === "notes") {
-      const { error } = await supabase.from(table).update({ notes: entry.before }).eq("id", entry.entryId)
-      if (error) return setMessage("Unable to undo.")
-      if (entry.entryId === selectedId) setCurrentRecord((prev) => ({ ...prev, notes: entry.before }))
-    } else if (entry.sectionIndex !== undefined) {
-      const next = [...highlights]
-      if (entry.entryId === selectedId && next[entry.sectionIndex]) {
-        next[entry.sectionIndex] = { ...next[entry.sectionIndex], info: entry.before }
-        setHighlights(next)
-        await persistHighlights(next)
-      }
+  async function loadRecentAuditLogs(kind: RecordKind, id: string) {
+    setAuditLoading(true)
+    try {
+      const tableName = kind === "company" ? "cc_companies" : kind === "country" ? "cc_countries" : "cc_ports"
+      const response = await fetch(`/api/admin/audit-logs?table=${tableName}&limit=120`)
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message || "Unable to load audit logs.")
+      const logs = ((payload.logs || []) as AuditLogRecord[])
+        .filter((log) => String(log.recordPk?.id || "") === id)
+        .slice(0, 12)
+      setRecentAuditLogs(logs)
+    } catch (error) {
+      setRecentAuditLogs([])
+      setMessage(error instanceof Error ? error.message : "Unable to load audit logs.")
+    } finally {
+      setAuditLoading(false)
     }
-    setMessage("Undo complete.")
   }
+
+  async function undoAuditEntry(logId: string) {
+    setAuditActionId(logId)
+    try {
+      const response = await fetch("/api/admin/audit-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo", id: logId }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message || "Unable to undo change.")
+      if (selectedKind && selectedId) {
+        await loadSelected(selectedKind, selectedId)
+        await loadRecentAuditLogs(selectedKind, selectedId)
+      }
+      setMessage("Undo complete.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to undo change.")
+    } finally {
+      setAuditActionId("")
+    }
+  }
+
+  function addChangeLog(_: unknown) {}
+
+  function addSimpleChangeLog(_: string) {}
 
   async function finishMainInfoEditing() {
     if (!selectedId || !selectedKind) return
@@ -1723,9 +1825,10 @@ export default function CountryCompanyInfoPage() {
     if (error || !data) throw error || new Error("Unable to load company")
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
-    setFiles([...filesResult, ...manualFilesResult])
+    const mergedFiles = [...filesResult, ...manualFilesResult]
+    setFiles(mergedFiles)
     setDeletedFiles([...deletedLegacyFilesResult, ...deletedManualFilesResult].sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || "")))
-    setFolders(foldersResult)
+    setFolders(mergeFolderRecords(foldersResult, mergedFiles))
     setCurrentFolderPath("")
     setCurrentCountryPorts([])
     const summaryMeta = parseSummaryMeta((data as BaseRecord).summary)
@@ -2351,6 +2454,7 @@ export default function CountryCompanyInfoPage() {
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
       setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+      setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
       const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
@@ -2380,11 +2484,44 @@ export default function CountryCompanyInfoPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || "Unable to create folder.")
       const nextFolder = data.folder as EntryFolderRecord
-      setFolders((prev) => [...prev, nextFolder].sort((a, b) => joinFolderPath(a.folder_path, a.name).localeCompare(joinFolderPath(b.folder_path, b.name))))
+      setFolders((prev) => mergeFolderRecords([...prev.filter((folder) => !folder.id.startsWith("virtual:")), nextFolder], files))
       setCurrentFolderPath(joinFolderPath(nextFolder.folder_path, nextFolder.name))
       setMessage("Folder created.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create folder.")
+    }
+  }
+
+  async function renameFolder(folder: EntryFolderRecord) {
+    if (folder.id.startsWith("virtual:")) {
+      setMessage("Imported company folders cannot be renamed here yet.")
+      return
+    }
+    const nextName = window.prompt("Folder name", folder.name)?.trim()
+    if (!nextName || nextName === folder.name) return
+    try {
+      const response = await fetch("/api/ccinfo/files", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "renameFolder",
+          folderId: folder.id,
+          name: nextName,
+          entryKind: selectedKind,
+          entryId: selectedId,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || "Unable to rename folder.")
+      const refreshedFiles = selectedId && selectedKind ? await refreshFiles(selectedKind, selectedId) : files
+      setFiles(refreshedFiles)
+      setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")).map((item) => item.id === folder.id ? { ...item, name: nextName } : item), refreshedFiles))
+      const previousPath = joinFolderPath(folder.folder_path, folder.name)
+      const nextPath = joinFolderPath(folder.folder_path, nextName)
+      if (currentFolderPath === previousPath) setCurrentFolderPath(nextPath)
+      setMessage("Folder renamed.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to rename folder.")
     }
   }
 
@@ -2450,7 +2587,9 @@ export default function CountryCompanyInfoPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || "Unable to restore file.")
       if (selectedId && selectedKind) {
-        setFiles(await refreshFiles(selectedKind, selectedId))
+        const refreshedFiles = await refreshFiles(selectedKind, selectedId)
+        setFiles(refreshedFiles)
+        setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
         setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       }
       setMessage("File restored.")
@@ -2479,6 +2618,7 @@ export default function CountryCompanyInfoPage() {
       if (!response.ok) throw new Error(data.message || "Unable to move file.")
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
+      setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
       setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       setMessage("File moved.")
     } catch (error) {
@@ -2692,16 +2832,28 @@ export default function CountryCompanyInfoPage() {
                   <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
                     <HighlightedInlineText value={folder.name} query={searchInPage} />
                   </span>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      void deleteFolder(folder)
-                    }}
-                    style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
-                  >
-                    Delete
-                  </button>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void renameFolder(folder)
+                      }}
+                      style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void deleteFolder(folder)
+                      }}
+                      style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -2877,7 +3029,7 @@ export default function CountryCompanyInfoPage() {
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 42px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
                 <a href="/admin" className="fc-admin-nav-button" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
-                  ← Back To Admin
+                  Back
                 </a>
                 <div style={{ position: "relative" }}>
                   <button
@@ -2942,13 +3094,28 @@ export default function CountryCompanyInfoPage() {
                   )}
                   <div style={{ display: "grid", gap: "6px", borderTop: "1px solid var(--fc-admin-border-soft)", paddingTop: "8px" }}>
                       <div style={{ fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>Recent Changes</div>
-                      {changeLog.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
-                      {changeLog.map((entry) => (
+                      {auditLoading && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Loading changes...</div>}
+                      {!auditLoading && recentAuditLogs.length === 0 && <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>No recent changes yet.</div>}
+                      {recentAuditLogs.map((entry) => (
                         <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: "var(--fc-admin-panel-soft-bg)" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</div>
-                            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>{formatTimestamp(entry.at)}</div>
+                            <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {entry.operation} {entry.changedFields.length ? entry.changedFields.join(", ") : "record"}
+                            </div>
+                            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", marginTop: "2px" }}>
+                              {formatTimestamp(entry.occurredAt)}{entry.actorName ? ` · ${entry.actorName}` : ""}{entry.undoneAt ? " · undone" : ""}
+                            </div>
                           </div>
+                          {!entry.undoOfLogId && !entry.undoneAt ? (
+                            <button
+                              type="button"
+                              onClick={() => void undoAuditEntry(entry.id)}
+                              disabled={auditActionId === entry.id}
+                              style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px", opacity: auditActionId === entry.id ? 0.6 : 1 }}
+                            >
+                              {auditActionId === entry.id ? "Undoing..." : "Undo"}
+                            </button>
+                          ) : null}
                         </div>
                       ))}
                   </div>

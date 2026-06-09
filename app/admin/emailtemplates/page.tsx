@@ -584,7 +584,7 @@ export default function EmailTemplatesAdminPage() {
           <h1 style={{ marginTop: 0 }}>Email Templates</h1>
           <p>Please log in from the admin homepage first.</p>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Back to Admin
+            Back
           </button>
         </div>
       </div>
@@ -611,7 +611,7 @@ export default function EmailTemplatesAdminPage() {
           <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>EMAIL TEMPLATES</h1>
         </div>
         <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-          Back To Admin
+          Back
         </button>
       </header>
       <div

@@ -310,7 +310,7 @@ export default function AdminPage() {
                   boxShadow: "none",
                 }}
               >
-                Back To Bunker Map
+                Back
               </button>
 
               {message && (

@@ -794,7 +794,7 @@ export default function AdminPage() {
               }}
             >
               <a href="/admin" className="fc-admin-nav-button" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
-                ← Back To Admin
+                Back
               </a>
               <button
                 onClick={handlePublishChina}

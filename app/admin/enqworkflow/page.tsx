@@ -409,7 +409,7 @@ export default function EnquiryWorkflowPage() {
               href="/admin"
               style={{ ...buttonStyle, display: "block", textAlign: "center", marginBottom: "18px" }}
             >
-              ← Back To Admin
+              Back
             </a>
           </aside>
         )}
