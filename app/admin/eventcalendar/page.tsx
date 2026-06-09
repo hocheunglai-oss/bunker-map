@@ -40,7 +40,8 @@ type LeaveRequestDraft = {
 }
 type RecurrentDraft = ManagedEvent & {
   frequency: RecurrentFrequency
-  count: number
+  weeklyDays: number[]
+  monthlyDay: number
 }
 type ManagedEvent = OfficeCalendarEvent & {
   eventType?: EventCategory
@@ -208,6 +209,12 @@ function formatGoogleEventTime(event: GoogleCalendarEvent) {
   return event.startTime || event.endTime || "-"
 }
 
+function addDaysToKey(dateKey: string, days: number) {
+  const date = parseLocalDate(dateKey)
+  date.setDate(date.getDate() + days)
+  return toDateKey(date)
+}
+
 function getMeetingRoomStyle(event: GoogleCalendarEvent) {
   const title = `${event.title} ${event.sourceTitle}`.toUpperCase()
 
@@ -332,11 +339,13 @@ function buildBlankEvent(todayKey: string): ManagedEvent {
 }
 
 function buildBlankRecurrentEvent(todayKey: string): RecurrentDraft {
+  const today = parseLocalDate(todayKey)
   return {
     ...buildBlankEvent(todayKey),
     id: `recurrent-${Date.now()}`,
     frequency: "weekly",
-    count: 4,
+    weeklyDays: [today.getDay()],
+    monthlyDay: today.getDate(),
   }
 }
 
@@ -352,13 +361,15 @@ function buildBlankLeaveRequest(todayKey: string, people: string[]): LeaveReques
   }
 }
 
-function addFrequency(dateKey: string, frequency: RecurrentFrequency, steps: number) {
-  const date = parseLocalDate(dateKey)
-  if (frequency === "daily") date.setDate(date.getDate() + steps)
-  if (frequency === "weekly") date.setDate(date.getDate() + steps * 7)
-  if (frequency === "monthly") date.setMonth(date.getMonth() + steps)
-  return toDateKey(date)
-}
+const weekDayButtons = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+]
 
 function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) {
   const seen = new Set(current.map((event) => `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`))
@@ -380,6 +391,7 @@ export default function EventCalendarPage() {
   const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
+  const tomorrowKey = addDaysToKey(todayKey, 1)
   const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
@@ -622,16 +634,14 @@ export default function EventCalendarPage() {
       .filter((event) => (viewMode === "past" ? isPastEvent(event, todayKey) : !isPastEvent(event, todayKey)))
       .sort(
         (a, b) =>
-          a.startDate.localeCompare(b.startDate) ||
-          (a.sourceRow || Number.MAX_SAFE_INTEGER) - (b.sourceRow || Number.MAX_SAFE_INTEGER) ||
+          (viewMode === "past" ? b.endDate.localeCompare(a.endDate) : a.startDate.localeCompare(b.startDate)) ||
+          (viewMode === "past" ? b.startDate.localeCompare(a.startDate) : 0) ||
+          (viewMode === "past"
+            ? (b.sourceRow || Number.MIN_SAFE_INTEGER) - (a.sourceRow || Number.MIN_SAFE_INTEGER)
+            : (a.sourceRow || Number.MAX_SAFE_INTEGER) - (b.sourceRow || Number.MAX_SAFE_INTEGER)) ||
           a.title.localeCompare(b.title)
       )
   }, [events, todayKey, viewMode])
-
-  const nextUpcomingDateKey = useMemo(() => {
-    if (viewMode !== "upcoming") return ""
-    return visibleEvents.find((event) => event.startDate > todayKey)?.startDate || ""
-  }, [todayKey, viewMode, visibleEvents])
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
@@ -741,20 +751,45 @@ export default function EventCalendarPage() {
   function saveRecurrentEvents() {
     if (!window.confirm("Are you sure you want to create these recurrent events?")) return
 
-    const count = Math.max(1, Math.min(52, Number(draftRecurrentEvent.count) || 1))
-    const baseStart = draftRecurrentEvent.startDate
-    const baseEnd = draftRecurrentEvent.endDate >= draftRecurrentEvent.startDate
-      ? draftRecurrentEvent.endDate
-      : draftRecurrentEvent.startDate
+    const rangeStart = parseLocalDate(draftRecurrentEvent.startDate)
+    const rangeEnd = parseLocalDate(
+      draftRecurrentEvent.endDate >= draftRecurrentEvent.startDate ? draftRecurrentEvent.endDate : draftRecurrentEvent.startDate
+    )
+    const occurrenceDates: string[] = []
 
-    const nextEvents = Array.from({ length: count }, (_, index) => ({
+    if (draftRecurrentEvent.frequency === "daily") {
+      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setDate(cursor.getDate() + 1)) {
+        occurrenceDates.push(toDateKey(cursor))
+      }
+    }
+
+    if (draftRecurrentEvent.frequency === "weekly") {
+      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setDate(cursor.getDate() + 1)) {
+        if (draftRecurrentEvent.weeklyDays.includes(cursor.getDay())) {
+          occurrenceDates.push(toDateKey(cursor))
+        }
+      }
+    }
+
+    if (draftRecurrentEvent.frequency === "monthly") {
+      const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1)
+      while (cursor <= rangeEnd) {
+        const candidate = new Date(cursor.getFullYear(), cursor.getMonth(), draftRecurrentEvent.monthlyDay)
+        if (candidate.getMonth() === cursor.getMonth() && candidate >= rangeStart && candidate <= rangeEnd) {
+          occurrenceDates.push(toDateKey(candidate))
+        }
+        cursor.setMonth(cursor.getMonth() + 1)
+      }
+    }
+
+    const nextEvents = occurrenceDates.map((dateKey, index) => ({
       ...draftRecurrentEvent,
       id: `recurrent-${Date.now()}-${index}`,
       title: draftRecurrentEvent.title.trim() || "NEW EVENT",
       people: normalizePeople(draftRecurrentEvent.people),
       uncertainPeople: normalizePeople(draftRecurrentEvent.uncertainPeople || []),
-      startDate: addFrequency(baseStart, draftRecurrentEvent.frequency, index),
-      endDate: addFrequency(baseEnd, draftRecurrentEvent.frequency, index),
+      startDate: dateKey,
+      endDate: dateKey,
       eventType: draftRecurrentEvent.eventType || "Unclassified",
     }))
 
@@ -816,6 +851,20 @@ export default function EventCalendarPage() {
       return {
         ...current,
         uncertainPeople: (current.uncertainPeople || []).filter((item) => item !== person),
+      }
+    })
+  }
+
+  function toggleDraftWeeklyDay(day: number) {
+    setDraftRecurrentEvent((current) => {
+      const hasDay = current.weeklyDays.includes(day)
+      const nextDays = hasDay
+        ? current.weeklyDays.filter((item) => item !== day)
+        : [...current.weeklyDays, day].sort((a, b) => a - b)
+
+      return {
+        ...current,
+        weeklyDays: nextDays.length ? nextDays : [day],
       }
     })
   }
@@ -997,9 +1046,9 @@ export default function EventCalendarPage() {
                   className="fc-admin-menu-button"
                   style={{
                     ...buttonStyle,
-                    width: "36px",
+                    minWidth: "44px",
                     height: "36px",
-                    padding: 0,
+                    padding: "0 12px",
                     display: "inline-grid",
                     placeItems: "center",
                   }}
@@ -1109,7 +1158,7 @@ export default function EventCalendarPage() {
                     setAddMenuOpen((current) => !current)
                   }}
                   aria-label="Add"
-                  style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}
+                  style={{ ...buttonStyle, minWidth: "44px", height: "34px", padding: "0 12px", fontSize: "22px" }}
                 >
                   +
                 </button>
@@ -1250,18 +1299,17 @@ export default function EventCalendarPage() {
                   const meetingRoomBooked = isMeetingRoomBooked(event)
                   const rowHighlighted =
                     selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
-                  const rowStartKey = event.startDate
-                  const isTodayEvent = rowStartKey === todayKey
-                  const isNextUpcomingEvent = !isTodayEvent && rowStartKey === nextUpcomingDateKey
+                  const isTodayEvent = event.startDate <= todayKey && event.endDate >= todayKey
+                  const isTomorrowEvent = !isTodayEvent && event.startDate <= tomorrowKey && event.endDate >= tomorrowKey
                   const rowBackground = isTodayEvent
                     ? "#fff8e5"
-                    : isNextUpcomingEvent
-                      ? "#fffced"
+                    : isTomorrowEvent
+                      ? "#fff1df"
                       : "var(--fc-row-bg)"
                   const rowBorder = isTodayEvent
                     ? "#f7b500"
-                    : isNextUpcomingEvent
-                      ? "#f4d35e"
+                    : isTomorrowEvent
+                      ? "#ff9f1c"
                       : "var(--fc-row-border)"
 
                   return (
@@ -1501,44 +1549,76 @@ export default function EventCalendarPage() {
                 style={inputStyle}
               />
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: "10px", marginBottom: "10px" }}>
-              <div>
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+                Repeat
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+                {(["daily", "weekly", "monthly"] as RecurrentFrequency[]).map((frequency) => {
+                  const active = draftRecurrentEvent.frequency === frequency
+                  return (
+                    <button
+                      key={frequency}
+                      type="button"
+                      onClick={() => setDraftRecurrentEvent((current) => ({ ...current, frequency }))}
+                      style={{
+                        ...buttonStyle,
+                        background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
+                        color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {frequency}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            {draftRecurrentEvent.frequency === "weekly" && (
+              <div style={{ marginBottom: "10px" }}>
                 <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
-                  Repeat
+                  Repeat On
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
-                  {(["daily", "weekly", "monthly"] as RecurrentFrequency[]).map((frequency) => {
-                    const active = draftRecurrentEvent.frequency === frequency
+                  {weekDayButtons.map((day) => {
+                    const active = draftRecurrentEvent.weeklyDays.includes(day.value)
                     return (
                       <button
-                        key={frequency}
+                        key={day.value}
                         type="button"
-                        onClick={() => setDraftRecurrentEvent((current) => ({ ...current, frequency }))}
+                        onClick={() => toggleDraftWeeklyDay(day.value)}
                         style={{
                           ...buttonStyle,
                           background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)",
                           color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
-                          textTransform: "capitalize",
+                          minWidth: "46px",
                         }}
                       >
-                        {frequency}
+                        {day.label}
                       </button>
                     )
                   })}
                 </div>
               </div>
-              <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                Times
+            )}
+            {draftRecurrentEvent.frequency === "monthly" && (
+              <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
+                Day Of Month
                 <input
                   type="number"
                   min={1}
-                  max={52}
-                  value={draftRecurrentEvent.count}
-                  onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, count: Number(event.target.value) }))}
+                  max={31}
+                  value={draftRecurrentEvent.monthlyDay}
+                  onChange={(event) =>
+                    setDraftRecurrentEvent((current) => ({
+                      ...current,
+                      monthlyDay: Math.max(1, Math.min(31, Number(event.target.value) || 1)),
+                    }))
+                  }
                   style={inputStyle}
                 />
               </label>
-            </div>
+            )}
             <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
               Attending
             </div>
