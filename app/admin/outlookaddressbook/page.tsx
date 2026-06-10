@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
@@ -410,6 +410,10 @@ export default function OutlookAddressBookPage() {
   const [exchangeSyncing, setExchangeSyncing] = useState(false)
   const [exchangeButtonLabel, setExchangeButtonLabel] = useState("Sync Exchange")
   const [exchangeSyncStartedAt, setExchangeSyncStartedAt] = useState<string | null>(null)
+  const contactDraftsRef = useRef<Record<string, SharedContact>>({})
+  const groupDraftsRef = useRef<Record<string, SharedGroup>>({})
+  const contactSaveChainsRef = useRef<Record<string, Promise<void>>>({})
+  const groupSaveChainsRef = useRef<Record<string, Promise<void>>>({})
 
   useEffect(() => {
     document.title = "Outlook Address Book - FC Uno"
@@ -520,6 +524,10 @@ export default function OutlookAddressBookPage() {
         loadTable<SharedGroup>("shared_addressbook_groups", "name"),
         loadTable<GroupMember>("shared_addressbook_group_members", "source_book"),
       ])
+      contactDraftsRef.current = {}
+      groupDraftsRef.current = {}
+      contactSaveChainsRef.current = {}
+      groupSaveChainsRef.current = {}
       setContacts(contactRows)
       setGroups(groupRows)
       setMembers(memberRows)
@@ -580,59 +588,92 @@ export default function OutlookAddressBookPage() {
     }
   }
 
+  function queueEntitySave(chainsRef: { current: Record<string, Promise<void>> }, entityId: string, operation: () => Promise<void>) {
+    const previous = chainsRef.current[entityId] || Promise.resolve()
+    const chained = previous.catch(() => undefined).then(operation)
+    let tracked: Promise<void>
+    tracked = chained.finally(() => {
+      if (chainsRef.current[entityId] === tracked) {
+        delete chainsRef.current[entityId]
+      }
+    })
+    chainsRef.current[entityId] = tracked
+    return tracked
+  }
+
+  async function waitForPendingSaves() {
+    while (true) {
+      const pending = [...Object.values(contactSaveChainsRef.current), ...Object.values(groupSaveChainsRef.current)]
+      if (pending.length === 0) return
+      await Promise.all(pending)
+    }
+  }
+
+  function latestContacts() {
+    return contacts.map((contact) => contactDraftsRef.current[contact.id] || contact)
+  }
+
   async function saveContact(partial: Partial<SharedContact>) {
     if (!selectedContact) return
-    const nextContact = { ...selectedContact, ...partial }
+    const nextContact = { ...(contactDraftsRef.current[selectedContact.id] || selectedContact), ...partial }
+    contactDraftsRef.current[selectedContact.id] = nextContact
     setContacts((current) => current.map((contact) => (contact.id === nextContact.id ? nextContact : contact)))
     markExchangeNeedsSync()
     setSaving("saving")
     setMessage("")
-    const { error } = await supabase.from("shared_addressbook_contacts").upsert(nextContact, { onConflict: "id" })
-    if (error) {
-      setSaving("failed")
-      setMessage(error.message)
-      return
-    }
-    const snapshot = contactExchangeSnapshot(nextContact)
-    await enqueueExchangeSyncChange({
-      action: "update_contact",
-      entityType: "contact",
-      entityId: nextContact.id,
-      entityEmail: snapshot.ExternalEmailAddress,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.DisplayName,
-      payload: { contact: snapshot },
-    })
-    setSaving("saved")
+    void queueEntitySave(contactSaveChainsRef, nextContact.id, async () => {
+      const contactToSave = contactDraftsRef.current[nextContact.id] || nextContact
+      const { error } = await supabase.from("shared_addressbook_contacts").upsert(contactToSave, { onConflict: "id" })
+      if (error) {
+        setSaving("failed")
+        setMessage(error.message)
+        throw error
+      }
+      const snapshot = contactExchangeSnapshot(contactToSave)
+      await enqueueExchangeSyncChange({
+        action: "update_contact",
+        entityType: "contact",
+        entityId: contactToSave.id,
+        entityEmail: snapshot.ExternalEmailAddress,
+        entityAlias: snapshot.Alias,
+        displayName: snapshot.DisplayName,
+        payload: { contact: snapshot },
+      })
+      setSaving("saved")
+    }).catch(() => undefined)
   }
 
   async function saveGroup(partial: Partial<SharedGroup>) {
     if (!selectedGroup) return
     const nextGroup = {
-      ...selectedGroup,
+      ...(groupDraftsRef.current[selectedGroup.id] || selectedGroup),
       ...partial,
       member_count: members.filter((member) => member.group_id === selectedGroup.id).length,
     }
+    groupDraftsRef.current[selectedGroup.id] = nextGroup
     setGroups((current) => current.map((group) => (group.id === nextGroup.id ? nextGroup : group)))
     markExchangeNeedsSync()
     setSaving("saving")
     setMessage("")
-    const { error } = await supabase.from("shared_addressbook_groups").upsert(nextGroup, { onConflict: "id" })
-    if (error) {
-      setSaving("failed")
-      setMessage(error.message)
-      return
-    }
-    const snapshot = groupExchangeSnapshot(nextGroup)
-    await enqueueExchangeSyncChange({
-      action: "update_group",
-      entityType: "group",
-      entityId: nextGroup.id,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.GroupName,
-      payload: { group: snapshot },
-    })
-    setSaving("saved")
+    void queueEntitySave(groupSaveChainsRef, nextGroup.id, async () => {
+      const groupToSave = groupDraftsRef.current[nextGroup.id] || nextGroup
+      const { error } = await supabase.from("shared_addressbook_groups").upsert(groupToSave, { onConflict: "id" })
+      if (error) {
+        setSaving("failed")
+        setMessage(error.message)
+        throw error
+      }
+      const snapshot = groupExchangeSnapshot(groupToSave)
+      await enqueueExchangeSyncChange({
+        action: "update_group",
+        entityType: "group",
+        entityId: groupToSave.id,
+        entityAlias: snapshot.Alias,
+        displayName: snapshot.GroupName,
+        payload: { group: snapshot },
+      })
+      setSaving("saved")
+    }).catch(() => undefined)
   }
 
   async function createContact() {
@@ -657,6 +698,7 @@ export default function OutlookAddressBookPage() {
       setMessage(error.message)
       return
     }
+    contactDraftsRef.current[id] = contact
     const snapshot = contactExchangeSnapshot(contact)
     await enqueueExchangeSyncChange({
       action: "create_contact",
@@ -691,6 +733,7 @@ export default function OutlookAddressBookPage() {
       setMessage(error.message)
       return
     }
+    groupDraftsRef.current[id] = group
     const snapshot = groupExchangeSnapshot(group)
     await enqueueExchangeSyncChange({
       action: "create_group",
@@ -853,20 +896,21 @@ export default function OutlookAddressBookPage() {
   }
 
   async function syncExchange() {
-    const missingEmailExamples = contacts
-      .filter((contact) => cleanText(contact.display_name) && !cleanText(contact.primary_email))
-      .slice(0, 3)
-      .map((contact) => contact.display_name)
-    if (missingEmailExamples.length > 0) {
-      setMessage(`Some contacts have no email address, so Exchange cannot create them. Example: ${missingEmailExamples.join(", ")}`)
-    } else {
-      setMessage("")
-    }
     const startedAt = new Date().toISOString()
     setExchangeSyncStartedAt(startedAt)
     setExchangeSyncing(true)
     setExchangeButtonLabel("Syncing")
     try {
+      await waitForPendingSaves()
+      const missingEmailExamples = latestContacts()
+        .filter((contact) => cleanText(contact.display_name) && !cleanText(contact.primary_email))
+        .slice(0, 3)
+        .map((contact) => contact.display_name)
+      if (missingEmailExamples.length > 0) {
+        setMessage(`Some contacts have no email address, so Exchange cannot create them. Example: ${missingEmailExamples.join(", ")}`)
+      } else {
+        setMessage("")
+      }
       const response = await fetch("/api/outlook-addressbook/exchange-sync", { method: "POST" })
       const data = await response.json()
       if (!response.ok) {
