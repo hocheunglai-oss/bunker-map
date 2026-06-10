@@ -1,9 +1,9 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { getAdminSession } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const STORE_KEY = "outlook-addressbook-exchange-sync"
+const ACTIVE_SYNC_WINDOW_MS = 30 * 60 * 1000
 
 type ExchangeSyncStatus = {
   status: "not_configured" | "queued" | "running" | "completed" | "failed"
@@ -26,10 +26,11 @@ function getSupabaseClient() {
 }
 
 async function requireAdminAccess() {
-  const cookieStore = await cookies()
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
+  const session = await getAdminSession()
+  if (!session.authenticated) {
     throw new Error("Unauthorized")
   }
+  return session
 }
 
 async function loadStatus(): Promise<ExchangeSyncStatus | null> {
@@ -42,6 +43,12 @@ async function loadStatus(): Promise<ExchangeSyncStatus | null> {
 
   if (error) throw error
   return (data?.payload as ExchangeSyncStatus | null) || null
+}
+
+function isActiveSync(status: ExchangeSyncStatus | null) {
+  if (!status || !["queued", "running"].includes(status.status)) return false
+  const requestedAtMs = status.requestedAt ? Date.parse(status.requestedAt) : NaN
+  return Number.isFinite(requestedAtMs) && Date.now() - requestedAtMs < ACTIVE_SYNC_WINDOW_MS
 }
 
 async function saveStatus(payload: ExchangeSyncStatus) {
@@ -78,10 +85,18 @@ export async function GET() {
 
 export async function POST() {
   try {
-    await requireAdminAccess()
+    const session = await requireAdminAccess()
     const webhookUrl = process.env.EXCHANGE_SYNC_WEBHOOK_URL
     if (!webhookUrl) {
       return NextResponse.json({ message: "EXCHANGE_SYNC_WEBHOOK_URL is not configured." }, { status: 400 })
+    }
+
+    const currentStatus = await loadStatus()
+    if (isActiveSync(currentStatus)) {
+      return NextResponse.json({
+        ...currentStatus,
+        message: "Exchange sync is already queued or running. Wait for the current Azure Automation job to finish before starting another sync.",
+      }, { status: 202 })
     }
 
     const requestedAt = new Date().toISOString()
@@ -90,7 +105,10 @@ export async function POST() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source: "fcuno-outlook-addressbook",
+        syncMode: "incremental",
         requestedAt,
+        requestedBy: session.displayName || session.username || "Admin",
+        requestedByEmail: session.username?.includes("@") ? session.username : null,
       }),
     })
     const text = await response.text()
