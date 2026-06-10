@@ -119,6 +119,23 @@ function Normalize-Email($Value) {
   return $text
 }
 
+function Has-MapKey($Map, [string]$Key) {
+  if (-not $Map -or -not $Key) { return $false }
+  if ($Map -is [hashtable] -or $Map -is [System.Collections.IDictionary]) {
+    return $Map.ContainsKey($Key)
+  }
+  $property = $Map.PSObject.Properties[$Key]
+  return $null -ne $property
+}
+
+function Get-MapValue($Map, [string]$Key) {
+  if (-not (Has-MapKey $Map $Key)) { return $null }
+  if ($Map -is [hashtable] -or $Map -is [System.Collections.IDictionary]) {
+    return $Map[$Key]
+  }
+  return $Map.PSObject.Properties[$Key].Value
+}
+
 function Get-RecipientEmail($Recipient) {
   if ($null -eq $Recipient) { return "" }
   $candidates = @(
@@ -170,7 +187,7 @@ function Get-ExchangeAlias($Value, $Fallback) {
 function Get-UniqueAlias($BaseAlias, [hashtable]$SeenAliases) {
   $alias = $BaseAlias
   $index = 2
-  while ($SeenAliases.ContainsKey($alias)) {
+  while ((Has-MapKey $SeenAliases $alias)) {
     $suffix = "-$index"
     $maxLength = 64 - $suffix.Length
     $alias = $BaseAlias.Substring(0, [Math]::Min($BaseAlias.Length, $maxLength)) + $suffix
@@ -210,7 +227,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
 
   foreach ($contact in $Contacts) {
     $email = (Clean-Text $contact.primary_email).ToLower()
-    if (-not $email -or $seenEmails.ContainsKey($email)) { continue }
+    if (-not $email -or (Has-MapKey $seenEmails $email)) { continue }
 
     $displayName = Clean-Text $(if ($contact.display_name) { $contact.display_name } else { $email })
     $aliasSeed = if ($contact.nickname) { $contact.nickname } else { $displayName }
@@ -256,7 +273,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     $contact = $contactById[$member.contact_id]
     if (-not $group -or -not $contact) { continue }
     $key = "$($group.Alias)`0$($contact.ExternalEmailAddress)"
-    if ($seenMembers.ContainsKey($key)) { continue }
+    if ((Has-MapKey $seenMembers $key)) { continue }
     $seenMembers[$key] = $true
     $group.MemberCount = [int]$group.MemberCount + 1
     $memberRows += [pscustomobject]@{
@@ -293,7 +310,7 @@ function Encode-QueryValue($Value) {
 }
 
 function Increment-Stat([hashtable]$Stats, $Name, $By = 1) {
-  if (-not $Stats.ContainsKey($Name)) { $Stats[$Name] = 0 }
+  if (-not (Has-MapKey $Stats $Name)) { $Stats[$Name] = 0 }
   $Stats[$Name] = [int]$Stats[$Name] + [int]$By
 }
 
@@ -354,7 +371,7 @@ function Mark-SupersededQueueRows($AllRows, $EffectiveRows, [hashtable]$Stats) {
   }
   foreach ($row in $AllRows) {
     $rowId = Clean-Text $row.id
-    if ($rowId -and -not $effectiveIds.ContainsKey($rowId)) {
+    if ($rowId -and -not (Has-MapKey $effectiveIds $rowId)) {
       Update-ExchangeQueueRow $rowId @{
         status = "skipped"
         error_message = "Skipped because a newer pending change exists for the same entity."
@@ -523,7 +540,7 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
   $currentMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
   foreach ($currentMember in $currentMembers) {
     $currentEmail = Get-RecipientEmail $currentMember
-    if ($currentEmail -and -not $desiredMembers.ContainsKey($currentEmail)) {
+    if ($currentEmail -and -not (Has-MapKey $desiredMembers $currentEmail)) {
       Remove-DistributionGroupMember -Identity $Group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
       Increment-Stat $Stats "removedMembers"
     }
@@ -666,7 +683,7 @@ function Escape-Html($Value) {
 
 function Add-NotificationRecipient([hashtable]$Seen, [System.Collections.ArrayList]$Recipients, $Value) {
   $email = Normalize-Email $Value
-  if ($email -and $email -match "^[^@\s]+@[^@\s]+\.[^@\s]+$" -and -not $Seen.ContainsKey($email)) {
+  if ($email -and $email -match "^[^@\s]+@[^@\s]+\.[^@\s]+$" -and -not (Has-MapKey $Seen $email)) {
     $Seen[$email] = $true
     [void]$Recipients.Add($email)
   }
@@ -675,7 +692,7 @@ function Add-NotificationRecipient([hashtable]$Seen, [System.Collections.ArrayLi
 function Get-DetailValue($Details, [string]$Key) {
   if (-not $Details) { return $null }
   if ($Details -is [hashtable] -or $Details -is [System.Collections.IDictionary]) {
-    if ($Details.ContainsKey($Key)) { return $Details[$Key] }
+    if ((Has-MapKey $Details $Key)) { return (Get-MapValue $Details $Key) }
     return $null
   }
   $property = $Details.PSObject.Properties[$Key]
@@ -818,7 +835,7 @@ try {
   }
   foreach ($member in $exchangeRows.Members) {
     $alias = (Clean-Text $member.GroupAlias).ToLower()
-    if (-not $desiredMembersByGroup.ContainsKey($alias)) {
+    if (-not (Has-MapKey $desiredMembersByGroup $alias)) {
       $desiredMembersByGroup[$alias] = @{}
     }
     $desiredMembersByGroup[$alias][(Normalize-Email $member.MemberEmail)] = $true
@@ -886,7 +903,7 @@ try {
     $currentMembers = @(Get-DistributionGroupMember -Identity $group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
     foreach ($currentMember in $currentMembers) {
       $currentEmail = Get-RecipientEmail $currentMember
-      if ($currentEmail -and -not $desiredMembers.ContainsKey($currentEmail)) {
+      if ($currentEmail -and -not (Has-MapKey $desiredMembers $currentEmail)) {
         try {
           Remove-DistributionGroupMember -Identity $group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
           $removedMembers += 1
@@ -901,7 +918,7 @@ try {
   $managedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
   foreach ($managedGroup in $managedGroups) {
     $alias = (Clean-Text $managedGroup.Alias).ToLower()
-    if ($alias -and -not $desiredGroupAliases.ContainsKey($alias)) {
+    if ($alias -and -not (Has-MapKey $desiredGroupAliases $alias)) {
       try {
         Remove-DistributionGroup -Identity $managedGroup.Identity -Confirm:$false -ErrorAction Stop
         $removedGroups += 1
@@ -915,7 +932,7 @@ try {
   $managedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
   foreach ($managedContact in $managedContacts) {
     $email = Get-RecipientEmail $managedContact
-    if ($email -and -not $desiredContactEmails.ContainsKey($email)) {
+    if ($email -and -not (Has-MapKey $desiredContactEmails $email)) {
       try {
         Remove-MailContact -Identity $managedContact.Identity -Confirm:$false -ErrorAction Stop
         $removedContacts += 1

@@ -48,6 +48,7 @@ type ActivityItem = {
   subject: string
   summary: string
   actorName: string | null
+  canUndo: boolean
 }
 type ExchangeQueueAction =
   | "create_contact"
@@ -517,6 +518,7 @@ export default function OutlookAddressBookPage() {
   const [addMemberMenuOpen, setAddMemberMenuOpen] = useState(false)
   const [recentActivityLogs, setRecentActivityLogs] = useState<AuditLogRecord[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
+  const [undoingActivityId, setUndoingActivityId] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<SaveState>("idle")
   const [message, setMessage] = useState("")
@@ -687,6 +689,7 @@ export default function OutlookAddressBookPage() {
           subject: outlookActivitySubject(log, contactNames, groupNames),
           summary: outlookActivitySummary(log, contactNames),
           actorName: log.actorName,
+          canUndo: !log.undoneAt && !log.undoOfLogId,
         }))
         .sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
         .slice(0, 60),
@@ -800,6 +803,30 @@ export default function OutlookAddressBookPage() {
       setMessage(error instanceof Error ? error.message : "Unable to load recent activities.")
     } finally {
       setActivityLoading(false)
+    }
+  }
+
+  async function undoActivity(logId: string) {
+    if (!logId) return
+    setUndoingActivityId(logId)
+    setMessage("")
+    try {
+      const response = await fetch("/api/admin/audit-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo", id: logId }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message || "Unable to undo recent activity.")
+      setSelectedSourceBook(SOURCE_ALL)
+      markExchangeNeedsSync()
+      await loadAll()
+      await loadRecentActivities()
+      setMessage("Undo applied. Press Sync Exchange when all changes are ready.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to undo recent activity.")
+    } finally {
+      setUndoingActivityId("")
     }
   }
 
@@ -1131,6 +1158,7 @@ export default function OutlookAddressBookPage() {
     }
     setMembers((current) => current.filter((member) => member.contact_id !== deletedContact.id))
     setContacts((current) => current.filter((contact) => contact.id !== deletedContact.id))
+    setSelectedSourceBook(SOURCE_ALL)
     setSelectedContactId(contacts.find((contact) => contact.id !== deletedContact.id)?.id || "")
     setSaving("saved")
     void loadRecentActivities()
@@ -1160,6 +1188,7 @@ export default function OutlookAddressBookPage() {
     })
     setMembers((current) => current.filter((member) => member.group_id !== deletedGroup.id))
     setGroups((current) => current.filter((group) => group.id !== deletedGroup.id))
+    setSelectedSourceBook(SOURCE_ALL)
     setSelectedGroupId(groups.find((group) => group.id !== deletedGroup.id)?.id || "")
     setSaving("saved")
     void loadRecentActivities()
@@ -1336,8 +1365,20 @@ export default function OutlookAddressBookPage() {
             {!activityLoading && activityItems.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No recent activities yet.</div> : null}
             {activityItems.map((entry) => (
               <div key={entry.id} style={{ display: "grid", gap: "3px", padding: "6px 7px", borderRadius: "9px", background: "var(--fc-admin-panel-soft-bg)", border: "1px solid transparent" }}>
-                <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {entry.subject}
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "6px", alignItems: "center" }}>
+                  <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {entry.subject}
+                  </div>
+                  {entry.canUndo ? (
+                    <button
+                      type="button"
+                      onClick={() => void undoActivity(entry.id)}
+                      disabled={undoingActivityId === entry.id}
+                      style={{ ...buttonStyle, minHeight: "22px", padding: "2px 7px", fontSize: "9px", opacity: undoingActivityId === entry.id ? 0.55 : 0.72 }}
+                    >
+                      {undoingActivityId === entry.id ? "Undoing" : "Undo"}
+                    </button>
+                  ) : null}
                 </div>
                 <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {entry.summary}
