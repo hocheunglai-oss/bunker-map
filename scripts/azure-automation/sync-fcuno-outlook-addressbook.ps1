@@ -672,6 +672,17 @@ function Add-NotificationRecipient([hashtable]$Seen, [System.Collections.ArrayLi
   }
 }
 
+function Get-DetailValue($Details, [string]$Key) {
+  if (-not $Details) { return $null }
+  if ($Details -is [hashtable] -or $Details -is [System.Collections.IDictionary]) {
+    if ($Details.ContainsKey($Key)) { return $Details[$Key] }
+    return $null
+  }
+  $property = $Details.PSObject.Properties[$Key]
+  if ($property) { return $property.Value }
+  return $null
+}
+
 function Get-NotificationRecipients($WebhookPayload) {
   $seen = @{}
   $recipients = New-Object System.Collections.ArrayList
@@ -708,8 +719,9 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   $detailsRows = ""
   if ($Details) {
     foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "skippedQueueRows", "verifiedQueueRows", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
-      if ($Details.ContainsKey($key)) {
-        $detailsRows += "<tr><td style='padding:4px 10px 4px 0;color:#475569;'>$(Escape-Html $key)</td><td style='padding:4px 0;font-weight:700;'>$(Escape-Html $Details[$key])</td></tr>"
+      $detailValue = Get-DetailValue $Details $key
+      if ($null -ne $detailValue) {
+        $detailsRows += "<tr><td style='padding:4px 10px 4px 0;color:#475569;'>$(Escape-Html $key)</td><td style='padding:4px 0;font-weight:700;'>$(Escape-Html $detailValue)</td></tr>"
       }
     }
   }

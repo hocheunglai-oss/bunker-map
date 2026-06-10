@@ -983,7 +983,7 @@ export default function OutlookAddressBookPage() {
     const sourceBook = cleanText(contactSourceDraft)
     if (!sourceBook) return
     await saveContact({ source_book: sourceBook })
-    setSelectedSourceBook(sourceBook)
+    setSelectedSourceBook(SOURCE_ALL)
     setContactSourceDraft("")
     setContactSourceAdding(false)
   }
@@ -992,7 +992,7 @@ export default function OutlookAddressBookPage() {
     const sourceBook = cleanText(groupSourceDraft)
     if (!sourceBook) return
     await saveGroup({ source_book: sourceBook })
-    setSelectedSourceBook(sourceBook)
+    setSelectedSourceBook(SOURCE_ALL)
     setGroupSourceDraft("")
     setGroupSourceAdding(false)
   }
@@ -1048,7 +1048,7 @@ export default function OutlookAddressBookPage() {
       payload: { contact: snapshot },
     })
     setContacts((current) => [contact, ...current])
-    setSelectedSourceBook(sourceBook)
+    setSelectedSourceBook(SOURCE_ALL)
     setActiveView("contacts")
     setSelectedContactId(id)
     setSaving("saved")
@@ -1085,7 +1085,7 @@ export default function OutlookAddressBookPage() {
       payload: { group: snapshot },
     })
     setGroups((current) => [group, ...current])
-    setSelectedSourceBook(sourceBook)
+    setSelectedSourceBook(SOURCE_ALL)
     setActiveView("groups")
     setSelectedGroupId(id)
     setSaving("saved")
@@ -1372,7 +1372,10 @@ export default function OutlookAddressBookPage() {
             <input
               value={directorySearch}
               onChange={(event) => setDirectorySearch(event.target.value)}
-              onFocus={() => setDirectorySearch("")}
+              onFocus={() => {
+                setDirectorySearch("")
+                setSelectedSourceBook(SOURCE_ALL)
+              }}
               placeholder="Search contacts or groups"
               style={inputStyle}
             />
