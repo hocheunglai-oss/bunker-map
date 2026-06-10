@@ -1347,6 +1347,7 @@ export default function CountryCompanyInfoPage() {
   const [draggingFileId, setDraggingFileId] = useState("")
   const [draggingFolderPath, setDraggingFolderPath] = useState("")
   const [dropFolderPath, setDropFolderPath] = useState<string | null>(null)
+  const [filePanelDropPath, setFilePanelDropPath] = useState<string | null>(null)
   const [currentCountryPorts, setCurrentCountryPorts] = useState<CountryPortListItem[]>([])
   const [countryOptions, setCountryOptions] = useState<Array<{ id: string; name: string }>>([])
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false)
@@ -2766,9 +2767,13 @@ export default function CountryCompanyInfoPage() {
     return fetchDeletedEntryFiles(kind, id)
   }
 
-  async function uploadFiles(picked: File[]) {
+  async function uploadFiles(picked: File[], targetFolderPath = currentFolderPath) {
     if (!selectedId || !selectedKind) {
       setMessage("Open a company, country, or port before uploading.")
+      return
+    }
+    if (!picked.length) {
+      setFilePanelDropPath(null)
       return
     }
     setUploadingFile(true)
@@ -2780,7 +2785,7 @@ export default function CountryCompanyInfoPage() {
         form.append("entryKind", selectedKind)
         form.append("entryId", selectedId)
         form.append("entryName", currentRecord.name || "Untitled")
-        form.append("folderPath", currentFolderPath)
+        form.append("folderPath", targetFolderPath)
         form.append("file", file)
         const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
         const data = await response.json()
@@ -2789,9 +2794,8 @@ export default function CountryCompanyInfoPage() {
       }
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
-      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
-      const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === currentFolderPath)
+      const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === targetFolderPath)
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
       void loadRecentAuditLogs()
@@ -2800,6 +2804,7 @@ export default function CountryCompanyInfoPage() {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
     } finally {
       setUploadingFile(false)
+      setFilePanelDropPath(null)
     }
   }
 
@@ -2858,7 +2863,6 @@ export default function CountryCompanyInfoPage() {
         const refreshedFiles = await refreshFiles(selectedKind, selectedId)
         setFiles(refreshedFiles)
         setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")), refreshedFiles))
-        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
         setSelectedPreviewFile((current) => {
           if (current?.id !== file.id) return current
           return refreshedFiles.find((item) => item.id === file.id) || null
@@ -3089,7 +3093,6 @@ export default function CountryCompanyInfoPage() {
       const refreshedFolders = mergeFolderRecords((await fetchFolders(selectedKind, selectedId)).filter((item) => !item.id.startsWith("virtual:")), refreshedFiles)
       setFiles(refreshedFiles)
       setFolders(refreshedFolders)
-      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       if (currentFolderPath === folderPath || currentFolderPath.startsWith(`${folderPath}/`)) {
         setCurrentFolderPath(rebaseFolderPath(currentFolderPath, folderPath, targetFolderPath))
       }
@@ -3105,7 +3108,12 @@ export default function CountryCompanyInfoPage() {
 
   async function moveFileToFolder(file: CompanyFileRecord | EntryFileRecord, targetFolderPath: string) {
     if (!selectedId || !selectedKind) return
-    if ((file.folder_path || "") === targetFolderPath) return
+    if ((file.folder_path || "") === targetFolderPath) {
+      setDraggingFileId("")
+      setDropFolderPath(null)
+      setFilePanelDropPath(null)
+      return
+    }
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "PATCH",
@@ -3124,7 +3132,6 @@ export default function CountryCompanyInfoPage() {
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
       setFiles(refreshedFiles)
       setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
-      setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
       void loadRecentAuditLogs()
       setMessage("File moved.")
     } catch (error) {
@@ -3132,6 +3139,7 @@ export default function CountryCompanyInfoPage() {
     } finally {
       setDraggingFileId("")
       setDropFolderPath(null)
+      setFilePanelDropPath(null)
     }
   }
 
@@ -3228,16 +3236,33 @@ export default function CountryCompanyInfoPage() {
   const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
   const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
   const draggingFolder = draggingFolderPath ? folders.find((folder) => joinFolderPath(folder.folder_path, folder.name) === draggingFolderPath) : null
+  const hasNativeFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types || []).includes("Files")
   const canDropOnFolderPath = (targetFolderPath: string) => Boolean(draggingFileId) || Boolean(draggingFolderPath && canMoveFolderToPath(draggingFolderPath, targetFolderPath))
   const handleFolderPathDragOver = (event: React.DragEvent, targetFolderPath: string) => {
+    if (hasNativeFiles(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = "copy"
+      setFilePanelDropPath(targetFolderPath)
+      return
+    }
     if (!canDropOnFolderPath(targetFolderPath)) return
     event.preventDefault()
+    event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
     setDropFolderPath(targetFolderPath)
   }
   const handleFolderPathDrop = (event: React.DragEvent, targetFolderPath: string) => {
+    if (hasNativeFiles(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      const droppedFiles = Array.from(event.dataTransfer.files || []).filter((file) => file.size > 0)
+      void uploadFiles(droppedFiles, targetFolderPath)
+      return
+    }
     if (!canDropOnFolderPath(targetFolderPath)) return
     event.preventDefault()
+    event.stopPropagation()
     const fileId = event.dataTransfer.getData("application/x-ccinfo-file") || event.dataTransfer.getData("text/plain")
     if (draggingFileId || fileId) {
       const file = files.find((item) => item.id === (fileId || draggingFileId))
@@ -3248,24 +3273,49 @@ export default function CountryCompanyInfoPage() {
   }
   const clearFolderDropTarget = (targetFolderPath: string) => {
     if (dropFolderPath === targetFolderPath) setDropFolderPath(null)
+    if (filePanelDropPath === targetFolderPath) setFilePanelDropPath(null)
   }
   const folderDropButtonStyle = (targetFolderPath: string, active: boolean): React.CSSProperties => {
     const isDropTarget = dropFolderPath === targetFolderPath && canDropOnFolderPath(targetFolderPath)
+    const isUploadTarget = filePanelDropPath === targetFolderPath
     return {
       ...buttonStyle,
       padding: "5px 8px",
       fontSize: "10px",
-      background: isDropTarget ? "var(--fc-admin-success-bg)" : "#ffffff",
-      border: isDropTarget ? "1px dashed var(--fc-admin-success-border)" : "none",
-      boxShadow: isDropTarget ? "0 0 0 3px #2f9e4430" : "none",
-      color: isDropTarget || active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
-      transform: isDropTarget ? "translateY(-1px)" : "none",
+      background: isDropTarget || isUploadTarget ? "var(--fc-admin-success-bg)" : "#ffffff",
+      border: isDropTarget || isUploadTarget ? "1px dashed var(--fc-admin-success-border)" : "none",
+      boxShadow: isDropTarget || isUploadTarget ? "0 0 0 3px #2f9e4430" : "none",
+      color: isDropTarget || isUploadTarget || active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
+      transform: isDropTarget || isUploadTarget ? "translateY(-1px)" : "none",
     }
   }
   const fileSection = !initialMode ? (
-    <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
-      <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
-        Files
+    <div
+      onDragOver={(event) => handleFolderPathDragOver(event, currentFolderPath)}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setDropFolderPath(null)
+          setFilePanelDropPath(null)
+        }
+      }}
+      onDrop={(event) => handleFolderPathDrop(event, currentFolderPath)}
+      style={{
+        ...panelStyle,
+        padding: "12px",
+        display: "grid",
+        gap: "10px",
+        position: "relative",
+        outline: filePanelDropPath === currentFolderPath ? "2px dashed var(--fc-admin-success-border)" : "none",
+        outlineOffset: "3px",
+      }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: "8px" }}>
+        <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
+          Files
+        </div>
+        <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", textAlign: "right" }}>
+          Drag files here to upload
+        </div>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
         <button
@@ -3299,9 +3349,26 @@ export default function CountryCompanyInfoPage() {
           )
         })}
       </div>
-      <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "240px" : "56vh", overflowY: "auto", paddingRight: "2px" }}>
+      {(filePanelDropPath === currentFolderPath || (dropFolderPath === currentFolderPath && canDropOnFolderPath(currentFolderPath))) && (
+        <div style={{ border: "1px dashed var(--fc-admin-success-border)", borderRadius: "12px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", padding: "8px 10px", fontSize: "11px", fontWeight: 800, textAlign: "center" }}>
+          {filePanelDropPath === currentFolderPath ? `Drop to upload into ${currentFolderPath || "HOME"}` : `Drop to move into ${currentFolderPath || "HOME"}`}
+        </div>
+      )}
+      <div
+        style={{
+          display: "grid",
+          gap: "6px",
+          maxHeight: isMobile ? "240px" : "56vh",
+          overflowY: "auto",
+          padding: "2px",
+          borderRadius: "12px",
+          background: filePanelDropPath === currentFolderPath ? "#2f9e4412" : "transparent",
+        }}
+      >
         {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No linked files yet.</div>
+          <div style={{ color: filePanelDropPath === currentFolderPath ? "var(--fc-admin-success-text)" : "var(--fc-admin-muted)", fontSize: "12px", border: filePanelDropPath === currentFolderPath ? "1px dashed var(--fc-admin-success-border)" : "1px dashed var(--fc-admin-border-soft)", borderRadius: "12px", padding: "18px 10px", textAlign: "center", background: filePanelDropPath === currentFolderPath ? "var(--fc-admin-success-bg)" : "transparent" }}>
+            {filePanelDropPath === currentFolderPath ? "Drop files here to upload." : "No linked files yet. Drag files here to upload."}
+          </div>
         ) : (
           <>
             {visibleFolders.map((folder) => {
@@ -3320,6 +3387,7 @@ export default function CountryCompanyInfoPage() {
                   onDragEnd={() => {
                     setDraggingFolderPath("")
                     setDropFolderPath(null)
+                    setFilePanelDropPath(null)
                   }}
                   onDragOver={(event) => handleFolderPathDragOver(event, folderPath)}
                   onDragLeave={() => clearFolderDropTarget(folderPath)}
@@ -3332,18 +3400,18 @@ export default function CountryCompanyInfoPage() {
                     padding: "7px 8px",
                     borderRadius: "10px",
                     border:
-                      dropFolderPath === folderPath && canDropOnFolderPath(folderPath)
+                      (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath
                         ? "1px dashed var(--fc-admin-success-border)"
                         : "1px solid var(--fc-admin-border-soft)",
                     background:
-                      dropFolderPath === folderPath && canDropOnFolderPath(folderPath)
+                      (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath
                         ? "var(--fc-admin-success-bg)"
                         : "var(--fc-tool-input-bg)",
                     color: "var(--fc-admin-panel-text)",
                     cursor: "pointer",
-                    boxShadow: dropFolderPath === folderPath && canDropOnFolderPath(folderPath) ? "0 0 0 3px #2f9e4430" : "none",
+                    boxShadow: (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath ? "0 0 0 3px #2f9e4430" : "none",
                     opacity: draggingFolderPath === folderPath ? 0.62 : 1,
-                    transform: dropFolderPath === folderPath && canDropOnFolderPath(folderPath) ? "translateY(-1px)" : "none",
+                    transform: (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath ? "translateY(-1px)" : "none",
                   }}
                 >
                   <FolderIcon />
@@ -3388,6 +3456,7 @@ export default function CountryCompanyInfoPage() {
                 onDragEnd={() => {
                   setDraggingFileId("")
                   setDropFolderPath(null)
+                  setFilePanelDropPath(null)
                 }}
                 style={{
                   display: "grid",
