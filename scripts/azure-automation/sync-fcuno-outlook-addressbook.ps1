@@ -463,10 +463,10 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
 
   $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
   if ($existing) {
-    Set-DistributionGroup -Identity $alias -Name $Group.GroupName -DisplayName $Group.GroupName -Notes $Group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-DistributionGroup -Identity $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "updatedGroups"
   } else {
-    New-DistributionGroup -Name $Group.GroupName -Alias $alias -Notes $Group.Description -ErrorAction Stop | Out-Null
+    New-DistributionGroup -Name $Group.GroupName -Alias $alias -ErrorAction Stop | Out-Null
     Set-DistributionGroup -Identity $alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "createdGroups"
   }
@@ -840,12 +840,12 @@ try {
   foreach ($group in $exchangeRows.Groups) {
     $existing = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
     if ($existing) {
-      Set-DistributionGroup -Identity $group.Alias -Name $group.GroupName -DisplayName $group.GroupName -Notes $group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-DistributionGroup -Identity $group.Alias -Name $group.GroupName -DisplayName $group.GroupName -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
       if ($verifiedGroup) { Assert-ExchangeRecipientName $verifiedGroup $group.GroupName "Exchange group $($group.Alias)" }
       $updatedGroups += 1
     } else {
-      New-DistributionGroup -Name $group.GroupName -Alias $group.Alias -Notes $group.Description | Out-Null
+      New-DistributionGroup -Name $group.GroupName -Alias $group.Alias | Out-Null
       Set-DistributionGroup -Identity $group.Alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
       if (-not $verifiedGroup) { throw "Could not verify Exchange group $($group.Alias) after creation." }

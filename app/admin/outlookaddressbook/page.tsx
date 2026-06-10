@@ -38,7 +38,6 @@ type GroupMember = {
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
 type ActiveView = "contacts" | "groups"
-type DirectoryFilter = "all" | "contacts" | "groups"
 type CreateDraftType = "contact" | "group"
 type DirectoryItem =
   | { type: "contact"; id: string; name: string; detail: string; sourceBook: string; contact: SharedContact }
@@ -448,7 +447,7 @@ Import-Csv $GroupsCsv | ForEach-Object {
   if ($existing) {
     Write-Host "Exists group:" $_.GroupName
   } else {
-    New-DistributionGroup -Name $_.GroupName -Alias $alias -Notes $_.Description | Out-Null
+    New-DistributionGroup -Name $_.GroupName -Alias $alias | Out-Null
     Write-Host "Created group:" $_.GroupName
   }
 
@@ -503,7 +502,6 @@ export default function OutlookAddressBookPage() {
   const [selectedContactId, setSelectedContactId] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState("")
   const [selectedSourceBook, setSelectedSourceBook] = useState(SOURCE_ALL)
-  const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all")
   const [directorySearch, setDirectorySearch] = useState("")
   const [addMemberSearch, setAddMemberSearch] = useState("")
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
@@ -514,6 +512,8 @@ export default function OutlookAddressBookPage() {
   const [createEmail, setCreateEmail] = useState("")
   const [contactSourceDraft, setContactSourceDraft] = useState("")
   const [groupSourceDraft, setGroupSourceDraft] = useState("")
+  const [contactSourceAdding, setContactSourceAdding] = useState(false)
+  const [groupSourceAdding, setGroupSourceAdding] = useState(false)
   const [addMemberMenuOpen, setAddMemberMenuOpen] = useState(false)
   const [recentActivityLogs, setRecentActivityLogs] = useState<AuditLogRecord[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
@@ -574,6 +574,18 @@ export default function OutlookAddressBookPage() {
     }, 5000)
     return () => window.clearTimeout(timer)
   }, [authenticated, exchangeSyncStatus, exchangeSyncing, exchangeSyncStartedAt])
+
+  useEffect(() => {
+    setContactSourceAdding(false)
+    setContactSourceDraft("")
+  }, [selectedContactId])
+
+  useEffect(() => {
+    setGroupSourceAdding(false)
+    setGroupSourceDraft("")
+    setAddMemberMenuOpen(false)
+    setAddMemberSearch("")
+  }, [selectedGroupId])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null
@@ -651,10 +663,9 @@ export default function OutlookAddressBookPage() {
       count: members.filter((member) => member.group_id === group.id).length,
     }))
     return [...contactItems, ...groupItems]
-      .filter((item) => directoryFilter === "all" || item.type === directoryFilter.slice(0, -1))
       .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, 600)
-  }, [directoryFilter, members, visibleContacts, visibleGroups])
+  }, [members, visibleContacts, visibleGroups])
 
   const addableContacts = useMemo(
     () =>
@@ -934,32 +945,36 @@ export default function OutlookAddressBookPage() {
 
   function contactSourceBookValue() {
     if (!selectedContact) return ""
-    if (contactSourceDraft) return SOURCE_NEW
+    if (contactSourceAdding) return SOURCE_NEW
     const sourceBook = cleanText(selectedContact.source_book)
     return sourceBook && sourceBookOptions.includes(sourceBook) ? sourceBook : SOURCE_NEW
   }
 
   function groupSourceBookValue() {
     if (!selectedGroup) return ""
-    if (groupSourceDraft) return SOURCE_NEW
+    if (groupSourceAdding) return SOURCE_NEW
     const sourceBook = cleanText(selectedGroup.source_book)
     return sourceBook && sourceBookOptions.includes(sourceBook) ? sourceBook : SOURCE_NEW
   }
 
   async function applyContactSourceBook(value: string) {
     if (value === SOURCE_NEW) {
+      setContactSourceAdding(true)
       setContactSourceDraft("")
       return
     }
+    setContactSourceAdding(false)
     setContactSourceDraft("")
     await saveContact({ source_book: value })
   }
 
   async function applyGroupSourceBook(value: string) {
     if (value === SOURCE_NEW) {
+      setGroupSourceAdding(true)
       setGroupSourceDraft("")
       return
     }
+    setGroupSourceAdding(false)
     setGroupSourceDraft("")
     await saveGroup({ source_book: value })
   }
@@ -970,6 +985,7 @@ export default function OutlookAddressBookPage() {
     await saveContact({ source_book: sourceBook })
     setSelectedSourceBook(sourceBook)
     setContactSourceDraft("")
+    setContactSourceAdding(false)
   }
 
   async function commitGroupSourceBook() {
@@ -978,6 +994,7 @@ export default function OutlookAddressBookPage() {
     await saveGroup({ source_book: sourceBook })
     setSelectedSourceBook(sourceBook)
     setGroupSourceDraft("")
+    setGroupSourceAdding(false)
   }
 
   async function submitCreate() {
@@ -1369,22 +1386,6 @@ export default function OutlookAddressBookPage() {
                 <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
               ))}
             </select>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "6px" }}>
-              {([
-                ["all", "All"],
-                ["contacts", "Contacts"],
-                ["groups", "Groups"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setDirectoryFilter(value)}
-                  style={{ ...(directoryFilter === value ? primaryButtonStyle : buttonStyle), minHeight: "30px", padding: "5px 8px", fontSize: "11px" }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
           <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 250px)", overflow: "auto", padding: "6px" }}>
             {directoryItems.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", padding: "8px" }}>No records found.</div> : null}
@@ -1502,23 +1503,7 @@ export default function OutlookAddressBookPage() {
                   <div style={{ border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", padding: "10px", background: "var(--fc-admin-panel-soft-bg)", color: "var(--fc-admin-panel-text)" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
                       <div style={titleStyle}>Members</div>
-                      <div style={{ position: "relative" }}>
-                        <button type="button" onClick={() => setAddMemberMenuOpen((current) => !current)} style={primaryButtonStyle}>Add Member</button>
-                        {addMemberMenuOpen ? (
-                          <div style={{ position: "absolute", right: 0, top: "42px", zIndex: 25, width: isMobile ? "min(82vw, 360px)" : "360px", display: "grid", gap: "8px", padding: "10px", border: "1px solid var(--fc-admin-border)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", boxShadow: "0 16px 30px #00000026" }}>
-                            <input value={addMemberSearch} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} autoFocus />
-                            <div style={{ display: "grid", gap: "6px", maxHeight: "240px", overflow: "auto" }}>
-                              {addableContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching contacts.</div> : null}
-                              {addableContacts.map((contact) => (
-                                <button key={contact.id} type="button" onClick={() => void addMember(contact)} style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}>
-                                  <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
-                                  <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
+                      <button type="button" onClick={() => setAddMemberMenuOpen(true)} style={primaryButtonStyle}>Add Member</button>
                     </div>
                     <div style={{ display: "grid", gap: "6px", maxHeight: "240px", overflow: "auto" }}>
                       {selectedGroupMembers.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No members yet.</div> : null}
@@ -1541,6 +1526,31 @@ export default function OutlookAddressBookPage() {
         </main>
 
       </div>
+      {addMemberMenuOpen && selectedGroup ? (
+        <div style={{ position: "fixed", inset: 0, zIndex: 75, display: "grid", placeItems: "center", padding: "18px", background: "rgba(15, 23, 42, 0.32)" }} onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setAddMemberMenuOpen(false)
+        }}>
+          <section style={{ ...panelStyle, width: "min(520px, 100%)", padding: "14px", display: "grid", gap: "12px", boxShadow: "0 24px 60px #00000038" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+              <div>
+                <div style={{ ...titleStyle, color: "var(--fc-admin-link)" }}>Add Member</div>
+                <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", marginTop: "2px" }}>{selectedGroup.name}</div>
+              </div>
+              <button type="button" onClick={() => setAddMemberMenuOpen(false)} style={{ ...buttonStyle, minWidth: "34px", padding: "6px 10px" }}>x</button>
+            </div>
+            <input value={addMemberSearch} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} autoFocus />
+            <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "52vh" : "420px", overflow: "auto" }}>
+              {addableContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching contacts.</div> : null}
+              {addableContacts.map((contact) => (
+                <button key={contact.id} type="button" onClick={() => void addMember(contact)} style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}>
+                  <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
+                  <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
       {createDraftType ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", padding: "18px", background: "rgba(15, 23, 42, 0.38)" }} onMouseDown={(event) => {
           if (event.target === event.currentTarget) cancelCreate()
