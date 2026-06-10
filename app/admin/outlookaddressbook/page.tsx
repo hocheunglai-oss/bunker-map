@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import type { AuditLogRecord } from "@/lib/auditLog"
 
 type SharedContact = {
   id: string
@@ -37,6 +38,14 @@ type GroupMember = {
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
 type ActiveView = "contacts" | "groups"
+type CreateDraftType = "contact" | "group"
+type ActivityItem = {
+  id: string
+  occurredAt: string
+  subject: string
+  summary: string
+  actorName: string | null
+}
 type ExchangeQueueAction =
   | "create_contact"
   | "update_contact"
@@ -58,6 +67,9 @@ type ExchangeSyncStatus = {
 
 const INTERNAL_DOMAINS = ["cosulich.com.hk", "cosulich.com.sg"]
 const EXCHANGE_SYNC_TIMEOUT_MS = 10 * 60 * 1000
+const SOURCE_ALL = "__all_contacts__"
+const SOURCE_NEW = "__new_source_book__"
+const DEFAULT_SOURCE_BOOK = "FC-OUTLOOK"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -112,6 +124,17 @@ const primaryButtonStyle: React.CSSProperties = {
   borderColor: "var(--fc-admin-success-border)",
   background: "var(--fc-admin-success-bg)",
   color: "var(--fc-admin-success-text)",
+}
+
+const addButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  minWidth: "36px",
+  borderColor: "#1d4ed8",
+  background: "#2563eb",
+  color: "#ffffff",
+  fontSize: "18px",
+  lineHeight: 1,
+  padding: "6px 10px",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
@@ -214,6 +237,81 @@ function matchesSearch(values: unknown[], query: string) {
   if (tokens.length === 0) return true
   const haystack = normalized(values.join(" "))
   return tokens.every((token) => haystack.includes(token))
+}
+
+function formatTimestamp(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleString("en-HK", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+}
+
+function textValue(row: Record<string, unknown> | null | undefined, key: string) {
+  return cleanText(row?.[key])
+}
+
+function rowFor(log: AuditLogRecord) {
+  return log.afterRow || log.beforeRow || {}
+}
+
+function outlookActivitySubject(log: AuditLogRecord, contactNames: Map<string, string>, groupNames: Map<string, string>) {
+  const row = rowFor(log)
+  if (log.tableName === "shared_addressbook_contacts") {
+    return cleanText(row.display_name || row.primary_email || log.recordPk.id || "CONTACT").toUpperCase()
+  }
+  if (log.tableName === "shared_addressbook_groups") {
+    return cleanText(row.name || row.nickname || log.recordPk.id || "GROUP").toUpperCase()
+  }
+  if (log.tableName === "shared_addressbook_group_members") {
+    const groupId = textValue(row, "group_id")
+    return cleanText(groupNames.get(groupId) || groupId || "GROUP MEMBERS").toUpperCase()
+  }
+  return "OUTLOOK ADDRESS BOOK"
+}
+
+function outlookActivitySummary(log: AuditLogRecord, contactNames: Map<string, string>) {
+  const before = log.beforeRow || {}
+  const after = log.afterRow || {}
+  const row = rowFor(log)
+
+  if (log.tableName === "shared_addressbook_contacts") {
+    if (log.operation === "INSERT") return "Created contact"
+    if (log.operation === "DELETE") return "Deleted contact"
+    if (log.changedFields.includes("display_name")) {
+      return `Renamed from ${textValue(before, "display_name") || "blank"} to ${textValue(after, "display_name") || "blank"}`
+    }
+    if (log.changedFields.includes("primary_email")) return "Updated email"
+    if (log.changedFields.includes("source_book")) return "Changed source book"
+    return log.changedFields.length ? `Updated ${log.changedFields.join(", ")}` : "Updated contact"
+  }
+
+  if (log.tableName === "shared_addressbook_groups") {
+    if (log.operation === "INSERT") return "Created group"
+    if (log.operation === "DELETE") return "Deleted group"
+    if (log.changedFields.includes("name")) {
+      return `Renamed from ${textValue(before, "name") || "blank"} to ${textValue(after, "name") || "blank"}`
+    }
+    if (log.changedFields.includes("source_book")) return "Changed source book"
+    return log.changedFields.length ? `Updated ${log.changedFields.join(", ")}` : "Updated group"
+  }
+
+  if (log.tableName === "shared_addressbook_group_members") {
+    const contactId = textValue(row, "contact_id")
+    const contactName = contactNames.get(contactId) || contactId.slice(0, 10) || "member"
+    if (log.operation === "INSERT") return `Added ${contactName}`
+    if (log.operation === "DELETE") return `Removed ${contactName}`
+    return "Updated group members"
+  }
+
+  return "Updated address book"
 }
 
 function contactExchangeSnapshot(contact: SharedContact) {
@@ -400,9 +498,18 @@ export default function OutlookAddressBookPage() {
   const [activeView, setActiveView] = useState<ActiveView>("contacts")
   const [selectedContactId, setSelectedContactId] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState("")
-  const [contactSearch, setContactSearch] = useState("")
-  const [groupSearch, setGroupSearch] = useState("")
+  const [selectedSourceBook, setSelectedSourceBook] = useState(SOURCE_ALL)
+  const [directorySearch, setDirectorySearch] = useState("")
   const [addMemberSearch, setAddMemberSearch] = useState("")
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [createDraftType, setCreateDraftType] = useState<CreateDraftType | null>(null)
+  const [createSourceBook, setCreateSourceBook] = useState(DEFAULT_SOURCE_BOOK)
+  const [createNewSourceBook, setCreateNewSourceBook] = useState("")
+  const [createName, setCreateName] = useState("")
+  const [createEmail, setCreateEmail] = useState("")
+  const [addMemberMenuOpen, setAddMemberMenuOpen] = useState(false)
+  const [recentActivityLogs, setRecentActivityLogs] = useState<AuditLogRecord[]>([])
+  const [activityLoading, setActivityLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<SaveState>("idle")
   const [message, setMessage] = useState("")
@@ -423,6 +530,7 @@ export default function OutlookAddressBookPage() {
     if (!authenticated) return
     void loadAll()
     void loadExchangeSyncStatus()
+    void loadRecentActivities()
   }, [authenticated])
 
   useEffect(() => {
@@ -471,20 +579,45 @@ export default function OutlookAddressBookPage() {
     [contacts, groupMemberIds]
   )
 
+  const sourceBookOptions = useMemo(() => {
+    const values = new Set<string>()
+    contacts.forEach((contact) => {
+      const sourceBook = cleanText(contact.source_book)
+      if (sourceBook) values.add(sourceBook)
+    })
+    groups.forEach((group) => {
+      const sourceBook = cleanText(group.source_book)
+      if (sourceBook) values.add(sourceBook)
+    })
+    return Array.from(values).sort((a, b) => a.localeCompare(b))
+  }, [contacts, groups])
+
+  const contactNames = useMemo(
+    () => new Map(contacts.map((contact) => [contact.id, cleanText(contact.display_name || contact.primary_email || contact.id)])),
+    [contacts]
+  )
+
+  const groupNames = useMemo(
+    () => new Map(groups.map((group) => [group.id, cleanText(group.name || group.nickname || group.id)])),
+    [groups]
+  )
+
   const visibleContacts = useMemo(
     () =>
       contacts
-        .filter((contact) => matchesSearch([contact.display_name, contact.primary_email, contact.nickname, contact.source_book], contactSearch))
+        .filter((contact) => selectedSourceBook === SOURCE_ALL || cleanText(contact.source_book) === selectedSourceBook)
+        .filter((contact) => matchesSearch([contact.display_name, contact.primary_email, contact.nickname, contact.source_book], directorySearch))
         .slice(0, 500),
-    [contacts, contactSearch]
+    [contacts, directorySearch, selectedSourceBook]
   )
 
   const visibleGroups = useMemo(
     () =>
       groups
-        .filter((group) => matchesSearch([group.name, group.nickname, group.source_book], groupSearch))
+        .filter((group) => selectedSourceBook === SOURCE_ALL || cleanText(group.source_book) === selectedSourceBook)
+        .filter((group) => matchesSearch([group.name, group.nickname, group.source_book], directorySearch))
         .slice(0, 500),
-    [groups, groupSearch]
+    [directorySearch, groups, selectedSourceBook]
   )
 
   const addableContacts = useMemo(
@@ -497,7 +630,38 @@ export default function OutlookAddressBookPage() {
   )
 
   const exportRows = useMemo(() => buildExportRows(contacts, groups, members), [contacts, groups, members])
-  const activeSearch = activeView === "contacts" ? contactSearch : groupSearch
+
+  const activityItems = useMemo<ActivityItem[]>(
+    () =>
+      recentActivityLogs
+        .map((log) => ({
+          id: log.id,
+          occurredAt: log.occurredAt,
+          subject: outlookActivitySubject(log, contactNames, groupNames),
+          summary: outlookActivitySummary(log, contactNames),
+          actorName: log.actorName,
+        }))
+        .sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
+        .slice(0, 60),
+    [contactNames, groupNames, recentActivityLogs]
+  )
+
+  useEffect(() => {
+    if (loading) return
+    const selectedContactVisible = visibleContacts.some((contact) => contact.id === selectedContactId)
+    const selectedGroupVisible = visibleGroups.some((group) => group.id === selectedGroupId)
+    if (activeView === "contacts" && selectedContactVisible) return
+    if (activeView === "groups" && selectedGroupVisible) return
+    if (visibleContacts[0]) {
+      setActiveView("contacts")
+      setSelectedContactId(visibleContacts[0].id)
+      return
+    }
+    if (visibleGroups[0]) {
+      setActiveView("groups")
+      setSelectedGroupId(visibleGroups[0].id)
+    }
+  }, [activeView, loading, selectedContactId, selectedGroupId, visibleContacts, visibleGroups])
 
   function markExchangeNeedsSync() {
     if (!exchangeSyncing) setExchangeButtonLabel("Sync Exchange")
@@ -559,6 +723,21 @@ export default function OutlookAddressBookPage() {
       from += pageSize
     }
     return allRows
+  }
+
+  async function loadRecentActivities() {
+    setActivityLoading(true)
+    try {
+      const response = await fetch("/api/admin/audit-logs?table=outlookaddressbook&limit=160")
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message || "Unable to load recent activities.")
+      setRecentActivityLogs(((payload.logs || []) as AuditLogRecord[]).slice(0, 80))
+    } catch (error) {
+      setRecentActivityLogs([])
+      setMessage(error instanceof Error ? error.message : "Unable to load recent activities.")
+    } finally {
+      setActivityLoading(false)
+    }
   }
 
   async function enqueueExchangeSyncChange(input: {
@@ -676,14 +855,55 @@ export default function OutlookAddressBookPage() {
     }).catch(() => undefined)
   }
 
-  async function createContact() {
+  function beginCreate(type: CreateDraftType) {
+    const defaultSource = selectedSourceBook !== SOURCE_ALL
+      ? selectedSourceBook
+      : sourceBookOptions[0] || DEFAULT_SOURCE_BOOK
+    setCreateDraftType(type)
+    setCreateSourceBook(defaultSource)
+    setCreateNewSourceBook("")
+    setCreateName(type === "contact" ? "NEW CONTACT" : "NEW GROUP")
+    setCreateEmail("")
+    setCreateMenuOpen(false)
+    setAddMemberMenuOpen(false)
+  }
+
+  function cancelCreate() {
+    setCreateDraftType(null)
+    setCreateNewSourceBook("")
+    setCreateName("")
+    setCreateEmail("")
+  }
+
+  function resolvedCreateSourceBook() {
+    return cleanText(createSourceBook === SOURCE_NEW ? createNewSourceBook : createSourceBook)
+  }
+
+  async function submitCreate() {
+    const sourceBook = resolvedCreateSourceBook()
+    if (!sourceBook) {
+      setMessage("Select or enter a Source Book before creating.")
+      return
+    }
+    if (createDraftType === "contact") {
+      await createContact(sourceBook, createName, createEmail)
+      cancelCreate()
+      return
+    }
+    if (createDraftType === "group") {
+      await createGroup(sourceBook, createName)
+      cancelCreate()
+    }
+  }
+
+  async function createContact(sourceBook: string, displayName = "NEW CONTACT", email = "") {
     const id = newId("contact")
     const contact: SharedContact = {
       id,
-      source_book: "FC-OUTLOOK",
+      source_book: sourceBook,
       source_card: id,
-      display_name: "NEW CONTACT",
-      primary_email: "",
+      display_name: cleanText(displayName) || "NEW CONTACT",
+      primary_email: normalized(email),
       nickname: null,
       first_name: null,
       last_name: null,
@@ -710,17 +930,20 @@ export default function OutlookAddressBookPage() {
       payload: { contact: snapshot },
     })
     setContacts((current) => [contact, ...current])
+    setSelectedSourceBook(sourceBook)
+    setActiveView("contacts")
     setSelectedContactId(id)
     setSaving("saved")
+    void loadRecentActivities()
   }
 
-  async function createGroup() {
+  async function createGroup(sourceBook: string, name = "NEW GROUP") {
     const id = newId("group")
     const group: SharedGroup = {
       id,
-      source_book: "FC-OUTLOOK",
+      source_book: sourceBook,
       source_uid: id,
-      name: "NEW GROUP",
+      name: cleanText(name) || "NEW GROUP",
       nickname: null,
       description: null,
       member_count: 0,
@@ -744,16 +967,11 @@ export default function OutlookAddressBookPage() {
       payload: { group: snapshot },
     })
     setGroups((current) => [group, ...current])
+    setSelectedSourceBook(sourceBook)
+    setActiveView("groups")
     setSelectedGroupId(id)
     setSaving("saved")
-  }
-
-  function createSelected() {
-    if (activeView === "contacts") {
-      void createContact()
-      return
-    }
-    void createGroup()
+    void loadRecentActivities()
   }
 
   async function deleteContact() {
@@ -797,6 +1015,7 @@ export default function OutlookAddressBookPage() {
     setContacts((current) => current.filter((contact) => contact.id !== deletedContact.id))
     setSelectedContactId(contacts.find((contact) => contact.id !== deletedContact.id)?.id || "")
     setSaving("saved")
+    void loadRecentActivities()
   }
 
   async function deleteGroup() {
@@ -825,6 +1044,7 @@ export default function OutlookAddressBookPage() {
     setGroups((current) => current.filter((group) => group.id !== deletedGroup.id))
     setSelectedGroupId(groups.find((group) => group.id !== deletedGroup.id)?.id || "")
     setSaving("saved")
+    void loadRecentActivities()
   }
 
   function deleteSelected() {
@@ -858,7 +1078,10 @@ export default function OutlookAddressBookPage() {
       payload: { group: snapshot, addedContact: contactExchangeSnapshot(contact) },
     })
     setMembers((current) => (current.some((item) => item.group_id === member.group_id && item.contact_id === member.contact_id) ? current : [...current, member]))
+    setAddMemberMenuOpen(false)
+    setAddMemberSearch("")
     setSaving("saved")
+    void loadRecentActivities()
   }
 
   async function removeMember(contactId: string) {
@@ -886,6 +1109,7 @@ export default function OutlookAddressBookPage() {
     })
     setMembers((current) => current.filter((member) => !(member.group_id === selectedGroup.id && member.contact_id === contactId)))
     setSaving("saved")
+    void loadRecentActivities()
   }
 
   function downloadExchangeFiles() {
@@ -955,60 +1179,75 @@ export default function OutlookAddressBookPage() {
   return (
     <div style={pageStyle}>
       <header style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "flex", alignItems: "end", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-        <div>
-          <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>Contact Tools</div>
-          <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK ADDRESS BOOK</h1>
-        </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing}>
-            {exchangeButtonLabel}
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Back
+          </button>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>Contact Tools</div>
+            <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK ADDRESS BOOK</h1>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
+            Sync only when all changes are made.
+          </div>
+          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing}>
+            {exchangeButtonLabel}
           </button>
         </div>
       </header>
 
       {message ? <div style={{ maxWidth: "1680px", margin: "0 auto 12px", color: "var(--fc-error)", fontWeight: 800 }}>{message}</div> : null}
 
-      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(340px, 1fr) minmax(0, 2fr)", gap: "10px", alignItems: "start" }}>
+      <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(320px, 0.95fr) minmax(0, 1.6fr) minmax(290px, 0.75fr)", gap: "10px", alignItems: "start" }}>
         <section style={panelStyle}>
           <div style={headerStyle}>
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setActiveView("contacts")}
-                style={activeView === "contacts" ? primaryButtonStyle : buttonStyle}
-              >
-                Contacts
+            <div style={{ ...titleStyle, minWidth: 0 }}>Directory</div>
+            <div style={{ position: "relative" }}>
+              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group">
+                +
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveView("groups")}
-                style={activeView === "groups" ? primaryButtonStyle : buttonStyle}
-              >
-                Groups
-              </button>
+              {createMenuOpen ? (
+                <div style={{ position: "absolute", right: 0, top: "42px", zIndex: 30, display: "grid", gap: "6px", minWidth: "150px", padding: "8px", border: "1px solid var(--fc-admin-border)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", boxShadow: "0 14px 28px #00000024" }}>
+                  <button type="button" onClick={() => beginCreate("contact")} style={{ ...buttonStyle, justifyContent: "flex-start", textAlign: "left" }}>New Contact</button>
+                  <button type="button" onClick={() => beginCreate("group")} style={{ ...buttonStyle, justifyContent: "flex-start", textAlign: "left" }}>New Group</button>
+                </div>
+              ) : null}
             </div>
-            <button type="button" onClick={createSelected} style={primaryButtonStyle}>New</button>
           </div>
           <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
+            <select
+              value={selectedSourceBook}
+              onChange={(event) => setSelectedSourceBook(event.target.value)}
+              style={inputStyle}
+            >
+              <option value={SOURCE_ALL}>ALL CONTACTS</option>
+              {sourceBookOptions.map((sourceBook) => (
+                <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
+              ))}
+            </select>
             <input
-              value={activeSearch}
-              onChange={(event) => activeView === "contacts" ? setContactSearch(event.target.value) : setGroupSearch(event.target.value)}
-              onFocus={() => activeView === "contacts" ? setContactSearch("") : setGroupSearch("")}
-              placeholder={activeView === "contacts" ? "Search contacts" : "Search groups"}
+              value={directorySearch}
+              onChange={(event) => setDirectorySearch(event.target.value)}
+              onFocus={() => setDirectorySearch("")}
+              placeholder="Search contacts or groups"
               style={inputStyle}
             />
           </div>
           <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 250px)", overflow: "auto", padding: "6px" }}>
-            {activeView === "contacts" ? visibleContacts.map((contact) => {
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", padding: "6px 4px" }}>Contacts</div>
+            {visibleContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", padding: "4px 8px 10px" }}>No contacts found.</div> : null}
+            {visibleContacts.map((contact) => {
               const active = contact.id === selectedContactId
               return (
                 <button
                   key={contact.id}
                   type="button"
-                  onClick={() => setSelectedContactId(contact.id)}
+                  onClick={() => {
+                    setActiveView("contacts")
+                    setSelectedContactId(contact.id)
+                  }}
                   style={{
                     width: "100%",
                     display: "block",
@@ -1023,16 +1262,23 @@ export default function OutlookAddressBookPage() {
                   }}
                 >
                   <span style={{ display: "block", fontSize: "13px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
+                  <span style={{ display: "block", marginTop: "2px", color: active ? "var(--fc-row-active-text)" : "var(--fc-admin-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email || contact.source_book}</span>
                 </button>
               )
-            }) : visibleGroups.map((group) => {
+            })}
+            <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", padding: "10px 4px 6px" }}>Groups</div>
+            {visibleGroups.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", padding: "4px 8px" }}>No groups found.</div> : null}
+            {visibleGroups.map((group) => {
               const active = group.id === selectedGroupId
               const count = members.filter((member) => member.group_id === group.id).length
               return (
                 <button
                   key={group.id}
                   type="button"
-                  onClick={() => setSelectedGroupId(group.id)}
+                  onClick={() => {
+                    setActiveView("groups")
+                    setSelectedGroupId(group.id)
+                  }}
                   style={{
                     width: "100%",
                     display: "grid",
@@ -1065,6 +1311,45 @@ export default function OutlookAddressBookPage() {
             </div>
           </div>
           <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
+            {createDraftType ? (
+              <section style={{ display: "grid", gap: "10px", padding: "10px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-soft-bg)" }}>
+                <div style={{ ...titleStyle, color: "var(--fc-admin-link)" }}>{createDraftType === "contact" ? "New Contact" : "New Group"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: "8px" }}>
+                  <label>
+                    <div style={fieldLabelStyle}>Source Book</div>
+                    <select value={createSourceBook} onChange={(event) => setCreateSourceBook(event.target.value)} style={inputStyle}>
+                      {sourceBookOptions.length === 0 ? <option value={DEFAULT_SOURCE_BOOK}>{DEFAULT_SOURCE_BOOK}</option> : null}
+                      {sourceBookOptions.map((sourceBook) => (
+                        <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
+                      ))}
+                      <option value={SOURCE_NEW}>Add New</option>
+                    </select>
+                  </label>
+                  {createSourceBook === SOURCE_NEW ? (
+                    <label>
+                      <div style={fieldLabelStyle}>New Source Book</div>
+                      <input value={createNewSourceBook} onChange={(event) => setCreateNewSourceBook(event.target.value.toUpperCase())} style={inputStyle} />
+                    </label>
+                  ) : null}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile || createDraftType === "group" ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: "8px" }}>
+                  <label>
+                    <div style={fieldLabelStyle}>{createDraftType === "contact" ? "Display Name" : "Group Name"}</div>
+                    <input value={createName} onChange={(event) => setCreateName(event.target.value)} style={inputStyle} />
+                  </label>
+                  {createDraftType === "contact" ? (
+                    <label>
+                      <div style={fieldLabelStyle}>Email</div>
+                      <input value={createEmail} onChange={(event) => setCreateEmail(event.target.value)} style={inputStyle} />
+                    </label>
+                  ) : null}
+                </div>
+                <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button type="button" onClick={cancelCreate} style={buttonStyle}>Cancel</button>
+                  <button type="button" onClick={() => void submitCreate()} style={{ ...addButtonStyle, minWidth: "auto", fontSize: "12px", padding: "8px 14px" }}>Create</button>
+                </div>
+              </section>
+            ) : null}
             {activeView === "contacts" ? (
             <section style={{ display: "grid", gap: "10px", maxWidth: "760px" }}>
               <div style={titleStyle}>Contact Details</div>
@@ -1093,24 +1378,35 @@ export default function OutlookAddressBookPage() {
                   <label><div style={fieldLabelStyle}>Description</div><input value={selectedGroup.description || ""} onChange={(event) => void saveGroup({ description: event.target.value })} style={inputStyle} /></label>
                   <label><div style={fieldLabelStyle}>Source Book</div><input value={selectedGroup.source_book || ""} onChange={(event) => void saveGroup({ source_book: event.target.value })} style={inputStyle} /></label>
                   <div style={{ border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", padding: "10px", background: "var(--fc-admin-panel-soft-bg)", color: "var(--fc-admin-panel-text)" }}>
-                    <div style={{ ...titleStyle, marginBottom: "8px" }}>Members</div>
-                    <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflow: "auto" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
+                      <div style={titleStyle}>Members</div>
+                      <div style={{ position: "relative" }}>
+                        <button type="button" onClick={() => setAddMemberMenuOpen((current) => !current)} style={primaryButtonStyle}>Add Member</button>
+                        {addMemberMenuOpen ? (
+                          <div style={{ position: "absolute", right: 0, top: "42px", zIndex: 25, width: isMobile ? "min(82vw, 360px)" : "360px", display: "grid", gap: "8px", padding: "10px", border: "1px solid var(--fc-admin-border)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", boxShadow: "0 16px 30px #00000026" }}>
+                            <input value={addMemberSearch} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} autoFocus />
+                            <div style={{ display: "grid", gap: "6px", maxHeight: "240px", overflow: "auto" }}>
+                              {addableContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching contacts.</div> : null}
+                              {addableContacts.map((contact) => (
+                                <button key={contact.id} type="button" onClick={() => void addMember(contact)} style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}>
+                                  <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
+                                  <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gap: "6px", maxHeight: "240px", overflow: "auto" }}>
+                      {selectedGroupMembers.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No members yet.</div> : null}
                       {selectedGroupMembers.map((contact) => (
-                        <div key={contact.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center", color: "var(--fc-admin-panel-text)", fontSize: "12px" }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name} · {contact.primary_email}</span>
-                          <button type="button" onClick={() => void removeMember(contact.id)} style={dangerButtonStyle}>Remove</button>
+                        <div key={contact.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 8px", borderRadius: "10px", background: "var(--fc-row-bg)", color: "var(--fc-admin-panel-text)", fontSize: "12px", flexWrap: "wrap" }}>
+                          <span style={{ minWidth: 0, maxWidth: "520px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 800 }}>{contact.display_name}</span>
+                          <span style={{ minWidth: 0, maxWidth: "360px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--fc-admin-muted)" }}>{contact.primary_email}</span>
+                          <button type="button" onClick={() => void removeMember(contact.id)} style={{ ...dangerButtonStyle, minHeight: "28px", padding: "4px 10px" }}>Remove</button>
                         </div>
                       ))}
-                    </div>
-                    <div style={{ marginTop: "10px", display: "grid", gap: "6px" }}>
-                      <input value={addMemberSearch} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} />
-                      <div style={{ display: "grid", gap: "6px", maxHeight: "180px", overflow: "auto" }}>
-                        {addableContacts.map((contact) => (
-                          <button key={contact.id} type="button" onClick={() => void addMember(contact)} style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px" }}>
-                            {contact.display_name} · {contact.primary_email}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   </div>
                 </>
@@ -1121,6 +1417,37 @@ export default function OutlookAddressBookPage() {
             )}
           </div>
         </main>
+
+        <aside style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+            <div style={titleStyle}>Recent Activities</div>
+            <button
+              type="button"
+              onClick={() => void loadRecentActivities()}
+              disabled={activityLoading}
+              style={{ ...buttonStyle, minHeight: "28px", padding: "4px 10px", fontSize: "10px", opacity: activityLoading ? 0.6 : 1 }}
+            >
+              {activityLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+          <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "260px" : "calc(100vh - 190px)", overflowY: "auto", paddingRight: "2px" }}>
+            {activityLoading ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>Loading activities...</div> : null}
+            {!activityLoading && activityItems.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No recent activities yet.</div> : null}
+            {activityItems.map((entry) => (
+              <div key={entry.id} style={{ display: "grid", gap: "3px", padding: "7px 8px", borderRadius: "10px", background: "var(--fc-admin-panel-soft-bg)", border: "1px solid transparent" }}>
+                <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {entry.subject}
+                </div>
+                <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {entry.summary}
+                </div>
+                <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px" }}>
+                  {formatTimestamp(entry.occurredAt)}{entry.actorName ? ` · ${entry.actorName}` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
       </div>
     </div>
   )

@@ -72,6 +72,12 @@ const CCINFO_AUDITED_TABLES = [
   "cc_entry_folders",
 ]
 
+const OUTLOOK_ADDRESSBOOK_AUDITED_TABLES = [
+  "shared_addressbook_contacts",
+  "shared_addressbook_groups",
+  "shared_addressbook_group_members",
+]
+
 const AUDIT_SELECT = [
   "id",
   "occurred_at",
@@ -142,6 +148,8 @@ export async function listAuditLogs(options: {
 
   if (options.tableName === "ccinfo") {
     query = query.in("table_name", CCINFO_AUDITED_TABLES)
+  } else if (options.tableName === "outlookaddressbook") {
+    query = query.in("table_name", OUTLOOK_ADDRESSBOOK_AUDITED_TABLES)
   } else if (options.tableName && options.tableName !== "all") {
     query = query.eq("table_name", options.tableName)
   }
