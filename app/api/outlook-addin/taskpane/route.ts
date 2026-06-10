@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v5";
-        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v2";
+        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v3";
         var state = {
           templates: [],
           detailCache: {},
@@ -547,29 +547,66 @@ export async function GET(request: Request) {
           return key ? state.recipientMap[key] || "" : "";
         }
 
-        function parseRecipients(value) {
-          return splitRecipientText(value)
-            .map(function (part) {
-              var bracket = part.match(/^(.*?)<([^>]+)>$/);
-              var address = stripOuterQuotes(bracket ? bracket[2] : part);
-              var name = stripOuterQuotes(bracket ? bracket[1] : "");
-              if (!address) return null;
-              if (!/@/.test(address)) {
-                var resolved = resolveRecipient(address) || resolveRecipient(name);
-                if (resolved && typeof resolved === "object" && resolved.emailAddress) {
+        function addParsedRecipient(recipients, seen, recipient) {
+          if (!recipient) return;
+          var key = "";
+          if (typeof recipient === "string") {
+            key = normaliseRecipientKey(recipient);
+          } else if (recipient.emailAddress) {
+            key = String(recipient.emailAddress).toLowerCase();
+          }
+          if (!key || seen[key]) return;
+          seen[key] = true;
+          recipients.push(recipient);
+        }
+
+        function resolvedRecipientList(resolved, name, address) {
+          if (resolved && typeof resolved === "object") {
+            if (Array.isArray(resolved.members) && resolved.members.length) {
+              return resolved.members
+                .map(function (member) {
+                  if (!member || !member.emailAddress) return null;
                   return {
-                    displayName: resolved.displayName || name || address,
-                    emailAddress: resolved.emailAddress
+                    displayName: member.displayName || member.emailAddress,
+                    emailAddress: member.emailAddress
                   };
-                }
-                if (typeof resolved === "string" && /@/.test(resolved)) {
-                  return { displayName: name || address, emailAddress: resolved };
-                }
-                return resolved || address;
+                })
+                .filter(Boolean);
+            }
+            if (resolved.emailAddress) {
+              return [{
+                displayName: resolved.displayName || name || address,
+                emailAddress: resolved.emailAddress
+              }];
+            }
+          }
+          if (typeof resolved === "string" && /@/.test(resolved)) {
+            return [{ displayName: name || address, emailAddress: resolved }];
+          }
+          return [];
+        }
+
+        function parseRecipients(value) {
+          var recipients = [];
+          var seen = {};
+          splitRecipientText(value).forEach(function (part) {
+            var bracket = part.match(/^(.*?)<([^>]+)>$/);
+            var address = stripOuterQuotes(bracket ? bracket[2] : part);
+            var name = stripOuterQuotes(bracket ? bracket[1] : "");
+            if (!address) return;
+            if (!/@/.test(address)) {
+              var resolved = resolveRecipient(address) || resolveRecipient(name);
+              var expanded = resolvedRecipientList(resolved, name, address);
+              if (expanded.length) {
+                expanded.forEach(function (recipient) { addParsedRecipient(recipients, seen, recipient); });
+                return;
               }
-              return name ? { displayName: name, emailAddress: address } : { emailAddress: address };
-            })
-            .filter(Boolean);
+              addParsedRecipient(recipients, seen, resolved || address);
+              return;
+            }
+            addParsedRecipient(recipients, seen, name ? { displayName: name, emailAddress: address } : { emailAddress: address });
+          });
+          return recipients;
         }
 
         async function setRecipients(recipientApi, value) {

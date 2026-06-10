@@ -9,7 +9,7 @@ function xmlEscape(value) {
 
 export function buildOutlookManifest(rawBaseUrl) {
   const baseUrl = xmlEscape(String(rawBaseUrl || "https://fcuno.com").replace(/\/$/, ""))
-  const assetVersion = "2026-06-08-recipient-map-v2"
+  const assetVersion = "2026-06-10-group-expand-v1"
   const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${assetVersion}`
   const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${assetVersion}`
 
@@ -19,7 +19,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.5.0</Version>
+  <Version>1.0.6.0</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
