@@ -137,6 +137,7 @@ function Get-RecipientEmail($Recipient) {
 function Set-ExchangeContactProfile($Identity, $Contact) {
   $profile = @{
     Identity = $Identity
+    Name = $Contact.DisplayName
     DisplayName = $Contact.DisplayName
     ErrorAction = "Stop"
   }
@@ -145,6 +146,15 @@ function Set-ExchangeContactProfile($Identity, $Contact) {
   if ($firstName) { $profile["FirstName"] = $firstName }
   if ($lastName) { $profile["LastName"] = $lastName }
   Set-Contact @profile
+}
+
+function Assert-ExchangeRecipientName($Recipient, $ExpectedName, $Label) {
+  $expected = Clean-Text $ExpectedName
+  $actualDisplayName = Clean-Text $Recipient.DisplayName
+  $actualName = Clean-Text $Recipient.Name
+  if ($actualDisplayName -ne $expected -or $actualName -ne $expected) {
+    throw "$Label was updated but Exchange verification did not match. Expected Name/DisplayName '$expected'; got Name '$actualName' and DisplayName '$actualDisplayName'."
+  }
 }
 
 function Get-ExchangeAlias($Value, $Fallback) {
@@ -412,6 +422,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
 
   $verified = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
   if (-not $verified) { throw "Could not verify Exchange contact $email after upsert." }
+  Assert-ExchangeRecipientName $verified $Contact.DisplayName "Exchange contact $email"
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
@@ -452,7 +463,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
 
   $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
   if ($existing) {
-    Set-DistributionGroup -Identity $alias -DisplayName $Group.GroupName -Notes $Group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-DistributionGroup -Identity $alias -Name $Group.GroupName -DisplayName $Group.GroupName -Notes $Group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "updatedGroups"
   } else {
     New-DistributionGroup -Name $Group.GroupName -Alias $alias -Notes $Group.Description -ErrorAction Stop | Out-Null
@@ -462,6 +473,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
 
   $verified = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
   if (-not $verified) { throw "Could not verify Exchange group $alias after upsert." }
+  Assert-ExchangeRecipientName $verified $Group.GroupName "Exchange group $alias"
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
@@ -613,6 +625,7 @@ function Invoke-IncrementalExchangeSync {
         error_message = $null
       }
       Increment-Stat $stats "processedQueueRows"
+      Write-Output ("Processing Exchange queue row {0}: {1} {2}" -f $rowId, (Clean-Text $row.action), (Clean-Text $row.display_name))
       Process-ExchangeQueueRow $row $stats
       Update-ExchangeQueueRow $rowId @{
         status = "completed"
@@ -621,6 +634,7 @@ function Invoke-IncrementalExchangeSync {
         error_message = $null
       }
       Increment-Stat $stats "completedQueueRows"
+      Write-Output ("Completed Exchange queue row {0}" -f $rowId)
     } catch {
       Update-ExchangeQueueRow $rowId @{
         status = "failed"
@@ -755,6 +769,7 @@ try {
   if (-not $syncMode) { $syncMode = "incremental" }
   if ($syncMode -ne "full") {
     $details = Invoke-IncrementalExchangeSync
+    Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
     $failedRows = [int]$details.failedQueueRows
     if ($failedRows -gt 0) {
       $message = "Exchange incremental sync completed with $failedRows failed queue row(s)."
@@ -804,6 +819,8 @@ try {
     if ($existing) {
       Set-ExchangeContactProfile $existing.Identity $contact
       Set-MailContact -Identity $existing.Identity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      $verifiedContact = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
+      if ($verifiedContact) { Assert-ExchangeRecipientName $verifiedContact $contact.DisplayName "Exchange contact $($contact.ExternalEmailAddress)" }
       $updatedContacts += 1
     } else {
       $newContact = New-MailContact -Name $contact.DisplayName -DisplayName $contact.DisplayName -ExternalEmailAddress $contact.ExternalEmailAddress -Alias $contact.Alias -ErrorAction Stop
@@ -811,6 +828,9 @@ try {
       if (-not $contactIdentity) { $contactIdentity = $contact.ExternalEmailAddress }
       Set-ExchangeContactProfile $contactIdentity $contact
       Set-MailContact -Identity $contactIdentity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      $verifiedContact = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
+      if (-not $verifiedContact) { throw "Could not verify Exchange contact $($contact.ExternalEmailAddress) after creation." }
+      Assert-ExchangeRecipientName $verifiedContact $contact.DisplayName "Exchange contact $($contact.ExternalEmailAddress)"
       $createdContacts += 1
     }
   }
@@ -820,11 +840,16 @@ try {
   foreach ($group in $exchangeRows.Groups) {
     $existing = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
     if ($existing) {
-      Set-DistributionGroup -Identity $group.Alias -DisplayName $group.GroupName -Notes $group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-DistributionGroup -Identity $group.Alias -Name $group.GroupName -DisplayName $group.GroupName -Notes $group.Description -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
+      if ($verifiedGroup) { Assert-ExchangeRecipientName $verifiedGroup $group.GroupName "Exchange group $($group.Alias)" }
       $updatedGroups += 1
     } else {
       New-DistributionGroup -Name $group.GroupName -Alias $group.Alias -Notes $group.Description | Out-Null
       Set-DistributionGroup -Identity $group.Alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
+      if (-not $verifiedGroup) { throw "Could not verify Exchange group $($group.Alias) after creation." }
+      Assert-ExchangeRecipientName $verifiedGroup $group.GroupName "Exchange group $($group.Alias)"
       $createdGroups += 1
     }
   }
@@ -901,6 +926,7 @@ try {
     removedGroups = $removedGroups
     removedContacts = $removedContacts
   }
+  Write-Output ("Exchange full sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
   Save-SyncStatus "completed" "Exchange sync completed." $details
   Send-ExchangeSyncNotification "completed" "Exchange sync completed." $details $webhookPayload
 } catch {
