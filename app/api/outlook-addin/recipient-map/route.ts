@@ -40,6 +40,8 @@ type RecipientMapEntry = {
   kind: "contact" | "group"
 }
 
+const DEFAULT_GROUP_SMTP_DOMAIN = "cosulich1.onmicrosoft.com"
+
 function requireEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing environment variable: ${name}`)
@@ -90,6 +92,38 @@ function normaliseRecipientKey(value: unknown) {
     .trim()
 }
 
+function exchangeAlias(value: string, fallback: string) {
+  const base = cleanText(value || fallback)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 58)
+
+  return base || fallback
+}
+
+function uniqueAlias(baseAlias: string, seenAliases: Set<string>) {
+  let alias = baseAlias
+  let index = 2
+  while (seenAliases.has(alias)) {
+    const suffix = `-${index}`
+    alias = `${baseAlias.slice(0, 64 - suffix.length)}${suffix}`
+    index += 1
+  }
+  seenAliases.add(alias)
+  return alias
+}
+
+function outlookGroupSmtpDomain() {
+  return cleanText(process.env.OUTLOOK_ADDIN_GROUP_DOMAIN || process.env.EXCHANGE_ADDRESSBOOK_DOMAIN || DEFAULT_GROUP_SMTP_DOMAIN)
+    .toLowerCase()
+}
+
+function groupSmtpAddress(alias: string, domain: string) {
+  return `${alias}@${domain}`.toLowerCase()
+}
+
 function addLookup(lookup: Record<string, RecipientMapEntry>, value: unknown, resolvedRecipient: RecipientMapEntry) {
   const key = normaliseRecipientKey(value)
   if (!key || (!resolvedRecipient.emailAddress && !resolvedRecipient.members?.length)) return
@@ -132,20 +166,29 @@ function addGroupLookups(
   groups: SharedGroup[],
   membersByGroupId: Map<string, RecipientAddress[]>
 ) {
+  const seenAliases = new Set<string>()
+  const smtpDomain = outlookGroupSmtpDomain()
+
   groups
     .filter((group) => Number(group.member_count || 0) > 0)
-    .forEach((group) => {
+    .forEach((group, index) => {
       const name = cleanText(group.name || group.nickname || group.source_uid)
       if (!name) return
+      const aliasSeed = cleanText(group.nickname || name)
+      const alias = uniqueAlias(exchangeAlias(aliasSeed, `group-${index + 1}`), seenAliases)
+      const emailAddress = groupSmtpAddress(alias, smtpDomain)
       const groupMembers = membersByGroupId.get(group.id) || []
       const resolvedRecipient = {
         displayName: name,
+        emailAddress,
         members: groupMembers,
         kind: "group" as const,
       }
       addLookup(lookup, name, resolvedRecipient)
       addLookup(lookup, group.nickname, resolvedRecipient)
       addLookup(lookup, group.source_uid, resolvedRecipient)
+      addLookup(lookup, alias, resolvedRecipient)
+      addLookup(lookup, emailAddress, resolvedRecipient)
     })
 }
 

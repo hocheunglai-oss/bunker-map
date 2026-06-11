@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v5";
-        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v3";
+        var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-recipient-map-v4";
         var state = {
           templates: [],
           detailCache: {},
@@ -562,6 +562,12 @@ export async function GET(request: Request) {
 
         function resolvedRecipientList(resolved, name, address) {
           if (resolved && typeof resolved === "object") {
+            if (resolved.emailAddress) {
+              return [{
+                displayName: resolved.displayName || name || address,
+                emailAddress: resolved.emailAddress
+              }];
+            }
             if (Array.isArray(resolved.members) && resolved.members.length) {
               return resolved.members
                 .map(function (member) {
@@ -572,12 +578,6 @@ export async function GET(request: Request) {
                   };
                 })
                 .filter(Boolean);
-            }
-            if (resolved.emailAddress) {
-              return [{
-                displayName: resolved.displayName || name || address,
-                emailAddress: resolved.emailAddress
-              }];
             }
           }
           if (typeof resolved === "string" && /@/.test(resolved)) {
