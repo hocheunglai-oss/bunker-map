@@ -411,6 +411,35 @@ function Get-QueuePayloadValue($Row, $ObjectName, $PropertyName) {
   return Clean-Text $object.$PropertyName
 }
 
+function Get-QueueChangeSummary($Row) {
+  $action = Clean-Text $Row.action
+  $name = Clean-Text $Row.display_name
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "contact" "DisplayName" }
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "group" "GroupName" }
+  if (-not $name) { $name = Clean-Text $Row.entity_email }
+  if (-not $name) { $name = Clean-Text $Row.entity_alias }
+  if (-not $name) { $name = Clean-Text $Row.entity_id }
+  if (-not $name) { $name = "Unknown item" }
+
+  switch ($action) {
+    "create_contact" { return "Created contact: $name" }
+    "update_contact" { return "Updated contact: $name" }
+    "delete_contact" { return "Deleted contact: $name" }
+    "create_group" { return "Created group: $name" }
+    "update_group" { return "Updated group: $name" }
+    "delete_group" { return "Deleted group: $name" }
+    "update_group_members" { return "Updated group members: $name" }
+    default { return "Updated: $name" }
+  }
+}
+
+function Add-SyncChange([hashtable]$Stats, $Row) {
+  $summary = Get-QueueChangeSummary $Row
+  if (-not $summary) { return }
+  if (-not (Has-MapKey $Stats "changes")) { $Stats["changes"] = @() }
+  $Stats["changes"] = @($Stats["changes"]) + $summary
+}
+
 function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
   if (-not $Contact) {
     Increment-Stat $Stats "skippedQueueRows"
@@ -612,6 +641,7 @@ function Invoke-IncrementalExchangeSync {
     failedQueueRows = 0
     skippedQueueRows = 0
     verifiedQueueRows = 0
+    changes = @()
     createdContacts = 0
     updatedContacts = 0
     removedContacts = 0
@@ -651,6 +681,7 @@ function Invoke-IncrementalExchangeSync {
         error_message = $null
       }
       Increment-Stat $stats "completedQueueRows"
+      Add-SyncChange $stats $row
       Write-Output ("Completed Exchange queue row {0}" -f $rowId)
     } catch {
       Update-ExchangeQueueRow $rowId @{
@@ -733,6 +764,27 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   if (-not $startedAt) { $startedAt = (Get-Date).ToUniversalTime().ToString("o") }
 
   $statusText = if ($Status -eq "completed") { "Completed" } else { "Failed" }
+  $changesRows = ""
+  $changes = Get-DetailValue $Details "changes"
+  if ($changes) {
+    $index = 0
+    foreach ($change in @($changes)) {
+      if ($index -ge 25) { break }
+      $changeText = Clean-Text $change
+      if ($changeText) {
+        $changesRows += "<li style='margin:0 0 4px;'>$(Escape-Html $changeText)</li>"
+        $index += 1
+      }
+    }
+    $remainingChanges = @($changes).Count - $index
+    if ($remainingChanges -gt 0) {
+      $changesRows += "<li style='margin:0;color:#64748b;'>$(Escape-Html "and $remainingChanges more...")</li>"
+    }
+  }
+  if (-not $changesRows) {
+    $changesRows = "<li style='margin:0;color:#64748b;'>No individual changes were reported.</li>"
+  }
+
   $detailsRows = ""
   if ($Details) {
     foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "skippedQueueRows", "verifiedQueueRows", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
@@ -753,6 +805,9 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   <p><strong>Message:</strong> $(Escape-Html $Message)</p>
   <p><strong>Requested by:</strong> $(Escape-Html $requestedBy)</p>
   <p><strong>Requested at:</strong> $(Escape-Html $startedAt)</p>
+  <h3 style="margin:16px 0 8px;">Changes</h3>
+  <ul style="margin:0 0 12px;padding-left:18px;">$changesRows</ul>
+  <h3 style="margin:16px 0 8px;">Summary</h3>
   <table style="border-collapse:collapse;margin-top:12px;">$detailsRows</table>
 </div>
 "@

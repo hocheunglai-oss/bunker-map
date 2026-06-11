@@ -696,25 +696,6 @@ export default function OutlookAddressBookPage() {
     [contactNames, groupNames, recentActivityLogs]
   )
 
-  useEffect(() => {
-    if (loading) return
-    const selectedVisible = directoryItems.some((item) =>
-      (activeView === "contacts" && item.type === "contact" && item.id === selectedContactId) ||
-      (activeView === "groups" && item.type === "group" && item.id === selectedGroupId)
-    )
-    if (selectedVisible) return
-    const first = directoryItems[0]
-    if (first?.type === "contact") {
-      setActiveView("contacts")
-      setSelectedContactId(first.id)
-      return
-    }
-    if (first?.type === "group") {
-      setActiveView("groups")
-      setSelectedGroupId(first.id)
-    }
-  }, [activeView, directoryItems, loading, selectedContactId, selectedGroupId])
-
   function clearCreateMenuHideTimer() {
     if (createMenuHideTimerRef.current) {
       window.clearTimeout(createMenuHideTimerRef.current)
@@ -761,8 +742,8 @@ export default function OutlookAddressBookPage() {
       setContacts(contactRows)
       setGroups(groupRows)
       setMembers(memberRows)
-      setSelectedContactId(contactRows[0]?.id || "")
-      setSelectedGroupId(groupRows[0]?.id || "")
+      setSelectedContactId("")
+      setSelectedGroupId("")
       setSaving("saved")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load Outlook address book.")
@@ -953,7 +934,7 @@ export default function OutlookAddressBookPage() {
     setCreateDraftType(type)
     setCreateSourceBook(defaultSource)
     setCreateNewSourceBook("")
-    setCreateName(type === "contact" ? "NEW CONTACT" : "NEW GROUP")
+    setCreateName("")
     setCreateEmail("")
     setCreateMenuOpen(false)
     setAddMemberMenuOpen(false)
@@ -1225,8 +1206,6 @@ export default function OutlookAddressBookPage() {
       payload: { group: snapshot, addedContact: contactExchangeSnapshot(contact) },
     })
     setMembers((current) => (current.some((item) => item.group_id === member.group_id && item.contact_id === member.contact_id) ? current : [...current, member]))
-    setAddMemberMenuOpen(false)
-    setAddMemberSearch("")
     setSaving("saved")
     void loadRecentActivities()
   }
@@ -1374,9 +1353,11 @@ export default function OutlookAddressBookPage() {
                       type="button"
                       onClick={() => void undoActivity(entry.id)}
                       disabled={undoingActivityId === entry.id}
+                      title="Undo"
+                      aria-label="Undo activity"
                       style={{ ...buttonStyle, minHeight: "22px", padding: "2px 7px", fontSize: "9px", opacity: undoingActivityId === entry.id ? 0.55 : 0.72 }}
                     >
-                      {undoingActivityId === entry.id ? "Undoing" : "Undo"}
+                      {undoingActivityId === entry.id ? "..." : "↶"}
                     </button>
                   ) : null}
                 </div>
