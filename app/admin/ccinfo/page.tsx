@@ -664,6 +664,17 @@ function formatTimestamp(value?: string | null) {
   })
 }
 
+function formatDateOnly(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+}
+
 function HoverableTextBlock({
   value,
   updates,
@@ -693,11 +704,11 @@ function HoverableTextBlock({
         wordBreak: "break-word",
         position: "relative",
         color: "var(--fc-admin-panel-text)",
-        fontSize: "14px",
-        lineHeight: 1.35,
-        padding: "8px 10px",
+        fontSize: "12px",
+        lineHeight: 1.22,
+        padding: "5px 7px",
         border: "1px solid var(--fc-admin-selected-border)",
-        borderRadius: "14px",
+        borderRadius: "12px",
         background: "var(--fc-admin-panel-soft-bg)",
         transition: "box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
@@ -711,12 +722,12 @@ function HoverableTextBlock({
             key={`hover-line-${index}`}
             onMouseEnter={() => setHoveredLine(index)}
             style={{
-              minHeight: "1.35em",
+              minHeight: "1.22em",
               cursor: "default",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
-              borderRadius: "6px",
-              padding: "0 1px",
+              borderRadius: "7px",
+              padding: "1px 3px",
               margin: 0,
               background: "transparent",
               boxShadow: "none",
@@ -770,7 +781,7 @@ function BlockTextBlock({
   const [actionPanelTop, setActionPanelTop] = useState(6)
   const selectedIndex = blocks.findIndex((block) => block.id === selectedBlockId)
   const selectedBlock = selectedIndex >= 0 ? blocks[selectedIndex] : undefined
-  const selectedStamp = selectedBlock ? (formatTimestamp(selectedBlock.updated_at) || formatTimestamp(fallbackUpdatedAt)) : ""
+  const selectedStamp = selectedBlock ? (formatDateOnly(selectedBlock.updated_at) || formatDateOnly(fallbackUpdatedAt)) : ""
 
   useEffect(() => {
     function handleExternalSelection(event: Event) {
@@ -814,6 +825,8 @@ function BlockTextBlock({
     onInsertBlock(insertAt)
   }
   const showControls = editable && (Boolean(selectedBlock) || Boolean(editingBlockId) || blocks.length === 0)
+  const panelWidth = 136
+  const reservedPanelSpace = showControls ? panelWidth + 18 : 0
 
   const textBox = (
     <div
@@ -825,9 +838,9 @@ function BlockTextBlock({
         wordBreak: "break-word",
         position: "relative",
         color: "var(--fc-admin-panel-text)",
-        fontSize: "13px",
-        lineHeight: 1.28,
-        padding: "5px 8px",
+        fontSize: "12px",
+        lineHeight: 1.2,
+        padding: `4px ${8 + reservedPanelSpace}px 4px 7px`,
         border: "1px solid var(--fc-admin-selected-border)",
         borderRadius: "12px",
         background: "var(--fc-admin-panel-soft-bg)",
@@ -835,7 +848,7 @@ function BlockTextBlock({
       onDoubleClick={onDoubleClick}
       title={onDoubleClick ? "Double click to edit" : undefined}
     >
-      {blocks.length === 0 ? <div style={{ minHeight: "1.55em", color: "var(--fc-admin-muted)" }}>Double click or use Add Below to start.</div> : null}
+      {blocks.length === 0 ? <div style={{ minHeight: "1.35em", color: "var(--fc-admin-muted)" }}>Double click or use Add Below to start.</div> : null}
       {blocks.map((block, index) => {
         const selected = block.id === selectedBlockId
         const editing = editingBlockId === block.id
@@ -853,9 +866,9 @@ function BlockTextBlock({
               onBlockDoubleClick(block)
             }}
             style={{
-              minHeight: "1.35em",
-              borderRadius: "9px",
-              padding: editing ? "1px 2px" : "2px 4px",
+              minHeight: "1.22em",
+              borderRadius: "8px",
+              padding: editing ? "0 2px" : "1px 4px",
               margin: 0,
               position: "relative",
               background: selected ? "#e7f2ff" : "transparent",
@@ -871,13 +884,14 @@ function BlockTextBlock({
                 autoFocus
                 style={{
                   ...textareaStyle,
-                  minHeight: "1.45em",
+                  minHeight: "1.3em",
                   maxHeight: "62vh",
-                  padding: "1px 2px",
+                  padding: "0 2px",
                   border: "none",
                   borderRadius: "6px",
                   background: "transparent",
-                  lineHeight: 1.45,
+                  fontSize: "12px",
+                  lineHeight: 1.25,
                   boxShadow: "none",
                 }}
               />
@@ -895,34 +909,34 @@ function BlockTextBlock({
   return (
     <div style={{ position: "relative" }}>
       {textBox}
-      <div style={{ position: "absolute", top: `${actionPanelTop}px`, right: "6px", width: "174px", display: "grid", gap: "7px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", background: "var(--fc-admin-panel-bg)", padding: "9px", boxShadow: "0 12px 26px #00000018", zIndex: 6 }}>
-        <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>
+      <div style={{ position: "absolute", top: `${actionPanelTop}px`, right: "7px", width: `${panelWidth}px`, display: "grid", gap: "5px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "10px", background: "var(--fc-admin-panel-bg)", padding: "7px", boxShadow: "0 8px 18px #00000014", zIndex: 6 }}>
+        <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", lineHeight: 1.15, whiteSpace: "nowrap" }}>
           {selectedStamp ? `Updated ${selectedStamp}` : "No update recorded"}
         </div>
         {onInsertBlock ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
-            <button type="button" onClick={() => insertNearSelected("above")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Above</button>
-            <button type="button" onClick={() => insertNearSelected("below")} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Add Below</button>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "4px" }}>
+            <button type="button" onClick={() => insertNearSelected("above")} style={{ ...buttonStyle, padding: "4px 5px", fontSize: "9px", minHeight: "24px" }}>Above</button>
+            <button type="button" onClick={() => insertNearSelected("below")} style={{ ...buttonStyle, padding: "4px 5px", fontSize: "9px", minHeight: "24px" }}>Below</button>
           </div>
         ) : null}
         {editingBlockId ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "6px" }}>
-            <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-            <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "5px 8px", fontSize: "10px" }}>Cancel</button>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "4px" }}>
+            <button type="button" onClick={onBlockSave} style={{ ...buttonStyle, padding: "4px 5px", fontSize: "9px", minHeight: "24px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
+            <button type="button" onClick={onBlockCancel} style={{ ...buttonStyle, padding: "4px 5px", fontSize: "9px", minHeight: "24px" }}>Cancel</button>
             {selectedBlock && onBlockDelete ? (
               <button
                 type="button"
                 onClick={() => {
                   if (confirm("Delete this row?")) onBlockDelete(selectedBlock.id)
                 }}
-                style={{ ...buttonStyle, gridColumn: "1 / -1", padding: "5px 8px", fontSize: "10px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
+                style={{ ...buttonStyle, gridColumn: "1 / -1", padding: "4px 5px", fontSize: "9px", minHeight: "24px", background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
               >
-                Delete Row
+                Delete
               </button>
             ) : null}
           </div>
         ) : (
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", lineHeight: 1.35 }}>Double click text to edit.</div>
+          <div style={{ color: "var(--fc-admin-muted)", fontSize: "9px", lineHeight: 1.2 }}>Double click to edit</div>
         )}
       </div>
     </div>
