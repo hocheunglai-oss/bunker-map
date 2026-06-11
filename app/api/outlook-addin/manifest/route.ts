@@ -39,7 +39,7 @@ export async function GET(request: Request) {
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
   <IconUrl DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="${xmlEscape(baseUrl)}/outlook-template-icon-80.png"/>
-  <SupportUrl DefaultValue="${xmlEscape(baseUrl)}/admin/emailtemplates"/>
+  <SupportUrl DefaultValue="${xmlEscape(baseUrl)}/admin/outlooktemplates"/>
   <AppDomains>
     <AppDomain>${xmlEscape(baseUrl)}</AppDomain>
   </AppDomains>

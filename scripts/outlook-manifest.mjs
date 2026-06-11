@@ -26,7 +26,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
   <IconUrl DefaultValue="${baseUrl}/outlook-template-icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
-  <SupportUrl DefaultValue="${baseUrl}/admin/emailtemplates"/>
+  <SupportUrl DefaultValue="${baseUrl}/admin/outlooktemplates"/>
   <AppDomains>
     <AppDomain>${baseUrl}</AppDomain>
   </AppDomains>

@@ -11,7 +11,7 @@
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
   <IconUrl DefaultValue="https://fcuno.com/outlook-template-icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://fcuno.com/outlook-template-icon-80.png"/>
-  <SupportUrl DefaultValue="https://fcuno.com/admin/emailtemplates"/>
+  <SupportUrl DefaultValue="https://fcuno.com/admin/outlooktemplates"/>
   <AppDomains>
     <AppDomain>https://fcuno.com</AppDomain>
   </AppDomains>

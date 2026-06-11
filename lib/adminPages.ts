@@ -60,9 +60,10 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
   },
   {
     id: "email-templates",
-    label: "EMAIL TEMPLATES",
+    label: "OUTLOOK TEMPLATES",
     group: "contacts",
-    path: "/admin/emailtemplates",
+    path: "/admin/outlooktemplates",
+    matchPrefixes: ["/admin/emailtemplates", "/admin/outlooktemplates"],
   },
   {
     id: "event-calendar",

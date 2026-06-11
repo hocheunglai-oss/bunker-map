@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 
@@ -46,6 +47,30 @@ type FolderNode = {
 }
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed"
+type RecipientField = "to" | "cc" | "bcc"
+type FolderDialogMode = "create" | "edit"
+
+type AddressContact = {
+  id: string
+  display_name: string
+  primary_email: string
+  nickname: string | null
+}
+
+type AddressGroup = {
+  id: string
+  name: string
+  nickname: string | null
+  member_count: number
+}
+
+type RecipientOption = {
+  id: string
+  type: "contact" | "group"
+  label: string
+  detail: string
+  value: string
+}
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -70,9 +95,9 @@ const buttonStyle: React.CSSProperties = {
 
 const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  borderColor: "var(--fc-admin-success-border)",
-  background: "var(--fc-admin-success-bg)",
-  color: "var(--fc-admin-success-text)",
+  borderColor: "var(--fc-admin-button-border)",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)",
 }
 
 const dangerButtonStyle: React.CSSProperties = {
@@ -168,6 +193,17 @@ function buildFolderTree(templates: EmailTemplate[]) {
   return { root, index }
 }
 
+function buildFolderTreeFromPaths(templates: EmailTemplate[], folderPaths: string[]) {
+  const folderTemplates = [
+    ...templates,
+    ...folderPaths
+      .filter((folder) => folder.trim())
+      .map((folder) => ({ folder } as EmailTemplate)),
+  ]
+
+  return buildFolderTree(folderTemplates)
+}
+
 function folderContains(template: EmailTemplate, folder: string) {
   if (!folder) return true
   return template.folder === folder || template.folder.startsWith(`${folder} / `)
@@ -207,6 +243,55 @@ function htmlToText(html: string) {
   return (div.textContent || "").trim()
 }
 
+function formatContactRecipient(contact: AddressContact) {
+  const name = (contact.display_name || contact.nickname || contact.primary_email || "").trim()
+  const email = (contact.primary_email || "").trim()
+  return name && name !== email ? `${name} <${email}>` : email
+}
+
+function formatGroupRecipient(group: AddressGroup) {
+  const name = (group.name || group.nickname || "").trim()
+  return name ? `${name} <${name}>` : ""
+}
+
+function splitRecipientText(value: string) {
+  const text = String(value || "").replace(/\r?\n/g, " ")
+  const parts: string[] = []
+  let current = ""
+  let inQuote = false
+  let angleDepth = 0
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text.charAt(index)
+    if (char === "\"" && text.charAt(index - 1) !== "\\") inQuote = !inQuote
+    if (!inQuote && char === "<") angleDepth += 1
+    if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1
+    if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
+      if (current.trim()) parts.push(current.trim())
+      current = ""
+      continue
+    }
+    current += char
+  }
+
+  if (current.trim()) parts.push(current.trim())
+  return parts
+}
+
+function joinRecipients(values: string[]) {
+  const seen = new Set<string>()
+  const cleaned = values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => {
+      const key = value.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  return cleaned.join(", ")
+}
+
 function createBlankTemplate(folder: string): EmailTemplate {
   const now = new Date().toISOString()
   const id = `manual-${Date.now()}`
@@ -244,6 +329,17 @@ export default function EmailTemplatesAdminPage() {
   const [selectedId, setSelectedId] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ "": true })
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const [customFolders, setCustomFolders] = useState<string[]>([])
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false)
+  const [folderDialogMode, setFolderDialogMode] = useState<FolderDialogMode>("create")
+  const [folderDialogTarget, setFolderDialogTarget] = useState("")
+  const [folderNameDraft, setFolderNameDraft] = useState("")
+  const [draggedTemplateId, setDraggedTemplateId] = useState("")
+  const [dropTargetFolder, setDropTargetFolder] = useState("")
+  const [contacts, setContacts] = useState<AddressContact[]>([])
+  const [groups, setGroups] = useState<AddressGroup[]>([])
+  const [recipientPickerField, setRecipientPickerField] = useState<RecipientField | null>(null)
+  const [recipientSearch, setRecipientSearch] = useState("")
   const [search, setSearch] = useState("")
   const [message, setMessage] = useState("")
   const [saveState, setSaveState] = useState<SaveState>("idle")
@@ -251,11 +347,10 @@ export default function EmailTemplatesAdminPage() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
   useEffect(() => {
-    document.title = "Email Templates - FC Uno"
+    document.title = "Outlook Templates - FC Uno"
   }, [])
 
-  const folderTree = useMemo(() => buildFolderTree(templates), [templates])
-  const folderCount = Math.max(Object.keys(folderTree.index).length - 1, 0)
+  const folderTree = useMemo(() => buildFolderTreeFromPaths(templates, customFolders), [customFolders, templates])
 
   const visibleTemplates = useMemo(() => {
     return templates.filter((template) => {
@@ -266,6 +361,36 @@ export default function EmailTemplatesAdminPage() {
   }, [search, selectedFolder, templates])
 
   const selectedTemplate = templates.find((template) => template.id === selectedId) || null
+
+  const recipientOptions = useMemo<RecipientOption[]>(() => {
+    const contactOptions = contacts
+      .filter((contact) => contact.primary_email)
+      .map((contact) => ({
+        id: `contact-${contact.id}`,
+        type: "contact" as const,
+        label: contact.display_name || contact.nickname || contact.primary_email,
+        detail: contact.primary_email,
+        value: formatContactRecipient(contact),
+      }))
+    const groupOptions = groups
+      .filter((group) => group.name)
+      .map((group) => ({
+        id: `group-${group.id}`,
+        type: "group" as const,
+        label: group.name || group.nickname || "",
+        detail: `${group.member_count || 0} members`,
+        value: formatGroupRecipient(group),
+      }))
+
+    const tokens = normaliseSearchText(recipientSearch).split(" ").filter(Boolean)
+    return [...groupOptions, ...contactOptions]
+      .filter((option) => {
+        if (tokens.length === 0) return true
+        const haystack = normaliseSearchText([option.label, option.detail, option.value, option.type].join(" "))
+        return tokens.every((token) => haystack.includes(token))
+      })
+      .slice(0, 250)
+  }, [contacts, groups, recipientSearch])
 
   useEffect(() => {
     if (!authenticated) return
@@ -298,6 +423,39 @@ export default function EmailTemplatesAdminPage() {
     }
 
     loadTemplates()
+  }, [authenticated])
+
+  useEffect(() => {
+    if (!authenticated) return
+
+    async function loadAddressBook() {
+      const [contactResult, groupResult] = await Promise.all([
+        supabase
+          .from("shared_addressbook_contacts")
+          .select("id,display_name,primary_email,nickname")
+          .order("display_name", { ascending: true })
+          .limit(6000),
+        supabase
+          .from("shared_addressbook_groups")
+          .select("id,name,nickname,member_count")
+          .order("name", { ascending: true })
+          .limit(1000),
+      ])
+
+      if (contactResult.error) {
+        setMessage(contactResult.error.message)
+      } else {
+        setContacts((contactResult.data || []) as AddressContact[])
+      }
+
+      if (groupResult.error) {
+        setMessage(groupResult.error.message)
+      } else {
+        setGroups((groupResult.data || []) as AddressGroup[])
+      }
+    }
+
+    void loadAddressBook()
   }, [authenticated])
 
   useEffect(() => {
@@ -401,6 +559,34 @@ export default function EmailTemplatesAdminPage() {
     }
   }
 
+  async function saveTemplates(templatesToSave: EmailTemplate[]) {
+    if (templatesToSave.length === 0) return
+    setSaveState("saving")
+    setMessage("")
+
+    try {
+      const savedTemplates = await Promise.all(
+        templatesToSave.map(async (template) => {
+          const response = await fetch("/api/admin/email-templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "save-template", template }),
+          })
+          const data = (await response.json()) as SaveTemplateResponse
+          if (!response.ok) throw new Error(data.message || "Save failed.")
+          return data.template || template
+        })
+      )
+      const savedById = new Map(savedTemplates.map((template) => [template.id, template]))
+      setTemplates((current) => current.map((template) => savedById.get(template.id) || template))
+      setLastUpdatedAt(new Date().toISOString())
+      setSaveState("saved")
+    } catch (error) {
+      setSaveState("failed")
+      setMessage(error instanceof Error ? error.message : "Save failed.")
+    }
+  }
+
   function handleManualSave() {
     const template = pendingTemplateRef.current || selectedTemplate
     if (!template) return
@@ -444,6 +630,118 @@ export default function EmailTemplatesAdminPage() {
     markDirty(template)
   }
 
+  function openCreateFolderDialog(parentPath = selectedFolder) {
+    setFolderDialogMode("create")
+    setFolderDialogTarget(parentPath || "")
+    setFolderNameDraft("")
+    setFolderDialogOpen(true)
+  }
+
+  function openEditFolderDialog(folderPath: string) {
+    if (!folderPath) return
+    const parts = getFolderParts(folderPath)
+    setFolderDialogMode("edit")
+    setFolderDialogTarget(folderPath)
+    setFolderNameDraft(parts[parts.length - 1] || "")
+    setFolderDialogOpen(true)
+  }
+
+  function closeFolderDialog() {
+    setFolderDialogOpen(false)
+    setFolderDialogTarget("")
+    setFolderNameDraft("")
+  }
+
+  function createFolderFromDialog() {
+    const name = folderNameDraft.trim()
+    if (!name) return
+    const folderPath = folderDialogTarget ? `${folderDialogTarget} / ${name}` : name
+    setCustomFolders((current) => Array.from(new Set([...current, folderPath])).sort((a, b) => a.localeCompare(b)))
+    setSelectedFolder(folderPath)
+    setExpandedFolders((current) => expandFolderPath(folderPath, current))
+    closeFolderDialog()
+  }
+
+  function renameFolderFromDialog() {
+    const nextName = folderNameDraft.trim()
+    const oldPath = folderDialogTarget
+    if (!oldPath || !nextName) return
+    const parts = getFolderParts(oldPath)
+    const parent = parts.slice(0, -1).join(" / ")
+    const nextPath = parent ? `${parent} / ${nextName}` : nextName
+    if (nextPath === oldPath) {
+      closeFolderDialog()
+      return
+    }
+
+    const now = new Date().toISOString()
+    const changedTemplates = templates
+      .filter((template) => folderContains(template, oldPath))
+      .map((template) => {
+        const suffix = template.folder === oldPath ? "" : template.folder.slice(oldPath.length)
+        const folder = `${nextPath}${suffix}`
+        return {
+          ...template,
+          folder,
+          tags: getFolderParts(folder),
+          updatedAt: now,
+        }
+      })
+    const changedById = new Map(changedTemplates.map((template) => [template.id, template]))
+
+    setTemplates((current) => current.map((template) => changedById.get(template.id) || template))
+    setCustomFolders((current) =>
+      Array.from(
+        new Set(
+          current.map((folder) => {
+            if (folder === oldPath) return nextPath
+            if (folder.startsWith(`${oldPath} / `)) return `${nextPath}${folder.slice(oldPath.length)}`
+            return folder
+          })
+        )
+      ).sort((a, b) => a.localeCompare(b))
+    )
+    setSelectedFolder(nextPath)
+    setExpandedFolders((current) => expandFolderPath(nextPath, current))
+    closeFolderDialog()
+    void saveTemplates(changedTemplates)
+  }
+
+  function deleteFolderFromDialog() {
+    const folderPath = folderDialogTarget
+    if (!folderPath) return
+    const affected = templates.filter((template) => folderContains(template, folderPath))
+    const confirmed = window.confirm(
+      `Delete folder "${folderPath}"?\n\nThis will delete ${affected.length} template${affected.length === 1 ? "" : "s"} in this folder and subfolders.`
+    )
+    if (!confirmed) return
+
+    setTemplates((current) => current.filter((template) => !folderContains(template, folderPath)))
+    setCustomFolders((current) => current.filter((folder) => folder !== folderPath && !folder.startsWith(`${folderPath} / `)))
+    setSelectedFolder("")
+    setSelectedId("")
+    closeFolderDialog()
+    affected.forEach((template) => void deleteTemplate(template.id))
+  }
+
+  function moveTemplateToFolder(templateId: string, folderPath: string) {
+    const template = templates.find((item) => item.id === templateId)
+    const targetFolder = folderPath || "Custom"
+    if (!template || template.folder === targetFolder) return
+    const now = new Date().toISOString()
+    const movedTemplate = {
+      ...template,
+      folder: targetFolder,
+      tags: getFolderParts(targetFolder),
+      updatedAt: now,
+    }
+    setTemplates((current) => current.map((item) => (item.id === templateId ? movedTemplate : item)))
+    setSelectedFolder(targetFolder)
+    setSelectedId(templateId)
+    setExpandedFolders((current) => expandFolderPath(targetFolder, current))
+    markDirty(movedTemplate)
+  }
+
   function handleDeleteTemplate() {
     if (!selectedTemplate) return
     const deletedId = selectedTemplate.id
@@ -464,6 +762,24 @@ export default function EmailTemplatesAdminPage() {
     setFolderPickerOpen(false)
   }
 
+  function openRecipientPicker(field: RecipientField) {
+    setRecipientPickerField(field)
+    setRecipientSearch("")
+  }
+
+  function closeRecipientPicker() {
+    setRecipientPickerField(null)
+    setRecipientSearch("")
+  }
+
+  function addRecipient(option: RecipientOption) {
+    if (!selectedTemplate || !recipientPickerField || !option.value) return
+    const current = splitRecipientText(selectedTemplate[recipientPickerField])
+    updateSelectedTemplate({
+      [recipientPickerField]: joinRecipients([...current, option.value]),
+    } as Pick<EmailTemplate, RecipientField>)
+  }
+
   function selectFolder(folderPath: string) {
     setSearch("")
     setSelectedFolder(folderPath)
@@ -481,6 +797,20 @@ export default function EmailTemplatesAdminPage() {
         <button
           type="button"
           onClick={() => selectFolder(node.path)}
+          onDoubleClick={() => openEditFolderDialog(node.path)}
+          onDragOver={(event) => {
+            event.preventDefault()
+            if (draggedTemplateId) setDropTargetFolder(node.path)
+          }}
+          onDragLeave={() => {
+            if (dropTargetFolder === node.path) setDropTargetFolder("")
+          }}
+          onDrop={(event) => {
+            event.preventDefault()
+            if (draggedTemplateId) moveTemplateToFolder(draggedTemplateId, node.path)
+            setDraggedTemplateId("")
+            setDropTargetFolder("")
+          }}
           style={{
             width: "100%",
             minHeight: "30px",
@@ -491,7 +821,9 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "var(--fc-row-active-bg)" : "#ffffff",
+            background: dropTargetFolder === node.path ? "#d6ecff" : active ? "var(--fc-row-active-bg)" : "#ffffff",
+            outline: dropTargetFolder === node.path ? "2px solid var(--fc-accent)" : "none",
+            outlineOffset: "-2px",
             color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
@@ -510,20 +842,7 @@ export default function EmailTemplatesAdminPage() {
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", fontWeight: 800 }}>
             {node.name}
           </span>
-          <span
-            style={{
-              minWidth: "24px",
-              borderRadius: "999px",
-              padding: "2px 6px",
-              background: active ? "var(--fc-row-bg)" : "var(--fc-count-bg)",
-              color: active ? "var(--fc-row-active-text)" : "var(--fc-count-text)",
-              fontSize: "11px",
-              fontWeight: 800,
-              textAlign: "center",
-            }}
-          >
-            {node.totalCount}
-          </span>
+          <span style={{ color: "var(--fc-muted)", fontSize: "11px", fontWeight: 800 }}> </span>
         </button>
         {hasChildren && expandedFolders[node.path] ? node.children.map(renderFolderNode) : null}
       </div>
@@ -581,7 +900,7 @@ export default function EmailTemplatesAdminPage() {
     return (
       <div style={pageStyle}>
         <div style={{ ...panelStyle, padding: "22px", maxWidth: "520px", margin: "0 auto" }}>
-          <h1 style={{ marginTop: 0 }}>Email Templates</h1>
+          <h1 style={{ marginTop: 0 }}>Outlook Templates</h1>
           <p>Please log in from the admin homepage first.</p>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Back
@@ -605,14 +924,18 @@ export default function EmailTemplatesAdminPage() {
         }}
       >
         <div>
-          <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>
-            Contact Tools
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
+              Back
+            </button>
+            <div>
+              <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+                Contact Tools
+              </div>
+              <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK TEMPLATES</h1>
+            </div>
           </div>
-          <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>EMAIL TEMPLATES</h1>
         </div>
-        <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-          Back
-        </button>
       </header>
       <div
         style={{
@@ -627,7 +950,6 @@ export default function EmailTemplatesAdminPage() {
         <section style={panelStyle}>
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>Folders</div>
-            <span style={{ color: "var(--fc-muted)", fontSize: "11px" }}>{folderCount} folders</span>
           </div>
           <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
             <input
@@ -636,9 +958,14 @@ export default function EmailTemplatesAdminPage() {
               placeholder="Search templates"
               style={inputStyle}
             />
-            <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle}>
-              New in selected folder
-            </button>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px" }}>
+              <button type="button" onClick={() => openCreateFolderDialog(selectedFolder)} style={primaryButtonStyle}>
+                New Folder
+              </button>
+              <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle}>
+                New Template
+              </button>
+            </div>
           </div>
           <div style={{ maxHeight: isMobile ? "320px" : "calc(100vh - 170px)", overflow: "auto", padding: "6px" }}>
             {renderFolderNode(folderTree.root)}
@@ -657,7 +984,17 @@ export default function EmailTemplatesAdminPage() {
                 <button
                   key={template.id}
                   type="button"
+                  draggable
                   onClick={() => setSelectedId(template.id)}
+                  onDragStart={(event) => {
+                    setDraggedTemplateId(template.id)
+                    event.dataTransfer.effectAllowed = "move"
+                    event.dataTransfer.setData("text/plain", template.id)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedTemplateId("")
+                    setDropTargetFolder("")
+                  }}
                   style={{
                     width: "100%",
                     display: "block",
@@ -684,19 +1021,6 @@ export default function EmailTemplatesAdminPage() {
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>Template Editor</div>
             <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ color: saveState === "failed" ? "var(--fc-error)" : "var(--fc-muted)", fontSize: "11px", fontWeight: 800 }}>
-                {saveState === "saving"
-                  ? "Saving..."
-                  : saveState === "saved"
-                    ? "Saved"
-                    : saveState === "dirty"
-                      ? "Unsaved changes"
-                      : saveState === "failed"
-                        ? "Save failed"
-                        : lastUpdatedAt
-                          ? "Saved"
-                          : "Saved"}
-              </span>
               <button
                 type="button"
                 onClick={handleManualSave}
@@ -743,15 +1067,21 @@ export default function EmailTemplatesAdminPage() {
               >
                 <label>
                   <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>To</div>
-                  <input value={selectedTemplate.to} onChange={(event) => updateSelectedTemplate({ to: event.target.value })} style={inputStyle} />
+                  <button type="button" onClick={() => openRecipientPicker("to")} style={{ ...inputStyle, height: "auto", minHeight: "38px", textAlign: "left", cursor: "pointer" }}>
+                    {selectedTemplate.to || "Select contacts or groups"}
+                  </button>
                 </label>
                 <label>
                   <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Cc</div>
-                  <input value={selectedTemplate.cc} onChange={(event) => updateSelectedTemplate({ cc: event.target.value })} style={inputStyle} />
+                  <button type="button" onClick={() => openRecipientPicker("cc")} style={{ ...inputStyle, height: "auto", minHeight: "38px", textAlign: "left", cursor: "pointer" }}>
+                    {selectedTemplate.cc || "Select contacts or groups"}
+                  </button>
                 </label>
                 <label>
                   <div style={{ fontSize: "12px", color: "var(--fc-muted)", marginBottom: "5px", fontWeight: 800 }}>Bcc</div>
-                  <input value={selectedTemplate.bcc} onChange={(event) => updateSelectedTemplate({ bcc: event.target.value })} style={inputStyle} />
+                  <button type="button" onClick={() => openRecipientPicker("bcc")} style={{ ...inputStyle, height: "auto", minHeight: "38px", textAlign: "left", cursor: "pointer" }}>
+                    {selectedTemplate.bcc || "Select contacts or groups"}
+                  </button>
                 </label>
               </div>
 
@@ -847,6 +1177,150 @@ export default function EmailTemplatesAdminPage() {
               <button type="button" onClick={() => setFolderPickerOpen(false)} style={buttonStyle}>Close</button>
             </div>
             <div style={{ padding: "8px", overflow: "auto" }}>{renderFolderPickerNode(folderTree.root)}</div>
+          </div>
+        </div>
+      ) : null}
+      {folderDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 45,
+            display: "grid",
+            placeItems: "center",
+            padding: "18px",
+            background: "#1d1d1f99",
+          }}
+        >
+          <div style={{ ...panelStyle, width: "min(520px, 100%)" }}>
+            <div style={sectionHeaderStyle}>
+              <div style={sectionTitleStyle}>{folderDialogMode === "create" ? "New Folder" : "Folder"}</div>
+              <button type="button" onClick={closeFolderDialog} style={buttonStyle}>Close</button>
+            </div>
+            <div style={{ display: "grid", gap: "12px", padding: "14px" }}>
+              <div style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
+                {folderDialogMode === "create"
+                  ? `Parent: ${folderDialogTarget || "All templates"}`
+                  : folderDialogTarget}
+              </div>
+              <input
+                value={folderNameDraft}
+                onChange={(event) => setFolderNameDraft(event.target.value)}
+                placeholder="Folder name"
+                autoFocus
+                style={inputStyle}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                {folderDialogMode === "edit" ? (
+                  <button type="button" onClick={deleteFolderFromDialog} style={dangerButtonStyle}>
+                    Delete Folder
+                  </button>
+                ) : <span />}
+                <button
+                  type="button"
+                  onClick={folderDialogMode === "create" ? createFolderFromDialog : renameFolderFromDialog}
+                  style={primaryButtonStyle}
+                >
+                  {folderDialogMode === "create" ? "Create Folder" : "Rename Folder"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {recipientPickerField && selectedTemplate ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            display: "grid",
+            placeItems: "center",
+            padding: "18px",
+            background: "#1d1d1f99",
+          }}
+        >
+          <div style={{ ...panelStyle, width: "min(820px, 100%)", maxHeight: "86vh", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
+            <div style={sectionHeaderStyle}>
+              <div style={sectionTitleStyle}>Select {recipientPickerField.toUpperCase()}</div>
+              <button type="button" onClick={closeRecipientPicker} style={buttonStyle}>Done</button>
+            </div>
+            <div style={{ display: "grid", gap: "10px", padding: "12px", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
+              <input
+                value={recipientSearch}
+                onChange={(event) => setRecipientSearch(event.target.value)}
+                placeholder="Search contacts and groups"
+                autoFocus
+                style={inputStyle}
+              />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {splitRecipientText(selectedTemplate[recipientPickerField]).length ? (
+                  splitRecipientText(selectedTemplate[recipientPickerField]).map((recipient) => (
+                    <button
+                      key={recipient}
+                      type="button"
+                      onClick={() =>
+                        updateSelectedTemplate({
+                          [recipientPickerField]: joinRecipients(
+                            splitRecipientText(selectedTemplate[recipientPickerField]).filter((item) => item !== recipient)
+                          ),
+                        } as Pick<EmailTemplate, RecipientField>)
+                      }
+                      style={{
+                        ...buttonStyle,
+                        borderRadius: "8px",
+                        background: "var(--fc-admin-panel-soft-bg)",
+                        maxWidth: "100%",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {recipient} x
+                    </button>
+                  ))
+                ) : (
+                  <span style={{ color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>No recipients selected.</span>
+                )}
+              </div>
+            </div>
+            <div style={{ overflow: "auto", padding: "8px", display: "grid", gap: "5px" }}>
+              {recipientOptions.length ? recipientOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => addRecipient(option)}
+                  style={{
+                    width: "100%",
+                    minHeight: "40px",
+                    display: "grid",
+                    gridTemplateColumns: "76px minmax(0, 1fr) minmax(120px, 0.8fr)",
+                    gap: "8px",
+                    alignItems: "center",
+                    border: "1px solid var(--fc-row-border)",
+                    borderRadius: "7px",
+                    background: "var(--fc-row-bg)",
+                    color: "var(--fc-row-text)",
+                    cursor: "pointer",
+                    padding: "8px 10px",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ color: "var(--fc-accent)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>{option.type}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "13px", fontWeight: 900 }}>
+                    {option.label}
+                  </span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--fc-muted)", fontSize: "12px", fontWeight: 800 }}>
+                    {option.detail}
+                  </span>
+                </button>
+              )) : (
+                <div style={{ padding: "18px", color: "var(--fc-muted)", fontSize: "13px" }}>No matching contacts or groups.</div>
+              )}
+            </div>
           </div>
         </div>
       ) : null}
