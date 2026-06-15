@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react"
 import {
+  ADMIN_PAGE_DEFINITIONS,
   normaliseAdminPagePermissions,
+  type AdminPageDefinition,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
+import { normaliseAdminPageDefinitions } from "@/lib/adminPageRegistry"
 
 type AuthState = {
   loading: boolean
@@ -13,6 +16,7 @@ type AuthState = {
   displayName: string | null
   role: string | null
   permissions: AdminPagePermissionMap
+  pages: AdminPageDefinition[]
 }
 
 export function useSimpleAdminAuth(): AuthState {
@@ -24,6 +28,7 @@ export function useSimpleAdminAuth(): AuthState {
   const [permissions, setPermissions] = useState<AdminPagePermissionMap>(
     normaliseAdminPagePermissions(null)
   )
+  const [pages, setPages] = useState<AdminPageDefinition[]>(ADMIN_PAGE_DEFINITIONS)
 
   useEffect(() => {
     async function checkSession() {
@@ -38,13 +43,19 @@ export function useSimpleAdminAuth(): AuthState {
         const nextDisplayName =
           typeof data.displayName === "string" ? data.displayName : nextUsername
         const nextRole = typeof data.role === "string" ? data.role : null
-        const nextPermissions = normaliseAdminPagePermissions(data.permissions)
+        const nextPages = normaliseAdminPageDefinitions(data.pages)
+        const nextPermissions = normaliseAdminPagePermissions(
+          data.permissions,
+          "none",
+          nextPages
+        )
 
         setAuthenticated(isAuthenticated)
         setUsername(isAuthenticated ? nextUsername : null)
         setDisplayName(isAuthenticated ? nextDisplayName : null)
         setRole(isAuthenticated ? nextRole : null)
         setPermissions(isAuthenticated ? nextPermissions : normaliseAdminPagePermissions(null))
+        setPages(nextPages)
 
         if (typeof window !== "undefined") {
           if (isAuthenticated && nextUsername) {
@@ -55,6 +66,7 @@ export function useSimpleAdminAuth(): AuthState {
                 displayName: nextDisplayName || nextUsername,
                 role: nextRole,
                 permissions: nextPermissions,
+                pages: nextPages,
               })
             )
           } else {
@@ -67,6 +79,7 @@ export function useSimpleAdminAuth(): AuthState {
         setDisplayName(null)
         setRole(null)
         setPermissions(normaliseAdminPagePermissions(null))
+        setPages(ADMIN_PAGE_DEFINITIONS)
         if (typeof window !== "undefined") {
           window.localStorage.removeItem("bunker_admin_actor")
         }
@@ -78,5 +91,5 @@ export function useSimpleAdminAuth(): AuthState {
     checkSession()
   }, [])
 
-  return { loading, authenticated, username, displayName, role, permissions }
+  return { loading, authenticated, username, displayName, role, permissions, pages }
 }

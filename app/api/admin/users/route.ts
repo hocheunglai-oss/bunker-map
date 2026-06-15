@@ -3,6 +3,7 @@ import {
   deleteManagedAdminUser,
   listManagedAdminRoleDefaults,
   listManagedAdminUsers,
+  loadManagedAdminRoleDefaults,
   saveManagedAdminRoleDefault,
   saveManagedAdminUser,
 } from "@/lib/adminUsers"
@@ -36,13 +37,15 @@ export async function GET() {
   try {
     await requireAdminPagePermission("user-management", "view")
     const pages = await getDiscoveredAdminPages()
-    const roleDefaults = await listManagedAdminRoleDefaults(pages)
+    const roleDefaultState = await loadManagedAdminRoleDefaults(pages)
+    const roleDefaults = roleDefaultState.roleDefaults
     const users = await listManagedAdminUsers(roleDefaults, pages)
 
     return NextResponse.json({
       users,
       pages,
       roleDefaults,
+      roleDefaultsAvailable: roleDefaultState.persisted,
     })
   } catch (error) {
     return errorResponse(error, "Failed to load admin users.")
@@ -78,6 +81,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Username is required." }, { status: 400 })
       }
 
+      const pages = await getDiscoveredAdminPages()
+      const roleDefaults = await listManagedAdminRoleDefaults(pages)
       const user = await saveManagedAdminUser(
         {
           id: payload.user.id,
@@ -87,7 +92,9 @@ export async function POST(request: Request) {
           password: payload.user.password,
           permissions: payload.user.permissions,
         },
-        session
+        session,
+        pages,
+        roleDefaults
       )
 
       return NextResponse.json({ success: true, user })

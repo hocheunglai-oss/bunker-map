@@ -1,7 +1,9 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import { canAccessAdminPage, getAdminPageByPath, isAdminRole } from "@/lib/adminPages"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { getAdminPageByPathFromPages } from "@/lib/adminPageRegistry"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const pageStyle: React.CSSProperties = {
@@ -41,12 +43,60 @@ const buttonStyle: React.CSSProperties = {
 export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const page = getAdminPageByPath(pathname)
-  const { loading, authenticated, permissions, role } = useSimpleAdminAuth()
+  const { loading, authenticated, permissions, role, pages } = useSimpleAdminAuth()
+  const page = getAdminPageByPathFromPages(pathname, pages)
+  const [guardedRequestKey, setGuardedRequestKey] = useState("")
+  const requestGuardKey =
+    page && authenticated && !isAdminRole(role)
+      ? `${page.id}:${permissions[page.id] || "none"}`
+      : ""
+
+  useEffect(() => {
+    if (loading || !authenticated || !page || isAdminRole(role)) return
+
+    const originalFetch = window.fetch.bind(window)
+    const canEdit = canAccessAdminPage(permissions, page.id, "edit")
+
+    const guardedFetch: typeof window.fetch = (input, init) => {
+      const method =
+        init?.method?.toUpperCase() ||
+        (input instanceof Request ? input.method.toUpperCase() : "GET")
+
+      if (!canEdit && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              message: "You have view-only access to this admin page.",
+            }),
+            {
+              status: 403,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          )
+        )
+      }
+
+      return originalFetch(input, init)
+    }
+    window.fetch = guardedFetch
+    setGuardedRequestKey(requestGuardKey)
+
+    return () => {
+      if (window.fetch === guardedFetch) {
+        window.fetch = originalFetch
+      }
+    }
+  }, [authenticated, loading, page, permissions, requestGuardKey, role])
 
   if (!page || pathname === "/admin") return <>{children}</>
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
+
+  if (requestGuardKey && guardedRequestKey !== requestGuardKey) {
+    return <p style={{ padding: "40px" }}>Loading...</p>
+  }
 
   const hasAccess =
     authenticated && (isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"))

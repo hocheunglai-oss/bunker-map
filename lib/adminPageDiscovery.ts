@@ -4,6 +4,7 @@ import {
   ADMIN_PAGE_DEFINITIONS,
   type AdminPageDefinition,
 } from "@/lib/adminPages"
+import { getAdminPageByPathFromPages } from "@/lib/adminPageRegistry"
 
 function titleFromSegment(segment: string) {
   return segment
@@ -14,35 +15,55 @@ function titleFromSegment(segment: string) {
     .toUpperCase()
 }
 
-async function pathExists(filePath: string) {
-  try {
-    await fs.access(filePath)
-    return true
-  } catch {
-    return false
+async function findAdminPageRoutes(
+  directory: string,
+  segments: string[] = []
+): Promise<string[]> {
+  const entries = await fs.readdir(directory, { withFileTypes: true })
+  const routes: string[] = []
+  const hasPage = entries.some(
+    (entry) => entry.isFile() && /^page\.(?:js|jsx|ts|tsx)$/.test(entry.name)
+  )
+
+  if (segments.length > 0 && hasPage) {
+    routes.push(`/admin/${segments.join("/")}`)
   }
+
+  const nestedRoutes = await Promise.all(
+    entries
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          !entry.name.startsWith(".") &&
+          !entry.name.startsWith("_") &&
+          !entry.name.startsWith("(") &&
+          !entry.name.startsWith("[")
+      )
+      .map((entry) =>
+        findAdminPageRoutes(path.join(directory, entry.name), [...segments, entry.name])
+      )
+  )
+
+  return routes.concat(...nestedRoutes)
 }
 
 export async function getDiscoveredAdminPages(): Promise<AdminPageDefinition[]> {
   const adminRoot = path.join(process.cwd(), "app", "admin")
-  const knownPaths = new Set(ADMIN_PAGE_DEFINITIONS.map((page) => page.path))
   const discovered: AdminPageDefinition[] = []
 
   try {
-    const entries = await fs.readdir(adminRoot, { withFileTypes: true })
+    const pageRoutes = await findAdminPageRoutes(adminRoot)
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+    for (const pagePath of pageRoutes) {
+      if (getAdminPageByPathFromPages(pagePath, ADMIN_PAGE_DEFINITIONS)) continue
 
-      const pagePath = `/admin/${entry.name}`
-      if (knownPaths.has(pagePath)) continue
-
-      const hasPage = await pathExists(path.join(adminRoot, entry.name, "page.tsx"))
-      if (!hasPage) continue
-
+      const routeSegments = pagePath.replace(/^\/admin\//, "").split("/")
       discovered.push({
-        id: entry.name.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase(),
-        label: titleFromSegment(entry.name),
+        id: routeSegments
+          .join("-")
+          .replace(/[^a-zA-Z0-9]+/g, "-")
+          .toLowerCase(),
+        label: titleFromSegment(routeSegments[routeSegments.length - 1]),
         group: "management",
         path: pagePath,
       })

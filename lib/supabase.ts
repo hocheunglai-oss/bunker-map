@@ -1,17 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   canAccessAdminPage,
-  getAdminPageByPath,
   isAdminRole,
   normaliseAdminPagePermissions,
+  type AdminPageDefinition,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
+import {
+  getAdminPageByPathFromPages,
+  normaliseAdminPageDefinitions,
+} from "@/lib/adminPageRegistry"
 
 type StoredAuditActor = {
   username: string
   displayName?: string
   role?: string | null
   permissions?: AdminPagePermissionMap
+  pages?: AdminPageDefinition[]
 }
 
 function getStoredAuditActor(): StoredAuditActor | null {
@@ -29,6 +34,7 @@ function getStoredAuditActor(): StoredAuditActor | null {
       displayName: actor.displayName || actor.username,
       role: actor.role || null,
       permissions: normaliseAdminPagePermissions(actor.permissions),
+      pages: normaliseAdminPageDefinitions(actor.pages),
     }
   } catch {
     return null
@@ -48,19 +54,22 @@ function canEditCurrentAdminPage(actor: StoredAuditActor) {
   if (typeof window === "undefined") return true
   if (isAdminRole(actor.role)) return true
 
-  const page = getAdminPageByPath(window.location.pathname)
+  const page = getAdminPageByPathFromPages(
+    window.location.pathname,
+    actor.pages
+  )
   if (!page) return true
 
   return canAccessAdminPage(actor.permissions, page.id, "edit")
 }
 
-function getCurrentAuditPage() {
+function getCurrentAuditPage(actor: StoredAuditActor) {
   if (typeof window === "undefined") return null
 
   const pathname = window.location.pathname
   if (!pathname.startsWith("/admin/")) return null
 
-  const knownPage = getAdminPageByPath(pathname)
+  const knownPage = getAdminPageByPathFromPages(pathname, actor.pages)
   if (knownPage) {
     return {
       id: knownPage.id,
@@ -115,7 +124,7 @@ function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
     headers.set("x-bunker-admin-role", actor.role)
   }
 
-  const page = getCurrentAuditPage()
+  const page = getCurrentAuditPage(actor)
   if (page) {
     headers.set("x-bunker-admin-page-id", page.id)
     headers.set("x-bunker-admin-page-label", page.label)

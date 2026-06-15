@@ -31,6 +31,7 @@ type UsersResponse = {
   users: ManagedAdminUser[]
   pages: AdminPageDefinition[]
   roleDefaults: ManagedAdminRoleDefault[]
+  roleDefaultsAvailable: boolean
   message?: string
 }
 
@@ -46,6 +47,7 @@ type DraftUser = {
   displayName: string
   role: AdminRoleId
   password: string
+  permissions: AdminPagePermissionMap
 }
 
 const pageStyle: React.CSSProperties = {
@@ -123,22 +125,31 @@ const labelStyle: React.CSSProperties = {
   textTransform: "uppercase",
 }
 
-function createDraftUser(): DraftUser {
+function createDraftUser(
+  role: AdminRoleId = "AC",
+  roleDefaults: ManagedAdminRoleDefault[] = [],
+  pages: AdminPageDefinition[] = []
+): DraftUser {
   return {
     username: "",
     displayName: "",
-    role: "AC",
+    role,
     password: "",
+    permissions: getDefaultPermissionsForRole(role, roleDefaults, pages),
   }
 }
 
-function userToDraft(user: ManagedAdminUser): DraftUser {
+function userToDraft(
+  user: ManagedAdminUser,
+  pages: AdminPageDefinition[]
+): DraftUser {
   return {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
     role: normaliseAdminRole(user.role),
     password: "",
+    permissions: normaliseAdminPagePermissions(user.permissions, "view", pages),
   }
 }
 
@@ -172,6 +183,7 @@ export default function UserManagementPage() {
   const [users, setUsers] = useState<ManagedAdminUser[]>([])
   const [pages, setPages] = useState<AdminPageDefinition[]>([])
   const [roleDefaults, setRoleDefaults] = useState<ManagedAdminRoleDefault[]>([])
+  const [roleDefaultsAvailable, setRoleDefaultsAvailable] = useState(false)
   const [selectedRole, setSelectedRole] = useState<AdminRoleId>("AC")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftUser>(createDraftUser)
@@ -187,6 +199,9 @@ export default function UserManagementPage() {
   )
   const selectedRoleIsAdmin = isAdminRole(selectedRole)
   const roleDefaultPermissions = getDefaultPermissionsForRole(selectedRole, roleDefaults, pages)
+  const draftPermissions = isAdminRole(draft.role)
+    ? getFullAdminPagePermissions(pages)
+    : normaliseAdminPagePermissions(draft.permissions, "view", pages)
 
   const groupedPages = useMemo(() => {
     return pages.reduce<Record<string, AdminPageDefinition[]>>((groups, page) => {
@@ -214,6 +229,7 @@ export default function UserManagementPage() {
       setUsers(data.users || [])
       setPages(data.pages || [])
       setRoleDefaults(data.roleDefaults || [])
+      setRoleDefaultsAvailable(Boolean(data.roleDefaultsAvailable))
 
       setSelectedId((currentSelectedId) => {
         const desiredSelectedId =
@@ -225,8 +241,11 @@ export default function UserManagementPage() {
 
         setDraft(
           nextSelectedId
-            ? userToDraft(data.users.find((user) => user.id === nextSelectedId)!)
-            : createDraftUser()
+            ? userToDraft(
+                data.users.find((user) => user.id === nextSelectedId)!,
+                data.pages || []
+              )
+            : createDraftUser("AC", data.roleDefaults || [], data.pages || [])
         )
 
         return nextSelectedId
@@ -248,13 +267,13 @@ export default function UserManagementPage() {
 
   function selectUser(user: ManagedAdminUser) {
     setSelectedId(user.id)
-    setDraft(userToDraft(user))
+    setDraft(userToDraft(user, pages))
     setMessage("")
   }
 
   function startNewUser() {
     setSelectedId(null)
-    setDraft(createDraftUser())
+    setDraft(createDraftUser("AC", roleDefaults, pages))
     setMessage("")
   }
 
@@ -269,8 +288,19 @@ export default function UserManagementPage() {
     setDraft((current) => ({
       ...current,
       role: nextRole,
+      permissions: getDefaultPermissionsForRole(nextRole, roleDefaults, pages),
     }))
     setSelectedRole(nextRole)
+  }
+
+  function updateUserPermission(pageId: string, permission: AdminPagePermission) {
+    setDraft((current) => ({
+      ...current,
+      permissions: {
+        ...normaliseAdminPagePermissions(current.permissions, "view", pages),
+        [pageId]: permission,
+      },
+    }))
   }
 
   function updateRolePermission(pageId: string, permission: AdminPagePermission) {
@@ -311,6 +341,7 @@ export default function UserManagementPage() {
             displayName: draft.displayName,
             role: draft.role,
             password: draft.password,
+            permissions: draftPermissions,
           },
         }),
       })
@@ -321,10 +352,10 @@ export default function UserManagementPage() {
         return
       }
 
-      setMessage("User saved.")
       setSelectedId(data.user.id)
-      setDraft(userToDraft(data.user))
+      setDraft(userToDraft(data.user, pages))
       await loadUsers(data.user.id)
+      setMessage("User saved.")
     } catch {
       setMessage("Failed to save user.")
     } finally {
@@ -399,10 +430,10 @@ export default function UserManagementPage() {
         return
       }
 
-      setMessage("User deleted.")
       setSelectedId(null)
-      setDraft(createDraftUser())
+      setDraft(createDraftUser("AC", roleDefaults, pages))
       await loadUsers(null)
+      setMessage("User deleted.")
     } catch {
       setMessage("Failed to delete user.")
     } finally {
@@ -428,24 +459,23 @@ export default function UserManagementPage() {
         <div
           style={{
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
             gap: "12px",
             flexWrap: "wrap",
           }}
         >
+          <button
+            type="button"
+            onClick={() => router.push("/admin")}
+            className="fc-admin-nav-button"
+            style={buttonStyle}
+          >
+            Back
+          </button>
           <div>
             <h1 style={{ margin: 0, fontSize: "24px", color: "var(--fc-admin-heading)" }}>
-              User Management
+              USER MANAGEMENT
             </h1>
-            <p style={{ margin: "5px 0 0", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
-              Create accounts and assign view or edit access by admin page.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-              Back
-            </button>
           </div>
         </div>
 
@@ -517,7 +547,11 @@ export default function UserManagementPage() {
                 )
               })}
 
-              {users.length === 0 ? (
+              {loading ? (
+                <div style={{ color: "var(--fc-admin-muted)", fontSize: "13px", padding: "8px" }}>
+                  Loading users...
+                </div>
+              ) : users.length === 0 ? (
                 <div style={{ color: "var(--fc-admin-muted)", fontSize: "13px", padding: "8px" }}>
                   No database users yet.
                 </div>
@@ -652,6 +686,113 @@ export default function UserManagementPage() {
           <div style={panelStyle}>
             <div style={sectionHeaderStyle}>
               <strong style={{ color: "var(--fc-admin-heading)", fontSize: "13px" }}>
+                Page Permissions
+              </strong>
+              <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
+                {isAdminRole(draft.role) ? "Full Access" : draft.role}
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "14px", padding: "12px" }}>
+              {Object.entries(groupedPages).map(([group, groupPages]) => (
+                <div key={group}>
+                  <div
+                    style={{
+                      marginBottom: "8px",
+                      color: "var(--fc-admin-heading)",
+                      fontSize: "12px",
+                      fontWeight: 900,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {ADMIN_PAGE_GROUP_LABELS[group as keyof typeof ADMIN_PAGE_GROUP_LABELS]}
+                  </div>
+
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    {groupPages.map((page) => {
+                      const permission = draftPermissions[page.id] || "view"
+                      const permissionLocked = !canEdit || isAdminRole(draft.role)
+
+                      return (
+                        <div
+                          key={page.id}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "minmax(150px, 1fr) auto",
+                            gap: "10px",
+                            alignItems: "center",
+                            border: "1px solid var(--fc-admin-border-soft)",
+                            borderRadius: "12px",
+                            background: "var(--fc-admin-panel-soft-bg)",
+                            padding: "9px 10px",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: "13px", fontWeight: 900 }}>
+                              {page.label}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: "3px",
+                                color: "var(--fc-admin-muted)",
+                                fontSize: "11px",
+                              }}
+                            >
+                              {getPermissionLabel(permission)}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(3, 58px)",
+                              gap: "5px",
+                            }}
+                          >
+                            {(["none", "view", "edit"] as AdminPagePermission[]).map(
+                              (option) => {
+                                const active = permission === option
+                                return (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    onClick={() => updateUserPermission(page.id, option)}
+                                    disabled={permissionLocked}
+                                    style={{
+                                      minHeight: "30px",
+                                      border: active
+                                        ? "1px solid var(--fc-admin-selected-border)"
+                                        : "1px solid var(--fc-admin-border)",
+                                      borderRadius: "999px",
+                                      background: active
+                                        ? "var(--fc-admin-selected-bg)"
+                                        : "var(--fc-admin-button-bg)",
+                                      color: active
+                                        ? "var(--fc-admin-selected-text)"
+                                        : "var(--fc-admin-button-text)",
+                                      cursor: permissionLocked ? "not-allowed" : "pointer",
+                                      fontSize: "11px",
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    {getPermissionLabel(option)}
+                                  </button>
+                                )
+                              }
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {roleDefaultsAvailable ? (
+            <div style={panelStyle}>
+            <div style={sectionHeaderStyle}>
+              <strong style={{ color: "var(--fc-admin-heading)", fontSize: "13px" }}>
                 Role Defaults
               </strong>
               <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
@@ -779,7 +920,8 @@ export default function UserManagementPage() {
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
