@@ -6,7 +6,9 @@ import {
   normaliseAdminRole,
   normaliseAdminPagePermissions,
   type AdminPagePermissionMap,
+  type AdminPageDefinition,
 } from "@/lib/adminPages"
+import { getDiscoveredAdminPages } from "@/lib/adminPageDiscovery"
 import {
   getDatabaseAdminUserByUsername,
   validateDatabaseAdminUser,
@@ -31,6 +33,7 @@ export type AdminSession = {
   displayName: string | null
   role: string | null
   permissions: AdminPagePermissionMap
+  pages: AdminPageDefinition[]
 }
 
 function normaliseUsername(username: string) {
@@ -154,7 +157,10 @@ export function getConfiguredAdminUsers(): ConfiguredAdminUser[] {
   return users
 }
 
-function normaliseConfiguredAdminUser(user: ConfiguredAdminUser) {
+function normaliseConfiguredAdminUser(
+  user: ConfiguredAdminUser,
+  pages: AdminPageDefinition[]
+) {
   const role = normaliseAdminRole(user.role)
 
   return {
@@ -163,15 +169,20 @@ function normaliseConfiguredAdminUser(user: ConfiguredAdminUser) {
     role,
     permissions:
       isAdminRole(role)
-        ? getFullAdminPagePermissions()
-        : normaliseAdminPagePermissions(user.permissions, "view"),
+        ? getFullAdminPagePermissions(pages)
+        : normaliseAdminPagePermissions(user.permissions, "view", pages),
   }
 }
 
 export async function validateAdminCredentials(username: string, password: string) {
   const normalisedUsername = normaliseUsername(username)
-  const databaseUser = await validateDatabaseAdminUser(normalisedUsername, password)
-  if (databaseUser) return databaseUser
+  const pages = await getDiscoveredAdminPages()
+  const databaseUser = await validateDatabaseAdminUser(
+    normalisedUsername,
+    password,
+    pages
+  )
+  if (databaseUser) return { ...databaseUser, pages }
 
   const users = getConfiguredAdminUsers()
 
@@ -184,7 +195,9 @@ export async function validateAdminCredentials(username: string, password: strin
       (user) => user.username === normalisedUsername && user.password === password
     ) || null
 
-  return configuredUser ? normaliseConfiguredAdminUser(configuredUser) : null
+  return configuredUser
+    ? { ...normaliseConfiguredAdminUser(configuredUser, pages), pages }
+    : null
 }
 
 function cookieOptions() {
@@ -230,6 +243,7 @@ export async function clearAdminSession() {
 export async function getAdminSession(): Promise<AdminSession> {
   const cookieStore = await cookies()
   const authenticated = cookieStore.get(ADMIN_COOKIE_NAME)?.value === "1"
+  const pages = await getDiscoveredAdminPages()
 
   if (!authenticated) {
     return {
@@ -237,12 +251,13 @@ export async function getAdminSession(): Promise<AdminSession> {
       username: null,
       displayName: null,
       role: null,
-      permissions: normaliseAdminPagePermissions(null),
+      permissions: normaliseAdminPagePermissions(null, "none", pages),
+      pages,
     }
   }
 
   const username = cookieStore.get(ADMIN_USER_COOKIE_NAME)?.value || "admin"
-  const databaseUser = await getDatabaseAdminUserByUsername(username)
+  const databaseUser = await getDatabaseAdminUserByUsername(username, pages)
 
   if (databaseUser) {
     return {
@@ -251,18 +266,23 @@ export async function getAdminSession(): Promise<AdminSession> {
       displayName: databaseUser.displayName,
       role: databaseUser.role,
       permissions: databaseUser.permissions,
+      pages,
     }
   }
 
   const configuredUser = getConfiguredAdminUsers().find((user) => user.username === username)
-  const normalisedUser = configuredUser
-    ? normaliseConfiguredAdminUser(configuredUser)
-    : {
-        username,
-        displayName: username,
-        role: "ADMIN",
-        permissions: getFullAdminPagePermissions(),
-      }
+  if (!configuredUser) {
+    return {
+      authenticated: false,
+      username: null,
+      displayName: null,
+      role: null,
+      permissions: normaliseAdminPagePermissions(null, "none", pages),
+      pages,
+    }
+  }
+
+  const normalisedUser = normaliseConfiguredAdminUser(configuredUser, pages)
 
   return {
     authenticated: true,
@@ -270,6 +290,7 @@ export async function getAdminSession(): Promise<AdminSession> {
     displayName: normalisedUser.displayName,
     role: normalisedUser.role,
     permissions: normalisedUser.permissions,
+    pages,
   }
 }
 

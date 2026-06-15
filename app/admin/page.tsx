@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { canAccessAdminPage, getAdminPagesByGroup, isAdminRole } from "@/lib/adminPages"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { getAdminPagesByGroupFromPages } from "@/lib/adminPageRegistry"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 
@@ -70,7 +71,7 @@ const lockedPanelShellStyle: React.CSSProperties = {
 export default function AdminPage() {
   const isMobile = useIsMobile()
   const router = useRouter()
-  const { loading, authenticated, displayName, permissions, role } = useSimpleAdminAuth()
+  const { loading, authenticated, displayName, permissions, role, pages } = useSimpleAdminAuth()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -109,6 +110,7 @@ export default function AdminPage() {
           displayName: data.user.displayName || data.user.username,
           role: data.user.role || null,
           permissions: data.user.permissions || {},
+          pages: data.user.pages || [],
         })
       )
     }
@@ -128,7 +130,7 @@ export default function AdminPage() {
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
   function visiblePages(group: "reports" | "trading" | "contacts" | "office" | "management") {
-    return getAdminPagesByGroup(group).filter(
+    return getAdminPagesByGroupFromPages(group, pages).filter(
       (page) => isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view")
     )
   }

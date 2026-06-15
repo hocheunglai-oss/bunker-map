@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       displayName: user.displayName || user.username,
       role: user.role || null,
       permissions: user.permissions,
+      pages: user.pages,
     },
   })
 }
