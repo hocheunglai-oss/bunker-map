@@ -3,12 +3,14 @@ import fsSync from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { google } from "googleapis"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
+import {
+  createAdminAuditContext,
+  createAdminAuditedSupabaseClient,
+} from "@/lib/adminAudit"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -109,12 +111,10 @@ async function makeDriveFilePublic(drive: any, fileId: string) {
 export async function POST(request: Request) {
   let tempPath = ""
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
-
-    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
+    const session = await requireAdminPagePermission("ccinfo", "edit")
+    const supabase = createAdminAuditedSupabaseClient(
+      createAdminAuditContext(session, request, "ccinfo")
+    )
     const formData = await request.formData()
     const entryKind = String(formData.get("entryKind") || "")
     const entryId = String(formData.get("entryId") || "")

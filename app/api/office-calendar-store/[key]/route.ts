@@ -1,8 +1,11 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { getAdminSession, type AdminSession } from "@/lib/adminAuth"
+import {
+  createAdminAuditContext,
+  createAdminAuditedSupabaseClient,
+} from "@/lib/adminAudit"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const allowedKeys = new Set(["event-calendar", "task-calendar"])
 
 function requireEnv(name: string) {
@@ -18,12 +21,12 @@ function getSupabaseClient() {
   )
 }
 
-async function hasAdminAccess(request: Request) {
+async function getAccessSession(request: Request): Promise<AdminSession | null | false> {
   const secret = process.env.CRON_SECRET
-  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true
+  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return null
 
-  const cookieStore = await cookies()
-  return cookieStore.get(ADMIN_COOKIE_NAME)?.value === "1"
+  const session = await getAdminSession()
+  return session.authenticated ? session : false
 }
 
 function normalizeKey(key: string) {
@@ -32,7 +35,7 @@ function normalizeKey(key: string) {
 }
 
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
-  if (!(await hasAdminAccess(request))) {
+  if ((await getAccessSession(request)) === false) {
     return NextResponse.json({ message: "Not authorized." }, { status: 401 })
   }
 
@@ -59,7 +62,8 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ key: string }> }) {
-  if (!(await hasAdminAccess(request))) {
+  const session = await getAccessSession(request)
+  if (session === false) {
     return NextResponse.json({ message: "Not authorized." }, { status: 401 })
   }
 
@@ -69,7 +73,12 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
 
   try {
     const payload = await request.json()
-    const supabase = getSupabaseClient()
+    const supabase = session
+      ? createAdminAuditedSupabaseClient(
+          createAdminAuditContext(session, request, storeKey),
+          { useServiceRole: true }
+        )
+      : getSupabaseClient()
     const { error } = await supabase.from("office_calendar_store").upsert({
       key: storeKey,
       payload,

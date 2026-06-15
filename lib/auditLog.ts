@@ -71,7 +71,6 @@ const AUDIT_SELECT = [
 ].join(",")
 
 const TABLE_PAGE_IDS: Record<string, string> = {
-  remarks: "taiwan-remarks",
   cc_countries: "ccinfo",
   cc_companies: "ccinfo",
   cc_ports: "ccinfo",
@@ -84,10 +83,14 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   shared_addressbook_contacts: "outlook-addressbook",
   shared_addressbook_groups: "outlook-addressbook",
   shared_addressbook_group_members: "outlook-addressbook",
-  office_calendar_store: "email-templates",
   email_templates: "email-templates",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
+}
+
+const AUDIT_PAGE_LABELS: Record<string, string> = {
+  "hongkong-price-history": "HONG KONG PRICE HISTORY",
+  "taiwan-price-history": "TAIWAN PRICE HISTORY",
 }
 
 const ENTITY_NAMES: Record<string, string> = {
@@ -106,7 +109,7 @@ const ENTITY_NAMES: Record<string, string> = {
   shared_addressbook_contacts: "address book contact",
   shared_addressbook_groups: "address book group",
   shared_addressbook_group_members: "group member",
-  office_calendar_store: "template settings",
+  office_calendar_store: "calendar",
   email_templates: "email template",
   admin_users: "user",
   admin_role_defaults: "role defaults",
@@ -230,6 +233,32 @@ function inferPricePageId(
   return "pricesetter"
 }
 
+function getRecordId(record: AuditLogRecord) {
+  const row = record.afterRow || record.beforeRow || {}
+  return Number(row.id ?? record.recordPk.id)
+}
+
+function inferRemarksPageId(record: AuditLogRecord) {
+  const recordId = getRecordId(record)
+  if (recordId === 1 || recordId === 2) return "taiwan-remarks"
+  if (recordId === 101) return "taiwan-price-history"
+  if (recordId === 102) return "hongkong-price-history"
+  return "pricesetter"
+}
+
+function inferOfficeCalendarPageId(record: AuditLogRecord) {
+  const row = record.afterRow || record.beforeRow || {}
+  const key = typeof row.key === "string" ? row.key : ""
+  return key === "task-calendar" ? "task-calendar" : "event-calendar"
+}
+
+function withAuditPageLabel(page: AdminPageDefinition) {
+  return {
+    ...page,
+    label: AUDIT_PAGE_LABELS[page.id] || page.label,
+  }
+}
+
 function getAuditPage(
   record: AuditLogRecord,
   pages: AdminPageDefinition[],
@@ -242,7 +271,7 @@ function getAuditPage(
   )
   if (contextPageId) {
     const page = pages.find((candidate) => candidate.id === contextPageId)
-    if (page) return page
+    if (page) return withAuditPageLabel(page)
   }
 
   const contextPath = getContextText(
@@ -252,17 +281,25 @@ function getAuditPage(
   )
   if (contextPath) {
     const page = pageFromPath(contextPath, pages)
-    if (page) return page
+    if (page) return withAuditPageLabel(page)
   }
 
   const pageId =
     record.tableName === "ports" || record.tableName === "price_history"
       ? inferPricePageId(record, portNames)
+      : record.tableName === "remarks"
+        ? inferRemarksPageId(record)
+        : record.tableName === "office_calendar_store"
+          ? inferOfficeCalendarPageId(record)
       : TABLE_PAGE_IDS[record.tableName]
 
-  return pages.find((page) => page.id === pageId) || {
+  const knownPage = pages.find((page) => page.id === pageId)
+  if (knownPage) return withAuditPageLabel(knownPage)
+
+  return {
     id: pageId || "other-admin-activity",
     label:
+      AUDIT_PAGE_LABELS[pageId] ||
       getContextText(record.requestContext, "pageLabel", "page_label") ||
       "OTHER ADMIN ACTIVITY",
     group: "management" as const,
@@ -322,7 +359,7 @@ function formatValue(field: string, value: unknown) {
     if (field.endsWith("_at") || /^\d{4}-\d{2}-\d{2}T/.test(value)) {
       return formatAuditDate(value)
     }
-    return value
+    return value.length > 180 ? `${value.slice(0, 177)}...` : value
   }
 
   if (Array.isArray(value)) {
@@ -338,6 +375,19 @@ function formatValue(field: string, value: unknown) {
 
 function getRecordLabel(record: AuditLogRecord, portNames: Map<string, string>) {
   const row = record.afterRow || record.beforeRow || {}
+  if (record.tableName === "remarks") {
+    const labels: Record<number, string> = {
+      1: "Taiwan remarks",
+      2: "Taiwan special notice",
+      101: "Taiwan price report",
+      102: "Hong Kong price report",
+      103: "China price report",
+      104: "Compact price report",
+      105: "report display settings",
+    }
+    return labels[getRecordId(record)] || "remark"
+  }
+
   const preferredKeys = [
     "company_name",
     "country_name",
@@ -382,6 +432,38 @@ function getChangedFields(record: AuditLogRecord) {
   return record.changedFields.filter((field) => !isTechnicalField(field))
 }
 
+function getReportPublicationSummary(record: AuditLogRecord) {
+  if (record.tableName !== "remarks") return null
+
+  const labels: Record<number, string> = {
+    101: "Published the Taiwan price report.",
+    102: "Published the Hong Kong price report.",
+    103: "Published the China price report.",
+    104: "Published the Compact price report.",
+    105: "Updated report display settings.",
+  }
+  return labels[getRecordId(record)] || null
+}
+
+function getPriceSettingSummary(
+  record: AuditLogRecord,
+  recordLabel: string
+) {
+  if (record.tableName !== "ports" || record.operation !== "UPDATE") return null
+
+  const priceFields = ["hsfo", "vlsfo", "mgo"].filter((field) =>
+    record.changedFields.includes(field)
+  )
+  if (priceFields.length === 0) return null
+
+  const changes = priceFields.map(
+    (field) =>
+      `${getFieldLabel(field)} from ${formatValue(field, record.beforeRow?.[field])} to ${formatValue(field, record.afterRow?.[field])}`
+  )
+
+  return `Changed ${changes.join(", ")} for "${recordLabel}".`
+}
+
 function buildSummary(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
@@ -389,6 +471,13 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  const publicationSummary = getReportPublicationSummary(record)
+  if (publicationSummary) return publicationSummary
+  if (record.tableName === "price_history" && record.operation === "INSERT") {
+    return `Added a new price record for ${recordLabel}.`
+  }
+  const priceSettingSummary = getPriceSettingSummary(record, recordLabel)
+  if (priceSettingSummary) return priceSettingSummary
   if (displayOperation === "INSERT") return `Created ${subject}.`
   if (displayOperation === "DELETE") return `Deleted ${subject}.`
 
@@ -414,7 +503,20 @@ function buildDetails(
     details.push(`This change restored the previous version of ${subject}.`)
   }
 
-  if (record.operation === "UPDATE") {
+  const publicationSummary = getReportPublicationSummary(record)
+  if (publicationSummary) {
+    return [publicationSummary]
+  }
+
+  if (record.tableName === "price_history" && record.operation === "INSERT") {
+    details.push(`Added a new price record for ${recordLabel}.`)
+    const row = record.afterRow || {}
+    for (const field of ["hsfo", "vlsfo", "mgo", "recorded_at"]) {
+      const value = row[field]
+      if (value === null || value === undefined || value === "") continue
+      details.push(`Set ${getFieldLabel(field)} to ${formatValue(field, value)}.`)
+    }
+  } else if (record.operation === "UPDATE") {
     for (const field of getChangedFields(record)) {
       if (field === "password_hash") {
         details.push("Changed the password.")
@@ -522,17 +624,38 @@ export function matchesAuditActor(record: AuditLogRecord, actor: string | null) 
     .some((value) => value!.trim().toLowerCase() === actorFilter)
 }
 
+export function isUserAuditRecord(record: AuditLogRecord) {
+  const actorId = record.actorId?.trim().toLowerCase()
+  if (
+    !actorId ||
+    actorId === "unknown" ||
+    !["app", "header"].includes(record.actorSource)
+  ) {
+    return false
+  }
+
+  if (record.tableName === "office_calendar_store") {
+    const row = record.afterRow || record.beforeRow || {}
+    return ["event-calendar", "task-calendar"].includes(String(row.key || ""))
+  }
+
+  return true
+}
+
 export async function listAuditLogs(options: { limit?: number }) {
   const supabase = getSupabaseAuditClient()
   const limit = Math.min(Math.max(options.limit || 100, 1), 500)
   const { data, error } = await supabase
     .from("audit_logs")
     .select(AUDIT_SELECT)
+    .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
     .limit(limit)
 
   if (error) throw error
-  return ((data || []) as unknown as AuditLogRow[]).map(mapAuditLog)
+  return ((data || []) as unknown as AuditLogRow[])
+    .map(mapAuditLog)
+    .filter(isUserAuditRecord)
 }
 
 export async function undoAuditLog(logId: string, session: AdminSession) {

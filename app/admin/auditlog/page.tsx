@@ -174,15 +174,6 @@ export default function AuditLogPage() {
     () => logs.find((log) => log.id === selectedId) || logs[0] || null,
     [logs, selectedId]
   )
-  const groupedLogs = useMemo(() => {
-    const groups = new Map<string, { label: string; logs: AuditLogRecord[] }>()
-    logs.forEach((log) => {
-      const current = groups.get(log.pageId) || { label: log.pageLabel, logs: [] }
-      current.logs.push(log)
-      groups.set(log.pageId, current)
-    })
-    return Array.from(groups.entries()).map(([id, group]) => ({ id, ...group }))
-  }, [logs])
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "audit-log", "edit")
 
   const loadLogs = useCallback(async () => {
@@ -399,114 +390,93 @@ export default function AuditLogPage() {
               </span>
             </div>
 
-            {groupedLogs.map((group) => (
-              <section key={group.id}>
-                <div
-                  style={{
-                    padding: "9px 12px",
-                    borderBottom: "1px solid var(--fc-admin-border)",
-                    background: "var(--fc-admin-panel-soft-bg)",
-                    color: "var(--fc-admin-heading)",
-                    fontSize: "12px",
-                    fontWeight: 900,
-                  }}
-                >
-                  {group.label}
-                  <span
-                    style={{
-                      marginLeft: "8px",
-                      color: "var(--fc-admin-muted)",
-                      fontWeight: 800,
-                    }}
-                  >
-                    {group.logs.length}
-                  </span>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "720px" }}>
-                    <thead>
-                      <tr>
-                        <th style={thStyle}>Time</th>
-                        <th style={thStyle}>User</th>
-                        <th style={thStyle}>Action</th>
-                        <th style={thStyle}>Change</th>
-                        <th style={thStyle}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.logs.map((log) => {
-                        const isSelected = selectedLog?.id === log.id
-                        const canUndo = canEdit && !log.undoneAt && !log.undoOfLogId
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px" }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Time</th>
+                    <th style={thStyle}>User</th>
+                    <th style={thStyle}>Action</th>
+                    <th style={thStyle}>Page</th>
+                    <th style={thStyle}>Change</th>
+                    <th style={thStyle}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map((log) => {
+                    const isSelected = selectedLog?.id === log.id
+                    const canUndo = canEdit && !log.undoneAt && !log.undoOfLogId
 
-                        return (
-                          <tr
-                            key={log.id}
-                            tabIndex={0}
-                            onClick={() => setSelectedId(log.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault()
-                                setSelectedId(log.id)
-                              }
+                    return (
+                      <tr
+                        key={log.id}
+                        tabIndex={0}
+                        onClick={() => setSelectedId(log.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            setSelectedId(log.id)
+                          }
+                        }}
+                        style={{
+                          background: isSelected
+                            ? "var(--fc-admin-selected-bg)"
+                            : "transparent",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                          {formatDate(log.occurredAt)}
+                        </td>
+                        <td style={tdStyle}>
+                          <strong>{log.actorName || log.actorId}</strong>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={operationStyle(log.displayOperation)}>
+                            {log.displayOperation}
+                          </span>
+                          {log.undoneAt ? (
+                            <div
+                              style={{
+                                marginTop: "5px",
+                                color: "var(--fc-admin-muted)",
+                                fontSize: "11px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              Undone
+                            </div>
+                          ) : null}
+                        </td>
+                        <td style={{ ...tdStyle, fontWeight: 800 }}>
+                          {log.pageLabel}
+                        </td>
+                        <td style={{ ...tdStyle, minWidth: "280px" }}>
+                          {log.summary}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleUndo(log)
                             }}
+                            disabled={!canUndo || undoingId === log.id}
                             style={{
-                              background: isSelected
-                                ? "var(--fc-admin-selected-bg)"
-                                : "transparent",
-                              cursor: "pointer",
+                              ...dangerButtonStyle,
+                              cursor: canUndo ? "pointer" : "not-allowed",
+                              opacity: canUndo ? 1 : 0.5,
                             }}
                           >
-                            <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
-                              {formatDate(log.occurredAt)}
-                            </td>
-                            <td style={tdStyle}>
-                              <strong>{log.actorName || log.actorId || "Unknown"}</strong>
-                            </td>
-                            <td style={tdStyle}>
-                              <span style={operationStyle(log.displayOperation)}>
-                                {log.displayOperation}
-                              </span>
-                              {log.undoneAt ? (
-                                <div
-                                  style={{
-                                    marginTop: "5px",
-                                    color: "var(--fc-admin-muted)",
-                                    fontSize: "11px",
-                                    fontWeight: 800,
-                                  }}
-                                >
-                                  Undone
-                                </div>
-                              ) : null}
-                            </td>
-                            <td style={{ ...tdStyle, minWidth: "260px" }}>
-                              {log.summary}
-                            </td>
-                            <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  handleUndo(log)
-                                }}
-                                disabled={!canUndo || undoingId === log.id}
-                                style={{
-                                  ...dangerButtonStyle,
-                                  cursor: canUndo ? "pointer" : "not-allowed",
-                                  opacity: canUndo ? 1 : 0.5,
-                                }}
-                              >
-                                {undoingId === log.id ? "Undoing..." : "Undo"}
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ))}
+                            {undoingId === log.id ? "Undoing..." : "Undo"}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             {!loading && logs.length === 0 ? (
               <div style={{ padding: "18px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
@@ -561,7 +531,7 @@ export default function AuditLogPage() {
                   <div>
                     <div style={{ color: "var(--fc-admin-muted)", fontWeight: 800 }}>User</div>
                     <div style={{ marginTop: "3px", fontWeight: 900 }}>
-                      {selectedLog.actorName || selectedLog.actorId || "Unknown"}
+                      {selectedLog.actorName || selectedLog.actorId}
                     </div>
                   </div>
                   <div style={{ gridColumn: "1 / -1" }}>

@@ -2,6 +2,10 @@ import { createClient } from "@supabase/supabase-js"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { requireAdminSession as requireSharedAdminSession } from "@/lib/adminAuth"
+import {
+  createAdminAuditedSupabaseClient,
+  type AdminAuditContext,
+} from "@/lib/adminAudit"
 
 const LEGACY_STORE_KEY = "email-templates"
 const THUNDERBIRD_ROOT = "/Users/hocheunglai/Desktop/- Thunderbird Templates/Templates.sbd"
@@ -44,7 +48,13 @@ function requireEnv(name: string) {
   return value
 }
 
-function getSupabaseClient() {
+function getSupabaseClient(auditContext?: AdminAuditContext) {
+  if (auditContext) {
+    return createAdminAuditedSupabaseClient(auditContext, {
+      useServiceRole: true,
+    })
+  }
+
   return createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
@@ -509,8 +519,11 @@ export async function loadEmailTemplate(id: string): Promise<EmailTemplate | nul
   return data ? rowToTemplate(data) : null
 }
 
-export async function saveTemplateLibrary(library: EmailTemplateLibrary) {
-  const supabase = getSupabaseClient()
+export async function saveTemplateLibrary(
+  library: EmailTemplateLibrary,
+  auditContext?: AdminAuditContext
+) {
+  const supabase = getSupabaseClient(auditContext)
   const templates = ensureUniqueSlugs(ensureUniqueIds(library.templates.map((template) => normaliseTemplate(template))))
 
   const { error: wipeError } = await supabase.from("email_templates").delete().neq("id", "")
@@ -539,8 +552,11 @@ export async function saveTemplateLibrary(library: EmailTemplateLibrary) {
   }
 }
 
-export async function saveEmailTemplate(template: EmailTemplate) {
-  const supabase = getSupabaseClient()
+export async function saveEmailTemplate(
+  template: EmailTemplate,
+  auditContext?: AdminAuditContext
+) {
+  const supabase = getSupabaseClient(auditContext)
   const nextTemplate = normaliseTemplate(template)
   const { error } = await supabase
     .from("email_templates")
@@ -567,8 +583,11 @@ export async function saveEmailTemplate(template: EmailTemplate) {
   return nextTemplate
 }
 
-export async function deleteEmailTemplate(id: string) {
-  const supabase = getSupabaseClient()
+export async function deleteEmailTemplate(
+  id: string,
+  auditContext?: AdminAuditContext
+) {
+  const supabase = getSupabaseClient(auditContext)
   const { error } = await supabase.from("email_templates").delete().eq("id", id)
 
   if (error) {
@@ -586,7 +605,9 @@ export async function deleteEmailTemplate(id: string) {
   }
 }
 
-export async function importThunderbirdTemplates() {
+export async function importThunderbirdTemplates(
+  auditContext?: AdminAuditContext
+) {
   const templateFiles = await walkTemplateFiles(THUNDERBIRD_ROOT)
   const imported: EmailTemplate[] = []
   let sequence = 0
@@ -654,6 +675,6 @@ export async function importThunderbirdTemplates() {
     lastUpdatedAt: new Date().toISOString(),
   }
 
-  await saveTemplateLibrary(library)
+  await saveTemplateLibrary(library, auditContext)
   return library
 }

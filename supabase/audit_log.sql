@@ -169,7 +169,6 @@ declare
   before_payload jsonb;
   after_payload jsonb;
   changed text[];
-  claims jsonb;
   actor_id text;
   actor_name text;
   actor_source text;
@@ -196,26 +195,37 @@ begin
     changed := array[]::text[];
   end if;
 
-  claims := public.audit_json_setting('request.jwt.claims');
+  if tg_table_name = 'office_calendar_store'
+    and coalesce(coalesce(after_payload, before_payload) ->> 'key', '')
+      not in ('event-calendar', 'task-calendar')
+  then
+    if tg_op = 'DELETE' then
+      return old;
+    end if;
+    return new;
+  end if;
+
   actor_id := coalesce(
     nullif(public.audit_text_setting('app.audit_actor_id'), ''),
-    nullif(public.audit_request_header('x-bunker-admin-user'), ''),
-    nullif(claims ->> 'email', ''),
-    nullif(claims ->> 'sub', ''),
-    'unknown'
+    nullif(public.audit_request_header('x-bunker-admin-user'), '')
   );
+
+  if actor_id is null then
+    if tg_op = 'DELETE' then
+      return old;
+    end if;
+    return new;
+  end if;
+
   actor_name := coalesce(
     nullif(public.audit_text_setting('app.audit_actor_name'), ''),
     nullif(public.audit_request_header('x-bunker-admin-display-name'), ''),
-    nullif(claims ->> 'email', ''),
     actor_id
   );
 
   actor_source := case
     when nullif(public.audit_text_setting('app.audit_actor_id'), '') is not null then 'app'
-    when nullif(public.audit_request_header('x-bunker-admin-user'), '') is not null then 'header'
-    when nullif(claims ->> 'email', '') is not null or nullif(claims ->> 'sub', '') is not null then 'jwt'
-    else 'unknown'
+    else 'header'
   end;
 
   context_payload := coalesce(

@@ -1,12 +1,14 @@
 import fs from "node:fs"
 import path from "node:path"
 import { google } from "googleapis"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
+import {
+  createAdminAuditContext,
+  createAdminAuditedSupabaseClient,
+} from "@/lib/adminAudit"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -171,12 +173,10 @@ function renameOriginalPathBasename(originalPath: string | null | undefined, nex
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
-
-    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
+    const session = await requireAdminPagePermission("ccinfo", "edit")
+    const supabase = createAdminAuditedSupabaseClient(
+      createAdminAuditContext(session, request, "ccinfo")
+    )
     const body = await request.json()
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
@@ -212,12 +212,10 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
-
-    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
+    const session = await requireAdminPagePermission("ccinfo", "edit")
+    const supabase = createAdminAuditedSupabaseClient(
+      createAdminAuditContext(session, request, "ccinfo")
+    )
     const { searchParams } = new URL(request.url)
     const fileId = searchParams.get("fileId")
     const folderId = searchParams.get("folderId")
@@ -285,12 +283,10 @@ export async function DELETE(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
-
-    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
+    const session = await requireAdminPagePermission("ccinfo", "edit")
+    const supabase = createAdminAuditedSupabaseClient(
+      createAdminAuditContext(session, request, "ccinfo")
+    )
     const body = await request.json()
     const fileId = String(body.fileId || "")
     const folderId = String(body.folderId || "")

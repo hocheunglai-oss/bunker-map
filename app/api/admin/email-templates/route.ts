@@ -8,6 +8,7 @@ import {
   saveEmailTemplate,
   saveTemplateLibrary,
 } from "@/lib/emailTemplates"
+import { createAdminAuditContext } from "@/lib/adminAudit"
 
 type SavePayload = {
   id?: string
@@ -31,7 +32,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdminSession()
+    const session = await requireAdminSession()
+    const auditContext = createAdminAuditContext(
+      session,
+      request,
+      "email-templates"
+    )
 
     const { action, id, template, templates } = (await request.json()) as SavePayload & {
       action?: string
@@ -39,7 +45,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString()
 
     if (action === "import") {
-      const library = await importThunderbirdTemplates()
+      const library = await importThunderbirdTemplates(auditContext)
       return NextResponse.json(library)
     }
 
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
         lastUpdatedAt: now,
       }
 
-      await saveTemplateLibrary(nextLibrary)
+      await saveTemplateLibrary(nextLibrary, auditContext)
 
       return NextResponse.json(nextLibrary)
     }
@@ -62,7 +68,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Missing template." }, { status: 400 })
       }
 
-      const savedTemplate = await saveEmailTemplate(template)
+      const savedTemplate = await saveEmailTemplate(template, auditContext)
       return NextResponse.json({
         template: savedTemplate,
         lastUpdatedAt: savedTemplate.updatedAt || now,
@@ -74,7 +80,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Missing template id." }, { status: 400 })
       }
 
-      await deleteEmailTemplate(id)
+      await deleteEmailTemplate(id, auditContext)
       return NextResponse.json({ id, lastUpdatedAt: now })
     }
 
