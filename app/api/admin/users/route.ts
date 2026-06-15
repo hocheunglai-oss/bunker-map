@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import {
+  deleteManagedAdminRoleDefault,
   deleteManagedAdminUser,
-  listManagedAdminRoleDefaults,
   listManagedAdminUsers,
   loadManagedAdminRoleDefaults,
   saveManagedAdminRoleDefault,
@@ -18,7 +18,6 @@ type UserActionPayload = {
     displayName?: string
     role?: string
     password?: string
-    permissions?: Record<string, "none" | "view" | "edit">
   }
   roleDefault?: {
     role?: string
@@ -29,7 +28,17 @@ type UserActionPayload = {
 
 function errorResponse(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback
-  const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500
+  const status =
+    message === "Unauthorized"
+      ? 401
+      : message === "Forbidden"
+        ? 403
+        : message.includes("required") ||
+            message.includes("valid permission group") ||
+            message.includes("cannot be deleted") ||
+            message.includes("Move all users")
+          ? 400
+          : 500
   return NextResponse.json({ message }, { status })
 }
 
@@ -45,7 +54,7 @@ export async function GET() {
       users,
       pages,
       roleDefaults,
-      roleDefaultsAvailable: roleDefaultState.persisted,
+      groupStorage: roleDefaultState.storage,
     })
   } catch (error) {
     return errorResponse(error, "Failed to load admin users.")
@@ -82,7 +91,7 @@ export async function POST(request: Request) {
       }
 
       const pages = await getDiscoveredAdminPages()
-      const roleDefaults = await listManagedAdminRoleDefaults(pages)
+      const roleDefaults = (await loadManagedAdminRoleDefaults(pages)).roleDefaults
       const user = await saveManagedAdminUser(
         {
           id: payload.user.id,
@@ -90,7 +99,6 @@ export async function POST(request: Request) {
           displayName: payload.user.displayName,
           role: payload.user.role,
           password: payload.user.password,
-          permissions: payload.user.permissions,
         },
         session,
         pages,
@@ -116,6 +124,15 @@ export async function POST(request: Request) {
       )
 
       return NextResponse.json({ success: true, roleDefault })
+    }
+
+    if (payload.action === "delete-role-default") {
+      if (!payload.roleDefault?.role) {
+        return NextResponse.json({ message: "Role is required." }, { status: 400 })
+      }
+
+      await deleteManagedAdminRoleDefault(payload.roleDefault.role, session)
+      return NextResponse.json({ success: true })
     }
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })

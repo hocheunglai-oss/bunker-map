@@ -4,7 +4,7 @@ export type AdminPagePermissionMap = Record<string, AdminPagePermission>
 
 export const ADMIN_ROLE_IDS = ["ADMIN", "AC", "BT", "VN"] as const
 
-export type AdminRoleId = (typeof ADMIN_ROLE_IDS)[number]
+export type AdminRoleId = string
 
 export type AdminPageDefinition = {
   id: string
@@ -106,11 +106,14 @@ const ADMIN_PERMISSION_RANK: Record<AdminPagePermission, number> = {
 }
 
 export function normaliseAdminRole(role: string | null | undefined): AdminRoleId {
-  const normalised = (role || "").trim().toUpperCase()
-  if (normalised === "ADMIN") return "ADMIN"
-  if (normalised === "BT") return "BT"
-  if (normalised === "VN") return "VN"
-  return "AC"
+  const normalised = (role || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .slice(0, 40)
+
+  if (!normalised || normalised === "USER") return "AC"
+  return normalised
 }
 
 export function isAdminRole(role: string | null | undefined) {

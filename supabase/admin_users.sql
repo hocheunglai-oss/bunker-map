@@ -40,10 +40,6 @@ where public.admin_users.id = normalised.id
   and public.admin_users.role is distinct from normalised.role;
 
 alter table public.admin_users
-add constraint admin_users_role_check
-check (role in ('ADMIN', 'AC', 'BT', 'VN'));
-
-alter table public.admin_users
 drop column if exists is_active;
 
 create unique index if not exists admin_users_username_lower_key
