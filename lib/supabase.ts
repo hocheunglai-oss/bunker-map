@@ -54,6 +54,35 @@ function canEditCurrentAdminPage(actor: StoredAuditActor) {
   return canAccessAdminPage(actor.permissions, page.id, "edit")
 }
 
+function getCurrentAuditPage() {
+  if (typeof window === "undefined") return null
+
+  const pathname = window.location.pathname
+  if (!pathname.startsWith("/admin/")) return null
+
+  const knownPage = getAdminPageByPath(pathname)
+  if (knownPage) {
+    return {
+      id: knownPage.id,
+      label: knownPage.label,
+      path: pathname,
+    }
+  }
+
+  const segment = pathname.split("/").filter(Boolean)[1]
+  if (!segment) return null
+
+  return {
+    id: segment.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase(),
+    label: segment
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[-_]+/g, " ")
+      .trim()
+      .toUpperCase(),
+    path: pathname,
+  }
+}
+
 function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
   const actor = getStoredAuditActor()
 
@@ -84,6 +113,13 @@ function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
 
   if (actor.role) {
     headers.set("x-bunker-admin-role", actor.role)
+  }
+
+  const page = getCurrentAuditPage()
+  if (page) {
+    headers.set("x-bunker-admin-page-id", page.id)
+    headers.set("x-bunker-admin-page-label", page.label)
+    headers.set("x-bunker-admin-page-path", page.path)
   }
 
   return fetch(input, {

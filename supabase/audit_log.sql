@@ -218,7 +218,16 @@ begin
     else 'unknown'
   end;
 
-  context_payload := public.audit_json_setting('app.audit_context');
+  context_payload := coalesce(
+    public.audit_json_setting('app.audit_context'),
+    '{}'::jsonb
+  ) || jsonb_strip_nulls(
+    jsonb_build_object(
+      'pageId', nullif(public.audit_request_header('x-bunker-admin-page-id'), ''),
+      'pageLabel', nullif(public.audit_request_header('x-bunker-admin-page-label'), ''),
+      'pagePath', nullif(public.audit_request_header('x-bunker-admin-page-path'), '')
+    )
+  );
   undo_of := public.audit_uuid_setting('app.audit_undo_of_log_id');
 
   insert into public.audit_logs (

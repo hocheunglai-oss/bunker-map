@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import type { AdminSession } from "@/lib/adminAuth"
+import type { AdminPageDefinition } from "@/lib/adminPages"
 
 export type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
 
@@ -22,6 +23,15 @@ export type AuditLogRecord = {
   undoneByLogId: string | null
 }
 
+export type PresentedAuditLogRecord = AuditLogRecord & {
+  displayOperation: AuditOperation
+  pageId: string
+  pageLabel: string
+  recordLabel: string
+  summary: string
+  details: string[]
+}
+
 type AuditLogRow = {
   id: string
   occurred_at: string
@@ -41,43 +51,6 @@ type AuditLogRow = {
   undone_by_log_id: string | null
 }
 
-export const AUDITED_TABLES = [
-  "ports",
-  "price_history",
-  "remarks",
-  "cc_countries",
-  "cc_companies",
-  "cc_ports",
-  "cc_documents",
-  "cc_company_files",
-  "cc_entry_files",
-  "cc_entry_folders",
-  "phonebook_contacts",
-  "phonebook_companies",
-  "shared_addressbook_contacts",
-  "shared_addressbook_groups",
-  "shared_addressbook_group_members",
-  "office_calendar_store",
-  "email_templates",
-  "admin_users",
-  "admin_role_defaults",
-]
-
-const CCINFO_AUDITED_TABLES = [
-  "cc_companies",
-  "cc_countries",
-  "cc_ports",
-  "cc_company_files",
-  "cc_entry_files",
-  "cc_entry_folders",
-]
-
-const OUTLOOK_ADDRESSBOOK_AUDITED_TABLES = [
-  "shared_addressbook_contacts",
-  "shared_addressbook_groups",
-  "shared_addressbook_group_members",
-]
-
 const AUDIT_SELECT = [
   "id",
   "occurred_at",
@@ -96,6 +69,101 @@ const AUDIT_SELECT = [
   "undone_at",
   "undone_by_log_id",
 ].join(",")
+
+const TABLE_PAGE_IDS: Record<string, string> = {
+  remarks: "taiwan-remarks",
+  cc_countries: "ccinfo",
+  cc_companies: "ccinfo",
+  cc_ports: "ccinfo",
+  cc_documents: "ccinfo",
+  cc_company_files: "ccinfo",
+  cc_entry_files: "ccinfo",
+  cc_entry_folders: "ccinfo",
+  phonebook_contacts: "phonebook",
+  phonebook_companies: "phonebook",
+  shared_addressbook_contacts: "outlook-addressbook",
+  shared_addressbook_groups: "outlook-addressbook",
+  shared_addressbook_group_members: "outlook-addressbook",
+  office_calendar_store: "email-templates",
+  email_templates: "email-templates",
+  admin_users: "user-management",
+  admin_role_defaults: "user-management",
+}
+
+const ENTITY_NAMES: Record<string, string> = {
+  ports: "price setting",
+  price_history: "price history",
+  remarks: "remark",
+  cc_countries: "country",
+  cc_companies: "company",
+  cc_ports: "port",
+  cc_documents: "document",
+  cc_company_files: "company file",
+  cc_entry_files: "file",
+  cc_entry_folders: "folder",
+  phonebook_contacts: "contact",
+  phonebook_companies: "company",
+  shared_addressbook_contacts: "address book contact",
+  shared_addressbook_groups: "address book group",
+  shared_addressbook_group_members: "group member",
+  office_calendar_store: "template settings",
+  email_templates: "email template",
+  admin_users: "user",
+  admin_role_defaults: "role defaults",
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  name: "name",
+  full_name: "name",
+  display_name: "display name",
+  username: "username",
+  role: "role",
+  permissions: "page access",
+  password_hash: "password",
+  country: "country",
+  country_name: "country",
+  company: "company",
+  company_name: "company",
+  port: "port",
+  port_name: "port",
+  title: "title",
+  subject: "subject",
+  email: "email",
+  phone: "phone",
+  mobile: "mobile",
+  work_phone: "work phone",
+  address: "address",
+  notes: "notes",
+  remark: "remark",
+  hsfo: "HSFO price",
+  vlsfo: "VLSFO price",
+  mgo: "MGO price",
+  hsfo_formula: "HSFO formula",
+  vlsfo_formula: "VLSFO formula",
+  mgo_formula: "MGO formula",
+  recorded_at: "record date",
+  file_name: "file name",
+  folder_name: "folder name",
+  group_name: "group name",
+  type: "type",
+  content: "content",
+  body: "content",
+}
+
+const HIDDEN_FIELDS = new Set([
+  "id",
+  "created_at",
+  "updated_at",
+  "deleted_at",
+  "source_key",
+])
+
+const NON_CREATION_INSERT_TABLES = new Set([
+  "price_history",
+  "remarks",
+  "office_calendar_store",
+  "admin_role_defaults",
+])
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -131,49 +199,340 @@ function mapAuditLog(row: AuditLogRow): AuditLogRecord {
   }
 }
 
-export async function listAuditLogs(options: {
-  tableName?: string | null
-  operation?: string | null
-  actor?: string | null
-  limit?: number
-}) {
+function getContextText(context: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = context[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function pageFromPath(pathname: string, pages: AdminPageDefinition[]) {
+  return pages.find((page) => {
+    if (pathname === page.path) return true
+    return (page.matchPrefixes || []).some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    )
+  })
+}
+
+function inferPricePageId(
+  record: AuditLogRecord,
+  portNames: Map<string, string>
+) {
+  const row = record.afterRow || record.beforeRow || {}
+  const directName =
+    typeof row.name === "string" ? row.name : portNames.get(String(row.port_id || ""))
+  const portName = directName?.trim().toLowerCase()
+
+  if (portName === "hong kong") return "hongkong-price-history"
+  if (portName === "kaohsiung" || portName === "taichung") return "taiwan-price-history"
+  return "pricesetter"
+}
+
+function getAuditPage(
+  record: AuditLogRecord,
+  pages: AdminPageDefinition[],
+  portNames: Map<string, string>
+) {
+  const contextPageId = getContextText(
+    record.requestContext,
+    "pageId",
+    "page_id"
+  )
+  if (contextPageId) {
+    const page = pages.find((candidate) => candidate.id === contextPageId)
+    if (page) return page
+  }
+
+  const contextPath = getContextText(
+    record.requestContext,
+    "pagePath",
+    "page_path"
+  )
+  if (contextPath) {
+    const page = pageFromPath(contextPath, pages)
+    if (page) return page
+  }
+
+  const pageId =
+    record.tableName === "ports" || record.tableName === "price_history"
+      ? inferPricePageId(record, portNames)
+      : TABLE_PAGE_IDS[record.tableName]
+
+  return pages.find((page) => page.id === pageId) || {
+    id: pageId || "other-admin-activity",
+    label:
+      getContextText(record.requestContext, "pageLabel", "page_label") ||
+      "OTHER ADMIN ACTIVITY",
+    group: "management" as const,
+    path: "/admin",
+  }
+}
+
+function getDisplayOperation(record: AuditLogRecord): AuditOperation {
+  if (
+    record.operation === "INSERT" &&
+    NON_CREATION_INSERT_TABLES.has(record.tableName)
+  ) {
+    return "UPDATE"
+  }
+
+  return record.operation
+}
+
+function getFieldLabel(field: string) {
+  return (
+    FIELD_LABELS[field] ||
+    field
+      .replace(/_id$/, "")
+      .replace(/_/g, " ")
+      .trim()
+  )
+}
+
+function isTechnicalField(field: string) {
+  return HIDDEN_FIELDS.has(field) || field.endsWith("_id")
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  )
+}
+
+function formatAuditDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date)
+}
+
+function formatValue(field: string, value: unknown) {
+  if (value === null || value === undefined || value === "") return "blank"
+  if (typeof value === "boolean") return value ? "yes" : "no"
+  if (typeof value === "number") return new Intl.NumberFormat("en-US").format(value)
+
+  if (typeof value === "string") {
+    if (isUuid(value)) return "linked item"
+    if (field.endsWith("_at") || /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      return formatAuditDate(value)
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    const readable = value.filter(
+      (item) => ["string", "number", "boolean"].includes(typeof item)
+    )
+    return readable.length === value.length ? readable.join(", ") || "blank" : "updated"
+  }
+
+  if (field === "permissions") return "the selected page access"
+  return "updated details"
+}
+
+function getRecordLabel(record: AuditLogRecord, portNames: Map<string, string>) {
+  const row = record.afterRow || record.beforeRow || {}
+  const preferredKeys = [
+    "company_name",
+    "country_name",
+    "port_name",
+    "name",
+    "full_name",
+    "display_name",
+    "username",
+    "email",
+    "title",
+    "subject",
+    "file_name",
+    "folder_name",
+    "group_name",
+  ]
+
+  for (const key of preferredKeys) {
+    const value = row[key]
+    if (
+      (typeof value === "string" || typeof value === "number") &&
+      String(value).trim()
+    ) {
+      return String(value).trim()
+    }
+  }
+
+  const portName = portNames.get(String(row.port_id || ""))
+  if (record.tableName === "price_history" && portName) {
+    const recordedAt = typeof row.recorded_at === "string" ? row.recorded_at : ""
+    return recordedAt ? `${portName}, ${formatAuditDate(recordedAt)}` : portName
+  }
+
+  return ENTITY_NAMES[record.tableName] || "record"
+}
+
+function subjectFor(record: AuditLogRecord, recordLabel: string) {
+  const entity = ENTITY_NAMES[record.tableName] || "record"
+  return recordLabel === entity ? entity : `${entity} "${recordLabel}"`
+}
+
+function getChangedFields(record: AuditLogRecord) {
+  return record.changedFields.filter((field) => !isTechnicalField(field))
+}
+
+function buildSummary(
+  record: AuditLogRecord,
+  displayOperation: AuditOperation,
+  recordLabel: string
+) {
+  const subject = subjectFor(record, recordLabel)
+  if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  if (displayOperation === "INSERT") return `Created ${subject}.`
+  if (displayOperation === "DELETE") return `Deleted ${subject}.`
+
+  const fields = getChangedFields(record)
+  if (record.operation === "UPDATE" && fields.length > 0) {
+    const fieldNames = fields.slice(0, 3).map(getFieldLabel)
+    const suffix = fields.length > 3 ? " and other details" : ""
+    return `Changed ${fieldNames.join(", ")}${suffix} for ${subject}.`
+  }
+
+  return `Updated ${subject}.`
+}
+
+function buildDetails(
+  record: AuditLogRecord,
+  displayOperation: AuditOperation,
+  recordLabel: string
+) {
+  const subject = subjectFor(record, recordLabel)
+  const details: string[] = []
+
+  if (record.undoOfLogId) {
+    details.push(`This change restored the previous version of ${subject}.`)
+  }
+
+  if (record.operation === "UPDATE") {
+    for (const field of getChangedFields(record)) {
+      if (field === "password_hash") {
+        details.push("Changed the password.")
+        continue
+      }
+
+      const before = formatValue(field, record.beforeRow?.[field])
+      const after = formatValue(field, record.afterRow?.[field])
+      if (
+        field === "permissions" ||
+        (before === "updated details" && after === "updated details")
+      ) {
+        details.push(`Changed ${getFieldLabel(field)} settings.`)
+      } else {
+        details.push(`Changed ${getFieldLabel(field)} from ${before} to ${after}.`)
+      }
+    }
+  } else if (displayOperation === "INSERT") {
+    details.push(`Created ${subject}.`)
+    const row = record.afterRow || {}
+    for (const [field, value] of Object.entries(row)) {
+      if (
+        isTechnicalField(field) ||
+        field === "password_hash" ||
+        value === null ||
+        value === ""
+      ) {
+        continue
+      }
+      if (recordLabel === String(value)) continue
+      details.push(`Set ${getFieldLabel(field)} to ${formatValue(field, value)}.`)
+    }
+  } else if (displayOperation === "UPDATE") {
+    details.push(`Updated ${subject}.`)
+    const row = record.afterRow || {}
+    for (const [field, value] of Object.entries(row)) {
+      if (
+        isTechnicalField(field) ||
+        field === "password_hash" ||
+        value === null ||
+        value === ""
+      ) {
+        continue
+      }
+      details.push(`Set ${getFieldLabel(field)} to ${formatValue(field, value)}.`)
+    }
+  } else {
+    details.push(`Deleted ${subject}.`)
+  }
+
+  return Array.from(new Set(details)).slice(0, 12)
+}
+
+async function getPortNames(records: AuditLogRecord[]) {
+  const portIds = Array.from(
+    new Set(
+      records
+        .map((record) => record.afterRow?.port_id || record.beforeRow?.port_id)
+        .filter((value) => value !== null && value !== undefined)
+        .map(String)
+    )
+  )
+
+  if (portIds.length === 0) return new Map<string, string>()
+
+  const supabase = getSupabaseAuditClient()
+  const { data } = await supabase.from("ports").select("id,name").in("id", portIds)
+  return new Map(
+    ((data || []) as Array<{ id: string | number; name: string }>).map((port) => [
+      String(port.id),
+      port.name,
+    ])
+  )
+}
+
+export async function presentAuditLogs(
+  records: AuditLogRecord[],
+  pages: AdminPageDefinition[]
+) {
+  const portNames = await getPortNames(records)
+
+  return records.map<PresentedAuditLogRecord>((record) => {
+    const page = getAuditPage(record, pages, portNames)
+    const displayOperation = getDisplayOperation(record)
+    const recordLabel = getRecordLabel(record, portNames)
+
+    return {
+      ...record,
+      displayOperation,
+      pageId: page.id,
+      pageLabel: page.label,
+      recordLabel,
+      summary: buildSummary(record, displayOperation, recordLabel),
+      details: buildDetails(record, displayOperation, recordLabel),
+    }
+  })
+}
+
+export function matchesAuditActor(record: AuditLogRecord, actor: string | null) {
+  const actorFilter = actor?.trim().toLowerCase()
+  if (!actorFilter || actorFilter === "all") return true
+
+  return [record.actorId, record.actorName]
+    .filter(Boolean)
+    .some((value) => value!.trim().toLowerCase() === actorFilter)
+}
+
+export async function listAuditLogs(options: { limit?: number }) {
   const supabase = getSupabaseAuditClient()
   const limit = Math.min(Math.max(options.limit || 100, 1), 500)
-
-  let query = supabase
+  const { data, error } = await supabase
     .from("audit_logs")
     .select(AUDIT_SELECT)
     .order("occurred_at", { ascending: false })
     .limit(limit)
 
-  if (options.tableName === "ccinfo") {
-    query = query.in("table_name", CCINFO_AUDITED_TABLES)
-  } else if (options.tableName === "outlookaddressbook") {
-    query = query.in("table_name", OUTLOOK_ADDRESSBOOK_AUDITED_TABLES)
-  } else if (options.tableName && options.tableName !== "all") {
-    query = query.eq("table_name", options.tableName)
-  }
-
-  if (
-    options.operation &&
-    ["INSERT", "UPDATE", "DELETE"].includes(options.operation.toUpperCase())
-  ) {
-    query = query.eq("operation", options.operation.toUpperCase())
-  }
-
-  const { data, error } = await query
   if (error) throw error
-
-  const actorFilter = options.actor?.trim().toLowerCase()
-  const records = ((data || []) as unknown as AuditLogRow[]).map(mapAuditLog)
-
-  if (!actorFilter) return records
-
-  return records.filter((record) =>
-    [record.actorId, record.actorName, record.actorSource]
-      .filter(Boolean)
-      .some((value) => value!.toLowerCase().includes(actorFilter))
-  )
+  return ((data || []) as unknown as AuditLogRow[]).map(mapAuditLog)
 }
 
 export async function undoAuditLog(logId: string, session: AdminSession) {

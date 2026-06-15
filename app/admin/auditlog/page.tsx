@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
-import { getAuditChangeSummary, getAuditSubject } from "@/lib/auditDisplay"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
@@ -13,23 +12,31 @@ type AuditLogRecord = {
   occurredAt: string
   actorId: string | null
   actorName: string | null
-  actorSource: string
-  tableSchema: string
-  tableName: string
   operation: AuditOperation
-  recordPk: Record<string, unknown>
-  changedFields: string[]
-  beforeRow: Record<string, unknown> | null
-  afterRow: Record<string, unknown> | null
-  requestContext: Record<string, unknown>
+  displayOperation: AuditOperation
+  pageId: string
+  pageLabel: string
+  recordLabel: string
+  summary: string
+  details: string[]
   undoOfLogId: string | null
   undoneAt: string | null
-  undoneByLogId: string | null
+}
+
+type AuditPageOption = {
+  id: string
+  label: string
+}
+
+type AuditUserOption = {
+  value: string
+  label: string
 }
 
 type AuditResponse = {
   logs: AuditLogRecord[]
-  tables: string[]
+  pages: AuditPageOption[]
+  users: AuditUserOption[]
   message?: string
 }
 
@@ -63,9 +70,9 @@ const dangerButtonStyle: React.CSSProperties = {
 
 const panelStyle: React.CSSProperties = {
   border: "1px solid var(--fc-admin-border)",
-  borderRadius: "18px",
+  borderRadius: "8px",
   background: "var(--fc-admin-panel-bg)",
-  boxShadow: "0 12px 28px #00000010",
+  boxShadow: "0 12px 28px #0000000d",
   overflow: "hidden",
 }
 
@@ -81,9 +88,10 @@ const sectionHeaderStyle: React.CSSProperties = {
 }
 
 const inputStyle: React.CSSProperties = {
-  minHeight: "34px",
+  minHeight: "36px",
+  width: "100%",
   border: "1px solid var(--fc-input-border)",
-  borderRadius: "12px",
+  borderRadius: "6px",
   background: "var(--fc-tool-input-bg)",
   color: "var(--fc-tool-input-text)",
   fontSize: "13px",
@@ -101,7 +109,7 @@ const labelStyle: React.CSSProperties = {
 }
 
 const thStyle: React.CSSProperties = {
-  padding: "10px",
+  padding: "9px 10px",
   color: "var(--fc-table-head-text)",
   fontSize: "11px",
   fontWeight: 900,
@@ -116,7 +124,7 @@ const tdStyle: React.CSSProperties = {
   padding: "10px",
   borderBottom: "1px solid var(--fc-admin-border-soft)",
   fontSize: "13px",
-  verticalAlign: "top",
+  verticalAlign: "middle",
 }
 
 function formatDate(value: string) {
@@ -124,23 +132,6 @@ function formatDate(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value))
-}
-
-function stringifyValue(value: unknown, maxLength = 180) {
-  if (value === null || value === undefined) return ""
-
-  const text =
-    typeof value === "string" ? value : JSON.stringify(value, null, typeof value === "object" ? 2 : 0)
-
-  if (!text) return ""
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
-}
-
-function formatPrimaryKey(recordPk: Record<string, unknown>) {
-  const entries = Object.entries(recordPk)
-  if (entries.length === 0) return "No primary key"
-
-  return entries.map(([key, value]) => `${key}: ${stringifyValue(value, 80)}`).join(", ")
 }
 
 function operationStyle(operation: AuditOperation): React.CSSProperties {
@@ -165,57 +156,15 @@ function operationStyle(operation: AuditOperation): React.CSSProperties {
   }
 }
 
-function ChangedFields({ log }: { log: AuditLogRecord }) {
-  if (log.operation !== "UPDATE") {
-    const row = log.afterRow || log.beforeRow || {}
-    return (
-      <pre
-        style={{
-          margin: 0,
-          maxHeight: "420px",
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          fontSize: "12px",
-          color: "var(--fc-admin-panel-text)",
-        }}
-      >
-        {JSON.stringify(row, null, 2)}
-      </pre>
-    )
-  }
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "680px" }}>
-        <thead>
-          <tr>
-            <th style={thStyle}>Field</th>
-            <th style={thStyle}>Before</th>
-            <th style={thStyle}>After</th>
-          </tr>
-        </thead>
-        <tbody>
-          {log.changedFields.map((field) => (
-            <tr key={field}>
-              <td style={{ ...tdStyle, width: "180px", fontWeight: 900 }}>{field}</td>
-              <td style={tdStyle}>{stringifyValue(log.beforeRow?.[field]) || "Blank"}</td>
-              <td style={tdStyle}>{stringifyValue(log.afterRow?.[field]) || "Blank"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 export default function AuditLogPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
   const [logs, setLogs] = useState<AuditLogRecord[]>([])
-  const [tables, setTables] = useState<string[]>([])
-  const [tableName, setTableName] = useState("all")
+  const [pages, setPages] = useState<AuditPageOption[]>([])
+  const [users, setUsers] = useState<AuditUserOption[]>([])
+  const [pageId, setPageId] = useState("all")
   const [operation, setOperation] = useState("all")
-  const [actor, setActor] = useState("")
+  const [actor, setActor] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [undoingId, setUndoingId] = useState<string | null>(null)
@@ -225,6 +174,15 @@ export default function AuditLogPage() {
     () => logs.find((log) => log.id === selectedId) || logs[0] || null,
     [logs, selectedId]
   )
+  const groupedLogs = useMemo(() => {
+    const groups = new Map<string, { label: string; logs: AuditLogRecord[] }>()
+    logs.forEach((log) => {
+      const current = groups.get(log.pageId) || { label: log.pageLabel, logs: [] }
+      current.logs.push(log)
+      groups.set(log.pageId, current)
+    })
+    return Array.from(groups.entries()).map(([id, group]) => ({ id, ...group }))
+  }, [logs])
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "audit-log", "edit")
 
   const loadLogs = useCallback(async () => {
@@ -234,9 +192,9 @@ export default function AuditLogPage() {
     setMessage("")
 
     const params = new URLSearchParams({ limit: "150" })
-    if (tableName !== "all") params.set("table", tableName)
+    if (pageId !== "all") params.set("page", pageId)
     if (operation !== "all") params.set("operation", operation)
-    if (actor.trim()) params.set("actor", actor.trim())
+    if (actor !== "all") params.set("actor", actor)
 
     try {
       const response = await fetch(`/api/admin/audit-logs?${params.toString()}`, {
@@ -250,7 +208,8 @@ export default function AuditLogPage() {
       }
 
       setLogs(data.logs || [])
-      setTables(data.tables || [])
+      setPages(data.pages || [])
+      setUsers(data.users || [])
       setSelectedId((current) =>
         current && data.logs.some((log) => log.id === current)
           ? current
@@ -261,13 +220,10 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false)
     }
-  }, [actor, authenticated, operation, tableName])
+  }, [actor, authenticated, operation, pageId])
 
   useEffect(() => {
-    document.title = "Audit Log - FC Uno"
-    const params = new URLSearchParams(window.location.search)
-    const table = params.get("table")
-    if (table) setTableName(table)
+    document.title = "AUDIT LOG - FC Uno"
   }, [])
 
   useEffect(() => {
@@ -275,12 +231,9 @@ export default function AuditLogPage() {
   }, [loadLogs])
 
   async function handleUndo(log: AuditLogRecord) {
-    if (log.undoneAt || log.undoOfLogId) return
-    if (!canEdit) return
+    if (log.undoneAt || log.undoOfLogId || !canEdit) return
 
-    const confirmed = window.confirm(
-      `Undo this ${log.operation.toLowerCase()} on ${log.tableName}?`
-    )
+    const confirmed = window.confirm(`Undo this change?\n\n${log.summary}`)
     if (!confirmed) return
 
     setUndoingId(log.id)
@@ -315,8 +268,13 @@ export default function AuditLogPage() {
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-          Back
+        <button
+          type="button"
+          onClick={() => router.push("/admin")}
+          className="fc-admin-nav-button"
+          style={buttonStyle}
+        >
+          Go To Admin
         </button>
       </div>
     )
@@ -328,48 +286,45 @@ export default function AuditLogPage() {
         <div
           style={{
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
-            gap: "12px",
+            gap: "10px",
             flexWrap: "wrap",
           }}
         >
-          <div>
-            <h1 style={{ margin: 0, fontSize: "24px", color: "var(--fc-admin-heading)" }}>
-              Audit Log
-            </h1>
-            <p style={{ margin: "5px 0 0", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
-              Recent database changes with reversible row snapshots.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-              Back
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/admin")}
+            className="fc-admin-nav-button"
+            style={buttonStyle}
+          >
+            Back
+          </button>
+          <h1 style={{ margin: 0, fontSize: "24px", color: "var(--fc-admin-heading)" }}>
+            AUDIT LOG
+          </h1>
         </div>
 
         <div style={panelStyle}>
           <div
             style={{
-              ...sectionHeaderStyle,
+              padding: "12px",
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
               alignItems: "end",
+              gap: "12px",
             }}
           >
             <label style={labelStyle}>
-              Table
+              Page
               <select
-                value={tableName}
-                onChange={(event) => setTableName(event.target.value)}
+                value={pageId}
+                onChange={(event) => setPageId(event.target.value)}
                 style={inputStyle}
               >
-                <option value="all">All tables</option>
-                <option value="ccinfo">CCINFO</option>
-                {tables.map((table) => (
-                  <option key={table} value={table}>
-                    {table}
+                <option value="all">All pages</option>
+                {pages.map((page) => (
+                  <option key={page.id} value={page.id}>
+                    {page.label}
                   </option>
                 ))}
               </select>
@@ -383,20 +338,26 @@ export default function AuditLogPage() {
                 style={inputStyle}
               >
                 <option value="all">All operations</option>
-                <option value="INSERT">Insert</option>
-                <option value="UPDATE">Update</option>
-                <option value="DELETE">Delete</option>
+                <option value="INSERT">INSERT</option>
+                <option value="UPDATE">UPDATE</option>
+                <option value="DELETE">DELETE</option>
               </select>
             </label>
 
             <label style={labelStyle}>
               User
-              <input
+              <select
                 value={actor}
                 onChange={(event) => setActor(event.target.value)}
-                placeholder="Name or username"
                 style={inputStyle}
-              />
+              >
+                <option value="all">All users</option>
+                {users.map((user) => (
+                  <option key={user.value} value={user.value}>
+                    {user.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </div>
@@ -405,9 +366,9 @@ export default function AuditLogPage() {
           <div
             style={{
               border: "1px solid var(--fc-admin-border)",
-              borderRadius: "12px",
+              borderRadius: "6px",
               background: "var(--fc-admin-panel-bg)",
-              color: message.includes("failed") || message.includes("Failed")
+              color: message.toLowerCase().includes("failed")
                 ? "var(--fc-error)"
                 : "var(--fc-success)",
               padding: "10px 12px",
@@ -420,10 +381,12 @@ export default function AuditLogPage() {
         ) : null}
 
         <div
+          className="audit-layout"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 520px), 1fr))",
+            gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 1fr)",
             gap: "14px",
+            alignItems: "start",
           }}
         >
           <div style={panelStyle}>
@@ -432,94 +395,127 @@ export default function AuditLogPage() {
                 Changes
               </strong>
               <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-                {logs.length} shown
+                {loading ? "Loading..." : `${logs.length} shown`}
               </span>
             </div>
 
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "920px" }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Time</th>
-                    <th style={thStyle}>User</th>
-                    <th style={thStyle}>Action</th>
-                    <th style={thStyle}>Table</th>
-                    <th style={thStyle}>Subject</th>
-                    <th style={thStyle}>Change</th>
-                    <th style={thStyle}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((log) => {
-                    const isSelected = selectedLog?.id === log.id
-                    const canUndo = canEdit && !log.undoneAt && !log.undoOfLogId
-
-                    return (
-                      <tr
-                        key={log.id}
-                        style={{
-                          background: isSelected ? "var(--fc-admin-selected-bg)" : "transparent",
-                        }}
-                      >
-                        <td style={tdStyle}>{formatDate(log.occurredAt)}</td>
-                        <td style={tdStyle}>
-                          <div style={{ fontWeight: 900 }}>{log.actorName || "Unknown"}</div>
-                          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>
-                            {log.actorSource}
-                          </div>
-                        </td>
-                        <td style={tdStyle}>
-                          <span style={operationStyle(log.operation)}>{log.operation}</span>
-                          {log.undoOfLogId ? (
-                            <div style={{ marginTop: "6px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 800 }}>
-                              Undo record
-                            </div>
-                          ) : null}
-                          {log.undoneAt ? (
-                            <div style={{ marginTop: "6px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 800 }}>
-                              Undone
-                            </div>
-                          ) : null}
-                        </td>
-                        <td style={tdStyle}>{log.tableName}</td>
-                        <td style={{ ...tdStyle, maxWidth: "240px", fontWeight: 900 }}>{getAuditSubject(log)}</td>
-                        <td style={{ ...tdStyle, maxWidth: "220px" }}>
-                          {getAuditChangeSummary(log)}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedId(log.id)}
-                            style={{ ...buttonStyle, marginRight: "6px" }}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUndo(log)}
-                            disabled={!canUndo || undoingId === log.id}
-                            style={dangerButtonStyle}
-                          >
-                            {undoingId === log.id ? "Undoing..." : "Undo"}
-                          </button>
-                        </td>
+            {groupedLogs.map((group) => (
+              <section key={group.id}>
+                <div
+                  style={{
+                    padding: "9px 12px",
+                    borderBottom: "1px solid var(--fc-admin-border)",
+                    background: "var(--fc-admin-panel-soft-bg)",
+                    color: "var(--fc-admin-heading)",
+                    fontSize: "12px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {group.label}
+                  <span
+                    style={{
+                      marginLeft: "8px",
+                      color: "var(--fc-admin-muted)",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {group.logs.length}
+                  </span>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "720px" }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Time</th>
+                        <th style={thStyle}>User</th>
+                        <th style={thStyle}>Action</th>
+                        <th style={thStyle}>Change</th>
+                        <th style={thStyle}></th>
                       </tr>
-                    )
-                  })}
+                    </thead>
+                    <tbody>
+                      {group.logs.map((log) => {
+                        const isSelected = selectedLog?.id === log.id
+                        const canUndo = canEdit && !log.undoneAt && !log.undoOfLogId
 
-                  {logs.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ ...tdStyle, color: "var(--fc-admin-muted)" }}>
-                        No audit records found.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                        return (
+                          <tr
+                            key={log.id}
+                            tabIndex={0}
+                            onClick={() => setSelectedId(log.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                setSelectedId(log.id)
+                              }
+                            }}
+                            style={{
+                              background: isSelected
+                                ? "var(--fc-admin-selected-bg)"
+                                : "transparent",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                              {formatDate(log.occurredAt)}
+                            </td>
+                            <td style={tdStyle}>
+                              <strong>{log.actorName || log.actorId || "Unknown"}</strong>
+                            </td>
+                            <td style={tdStyle}>
+                              <span style={operationStyle(log.displayOperation)}>
+                                {log.displayOperation}
+                              </span>
+                              {log.undoneAt ? (
+                                <div
+                                  style={{
+                                    marginTop: "5px",
+                                    color: "var(--fc-admin-muted)",
+                                    fontSize: "11px",
+                                    fontWeight: 800,
+                                  }}
+                                >
+                                  Undone
+                                </div>
+                              ) : null}
+                            </td>
+                            <td style={{ ...tdStyle, minWidth: "260px" }}>
+                              {log.summary}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleUndo(log)
+                                }}
+                                disabled={!canUndo || undoingId === log.id}
+                                style={{
+                                  ...dangerButtonStyle,
+                                  cursor: canUndo ? "pointer" : "not-allowed",
+                                  opacity: canUndo ? 1 : 0.5,
+                                }}
+                              >
+                                {undoingId === log.id ? "Undoing..." : "Undo"}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+
+            {!loading && logs.length === 0 ? (
+              <div style={{ padding: "18px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
+                No changes match these filters.
+              </div>
+            ) : null}
           </div>
 
-          <div style={panelStyle}>
+          <div style={{ ...panelStyle, position: "sticky", top: "18px" }}>
             <div style={sectionHeaderStyle}>
               <strong style={{ color: "var(--fc-admin-heading)", fontSize: "13px" }}>
                 Details
@@ -527,51 +523,88 @@ export default function AuditLogPage() {
             </div>
 
             {selectedLog ? (
-              <div style={{ padding: "12px", display: "grid", gap: "12px" }}>
-                <div style={{ display: "grid", gap: "8px", fontSize: "13px" }}>
-                  <div>
-                    <strong>Subject</strong>
-                    <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px" }}>
-                      {getAuditSubject(selectedLog)}
-                    </div>
-                  </div>
-                  <div>
-                    <strong>Change</strong>
-                    <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px" }}>
-                      {getAuditChangeSummary(selectedLog)}
-                    </div>
-                  </div>
-                  <div>
-                    <strong>Primary key</strong>
-                    <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px" }}>
-                      {formatPrimaryKey(selectedLog.recordPk)}
-                    </div>
-                  </div>
-                  <div>
-                    <strong>Audit id</strong>
-                    <div style={{ color: "var(--fc-admin-muted)", marginTop: "3px", wordBreak: "break-all" }}>
-                      {selectedLog.id}
-                    </div>
-                  </div>
+              <div style={{ padding: "14px", display: "grid", gap: "14px" }}>
+                <div>
+                  <span style={operationStyle(selectedLog.displayOperation)}>
+                    {selectedLog.displayOperation}
+                  </span>
+                  <h2
+                    style={{
+                      margin: "10px 0 0",
+                      color: "var(--fc-admin-heading)",
+                      fontSize: "17px",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {selectedLog.summary}
+                  </h2>
                 </div>
 
                 <div
                   style={{
-                    borderTop: "1px solid var(--fc-admin-border-soft)",
-                    paddingTop: "12px",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: "10px",
+                    padding: "11px",
+                    border: "1px solid var(--fc-admin-border-soft)",
+                    borderRadius: "6px",
+                    background: "var(--fc-admin-panel-soft-bg)",
+                    fontSize: "12px",
                   }}
                 >
-                  <ChangedFields log={selectedLog} />
+                  <div>
+                    <div style={{ color: "var(--fc-admin-muted)", fontWeight: 800 }}>Page</div>
+                    <div style={{ marginTop: "3px", fontWeight: 900 }}>
+                      {selectedLog.pageLabel}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--fc-admin-muted)", fontWeight: 800 }}>User</div>
+                    <div style={{ marginTop: "3px", fontWeight: 900 }}>
+                      {selectedLog.actorName || selectedLog.actorId || "Unknown"}
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <div style={{ color: "var(--fc-admin-muted)", fontWeight: 800 }}>Time</div>
+                    <div style={{ marginTop: "3px", fontWeight: 900 }}>
+                      {formatDate(selectedLog.occurredAt)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: "8px" }}>
+                  {selectedLog.details.map((detail, index) => (
+                    <div
+                      key={`${selectedLog.id}-${index}`}
+                      style={{
+                        borderLeft: "3px solid var(--fc-admin-button-border)",
+                        padding: "7px 0 7px 10px",
+                        color: "var(--fc-admin-panel-text)",
+                        fontSize: "13px",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {detail}
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
-              <div style={{ padding: "12px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
-                Select a change to inspect it.
+              <div style={{ padding: "14px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
+                Select a change to see what happened.
               </div>
             )}
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        @media (max-width: 980px) {
+          .audit-layout {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   )
 }
