@@ -89,6 +89,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     group: "management",
     path: "/admin/usermanagement",
   },
+  {
+    id: "enqworkflow",
+    label: "ENQ WORKFLOW",
+    group: "management",
+    path: "/admin/enqworkflow",
+  },
 ]
 
 export const ADMIN_PAGE_GROUP_LABELS: Record<AdminPageDefinition["group"], string> = {
