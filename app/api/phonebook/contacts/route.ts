@@ -90,20 +90,24 @@ async function fetchContactsBySearch(supabase: any, query: string) {
     contactQuery = contactQuery.ilike("search_text", `%${token}%`)
   }
 
-  const { data: directMatches, error: directError } = await contactQuery
-  if (directError) throw directError
-
-  const direct = ((directMatches || []) as ContactRow[]).map((contact) => [contact.id, contact] as const)
-  const results = new Map<string, ContactRow>(direct)
-
   const companyTokenFilters = tokens.flatMap((token) => [`name.ilike.%${token}%`, `other_name.ilike.%${token}%`])
-  const { data: matchingCompanies, error: companyError } = await supabase
+  const directMatchesPromise = contactQuery
+  const matchingCompaniesPromise = supabase
     .from("phonebook_companies")
     .select("name")
     .or(companyTokenFilters.join(","))
     .limit(120)
 
+  const [
+    { data: directMatches, error: directError },
+    { data: matchingCompanies, error: companyError },
+  ] = await Promise.all([directMatchesPromise, matchingCompaniesPromise])
+
+  if (directError) throw directError
   if (companyError) throw companyError
+
+  const direct = ((directMatches || []) as ContactRow[]).map((contact) => [contact.id, contact] as const)
+  const results = new Map<string, ContactRow>(direct)
 
   const companyNames = Array.from(
     new Set(
