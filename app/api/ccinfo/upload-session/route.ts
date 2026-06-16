@@ -146,6 +146,22 @@ async function makeDriveFilePublic(drive: any, fileId: string) {
   }
 }
 
+function requireGoogleUploadUrl(value: string) {
+  const url = new URL(value)
+  const allowedHosts = new Set(["www.googleapis.com", "content.googleapis.com"])
+  if (!allowedHosts.has(url.hostname) || !url.pathname.startsWith("/upload/drive/v3/files")) {
+    throw new Error("Invalid Google Drive upload session.")
+  }
+  return url.toString()
+}
+
+function getReceivedByteCount(rangeHeader: string | null, fallback: number) {
+  const match = rangeHeader?.match(/bytes=0-(\d+)/i)
+  if (!match) return fallback
+  const lastByte = Number(match[1])
+  return Number.isFinite(lastByte) ? lastByte + 1 : fallback
+}
+
 export async function POST(request: Request) {
   try {
     await requireAdminPagePermission("ccinfo", "view")
@@ -197,6 +213,86 @@ export async function POST(request: Request) {
     return NextResponse.json({ uploadUrl, mimeType })
   } catch (error) {
     console.error("ccinfo upload session failed", error)
+    return NextResponse.json({ message: messageFromError(error) }, { status: 500 })
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    await requireAdminPagePermission("ccinfo", "view")
+    const requestUrl = new URL(request.url)
+    const uploadSessionUrl =
+      request.headers.get("x-google-drive-upload-url") ||
+      requestUrl.searchParams.get("uploadUrl") ||
+      ""
+    const uploadUrl = requireGoogleUploadUrl(String(uploadSessionUrl))
+    const start = Number(requestUrl.searchParams.get("start") || 0)
+    const end = Number(requestUrl.searchParams.get("end") || -1)
+    const total = Number(requestUrl.searchParams.get("total") || 0)
+    const mimeType = getMimeType(
+      String(requestUrl.searchParams.get("fileName") || "upload.bin"),
+      requestUrl.searchParams.get("mimeType"),
+    )
+
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      !Number.isSafeInteger(total) ||
+      start < 0 ||
+      end < start ||
+      total <= 0 ||
+      end >= total
+    ) {
+      return NextResponse.json({ message: "Invalid upload chunk range." }, { status: 400 })
+    }
+
+    const chunk = Buffer.from(await request.arrayBuffer())
+    const expectedLength = end - start + 1
+    if (chunk.byteLength !== expectedLength) {
+      return NextResponse.json(
+        { message: `Upload chunk size mismatch. Expected ${expectedLength} bytes but received ${chunk.byteLength}.` },
+        { status: 400 },
+      )
+    }
+
+    const googleResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": mimeType,
+        "Content-Length": String(chunk.byteLength),
+        "Content-Range": `bytes ${start}-${end}/${total}`,
+      },
+      body: chunk,
+    })
+    const responseText = await googleResponse.text()
+
+    if (googleResponse.status === 308) {
+      return NextResponse.json({
+        done: false,
+        nextStart: getReceivedByteCount(googleResponse.headers.get("range"), end + 1),
+      })
+    }
+
+    if (!googleResponse.ok) {
+      throw new Error(responseText || "Google Drive chunk upload failed.")
+    }
+
+    let driveFile: { id?: string; webViewLink?: string; webContentLink?: string; name?: string } = {}
+    if (responseText) {
+      try {
+        driveFile = JSON.parse(responseText)
+      } catch {
+        throw new Error(responseText)
+      }
+    }
+    if (!driveFile.id) throw new Error("Google Drive did not return the uploaded file.")
+
+    return NextResponse.json({
+      done: true,
+      file: driveFile,
+    })
+  } catch (error) {
+    console.error("ccinfo upload chunk failed", error)
     return NextResponse.json({ message: messageFromError(error) }, { status: 500 })
   }
 }

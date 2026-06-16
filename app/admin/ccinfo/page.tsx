@@ -223,6 +223,7 @@ const fileIconStyle: React.CSSProperties = {
 }
 
 const DIRECT_DRIVE_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024
+const DIRECT_DRIVE_UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -2815,23 +2816,40 @@ export default function CountryCompanyInfoPage() {
     const uploadUrl = typeof session.uploadUrl === "string" ? session.uploadUrl : ""
     if (!uploadUrl) throw new Error("Google Drive did not return a large-file upload URL.")
 
-    const uploadResponse = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": String(session.mimeType || file.type || "application/octet-stream") },
-      body: file,
-    })
-    const uploadText = await uploadResponse.text()
+    let offset = 0
     let driveFile: { id?: string; webViewLink?: string; webContentLink?: string; name?: string } = {}
-    if (uploadText) {
-      try {
-        driveFile = JSON.parse(uploadText)
-      } catch {
-        throw new Error(uploadText)
+    while (offset < file.size) {
+      const nextOffset = Math.min(offset + DIRECT_DRIVE_UPLOAD_CHUNK_BYTES, file.size)
+      const chunk = file.slice(offset, nextOffset)
+      const chunkResponse = await fetch(`/api/ccinfo/upload-session?${new URLSearchParams({
+        start: String(offset),
+        end: String(nextOffset - 1),
+        total: String(file.size),
+        fileName: file.name,
+        mimeType: String(session.mimeType || file.type || "application/octet-stream"),
+      }).toString()}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Google-Drive-Upload-Url": uploadUrl,
+        },
+        body: chunk,
+      })
+      const chunkResult = await chunkResponse.json()
+      if (!chunkResponse.ok) throw new Error(chunkResult.message || "Google Drive large file upload failed.")
+      if (chunkResult.done) {
+        driveFile = chunkResult.file || {}
+        offset = file.size
+      } else {
+        const nextStart = Number(chunkResult.nextStart || nextOffset)
+        if (!Number.isFinite(nextStart) || nextStart <= offset) {
+          throw new Error("Google Drive did not accept the upload chunk.")
+        }
+        offset = nextStart
       }
+      setMessage(`Uploading ${file.name} ${Math.round((offset / file.size) * 100)}%...`)
     }
-    if (!uploadResponse.ok || !driveFile.id) {
-      throw new Error(uploadText || "Google Drive large file upload failed.")
-    }
+    if (!driveFile.id) throw new Error("Google Drive large file upload did not finish.")
 
     const completeResponse = await fetch("/api/ccinfo/upload-session", {
       method: "PATCH",
