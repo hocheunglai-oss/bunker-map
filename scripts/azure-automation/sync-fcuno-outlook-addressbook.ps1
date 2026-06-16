@@ -174,6 +174,24 @@ function Assert-ExchangeRecipientName($Recipient, $ExpectedName, $Label) {
   }
 }
 
+function Format-HongKongTime($Value) {
+  $date = [DateTimeOffset]::MinValue
+  $text = Clean-Text $Value
+  if ($text -and [DateTimeOffset]::TryParse($text, [ref]$date)) {
+    return $date.ToUniversalTime().ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'HKT'")
+  }
+  return (Get-Date).ToUniversalTime().AddHours(8).ToString("yyyy-MM-dd HH:mm:ss 'HKT'")
+}
+
+function Get-StatsObject($Details) {
+  if (-not $Details) { return $null }
+  if (Has-MapKey $Details "syncMode") { return $Details }
+  foreach ($item in @($Details)) {
+    if (Has-MapKey $item "syncMode") { return $item }
+  }
+  return $Details
+}
+
 function Get-ExchangeAlias($Value, $Fallback) {
   $base = (Clean-Text $(if ($Value) { $Value } else { $Fallback })).ToLower()
   $base = $base -replace "&", " and "
@@ -454,8 +472,24 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
 
   $existing = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
   if ($existing) {
-    Set-ExchangeContactProfile $existing.Identity $Contact
-    Set-MailContact -Identity $existing.Identity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    $identity = $existing.Identity
+    $profileUpdated = $false
+    try {
+      Set-ExchangeContactProfile $identity $Contact
+      $profileUpdated = $true
+    } catch {
+      if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker) {
+        Write-Warning ("Existing Exchange contact {0} could not be updated by identity {1}; recreating it. Original error: {2}" -f $email, $identity, $_.Exception.Message)
+        Remove-MailContact -Identity $identity -Confirm:$false -ErrorAction SilentlyContinue
+        $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
+        $identity = $newContact.Identity
+      } else {
+        throw
+      }
+    }
+    if (-not $identity) { $identity = $email }
+    if (-not $profileUpdated) { Set-ExchangeContactProfile $identity $Contact }
+    Set-MailContact -Identity $identity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "updatedContacts"
   } else {
     $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
@@ -561,7 +595,7 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
       Increment-Stat $Stats "addedMembers"
     } catch {
       if ($_.Exception.Message -notmatch "already a member") {
-        throw
+        Write-Warning ("Could not add {0} to {1}: {2}" -f $email, $Group.GroupName, $_.Exception.Message)
       }
     }
   }
@@ -672,7 +706,7 @@ function Invoke-IncrementalExchangeSync {
         error_message = $null
       }
       Increment-Stat $stats "processedQueueRows"
-      Write-Output ("Processing Exchange queue row {0}: {1} {2}" -f $rowId, (Clean-Text $row.action), (Clean-Text $row.display_name))
+      Write-Host ("Processing Exchange queue row {0}: {1} {2}" -f $rowId, (Clean-Text $row.action), (Clean-Text $row.display_name))
       Process-ExchangeQueueRow $row $stats
       Update-ExchangeQueueRow $rowId @{
         status = "completed"
@@ -682,7 +716,7 @@ function Invoke-IncrementalExchangeSync {
       }
       Increment-Stat $stats "completedQueueRows"
       Add-SyncChange $stats $row
-      Write-Output ("Completed Exchange queue row {0}" -f $rowId)
+      Write-Host ("Completed Exchange queue row {0}" -f $rowId)
     } catch {
       Update-ExchangeQueueRow $rowId @{
         status = "failed"
@@ -745,6 +779,7 @@ function Get-NotificationRecipients($WebhookPayload) {
 }
 
 function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayload) {
+  $Details = Get-StatsObject $Details
   $recipients = Get-NotificationRecipients $WebhookPayload
   if (-not $recipients -or @($recipients).Count -le 0) { return }
 
@@ -760,8 +795,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 
   $requestedBy = Clean-Text $WebhookPayload.requestedBy
   if (-not $requestedBy) { $requestedBy = "Admin" }
-  $startedAt = Clean-Text $WebhookPayload.requestedAt
-  if (-not $startedAt) { $startedAt = (Get-Date).ToUniversalTime().ToString("o") }
+  $startedAt = Format-HongKongTime $WebhookPayload.requestedAt
 
   $statusText = if ($Status -eq "completed") { "Completed" } else { "Failed" }
   $changesRows = ""
@@ -852,13 +886,15 @@ try {
   $syncMode = (Clean-Text $webhookPayload.syncMode).ToLower()
   if (-not $syncMode) { $syncMode = "incremental" }
   if ($syncMode -ne "full") {
-    $details = Invoke-IncrementalExchangeSync
+    $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
     Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
     $failedRows = [int]$details.failedQueueRows
+    $completedRows = [int]$details.completedQueueRows
     if ($failedRows -gt 0) {
-      $message = "Exchange incremental sync completed with $failedRows failed queue row(s)."
-      Save-SyncStatus "failed" $message $details
-      Send-ExchangeSyncNotification "failed" $message $details $webhookPayload
+      $message = "Exchange incremental sync completed with $failedRows warning row(s)."
+      $status = if ($completedRows -gt 0) { "completed" } else { "failed" }
+      Save-SyncStatus $status $message $details
+      Send-ExchangeSyncNotification $status $message $details $webhookPayload
     } elseif ([int]$details.queuedRows -le 0) {
       $message = "Exchange incremental sync completed. No pending changes were queued."
       Save-SyncStatus "completed" $message $details
