@@ -1,10 +1,9 @@
 import fs from "fs"
 import path from "path"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { google } from "googleapis"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const TIME_ZONE = "Asia/Hong_Kong"
@@ -63,20 +62,14 @@ function parseGoogleEventDate(value: { date?: string | null; dateTime?: string |
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ message: "Admin login required." }, { status: 401 })
-  }
-
-  const { searchParams } = new URL(request.url)
-  const calendarId = searchParams.get("calendarId")?.trim() || process.env.GOOGLE_MEETING_CALENDAR_ID || DEFAULT_CALENDAR_ID
-  const now = new Date()
-  const defaultTimeMin = new Date(now)
-  const defaultTimeMax = new Date(now)
-  defaultTimeMax.setDate(defaultTimeMax.getDate() + 180)
-
   try {
+    await requireAdminPagePermission("event-calendar", "view")
+    const { searchParams } = new URL(request.url)
+    const calendarId = searchParams.get("calendarId")?.trim() || process.env.GOOGLE_MEETING_CALENDAR_ID || DEFAULT_CALENDAR_ID
+    const now = new Date()
+    const defaultTimeMin = new Date(now)
+    const defaultTimeMax = new Date(now)
+    defaultTimeMax.setDate(defaultTimeMax.getDate() + 180)
     const calendar = await getCalendarClient()
     const response = await calendar.events.list({
       calendarId,
@@ -106,6 +99,12 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, calendarId, events })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     const missingToken =
       error instanceof Error && error.message.includes(".google-calendar-oauth-token.json")
 

@@ -1,8 +1,7 @@
-import { cookies } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 export const GRAPH_STORE_KEY = "outlook-addressbook-graph"
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
 export type GraphStorePayload = {
   tenantId?: string
@@ -42,11 +41,8 @@ export function getSupabaseClient() {
   )
 }
 
-export async function requireAdminAccess() {
-  const cookieStore = await cookies()
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    throw new Error("Unauthorized")
-  }
+export async function requireAdminAccess(access: "view" | "edit" = "view") {
+  return requireAdminPagePermission("outlook-addressbook", access)
 }
 
 export async function loadGraphStore(): Promise<GraphStorePayload | null> {

@@ -489,7 +489,7 @@ export default function UserManagementPage() {
   return (
     <div style={pageStyle}>
       <div style={{ display: "grid", gap: "16px", maxWidth: "1500px", margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
             Back
           </button>
@@ -504,9 +504,6 @@ export default function UserManagementPage() {
             >
               USER MANAGEMENT
             </h1>
-            <div style={{ marginTop: "3px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>
-              Manage accounts and permission groups
-            </div>
           </div>
         </div>
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getGraphConfig, saveGraphStore } from "../_shared"
+import { getGraphConfig, requireAdminAccess, saveGraphStore } from "../_shared"
 
 function html(title: string, body: string) {
   return new NextResponse(
@@ -9,6 +9,15 @@ function html(title: string, body: string) {
 }
 
 export async function GET(request: Request) {
+  try {
+    await requireAdminAccess("edit")
+  } catch (error) {
+    return html(
+      "Microsoft Graph Consent Failed",
+      error instanceof Error ? error.message : "Permission denied."
+    )
+  }
+
   const url = new URL(request.url)
   const config = getGraphConfig(request)
   const state = url.searchParams.get("state") || ""

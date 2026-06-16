@@ -1,12 +1,11 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { google, people_v1 } from "googleapis"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-people-oauth-token.json")
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const SYNC_MARKER_KEY = "BUNKER_MAP_SYNC"
 const CONTACT_ID_KEY = "BUNKER_MAP_CONTACT_ID"
 
@@ -381,10 +380,7 @@ async function createContacts(people: ReturnType<typeof google.people>, contacts
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
+    await requireAdminPagePermission("phonebook", "edit")
 
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
@@ -466,6 +462,12 @@ export async function POST(request: Request) {
       failed: result.failed.slice(0, 20),
     })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     const message = error instanceof Error ? error.message : "Google Contacts sync failed."
     console.error("phonebook google sync failed", error)
     if (isInvalidGrantError(error)) {

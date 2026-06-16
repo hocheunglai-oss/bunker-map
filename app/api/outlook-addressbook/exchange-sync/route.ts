@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getAdminSession } from "@/lib/adminAuth"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const STORE_KEY = "outlook-addressbook-exchange-sync"
 const ACTIVE_SYNC_WINDOW_MS = 30 * 60 * 1000
@@ -23,14 +23,6 @@ function getSupabaseClient() {
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
   )
-}
-
-async function requireAdminAccess() {
-  const session = await getAdminSession()
-  if (!session.authenticated) {
-    throw new Error("Unauthorized")
-  }
-  return session
 }
 
 async function loadStatus(): Promise<ExchangeSyncStatus | null> {
@@ -63,7 +55,7 @@ async function saveStatus(payload: ExchangeSyncStatus) {
 
 export async function GET() {
   try {
-    await requireAdminAccess()
+    await requireAdminPagePermission("outlook-addressbook", "view")
     const webhookConfigured = Boolean(process.env.EXCHANGE_SYNC_WEBHOOK_URL)
     const status = await loadStatus()
 
@@ -76,8 +68,11 @@ export async function GET() {
       },
     })
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
     return NextResponse.json({ message: error instanceof Error ? error.message : "Could not load Exchange sync status." }, { status: 500 })
   }
@@ -85,7 +80,7 @@ export async function GET() {
 
 export async function POST() {
   try {
-    const session = await requireAdminAccess()
+    const session = await requireAdminPagePermission("outlook-addressbook", "edit")
     const webhookUrl = process.env.EXCHANGE_SYNC_WEBHOOK_URL
     if (!webhookUrl) {
       return NextResponse.json({ message: "EXCHANGE_SYNC_WEBHOOK_URL is not configured." }, { status: 400 })
@@ -145,8 +140,11 @@ export async function POST() {
     await saveStatus(queuedStatus)
     return NextResponse.json(queuedStatus)
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
     return NextResponse.json({ message: error instanceof Error ? error.message : "Could not trigger Exchange sync." }, { status: 500 })
   }

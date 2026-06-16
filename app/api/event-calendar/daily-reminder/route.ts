@@ -1,8 +1,7 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
 
 function hasAccess(request: Request) {
@@ -19,10 +18,16 @@ function buildLinkReminderEmail() {
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-
-  if (!hasAccess(request) && cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ message: "Not authorized." }, { status: 401 })
+  if (!hasAccess(request)) {
+    try {
+      await requireAdminPagePermission("event-calendar", "edit")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized"
+      return NextResponse.json(
+        { message },
+        { status: message === "Unauthorized" ? 401 : 403 }
+      )
+    }
   }
 
   const recipients = normalizeEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS)

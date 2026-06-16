@@ -1,8 +1,7 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const HOLIDAY_COUNTRIES = [
   { code: "TW", label: "TAIWAN" },
   { code: "US", label: "USA" },
@@ -63,20 +62,15 @@ async function fetchCountryHolidays(year: number, countryCode: string) {
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ message: "Admin login required." }, { status: 401 })
-  }
-
-  const { searchParams } = new URL(request.url)
-  const years = parseYears(searchParams.get("years"))
-  const countries = parseCountries(searchParams.get("countries"))
-  const titleStyle = searchParams.get("titleStyle")
-  const events: OfficeCalendarEvent[] = []
-  const seen = new Set<string>()
-
   try {
+    await requireAdminPagePermission("event-calendar", "view")
+    const { searchParams } = new URL(request.url)
+    const years = parseYears(searchParams.get("years"))
+    const countries = parseCountries(searchParams.get("countries"))
+    const titleStyle = searchParams.get("titleStyle")
+    const events: OfficeCalendarEvent[] = []
+    const seen = new Set<string>()
+
     for (const year of years) {
       for (const country of HOLIDAY_COUNTRIES.filter((item) => countries.includes(item.code))) {
         let holidays: NagerHoliday[]
@@ -111,6 +105,12 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ years, events })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Public holiday import failed." },
       { status: 500 }

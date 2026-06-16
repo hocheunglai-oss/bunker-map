@@ -92,13 +92,14 @@ function getCurrentAuditPage(actor: StoredAuditActor) {
   }
 }
 
-function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
+async function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
   const actor = getStoredAuditActor()
 
   if (!actor) {
     return fetch(input, init)
   }
 
+  const request = new Request(input, init)
   const method = getRequestMethod(input, init)
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && !canEditCurrentAdminPage(actor)) {
     return Promise.resolve(
@@ -131,9 +132,25 @@ function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit) {
     headers.set("x-bunker-admin-page-path", page.path)
   }
 
-  return fetch(input, {
-    ...(init || {}),
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+  const isSupabaseMutation =
+    !["GET", "HEAD", "OPTIONS"].includes(method) &&
+    request.url.startsWith(`${supabaseUrl}/rest/v1/`)
+
+  if (isSupabaseMutation) {
+    return fetch(`/api/admin/supabase?target=${encodeURIComponent(request.url)}`, {
+      method,
+      headers,
+      body: await request.arrayBuffer(),
+      signal: request.signal,
+    })
+  }
+
+  return fetch(request.url, {
+    method,
     headers,
+    body: ["GET", "HEAD"].includes(method) ? undefined : await request.arrayBuffer(),
+    signal: request.signal,
   })
 }
 

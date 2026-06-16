@@ -3,7 +3,7 @@ import { getGraphAccessToken, graphGet, loadGraphStore, requireAdminAccess } fro
 
 export async function POST() {
   try {
-    await requireAdminAccess()
+    await requireAdminAccess("edit")
     const store = await loadGraphStore()
     if (!store?.tenantId || !store.adminConsent) {
       return NextResponse.json({ message: "Microsoft Graph admin consent has not been completed." }, { status: 400 })
@@ -20,8 +20,11 @@ export async function POST() {
         "Graph access is working, but Microsoft Graph organizational contacts are read-only. GAL updates still need Exchange PowerShell.",
     })
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
     return NextResponse.json({ message: error instanceof Error ? error.message : "Graph sync check failed." }, { status: 500 })
   }

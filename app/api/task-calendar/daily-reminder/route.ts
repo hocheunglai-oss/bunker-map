@@ -1,4 +1,3 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import {
@@ -9,8 +8,8 @@ import {
   taskCalendarTasks,
 } from "@/data/taskCalendar"
 import { sendCalendarEmail } from "@/lib/eventCalendarEmail"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const SHARED_STORE_KEY = "task-calendar"
 
 function requireEnv(name: string) {
@@ -89,10 +88,16 @@ async function loadTaskCalendarTasks() {
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-
-  if (!hasAccess(request) && cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ message: "Not authorized." }, { status: 401 })
+  if (!hasAccess(request)) {
+    try {
+      await requireAdminPagePermission("task-calendar", "edit")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized"
+      return NextResponse.json(
+        { message },
+        { status: message === "Unauthorized" ? 401 : 403 }
+      )
+    }
   }
 
   const { searchParams } = new URL(request.url)

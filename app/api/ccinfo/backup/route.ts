@@ -1,10 +1,9 @@
 import fs from "node:fs"
 import path from "node:path"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -14,10 +13,7 @@ function requireEnv(name: string) {
 
 export async function GET() {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
+    await requireAdminPagePermission("ccinfo", "view")
 
     const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"))
 
@@ -64,6 +60,12 @@ export async function GET() {
       },
     })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     const message =
       error instanceof Error
         ? error.message

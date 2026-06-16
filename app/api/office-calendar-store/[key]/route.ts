@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getAdminSession, type AdminSession } from "@/lib/adminAuth"
+import {
+  getAdminSession,
+  hasAdminPagePermission,
+  type AdminSession,
+} from "@/lib/adminAuth"
 import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
@@ -34,14 +38,22 @@ function normalizeKey(key: string) {
   return key
 }
 
+function getPageId(storeKey: string) {
+  return storeKey === "event-calendar" ? "event-calendar" : "task-calendar"
+}
+
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
-  if ((await getAccessSession(request)) === false) {
+  const session = await getAccessSession(request)
+  if (session === false) {
     return NextResponse.json({ message: "Not authorized." }, { status: 401 })
   }
 
   const { key } = await context.params
   const storeKey = normalizeKey(key)
   if (!storeKey) return NextResponse.json({ message: "Unknown store key." }, { status: 404 })
+  if (session && !hasAdminPagePermission(session, getPageId(storeKey), "view")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+  }
 
   try {
     const supabase = getSupabaseClient()
@@ -70,6 +82,9 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
   const { key } = await context.params
   const storeKey = normalizeKey(key)
   if (!storeKey) return NextResponse.json({ message: "Unknown store key." }, { status: 404 })
+  if (session && !hasAdminPagePermission(session, getPageId(storeKey), "edit")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+  }
 
   try {
     const payload = await request.json()

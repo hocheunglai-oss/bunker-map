@@ -4,11 +4,11 @@ import {
   EmailTemplate,
   importThunderbirdTemplates,
   loadTemplateLibrary,
-  requireAdminSession,
   saveEmailTemplate,
   saveTemplateLibrary,
 } from "@/lib/emailTemplates"
 import { createAdminAuditContext } from "@/lib/adminAudit"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 type SavePayload = {
   id?: string
@@ -18,12 +18,15 @@ type SavePayload = {
 
 export async function GET() {
   try {
-    await requireAdminSession()
+    await requireAdminPagePermission("email-templates", "view")
     const library = await loadTemplateLibrary()
     return NextResponse.json(library)
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
 
     return NextResponse.json({ message: "Failed to load templates." }, { status: 500 })
@@ -32,7 +35,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAdminSession()
+    const session = await requireAdminPagePermission("email-templates", "edit")
     const auditContext = createAdminAuditContext(
       session,
       request,
@@ -86,8 +89,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
 
     return NextResponse.json({ message: "Template action failed." }, { status: 500 })

@@ -89,12 +89,6 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     group: "management",
     path: "/admin/usermanagement",
   },
-  {
-    id: "enqworkflow",
-    label: "ENQ WORKFLOW",
-    group: "management",
-    path: "/admin/enqworkflow",
-  },
 ]
 
 export const ADMIN_PAGE_GROUP_LABELS: Record<AdminPageDefinition["group"], string> = {
@@ -151,13 +145,6 @@ export function normaliseAdminPagePermissions(
       value === "edit" || value === "view" || value === "none" ? value : fallback
     return pagePermissions
   }, {})
-
-  Object.entries(source).forEach(([pageId, value]) => {
-    if (next[pageId]) return
-    if (value === "edit" || value === "view" || value === "none") {
-      next[pageId] = value
-    }
-  })
 
   return next
 }

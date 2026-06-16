@@ -24,8 +24,11 @@ export async function GET(request: Request) {
         "Microsoft Graph can read Exchange organizational contacts, but cannot create or update GAL mail contacts. Exchange PowerShell remains required for GAL writes.",
     })
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
     }
     return NextResponse.json({ message: error instanceof Error ? error.message : "Could not load Graph status." }, { status: 500 })
   }

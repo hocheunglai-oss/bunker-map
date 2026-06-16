@@ -1,8 +1,7 @@
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const MANAGED_PREFIX = "bunker-map-"
 const FULL_REBUILD_BATCH_SIZE = 250
 
@@ -279,10 +278,7 @@ async function fetchContacts(supabase: any, company: string | null) {
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies()
-    if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
+    await requireAdminPagePermission("phonebook", "edit")
 
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
@@ -365,6 +361,12 @@ export async function POST(request: Request) {
       phase: "upload",
     })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     console.error("phonebook carddav sync failed", error)
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "CardDAV sync failed." },

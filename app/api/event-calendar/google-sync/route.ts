@@ -1,11 +1,10 @@
 import fs from "fs"
 import path from "path"
-import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { google } from "googleapis"
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
-const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const TIME_ZONE = "Asia/Hong_Kong"
@@ -124,26 +123,20 @@ async function getCalendarClient() {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies()
-
-  if (cookieStore.get(ADMIN_COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ message: "Admin login required." }, { status: 401 })
-  }
-
-  const body = await request.json()
-  const events: OfficeCalendarEvent[] = Array.isArray(body.events) ? body.events.filter(isOfficeCalendarEvent) : []
-  const activeEventIdValues: unknown[] = Array.isArray(body.activeEventIds) ? body.activeEventIds : events.map((event) => event.id)
-  const activeEventIds = new Set(
-    activeEventIdValues
-      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-      .map((id) => id.trim())
-  )
-  const calendarId =
-    typeof body.calendarId === "string" && body.calendarId.trim()
-      ? body.calendarId.trim()
-      : process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
-
   try {
+    await requireAdminPagePermission("event-calendar", "edit")
+    const body = await request.json()
+    const events: OfficeCalendarEvent[] = Array.isArray(body.events) ? body.events.filter(isOfficeCalendarEvent) : []
+    const activeEventIdValues: unknown[] = Array.isArray(body.activeEventIds) ? body.activeEventIds : events.map((event) => event.id)
+    const activeEventIds = new Set(
+      activeEventIdValues
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        .map((id) => id.trim())
+    )
+    const calendarId =
+      typeof body.calendarId === "string" && body.calendarId.trim()
+        ? body.calendarId.trim()
+        : process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
     const calendar = await getCalendarClient()
     let inserted = 0
     let updated = 0
@@ -220,6 +213,12 @@ export async function POST(request: Request) {
       failed,
     })
   } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.message === "Unauthorized" ? 401 : 403 }
+      )
+    }
     const missingToken =
       error instanceof Error && error.message.includes(".google-calendar-oauth-token.json")
 
