@@ -166,6 +166,16 @@ function canMoveFolderToPath(sourcePath: string, targetParentPath: string) {
   return true
 }
 
+async function requireCcinfoFileAccess(request: Request) {
+  // CCINFO document management is intentionally collaborative for anyone
+  // who can view CCINFO. Other CCINFO content edits remain protected by
+  // the page-level edit checks used by the Supabase mutation proxy.
+  const session = await requireAdminPagePermission("ccinfo", "view")
+  return createAdminAuditedSupabaseClient(
+    createAdminAuditContext(session, request, "ccinfo")
+  )
+}
+
 function renameOriginalPathBasename(originalPath: string | null | undefined, nextName: string, entryKind = "company", entryName = "Untitled") {
   const folderPath = deriveFolderPathFromOriginalPath(originalPath)
   return setFolderPathInOriginalPath(originalPath, folderPath, nextName, entryKind, entryName)
@@ -173,10 +183,7 @@ function renameOriginalPathBasename(originalPath: string | null | undefined, nex
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAdminPagePermission("ccinfo", "edit")
-    const supabase = createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "ccinfo")
-    )
+    const supabase = await requireCcinfoFileAccess(request)
     const body = await request.json()
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
@@ -212,10 +219,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const session = await requireAdminPagePermission("ccinfo", "edit")
-    const supabase = createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "ccinfo")
-    )
+    const supabase = await requireCcinfoFileAccess(request)
     const { searchParams } = new URL(request.url)
     const fileId = searchParams.get("fileId")
     const folderId = searchParams.get("folderId")
@@ -283,10 +287,7 @@ export async function DELETE(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await requireAdminPagePermission("ccinfo", "edit")
-    const supabase = createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "ccinfo")
-    )
+    const supabase = await requireCcinfoFileAccess(request)
     const body = await request.json()
     const fileId = String(body.fileId || "")
     const folderId = String(body.folderId || "")

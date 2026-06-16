@@ -2804,6 +2804,7 @@ export default function CountryCompanyInfoPage() {
         const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
         const data = await response.json()
         if (!response.ok) throw new Error(data.message || "Upload failed")
+        if (data.warning) setMessage(String(data.warning))
         uploaded.push(data.file as EntryFileRecord)
       }
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
@@ -2813,7 +2814,7 @@ export default function CountryCompanyInfoPage() {
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
       void loadRecentAuditLogs()
-      setMessage(`Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
+      setMessage((current) => current || `Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
     } finally {

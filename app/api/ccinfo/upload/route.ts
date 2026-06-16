@@ -97,21 +97,48 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
   return created.data.id
 }
 
+function messageFromError(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message?: unknown }).message || "Request failed.")
+        : "Request failed."
+  const details =
+    typeof error === "object" && error !== null && "details" in error
+      ? String((error as { details?: unknown }).details || "")
+      : ""
+  const hint =
+    typeof error === "object" && error !== null && "hint" in error
+      ? String((error as { hint?: unknown }).hint || "")
+      : ""
+  return [message, details, hint].filter(Boolean).join(" | ") || "Request failed."
+}
+
 async function makeDriveFilePublic(drive: any, fileId: string) {
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: "reader",
-      type: "anyone",
-    },
-    supportsAllDrives: true,
-  })
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+      supportsAllDrives: true,
+    })
+    return null
+  } catch (error) {
+    const message = messageFromError(error)
+    console.warn("ccinfo upload sharing skipped", { fileId, message })
+    return message
+  }
 }
 
 export async function POST(request: Request) {
   let tempPath = ""
   try {
-    const session = await requireAdminPagePermission("ccinfo", "edit")
+    // CCINFO file panel actions are intentionally available to everyone
+    // who can access CCINFO, while text/table edits still go through edit-only APIs.
+    const session = await requireAdminPagePermission("ccinfo", "view")
     const supabase = createAdminAuditedSupabaseClient(
       createAdminAuditContext(session, request, "ccinfo")
     )
@@ -165,7 +192,7 @@ export async function POST(request: Request) {
 
     const fileId = uploaded.data.id
     if (!fileId) throw new Error("Google Drive upload failed.")
-    await makeDriveFilePublic(drive, fileId)
+    const sharingWarning = await makeDriveFilePublic(drive, fileId)
 
     const url = uploaded.data.webViewLink || uploaded.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`
 
@@ -180,6 +207,7 @@ export async function POST(request: Request) {
           file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
           drive_file_id: fileId,
           drive_url: url,
+          deleted_at: null,
           original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${uploadFile.name}`,
         },
         {
@@ -201,23 +229,10 @@ export async function POST(request: Request) {
         drive_url: savedFile.drive_url,
         source: "entry",
       },
+      warning: sharingWarning ? `Uploaded, but Google Drive sharing could not be changed automatically: ${sharingWarning}` : null,
     })
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "object" && error !== null && "message" in error
-          ? String((error as { message?: unknown }).message || "Upload failed.")
-          : "Upload failed."
-    const details =
-      typeof error === "object" && error !== null && "details" in error
-        ? String((error as { details?: unknown }).details || "")
-        : ""
-    const hint =
-      typeof error === "object" && error !== null && "hint" in error
-        ? String((error as { hint?: unknown }).hint || "")
-        : ""
-    const joined = [message, details, hint].filter(Boolean).join(" | ")
+    const joined = messageFromError(error)
     console.error("ccinfo upload failed", error)
     return NextResponse.json({ message: joined || "Upload failed." }, { status: 500 })
   } finally {
