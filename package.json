@@ -7,6 +7,7 @@
     "restart:dev": "sh ./scripts/restart-dev.sh",
     "build": "next build",
     "start": "next start",
+    "release:check": "node scripts/release-check.mjs",
     "vercel-build": "next build",
     "auth:google-drive": "node scripts/auth-google-drive.mjs",
     "backup:bunker-map-drive": "node scripts/backup-bunker-map-drive.mjs",

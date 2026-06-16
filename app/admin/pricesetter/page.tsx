@@ -274,6 +274,7 @@ export default function AdminPage() {
       .gte("recorded_at", dayStart.toISOString())
       .lte("recorded_at", dayEnd.toISOString())
       .order("recorded_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(1)
 
     if (existingHistory && existingHistory.length > 0) {
@@ -512,7 +513,7 @@ export default function AdminPage() {
       sections: buildChinaReportSections(portsData, sections),
     }
 
-    await saveReportSnapshot(key, snapshot)
+    await saveReportSnapshotOrThrow(key, snapshot)
     return snapshot
   }
 
@@ -530,6 +531,11 @@ export default function AdminPage() {
       ...prev,
       [key]: value,
     }))
+  }
+
+  async function saveReportSnapshotOrThrow<T>(key: ReportSnapshotKey, snapshot: T) {
+    const { error } = await saveReportSnapshot(key, snapshot)
+    if (error) throw error
   }
 
   async function buildTaiwanSnapshot(): Promise<{
@@ -552,6 +558,7 @@ export default function AdminPage() {
       .select("*")
       .in("port_id", portIds)
       .order("recorded_at", { ascending: false })
+      .order("id", { ascending: false })
 
     if (!historyData || historyData.length === 0) return null
 
@@ -591,6 +598,7 @@ export default function AdminPage() {
       .select("*")
       .in("port_id", portIds)
       .order("recorded_at", { ascending: false })
+      .order("id", { ascending: false })
 
     if (!historyData || historyData.length === 0) return null
 
@@ -604,44 +612,72 @@ export default function AdminPage() {
 
   async function handlePublishChina() {
     setPublishingChina(true)
-    const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
-    if (snapshot) setPublishedChina(true)
-    if (snapshot) setReportDates((prev) => ({ ...prev, china: snapshot.reportDate }))
-    setPublishingChina(false)
-    if (snapshot) addActivityLog("China report published")
+    try {
+      const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
+      if (snapshot) setPublishedChina(true)
+      if (snapshot) setReportDates((prev) => ({ ...prev, china: snapshot.reportDate }))
+      if (snapshot) addActivityLog("China report published")
+    } catch (error) {
+      console.error(error)
+      setPublishedChina(false)
+      addActivityLog("China report publish failed")
+    } finally {
+      setPublishingChina(false)
+    }
   }
 
   async function handlePublishCompact() {
     setPublishingCompact(true)
-    const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
-    if (snapshot) setPublishedCompact(true)
-    if (snapshot) setReportDates((prev) => ({ ...prev, compact: snapshot.reportDate }))
-    setPublishingCompact(false)
-    if (snapshot) addActivityLog("Compact report published")
+    try {
+      const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
+      if (snapshot) setPublishedCompact(true)
+      if (snapshot) setReportDates((prev) => ({ ...prev, compact: snapshot.reportDate }))
+      if (snapshot) addActivityLog("Compact report published")
+    } catch (error) {
+      console.error(error)
+      setPublishedCompact(false)
+      addActivityLog("Compact report publish failed")
+    } finally {
+      setPublishingCompact(false)
+    }
   }
 
   async function handlePublishTaiwan() {
     setPublishingTaiwan(true)
-    const snapshot = await buildTaiwanSnapshot()
-    if (snapshot) {
-      await saveReportSnapshot("taiwan", snapshot)
-      setPublishedTaiwan(true)
-      setReportDates((prev) => ({ ...prev, taiwan: snapshot.reportDate }))
-      addActivityLog("Taiwan report published")
+    try {
+      const snapshot = await buildTaiwanSnapshot()
+      if (snapshot) {
+        await saveReportSnapshotOrThrow("taiwan", snapshot)
+        setPublishedTaiwan(true)
+        setReportDates((prev) => ({ ...prev, taiwan: snapshot.reportDate }))
+        addActivityLog("Taiwan report published")
+      }
+    } catch (error) {
+      console.error(error)
+      setPublishedTaiwan(false)
+      addActivityLog("Taiwan report publish failed")
+    } finally {
+      setPublishingTaiwan(false)
     }
-    setPublishingTaiwan(false)
   }
 
   async function handlePublishHongKong() {
     setPublishingHongKong(true)
-    const snapshot = await buildHongKongSnapshot()
-    if (snapshot) {
-      await saveReportSnapshot("hongkong", snapshot)
-      setPublishedHongKong(true)
-      setReportDates((prev) => ({ ...prev, hongkong: snapshot.reportDate }))
-      addActivityLog("Hong Kong report published")
+    try {
+      const snapshot = await buildHongKongSnapshot()
+      if (snapshot) {
+        await saveReportSnapshotOrThrow("hongkong", snapshot)
+        setPublishedHongKong(true)
+        setReportDates((prev) => ({ ...prev, hongkong: snapshot.reportDate }))
+        addActivityLog("Hong Kong report published")
+      }
+    } catch (error) {
+      console.error(error)
+      setPublishedHongKong(false)
+      addActivityLog("Hong Kong report publish failed")
+    } finally {
+      setPublishingHongKong(false)
     }
-    setPublishingHongKong(false)
   }
 
   const visiblePorts = useMemo(() => {

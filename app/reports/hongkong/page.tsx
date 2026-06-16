@@ -104,7 +104,7 @@ export default function HongKongReport() {
   const [fallbacks, setFallbacks] = useState<FallbackMap>({})
 
   useEffect(() => {
-    async function load() {
+    async function loadSnapshot() {
       const snapshot = await loadReportSnapshot<{
         reportDate: string
         rows: HongKongReportRow[]
@@ -116,7 +116,19 @@ export default function HongKongReport() {
       setRows(snapshot.rows)
     }
 
-    load()
+    loadSnapshot()
+
+    function refreshVisibleReport() {
+      if (document.visibilityState === "visible") void loadSnapshot()
+    }
+
+    window.addEventListener("focus", refreshVisibleReport)
+    document.addEventListener("visibilitychange", refreshVisibleReport)
+
+    return () => {
+      window.removeEventListener("focus", refreshVisibleReport)
+      document.removeEventListener("visibilitychange", refreshVisibleReport)
+    }
   }, [])
 
   useEffect(() => {

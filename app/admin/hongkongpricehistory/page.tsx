@@ -51,6 +51,14 @@ function average(values: Array<number | null>) {
   return Number((total / numbers.length).toFixed(2))
 }
 
+function sortHistoryRows(rows: HistoryRow[]) {
+  return [...rows].sort((a, b) => {
+    const dateDelta = new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
+    if (dateDelta !== 0) return dateDelta
+    return b.id - a.id
+  })
+}
+
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   background:
@@ -119,6 +127,7 @@ export default function HongKongPriceHistoryPage() {
   const [formMgo, setFormMgo] = useState("")
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
+  const [publishMessage, setPublishMessage] = useState("")
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
 
   async function buildHongKongSnapshot(): Promise<{
@@ -139,6 +148,7 @@ export default function HongKongPriceHistoryPage() {
       .select("*")
       .in("port_id", portIds)
       .order("recorded_at", { ascending: false })
+      .order("id", { ascending: false })
 
     if (!historyData || historyData.length === 0) return null
 
@@ -154,6 +164,7 @@ export default function HongKongPriceHistoryPage() {
       .select("hsfo,vlsfo,mgo,recorded_at")
       .eq("port_id", currentPortId)
       .order("recorded_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -241,8 +252,9 @@ export default function HongKongPriceHistoryPage() {
         .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
         .eq("port_id", portData.id)
         .order("recorded_at", { ascending: false })
+        .order("id", { ascending: false })
 
-      setRows(historyData ?? [])
+      setRows(sortHistoryRows(historyData ?? []))
       setLoading(false)
     }
 
@@ -318,12 +330,7 @@ export default function HongKongPriceHistoryPage() {
       .single()
 
     if (inserted) {
-      setRows((prev) =>
-        [...prev, inserted].sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-        )
-      )
+      setRows((prev) => sortHistoryRows([...prev, inserted]))
       setFormDate("")
       setFormHsfo("")
       setFormVlsfo("")
@@ -364,12 +371,7 @@ export default function HongKongPriceHistoryPage() {
       .single()
 
     if (inserted) {
-      setRows((prev) =>
-        [...prev, inserted].sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-        )
-      )
+      setRows((prev) => sortHistoryRows([...prev, inserted]))
       setFormHsfo("")
       setFormVlsfo("")
       setFormMgo("")
@@ -382,12 +384,27 @@ export default function HongKongPriceHistoryPage() {
 
   async function handlePublish() {
     setPublishing(true)
-    const snapshot = await buildHongKongSnapshot()
-    if (snapshot) {
-      await saveReportSnapshot("hongkong", snapshot)
+    setPublishMessage("")
+    try {
+      const snapshot = await buildHongKongSnapshot()
+      if (!snapshot) {
+        setPublishMessage("No Hong Kong history records found to publish.")
+        setPublished(false)
+        return
+      }
+
+      const { error } = await saveReportSnapshot("hongkong", snapshot)
+      if (error) throw error
+
       setPublished(true)
+      setPublishMessage(`Published ${snapshot.reportDate}`)
+    } catch (error) {
+      console.error(error)
+      setPublished(false)
+      setPublishMessage("Publish failed. Please try again.")
+    } finally {
+      setPublishing(false)
     }
-    setPublishing(false)
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -480,6 +497,29 @@ export default function HongKongPriceHistoryPage() {
             </button>
           </div>
         </div>
+
+        {publishMessage && (
+          <div
+            style={{
+              marginBottom: "14px",
+              padding: "10px 12px",
+              borderRadius: "12px",
+              border: published
+                ? "1px solid var(--fc-admin-success-border)"
+                : "1px solid var(--fc-admin-danger-border)",
+              background: published
+                ? "var(--fc-admin-success-bg)"
+                : "var(--fc-admin-danger-bg)",
+              color: published
+                ? "var(--fc-admin-success-text)"
+                : "var(--fc-admin-danger-text)",
+              fontSize: "13px",
+              fontWeight: 700,
+            }}
+          >
+            {publishMessage}
+          </div>
+        )}
 
         <div style={{ ...sectionCardStyle, padding: "16px", marginBottom: "14px" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "end", justifyContent: "space-between" }}>

@@ -29,5 +29,5 @@ export async function saveReportSnapshot<T>(key: ReportSnapshotKey, payload: T) 
   return supabase.from("remarks").upsert({
     id: snapshotIds[key],
     content: JSON.stringify(payload),
-  })
+  }, { onConflict: "id" }).select("id").single()
 }
