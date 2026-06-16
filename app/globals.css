@@ -192,6 +192,336 @@ body {
   pointer-events: none;
 }
 
+.fc-admin-folder-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42px;
+  background: var(--fc-admin-page-bg);
+  color: var(--fc-admin-panel-text);
+  font-family: var(--fc-admin-font);
+}
+
+.fc-admin-folder-shell {
+  width: min(1520px, 100%);
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.fc-admin-loading {
+  width: min(340px, 100%);
+  border: 1px solid #d9ded9;
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 24px;
+  color: #5f665f;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 18px 40px rgba(70, 78, 72, 0.12);
+}
+
+.fc-admin-folder {
+  position: relative;
+  min-width: 0;
+  padding-top: 32px;
+}
+
+.fc-admin-access-panel {
+  position: sticky;
+  top: 28px;
+  min-width: 0;
+}
+
+.fc-admin-folder-tab {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  z-index: 0;
+  min-width: 142px;
+  max-width: calc(100% - 36px);
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--fc-folder-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--fc-folder-tab);
+  color: var(--fc-folder-accent);
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fc-admin-folder-body {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--fc-folder-edge);
+  border-radius: 8px;
+  background: var(--fc-folder-cover);
+  box-shadow: 0 18px 42px rgba(76, 84, 78, 0.13);
+}
+
+.fc-admin-access-body {
+  display: grid;
+  padding: 30px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 28px;
+  background: var(--fc-admin-panel-bg);
+  color: var(--fc-admin-panel-text);
+  box-shadow: 0 18px 42px #00000014;
+}
+
+.fc-admin-access-panel.is-authenticated .fc-admin-access-body {
+  opacity: 0.58;
+  box-shadow: 0 10px 24px #0000000a;
+}
+
+.fc-admin-logo-link {
+  display: inline-flex;
+  justify-self: center;
+  margin-bottom: 18px;
+  text-decoration: none;
+}
+
+.fc-admin-logo {
+  width: auto;
+  height: 156px;
+  object-fit: contain;
+}
+
+.fc-admin-login-form {
+  display: block;
+}
+
+.fc-admin-auth-field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.fc-admin-auth-field + .fc-admin-auth-field {
+  margin-bottom: 20px;
+}
+
+.fc-admin-auth-field span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.fc-admin-auth-input {
+  width: 100%;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 14px;
+  background: var(--fc-login-input-bg);
+  color: var(--fc-login-input-text);
+  outline: none;
+  padding: 12px 14px;
+  font-size: 15px;
+  box-shadow: none;
+}
+
+.fc-admin-auth-input:focus-visible {
+  border-color: var(--fc-admin-selected-border);
+  box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.22);
+}
+
+.fc-admin-auth-button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: none;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.fc-admin-auth-button:hover,
+.fc-admin-file-label:hover {
+  transform: translateY(-1px);
+}
+
+.fc-admin-auth-button:active,
+.fc-admin-file-label:active {
+  transform: translateY(0);
+}
+
+.fc-admin-auth-button:focus-visible,
+.fc-admin-file-label:focus-visible {
+  outline: 3px solid rgba(138, 180, 248, 0.28);
+  outline-offset: 2px;
+}
+
+.fc-admin-auth-button-primary {
+  margin-bottom: 12px;
+  background: var(--fc-admin-success-bg);
+  border-color: var(--fc-admin-success-border);
+  color: var(--fc-admin-success-text);
+}
+
+.fc-admin-auth-button-danger {
+  margin-bottom: 12px;
+  background: var(--fc-admin-danger-bg);
+  border-color: var(--fc-admin-danger-border);
+  color: var(--fc-admin-danger-text);
+}
+
+.fc-admin-auth-button-secondary {
+  padding: 12px 16px;
+  background: var(--fc-admin-button-bg);
+  border-color: var(--fc-admin-border);
+  color: var(--fc-admin-button-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fc-admin-auth-message {
+  margin: 16px 0 0;
+  color: var(--fc-error);
+  font-weight: 700;
+}
+
+.fc-admin-signed-in {
+  margin: 0 0 12px;
+  color: var(--fc-admin-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.fc-admin-folder-workspace {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+}
+
+.fc-admin-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 22px;
+  align-items: start;
+}
+
+.fc-admin-folder-body {
+  min-height: 186px;
+  padding: 18px;
+}
+
+.fc-admin-file-list {
+  display: grid;
+  gap: 10px;
+}
+
+.fc-admin-file-label {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--fc-folder-tab) 72%, #b7aca0);
+  border-radius: 8px;
+  background: var(--fc-folder-sticker);
+  color: var(--fc-folder-accent);
+  cursor: pointer;
+  padding: 10px 16px;
+  text-align: center;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.fc-admin-file-label:hover {
+  border-color: var(--fc-folder-accent);
+  background: color-mix(in srgb, var(--fc-folder-sticker) 78%, #ffffff);
+}
+
+.fc-admin-file-label span {
+  min-width: 0;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.25;
+  letter-spacing: 0.03em;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.fc-admin-folder-empty {
+  margin: 0;
+  color: #737a74;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.fc-admin-folder.is-locked {
+  padding-top: 0;
+  opacity: 0.58;
+}
+
+.fc-admin-folder-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.fc-admin-folder-preview span {
+  display: block;
+  height: 42px;
+  border: 1px solid rgba(70, 78, 72, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 254, 250, 0.56);
+}
+
+@media (max-width: 980px) {
+  .fc-admin-folder-page {
+    align-items: start;
+    padding: 24px;
+  }
+
+  .fc-admin-folder-shell {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .fc-admin-access-panel {
+    position: relative;
+    top: auto;
+  }
+
+  .fc-admin-logo {
+    height: 123px;
+  }
+}
+
+@media (max-width: 640px) {
+  .fc-admin-folder-page {
+    padding: 18px;
+  }
+
+  .fc-admin-folder-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fc-admin-access-body,
+  .fc-admin-folder-body {
+    padding: 16px;
+  }
+}
+
 .glass-popup .leaflet-popup-content-wrapper {
   background:
     radial-gradient(circle at top left, rgba(88, 182, 255, 0.22), transparent 34%),

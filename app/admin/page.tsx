@@ -2,74 +2,88 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import {
+  ADMIN_PAGE_GROUP_LABELS,
+  canAccessAdminPage,
+  isAdminRole,
+  type AdminPageDefinition,
+} from "@/lib/adminPages"
 import { getAdminPagesByGroupFromPages } from "@/lib/adminPageRegistry"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { useIsMobile } from "@/lib/useIsMobile"
 
-const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  padding: "24px",
-  background: "var(--fc-admin-page-bg)",
-  color: "var(--fc-admin-panel-text)",
-  fontFamily: "var(--fc-admin-font)",
+type AdminPageGroup = AdminPageDefinition["group"]
+
+type FolderTone = {
+  cover: string
+  tab: string
+  sticker: string
+  edge: string
+  accent: string
 }
 
-const shellStyle: React.CSSProperties = {
-  width: "min(1380px, 100%)",
-  display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
-  gap: "18px",
+type FolderStyle = React.CSSProperties & {
+  "--fc-folder-cover": string
+  "--fc-folder-tab": string
+  "--fc-folder-sticker": string
+  "--fc-folder-edge": string
+  "--fc-folder-accent": string
 }
 
-const panelStyle: React.CSSProperties = {
-  borderRadius: "28px",
-  padding: "30px",
-  background: "var(--fc-admin-panel-bg)",
-  border: "1px solid var(--fc-admin-border)",
-  boxShadow: "0 18px 42px #00000014",
-  color: "var(--fc-admin-panel-text)",
+const ADMIN_GROUP_ORDER = Object.keys(ADMIN_PAGE_GROUP_LABELS) as AdminPageGroup[]
+
+const FOLDER_TONES: FolderTone[] = [
+  {
+    cover: "#f4f8f5",
+    tab: "#d9e8e1",
+    sticker: "#eaf3ef",
+    edge: "#c7d8cf",
+    accent: "#355e52",
+  },
+  {
+    cover: "#fbf4ef",
+    tab: "#efd9cc",
+    sticker: "#f7e8df",
+    edge: "#dec5b5",
+    accent: "#815a48",
+  },
+  {
+    cover: "#f3f7fb",
+    tab: "#d8e6f0",
+    sticker: "#e8f1f7",
+    edge: "#c6d6e0",
+    accent: "#486b7f",
+  },
+  {
+    cover: "#f8f5f9",
+    tab: "#e7ddea",
+    sticker: "#f0e8f2",
+    edge: "#d7cbdc",
+    accent: "#66536e",
+  },
+  {
+    cover: "#fbf7ea",
+    tab: "#efe3bd",
+    sticker: "#f7efd0",
+    edge: "#dccd9d",
+    accent: "#735f2e",
+  },
+]
+
+function toneForIndex(index: number) {
+  return FOLDER_TONES[index % FOLDER_TONES.length]
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "12px 14px",
-  border: "1px solid var(--fc-input-border)",
-  borderRadius: "14px",
-  fontSize: "15px",
-  background: "var(--fc-login-input-bg)",
-  color: "var(--fc-login-input-text)",
-  outline: "none",
-  boxShadow: "none",
-}
-
-const actionButtonStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "12px 16px",
-  border: "1px solid var(--fc-admin-button-border)",
-  borderRadius: "999px",
-  background: "var(--fc-admin-button-bg)",
-  color: "var(--fc-admin-button-text)",
-  cursor: "pointer",
-  fontSize: "14px",
-  fontWeight: 700,
-  textAlign: "center",
-  transition: "transform 0.16s ease, background 0.16s ease, border-color 0.16s ease",
-  boxShadow: "none",
-}
-
-const lockedPanelShellStyle: React.CSSProperties = {
-  ...panelStyle,
-  background: "var(--fc-admin-panel-soft-bg)",
-  border: "1px solid var(--fc-admin-border-soft)",
-  boxShadow: "0 18px 42px #00000010",
+function folderStyleForTone(tone: FolderTone): FolderStyle {
+  return {
+    "--fc-folder-cover": tone.cover,
+    "--fc-folder-tab": tone.tab,
+    "--fc-folder-sticker": tone.sticker,
+    "--fc-folder-edge": tone.edge,
+    "--fc-folder-accent": tone.accent,
+  }
 }
 
 export default function AdminPage() {
-  const isMobile = useIsMobile()
   const router = useRouter()
   const { loading, authenticated, displayName, permissions, role, pages } = useSimpleAdminAuth()
   const [username, setUsername] = useState("")
@@ -127,358 +141,137 @@ export default function AdminPage() {
     window.location.reload()
   }
 
-  if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
-
-  function visiblePages(group: "reports" | "trading" | "contacts" | "office" | "management") {
+  function visiblePages(group: AdminPageGroup) {
     return getAdminPagesByGroupFromPages(group, pages).filter(
       (page) => isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view")
     )
   }
 
-  function renderToolButtons(group: "reports" | "trading" | "contacts" | "office" | "management") {
-    const pages = visiblePages(group)
-
-    if (pages.length === 0) {
-      return (
-        <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", textAlign: "center" }}>
-          No tools assigned.
-        </p>
-      )
-    }
-
-    return pages.map((item) => (
-      <button
-        key={item.label}
-        onClick={() => router.push(item.path)}
-        style={{
-          ...actionButtonStyle,
-          padding: isMobile ? "13px 14px" : actionButtonStyle.padding,
-          background: "var(--fc-admin-button-bg)",
-          color: "var(--fc-admin-button-text)",
-          borderColor: "var(--fc-admin-button-border)",
-          cursor: "pointer",
-          boxShadow: "none",
-        }}
-      >
-        {item.label}
-      </button>
-    ))
+  const folderGroups = ADMIN_GROUP_ORDER.map((group, index) => ({
+    group,
+    label: ADMIN_PAGE_GROUP_LABELS[group],
+    pages: visiblePages(group),
+    tone: toneForIndex(index),
+  }))
+  if (loading) {
+    return (
+      <div className="fc-admin-folder-page">
+        <div className="fc-admin-loading">Loading...</div>
+      </div>
+    )
   }
 
   return (
-    <div style={pageStyle}>
-      <div
-        style={{
-          ...shellStyle,
-          gridTemplateColumns: isMobile ? "1fr" : shellStyle.gridTemplateColumns,
-          gap: isMobile ? "14px" : "18px",
-        }}
-      >
-        <form
-          onSubmit={handleLogin}
-          style={{
-            ...panelStyle,
-            ...(isMobile ? {} : { gridColumn: "1", gridRow: "1" }),
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              minHeight: "100%",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
-              <a href="/" style={{ display: "inline-flex" }}>
-                <img
-                  src="/uno-transparent.png"
-                  alt="Bunker Map"
-                  style={{ height: isMobile ? "123px" : "156px", width: "auto" }}
-                />
-              </a>
-            </div>
+    <div className="fc-admin-folder-page">
+      <div className="fc-admin-folder-shell">
+        <aside className={`fc-admin-access-panel${authenticated ? " is-authenticated" : ""}`}>
+          <div className="fc-admin-access-body">
+            <a href="/" className="fc-admin-logo-link">
+              <img src="/uno-transparent.png" alt="Bunker Map" className="fc-admin-logo" />
+            </a>
 
-            <label style={{ display: "block", marginBottom: 16 }}>
-              <div
-                style={{
-                  marginBottom: 8,
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  fontWeight: 700,
-                }}
-              >
-                Username
-              </div>
-              <input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                style={inputStyle}
-              />
-            </label>
-
-            <label style={{ display: "block", marginBottom: 20 }}>
-              <div
-                style={{
-                  marginBottom: 8,
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  fontWeight: 700,
-                }}
-              >
-                Password
-              </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                style={inputStyle}
-              />
-            </label>
-
-            <div style={{ marginTop: "auto" }}>
-              {authenticated && displayName ? (
-                <p
-                  style={{
-                    margin: "0 0 12px",
-                    color: "var(--fc-admin-muted)",
-                    fontSize: "13px",
-                    fontWeight: 700,
-                    textAlign: "center",
-                  }}
-                >
-                  Signed in as {displayName}
-                </p>
-              ) : null}
-
-              {authenticated ? (
+            {authenticated ? (
+              <>
+                {displayName ? <p className="fc-admin-signed-in">Signed in as {displayName}</p> : null}
                 <button
                   type="button"
                   onClick={handleLogout}
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid var(--fc-admin-danger-border)",
-                  borderRadius: "999px",
-                  background: "var(--fc-admin-danger-bg)",
-                  color: "var(--fc-admin-danger-text)",
-                  cursor: "pointer",
-                  fontSize: "15px",
-                  fontWeight: 800,
-                  boxShadow: "none",
-                  marginBottom: "12px",
-                }}
+                  className="fc-admin-auth-button fc-admin-auth-button-danger"
                 >
                   Logout
                 </button>
-              ) : (
+              </>
+            ) : (
+              <form onSubmit={handleLogin} className="fc-admin-login-form">
+                <label className="fc-admin-auth-field">
+                  <span>Username</span>
+                  <input
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    autoComplete="username"
+                    className="fc-admin-auth-input"
+                  />
+                </label>
+
+                <label className="fc-admin-auth-field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                    className="fc-admin-auth-input"
+                  />
+                </label>
+
                 <button
                   type="submit"
                   disabled={submitting}
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid var(--fc-admin-success-border)",
-                  borderRadius: "999px",
-                  background: "var(--fc-admin-success-bg)",
-                  color: "var(--fc-admin-success-text)",
-                  cursor: "pointer",
-                  fontSize: "15px",
-                  fontWeight: 800,
-                  boxShadow: "none",
-                  marginBottom: "12px",
-                }}
+                  className="fc-admin-auth-button fc-admin-auth-button-primary"
                 >
-                  {submitting ? "Signing In..." : "Login"}
+                  {submitting ? "Signing in..." : "Login"}
                 </button>
-              )}
 
-              <button
-                type="button"
-                onClick={() => router.push("/")}
-                style={{
-                  width: "100%",
-                  padding: "12px 16px",
-                  border: "1px solid var(--fc-admin-border)",
-                  borderRadius: "999px",
-                  background: "var(--fc-admin-button-bg)",
-                  color: "var(--fc-admin-button-text)",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  boxShadow: "none",
-                }}
-              >
-                Back To Bunker Map
-              </button>
+                {message ? <p className="fc-admin-auth-message">{message}</p> : null}
+              </form>
+            )}
 
-              {message && (
-                <p style={{ marginBottom: 0, marginTop: 16, color: "var(--fc-error)", fontWeight: 700 }}>
-                  {message}
-                </p>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="fc-admin-auth-button fc-admin-auth-button-secondary"
+            >
+              Back
+            </button>
           </div>
-        </form>
+        </aside>
 
-        <div
-          style={{
-            ...(authenticated ? panelStyle : lockedPanelShellStyle),
-            display: "flex",
-            flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "1", gridRow: "2" }),
-          }}
-        >
-          {authenticated ? (
-            <>
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  marginBottom: "10px",
-                  fontWeight: 700,
-                }}
+        <main className="fc-admin-folder-workspace">
+          <div className={`fc-admin-folder-grid${authenticated ? "" : " is-locked"}`}>
+            {folderGroups.map((folder) => (
+              <section
+                key={folder.group}
+                className={`fc-admin-folder${authenticated ? "" : " is-locked"}`}
+                style={folderStyleForTone(folder.tone)}
+                aria-labelledby={authenticated ? `admin-folder-${folder.group}` : undefined}
+                aria-label={authenticated ? undefined : folder.label}
               >
-                Report Tools
-              </div>
+                {authenticated ? (
+                  <div id={`admin-folder-${folder.group}`} className="fc-admin-folder-tab">
+                    <span>{folder.label}</span>
+                  </div>
+                ) : null}
 
-              <div style={{ display: "grid", gap: "12px" }}>
-                {renderToolButtons("reports")}
-              </div>
-            </>
-          ) : null}
-
-        </div>
-
-        <div
-          style={{
-            ...(authenticated ? panelStyle : lockedPanelShellStyle),
-            display: "flex",
-            flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "2", gridRow: "1" }),
-          }}
-        >
-          {authenticated ? (
-            <>
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  marginBottom: "10px",
-                  fontWeight: 700,
-                }}
-              >
-                Trading Tools
-              </div>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {renderToolButtons("trading")}
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            ...(authenticated ? panelStyle : lockedPanelShellStyle),
-            display: "flex",
-            flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "4", gridRow: "1" }),
-          }}
-        >
-          {authenticated ? (
-            <>
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  marginBottom: "10px",
-                  fontWeight: 700,
-                }}
-              >
-                Contact Tools
-              </div>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {renderToolButtons("contacts")}
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            ...(authenticated ? panelStyle : lockedPanelShellStyle),
-            display: "flex",
-            flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "3", gridRow: "1" }),
-          }}
-        >
-          {authenticated ? (
-            <>
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  marginBottom: "10px",
-                  fontWeight: 700,
-                }}
-              >
-                Office Tools
-              </div>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {renderToolButtons("office")}
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            ...(authenticated ? panelStyle : lockedPanelShellStyle),
-            display: "flex",
-            flexDirection: "column",
-            ...(isMobile ? {} : { gridColumn: "2", gridRow: "2" }),
-          }}
-        >
-          {authenticated ? (
-            <>
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "12px",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: "var(--fc-admin-heading)",
-                  marginBottom: "10px",
-                  fontWeight: 700,
-                }}
-              >
-                Management Tools
-              </div>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {renderToolButtons("management")}
-              </div>
-            </>
-          ) : null}
-        </div>
+                <div className="fc-admin-folder-body">
+                  {authenticated ? (
+                    folder.pages.length > 0 ? (
+                      <div className="fc-admin-file-list">
+                        {folder.pages.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => router.push(item.path)}
+                            className="fc-admin-file-label"
+                          >
+                            <span>{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="fc-admin-folder-empty">No tools assigned.</p>
+                    )
+                  ) : (
+                    <div className="fc-admin-folder-preview" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
+        </main>
       </div>
     </div>
   )
