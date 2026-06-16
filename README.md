@@ -53,3 +53,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ## Deployment
 
 This project can be deployed on Vercel. Pushing to the connected GitHub repository will trigger a new deployment.
+
+Before relying on production, run:
+
+```bash
+npm run release:check
+```
+
+The live app exposes `/api/deploy-info` so the deployed commit can be compared
+with `git rev-parse origin/main`.

@@ -22,10 +22,27 @@ On your server (Hong Kong, Singapore, or Mainland cloud):
 sh scripts/deploy-cn.sh
 ```
 
+The deploy script now refuses to publish unless the server checkout is exactly
+the latest pushed `origin/main`. It runs the release check, rebuilds the app
+image without Docker cache, and recreates the running containers so only one
+fresh app version is served.
+
 This starts:
 
 - `bunker-map-cn` (Next.js app on port 3000)
 - `bunker-map-nginx` (public port 80 reverse proxy)
+
+After deployment, confirm the live commit:
+
+```bash
+curl https://cn.yourdomain.com/api/deploy-info
+```
+
+The `commit` value should match:
+
+```bash
+git rev-parse origin/main
+```
 
 ## 3) DNS
 

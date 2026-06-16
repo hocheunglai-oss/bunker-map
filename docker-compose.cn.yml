@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        DEPLOY_COMMIT: ${DEPLOY_COMMIT:-unknown}
+        DEPLOY_BRANCH: ${DEPLOY_BRANCH:-unknown}
+        DEPLOYED_AT: ${DEPLOYED_AT:-unknown}
     container_name: bunker-map-cn
     restart: unless-stopped
     env_file:
