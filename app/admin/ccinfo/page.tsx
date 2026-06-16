@@ -222,6 +222,8 @@ const fileIconStyle: React.CSSProperties = {
   lineHeight: 1,
 }
 
+const DIRECT_DRIVE_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -2781,6 +2783,73 @@ export default function CountryCompanyInfoPage() {
     return fetchDeletedEntryFiles(kind, id)
   }
 
+  async function uploadSmallFile(file: File, targetFolderPath: string) {
+    const form = new FormData()
+    form.append("entryKind", selectedKind)
+    form.append("entryId", selectedId)
+    form.append("entryName", currentRecord.name || "Untitled")
+    form.append("folderPath", targetFolderPath)
+    form.append("file", file)
+    const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message || "Upload failed")
+    return data as { file: EntryFileRecord; warning?: string | null }
+  }
+
+  async function uploadLargeFile(file: File, targetFolderPath: string) {
+    const sessionResponse = await fetch("/api/ccinfo/upload-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entryKind: selectedKind,
+        entryId: selectedId,
+        entryName: currentRecord.name || "Untitled",
+        folderPath: targetFolderPath,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || null,
+      }),
+    })
+    const session = await sessionResponse.json()
+    if (!sessionResponse.ok) throw new Error(session.message || "Unable to prepare large file upload.")
+    const uploadUrl = typeof session.uploadUrl === "string" ? session.uploadUrl : ""
+    if (!uploadUrl) throw new Error("Google Drive did not return a large-file upload URL.")
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": String(session.mimeType || file.type || "application/octet-stream") },
+      body: file,
+    })
+    const uploadText = await uploadResponse.text()
+    let driveFile: { id?: string; webViewLink?: string; webContentLink?: string; name?: string } = {}
+    if (uploadText) {
+      try {
+        driveFile = JSON.parse(uploadText)
+      } catch {
+        throw new Error(uploadText)
+      }
+    }
+    if (!uploadResponse.ok || !driveFile.id) {
+      throw new Error(uploadText || "Google Drive large file upload failed.")
+    }
+
+    const completeResponse = await fetch("/api/ccinfo/upload-session", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entryKind: selectedKind,
+        entryId: selectedId,
+        entryName: currentRecord.name || "Untitled",
+        folderPath: targetFolderPath,
+        fileName: file.name,
+        driveFileId: driveFile.id,
+      }),
+    })
+    const completed = await completeResponse.json()
+    if (!completeResponse.ok) throw new Error(completed.message || "Uploaded to Drive, but CCINFO could not save the file record.")
+    return completed as { file: EntryFileRecord; warning?: string | null }
+  }
+
   async function uploadFiles(picked: File[], targetFolderPath = currentFolderPath) {
     if (!selectedId || !selectedKind) {
       setMessage("Open a company, country, or port before uploading.")
@@ -2794,17 +2863,12 @@ export default function CountryCompanyInfoPage() {
     setMessage("")
     try {
       const uploaded: EntryFileRecord[] = []
+      const warnings: string[] = []
       for (const file of picked) {
-        const form = new FormData()
-        form.append("entryKind", selectedKind)
-        form.append("entryId", selectedId)
-        form.append("entryName", currentRecord.name || "Untitled")
-        form.append("folderPath", targetFolderPath)
-        form.append("file", file)
-        const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.message || "Upload failed")
-        if (data.warning) setMessage(String(data.warning))
+        const data = file.size > DIRECT_DRIVE_UPLOAD_THRESHOLD_BYTES
+          ? await uploadLargeFile(file, targetFolderPath)
+          : await uploadSmallFile(file, targetFolderPath)
+        if (data.warning) warnings.push(String(data.warning))
         uploaded.push(data.file as EntryFileRecord)
       }
       const refreshedFiles = await refreshFiles(selectedKind, selectedId)
@@ -2814,7 +2878,7 @@ export default function CountryCompanyInfoPage() {
       setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
       void loadRecentAuditLogs()
-      setMessage((current) => current || `Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
+      setMessage(warnings[0] || `Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload file.")
     } finally {
