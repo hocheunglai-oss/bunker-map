@@ -17,6 +17,8 @@ const DRIVE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
 const MANIFEST_FILE_PREFIX = "drive-file-backup-manifest"
 const DEFAULT_SOURCE_FOLDER_NAME = "Manual Uploads"
 const DEFAULT_GCS_PREFIX = "ccinfo-drive"
+const FREE_TIER_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024
+const FREE_TIER_STORAGE_REGIONS = new Set(["US-WEST1", "US-CENTRAL1", "US-EAST1"])
 
 const GOOGLE_WORKSPACE_EXPORTS = new Map([
   ["application/vnd.google-apps.document", {
@@ -66,6 +68,11 @@ function optionalEnv(name) {
 function parseInteger(value, fallback) {
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function parseByteCount(value) {
+  const parsed = Number(value || 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
 function getErrorMessage(error) {
@@ -435,9 +442,13 @@ function createEmptyManifest({ startedAt, bucketName, prefix, sourceFolder, buck
       versioningEnabled: bucketInfo.versioningEnabled,
       location: bucketInfo.location,
       storageClass: bucketInfo.storageClass,
+      freeTierStorageLimitBytes: FREE_TIER_STORAGE_REGIONS.has(String(bucketInfo.location).toUpperCase())
+        ? FREE_TIER_STORAGE_LIMIT_BYTES
+        : 0,
     },
     counts: {
       totalFiles: 0,
+      estimatedCurrentStorageBytes: 0,
       uploaded: 0,
       skipped: 0,
       failed: 0,
@@ -476,6 +487,7 @@ async function main() {
   const { sourceFolder, files, warnings } = await collectDriveFiles(drive, sharedDriveId)
   const manifest = createEmptyManifest({ startedAt, bucketName, prefix, sourceFolder, bucketInfo })
   manifest.counts.totalFiles = files.length
+  manifest.counts.estimatedCurrentStorageBytes = files.reduce((total, file) => total + parseByteCount(file.size), 0)
   manifest.warnings.push(...warnings)
 
   if (!bucketInfo.versioningEnabled) {

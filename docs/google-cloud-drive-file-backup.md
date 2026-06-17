@@ -7,6 +7,8 @@ This backs up Google Drive `Manual Uploads` file contents to Google Cloud Storag
 - Source: Google Drive folder `Manual Uploads` under `GOOGLE_DRIVE_COMPANY_FOLDER_ID`
 - Backup target: Google Cloud Storage bucket
 - Runner: Cloud Run Job
+- Region: `us-central1` by default
+- Backup bucket: `US-CENTRAL1` by default, so the first 5 GB-months of Standard storage are eligible for the Google Cloud Storage Always Free limit
 - Schedule: Cloud Scheduler, weekly at `0 20 * * 6` UTC by default, which is Sunday 04:00 in Hong Kong
 - Manifest copy: Google Drive folder `Bunker Map Backups / Drive File Backup Manifests`
 - Health check: `/admin/systemhealth` reads the latest Drive manifest
@@ -43,8 +45,8 @@ GCP_PROJECT_ID=YOUR_GCP_PROJECT_ID ./scripts/deploy-google-cloud-drive-backup.sh
 Defaults:
 
 ```bash
-GCP_REGION=asia-east2
-GCS_BUCKET_LOCATION=ASIA-EAST2
+GCP_REGION=us-central1
+GCS_BUCKET_LOCATION=US-CENTRAL1
 GCS_BACKUP_BUCKET=YOUR_PROJECT_ID-bunker-map-drive-file-backups
 GCS_BACKUP_PREFIX=ccinfo-drive
 DRIVE_FILE_BACKUP_SCHEDULE="0 20 * * 6"
@@ -77,3 +79,5 @@ After the first run succeeds:
 The backup job skips unchanged files by comparing Drive metadata with GCS object metadata. When a file changes, uploading to the same GCS object name creates a new generation if bucket versioning is enabled.
 
 The job writes `ccinfo-drive/manifests/latest.json` in GCS and also writes a timestamped manifest to Google Drive so the Vercel app can check backup freshness without needing GCS credentials.
+
+System Health reads the latest manifest and shows estimated current backup size against the 5 GB Cloud Storage Always Free storage limit. It warns at 80% usage, and Google Cloud Billing has a separate 10 HKD budget alert for the project.

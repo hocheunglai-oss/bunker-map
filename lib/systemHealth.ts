@@ -32,6 +32,7 @@ const WEEKLY_FOLDER_NAME = "Weekly Supabase Backups"
 const DRIVE_FILE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
 const DRIVE_FILE_MANIFEST_PREFIX = "drive-file-backup-manifest"
 const BACKUP_WARNING_AGE_HOURS = 8 * 24
+const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 
 function requireEnv(name: string) {
@@ -345,11 +346,13 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const ageHours = Math.round((Date.now() - new Date(latest.createdTime).getTime()) / 36_000) / 100
   const stale = ageHours > BACKUP_WARNING_AGE_HOURS
   let manifestCounts: Record<string, unknown> = {}
+  let manifestGcs: Record<string, unknown> = {}
 
   try {
     if (latest.id) {
       const manifest = await readDriveJsonFile(drive, latest.id)
       manifestCounts = (manifest.counts || {}) as Record<string, unknown>
+      manifestGcs = (manifest.gcs || {}) as Record<string, unknown>
     }
   } catch (error) {
     return {
@@ -371,15 +374,29 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const totalFiles = Number(manifestCounts.totalFiles || 0)
   const uploadedFiles = Number(manifestCounts.uploaded || 0)
   const skippedFiles = Number(manifestCounts.skipped || 0)
+  const estimatedStorageBytes = Number(manifestCounts.estimatedCurrentStorageBytes || 0)
+  const freeTierLimitBytes = Number(manifestGcs.freeTierStorageLimitBytes || 0)
+  const estimatedStorageGiB = Math.round((estimatedStorageBytes / 1024 / 1024 / 1024) * 1000) / 1000
+  const freeTierLimitGiB = Math.round((freeTierLimitBytes / 1024 / 1024 / 1024) * 1000) / 1000
+  const freeTierRemainingGiB = Math.round(((freeTierLimitBytes - estimatedStorageBytes) / 1024 / 1024 / 1024) * 1000) / 1000
+  const freeTierUsedPercent = freeTierLimitBytes
+    ? Math.round((estimatedStorageBytes / freeTierLimitBytes) * 10_000) / 100
+    : 0
+  const storageNearFreeTier = freeTierLimitBytes > 0 && freeTierUsedPercent >= DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT
+  const freeTierUnavailable = freeTierLimitBytes <= 0
 
   return {
-    status: stale || failedFiles > 0 ? "warning" : "ok",
+    status: stale || failedFiles > 0 || storageNearFreeTier || freeTierUnavailable ? "warning" : "ok",
     message:
       failedFiles > 0
         ? "Latest Drive file backup completed with file errors"
         : stale
           ? "Latest Drive file backup is older than expected"
-          : "Latest Drive file backup manifest found",
+          : freeTierUnavailable
+            ? "Drive file backup bucket is not in a Cloud Storage Always Free storage region"
+            : storageNearFreeTier
+              ? "Drive file backup storage is close to the free-tier storage limit"
+              : "Latest Drive file backup manifest found",
     details: {
       activeCompanyFiles: companyFileCount,
       activeEntryFiles: entryFileCount,
@@ -387,6 +404,11 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
       uploadedFiles,
       skippedFiles,
       failedFiles,
+      estimatedStorageGiB,
+      freeTierLimitGiB,
+      freeTierRemainingGiB,
+      freeTierUsedPercent,
+      gcsLocation: String(manifestGcs.location || ""),
       name: latest.name || "",
       createdTime: latest.createdTime,
       ageHours,

@@ -94,9 +94,9 @@ if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "(unset)" ]]; then
   exit 1
 fi
 
-REGION="${GCP_REGION:-asia-east2}"
+REGION="${GCP_REGION:-us-central1}"
 SCHEDULER_LOCATION="${GCP_SCHEDULER_LOCATION:-$REGION}"
-BUCKET_LOCATION="${GCS_BUCKET_LOCATION:-ASIA-EAST2}"
+BUCKET_LOCATION="${GCS_BUCKET_LOCATION:-US-CENTRAL1}"
 GCS_BACKUP_BUCKET="${GCS_BACKUP_BUCKET:-${PROJECT_ID}-bunker-map-drive-file-backups}"
 GCS_BACKUP_PREFIX="${GCS_BACKUP_PREFIX:-ccinfo-drive}"
 ARTIFACT_REPO="${GCP_ARTIFACT_REPO:-bunker-map}"
@@ -161,6 +161,11 @@ gcloud storage buckets add-iam-policy-binding "gs://${GCS_BACKUP_BUCKET}" \
   --project "$PROJECT_ID" \
   --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
   --role roles/storage.objectAdmin >/dev/null
+
+gcloud storage buckets add-iam-policy-binding "gs://${GCS_BACKUP_BUCKET}" \
+  --project "$PROJECT_ID" \
+  --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+  --role roles/storage.legacyBucketReader >/dev/null
 
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
