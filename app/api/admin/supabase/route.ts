@@ -2,9 +2,9 @@ import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
-  pricesetter: new Set(["ports", "price_history"]),
-  "hongkong-price-history": new Set(["price_history"]),
-  "taiwan-price-history": new Set(["price_history"]),
+  pricesetter: new Set(["ports", "price_history", "remarks"]),
+  "hongkong-price-history": new Set(["price_history", "remarks"]),
+  "taiwan-price-history": new Set(["price_history", "remarks"]),
   "taiwan-remarks": new Set(["remarks"]),
   ccinfo: new Set([
     "cc_companies",

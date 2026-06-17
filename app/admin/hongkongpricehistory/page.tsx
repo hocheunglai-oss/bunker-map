@@ -59,6 +59,15 @@ function sortHistoryRows(rows: HistoryRow[]) {
   })
 }
 
+function getPublishErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) return message
+  }
+
+  return "Publish failed. Please try again."
+}
+
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   background:
@@ -401,7 +410,7 @@ export default function HongKongPriceHistoryPage() {
     } catch (error) {
       console.error(error)
       setPublished(false)
-      setPublishMessage("Publish failed. Please try again.")
+      setPublishMessage(getPublishErrorMessage(error))
     } finally {
       setPublishing(false)
     }
