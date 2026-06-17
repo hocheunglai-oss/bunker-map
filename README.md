@@ -71,6 +71,12 @@ GOOGLE_DRIVE_BACKUP_FOLDER_ID=your_backup_root_folder_id
 GOOGLE_DRIVE_SHARED_DRIVE_ID=your_shared_drive_id
 ```
 
+## System Health Alerts
+
+Vercel runs `/api/admin/system-health/notify` daily at `30 0 * * *` UTC, which is 08:30 in Hong Kong. It sends an email only when the System Health status is `warning` or `error`.
+
+Recipients come from `SYSTEM_HEALTH_EMAIL_RECIPIENTS`; if that is not set, the app falls back to `EVENT_CALENDAR_EMAIL_RECIPIENTS`.
+
 Before relying on production, run:
 
 ```bash
