@@ -6,11 +6,10 @@ import "leaflet/dist/leaflet.css"
 import "@maptiler/sdk/dist/maptiler-sdk.css"
 import L from "leaflet"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { resolvePortFuelValue } from "@/lib/portPricing"
 import DisclaimerLink from "@/components/DisclaimerLink"
-import { buildFallbackKey, loadReportFallbacks, type FallbackMap } from "@/lib/reportFallbacks"
+import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 
 type Port = {
   id: number
@@ -27,6 +26,12 @@ type Port = {
   recorded_at?: string | null
   updated_at?: string | null
   date?: string | null
+}
+
+type HomepageDataResponse = {
+  ports?: Port[]
+  fallbacks?: FallbackMap
+  message?: string
 }
 
 const mapTilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY
@@ -293,6 +298,7 @@ export default function Homepage() {
   const [reportsOpen, setReportsOpen] = useState(false)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
   const [fallbacks, setFallbacks] = useState<FallbackMap>({})
+  const [marketDataStatus, setMarketDataStatus] = useState<"loading" | "ready" | "error">("loading")
 
   const mapRef = useRef<L.Map | null>(null)
   const markerRefs = useRef<Record<number, L.CircleMarker>>({})
@@ -315,32 +321,45 @@ export default function Homepage() {
   }
 
   useEffect(() => {
-    async function loadPorts() {
-      const { data } = await supabase.from("ports").select("*")
-      if (!data) return
+    let cancelled = false
 
-      const portsByName = new Map(
-        data.map((port: Port) => [port.name.toLowerCase(), port] as const)
-      )
+    async function loadHomepageData() {
+      try {
+        setMarketDataStatus("loading")
+        const response = await fetch("/api/homepage-data", { cache: "no-store" })
+        const payload = (await response.json()) as HomepageDataResponse
 
-      const processed = data.map((port: Port) => ({
-        ...port,
-        hsfo: resolvePortFuelValue(port, portsByName, "hsfo"),
-        vlsfo: resolvePortFuelValue(port, portsByName, "vlsfo"),
-        mgo: resolvePortFuelValue(port, portsByName, "mgo"),
-      }))
+        if (!response.ok) {
+          throw new Error(payload.message || "Unable to load homepage data.")
+        }
 
-      setPorts(processed)
+        const data = Array.isArray(payload.ports) ? payload.ports : []
+        const portsByName = new Map(
+          data.map((port: Port) => [port.name.toLowerCase(), port] as const)
+        )
+
+        const processed = data.map((port: Port) => ({
+          ...port,
+          hsfo: resolvePortFuelValue(port, portsByName, "hsfo"),
+          vlsfo: resolvePortFuelValue(port, portsByName, "vlsfo"),
+          mgo: resolvePortFuelValue(port, portsByName, "mgo"),
+        }))
+
+        if (cancelled) return
+        setPorts(processed)
+        setFallbacks(payload.fallbacks || {})
+        setMarketDataStatus("ready")
+      } catch (error) {
+        console.error("Failed to load homepage data", error)
+        if (!cancelled) setMarketDataStatus("error")
+      }
     }
 
-    loadPorts()
-  }, [])
+    loadHomepageData()
 
-  useEffect(() => {
-    async function load() {
-      setFallbacks(await loadReportFallbacks())
+    return () => {
+      cancelled = true
     }
-    load()
   }, [])
 
   function fuelFallback(portName: string, fuel: "hsfo" | "vlsfo" | "mgo") {
@@ -792,6 +811,22 @@ export default function Homepage() {
             </div>
           )}
         </div>
+
+        {marketDataStatus === "error" && (
+          <div
+            style={{
+              ...panelSectionStyle,
+              marginBottom: isMobile ? "10px" : "14px",
+              padding: "12px",
+              color: "#ffd8a8",
+              fontSize: "13px",
+              fontWeight: 700,
+              lineHeight: 1.35,
+            }}
+          >
+            Market data is temporarily unavailable.
+          </div>
+        )}
 
         {!isMobile && !search && selectedPortId == null && (
           <div style={{ display: "grid", gap: "8px" }}>

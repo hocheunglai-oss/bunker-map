@@ -1,15 +1,8 @@
-"use client"
+import HomepageClient from "@/components/HomepageClient"
 
-import dynamic from "next/dynamic"
-
-const Homepage = dynamic(() => import("@/components/Homepage"), {
-  ssr: false,
-})
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 export default function Home() {
-  return (
-    <div className="h-screen w-full bg-[#07121f]">
-      <Homepage />
-    </div>
-  )
+  return <HomepageClient />
 }

@@ -1,14 +1,12 @@
 import { supabase } from "@/lib/supabase"
+import { FALLBACK_REMARK_ID, type FallbackMap } from "@/lib/reportFallbackKeys"
 
-export type FuelKey = "hsfo" | "vlsfo" | "mgo"
-export type FallbackValue = "-" | "NA" | "SE"
-export type FallbackMap = Record<string, FallbackValue>
-
-const FALLBACK_REMARK_ID = 105
-
-export function buildFallbackKey(port: string, fuel: FuelKey) {
-  return `${port.toLowerCase()}::${fuel}`
-}
+export {
+  buildFallbackKey,
+  type FallbackMap,
+  type FallbackValue,
+  type FuelKey,
+} from "@/lib/reportFallbackKeys"
 
 export async function loadReportFallbacks(): Promise<FallbackMap> {
   const { data, error } = await supabase
