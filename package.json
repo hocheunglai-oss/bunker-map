@@ -10,6 +10,7 @@
     "release:check": "node scripts/release-check.mjs",
     "vercel-build": "next build",
     "auth:google-drive": "node scripts/auth-google-drive.mjs",
+    "backup:drive-files:gcs": "node scripts/backup-google-drive-files-to-gcs.mjs",
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
     "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
@@ -18,6 +19,7 @@
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.21.0",
     "@maptiler/leaflet-maptilersdk": "^4.1.1",
     "@maptiler/sdk": "^3.11.1",
     "@supabase/supabase-js": "^2.98.0",

@@ -9,7 +9,6 @@ export const maxDuration = 45
 
 const NON_ALERTING_CHECK_IDS = new Set([
   "schema",
-  "drive-file-content-backup",
 ])
 
 function hasCronAccess(request: Request) {
@@ -72,6 +71,11 @@ function buildAlertHtml(unhealthyChecks: HealthCheck[], checkedAt: string) {
   `
 }
 
+function isNonAlertingCheck(check: HealthCheck) {
+  if (NON_ALERTING_CHECK_IDS.has(check.id)) return true
+  return check.id === "drive-file-content-backup" && check.details?.firstBackupMissing === true
+}
+
 export async function GET(request: Request) {
   if (!hasCronAccess(request)) {
     try {
@@ -87,7 +91,7 @@ export async function GET(request: Request) {
 
   try {
     const health = await getSystemHealth()
-    const unhealthyChecks = health.checks.filter((check) => check.status !== "ok" && !NON_ALERTING_CHECK_IDS.has(check.id))
+    const unhealthyChecks = health.checks.filter((check) => check.status !== "ok" && !isNonAlertingCheck(check))
 
     if (unhealthyChecks.length === 0) {
       return NextResponse.json({

@@ -46,7 +46,7 @@ CCINFO uploaded documents are stored as file contents in Google Drive under `Man
 
 The weekly Supabase backup does not create an independent second copy of the actual uploaded file contents. If a Google Drive file is permanently deleted or corrupted, the database backup can restore the reference row, but it cannot recreate the file bytes by itself.
 
-System Health includes a non-alerting warning named `Drive File Content Backup` until this second-copy backup is implemented.
+The Google Cloud file backup job is documented in [google-cloud-drive-file-backup.md](google-cloud-drive-file-backup.md). System Health shows a non-alerting `Drive File Content Backup` warning until the first Google Cloud file-backup manifest exists. After the first manifest exists, stale or failed file backups are eligible for health alert emails.
 
 ## External systems not exported by this backup
 
@@ -70,4 +70,4 @@ System Health includes a non-alerting warning named `Drive File Content Backup` 
 
 ## Next backup improvement
 
-Implement an independent cloud-side backup for Google Drive `Manual Uploads` file contents. The existing local `npm run backup:ccinfo-files` script can download those files to this Mac, but that is not dependable business backup because it relies on a local machine and local OAuth token files.
+Deploy and run the Google Cloud file backup job. After a successful first run, the existing local `npm run backup:ccinfo-files` script can be removed because the dependable backup will no longer rely on a local machine or local OAuth token files.

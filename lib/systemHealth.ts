@@ -29,6 +29,8 @@ export type SystemHealth = {
 
 const BACKUP_FOLDER_NAME = "Bunker Map Backups"
 const WEEKLY_FOLDER_NAME = "Weekly Supabase Backups"
+const DRIVE_FILE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
+const DRIVE_FILE_MANIFEST_PREFIX = "drive-file-backup-manifest"
 const BACKUP_WARNING_AGE_HOURS = 8 * 24
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 
@@ -175,6 +177,24 @@ async function findDriveFolder(drive: ReturnType<typeof google.drive>, parentId:
   return lookup.data.files?.[0] || null
 }
 
+async function readDriveJsonFile(drive: ReturnType<typeof google.drive>, fileId: string) {
+  const response = await drive.files.get(
+    {
+      fileId,
+      alt: "media",
+      supportsAllDrives: true,
+    },
+    {
+      responseType: "stream",
+    }
+  )
+  const chunks: Buffer[] = []
+  for await (const chunk of response.data as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+}
+
 async function checkDriveBackup(): Promise<HealthCheckResult> {
   const auth = getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
   const drive = google.drive({ version: "v3", auth })
@@ -267,14 +287,110 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
     }
   }
 
+  const auth = getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
+  const drive = google.drive({ version: "v3", auth })
+  const rootFolderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID || requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID")
+  const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
+  const backupRoot = await findDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
+  if (!backupRoot?.id) {
+    return {
+      status: "warning",
+      message: "Drive file backup has not run yet",
+      details: {
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+        firstBackupMissing: true,
+        missingFolder: BACKUP_FOLDER_NAME,
+      },
+    }
+  }
+
+  const manifestFolder = await findDriveFolder(drive, backupRoot.id, DRIVE_FILE_MANIFEST_FOLDER_NAME, sharedDriveId)
+  if (!manifestFolder?.id) {
+    return {
+      status: "warning",
+      message: "Drive file backup has not run yet",
+      details: {
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+        firstBackupMissing: true,
+        missingFolder: DRIVE_FILE_MANIFEST_FOLDER_NAME,
+      },
+    }
+  }
+
+  const latestManifest = await drive.files.list({
+    q: `trashed = false and '${manifestFolder.id}' in parents and name contains '${DRIVE_FILE_MANIFEST_PREFIX}'`,
+    fields: "files(id,name,createdTime,webViewLink)",
+    orderBy: "createdTime desc",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    corpora: sharedDriveId ? "drive" : undefined,
+    driveId: sharedDriveId || undefined,
+  })
+  const latest = latestManifest.data.files?.[0]
+  if (!latest?.createdTime) {
+    return {
+      status: "warning",
+      message: "Drive file backup has not run yet",
+      details: {
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+        firstBackupMissing: true,
+      },
+    }
+  }
+
+  const ageHours = Math.round((Date.now() - new Date(latest.createdTime).getTime()) / 36_000) / 100
+  const stale = ageHours > BACKUP_WARNING_AGE_HOURS
+  let manifestCounts: Record<string, unknown> = {}
+
+  try {
+    if (latest.id) {
+      const manifest = await readDriveJsonFile(drive, latest.id)
+      manifestCounts = (manifest.counts || {}) as Record<string, unknown>
+    }
+  } catch (error) {
+    return {
+      status: "warning",
+      message: "Latest Drive file backup manifest could not be read",
+      details: {
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+        name: latest.name || "",
+        createdTime: latest.createdTime,
+        ageHours,
+        webViewLink: latest.webViewLink || "",
+        error: getErrorMessage(error),
+      },
+    }
+  }
+
+  const failedFiles = Number(manifestCounts.failed || 0)
+  const totalFiles = Number(manifestCounts.totalFiles || 0)
+  const uploadedFiles = Number(manifestCounts.uploaded || 0)
+  const skippedFiles = Number(manifestCounts.skipped || 0)
+
   return {
-    status: "warning",
-    message: "Uploaded file metadata is backed up, but file contents still need an independent backup",
+    status: stale || failedFiles > 0 ? "warning" : "ok",
+    message:
+      failedFiles > 0
+        ? "Latest Drive file backup completed with file errors"
+        : stale
+          ? "Latest Drive file backup is older than expected"
+          : "Latest Drive file backup manifest found",
     details: {
       activeCompanyFiles: companyFileCount,
       activeEntryFiles: entryFileCount,
-      backedUpNow: "Supabase rows, Drive file IDs, Drive URLs",
-      missingBackup: "Second copy of Google Drive file contents",
+      totalFiles,
+      uploadedFiles,
+      skippedFiles,
+      failedFiles,
+      name: latest.name || "",
+      createdTime: latest.createdTime,
+      ageHours,
+      webViewLink: latest.webViewLink || "",
     },
   }
 }
