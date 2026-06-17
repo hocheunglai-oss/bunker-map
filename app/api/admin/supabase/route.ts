@@ -3,8 +3,8 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
   pricesetter: new Set(["ports", "price_history", "remarks"]),
-  "hongkong-price-history": new Set(["price_history", "remarks"]),
-  "taiwan-price-history": new Set(["price_history", "remarks"]),
+  "hongkong-price-history": new Set(["ports", "price_history", "remarks"]),
+  "taiwan-price-history": new Set(["ports", "price_history", "remarks"]),
   "taiwan-remarks": new Set(["remarks"]),
   ccinfo: new Set([
     "cc_companies",

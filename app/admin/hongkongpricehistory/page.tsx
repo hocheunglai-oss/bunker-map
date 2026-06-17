@@ -6,7 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
 import { saveReportSnapshot } from "@/lib/reportSnapshots"
-import { parseSimpleFormula } from "@/lib/portPricing"
+import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
 
 type HistoryRow = {
   id: number
@@ -167,76 +167,6 @@ export default function HongKongPriceHistoryPage() {
     }
   }
 
-  async function syncPortFromLatestHistory(currentPortId: number) {
-    const { data: latestHistory } = await supabase
-      .from("price_history")
-      .select("hsfo,vlsfo,mgo,recorded_at")
-      .eq("port_id", currentPortId)
-      .order("recorded_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (!latestHistory) return
-
-    await supabase
-      .from("ports")
-      .update({
-        hsfo: latestHistory.hsfo,
-        vlsfo: latestHistory.vlsfo,
-        mgo: latestHistory.mgo,
-        updated_at: latestHistory.recorded_at,
-      })
-      .eq("id", currentPortId)
-
-    const { data: currentPort } = await supabase
-      .from("ports")
-      .select("name")
-      .eq("id", currentPortId)
-      .maybeSingle()
-
-    const { data: allPorts } = await supabase
-      .from("ports")
-      .select("id,name,type,hsfo_formula,vlsfo_formula,mgo_formula")
-
-    if (!currentPort?.name || !allPorts) return
-
-    const dependentIds = new Set<number>()
-    const queue = [String(currentPort.name).toLowerCase()]
-
-    while (queue.length > 0) {
-      const currentName = queue.shift()
-      if (!currentName) continue
-
-      for (const candidate of allPorts) {
-        if (candidate.id === currentPortId || candidate.type === "divider") continue
-
-        const formulas = [
-          candidate.hsfo_formula,
-          candidate.vlsfo_formula,
-          candidate.mgo_formula,
-        ]
-
-        const referencesCurrent = formulas.some((formula: string | null | undefined) => {
-          const parsed = parseSimpleFormula(formula)
-          return parsed?.refName === currentName
-        })
-
-        if (!referencesCurrent || dependentIds.has(candidate.id)) continue
-
-        dependentIds.add(candidate.id)
-        queue.push(String(candidate.name).toLowerCase())
-      }
-    }
-
-    if (dependentIds.size > 0) {
-      await supabase
-        .from("ports")
-        .update({ updated_at: latestHistory.recorded_at })
-        .in("id", Array.from(dependentIds))
-    }
-  }
-
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -310,7 +240,7 @@ export default function HongKongPriceHistoryPage() {
     setDeletingId(row.id)
     await supabase.from("price_history").delete().eq("id", row.id)
     setRows((prev) => prev.filter((item) => item.id !== row.id))
-    await syncPortFromLatestHistory(row.port_id)
+    await syncPortFromLatestHistory(supabase, row.port_id)
     setDeletingId(null)
   }
 
@@ -344,7 +274,7 @@ export default function HongKongPriceHistoryPage() {
       setFormHsfo("")
       setFormVlsfo("")
       setFormMgo("")
-      await syncPortFromLatestHistory(portId)
+      await syncPortFromLatestHistory(supabase, portId)
       setPublished(false)
     }
 
@@ -384,7 +314,7 @@ export default function HongKongPriceHistoryPage() {
       setFormHsfo("")
       setFormVlsfo("")
       setFormMgo("")
-      await syncPortFromLatestHistory(portId)
+      await syncPortFromLatestHistory(supabase, portId)
       setPublished(false)
     }
 

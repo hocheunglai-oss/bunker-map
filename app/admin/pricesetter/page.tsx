@@ -21,11 +21,6 @@ import {
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
-type ActivityLog = {
-  id: string
-  message: string
-  timestamp: string
-}
 
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
 type ReportDateOverrides = Record<ReportSnapshotKey, string>
@@ -123,7 +118,6 @@ export default function AdminPage() {
     document.title = "Price Setter - FC Uno"
   }, [])
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
   const [reportFallbacks, setReportFallbacks] = useState<FallbackMap>({})
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
@@ -201,20 +195,6 @@ export default function AdminPage() {
     }))
   }
 
-  function addActivityLog(message: string) {
-    const timestamp = new Date().toLocaleString("en-GB", {
-      hour12: false,
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-    setActivityLogs((prev) => [
-      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, message, timestamp },
-      ...prev,
-    ].slice(0, 80))
-  }
-
   async function saveDivider(port: any) {
     await supabase
       .from("ports")
@@ -222,7 +202,6 @@ export default function AdminPage() {
         name: port.name,
       })
       .eq("id", port.id)
-    addActivityLog(`${port.name || "Divider"} divider updated`)
   }
 
   async function savePort(port: any) {
@@ -340,11 +319,6 @@ export default function AdminPage() {
       [port.id]: true,
     }))
     setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
-    addActivityLog(
-      isFormulaStylePort(port)
-        ? `${port.name} formula updated`
-        : `${port.name} price saved`
-    )
   }
 
   async function deletePort(id: string, name: string) {
@@ -352,7 +326,6 @@ export default function AdminPage() {
 
     await supabase.from("ports").delete().eq("id", id)
     setPorts((prev) => prev.filter((port) => port.id !== id))
-    addActivityLog(`${name} deleted`)
   }
 
   async function addPort() {
@@ -366,7 +339,6 @@ export default function AdminPage() {
 
     if (data) {
       setPorts([...ports, ...data])
-      addActivityLog("New port added")
     }
   }
 
@@ -382,7 +354,6 @@ export default function AdminPage() {
 
     if (data) {
       setPorts([...ports, ...data])
-      addActivityLog("Section divider added")
     }
   }
 
@@ -616,11 +587,9 @@ export default function AdminPage() {
       const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
       if (snapshot) setPublishedChina(true)
       if (snapshot) setReportDates((prev) => ({ ...prev, china: snapshot.reportDate }))
-      if (snapshot) addActivityLog("China report published")
     } catch (error) {
       console.error(error)
       setPublishedChina(false)
-      addActivityLog("China report publish failed")
     } finally {
       setPublishingChina(false)
     }
@@ -632,11 +601,9 @@ export default function AdminPage() {
       const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
       if (snapshot) setPublishedCompact(true)
       if (snapshot) setReportDates((prev) => ({ ...prev, compact: snapshot.reportDate }))
-      if (snapshot) addActivityLog("Compact report published")
     } catch (error) {
       console.error(error)
       setPublishedCompact(false)
-      addActivityLog("Compact report publish failed")
     } finally {
       setPublishingCompact(false)
     }
@@ -650,12 +617,10 @@ export default function AdminPage() {
         await saveReportSnapshotOrThrow("taiwan", snapshot)
         setPublishedTaiwan(true)
         setReportDates((prev) => ({ ...prev, taiwan: snapshot.reportDate }))
-        addActivityLog("Taiwan report published")
       }
     } catch (error) {
       console.error(error)
       setPublishedTaiwan(false)
-      addActivityLog("Taiwan report publish failed")
     } finally {
       setPublishingTaiwan(false)
     }
@@ -669,12 +634,10 @@ export default function AdminPage() {
         await saveReportSnapshotOrThrow("hongkong", snapshot)
         setPublishedHongKong(true)
         setReportDates((prev) => ({ ...prev, hongkong: snapshot.reportDate }))
-        addActivityLog("Hong Kong report published")
       }
     } catch (error) {
       console.error(error)
       setPublishedHongKong(false)
-      addActivityLog("Hong Kong report publish failed")
     } finally {
       setPublishingHongKong(false)
     }
@@ -749,7 +712,6 @@ export default function AdminPage() {
     }
     setReportFallbacks(next)
     await saveReportFallbacks(next)
-    addActivityLog(`${port} ${fuel.toUpperCase()} fallback set to ${value}`)
   }
 
   function switchPortGroup(nextGroup: PortGroupMode) {
@@ -1071,7 +1033,7 @@ export default function AdminPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 280px",
+            gridTemplateColumns: "1fr",
             gap: "16px",
             alignItems: "start",
           }}
@@ -1279,47 +1241,6 @@ export default function AdminPage() {
             </tbody>
           </table>
         </div>
-        <aside
-          style={{
-            background: "var(--fc-admin-panel-soft-bg)",
-            border: "1px solid var(--fc-admin-border-soft)",
-            borderRadius: "18px",
-            padding: "14px",
-            boxShadow: "none",
-            display: "grid",
-            gap: "10px",
-            position: isMobile ? "static" : "sticky",
-            top: isMobile ? undefined : "122px",
-          }}
-        >
-          <div style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>
-            Log
-          </div>
-          <div style={{ display: "grid", gap: "8px", maxHeight: isMobile ? "none" : "70vh", overflowY: "auto", paddingRight: "4px" }}>
-            {activityLogs.length === 0 ? (
-              <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", lineHeight: 1.5 }}>
-                No activity yet. Saves, publishes, new ports, and formula changes will appear here.
-              </div>
-            ) : (
-              activityLogs.map((log) => (
-                <div
-                  key={log.id}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: "14px",
-                    background: "var(--fc-admin-panel-bg)",
-                    border: "1px solid var(--fc-admin-border-soft)",
-                  }}
-                >
-                  <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.45 }}>{log.message}</div>
-                  <div style={{ marginTop: "4px", color: "var(--fc-admin-muted)", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                    {log.timestamp}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
         </div>
 
         <section

@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { saveReportSnapshot } from "@/lib/reportSnapshots"
-import { parseSimpleFormula } from "@/lib/portPricing"
+import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
 
 type HistoryRow = {
   id: number
@@ -179,75 +179,6 @@ export default function TaiwanPriceHistoryPage() {
     }
   }
 
-  async function syncPortFromLatestHistory(currentPortId: number) {
-    const { data: latestHistory } = await supabase
-      .from("price_history")
-      .select("hsfo,vlsfo,mgo,recorded_at")
-      .eq("port_id", currentPortId)
-      .order("recorded_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (!latestHistory) return
-
-    await supabase
-      .from("ports")
-      .update({
-        hsfo: latestHistory.hsfo,
-        vlsfo: latestHistory.vlsfo,
-        mgo: latestHistory.mgo,
-        updated_at: latestHistory.recorded_at,
-      })
-      .eq("id", currentPortId)
-
-    const { data: currentPort } = await supabase
-      .from("ports")
-      .select("name")
-      .eq("id", currentPortId)
-      .maybeSingle()
-
-    const { data: allPorts } = await supabase
-      .from("ports")
-      .select("id,name,type,hsfo_formula,vlsfo_formula,mgo_formula")
-
-    if (!currentPort?.name || !allPorts) return
-
-    const dependentIds = new Set<number>()
-    const queue = [String(currentPort.name).toLowerCase()]
-
-    while (queue.length > 0) {
-      const currentName = queue.shift()
-      if (!currentName) continue
-
-      for (const candidate of allPorts) {
-        if (candidate.id === currentPortId || candidate.type === "divider") continue
-
-        const formulas = [
-          candidate.hsfo_formula,
-          candidate.vlsfo_formula,
-          candidate.mgo_formula,
-        ]
-
-        const referencesCurrent = formulas.some((formula: string | null | undefined) => {
-          const parsed = parseSimpleFormula(formula)
-          return parsed?.refName === currentName
-        })
-
-        if (!referencesCurrent || dependentIds.has(candidate.id)) continue
-
-        dependentIds.add(candidate.id)
-        queue.push(String(candidate.name).toLowerCase())
-      }
-    }
-
-    if (dependentIds.size > 0) {
-      await supabase
-        .from("ports")
-        .update({ updated_at: latestHistory.recorded_at })
-        .in("id", Array.from(dependentIds))
-    }
-  }
-
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -375,8 +306,8 @@ export default function TaiwanPriceHistoryPage() {
     setDeletingId(idsToDelete[0])
     await supabase.from("price_history").delete().in("id", idsToDelete)
     setRows((prev) => prev.filter((item) => !idsToDelete.includes(item.id)))
-    if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
-    if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
+    if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
+    if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
     setDeletingId(null)
   }
 
@@ -430,8 +361,8 @@ export default function TaiwanPriceHistoryPage() {
         )
       )
       resetForm()
-      if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
-      if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
+      if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
+      if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
       setPublished(false)
     }
 
@@ -463,8 +394,8 @@ export default function TaiwanPriceHistoryPage() {
       setFormVlsfoTaichung("")
       setFormMgoKaohsiung("")
       setFormMgoTaichung("")
-      if (kaohsiungPortId) await syncPortFromLatestHistory(kaohsiungPortId)
-      if (taichungPortId) await syncPortFromLatestHistory(taichungPortId)
+      if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
+      if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
       setPublished(false)
     }
 
