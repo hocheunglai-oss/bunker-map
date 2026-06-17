@@ -21,11 +21,12 @@ type TableConfig = {
   key: string
   table: string
   order?: OrderConfig[]
+  optional?: boolean
 }
 
 const TABLES: TableConfig[] = [
   { key: "adminUsers", table: "admin_users", order: [{ column: "username", ascending: true }] },
-  { key: "adminRoleDefaults", table: "admin_role_defaults", order: [{ column: "role", ascending: true }] },
+  { key: "adminRoleDefaults", table: "admin_role_defaults", order: [{ column: "role", ascending: true }], optional: true },
   { key: "auditLogs", table: "audit_logs", order: [{ column: "occurred_at", ascending: false }] },
   { key: "officeCalendarStore", table: "office_calendar_store", order: [{ column: "key", ascending: true }] },
   { key: "emailTemplates", table: "email_templates", order: [{ column: "folder", ascending: true }, { column: "title", ascending: true }] },
@@ -57,6 +58,21 @@ function hasCronAccess(request: Request) {
   const secret = process.env.CRON_SECRET
   if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true
   return false
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || "Request failed.")
+  }
+  return String(error || "Request failed.")
+}
+
+function isMissingTableError(error: unknown) {
+  if (!error || typeof error !== "object") return false
+  const code = "code" in error ? String((error as { code?: unknown }).code || "") : ""
+  const message = getErrorMessage(error).toLowerCase()
+  return code === "PGRST205" || message.includes("could not find the table") || message.includes("does not exist")
 }
 
 function getSupabaseClient() {
@@ -144,9 +160,24 @@ async function buildBackupPayload() {
   const supabase = getSupabaseClient()
   const counts: Record<string, number> = {}
   const data: Record<string, unknown[]> = {}
+  const warnings: Array<{ key: string; table: string; message: string }> = []
 
   for (const tableConfig of TABLES) {
-    const rows = await fetchAllRows(supabase, tableConfig)
+    let rows: unknown[]
+    try {
+      rows = await fetchAllRows(supabase, tableConfig)
+    } catch (error) {
+      if (tableConfig.optional && isMissingTableError(error)) {
+        rows = []
+        warnings.push({
+          key: tableConfig.key,
+          table: tableConfig.table,
+          message: getErrorMessage(error),
+        })
+      } else {
+        throw new Error(`Backup failed while reading ${tableConfig.table}: ${getErrorMessage(error)}`)
+      }
+    }
     counts[tableConfig.key] = rows.length
     data[tableConfig.key] = rows
   }
@@ -157,6 +188,7 @@ async function buildBackupPayload() {
     source: "vercel-cron",
     counts,
     data,
+    warnings,
   }
 }
 
@@ -237,11 +269,12 @@ export async function GET(request: Request) {
       success: true,
       file: uploaded,
       counts: payload.counts,
+      warnings: payload.warnings,
       pruned,
     })
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Weekly backup failed." },
+      { message: getErrorMessage(error) },
       { status: 500 }
     )
   }
