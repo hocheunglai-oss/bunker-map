@@ -234,6 +234,51 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
   }
 }
 
+async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
+  const supabase = getSupabaseClient()
+  const [companyFiles, entryFiles] = await Promise.all([
+    supabase
+      .from("cc_company_files")
+      .select("id", { count: "exact", head: true })
+      .not("drive_file_id", "is", null)
+      .is("deleted_at", null),
+    supabase
+      .from("cc_entry_files")
+      .select("id", { count: "exact", head: true })
+      .not("drive_file_id", "is", null)
+      .is("deleted_at", null),
+  ])
+
+  if (companyFiles.error) throw companyFiles.error
+  if (entryFiles.error) throw entryFiles.error
+
+  const companyFileCount = companyFiles.count || 0
+  const entryFileCount = entryFiles.count || 0
+  const total = companyFileCount + entryFileCount
+
+  if (!total) {
+    return {
+      status: "ok",
+      message: "No active Google Drive upload records found",
+      details: {
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+      },
+    }
+  }
+
+  return {
+    status: "warning",
+    message: "Uploaded file metadata is backed up, but file contents still need an independent backup",
+    details: {
+      activeCompanyFiles: companyFileCount,
+      activeEntryFiles: entryFileCount,
+      backedUpNow: "Supabase rows, Drive file IDs, Drive URLs",
+      missingBackup: "Second copy of Google Drive file contents",
+    },
+  }
+}
+
 async function checkGoogleCalendar(): Promise<HealthCheckResult> {
   const calendar = google.calendar({ version: "v3", auth: getOAuthClient("GOOGLE_CALENDAR_REFRESH_TOKEN") })
   const calendarId = process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
@@ -306,6 +351,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     runCheck("supabase", "Supabase", checkSupabase),
     runCheck("schema", "Optional Schema", checkOptionalSchema),
     runCheck("backup", "Weekly Backup", checkDriveBackup),
+    runCheck("drive-file-content-backup", "Drive File Content Backup", checkDriveFileContentBackup),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange", "Exchange Sync", checkExchangeConfig),

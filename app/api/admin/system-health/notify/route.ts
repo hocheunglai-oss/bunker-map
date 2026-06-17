@@ -7,6 +7,11 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 45
 
+const NON_ALERTING_CHECK_IDS = new Set([
+  "schema",
+  "drive-file-content-backup",
+])
+
 function hasCronAccess(request: Request) {
   const secret = process.env.CRON_SECRET
   if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true
@@ -82,7 +87,7 @@ export async function GET(request: Request) {
 
   try {
     const health = await getSystemHealth()
-    const unhealthyChecks = health.checks.filter((check) => check.status !== "ok" && check.id !== "schema")
+    const unhealthyChecks = health.checks.filter((check) => check.status !== "ok" && !NON_ALERTING_CHECK_IDS.has(check.id))
 
     if (unhealthyChecks.length === 0) {
       return NextResponse.json({
