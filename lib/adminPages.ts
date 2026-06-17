@@ -89,6 +89,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     group: "management",
     path: "/admin/usermanagement",
   },
+  {
+    id: "system-health",
+    label: "SYSTEM HEALTH",
+    group: "management",
+    path: "/admin/systemhealth",
+  },
 ]
 
 export const ADMIN_PAGE_GROUP_LABELS: Record<AdminPageDefinition["group"], string> = {
