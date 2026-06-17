@@ -25,6 +25,8 @@ async function getCalendarClient() {
 
   if (refreshToken) {
     auth.setCredentials({ refresh_token: refreshToken })
+  } else if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    throw new Error("Google Calendar is not authorized on the hosted app yet. Add GOOGLE_CALENDAR_REFRESH_TOKEN in Vercel.")
   } else {
     const tokenRaw = fs.readFileSync(TOKEN_PATH, "utf8")
     auth.setCredentials(JSON.parse(tokenRaw))

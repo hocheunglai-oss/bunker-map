@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import {
   deleteEmailTemplate,
   EmailTemplate,
-  importThunderbirdTemplates,
   loadTemplateLibrary,
   saveEmailTemplate,
   saveTemplateLibrary,
@@ -46,11 +45,6 @@ export async function POST(request: Request) {
       action?: string
     }
     const now = new Date().toISOString()
-
-    if (action === "import") {
-      const library = await importThunderbirdTemplates(auditContext)
-      return NextResponse.json(library)
-    }
 
     if (action === "save") {
       const library = await loadTemplateLibrary()

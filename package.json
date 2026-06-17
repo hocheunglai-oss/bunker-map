@@ -10,21 +10,12 @@
     "release:check": "node scripts/release-check.mjs",
     "vercel-build": "next build",
     "auth:google-drive": "node scripts/auth-google-drive.mjs",
-    "backup:bunker-map-drive": "node scripts/backup-bunker-map-drive.mjs",
     "backup:ccinfo-files": "node scripts/backup-ccinfo-drive.mjs",
     "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
-    "import:phonebook": "node scripts/import-phonebook.mjs",
-    "import:thunderbird-addressbook": "node scripts/import-thunderbird-addressbook.mjs",
-    "audit:email-templates": "node scripts/audit-email-template-integrity.mjs",
     "export:exchange-addressbook": "node scripts/export-exchange-addressbook.mjs",
-    "import:cistem-phonebook": "node scripts/import-cistem-phonebook.mjs",
-    "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs",
-    "audit:ccinfo-company-files": "node scripts/audit-ccinfo-company-files.mjs",
-    "upload:company-files": "node scripts/upload-company-files-to-drive.mjs",
-    "import:pcinfo": "node scripts/import-pcinfo.mjs",
-    "import:japan": "node scripts/import-japan-curated.mjs"
+    "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs"
   },
   "dependencies": {
     "@maptiler/leaflet-maptilersdk": "^4.1.1",

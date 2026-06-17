@@ -1,6 +1,4 @@
 import { createClient } from "@supabase/supabase-js"
-import fs from "node:fs/promises"
-import path from "node:path"
 import { requireAdminSession as requireSharedAdminSession } from "@/lib/adminAuth"
 import {
   createAdminAuditedSupabaseClient,
@@ -8,7 +6,6 @@ import {
 } from "@/lib/adminAudit"
 
 const LEGACY_STORE_KEY = "email-templates"
-const THUNDERBIRD_ROOT = "/Users/hocheunglai/Desktop/- Thunderbird Templates/Templates.sbd"
 
 export type EmailTemplate = {
   id: string
@@ -39,8 +36,6 @@ export type EmailTemplateIndexItem = Pick<
   EmailTemplate,
   "id" | "title" | "subject" | "folder" | "to" | "cc" | "bcc" | "isActive" | "updatedAt"
 >
-
-type ThunderbirdTemplate = Omit<EmailTemplate, "id" | "updatedAt" | "slug" | "isActive" | "placeholders">
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -79,197 +74,6 @@ function slugify(input: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80)
-}
-
-function normaliseNewlines(input: string) {
-  return input.replace(/\r\n/g, "\n")
-}
-
-function decodeHtmlEntities(text: string) {
-  return text
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-}
-
-function getHeaderValue(headers: string, name: string) {
-  const target = name.toLowerCase()
-  let currentName = ""
-  let currentValue: string[] = []
-
-  function flush() {
-    if (currentName.toLowerCase() !== target) return ""
-    return decodeHtmlEntities(currentValue.join(" ").replace(/\s+/g, " ").trim())
-  }
-
-  for (const line of normaliseNewlines(headers).split("\n")) {
-    if (/^[ \t]/.test(line) && currentName) {
-      currentValue.push(line.trim())
-      continue
-    }
-
-    const value = flush()
-    if (value) return value
-
-    const colonIndex = line.indexOf(":")
-    if (colonIndex <= 0) {
-      currentName = ""
-      currentValue = []
-      continue
-    }
-    currentName = line.slice(0, colonIndex).trim()
-    currentValue = [line.slice(colonIndex + 1).trim()]
-  }
-
-  return flush()
-}
-
-function extractBody(rawMessage: string) {
-  const normalised = normaliseNewlines(rawMessage)
-  const dividerIndex = normalised.indexOf("\n\n")
-
-  if (dividerIndex === -1) {
-    return { headers: normalised, body: "" }
-  }
-
-  return {
-    headers: normalised.slice(0, dividerIndex),
-    body: normalised.slice(dividerIndex + 2).trim(),
-  }
-}
-
-function htmlToText(html: string) {
-  return decodeHtmlEntities(
-    html
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n\n")
-      .replace(/<[^>]+>/g, "")
-      .trim()
-  )
-}
-
-function splitMboxMessages(rawFile: string) {
-  const normalised = normaliseNewlines(rawFile).trim()
-  if (!normalised) return []
-
-  const lines = normalised.split("\n")
-  const messages: string[] = []
-  let current: string[] = []
-
-  for (const line of lines) {
-    if (/^From - /.test(line) && current.length > 0) {
-      messages.push(current.join("\n"))
-      current = [line]
-      continue
-    }
-    current.push(line)
-  }
-
-  if (current.length > 0) messages.push(current.join("\n"))
-  return messages
-}
-
-async function walkTemplateFiles(directoryPath: string): Promise<string[]> {
-  const entries = await fs.readdir(directoryPath, { withFileTypes: true })
-  const files: string[] = []
-
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue
-    if (entry.name.endsWith(".msf")) continue
-    if (entry.name === "msgFilterRules.dat") continue
-    if (/^nstmp/i.test(entry.name)) continue
-
-    const fullPath = path.join(directoryPath, entry.name)
-
-    if (entry.isDirectory()) {
-      files.push(...(await walkTemplateFiles(fullPath)))
-      continue
-    }
-
-    if (entry.isFile()) files.push(fullPath)
-  }
-
-  return files
-}
-
-function buildFolderLabel(filePath: string) {
-  const relative = path.relative(THUNDERBIRD_ROOT, filePath)
-  return relative
-    .split(path.sep)
-    .map((part) => part.replace(/\.sbd$/i, ""))
-    .filter(Boolean)
-    .join(" / ")
-}
-
-function buildTemplateId(template: ThunderbirdTemplate, sequence: number) {
-  const parts = [
-    template.folder || "root",
-    path.basename(template.sourcePath),
-    template.title || `template-${sequence + 1}`,
-    String(sequence + 1),
-  ]
-
-  return slugify(parts.join("-")) || `template-${sequence + 1}`
-}
-
-function normaliseTemplateFolderParts(folder: string) {
-  return (folder || "")
-    .split(" / ")
-    .map((part) => part.trim())
-    .filter(Boolean)
-}
-
-function shouldSkipImportedFolder(folder: string) {
-  const parts = normaliseTemplateFolderParts(folder)
-  if (folder.startsWith("Internal / Outgoing")) return true
-
-  return parts.some((part) => {
-    if (["Drafts", "Trash", "Unsent Messages", "!Retired"].includes(part)) return true
-    if (/^nstmp/i.test(part)) return true
-    return /\((backup|temp)\)/i.test(part)
-  })
-}
-
-function normaliseDedupValue(value: string) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function templateDedupKey(template: Pick<EmailTemplate, "subject" | "to" | "cc" | "bcc" | "bodyHtml">) {
-  return [template.subject, template.to, template.cc, template.bcc, template.bodyHtml]
-    .map(normaliseDedupValue)
-    .join("\u0001")
-}
-
-function templateFolderPreference(template: Pick<EmailTemplate, "folder">) {
-  const folder = template.folder || ""
-  const depthPenalty = normaliseTemplateFolderParts(folder).length
-  let score = 100 - depthPenalty
-  if (folder.startsWith("Outgoing")) score += 40
-  if (folder.startsWith("Internal")) score += 20
-  if (folder.startsWith("FCBV")) score += 10
-  return score
-}
-
-function deduplicateTemplatesByContent(templates: EmailTemplate[]) {
-  const byKey = new Map<string, EmailTemplate>()
-
-  for (const template of templates) {
-    const key = templateDedupKey(template)
-    const existing = byKey.get(key)
-    if (!existing || templateFolderPreference(template) > templateFolderPreference(existing)) {
-      byKey.set(key, template)
-    }
-  }
-
-  return Array.from(byKey.values())
 }
 
 export function extractPlaceholders(...values: string[]) {
@@ -603,78 +407,4 @@ export async function deleteEmailTemplate(
     }
     throw error
   }
-}
-
-export async function importThunderbirdTemplates(
-  auditContext?: AdminAuditContext
-) {
-  const templateFiles = await walkTemplateFiles(THUNDERBIRD_ROOT)
-  const imported: EmailTemplate[] = []
-  let sequence = 0
-
-  for (const filePath of templateFiles) {
-    const rawFile = await fs.readFile(filePath, "utf8")
-    const messages = splitMboxMessages(rawFile)
-    const folder = buildFolderLabel(filePath)
-    if (shouldSkipImportedFolder(folder)) continue
-
-    for (const message of messages) {
-      const { headers, body } = extractBody(message)
-      const subject = getHeaderValue(headers, "Subject")
-      const title = subject || `${path.basename(filePath)} ${sequence + 1}`
-      const to = getHeaderValue(headers, "To")
-      const cc = getHeaderValue(headers, "Cc")
-      const bcc = getHeaderValue(headers, "Bcc") || getHeaderValue(headers, "BCC")
-      const from = getHeaderValue(headers, "From")
-      const bodyHtml = body
-      const bodyText = htmlToText(body)
-      const tags = folder.split(" / ").map((part) => part.trim()).filter(Boolean)
-
-      const template: ThunderbirdTemplate = {
-        title,
-        subject,
-        folder,
-        sourcePath: filePath,
-        from,
-        to,
-        cc,
-        bcc,
-        bodyHtml,
-        bodyText,
-        tags,
-      }
-
-      imported.push(
-        normaliseTemplate({
-          ...template,
-          id: buildTemplateId(template, sequence),
-          slug: slugify(`${folder}-${title}`) || `template-${sequence + 1}`,
-          isActive: true,
-          placeholders: [],
-          updatedAt: new Date().toISOString(),
-        })
-      )
-
-      sequence += 1
-    }
-  }
-
-  const deduplicated = deduplicateTemplatesByContent(imported)
-
-  deduplicated.sort((a, b) => {
-    const folderCompare = a.folder.localeCompare(b.folder)
-    if (folderCompare !== 0) return folderCompare
-    return a.title.localeCompare(b.title)
-  })
-
-  const uniqueTemplates = ensureUniqueSlugs(ensureUniqueIds(deduplicated))
-
-  const library: EmailTemplateLibrary = {
-    templates: uniqueTemplates,
-    lastImportedAt: new Date().toISOString(),
-    lastUpdatedAt: new Date().toISOString(),
-  }
-
-  await saveTemplateLibrary(library, auditContext)
-  return library
 }

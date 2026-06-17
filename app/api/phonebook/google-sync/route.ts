@@ -75,6 +75,8 @@ async function getPeopleClient() {
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
   if (refreshToken) {
     auth.setCredentials({ refresh_token: refreshToken })
+  } else if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    throw new Error("Google Contacts is not authorized on the hosted app yet. Add GOOGLE_OAUTH_REFRESH_TOKEN in Vercel.")
   } else {
     const tokenRaw = await fs.readFile(TOKEN_PATH, "utf8")
     auth.setCredentials(JSON.parse(tokenRaw))

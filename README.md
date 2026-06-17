@@ -54,6 +54,23 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 This project can be deployed on Vercel. Pushing to the connected GitHub repository will trigger a new deployment.
 
+## Hosted Backups
+
+Vercel runs `/api/backups/bunker-map-drive` weekly at `0 19 * * 6` UTC, which is Sunday 03:00 in Hong Kong. The route uploads a Supabase JSON backup to Google Drive and keeps the latest 12 files.
+
+Required production environment variables:
+
+```bash
+CRON_SECRET=your_cron_secret
+GOOGLE_OAUTH_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_OAUTH_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_DRIVE_REFRESH_TOKEN=your_google_drive_refresh_token
+GOOGLE_DRIVE_COMPANY_FOLDER_ID=your_google_drive_folder_id
+# Optional override:
+GOOGLE_DRIVE_BACKUP_FOLDER_ID=your_backup_root_folder_id
+GOOGLE_DRIVE_SHARED_DRIVE_ID=your_shared_drive_id
+```
+
 Before relying on production, run:
 
 ```bash
