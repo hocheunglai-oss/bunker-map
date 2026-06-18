@@ -78,3 +78,31 @@ The validator performs no writes. It checks required sections, declared counts, 
 4. For CCINFO uploaded documents, use the restored `drive_file_id` values to verify that files still exist in Google Drive.
 5. If file contents are missing from Google Drive, recover the matching object/version from Google Cloud Storage.
 6. Restore first into a separate Supabase recovery project. Validate row counts and application workflows before considering any production replacement.
+
+## Recovery-project rehearsal
+
+Create a separate Supabase project with a name such as `bunker-map-recovery`. Never use the production project reference `gglyugbrnyvyfktgwert`.
+
+Apply the repository SQL files to the recovery project in this order:
+
+1. The production schema definitions for legacy `ports`, `price_history`, `remarks`, and `admins`.
+2. `supabase/ccinfo_schema.sql`
+3. `supabase/office_calendar_store.sql`
+4. `supabase/email_templates.sql`
+5. `supabase/shared_address_book.sql`
+6. `supabase/outlook_exchange_sync_queue.sql`
+7. `supabase/audit_log.sql`
+8. `supabase/admin_users.sql`
+9. `supabase/security_performance_hardening.sql`
+10. `supabase/enable_business_rls.sql`
+
+Then run the guarded importer:
+
+```bash
+RECOVERY_SUPABASE_URL=https://RECOVERY_REF.supabase.co \
+RECOVERY_SUPABASE_SERVICE_ROLE_KEY=RECOVERY_SERVICE_ROLE_KEY \
+RECOVERY_CONFIRM=RESTORE_TO_RECOVERY_ONLY \
+npm run backup:restore:recovery -- /absolute/path/to/bunker-map-backup.json
+```
+
+The importer refuses the production project reference, imports in dependency order, and verifies every restored table count. It does not write to Google Contacts, Google Calendar, Google Drive, or Microsoft Exchange.
