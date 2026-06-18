@@ -16,7 +16,6 @@
     "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
     "backup:validate": "node scripts/validate-backup.mjs",
     "backup:restore:recovery": "node scripts/restore-backup-to-recovery.mjs",
-    "ccinfo:prune-general-info": "node scripts/prune-verified-general-info-files.mjs",
     "export:exchange-addressbook": "node scripts/export-exchange-addressbook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs"
   },
