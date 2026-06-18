@@ -1144,10 +1144,15 @@ export default function PhonebookPage() {
   const companyInputSuggestions = useMemo(() => {
     const needle = (draft?.company || "").trim().toLowerCase()
     if (!needle) return companyNameSuggestions.slice(0, 10)
-    return companyNameSuggestions
-      .filter((name) => name.toLowerCase().includes(needle))
+    return companies
+      .filter((company) =>
+        [company.name, company.other_name]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(needle)),
+      )
+      .map((company) => company.name)
       .slice(0, 10)
-  }, [companyNameSuggestions, draft?.company])
+  }, [companies, companyNameSuggestions, draft?.company])
 
   const filteredContacts = useMemo(() => {
     const next = [...contacts].sort((a, b) => {
@@ -1174,12 +1179,21 @@ export default function PhonebookPage() {
 
   async function saveCurrent() {
     if (!draft) return
+    const selectedContactCompany = companies.find(
+      (company) => normalizeCompanyKey(company.name) === normalizeCompanyKey(draft.company),
+    )
+    if (!selectedContactCompany) {
+      setMessage("Select an existing company from the company list before saving.")
+      setCompanySuggestOpen(true)
+      return
+    }
+
     setSaving(true)
     setMessage("")
     const payload = {
       full_name: draft.full_name.trim().toUpperCase(),
-      company: draft.company?.trim().toUpperCase() || null,
-      company_source_id: draft.company_source_id?.trim() || null,
+      company: selectedContactCompany.name,
+      company_source_id: selectedContactCompany.source_key || draft.company_source_id?.trim() || null,
       title: normalizeTitleValue(draft.title) || null,
       name_remark: draft.name_remark?.trim().toUpperCase() || null,
       position: draft.position?.trim().toUpperCase() || null,
@@ -1419,6 +1433,7 @@ export default function PhonebookPage() {
 
   function closeContactModal() {
     setContactModalOpen(false)
+    setCompanySuggestOpen(false)
     setCreatingContact(false)
     setSaving(false)
     setDraft(current ? { ...current } : null)
@@ -1671,6 +1686,7 @@ export default function PhonebookPage() {
       updated_at: "",
     }
     setDraft(payload as Contact)
+    setCompanySuggestOpen(false)
     setCreatingContact(true)
     setContactModalOpen(true)
     setEditing(true)
@@ -2829,6 +2845,72 @@ export default function PhonebookPage() {
                   ["Private Email", "private_email"],
                 ].map(([label, field]) => {
                   const key = field as keyof Contact
+                  if (key === "company") {
+                    return (
+                      <div key={field}>
+                        <div style={sectionLabelStyle}>Company</div>
+                        <div style={{ position: "relative" }}>
+                          <input
+                            value={draft.company || ""}
+                            placeholder="Search existing companies"
+                            onChange={(event) => {
+                              updateCapsField("company", event.target.value)
+                              setCompanySuggestOpen(true)
+                            }}
+                            onFocus={() => setCompanySuggestOpen(true)}
+                            onBlur={() => {
+                              window.setTimeout(() => setCompanySuggestOpen(false), 120)
+                            }}
+                            style={detailInputStyle}
+                          />
+                          {companySuggestOpen && companyInputSuggestions.length > 0 ? (
+                            <div
+                              style={{
+                                position: "absolute",
+                                zIndex: 30,
+                                left: 0,
+                                right: 0,
+                                top: "calc(100% + 4px)",
+                                maxHeight: "190px",
+                                overflowY: "auto",
+                                borderRadius: "10px",
+                                border: "1px solid var(--fc-admin-border-soft)",
+                                background: "var(--fc-admin-panel-bg)",
+                                padding: "4px",
+                                display: "grid",
+                                gap: "3px",
+                              }}
+                            >
+                              {companyInputSuggestions.map((name) => (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    updateCapsField("company", name)
+                                    setCompanySuggestOpen(false)
+                                  }}
+                                  style={{
+                                    textAlign: "left",
+                                    padding: "7px 9px",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--fc-admin-border-soft)",
+                                    background: "var(--fc-admin-panel-soft-bg)",
+                                    color: "var(--fc-admin-panel-text)",
+                                    fontSize: "12px",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  }
+
                   return (
                     <div key={field}>
                       <div style={sectionLabelStyle}>{label}</div>

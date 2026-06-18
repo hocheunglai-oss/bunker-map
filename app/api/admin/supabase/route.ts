@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
@@ -29,7 +30,14 @@ const PAGE_TABLES: Record<string, Set<string>> = {
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Database action failed."
-  const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500
+  const status =
+    message === "Unauthorized"
+      ? 401
+      : message === "Forbidden"
+        ? 403
+        : message.startsWith("Select an existing phonebook company:")
+          ? 400
+          : 500
   return NextResponse.json({ message }, { status })
 }
 
@@ -44,6 +52,43 @@ function getTarget(request: Request) {
   }
 
   return target
+}
+
+async function validatePhonebookContactCompanies(body: ArrayBuffer, serviceKey: string) {
+  if (body.byteLength === 0) return
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(new TextDecoder().decode(body))
+  } catch {
+    return
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+  const companyNames = Array.from(
+    new Set(
+      rows.flatMap((row) => {
+        if (!row || typeof row !== "object" || !("company" in row)) return []
+        const company = (row as { company?: unknown }).company
+        return typeof company === "string" && company.trim() ? [company.trim().toUpperCase()] : []
+      }),
+    ),
+  )
+  if (companyNames.length === 0) return
+
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", serviceKey)
+  const { data, error } = await supabase
+    .from("phonebook_companies")
+    .select("name")
+    .in("name", companyNames)
+
+  if (error) throw error
+
+  const existing = new Set((data || []).map((company) => company.name?.trim().toUpperCase()))
+  const missing = companyNames.filter((company) => !existing.has(company))
+  if (missing.length > 0) {
+    throw new Error(`Select an existing phonebook company: ${missing.join(", ")}`)
+  }
 }
 
 async function proxyRequest(request: Request) {
@@ -84,11 +129,20 @@ async function proxyRequest(request: Request) {
     }
     headers.set("apikey", serviceKey)
     headers.set("authorization", `Bearer ${serviceKey}`)
+    const requestBody = isRead ? undefined : await request.arrayBuffer()
+
+    if (
+      table === "phonebook_contacts" &&
+      ["POST", "PATCH"].includes(request.method) &&
+      requestBody
+    ) {
+      await validatePhonebookContactCompanies(requestBody, serviceKey)
+    }
 
     const response = await fetch(target, {
       method: request.method,
       headers,
-      body: isRead ? undefined : await request.arrayBuffer(),
+      body: requestBody,
       cache: "no-store",
     })
     const responseHeaders = new Headers()
