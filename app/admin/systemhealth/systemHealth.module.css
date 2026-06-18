@@ -59,6 +59,7 @@
 }
 
 .backButton,
+.backupButton,
 .refreshButton {
   display: inline-grid;
   place-items: center;
@@ -83,9 +84,46 @@
   font-size: 11px;
 }
 
+.headerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.backupButton {
+  padding: 0 13px;
+  border-color: #185f38;
+  background: #185f38;
+  color: #fff;
+  font-size: 11px;
+}
+
+.backupButton:disabled,
 .refreshButton:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+.successMessage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #b7dfc4;
+  background: #e9f8ee;
+  color: #146b2f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.successMessage span {
+  overflow-wrap: anywhere;
+}
+
+.successMessage a {
+  margin-left: auto;
+  color: #146b2f;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .errorMessage {
@@ -218,6 +256,16 @@
 
   .pageHeader {
     align-items: flex-start;
+  }
+
+  .headerActions,
+  .successMessage {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .successMessage a {
+    margin-left: 0;
   }
 
   .pageTitle {
