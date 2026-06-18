@@ -260,12 +260,12 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const [companyFiles, entryFiles] = await Promise.all([
     supabase
       .from("cc_company_files")
-      .select("id", { count: "exact", head: true })
+      .select("drive_file_id")
       .not("drive_file_id", "is", null)
       .is("deleted_at", null),
     supabase
       .from("cc_entry_files")
-      .select("id", { count: "exact", head: true })
+      .select("drive_file_id")
       .not("drive_file_id", "is", null)
       .is("deleted_at", null),
   ])
@@ -273,8 +273,10 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   if (companyFiles.error) throw companyFiles.error
   if (entryFiles.error) throw entryFiles.error
 
-  const companyFileCount = companyFiles.count || 0
-  const entryFileCount = entryFiles.count || 0
+  const companyFileIds = (companyFiles.data || []).map((row) => row.drive_file_id).filter(Boolean)
+  const entryFileIds = (entryFiles.data || []).map((row) => row.drive_file_id).filter(Boolean)
+  const companyFileCount = companyFileIds.length
+  const entryFileCount = entryFileIds.length
   const total = companyFileCount + entryFileCount
 
   if (!total) {
@@ -347,12 +349,19 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const stale = ageHours > BACKUP_WARNING_AGE_HOURS
   let manifestCounts: Record<string, unknown> = {}
   let manifestGcs: Record<string, unknown> = {}
+  let manifestFileIds = new Set<string>()
 
   try {
     if (latest.id) {
       const manifest = await readDriveJsonFile(drive, latest.id)
       manifestCounts = (manifest.counts || {}) as Record<string, unknown>
       manifestGcs = (manifest.gcs || {}) as Record<string, unknown>
+      const manifestFiles = Array.isArray(manifest.files) ? manifest.files : []
+      manifestFileIds = new Set(
+        manifestFiles
+          .map((file) => (file && typeof file === "object" ? String((file as Record<string, unknown>).id || "") : ""))
+          .filter(Boolean)
+      )
     }
   } catch (error) {
     return {
@@ -384,12 +393,18 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
     : 0
   const storageNearFreeTier = freeTierLimitBytes > 0 && freeTierUsedPercent >= DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT
   const freeTierUnavailable = freeTierLimitBytes <= 0
+  const activeFileIds = [...companyFileIds, ...entryFileIds]
+  const coveredFiles = activeFileIds.filter((fileId) => manifestFileIds.has(fileId)).length
+  const missingFiles = activeFileIds.length - coveredFiles
+  const coverageComplete = missingFiles === 0
 
   return {
-    status: stale || failedFiles > 0 || storageNearFreeTier || freeTierUnavailable ? "warning" : "ok",
+    status: stale || failedFiles > 0 || !coverageComplete || storageNearFreeTier || freeTierUnavailable ? "warning" : "ok",
     message:
       failedFiles > 0
         ? "Latest Drive file backup completed with file errors"
+        : !coverageComplete
+          ? "Drive file backup does not cover every active CCINFO file"
         : stale
           ? "Latest Drive file backup is older than expected"
           : freeTierUnavailable
@@ -400,6 +415,10 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
     details: {
       activeCompanyFiles: companyFileCount,
       activeEntryFiles: entryFileCount,
+      activeFiles: activeFileIds.length,
+      coveredFiles,
+      missingFiles,
+      coverage: `${coveredFiles} / ${activeFileIds.length}`,
       totalFiles,
       uploadedFiles,
       skippedFiles,

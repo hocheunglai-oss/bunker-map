@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import styles from "./systemHealth.module.css"
 
 type HealthStatus = "ok" | "warning" | "error"
 
@@ -28,66 +29,6 @@ type HealthResponse = {
   }
   checks: HealthCheck[]
   message?: string
-}
-
-const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  background: "var(--fc-admin-page-bg)",
-  color: "var(--fc-admin-panel-text)",
-  fontFamily: "var(--fc-admin-font)",
-  padding: "18px",
-}
-
-const shellStyle: React.CSSProperties = {
-  display: "grid",
-  gap: "14px",
-  maxWidth: "1180px",
-  margin: "0 auto",
-}
-
-const panelStyle: React.CSSProperties = {
-  border: "1px solid var(--fc-admin-border)",
-  borderRadius: "8px",
-  background: "var(--fc-admin-panel-bg)",
-  boxShadow: "0 12px 28px #0000000d",
-  overflow: "hidden",
-}
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "12px",
-  padding: "14px",
-  borderBottom: "1px solid var(--fc-admin-border-soft)",
-  background: "var(--fc-admin-panel-soft-bg)",
-}
-
-const buttonStyle: React.CSSProperties = {
-  minHeight: "34px",
-  border: "1px solid var(--fc-admin-button-border)",
-  borderRadius: "999px",
-  background: "var(--fc-admin-button-bg)",
-  color: "var(--fc-admin-button-text)",
-  cursor: "pointer",
-  fontSize: "12px",
-  fontWeight: 800,
-  padding: "8px 12px",
-  boxShadow: "none",
-}
-
-const gridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "10px",
-  padding: "14px",
-}
-
-const checkGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-  gap: "10px",
-  padding: "14px",
 }
 
 function statusColors(status: HealthStatus) {
@@ -131,12 +72,19 @@ function DetailValue({ value }: { value: string | number | boolean | null }) {
   if (typeof value === "string" && /^https?:\/\//.test(value)) {
     return (
       <a href={value} target="_blank" rel="noreferrer" style={{ color: "#1b66c9", fontWeight: 800 }}>
-        Open
+        OPEN
       </a>
     )
   }
 
   return <span>{value === null || value === "" ? "-" : String(value)}</span>
+}
+
+function formatDetailLabel(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toUpperCase()
 }
 
 export default function SystemHealthPage() {
@@ -184,95 +132,83 @@ export default function SystemHealthPage() {
 
   if (authLoading || !authenticated || !canView) {
     return (
-      <div style={pageStyle}>
-        <div style={shellStyle}>Loading...</div>
+      <div className={styles.page}>
+        <div className={styles.shell}>LOADING...</div>
       </div>
     )
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={shellStyle}>
-        <section style={panelStyle}>
-          <div style={headerStyle}>
-            <div>
-              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 900, letterSpacing: 0 }}>SYSTEM HEALTH</h1>
-              <p style={{ margin: "6px 0 0", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-                {health ? `Checked ${formatDate(health.checkedAt)}` : "Checking..."}
-              </p>
+    <div className={styles.page}>
+      <div className={styles.shell}>
+        <section className={styles.panel}>
+          <div className={styles.pageHeader}>
+            <div className={styles.titleGroup}>
+              <button
+                type="button"
+                className={styles.backButton}
+                onClick={() => router.push("/admin")}
+                aria-label="Back to admin"
+                title="Back to admin"
+              >
+                ←
+              </button>
+              <div>
+                <h1 className={styles.pageTitle}>SYSTEM HEALTH</h1>
+                <p className={styles.checkedAt}>
+                  {health ? `CHECKED ${formatDate(health.checkedAt)}` : "CHECKING..."}
+                </p>
+              </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {health ? <StatusBadge status={health.status} /> : null}
-              <button type="button" onClick={loadHealth} disabled={loading} style={{ ...buttonStyle, opacity: loading ? 0.6 : 1 }}>
-                {loading ? "Refreshing..." : "Refresh"}
+            <div className={styles.headerActions}>
+              <button type="button" onClick={loadHealth} disabled={loading} className={styles.refreshButton}>
+                {loading ? "REFRESHING..." : "REFRESH"}
               </button>
             </div>
           </div>
 
-          {message ? (
-            <div style={{ padding: "12px 14px", color: "#9f1c27", fontSize: "13px", fontWeight: 800 }}>{message}</div>
-          ) : null}
+          {message ? <div className={styles.errorMessage}>{message.toUpperCase()}</div> : null}
 
-          <div style={gridStyle}>
-            <div>
-              <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Commit</div>
-              <div style={{ marginTop: "6px", fontSize: "18px", fontWeight: 900 }}>{health?.deployment.shortCommit || "-"}</div>
-            </div>
-            <div>
-              <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Branch</div>
-              <div style={{ marginTop: "6px", fontSize: "18px", fontWeight: 900 }}>{health?.deployment.branch || "-"}</div>
-            </div>
-            <div>
-              <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Environment</div>
-              <div style={{ marginTop: "6px", fontSize: "18px", fontWeight: 900 }}>{health?.deployment.environment || "-"}</div>
-            </div>
-            <div>
-              <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Deployed At</div>
-              <div style={{ marginTop: "6px", fontSize: "18px", fontWeight: 900 }}>{health?.deployment.deployedAt || "-"}</div>
-            </div>
+          <div className={styles.deploymentGrid}>
+            {[
+              ["COMMIT", health?.deployment.shortCommit || "-"],
+              ["BRANCH", health?.deployment.branch || "-"],
+              ["ENVIRONMENT", health?.deployment.environment || "-"],
+              ["DEPLOYED AT", health?.deployment.deployedAt || "-"],
+            ].map(([label, value]) => (
+              <div key={label} className={styles.deploymentItem}>
+                <div className={styles.deploymentLabel}>{label}</div>
+                <div className={styles.deploymentValue}>{value}</div>
+              </div>
+            ))}
           </div>
         </section>
 
-        <section style={panelStyle}>
-          <div style={headerStyle}>
-            <h2 style={{ margin: 0, fontSize: "15px", fontWeight: 900, letterSpacing: 0 }}>CHECKS</h2>
+        <section className={styles.panel}>
+          <div className={styles.sectionHeader}>
+            <h2>CHECKS</h2>
           </div>
-          <div style={checkGridStyle}>
+          <div className={styles.checkGrid}>
             {checks.map((check) => (
               <article
                 key={check.id}
-                style={{
-                  minWidth: 0,
-                  border: "1px solid var(--fc-admin-border-soft)",
-                  borderRadius: "8px",
-                  background: "#fff",
-                  padding: "12px",
-                }}
+                className={`${styles.checkCard} ${check.id === "drive-file-content-backup" ? styles.wideCard : ""}`}
               >
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 900, letterSpacing: 0 }}>{check.label}</h3>
-                    <p style={{ margin: "6px 0 0", color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 700 }}>
-                      {formatDate(check.checkedAt)}
-                    </p>
+                <div className={styles.checkHeader}>
+                  <div className={styles.checkTitleGroup}>
+                    <h3>{check.label.toUpperCase()}</h3>
+                    <p>{formatDate(check.checkedAt).toUpperCase()}</p>
                   </div>
                   <StatusBadge status={check.status} />
                 </div>
-                <p style={{ margin: "12px 0 0", fontSize: "13px", lineHeight: 1.45, fontWeight: 750 }}>{check.message}</p>
+                <p className={styles.checkMessage}>{check.message.toUpperCase()}</p>
 
                 {check.details && Object.keys(check.details).length ? (
-                  <dl style={{ display: "grid", gap: "7px", margin: "12px 0 0", fontSize: "12px" }}>
+                  <dl className={styles.detailList}>
                     {Object.entries(check.details).map(([key, value]) => (
-                      <div
-                        key={key}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(95px, 0.45fr) minmax(0, 1fr)",
-                          gap: "8px",
-                        }}
-                      >
-                        <dt style={{ color: "var(--fc-admin-muted)", fontWeight: 900 }}>{key}</dt>
-                        <dd style={{ margin: 0, minWidth: 0, overflowWrap: "anywhere", fontWeight: 750 }}>
+                      <div key={key} className={styles.detailRow}>
+                        <dt>{formatDetailLabel(key)}</dt>
+                        <dd>
                           <DetailValue value={value} />
                         </dd>
                       </div>
