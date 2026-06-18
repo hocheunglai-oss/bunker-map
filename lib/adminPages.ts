@@ -95,6 +95,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     group: "management",
     path: "/admin/systemhealth",
   },
+  {
+    id: "tech-stack",
+    label: "TECH STACK",
+    group: "management",
+    path: "/admin/techstack",
+  },
 ]
 
 export const ADMIN_PAGE_GROUP_LABELS: Record<AdminPageDefinition["group"], string> = {
