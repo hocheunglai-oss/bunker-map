@@ -31,6 +31,15 @@ type HealthResponse = {
   message?: string
 }
 
+type BackupResponse = {
+  success?: boolean
+  file?: { name?: string; webViewLink?: string }
+  counts?: Record<string, number>
+  warnings?: Array<{ message: string }>
+  pruned?: number
+  message?: string
+}
+
 function statusColors(status: HealthStatus) {
   if (status === "ok") return { bg: "#e9f8ee", border: "#b7dfc4", text: "#146b2f" }
   if (status === "warning") return { bg: "#fff6dd", border: "#ead28a", text: "#765400" }
@@ -92,7 +101,9 @@ export default function SystemHealthPage() {
   const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
   const [message, setMessage] = useState("")
+  const [backupResult, setBackupResult] = useState<BackupResponse | null>(null)
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "system-health", "view")
   const checks = useMemo(() => health?.checks || [], [health])
@@ -117,6 +128,28 @@ export default function SystemHealthPage() {
       setLoading(false)
     }
   }, [authenticated, canView])
+
+  const createBackup = useCallback(async () => {
+    setBackingUp(true)
+    setMessage("")
+    setBackupResult(null)
+    try {
+      const response = await fetch("/api/backups/bunker-map-drive", {
+        method: "POST",
+      })
+      const data = (await response.json()) as BackupResponse
+      if (!response.ok) {
+        setMessage(data.message || "Backup failed.")
+        return
+      }
+      setBackupResult(data)
+      await loadHealth()
+    } catch {
+      setMessage("Backup failed.")
+    } finally {
+      setBackingUp(false)
+    }
+  }, [loadHealth])
 
   useEffect(() => {
     document.title = "SYSTEM HEALTH - FC Uno"
@@ -161,6 +194,9 @@ export default function SystemHealthPage() {
               </div>
             </div>
             <div className={styles.headerActions}>
+              <button type="button" onClick={createBackup} disabled={backingUp || loading} className={styles.backupButton}>
+                {backingUp ? "BACKING UP..." : "BACK UP NOW"}
+              </button>
               <button type="button" onClick={loadHealth} disabled={loading} className={styles.refreshButton}>
                 {loading ? "REFRESHING..." : "REFRESH"}
               </button>
@@ -168,6 +204,21 @@ export default function SystemHealthPage() {
           </div>
 
           {message ? <div className={styles.errorMessage}>{message.toUpperCase()}</div> : null}
+          {backupResult?.success ? (
+            <div className={styles.successMessage}>
+              <strong>BACKUP COMPLETE</strong>
+              <span>{backupResult.file?.name || "BACKUP FILE CREATED"}</span>
+              <span>
+                GOOGLE CONTACTS: {backupResult.counts?.googleContacts ?? 0} · GOOGLE CALENDAR EVENTS:{" "}
+                {backupResult.counts?.googleCalendarEvents ?? 0} · OLDER FILES REMOVED: {backupResult.pruned ?? 0}
+              </span>
+              {backupResult.file?.webViewLink ? (
+                <a href={backupResult.file.webViewLink} target="_blank" rel="noreferrer">
+                  OPEN BACKUP
+                </a>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className={styles.deploymentGrid}>
             {[

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-const RETENTION_COUNT = 12
+const RETENTION_COUNT = 2
 const BACKUP_FOLDER_NAME = "Bunker Map Backups"
 const WEEKLY_FOLDER_NAME = "Weekly Supabase Backups"
 
@@ -344,19 +344,7 @@ async function pruneOldDriveBackups(
   return stale.length
 }
 
-export async function GET(request: Request) {
-  if (!hasCronAccess(request)) {
-    try {
-      await requireAdminPagePermission("audit-log", "view")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unauthorized"
-      return NextResponse.json(
-        { message },
-        { status: message === "Unauthorized" ? 401 : 403 }
-      )
-    }
-  }
-
+async function createBackup() {
   try {
     const payload = await buildBackupPayload()
     const content = JSON.stringify(payload, null, 2)
@@ -381,4 +369,24 @@ export async function GET(request: Request) {
       { status: 500 }
     )
   }
+}
+
+export async function GET(request: Request) {
+  if (!hasCronAccess(request)) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+  }
+  return createBackup()
+}
+
+export async function POST() {
+  try {
+    await requireAdminPagePermission("system-health", "edit")
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unauthorized"
+    return NextResponse.json(
+      { message },
+      { status: message === "Unauthorized" ? 401 : 403 }
+    )
+  }
+  return createBackup()
 }
