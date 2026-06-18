@@ -133,15 +133,15 @@ async function fetchWithAuditActor(input: RequestInfo | URL, init?: RequestInit)
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-  const isSupabaseMutation =
-    !["GET", "HEAD", "OPTIONS"].includes(method) &&
-    request.url.startsWith(`${supabaseUrl}/rest/v1/`)
+  const isSupabaseRequest =
+    request.url.startsWith(`${supabaseUrl}/rest/v1/`) &&
+    (Boolean(page) || !["GET", "HEAD", "OPTIONS"].includes(method))
 
-  if (isSupabaseMutation) {
+  if (isSupabaseRequest) {
     return fetch(`/api/admin/supabase?target=${encodeURIComponent(request.url)}`, {
       method,
       headers,
-      body: await request.arrayBuffer(),
+      body: ["GET", "HEAD"].includes(method) ? undefined : await request.arrayBuffer(),
       signal: request.signal,
     })
   }

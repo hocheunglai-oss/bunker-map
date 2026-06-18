@@ -21,6 +21,10 @@ const PAGE_TABLES: Record<string, Set<string>> = {
     "shared_addressbook_group_members",
     "shared_addressbook_groups",
   ]),
+  "email-templates": new Set([
+    "shared_addressbook_contacts",
+    "shared_addressbook_groups",
+  ]),
 }
 
 function errorResponse(error: unknown) {
@@ -42,17 +46,18 @@ function getTarget(request: Request) {
   return target
 }
 
-async function proxyMutation(request: Request) {
+async function proxyRequest(request: Request) {
   try {
     const pageId = request.headers.get("x-bunker-admin-page-id") || ""
     const target = getTarget(request)
     const table = target.pathname.replace(/^\/rest\/v1\//, "").split("/")[0]
+    const isRead = ["GET", "HEAD"].includes(request.method)
 
     if (!pageId || !PAGE_TABLES[pageId]?.has(table)) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 })
     }
 
-    await requireAdminPagePermission(pageId, "edit")
+    await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
 
     const headers = new Headers()
     ;[
@@ -83,7 +88,7 @@ async function proxyMutation(request: Request) {
     const response = await fetch(target, {
       method: request.method,
       headers,
-      body: await request.arrayBuffer(),
+      body: isRead ? undefined : await request.arrayBuffer(),
       cache: "no-store",
     })
     const responseHeaders = new Headers()
@@ -104,6 +109,8 @@ async function proxyMutation(request: Request) {
   }
 }
 
-export const POST = proxyMutation
-export const PATCH = proxyMutation
-export const DELETE = proxyMutation
+export const GET = proxyRequest
+export const HEAD = proxyRequest
+export const POST = proxyRequest
+export const PATCH = proxyRequest
+export const DELETE = proxyRequest
