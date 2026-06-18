@@ -14,6 +14,7 @@
     "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",
     "auth:google-contacts": "node scripts/auth-google-contacts.mjs",
     "auth:google-calendar": "node scripts/auth-google-calendar.mjs",
+    "backup:validate": "node scripts/validate-backup.mjs",
     "export:exchange-addressbook": "node scripts/export-exchange-addressbook.mjs",
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs"
   },

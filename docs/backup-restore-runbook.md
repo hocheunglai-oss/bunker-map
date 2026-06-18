@@ -1,6 +1,6 @@
 # Backup and Restore Runbook
 
-Last audited: 2026-06-17
+Last audited: 2026-06-18
 
 ## Production backup schedule
 
@@ -10,7 +10,7 @@ Vercel runs `/api/backups/bunker-map-drive` every Saturday at `19:00` UTC, which
 Bunker Map Backups / Weekly Supabase Backups
 ```
 
-It keeps the latest 12 backup files.
+It keeps the latest 2 backup files. An authorized administrator can also create one immediately from System Health using `BACK UP NOW`.
 
 ## What the weekly Supabase backup covers
 
@@ -40,20 +40,30 @@ The hosted weekly backup currently exports these Supabase tables:
 
 This covers the app database state used by the map, price history, Taiwan report remarks, admin users, email templates, shared address book, phonebook, CCINFO records, and CCINFO file metadata.
 
-## Known coverage gap
+The same JSON also includes point-in-time API exports named `googleContacts` and `googleCalendarEvents`.
+
+## File-content backup
 
 CCINFO uploaded documents are stored as file contents in Google Drive under `Manual Uploads`. The weekly Supabase backup includes their metadata, including `drive_file_id`, `drive_url`, names, paths, and soft-delete state in `cc_company_files` and `cc_entry_files`.
 
-The weekly Supabase backup does not create an independent second copy of the actual uploaded file contents. If a Google Drive file is permanently deleted or corrupted, the database backup can restore the reference row, but it cannot recreate the file bytes by itself.
+The weekly JSON cannot recreate file bytes by itself. The independent Google Cloud Storage copy is documented in [google-cloud-drive-file-backup.md](google-cloud-drive-file-backup.md), and its latest manifest is monitored by System Health.
 
-The Google Cloud file backup job is documented in [google-cloud-drive-file-backup.md](google-cloud-drive-file-backup.md). System Health shows a non-alerting `Drive File Content Backup` warning until the first Google Cloud file-backup manifest exists. After the first manifest exists, stale or failed file backups are eligible for health alert emails.
+## External-system limits
 
-## External systems not exported by this backup
-
-- Google Calendar remains the source for live calendar data.
-- Google Contacts or CardDAV remains the source for live synced contact data where applicable.
+- Google Calendar and Google Contacts remain the live sources, but their current records are exported into the weekly JSON.
+- CardDAV contacts are represented by the backed-up phonebook data that drives synchronization.
 - Microsoft Exchange remains the source for mailbox and address-book sync data outside the Supabase shared-address-book tables.
-- Google Drive remains the source for uploaded CCINFO file contents until a second-copy backup is added.
+- Google Drive remains the live source for CCINFO files; Google Cloud Storage is the independent second copy.
+
+## Non-destructive validation
+
+Before any restore, validate the downloaded JSON locally:
+
+```bash
+npm run backup:validate -- /absolute/path/to/bunker-map-backup.json
+```
+
+The validator performs no writes. It checks required sections, declared counts, duplicate IDs, major foreign-key relationships, and active CCINFO file references.
 
 ## Restore outline
 
@@ -66,8 +76,5 @@ The Google Cloud file backup job is documented in [google-cloud-drive-file-backu
    - phonebook and address book records: `phonebook_companies`, `phonebook_contacts`, `shared_addressbook_contacts`, `shared_addressbook_groups`, `shared_addressbook_group_members`
    - operational logs and queues: `audit_logs`, `outlook_exchange_sync_queue`
 4. For CCINFO uploaded documents, use the restored `drive_file_id` values to verify that files still exist in Google Drive.
-5. If the file contents are missing from Google Drive, recover them from the future second-copy file backup once implemented.
-
-## Next backup improvement
-
-Deploy and run the Google Cloud file backup job. The legacy local file-backup script has been removed; dependable backups do not rely on a local machine or local OAuth token files.
+5. If file contents are missing from Google Drive, recover the matching object/version from Google Cloud Storage.
+6. Restore first into a separate Supabase recovery project. Validate row counts and application workflows before considering any production replacement.

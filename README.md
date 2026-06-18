@@ -56,7 +56,7 @@ This project can be deployed on Vercel. Pushing to the connected GitHub reposito
 
 ## Hosted Backups
 
-Vercel runs `/api/backups/bunker-map-drive` weekly at `0 19 * * 6` UTC, which is Sunday 03:00 in Hong Kong. The route uploads a Supabase JSON backup to Google Drive and keeps the latest 12 files.
+Vercel runs `/api/backups/bunker-map-drive` weekly at `0 19 * * 6` UTC, which is Sunday 03:00 in Hong Kong. The route uploads a database, Google Contacts, and Google Calendar JSON backup to Google Drive and keeps the latest 2 files. Administrators can also use `BACK UP NOW` from System Health.
 
 The backup covers Supabase app data and CCINFO file metadata. Uploaded CCINFO file contents are handled by the Google Cloud Drive file backup job once deployed. See [docs/backup-restore-runbook.md](docs/backup-restore-runbook.md) and [docs/google-cloud-drive-file-backup.md](docs/google-cloud-drive-file-backup.md).
 
