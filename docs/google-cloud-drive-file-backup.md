@@ -1,10 +1,10 @@
 # Google Cloud Drive File Backup
 
-This backs up Google Drive `Manual Uploads` file contents to Google Cloud Storage. It is the dependable business backup and does not rely on a local workstation.
+This backs up all CCINFO file contents under `GOOGLE_DRIVE_COMPANY_FOLDER_ID` to Google Cloud Storage. It is the dependable business backup and does not rely on a local workstation.
 
 ## Architecture
 
-- Source: Google Drive folder `Manual Uploads` under `GOOGLE_DRIVE_COMPANY_FOLDER_ID`
+- Source: the complete Google Drive folder identified by `GOOGLE_DRIVE_COMPANY_FOLDER_ID`
 - Backup target: Google Cloud Storage bucket
 - Runner: Cloud Run Job
 - Region: `us-central1` by default
@@ -37,6 +37,8 @@ GOOGLE_DRIVE_SHARED_DRIVE_ID
 After the secrets exist in Google Secret Manager, local environment and OAuth token files may be deleted. They are not needed by the scheduled Cloud Run job.
 
 Each stored object name includes the Google Drive file ID. This preserves distinct Drive files even when they have the same folder path and filename.
+
+The source traversal excludes the root-level `Bunker Map Backups` folder so the job does not recursively back up its own manifests.
 
 ## Deploy or update
 

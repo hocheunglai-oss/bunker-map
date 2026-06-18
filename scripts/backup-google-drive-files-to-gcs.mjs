@@ -15,7 +15,6 @@ const LOCAL_DRIVE_TOKEN_PATH = path.join(PROJECT_ROOT, ".google-drive-oauth-toke
 const BACKUP_ROOT_FOLDER_NAME = "Bunker Map Backups"
 const DRIVE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
 const MANIFEST_FILE_PREFIX = "drive-file-backup-manifest"
-const DEFAULT_SOURCE_FOLDER_NAME = "Manual Uploads"
 const DEFAULT_GCS_PREFIX = "ccinfo-drive"
 const FREE_TIER_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024
 const FREE_TIER_STORAGE_REGIONS = new Set(["US-WEST1", "US-CENTRAL1", "US-EAST1"])
@@ -202,7 +201,15 @@ async function listChildren(drive, parentId, sharedDriveId) {
   return files
 }
 
-async function walkDriveFolder(drive, folderId, sharedDriveId, relativePath, files, warnings) {
+async function walkDriveFolder(
+  drive,
+  folderId,
+  sharedDriveId,
+  relativePath,
+  files,
+  warnings,
+  excludedRootFolderNames = new Set()
+) {
   const children = await listChildren(drive, folderId, sharedDriveId)
 
   for (const child of children) {
@@ -210,7 +217,24 @@ async function walkDriveFolder(drive, folderId, sharedDriveId, relativePath, fil
     const childPath = relativePath ? `${relativePath}/${child.name}` : child.name
 
     if (child.mimeType === "application/vnd.google-apps.folder") {
-      await walkDriveFolder(drive, child.id, sharedDriveId, childPath, files, warnings)
+      if (!relativePath && excludedRootFolderNames.has(child.name)) {
+        warnings.push({
+          type: "folderExcluded",
+          folderId: child.id,
+          relativePath: childPath,
+          message: "Backup output folder excluded from source traversal.",
+        })
+        continue
+      }
+      await walkDriveFolder(
+        drive,
+        child.id,
+        sharedDriveId,
+        childPath,
+        files,
+        warnings,
+        excludedRootFolderNames
+      )
       continue
     }
 
@@ -233,19 +257,21 @@ async function walkDriveFolder(drive, folderId, sharedDriveId, relativePath, fil
 
 async function collectDriveFiles(drive, sharedDriveId) {
   const rootFolderId = requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID")
-  const sourceFolderName = optionalEnv("GOOGLE_DRIVE_FILE_BACKUP_SOURCE_FOLDER") || DEFAULT_SOURCE_FOLDER_NAME
-  const sourceFolder = await findFolderByName(drive, rootFolderId, sourceFolderName, sharedDriveId)
-  if (!sourceFolder?.id) {
-    throw new Error(`Could not find Google Drive source folder: ${sourceFolderName}`)
-  }
-
   const files = []
   const warnings = []
-  await walkDriveFolder(drive, sourceFolder.id, sharedDriveId, "", files, warnings)
+  await walkDriveFolder(
+    drive,
+    rootFolderId,
+    sharedDriveId,
+    "",
+    files,
+    warnings,
+    new Set([BACKUP_ROOT_FOLDER_NAME])
+  )
   return {
     sourceFolder: {
-      id: sourceFolder.id,
-      name: sourceFolder.name || sourceFolderName,
+      id: rootFolderId,
+      name: "CCINFO Drive root",
     },
     files,
     warnings,
@@ -353,7 +379,7 @@ async function backupOneFile({ drive, bucket, prefix, force, file }) {
       metadata: {
         contentType: plan.contentType,
         metadata: {
-          backupSource: "google-drive-manual-uploads",
+          backupSource: "google-drive-ccinfo-root",
           downloadMode: plan.mode,
           driveFileId: String(file.id || ""),
           driveName: String(file.name || ""),
@@ -440,7 +466,7 @@ function createEmptyManifest({ startedAt, bucketName, prefix, sourceFolder, buck
     generatedAt: startedAt,
     finishedAt: "",
     fileName: `${MANIFEST_FILE_PREFIX}-${stamp}.json`,
-    source: "google-drive-manual-uploads",
+    source: "google-drive-ccinfo-root",
     target: "google-cloud-storage",
     sourceFolder,
     gcs: {
