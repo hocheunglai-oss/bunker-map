@@ -453,4 +453,9 @@ begin
   end loop;
 end $$;
 
-grant execute on function public.undo_audit_log(uuid, text, text) to anon, authenticated;
+revoke execute on function public.audit_enable_table(regclass) from public, anon, authenticated;
+revoke execute on function public.audit_table_changes() from public, anon, authenticated;
+revoke execute on function public.undo_audit_log(uuid, text, text) from public, anon, authenticated;
+
+grant execute on function public.audit_enable_table(regclass) to service_role;
+grant execute on function public.undo_audit_log(uuid, text, text) to service_role;

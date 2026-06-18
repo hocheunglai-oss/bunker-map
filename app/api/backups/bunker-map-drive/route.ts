@@ -6,7 +6,7 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 60
+export const maxDuration = 300
 
 const RETENTION_COUNT = 12
 const BACKUP_FOLDER_NAME = "Bunker Map Backups"
@@ -97,6 +97,80 @@ function getDriveClient() {
   }
 }
 
+function getGoogleOAuthClient(refreshToken: string) {
+  const auth = new google.auth.OAuth2(
+    requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
+    requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
+    process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1"
+  )
+  auth.setCredentials({ refresh_token: refreshToken })
+  return auth
+}
+
+async function fetchGoogleContacts() {
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+  if (!refreshToken) throw new Error("GOOGLE_OAUTH_REFRESH_TOKEN is not configured.")
+
+  const people = google.people({ version: "v1", auth: getGoogleOAuthClient(refreshToken) })
+  const contacts: unknown[] = []
+  let pageToken: string | undefined
+
+  do {
+    const response = await people.people.connections.list({
+      resourceName: "people/me",
+      pageSize: 1000,
+      pageToken,
+      personFields: [
+        "addresses",
+        "biographies",
+        "birthdays",
+        "emailAddresses",
+        "events",
+        "memberships",
+        "metadata",
+        "names",
+        "nicknames",
+        "organizations",
+        "phoneNumbers",
+        "photos",
+        "relations",
+        "urls",
+      ].join(","),
+    })
+    contacts.push(...(response.data.connections || []))
+    pageToken = response.data.nextPageToken || undefined
+  } while (pageToken)
+
+  return contacts
+}
+
+async function fetchGoogleCalendarEvents() {
+  const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN
+  if (!refreshToken) throw new Error("GOOGLE_CALENDAR_REFRESH_TOKEN is not configured.")
+
+  const calendar = google.calendar({ version: "v3", auth: getGoogleOAuthClient(refreshToken) })
+  const calendarId =
+    process.env.GOOGLE_MEETING_CALENDAR_ID ||
+    process.env.GOOGLE_CALENDAR_ID ||
+    "fcb.bunker@gmail.com"
+  const events: unknown[] = []
+  let pageToken: string | undefined
+
+  do {
+    const response = await calendar.events.list({
+      calendarId,
+      maxResults: 2500,
+      pageToken,
+      showDeleted: true,
+      singleEvents: false,
+    })
+    events.push(...(response.data.items || []))
+    pageToken = response.data.nextPageToken || undefined
+  } while (pageToken)
+
+  return { calendarId, events }
+}
+
 async function ensureDriveFolder(
   drive: drive_v3.Drive,
   parentId: string,
@@ -160,7 +234,7 @@ async function buildBackupPayload() {
   const supabase = getSupabaseClient()
   const counts: Record<string, number> = {}
   const data: Record<string, unknown[]> = {}
-  const warnings: Array<{ key: string; table: string; message: string }> = []
+  const warnings: Array<{ key: string; table?: string; source?: string; message: string }> = []
 
   for (const tableConfig of TABLES) {
     let rows: unknown[]
@@ -180,6 +254,35 @@ async function buildBackupPayload() {
     }
     counts[tableConfig.key] = rows.length
     data[tableConfig.key] = rows
+  }
+
+  try {
+    const contacts = await fetchGoogleContacts()
+    counts.googleContacts = contacts.length
+    data.googleContacts = contacts
+  } catch (error) {
+    counts.googleContacts = 0
+    data.googleContacts = []
+    warnings.push({
+      key: "googleContacts",
+      source: "Google People API",
+      message: getErrorMessage(error),
+    })
+  }
+
+  try {
+    const { calendarId, events } = await fetchGoogleCalendarEvents()
+    counts.googleCalendarEvents = events.length
+    data.googleCalendarEvents = events
+    data.googleCalendarMetadata = [{ calendarId }]
+  } catch (error) {
+    counts.googleCalendarEvents = 0
+    data.googleCalendarEvents = []
+    warnings.push({
+      key: "googleCalendarEvents",
+      source: "Google Calendar API",
+      message: getErrorMessage(error),
+    })
   }
 
   return {
