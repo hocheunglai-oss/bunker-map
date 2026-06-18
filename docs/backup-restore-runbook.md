@@ -70,4 +70,4 @@ The Google Cloud file backup job is documented in [google-cloud-drive-file-backu
 
 ## Next backup improvement
 
-Deploy and run the Google Cloud file backup job. After a successful first run, the existing local `npm run backup:ccinfo-files` script can be removed because the dependable backup will no longer rely on a local machine or local OAuth token files.
+Deploy and run the Google Cloud file backup job. The legacy local file-backup script has been removed; dependable backups do not rely on a local machine or local OAuth token files.

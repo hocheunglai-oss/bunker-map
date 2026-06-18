@@ -1,6 +1,6 @@
 # Google Cloud Drive File Backup
 
-This backs up Google Drive `Manual Uploads` file contents to Google Cloud Storage. It replaces the local `npm run backup:ccinfo-files` workflow as the dependable business backup.
+This backs up Google Drive `Manual Uploads` file contents to Google Cloud Storage. It is the dependable business backup and does not rely on a local workstation.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ gcloud auth login
 gcloud config set project YOUR_GCP_PROJECT_ID
 ```
 
-The deploy helper reads these values from environment variables, `.env.local`, or `.google-drive-oauth-token.json`:
+For initial deployment, the deploy helper reads these values from environment variables, `.env.local`, or `.google-drive-oauth-token.json`:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID
@@ -34,7 +34,9 @@ GOOGLE_DRIVE_BACKUP_FOLDER_ID
 GOOGLE_DRIVE_SHARED_DRIVE_ID
 ```
 
-If `GOOGLE_DRIVE_REFRESH_TOKEN` is not in `.env.local`, the helper can read it from `.google-drive-oauth-token.json`.
+After the secrets exist in Google Secret Manager, local environment and OAuth token files may be deleted. They are not needed by the scheduled Cloud Run job.
+
+Each stored object name includes the Google Drive file ID. This preserves distinct Drive files even when they have the same folder path and filename.
 
 ## Deploy or update
 

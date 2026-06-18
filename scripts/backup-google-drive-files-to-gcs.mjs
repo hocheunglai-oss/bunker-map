@@ -91,6 +91,12 @@ function normalizeObjectName(value) {
   return value.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\//, "").replace(/[\r\n]/g, " ")
 }
 
+function addDriveIdToObjectPath(relativePath, driveFileId) {
+  const extension = path.extname(relativePath)
+  const stem = extension ? relativePath.slice(0, -extension.length) : relativePath
+  return `${stem} [drive-${driveFileId}]${extension}`
+}
+
 function getGoogleCredentials() {
   const clientEmail = optionalEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL")
   const privateKey = optionalEnv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY").replace(/\\n/g, "\n")
@@ -325,7 +331,8 @@ async function backupOneFile({ drive, bucket, prefix, force, file }) {
     }
   }
 
-  const objectName = normalizeObjectName(`${prefix}/files/${plan.objectRelativePath}`)
+  const uniqueRelativePath = addDriveIdToObjectPath(plan.objectRelativePath, file.id)
+  const objectName = normalizeObjectName(`${prefix}/files/${uniqueRelativePath}`)
   const gcsFile = bucket.file(objectName)
   const existingMetadata = await getGcsMetadata(gcsFile)
 
