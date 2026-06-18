@@ -1348,6 +1348,7 @@ export default function CountryCompanyInfoPage() {
   const [saving, setSaving] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
+  const [cleaningGeneralInfo, setCleaningGeneralInfo] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
 
   useEffect(() => {
@@ -3266,6 +3267,32 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
+  async function cleanVerifiedGeneralInfoFiles() {
+    if (!window.confirm("DELETE VERIFIED GENERAL INFO FILES FROM GOOGLE DRIVE? 16 UNVERIFIED FILES WILL BE PRESERVED.")) return
+    setCleaningGeneralInfo(true)
+    setMessage("Cleaning verified General Info files...")
+    let totalDeleted = 0
+    try {
+      while (true) {
+        const response = await fetch("/api/admin/ccinfo/prune-general-info", { method: "POST" })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.message || "Cleanup failed.")
+        totalDeleted += Number(data.deleted || 0)
+        setMessage(`Deleted ${totalDeleted} verified General Info files. ${data.remaining || 0} remaining...`)
+        if (!data.remaining) {
+          setMessage(`Cleanup complete. Deleted ${totalDeleted} verified files; preserved ${data.preserved || 0} unverified files.`)
+          break
+        }
+        if (!data.deleted) throw new Error((data.failures || []).join(" | ") || "Cleanup made no progress.")
+      }
+      if (selectedId && selectedKind) setFiles(await refreshFiles(selectedKind, selectedId))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Cleanup failed.")
+    } finally {
+      setCleaningGeneralInfo(false)
+    }
+  }
+
   async function pickSuggestion(item: SearchRecord) {
     await loadSelected(item.kind, item.id)
     if (typeof window !== "undefined") {
@@ -3695,6 +3722,9 @@ export default function CountryCompanyInfoPage() {
                       <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                         {backingUp ? "Preparing Backup..." : "Download Backup"}
                       </button>
+                      <button onClick={() => void cleanVerifiedGeneralInfoFiles()} disabled={cleaningGeneralInfo} style={{ ...buttonStyle, textAlign: "left" }}>
+                        {cleaningGeneralInfo ? "Cleaning General Info..." : "Clean Verified General Info Files"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -3806,6 +3836,9 @@ export default function CountryCompanyInfoPage() {
                       <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                         {backingUp ? "Preparing Backup..." : "Download Backup"}
                       </button>
+                      <button onClick={() => void cleanVerifiedGeneralInfoFiles()} disabled={cleaningGeneralInfo} style={{ ...buttonStyle, textAlign: "left" }}>
+                        {cleaningGeneralInfo ? "Cleaning General Info..." : "Clean Verified General Info Files"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -3903,6 +3936,9 @@ export default function CountryCompanyInfoPage() {
                           <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
                           <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
                             {backingUp ? "Preparing Backup..." : "Download Backup"}
+                          </button>
+                          <button onClick={() => void cleanVerifiedGeneralInfoFiles()} disabled={cleaningGeneralInfo} style={{ ...buttonStyle, textAlign: "left" }}>
+                            {cleaningGeneralInfo ? "Cleaning General Info..." : "Clean Verified General Info Files"}
                           </button>
                         </div>
                       )}

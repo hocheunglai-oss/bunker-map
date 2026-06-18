@@ -100,6 +100,14 @@ const primaryButtonStyle: React.CSSProperties = {
   color: "var(--fc-admin-button-text)",
 }
 
+const manifestButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  textDecoration: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+}
+
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
   borderColor: "var(--fc-admin-danger-border)",
@@ -936,6 +944,13 @@ export default function EmailTemplatesAdminPage() {
             </div>
           </div>
         </div>
+        <a
+          href="/api/outlook-addin/manifest"
+          download="fratelli-cosulich-templates-manifest.xml"
+          style={manifestButtonStyle}
+        >
+          DOWNLOAD OUTLOOK MANIFEST
+        </a>
       </header>
       <div
         style={{

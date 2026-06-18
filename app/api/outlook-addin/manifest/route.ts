@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const ADDIN_ASSET_VERSION = "2026-06-11-group-smtp-v1"
 
@@ -23,6 +24,16 @@ function buildBaseUrl(request: Request) {
 }
 
 export async function GET(request: Request) {
+  try {
+    await requireAdminPagePermission("email-templates", "view")
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unauthorized"
+    return NextResponse.json(
+      { message },
+      { status: message === "Unauthorized" ? 401 : 403 }
+    )
+  }
+
   const baseUrl = buildBaseUrl(request)
   const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${ADDIN_ASSET_VERSION}`
   const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${ADDIN_ASSET_VERSION}`
