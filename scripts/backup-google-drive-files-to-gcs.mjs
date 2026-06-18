@@ -208,55 +208,63 @@ async function walkDriveFolder(
   relativePath,
   files,
   warnings,
-  excludedRootFolderNames = new Set()
+  excludedRootFolderNames = new Set(),
+  scanConcurrency = 20
 ) {
-  const children = await listChildren(drive, folderId, sharedDriveId)
+  const folders = [{ id: folderId, relativePath }]
 
-  for (const child of children) {
-    if (!child.id || !child.name) continue
-    const childPath = relativePath ? `${relativePath}/${child.name}` : child.name
+  while (folders.length > 0) {
+    const batch = folders.splice(0, Math.max(1, scanConcurrency))
+    const results = await Promise.all(
+      batch.map(async (folder) => ({
+        folder,
+        children: await listChildren(drive, folder.id, sharedDriveId),
+      }))
+    )
 
-    if (child.mimeType === "application/vnd.google-apps.folder") {
-      if (!relativePath && excludedRootFolderNames.has(child.name)) {
-        warnings.push({
-          type: "folderExcluded",
-          folderId: child.id,
+    for (const { folder, children } of results) {
+      for (const child of children) {
+        if (!child.id || !child.name) continue
+        const childPath = folder.relativePath
+          ? `${folder.relativePath}/${child.name}`
+          : child.name
+
+        if (child.mimeType === "application/vnd.google-apps.folder") {
+          if (!folder.relativePath && excludedRootFolderNames.has(child.name)) {
+            warnings.push({
+              type: "folderExcluded",
+              folderId: child.id,
+              relativePath: childPath,
+              message: "Backup output folder excluded from source traversal.",
+            })
+            continue
+          }
+          folders.push({ id: child.id, relativePath: childPath })
+          continue
+        }
+
+        if (child.mimeType === "application/vnd.google-apps.shortcut") {
+          warnings.push({
+            type: "shortcutSkipped",
+            fileId: child.id,
+            relativePath: childPath,
+            message: "Google Drive shortcut skipped.",
+          })
+          continue
+        }
+
+        files.push({
+          ...child,
           relativePath: childPath,
-          message: "Backup output folder excluded from source traversal.",
         })
-        continue
       }
-      await walkDriveFolder(
-        drive,
-        child.id,
-        sharedDriveId,
-        childPath,
-        files,
-        warnings,
-        excludedRootFolderNames
-      )
-      continue
     }
-
-    if (child.mimeType === "application/vnd.google-apps.shortcut") {
-      warnings.push({
-        type: "shortcutSkipped",
-        fileId: child.id,
-        relativePath: childPath,
-        message: "Google Drive shortcut skipped.",
-      })
-      continue
-    }
-
-    files.push({
-      ...child,
-      relativePath: childPath,
-    })
   }
 }
 
 async function collectDriveFiles(drive, sharedDriveId) {
   const rootFolderId = requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID")
+  const scanConcurrency = parseInteger(process.env.DRIVE_FOLDER_SCAN_CONCURRENCY, 20)
   const files = []
   const warnings = []
   await walkDriveFolder(
@@ -266,7 +274,8 @@ async function collectDriveFiles(drive, sharedDriveId) {
     "",
     files,
     warnings,
-    new Set([BACKUP_ROOT_FOLDER_NAME])
+    new Set([BACKUP_ROOT_FOLDER_NAME]),
+    scanConcurrency
   )
   return {
     sourceFolder: {
