@@ -16,6 +16,7 @@ export const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 export const ADMIN_USER_COOKIE_NAME = "bunker_admin_user"
 
 const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+const ADMIN_USER_LOOKUP_CACHE_MS = 3000
 
 export type AdminSession = {
   authenticated: boolean
@@ -24,6 +25,40 @@ export type AdminSession = {
   role: string | null
   permissions: AdminPagePermissionMap
   pages: AdminPageDefinition[]
+}
+
+type DatabaseAdminUser = Awaited<ReturnType<typeof getDatabaseAdminUserByUsername>>
+
+const adminUserLookupCache = new Map<
+  string,
+  { user: DatabaseAdminUser; expiresAt: number }
+>()
+const adminUserLookupPromises = new Map<string, Promise<DatabaseAdminUser>>()
+
+async function getCachedDatabaseAdminUser(
+  username: string,
+  pages: AdminPageDefinition[],
+) {
+  const cached = adminUserLookupCache.get(username)
+  if (cached && cached.expiresAt > Date.now()) return cached.user
+
+  const pending = adminUserLookupPromises.get(username)
+  if (pending) return pending
+
+  const lookup = getDatabaseAdminUserByUsername(username, pages)
+    .then((user) => {
+      adminUserLookupCache.set(username, {
+        user,
+        expiresAt: Date.now() + ADMIN_USER_LOOKUP_CACHE_MS,
+      })
+      return user
+    })
+    .finally(() => {
+      adminUserLookupPromises.delete(username)
+    })
+
+  adminUserLookupPromises.set(username, lookup)
+  return lookup
 }
 
 function normaliseUsername(username: string) {
@@ -111,7 +146,7 @@ export async function getAdminSession(): Promise<AdminSession> {
     }
   }
 
-  const databaseUser = await getDatabaseAdminUserByUsername(username, pages)
+  const databaseUser = await getCachedDatabaseAdminUser(username, pages)
 
   if (databaseUser) {
     return {

@@ -47,7 +47,7 @@ async function findAdminPageRoutes(
   return routes.concat(...nestedRoutes)
 }
 
-export async function getDiscoveredAdminPages(): Promise<AdminPageDefinition[]> {
+async function discoverAdminPages(): Promise<AdminPageDefinition[]> {
   const adminRoots = [
     path.join(process.cwd(), "app", "admin"),
     path.join(process.cwd(), ".next", "server", "app", "admin"),
@@ -80,4 +80,13 @@ export async function getDiscoveredAdminPages(): Promise<AdminPageDefinition[]> 
   }
 
   return [...ADMIN_PAGE_DEFINITIONS, ...discovered.sort((a, b) => a.label.localeCompare(b.label))]
+}
+
+let discoveredAdminPagesPromise: Promise<AdminPageDefinition[]> | null = null
+
+export function getDiscoveredAdminPages(): Promise<AdminPageDefinition[]> {
+  if (!discoveredAdminPagesPromise) {
+    discoveredAdminPagesPromise = discoverAdminPages()
+  }
+  return discoveredAdminPagesPromise
 }

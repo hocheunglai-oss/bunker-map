@@ -50,20 +50,22 @@ type ContactRow = {
   search_text: string | null
 }
 
-async function fetchContactsByCompany(supabase: any, company: string) {
+async function fetchAllContacts(supabase: any, company?: string) {
   const allContacts: ContactRow[] = []
   const pageSize = 1000
   let from = 0
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("phonebook_contacts")
       .select("*")
-      .eq("company", company)
       .order("favorite", { ascending: false })
       .order("full_name", { ascending: true })
       .range(from, from + pageSize - 1)
 
+    if (company) query = query.eq("company", company)
+
+    const { data, error } = await query
     if (error) throw error
 
     const batch = (data || []) as ContactRow[]
@@ -146,15 +148,21 @@ export async function GET(request: Request) {
 
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     )
 
     const { searchParams } = new URL(request.url)
     const company = normalizeText(searchParams.get("company"))
     const query = normalizeText(searchParams.get("query"))
+    const all = searchParams.get("all") === "1"
 
     if (company) {
-      const contacts = await fetchContactsByCompany(supabase, company)
+      const contacts = await fetchAllContacts(supabase, company)
+      return NextResponse.json({ contacts })
+    }
+
+    if (all) {
+      const contacts = await fetchAllContacts(supabase)
       return NextResponse.json({ contacts })
     }
 

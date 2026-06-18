@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { createHash } from "node:crypto"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const MANAGED_PREFIX = "bunker-map-"
 const FULL_REBUILD_BATCH_SIZE = 250
+const CARDDAV_WRITE_ATTEMPTS = 3
+const CARDDAV_RETRY_BASE_MS = 300
 
 export const maxDuration = 300
 
@@ -120,7 +123,26 @@ function buildCompanyPhone(company: PhonebookCompany) {
   return ""
 }
 
-function buildVCard(contact: PhonebookContact) {
+function buildContactSyncHash(contact: PhonebookContact) {
+  const payload = [
+    buildDisplayName(contact),
+    normalizeText(contact.company),
+    normalizeText(contact.company_phone),
+    normalizeText(contact.company_other_name),
+    normalizeText(contact.position),
+    normalizeDialablePhone(contact.direct_line),
+    normalizeDialablePhone(contact.mobile_1),
+    normalizeDialablePhone(contact.mobile_2),
+    normalizeText(contact.personal_email),
+    normalizeText(contact.general_email),
+    normalizeText(contact.private_email),
+    normalizeText(contact.notes),
+  ]
+
+  return createHash("sha256").update(JSON.stringify(payload)).digest("base64url")
+}
+
+function buildVCard(contact: PhonebookContact, syncHash = buildContactSyncHash(contact)) {
   const displayName = buildDisplayName(contact)
   const note = [
     contact.company_other_name ? `OTHER NAME: ${contact.company_other_name}` : "",
@@ -146,6 +168,7 @@ function buildVCard(contact: PhonebookContact) {
     ...vcardLine("NOTE", note),
     "CATEGORIES:BUNKER MAP",
     `X-BUNKER-MAP-CONTACT-ID:${contact.id}`,
+    `X-BUNKER-MAP-SYNC-HASH:${syncHash}`,
     `REV:${new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15)}Z`,
     "END:VCARD",
   ]
@@ -170,6 +193,7 @@ async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) {
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : new URL(pathOrUrl, addressBookUrl).toString()
   const response = await fetch(url, {
     ...init,
+    signal: init.signal || AbortSignal.timeout(15000),
     headers: {
       Authorization: `Basic ${auth}`,
       ...(init.headers || {}),
@@ -197,38 +221,132 @@ async function loadManagedCardHrefs() {
 }
 
 async function deleteCard(href: string) {
-  const response = await cardDavRequest(href, { method: "DELETE" })
-  if (!response.ok && response.status !== 404) throw new Error(`CardDAV delete failed (${response.status}).`)
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= CARDDAV_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await cardDavRequest(href, {
+        method: "DELETE",
+        cache: "no-store",
+      })
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`CardDAV delete failed (${response.status}).`)
+      }
+
+      const verification = await cardDavRequest(href, {
+        method: "GET",
+        headers: { "Cache-Control": "no-cache" },
+        cache: "no-store",
+      })
+      if (verification.status === 404) return
+      throw new Error(`CardDAV delete verification failed (${verification.status}).`)
+    } catch (error) {
+      lastError = error
+      if (attempt < CARDDAV_WRITE_ATTEMPTS) {
+        await wait(CARDDAV_RETRY_BASE_MS * 2 ** (attempt - 1))
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("CardDAV delete failed.")
 }
 
-async function putContact(contact: PhonebookContact) {
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function verifyContact(contact: PhonebookContact, syncHash: string) {
   const response = await cardDavRequest(cardHref(contact.id), {
-    method: "PUT",
-    headers: { "Content-Type": "text/vcard; charset=utf-8" },
-    body: buildVCard(contact),
+    method: "GET",
+    headers: {
+      Accept: "text/vcard, text/x-vcard, */*",
+      "Cache-Control": "no-cache",
+    },
+    cache: "no-store",
   })
-  if (!response.ok && response.status !== 201 && response.status !== 204) {
-    throw new Error(`CardDAV upload failed (${response.status}) for ${contact.full_name}.`)
+
+  if (!response.ok) {
+    throw new Error(`CardDAV verification failed (${response.status}) for ${contact.full_name}.`)
+  }
+
+  const card = await response.text()
+  if (!card.includes(`X-BUNKER-MAP-CONTACT-ID:${contact.id}`)) {
+    throw new Error(`CardDAV verification returned the wrong contact for ${contact.full_name}.`)
+  }
+  if (!card.includes(`X-BUNKER-MAP-SYNC-HASH:${syncHash}`)) {
+    throw new Error(`CardDAV verification found stale data for ${contact.full_name}.`)
   }
 }
 
-async function loadCompanyPhoneMap(supabase: any) {
+async function putContact(contact: PhonebookContact) {
+  const syncHash = buildContactSyncHash(contact)
+  const card = buildVCard(contact, syncHash)
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= CARDDAV_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await cardDavRequest(cardHref(contact.id), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "text/vcard; charset=utf-8",
+          "Cache-Control": "no-cache",
+        },
+        body: card,
+        cache: "no-store",
+      })
+      if (!response.ok && response.status !== 201 && response.status !== 204) {
+        throw new Error(`CardDAV upload failed (${response.status}) for ${contact.full_name}.`)
+      }
+
+      await verifyContact(contact, syncHash)
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < CARDDAV_WRITE_ATTEMPTS) {
+        await wait(CARDDAV_RETRY_BASE_MS * 2 ** (attempt - 1))
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`CardDAV sync failed for ${contact.full_name}.`)
+}
+
+async function loadCompanyPhoneMap(supabase: any, companyNames?: string[]) {
   const rows: PhonebookCompany[] = []
   const pageSize = 1000
-  let from = 0
+  const normalizedCompanyNames = Array.from(
+    new Set((companyNames || []).map(normalizeText).filter(Boolean)),
+  )
 
-  while (true) {
-    const { data, error } = await supabase
-      .from("phonebook_companies")
-      .select("name,other_name,country,tel_country,tel_area,tel_no_1,phone")
-      .order("name", { ascending: true })
-      .range(from, from + pageSize - 1)
-    if (error) throw error
+  if (normalizedCompanyNames.length === 0) return new Map()
 
-    const batch = (data || []) as PhonebookCompany[]
-    rows.push(...batch)
-    if (batch.length < pageSize) break
-    from += pageSize
+  if (normalizedCompanyNames.length > 0 && normalizedCompanyNames.length <= 200) {
+    for (let index = 0; index < normalizedCompanyNames.length; index += 100) {
+      const names = normalizedCompanyNames.slice(index, index + 100)
+      const { data, error } = await supabase
+        .from("phonebook_companies")
+        .select("name,other_name,country,tel_country,tel_area,tel_no_1,phone")
+        .in("name", names)
+      if (error) throw error
+      rows.push(...((data || []) as PhonebookCompany[]))
+    }
+  } else {
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from("phonebook_companies")
+        .select("name,other_name,country,tel_country,tel_area,tel_no_1,phone")
+        .order("name", { ascending: true })
+        .range(from, from + pageSize - 1)
+      if (error) throw error
+
+      const batch = (data || []) as PhonebookCompany[]
+      rows.push(...batch)
+      if (batch.length < pageSize) break
+      from += pageSize
+    }
   }
 
   return new Map(
@@ -242,11 +360,17 @@ async function loadCompanyPhoneMap(supabase: any) {
   )
 }
 
-async function fetchContacts(supabase: any, company: string | null) {
+async function fetchContacts(
+  supabase: any,
+  options: {
+    company?: string | null
+    contactIds?: string[]
+  } = {},
+) {
   const rows: PhonebookContact[] = []
-  const companyPhoneMap = await loadCompanyPhoneMap(supabase)
   const pageSize = 1000
   let from = 0
+  const contactIds = Array.from(new Set((options.contactIds || []).filter(Boolean)))
 
   while (true) {
     let query = supabase
@@ -256,24 +380,32 @@ async function fetchContacts(supabase: any, company: string | null) {
       .order("full_name", { ascending: true })
       .range(from, from + pageSize - 1)
 
-    if (company) query = query.eq("company", company)
+    if (options.company) query = query.eq("company", options.company)
+    if (contactIds.length > 0) query = query.in("id", contactIds)
 
     const { data, error } = await query
     if (error) throw error
 
     const batch = (data || []) as Omit<PhonebookContact, "company_phone" | "company_other_name">[]
-    rows.push(
-      ...batch.map((contact) => ({
-        ...contact,
-        company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.phone || null,
-        company_other_name: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.otherName || null,
-      })),
-    )
+    rows.push(...batch.map((contact) => ({
+      ...contact,
+      company_phone: null,
+      company_other_name: null,
+    })))
     if (batch.length < pageSize) break
     from += pageSize
   }
 
-  return rows
+  const companyNames = Array.from(
+    new Set(rows.map((contact) => normalizeText(contact.company)).filter(Boolean)),
+  )
+  const companyPhoneMap = await loadCompanyPhoneMap(supabase, companyNames)
+
+  return rows.map((contact) => ({
+    ...contact,
+    company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.phone || null,
+    company_other_name: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.otherName || null,
+  }))
 }
 
 export async function POST(request: Request) {
@@ -282,7 +414,7 @@ export async function POST(request: Request) {
 
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     )
     const body = (await request.json().catch(() => ({}))) as {
       selectedCompany?: string
@@ -300,11 +432,11 @@ export async function POST(request: Request) {
     }
 
     const company = normalizeText(body.selectedCompany) || null
-    let contacts = await fetchContacts(supabase, company)
-    if (Array.isArray(body.contactIds) && body.contactIds.length > 0) {
-      const wanted = new Set(body.contactIds)
-      contacts = contacts.filter((contact) => wanted.has(contact.id))
-    }
+    const contactIds = Array.isArray(body.contactIds) ? body.contactIds.filter(Boolean) : []
+    let contacts = await fetchContacts(supabase, {
+      company,
+      contactIds,
+    })
 
     if (contacts.length === 0) {
       return NextResponse.json({ message: "No contacts to sync.", failed: [] }, { status: 400 })
@@ -338,22 +470,40 @@ export async function POST(request: Request) {
       contacts = contacts.slice(cursor, cursor + FULL_REBUILD_BATCH_SIZE)
     }
 
-    const failed: Array<{ id: string; label: string }> = []
+    const failed: Array<{ id: string; label: string; error?: string }> = []
+    if (contactIds.length > 0) {
+      const foundIds = new Set(contacts.map((contact) => contact.id))
+      for (const contactId of contactIds) {
+        if (!foundIds.has(contactId)) {
+          failed.push({
+            id: contactId,
+            label: `CONTACT ${contactId.slice(0, 8)}`,
+            error: "Contact was not found in Supabase.",
+          })
+        }
+      }
+    }
+
     let synced = 0
     for (const contact of contacts) {
       try {
         await putContact(contact)
         synced += 1
-      } catch {
-        failed.push({ id: contact.id, label: `${contact.full_name || "UNKNOWN"} @ ${contact.company || "NO COMPANY"}` })
+      } catch (error) {
+        failed.push({
+          id: contact.id,
+          label: `${contact.full_name || "UNKNOWN"} @ ${contact.company || "NO COMPANY"}`,
+          error: error instanceof Error ? error.message : "CardDAV verification failed.",
+        })
       }
     }
 
     return NextResponse.json({
       message: failed.length
-        ? `Synced ${synced} contacts to CardDAV. Skipped ${failed.length} problematic contacts.`
-        : `Synced ${synced} contacts to CardDAV.`,
+        ? `Verified ${synced} CardDAV contacts. ${failed.length} contacts still need retry.`
+        : `Verified ${synced} contacts in CardDAV.`,
       failed: failed.slice(0, 20),
+      verifiedCount: synced,
       total,
       done: !body.fullRebuild || cursor + contacts.length >= total,
       nextCursor: body.fullRebuild && cursor + contacts.length < total ? cursor + contacts.length : null,

@@ -96,13 +96,11 @@ const PHONEBOOK_COMPANIES_CACHE_KEY = "companies"
 const PHONEBOOK_CONTACTS_CACHE_KEY = "contacts"
 const MAX_RENDERED_COMPANIES = 300
 const MAX_RENDERED_CONTACTS = 400
-const PHONEBOOK_PAGE_SIZE = 1000
-const PHONEBOOK_PARALLEL_PAGES = 8
-const COMPANY_LIST_COLUMNS = "id,name,source_key,other_name,country,tel_country,tel_area,tel_no_1"
 
 type ContactSyncFailure = {
   id: string
   label: string
+  error?: string
 }
 
 type ContactSyncResponse = {
@@ -112,6 +110,7 @@ type ContactSyncResponse = {
   done?: boolean
   nextCursor?: number | null
   syncedCount?: number
+  verifiedCount?: number
   phase?: "delete" | "upload"
 }
 
@@ -505,32 +504,6 @@ async function writePhonebookCache<T>(key: string, items: T[]) {
   })
 }
 
-async function fetchPagedRows<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
-  pageBatchSize = PHONEBOOK_PARALLEL_PAGES,
-) {
-  const allRows: T[] = []
-  let nextFrom = 0
-
-  while (true) {
-    const starts = Array.from({ length: pageBatchSize }, (_, index) => nextFrom + index * PHONEBOOK_PAGE_SIZE)
-    const pages = await Promise.all(starts.map((from) => fetchPage(from, from + PHONEBOOK_PAGE_SIZE - 1)))
-    const batches = pages.map((page) => {
-      if (page.error) throw page.error
-      return page.data || []
-    })
-
-    for (const batch of batches) {
-      allRows.push(...batch)
-    }
-
-    if (batches.some((batch) => batch.length < PHONEBOOK_PAGE_SIZE)) break
-    nextFrom += PHONEBOOK_PAGE_SIZE * pageBatchSize
-  }
-
-  return allRows
-}
-
 function normalizeDialablePhone(value: string | null | undefined) {
   const trimmed = (value || "").trim()
   if (!trimmed) return null
@@ -671,32 +644,27 @@ export default function PhonebookPage() {
 
   async function loadCompanies() {
     const startedAt = performance.now()
-    const allCompanies = await fetchPagedRows<Partial<Company>>((from, to) =>
-      supabase
-        .from("phonebook_companies")
-        .select(COMPANY_LIST_COLUMNS)
-        .order("name", { ascending: true })
-        .range(from, to),
-    )
+    const response = await fetch("/api/phonebook/bootstrap", { cache: "no-store" })
+    const payload = (await response.json().catch(() => ({}))) as {
+      companies?: Partial<Company>[]
+      contactCount?: number
+      message?: string
+    }
+    if (!response.ok) {
+      throw new Error(payload.message || "Unable to load phonebook companies.")
+    }
+    const allCompanies = payload.companies || []
 
     setPerfStats((prev) => ({
       ...prev,
       companiesFetchMs: Math.round(performance.now() - startedAt),
       companyCount: allCompanies.length,
+      contactCount: payload.contactCount || prev.contactCount,
     }))
-    return allCompanies
-  }
-
-  async function loadContactCount() {
-    const { count, error } = await supabase
-      .from("phonebook_contacts")
-      .select("id", { count: "exact", head: true })
-
-    if (error) {
-      throw error
+    return {
+      companies: allCompanies,
+      contactCount: payload.contactCount || 0,
     }
-
-    return count || 0
   }
 
   function searchCachedContacts(queryValue: string) {
@@ -834,33 +802,33 @@ export default function PhonebookPage() {
   }
 
   async function loadCompanyContactsFromSupabase(companyName: string) {
-    const allContacts = await fetchPagedRows<Contact>((from, to) =>
-      supabase
-        .from("phonebook_contacts")
-        .select("*")
-        .eq("company", companyName)
-        .order("favorite", { ascending: false })
-        .order("full_name", { ascending: true })
-        .range(from, to),
-      1,
+    const response = await fetch(
+      `/api/phonebook/contacts?company=${encodeURIComponent(companyName)}`,
+      { cache: "no-store" },
     )
-
-    return normalizeLoadedContacts(allContacts)
+    const payload = (await response.json().catch(() => ({}))) as {
+      contacts?: Contact[]
+      message?: string
+    }
+    if (!response.ok) {
+      throw new Error(payload.message || "Unable to load company contacts.")
+    }
+    return normalizeLoadedContacts(payload.contacts || [])
   }
 
   async function loadAllContactsForCache() {
     const startedAt = performance.now()
-    const contactData = await fetchPagedRows<Contact>((from, to) =>
-      supabase
-        .from("phonebook_contacts")
-        .select("*")
-        .order("favorite", { ascending: false })
-        .order("full_name", { ascending: true })
-        .range(from, to),
-    )
+    const response = await fetch("/api/phonebook/contacts?all=1", { cache: "no-store" })
+    const payload = (await response.json().catch(() => ({}))) as {
+      contacts?: Contact[]
+      message?: string
+    }
+    if (!response.ok) {
+      throw new Error(payload.message || "Unable to load phonebook contacts.")
+    }
 
     const normalizeStartedAt = performance.now()
-    const allContacts = normalizeLoadedContacts(contactData)
+    const allContacts = normalizeLoadedContacts(payload.contacts || [])
     rebuildContactCaches(allContacts, {
       fetchMs: Math.round(normalizeStartedAt - startedAt),
       normalizeMs: Math.round(performance.now() - normalizeStartedAt),
@@ -895,10 +863,7 @@ export default function PhonebookPage() {
   }
 
   async function refreshCompaniesFromSupabase() {
-    const [companyData, contactCount] = await Promise.all([
-      loadCompanies(),
-      loadContactCount().catch(() => allContactsRef.current.length),
-    ])
+    const { companies: companyData, contactCount } = await loadCompanies()
     const normalizeCompaniesStartedAt = performance.now()
     const normalizedCompanies = normalizeLoadedCompanies(companyData)
     setPerfStats((prev) => ({
@@ -911,23 +876,43 @@ export default function PhonebookPage() {
     return normalizedCompanies
   }
 
+  async function hydrateCachedContacts() {
+    const cachedContacts = await readPhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY)
+    if (!cachedContacts?.length) return false
+
+    const normalizeContactsStartedAt = performance.now()
+    const normalizedContacts = normalizeLoadedContacts(cachedContacts)
+    rebuildContactCaches(normalizedContacts, {
+      fetchMs: 0,
+      normalizeMs: Math.round(performance.now() - normalizeContactsStartedAt),
+    })
+    return true
+  }
+
+  function schedulePhonebookWarmup() {
+    const hydrate = () => {
+      void hydrateCachedContacts().finally(() => {
+        window.setTimeout(() => refreshContactCachesInBackground(), 4000)
+      })
+    }
+    const requestIdle = (
+      window as Window & {
+        requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      }
+    ).requestIdleCallback
+
+    if (requestIdle) {
+      requestIdle(hydrate, { timeout: 1200 })
+    } else {
+      globalThis.setTimeout(hydrate, 50)
+    }
+  }
+
   async function loadAll() {
     setLoading(true)
     let renderedFromCache = false
     try {
-      const [cachedCompanies, cachedContacts] = await Promise.all([
-        readPhonebookCache<Company>(PHONEBOOK_COMPANIES_CACHE_KEY),
-        readPhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY),
-      ])
-
-      if (cachedContacts?.length) {
-        const normalizeContactsStartedAt = performance.now()
-        const normalizedContacts = normalizeLoadedContacts(cachedContacts)
-        rebuildContactCaches(normalizedContacts, {
-          fetchMs: 0,
-          normalizeMs: Math.round(performance.now() - normalizeContactsStartedAt),
-        })
-      }
+      const cachedCompanies = await readPhonebookCache<Company>(PHONEBOOK_COMPANIES_CACHE_KEY)
 
       if (cachedCompanies?.length) {
         const normalizeCompaniesStartedAt = performance.now()
@@ -936,7 +921,6 @@ export default function PhonebookPage() {
         setPerfStats((prev) => ({
           ...prev,
           companyCount: normalizedCompanies.length,
-          contactCount: cachedContacts?.length || prev.contactCount,
           normalizeCompaniesMs: Math.round(performance.now() - normalizeCompaniesStartedAt),
         }))
         setLoading(false)
@@ -945,13 +929,13 @@ export default function PhonebookPage() {
 
       setContacts([])
       if (renderedFromCache) {
-        void refreshCompaniesFromSupabase().catch(() => {})
-        window.setTimeout(() => refreshContactCachesInBackground(), 250)
+        schedulePhonebookWarmup()
+        window.setTimeout(() => void refreshCompaniesFromSupabase().catch(() => {}), 4000)
         return
       }
 
       await refreshCompaniesFromSupabase()
-      window.setTimeout(() => refreshContactCachesInBackground(), 250)
+      schedulePhonebookWarmup()
     } catch {
       setMessage("Unable to load phonebook.")
     } finally {
@@ -1252,10 +1236,10 @@ export default function PhonebookPage() {
       setCreatingContact(false)
       setContactModalOpen(false)
       const synced = await syncPhoneContacts(false, [nextContact.id], {
-        successMessage: "Saved and synced.",
+        successMessage: "Saved and verified on CardDAV.",
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
-      if (synced) setMessage("Saved and synced.")
+      if (synced) setMessage("Saved and verified on CardDAV.")
       setSaving(false)
       return
     }
@@ -1281,10 +1265,10 @@ export default function PhonebookPage() {
     setCurrent((prev) => (prev ? updatedContact : prev))
     setEditing(false)
     const synced = await syncPhoneContacts(false, [draft.id], {
-      successMessage: "Saved and synced.",
+      successMessage: "Saved and verified on CardDAV.",
       failureMessage: "Saved locally, but CardDAV sync failed.",
     })
-    if (synced) setMessage("Saved and synced.")
+    if (synced) setMessage("Saved and verified on CardDAV.")
     setSaving(false)
   }
 
@@ -1579,10 +1563,10 @@ export default function PhonebookPage() {
 
     if (syncedContactIds.length > 0) {
       const synced = await syncPhoneContacts(false, syncedContactIds, {
-        successMessage: "Saved and synced.",
+        successMessage: "Saved and verified on CardDAV.",
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
-      if (synced) setMessage("Saved and synced.")
+      if (synced) setMessage("Saved and verified on CardDAV.")
     }
   }
 
@@ -1984,7 +1968,18 @@ export default function PhonebookPage() {
         phase = payload.phase === "upload" ? "upload" : "delete"
       }
 
-      localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(accumulatedFailed.slice(0, 50)))
+      const uniqueFailed = Array.from(
+        new Map(accumulatedFailed.map((failure) => [failure.id, failure])).values(),
+      )
+      localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(uniqueFailed.slice(0, 50)))
+      if (uniqueFailed.length > 0) {
+        const firstFailure = uniqueFailed[0]
+        const failurePrefix = options?.failureMessage || "CardDAV sync verification failed."
+        const failureDetail = firstFailure.error || firstFailure.label
+        setMessage(`${failurePrefix} ${failureDetail}`)
+        return false
+      }
+
       setMessage(options?.successMessage || lastPayload.message || "CardDAV synced.")
       return true
     } catch (error) {

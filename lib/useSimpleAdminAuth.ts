@@ -19,6 +19,52 @@ type AuthState = {
   pages: AdminPageDefinition[]
 }
 
+type AdminSessionPayload = {
+  authenticated?: boolean
+  username?: string | null
+  displayName?: string | null
+  role?: string | null
+  permissions?: AdminPagePermissionMap
+  pages?: AdminPageDefinition[]
+}
+
+let sharedSessionPromise: Promise<AdminSessionPayload> | null = null
+let sharedSessionResult: { data: AdminSessionPayload; loadedAt: number } | null = null
+
+function loadAdminSession() {
+  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < 5000) {
+    return Promise.resolve(sharedSessionResult.data)
+  }
+  if (sharedSessionPromise) return sharedSessionPromise
+
+  sharedSessionPromise = fetch("/api/admin/session", { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error("Unable to load admin session.")
+      const data = (await response.json()) as AdminSessionPayload
+      sharedSessionResult = { data, loadedAt: Date.now() }
+      return data
+    })
+    .finally(() => {
+      sharedSessionPromise = null
+    })
+
+  return sharedSessionPromise
+}
+
+function readCachedAdminActor(): AdminSessionPayload | null {
+  if (typeof window === "undefined") return null
+
+  try {
+    const raw = window.localStorage.getItem("bunker_admin_actor")
+    if (!raw) return null
+    const actor = JSON.parse(raw) as AdminSessionPayload
+    if (!actor.username) return null
+    return { ...actor, authenticated: true }
+  } catch {
+    return null
+  }
+}
+
 export function useSimpleAdminAuth(): AuthState {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
@@ -31,49 +77,51 @@ export function useSimpleAdminAuth(): AuthState {
   const [pages, setPages] = useState<AdminPageDefinition[]>(ADMIN_PAGE_DEFINITIONS)
 
   useEffect(() => {
+    const cachedActor = readCachedAdminActor()
+
+    function applySession(data: AdminSessionPayload) {
+      const isAuthenticated = Boolean(data.authenticated)
+      const nextUsername = typeof data.username === "string" ? data.username : null
+      const nextDisplayName =
+        typeof data.displayName === "string" ? data.displayName : nextUsername
+      const nextRole = typeof data.role === "string" ? data.role : null
+      const nextPages = normaliseAdminPageDefinitions(data.pages)
+      const nextPermissions = normaliseAdminPagePermissions(
+        data.permissions,
+        "none",
+        nextPages
+      )
+
+      setAuthenticated(isAuthenticated)
+      setUsername(isAuthenticated ? nextUsername : null)
+      setDisplayName(isAuthenticated ? nextDisplayName : null)
+      setRole(isAuthenticated ? nextRole : null)
+      setPermissions(isAuthenticated ? nextPermissions : normaliseAdminPagePermissions(null))
+      setPages(nextPages)
+      setLoading(false)
+
+      if (isAuthenticated && nextUsername) {
+        window.localStorage.setItem(
+          "bunker_admin_actor",
+          JSON.stringify({
+            username: nextUsername,
+            displayName: nextDisplayName || nextUsername,
+            role: nextRole,
+            permissions: nextPermissions,
+            pages: nextPages,
+          })
+        )
+      } else {
+        window.localStorage.removeItem("bunker_admin_actor")
+      }
+    }
+
     async function checkSession() {
       try {
-        const response = await fetch("/api/admin/session", {
-          cache: "no-store",
-        })
-
-        const data = await response.json()
-        const isAuthenticated = Boolean(data.authenticated)
-        const nextUsername = typeof data.username === "string" ? data.username : null
-        const nextDisplayName =
-          typeof data.displayName === "string" ? data.displayName : nextUsername
-        const nextRole = typeof data.role === "string" ? data.role : null
-        const nextPages = normaliseAdminPageDefinitions(data.pages)
-        const nextPermissions = normaliseAdminPagePermissions(
-          data.permissions,
-          "none",
-          nextPages
-        )
-
-        setAuthenticated(isAuthenticated)
-        setUsername(isAuthenticated ? nextUsername : null)
-        setDisplayName(isAuthenticated ? nextDisplayName : null)
-        setRole(isAuthenticated ? nextRole : null)
-        setPermissions(isAuthenticated ? nextPermissions : normaliseAdminPagePermissions(null))
-        setPages(nextPages)
-
-        if (typeof window !== "undefined") {
-          if (isAuthenticated && nextUsername) {
-            window.localStorage.setItem(
-              "bunker_admin_actor",
-              JSON.stringify({
-                username: nextUsername,
-                displayName: nextDisplayName || nextUsername,
-                role: nextRole,
-                permissions: nextPermissions,
-                pages: nextPages,
-              })
-            )
-          } else {
-            window.localStorage.removeItem("bunker_admin_actor")
-          }
-        }
+        const data = await loadAdminSession()
+        applySession(data)
       } catch {
+        if (cachedActor) return
         setAuthenticated(false)
         setUsername(null)
         setDisplayName(null)
@@ -88,7 +136,8 @@ export function useSimpleAdminAuth(): AuthState {
       }
     }
 
-    checkSession()
+    if (cachedActor) applySession(cachedActor)
+    void checkSession()
   }, [])
 
   return { loading, authenticated, username, displayName, role, permissions, pages }
