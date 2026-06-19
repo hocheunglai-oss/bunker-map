@@ -124,7 +124,7 @@ export default function AdminPage() {
         </form>
 
         <Link href="/" className="fc-admin-login-back">
-          Back to map
+          Back
         </Link>
       </section>
     </div>

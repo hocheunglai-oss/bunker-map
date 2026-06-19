@@ -22,7 +22,13 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 type AdminPageGroup = AdminPageDefinition["group"]
 type VisiblePermission = Exclude<AdminPagePermission, "none">
 
-const ADMIN_GROUP_ORDER = Object.keys(ADMIN_PAGE_GROUP_LABELS) as AdminPageGroup[]
+const ADMIN_GROUP_ORDER: AdminPageGroup[] = [
+  "office",
+  "trading",
+  "contacts",
+  "reports",
+  "management",
+]
 const SIDEBAR_COLLAPSED_KEY = "fc-admin-sidebar-collapsed"
 const SIDEBAR_GROUPS_KEY = "fc-admin-sidebar-groups"
 
@@ -246,14 +252,12 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
 
   function renderPermissionSection(
     permission: VisiblePermission,
-    label: "EDITOR" | "VIEWER",
     entries: Array<{ page: AdminPageDefinition; permission: VisiblePermission }>,
   ) {
     if (entries.length === 0) return null
 
     return (
       <div className={`fc-admin-sidebar-permission is-${permission}`}>
-        <div className="fc-admin-sidebar-permission-label">{label}</div>
         <div className="fc-admin-sidebar-link-list">
           {entries.map(({ page }) => {
             const active =
@@ -270,6 +274,22 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                 aria-current={active ? "page" : undefined}
               >
                 <span>{page.label}</span>
+                <span
+                  className="fc-admin-sidebar-access-icon"
+                  title={permission === "edit" ? "Edit access" : "View access"}
+                  aria-label={permission === "edit" ? "Edit access" : "View access"}
+                >
+                  {permission === "edit" ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 20h4l10.7-10.7a2.1 2.1 0 0 0 0-3L17.7 5.3a2.1 2.1 0 0 0-3 0L4 16v4Zm11.8-12.8 1 1" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                      <circle cx="12" cy="12" r="2.8" />
+                    </svg>
+                  )}
+                </span>
               </Link>
             )
           })}
@@ -311,6 +331,9 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         data-admin-view-safe="true"
       >
         <div className="fc-admin-sidebar-top">
+          <Link href="/admin" className="fc-admin-sidebar-title">
+            FC UNO
+          </Link>
           <div className="fc-admin-sidebar-controls">
             <button
               type="button"
@@ -366,8 +389,8 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                   </button>
                   {expanded ? (
                     <div className="fc-admin-sidebar-folder-body">
-                      {renderPermissionSection("edit", "EDITOR", folder.editPages)}
-                      {renderPermissionSection("view", "VIEWER", folder.viewPages)}
+                      {renderPermissionSection("edit", folder.editPages)}
+                      {renderPermissionSection("view", folder.viewPages)}
                     </div>
                   ) : null}
                 </section>
@@ -383,10 +406,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
 
         <div className="fc-admin-sidebar-footer">
           <div className="fc-admin-sidebar-user">
-            <span>{(displayName || "U").slice(0, 1).toUpperCase()}</span>
-            <div>
-              <strong>{displayName || "Admin user"}</strong>
-            </div>
+            <span>{(displayName || "U").trim().slice(0, 2).toUpperCase()}</span>
           </div>
           <div className="fc-admin-sidebar-footer-actions">
             <button type="button" onClick={handleLogout}>
