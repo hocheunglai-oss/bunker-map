@@ -1,5 +1,7 @@
 "use client"
 
+import Image from "next/image"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -8,80 +10,13 @@ import {
   isAdminRole,
   type AdminPageDefinition,
 } from "@/lib/adminPages"
+import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { getAdminPagesByGroupFromPages } from "@/lib/adminPageRegistry"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type AdminPageGroup = AdminPageDefinition["group"]
 
-type FolderTone = {
-  cover: string
-  tab: string
-  sticker: string
-  edge: string
-  accent: string
-}
-
-type FolderStyle = React.CSSProperties & {
-  "--fc-folder-cover": string
-  "--fc-folder-tab": string
-  "--fc-folder-sticker": string
-  "--fc-folder-edge": string
-  "--fc-folder-accent": string
-}
-
 const ADMIN_GROUP_ORDER = Object.keys(ADMIN_PAGE_GROUP_LABELS) as AdminPageGroup[]
-
-const FOLDER_TONES: FolderTone[] = [
-  {
-    cover: "#f4f8f5",
-    tab: "#d9e8e1",
-    sticker: "#eaf3ef",
-    edge: "#c7d8cf",
-    accent: "#355e52",
-  },
-  {
-    cover: "#fbf4ef",
-    tab: "#efd9cc",
-    sticker: "#f7e8df",
-    edge: "#dec5b5",
-    accent: "#815a48",
-  },
-  {
-    cover: "#f3f7fb",
-    tab: "#d8e6f0",
-    sticker: "#e8f1f7",
-    edge: "#c6d6e0",
-    accent: "#486b7f",
-  },
-  {
-    cover: "#f8f5f9",
-    tab: "#e7ddea",
-    sticker: "#f0e8f2",
-    edge: "#d7cbdc",
-    accent: "#66536e",
-  },
-  {
-    cover: "#fbf7ea",
-    tab: "#efe3bd",
-    sticker: "#f7efd0",
-    edge: "#dccd9d",
-    accent: "#735f2e",
-  },
-]
-
-function toneForIndex(index: number) {
-  return FOLDER_TONES[index % FOLDER_TONES.length]
-}
-
-function folderStyleForTone(tone: FolderTone): FolderStyle {
-  return {
-    "--fc-folder-cover": tone.cover,
-    "--fc-folder-tab": tone.tab,
-    "--fc-folder-sticker": tone.sticker,
-    "--fc-folder-edge": tone.edge,
-    "--fc-folder-accent": tone.accent,
-  }
-}
 
 export default function AdminPage() {
   const router = useRouter()
@@ -151,7 +86,7 @@ export default function AdminPage() {
     group,
     label: ADMIN_PAGE_GROUP_LABELS[group],
     pages: visiblePages(group),
-    tone: toneForIndex(index),
+    style: getAdminFolderStyle(index),
   }))
   if (loading) {
     return (
@@ -166,9 +101,16 @@ export default function AdminPage() {
       <div className="fc-admin-folder-shell">
         <aside className={`fc-admin-access-panel${authenticated ? " is-authenticated" : ""}`}>
           <div className="fc-admin-access-body">
-            <a href="/" className="fc-admin-logo-link">
-              <img src="/uno-transparent.png" alt="Bunker Map" className="fc-admin-logo" />
-            </a>
+            <Link href="/" className="fc-admin-logo-link">
+              <Image
+                src="/uno-transparent.png"
+                alt="Bunker Map"
+                className="fc-admin-logo"
+                width={180}
+                height={156}
+                priority
+              />
+            </Link>
 
             {authenticated ? (
               <>
@@ -232,7 +174,7 @@ export default function AdminPage() {
               <section
                 key={folder.group}
                 className={`fc-admin-folder${authenticated ? "" : " is-locked"}`}
-                style={folderStyleForTone(folder.tone)}
+                style={folder.style}
                 aria-labelledby={authenticated ? `admin-folder-${folder.group}` : undefined}
                 aria-label={authenticated ? undefined : folder.label}
               >

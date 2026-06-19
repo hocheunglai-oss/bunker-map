@@ -1,4 +1,5 @@
 import { AdminRouteGuard } from "@/components/AdminRouteGuard"
+import { AdminNavigationShell } from "@/components/AdminNavigationShell"
 
 export const dynamic = "force-dynamic"
 
@@ -9,7 +10,9 @@ export default function AdminLayout({
 }>) {
   return (
     <div className="fc-admin-scope">
-      <AdminRouteGuard>{children}</AdminRouteGuard>
+      <AdminNavigationShell>
+        <AdminRouteGuard>{children}</AdminRouteGuard>
+      </AdminNavigationShell>
     </div>
   )
 }
