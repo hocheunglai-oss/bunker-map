@@ -13,6 +13,7 @@ import {
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
+  getAdminPageByPath,
   isAdminRole,
   type AdminPageDefinition,
   type AdminPagePermission,
@@ -31,6 +32,20 @@ const ADMIN_GROUP_ORDER: AdminPageGroup[] = [
 ]
 const SIDEBAR_COLLAPSED_KEY = "fc-admin-sidebar-collapsed"
 const SIDEBAR_GROUPS_KEY = "fc-admin-sidebar-groups"
+
+const ACTION_PATTERNS: Array<{
+  action: "save" | "sync" | "backup" | "delete" | "undo" | "add" | "publish" | "check"
+  pattern: RegExp
+}> = [
+  { action: "save", pattern: /\b(save|apply)\b/i },
+  { action: "sync", pattern: /\bsync(?:ing)?\b/i },
+  { action: "backup", pattern: /\bback\s*up\b|\bbackup\b/i },
+  { action: "delete", pattern: /\bdelete\b/i },
+  { action: "undo", pattern: /\bundo\b/i },
+  { action: "add", pattern: /\b(add|new|create|insert|upload)\b|^\+$/i },
+  { action: "publish", pattern: /\bpublish\b/i },
+  { action: "check", pattern: /\bcheck\b/i },
+]
 
 function defaultExpandedGroups() {
   return ADMIN_GROUP_ORDER.reduce<Record<AdminPageGroup, boolean>>(
@@ -52,6 +67,12 @@ function readStoredGroups() {
   } catch {
     return defaultExpandedGroups()
   }
+}
+
+function adminHeaderTitle(label: string) {
+  return label
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
@@ -222,6 +243,78 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           )),
     )
   }, [pages, permissions, query, role])
+
+  const currentPage = getAdminPageByPath(pathname)
+  const currentFolderLabel = currentPage
+    ? ADMIN_PAGE_GROUP_LABELS[currentPage.group]
+    : ""
+
+  useEffect(() => {
+    if (!authenticated || loading || pathname === "/admin") return
+
+    const content = document.querySelector<HTMLElement>(".fc-admin-app-content")
+    if (!content) return
+
+    const applyUniversalAdminUi = () => {
+      const firstHeading = Array.from(
+        content.querySelectorAll<HTMLElement>("h1"),
+      ).find((heading) => !heading.closest(".fc-admin-universal-page-header"))
+      if (firstHeading) firstHeading.dataset.adminLegacyHeading = "true"
+      if (currentFolderLabel) {
+        const legacyFolderLabel = Array.from(
+          content.querySelectorAll<HTMLElement>("div, p, span"),
+        ).find(
+          (element) =>
+            !element.closest(".fc-admin-universal-page-header") &&
+            element.textContent?.trim().toLowerCase() ===
+              currentFolderLabel.toLowerCase() &&
+            (!firstHeading ||
+              Boolean(
+                element.compareDocumentPosition(firstHeading) &
+                  Node.DOCUMENT_POSITION_FOLLOWING,
+              )),
+        )
+        if (legacyFolderLabel) legacyFolderLabel.dataset.adminLegacyFolder = "true"
+      }
+
+      content.querySelectorAll<HTMLElement>("button, a").forEach((element) => {
+        if (element.closest(".fc-admin-sidebar")) return
+        const label = [
+          element.getAttribute("aria-label"),
+          element.getAttribute("title"),
+          element.textContent,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+
+        if (/^(back|back to admin)$/i.test(label)) {
+          element.dataset.adminLegacyBack = "true"
+          return
+        }
+
+        if (
+          element.classList.contains("fc-admin-menu-button") ||
+          element.getAttribute("role") === "tab" ||
+          element.closest("[role='tablist']") ||
+          element.style.borderRadius.includes("0 0") ||
+          element.closest("[data-admin-button-style='preserve']")
+        ) {
+          return
+        }
+
+        const matched = ACTION_PATTERNS.find(({ pattern }) => pattern.test(label))
+        if (matched) element.dataset.adminAction = matched.action
+        element.dataset.adminUniversalButton = "true"
+      })
+    }
+
+    applyUniversalAdminUi()
+    const observer = new MutationObserver(applyUniversalAdminUi)
+    observer.observe(content, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [authenticated, currentFolderLabel, loading, pathname])
 
   if (loading || !authenticated) {
     return <>{children}</>
@@ -416,7 +509,15 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         </div>
       </aside>
 
-      <div className="fc-admin-app-content">{children}</div>
+      <div className="fc-admin-app-content">
+        {currentPage && pathname !== "/admin" ? (
+          <header className="fc-admin-universal-page-header">
+            <div>{currentFolderLabel}</div>
+            <h1>{adminHeaderTitle(currentPage.label)}</h1>
+          </header>
+        ) : null}
+        {children}
+      </div>
     </div>
   )
 }

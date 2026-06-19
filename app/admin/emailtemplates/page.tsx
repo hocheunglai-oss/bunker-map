@@ -1109,9 +1109,9 @@ export default function EmailTemplatesAdminPage() {
                   gap: "10px",
                   alignItems: "center",
                   padding: "9px 10px",
-                  border: "1px solid var(--fc-border-soft)",
+                  border: "1px solid var(--fc-admin-border-soft)",
                   borderRadius: "7px",
-                  background: "var(--fc-panel-soft)",
+                  background: "var(--fc-admin-panel-soft-bg)",
                 }}
               >
                 <div style={{ minWidth: 0 }}>

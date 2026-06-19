@@ -95,6 +95,7 @@ type CountryPortListItem = {
   name: string
   summary: string | null
   notes: string | null
+  updated_at?: string | null
 }
 
 type InfoBlock = {
@@ -750,6 +751,46 @@ function HighlightedInlineText({ value, query }: { value: string; query: string 
   return <span dangerouslySetInnerHTML={{ __html: highlightTextHtml(value, query) }} />
 }
 
+function ReadOnlyDatedText({
+  value,
+  updatedAt,
+  query,
+}: {
+  value: string
+  updatedAt?: string | null
+  query: string
+}) {
+  const [selected, setSelected] = useState(false)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => setSelected((current) => !current)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          setSelected((current) => !current)
+        }
+      }}
+      style={{
+        display: "grid",
+        gap: "4px",
+        borderRadius: "8px",
+        background: selected ? "var(--fc-admin-selected-bg)" : "transparent",
+        cursor: "pointer",
+        padding: "3px 5px",
+      }}
+    >
+      <HighlightedInlineText value={value} query={query} />
+      {selected ? (
+        <span style={{ color: "var(--fc-admin-muted)", fontSize: "10px" }}>
+          {updatedAt ? `Updated ${formatDateOnly(updatedAt)}` : "No update recorded"}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 function BlockTextBlock({
   blocks,
   fallbackUpdatedAt,
@@ -1381,8 +1422,6 @@ export default function CountryCompanyInfoPage() {
   const [recordNameDraft, setRecordNameDraft] = useState("")
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "", countryId: "", countryName: "" })
-  const [editingCountryPortId, setEditingCountryPortId] = useState("")
-  const [countryPortDraft, setCountryPortDraft] = useState({ name: "", notes: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
   const [sectionSaveState, setSectionSaveState] = useState<"saving" | "saved">("saved")
   const [mainInfoLineUpdates, setMainInfoLineUpdates] = useState<Record<string, string>>({})
@@ -2213,7 +2252,7 @@ export default function CountryCompanyInfoPage() {
     const countryName = (data as CountryRecord).name
     const portsResult = await supabase
       .from("cc_ports")
-      .select("id,name,summary,notes")
+      .select("id,name,summary,notes,updated_at")
       .or(`country_id.eq.${id},country_name.ilike.${countryName.replace(/,/g, "\\,")}`)
       .order("name", { ascending: true })
     setCurrentRecord(data as BaseRecord)
@@ -2399,7 +2438,7 @@ export default function CountryCompanyInfoPage() {
     const { data, error } = await supabase
       .from("cc_ports")
       .insert({ name: addPortDraft.name.trim().toUpperCase(), summary: null, notes: addPortDraft.notes || "", country_id: matchedCountry.id, country_name: matchedCountry.name, tags: [], status: "active" })
-      .select("id,name,summary,notes")
+      .select("id,name,summary,notes,updated_at")
       .single()
     if (error || !data) {
       setMessage("Unable to add port.")
@@ -2414,37 +2453,6 @@ export default function CountryCompanyInfoPage() {
     addSimpleChangeLog(`${matchedCountry.name} New Port Added`)
     setMessage("Port added.")
     await loadSelected("port", nextPort.id)
-  }
-
-  function startCountryPortEditing(port: CountryPortListItem) {
-    setEditingCountryPortId(port.id)
-    setCountryPortDraft({ name: port.name || "", notes: port.notes || "" })
-  }
-
-  async function saveCountryPortEditing() {
-    if (!editingCountryPortId) return
-    const name = countryPortDraft.name.trim().toUpperCase()
-    if (!name) {
-      setMessage("Port name is required.")
-      return
-    }
-    const { error } = await supabase
-      .from("cc_ports")
-      .update({ name, notes: countryPortDraft.notes || null })
-      .eq("id", editingCountryPortId)
-    if (error) {
-      setMessage("Unable to save port.")
-      return
-    }
-    setCurrentCountryPorts((prev) =>
-      prev
-        .map((port) => (port.id === editingCountryPortId ? { ...port, name, notes: countryPortDraft.notes || null } : port))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    )
-    setEditingCountryPortId("")
-    setCountryPortDraft({ name: "", notes: "" })
-    addSimpleChangeLog(`${changeLogSubject("country", currentRecord.name)} Port Updated`)
-    setMessage("Port saved.")
   }
 
   function renameHighlight(index: number) {
@@ -4304,25 +4312,10 @@ export default function CountryCompanyInfoPage() {
                           <div style={{ display: "grid", gap: "8px", padding: "10px" }}>
                             {currentCountryPorts.map((port) => (
                               <div key={port.id} style={{ borderBottom: "1px solid var(--fc-admin-border-soft)", paddingBottom: "10px", display: "grid", gap: "6px" }}>
-                                {editingCountryPortId === port.id ? (
-                                  <>
-                                    <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={inputStyle} />
-                                    <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", fontSize: "12px" }} />
-                                    <div style={{ display: "flex", gap: "8px" }}>
-                                      <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-                                      <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
-                                      <HighlightedInlineText value={port.name} query={searchInPage} />
-                                    </a>
-                                    <div onDoubleClick={() => startCountryPortEditing(port)} style={{ color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
-                                      <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
-                                    </div>
-                                  </>
-                                )}
+                                <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
+                                  <HighlightedInlineText value={port.name} query={searchInPage} />
+                                </a>
+                                <ReadOnlyDatedText value={port.notes || "No information yet"} updatedAt={port.updated_at} query={searchInPage} />
                               </div>
                             ))}
                           </div>
@@ -4339,26 +4332,12 @@ export default function CountryCompanyInfoPage() {
                                 {currentCountryPorts.map((port) => (
                                   <tr key={port.id}>
                                     <td style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                      {editingCountryPortId === port.id ? (
-                                        <input value={countryPortDraft.name} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, name: event.target.value.toUpperCase() }))} style={{ ...inputStyle, padding: "7px 9px", fontSize: "12px" }} />
-                                      ) : (
-                                        <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 700, textDecoration: "none" }}>
+                                      <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 700, textDecoration: "none" }}>
                                         <HighlightedInlineText value={port.name} query={searchInPage} />
-                                        </a>
-                                      )}
+                                      </a>
                                     </td>
-                                    <td onDoubleClick={() => startCountryPortEditing(port)} style={{ verticalAlign: "top", padding: "10px 12px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "pre-wrap", cursor: "text" }}>
-                                      {editingCountryPortId === port.id ? (
-                                        <div style={{ display: "grid", gap: "8px" }}>
-                                          <AutoSizeTextarea value={countryPortDraft.notes} onChange={(event) => setCountryPortDraft((prev) => ({ ...prev, notes: event.target.value }))} style={{ ...textareaStyle, minHeight: "1.55em", padding: "2px 4px", border: "none", borderRadius: "6px", background: "var(--fc-admin-selected-bg)", fontSize: "12px" }} />
-                                          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                                            <button type="button" onClick={() => void saveCountryPortEditing()} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-                                            <button type="button" onClick={() => setEditingCountryPortId("")} style={{ ...buttonStyle, padding: "2px 6px", fontSize: "9px" }}>Cancel</button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <HighlightedInlineText value={port.notes || "No information yet"} query={searchInPage} />
-                                      )}
+                                    <td style={{ verticalAlign: "top", padding: "7px 9px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                                      <ReadOnlyDatedText value={port.notes || "No information yet"} updatedAt={port.updated_at} query={searchInPage} />
                                     </td>
                                   </tr>
                                 ))}
