@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 
@@ -28,6 +27,8 @@ type TemplateLibraryResponse = {
   templates: EmailTemplate[]
   lastImportedAt: string | null
   lastUpdatedAt: string | null
+  contacts: AddressContact[]
+  groups: AddressGroup[]
 }
 
 type SaveTemplateResponse = {
@@ -424,6 +425,8 @@ export default function EmailTemplatesAdminPage() {
             ""
         )
         setLastUpdatedAt(data.lastUpdatedAt)
+        setContacts(data.contacts || [])
+        setGroups(data.groups || [])
         setSaveState("saved")
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Failed to load templates.")
@@ -431,39 +434,6 @@ export default function EmailTemplatesAdminPage() {
     }
 
     loadTemplates()
-  }, [authenticated])
-
-  useEffect(() => {
-    if (!authenticated) return
-
-    async function loadAddressBook() {
-      const [contactResult, groupResult] = await Promise.all([
-        supabase
-          .from("shared_addressbook_contacts")
-          .select("id,display_name,primary_email,nickname")
-          .order("display_name", { ascending: true })
-          .limit(6000),
-        supabase
-          .from("shared_addressbook_groups")
-          .select("id,name,nickname,member_count")
-          .order("name", { ascending: true })
-          .limit(1000),
-      ])
-
-      if (contactResult.error) {
-        setMessage(contactResult.error.message)
-      } else {
-        setContacts((contactResult.data || []) as AddressContact[])
-      }
-
-      if (groupResult.error) {
-        setMessage(groupResult.error.message)
-      } else {
-        setGroups((groupResult.data || []) as AddressGroup[])
-      }
-    }
-
-    void loadAddressBook()
   }, [authenticated])
 
   useEffect(() => {

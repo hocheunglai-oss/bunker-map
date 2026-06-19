@@ -8,6 +8,7 @@ import {
 } from "@/lib/emailTemplates"
 import { createAdminAuditContext } from "@/lib/adminAudit"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { loadSharedAddressBookRecipients } from "@/lib/sharedAddressBookServer"
 
 type SavePayload = {
   id?: string
@@ -18,8 +19,21 @@ type SavePayload = {
 export async function GET() {
   try {
     await requireAdminPagePermission("email-templates", "view")
-    const library = await loadTemplateLibrary()
-    return NextResponse.json(library)
+    const [library, recipients] = await Promise.all([
+      loadTemplateLibrary(),
+      loadSharedAddressBookRecipients(),
+    ])
+    return NextResponse.json(
+      {
+        ...library,
+        ...recipients,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      },
+    )
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(

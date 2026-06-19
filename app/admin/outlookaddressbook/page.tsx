@@ -539,8 +539,6 @@ export default function OutlookAddressBookPage() {
   useEffect(() => {
     if (!authenticated) return
     void loadAll()
-    void loadExchangeSyncStatus()
-    void loadRecentActivities()
   }, [authenticated])
 
   useEffect(() => {
@@ -628,6 +626,14 @@ export default function OutlookAddressBookPage() {
     [groups]
   )
 
+  const groupMemberCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    members.forEach((member) => {
+      counts.set(member.group_id, (counts.get(member.group_id) || 0) + 1)
+    })
+    return counts
+  }, [members])
+
   const visibleContacts = useMemo(
     () =>
       contacts
@@ -662,12 +668,12 @@ export default function OutlookAddressBookPage() {
       detail: cleanText(group.source_book),
       sourceBook: cleanText(group.source_book),
       group,
-      count: members.filter((member) => member.group_id === group.id).length,
+      count: groupMemberCounts.get(group.id) || 0,
     }))
     return [...contactItems, ...groupItems]
       .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, 600)
-  }, [members, visibleContacts, visibleGroups])
+  }, [groupMemberCounts, visibleContacts, visibleGroups])
 
   const addableContacts = useMemo(
     () =>
@@ -726,50 +732,39 @@ export default function OutlookAddressBookPage() {
     }
   }
 
-  async function loadAll() {
+  async function loadAll(options: { loadSecondary?: boolean } = {}) {
     setLoading(true)
     setMessage("")
     try {
-      const [contactRows, groupRows, memberRows] = await Promise.all([
-        loadTable<SharedContact>("shared_addressbook_contacts", "display_name"),
-        loadTable<SharedGroup>("shared_addressbook_groups", "name"),
-        loadTable<GroupMember>("shared_addressbook_group_members", "source_book"),
-      ])
+      const response = await fetch("/api/outlook-addressbook/bootstrap", {
+        cache: "no-store",
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to load Outlook address book.")
+      }
       contactDraftsRef.current = {}
       groupDraftsRef.current = {}
       contactSaveChainsRef.current = {}
       groupSaveChainsRef.current = {}
-      setContacts(contactRows)
-      setGroups(groupRows)
-      setMembers(memberRows)
+      setContacts((payload.contacts || []) as SharedContact[])
+      setGroups((payload.groups || []) as SharedGroup[])
+      setMembers((payload.members || []) as GroupMember[])
       setSelectedContactId("")
       setSelectedGroupId("")
       setSaving("saved")
+      if (options.loadSecondary !== false) {
+        window.setTimeout(() => {
+          void loadExchangeSyncStatus()
+          void loadRecentActivities()
+        }, 0)
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load Outlook address book.")
       setSaving("failed")
     } finally {
       setLoading(false)
     }
-  }
-
-  async function loadTable<T>(table: string, order: string) {
-    const allRows: T[] = []
-    const pageSize = 1000
-    let from = 0
-    while (true) {
-      const { data, error } = await supabase
-        .from(table)
-        .select("*")
-        .order(order, { ascending: true })
-        .range(from, from + pageSize - 1)
-      if (error) throw error
-      const batch = (data as T[]) || []
-      allRows.push(...batch)
-      if (batch.length < pageSize) break
-      from += pageSize
-    }
-    return allRows
   }
 
   async function loadRecentActivities() {
@@ -801,7 +796,7 @@ export default function OutlookAddressBookPage() {
       if (!response.ok) throw new Error(payload.message || "Unable to undo recent activity.")
       setSelectedSourceBook(SOURCE_ALL)
       markExchangeNeedsSync()
-      await loadAll()
+      await loadAll({ loadSecondary: false })
       await loadRecentActivities()
       setMessage("Undo applied. Press Sync Exchange when all changes are ready.")
     } catch (error) {

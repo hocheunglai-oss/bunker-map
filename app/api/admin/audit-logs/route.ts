@@ -12,6 +12,86 @@ import {
   listManagedAdminUsers,
 } from "@/lib/adminUsers"
 
+const PAGE_TABLES: Record<string, string[]> = {
+  ccinfo: [
+    "cc_countries",
+    "cc_companies",
+    "cc_ports",
+    "cc_documents",
+    "cc_company_files",
+    "cc_entry_files",
+    "cc_entry_folders",
+  ],
+  phonebook: ["phonebook_contacts", "phonebook_companies"],
+  "outlook-addressbook": [
+    "shared_addressbook_contacts",
+    "shared_addressbook_groups",
+    "shared_addressbook_group_members",
+  ],
+  "email-templates": ["email_templates"],
+  "user-management": ["admin_users", "admin_role_defaults"],
+  "event-calendar": ["office_calendar_store"],
+  "task-calendar": ["office_calendar_store"],
+  pricesetter: ["ports", "price_history", "remarks"],
+  "hongkong-price-history": ["ports", "price_history", "remarks"],
+  "taiwan-price-history": ["ports", "price_history", "remarks"],
+  "taiwan-remarks": ["remarks"],
+}
+
+const PAGE_ALIASES: Record<string, string> = {
+  outlookaddressbook: "outlook-addressbook",
+  outlooktemplates: "email-templates",
+  emailtemplates: "email-templates",
+}
+
+let managedUsersCache:
+  | {
+      expiresAt: number
+      users: Array<{ username: string; displayName: string }>
+    }
+  | undefined
+let managedUsersPromise:
+  | Promise<Array<{ username: string; displayName: string }>>
+  | undefined
+
+async function loadManagedUsersForFilters(
+  pages: Awaited<ReturnType<typeof getDiscoveredAdminPages>>,
+) {
+  if (managedUsersCache && managedUsersCache.expiresAt > Date.now()) {
+    return managedUsersCache.users
+  }
+  if (managedUsersPromise) return managedUsersPromise
+
+  managedUsersPromise = (async () => {
+    try {
+      const roleDefaults = await listManagedAdminRoleDefaults(pages)
+      const users = await listManagedAdminUsers(roleDefaults, pages)
+      const mapped = users.map((user) => ({
+        username: user.username,
+        displayName: user.displayName,
+      }))
+      managedUsersCache = {
+        expiresAt: Date.now() + 30_000,
+        users: mapped,
+      }
+      return mapped
+    } catch {
+      return []
+    } finally {
+      managedUsersPromise = undefined
+    }
+  })()
+
+  return managedUsersPromise
+}
+
+function rawOperationsForDisplay(operation: string | undefined) {
+  if (!operation || operation === "ALL") return undefined
+  if (operation === "UPDATE") return ["UPDATE", "INSERT"] as const
+  if (operation === "INSERT" || operation === "DELETE") return [operation] as const
+  return undefined
+}
+
 export async function GET(request: Request) {
   try {
     const session = await requireAdminPagePermission("audit-log", "view")
@@ -21,11 +101,27 @@ export async function GET(request: Request) {
       Math.max(Number(url.searchParams.get("limit") || 100), 1),
       150
     )
-    const pageId = url.searchParams.get("page")
+    const requestedPageId =
+      url.searchParams.get("page") || url.searchParams.get("table")
+    const pageId = requestedPageId
+      ? PAGE_ALIASES[requestedPageId] || requestedPageId
+      : null
     const operation = url.searchParams.get("operation")?.toUpperCase()
     const actor = url.searchParams.get("actor")
     const pages = await getDiscoveredAdminPages()
-    const records = await listAuditLogs({ limit: 500 })
+    const tableNames =
+      pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
+    const operations = rawOperationsForDisplay(operation)
+    const candidateLimit = Math.min(
+      Math.max(requestedLimit * (tableNames ? 2 : 3), requestedLimit),
+      500,
+    )
+    const records = await listAuditLogs({
+      limit: candidateLimit,
+      tableNames,
+      operations: operations ? [...operations] : undefined,
+      actorId: actor && actor !== "all" ? actor : undefined,
+    })
     const presented = await presentAuditLogs(records, pages)
     const logs = presented
       .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
@@ -38,13 +134,7 @@ export async function GET(request: Request) {
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
 
-    let managedUsers: Array<{ username: string; displayName: string }> = []
-    try {
-      const roleDefaults = await listManagedAdminRoleDefaults(pages)
-      managedUsers = await listManagedAdminUsers(roleDefaults, pages)
-    } catch {
-      managedUsers = []
-    }
+    const managedUsers = await loadManagedUsersForFilters(pages)
 
     const userMap = new Map<string, { value: string; label: string }>()
     const addUser = (value: string | null | undefined, label?: string | null) => {

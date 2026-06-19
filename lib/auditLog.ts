@@ -642,16 +642,35 @@ export function isUserAuditRecord(record: AuditLogRecord) {
   return true
 }
 
-export async function listAuditLogs(options: { limit?: number }) {
+export async function listAuditLogs(options: {
+  limit?: number
+  tableNames?: string[]
+  operations?: AuditOperation[]
+  actorId?: string | null
+}) {
   const supabase = getSupabaseAuditClient()
   const limit = Math.min(Math.max(options.limit || 100, 1), 500)
-  const { data, error } = await supabase
+  let query = supabase
     .from("audit_logs")
     .select(AUDIT_SELECT)
+    .eq("table_schema", "public")
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
     .limit(limit)
 
+  if (options.tableNames?.length) {
+    query = query.in("table_name", options.tableNames)
+  }
+  if (options.operations?.length === 1) {
+    query = query.eq("operation", options.operations[0])
+  } else if (options.operations && options.operations.length > 1) {
+    query = query.in("operation", options.operations)
+  }
+  if (options.actorId?.trim()) {
+    query = query.eq("actor_id", options.actorId.trim())
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return ((data || []) as unknown as AuditLogRow[])
     .map(mapAuditLog)
