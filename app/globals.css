@@ -654,6 +654,175 @@ body {
   height: 38px;
 }
 
+.fc-admin-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(217, 232, 225, 0.55), transparent 28%),
+    var(--fc-admin-page-bg);
+  padding: 28px;
+}
+
+.fc-admin-login-panel {
+  width: min(410px, 100%);
+  display: grid;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 28px;
+  background: var(--fc-admin-panel-bg);
+  padding: 30px;
+  box-shadow: 0 22px 54px rgba(29, 29, 31, 0.1);
+}
+
+.fc-admin-login-panel .fc-admin-logo-link {
+  margin-bottom: 8px;
+}
+
+.fc-admin-login-panel .fc-admin-logo {
+  height: 118px;
+}
+
+.fc-admin-login-heading {
+  margin-bottom: 25px;
+  text-align: center;
+}
+
+.fc-admin-login-heading p {
+  margin: 0 0 7px;
+  color: #355e52;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+}
+
+.fc-admin-login-heading h1 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.fc-admin-login-heading span {
+  display: block;
+  margin-top: 8px;
+  color: var(--fc-admin-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fc-admin-login-back {
+  justify-self: center;
+  margin-top: 17px;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.fc-admin-login-back:hover {
+  color: var(--fc-admin-link);
+}
+
+.fc-admin-welcome-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(217, 232, 225, 0.32), transparent 24%),
+    var(--fc-admin-page-bg);
+  padding: 48px 28px;
+}
+
+.fc-admin-welcome-content {
+  width: min(700px, 100%);
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.fc-admin-welcome-mark {
+  width: 78px;
+  height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c7d8cf;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 14px 34px rgba(53, 94, 82, 0.1);
+}
+
+.fc-admin-welcome-mark img {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+}
+
+.fc-admin-welcome-kicker {
+  margin: 25px 0 11px;
+  color: #56756c;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+}
+
+.fc-admin-welcome-content h1 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: clamp(34px, 5vw, 56px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+.fc-admin-welcome-message {
+  margin: 14px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: clamp(17px, 2vw, 21px);
+  line-height: 1.5;
+}
+
+.fc-admin-welcome-hint {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--fc-admin-muted);
+  margin-top: 34px;
+  padding: 10px 13px 10px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 10px 28px rgba(29, 29, 31, 0.05);
+}
+
+.fc-admin-welcome-hint > span {
+  color: #355e52;
+  font-size: 18px;
+}
+
+.fc-admin-welcome-hint kbd {
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fc-admin-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  font-family: var(--fc-admin-font);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .fc-admin-folder-page {
   min-height: 100vh;
   display: flex;
@@ -1064,6 +1233,32 @@ body {
 }
 
 @media (max-width: 640px) {
+  .fc-admin-login-page {
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  .fc-admin-login-panel {
+    margin-top: 5vh;
+    border-radius: 22px;
+    padding: 24px 20px;
+  }
+
+  .fc-admin-welcome-page {
+    min-height: calc(100vh - 58px);
+    padding: 30px 22px 50px;
+  }
+
+  .fc-admin-welcome-content h1 {
+    font-size: 36px;
+  }
+
+  .fc-admin-welcome-hint {
+    width: 100%;
+    justify-content: center;
+    margin-top: 28px;
+  }
+
   .fc-admin-folder-page {
     padding: 18px;
   }

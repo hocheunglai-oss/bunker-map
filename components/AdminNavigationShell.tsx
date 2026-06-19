@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import {
@@ -52,6 +52,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
@@ -72,6 +73,71 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     document.addEventListener("keydown", closeOnEscape)
     return () => document.removeEventListener("keydown", closeOnEscape)
   }, [mobileOpen])
+
+  useEffect(() => {
+    if (!authenticated || loading) return
+
+    const focusSearch = (event: KeyboardEvent) => {
+      const target = event.target
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+
+      if (event.key === "/" && !typing) {
+        event.preventDefault()
+        setCollapsed(false)
+        if (window.matchMedia("(max-width: 980px)").matches) {
+          setMobileOpen(true)
+        }
+        window.requestAnimationFrame(() => searchInputRef.current?.focus())
+      }
+    }
+
+    document.addEventListener("keydown", focusSearch)
+    return () => document.removeEventListener("keydown", focusSearch)
+  }, [authenticated, loading])
+
+  useEffect(() => {
+    if (!authenticated || loading) return
+
+    const accessiblePaths = pages
+      .filter(
+        (page) =>
+          isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"),
+      )
+      .map((page) => page.path)
+      .filter((path) => path !== pathname)
+
+    let cancelled = false
+    let nextIndex = 0
+    let timer: number | undefined
+
+    const prefetchNext = () => {
+      if (cancelled || nextIndex >= accessiblePaths.length) return
+      router.prefetch(accessiblePaths[nextIndex])
+      nextIndex += 1
+      timer = window.setTimeout(prefetchNext, 180)
+    }
+
+    const idleCallback =
+      "requestIdleCallback" in window
+        ? window.requestIdleCallback(prefetchNext, { timeout: 1200 })
+        : undefined
+
+    if (idleCallback === undefined) {
+      timer = window.setTimeout(prefetchNext, 500)
+    }
+
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      if (idleCallback !== undefined && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleCallback)
+      }
+    }
+  }, [authenticated, loading, pages, pathname, permissions, role, router])
 
   const navigationGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -120,7 +186,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     )
   }, [pages, permissions, query, role])
 
-  if (pathname === "/admin" || loading || !authenticated) {
+  if (loading || !authenticated) {
     return <>{children}</>
   }
 
@@ -251,6 +317,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
             <span className="fc-admin-sidebar-search-icon" aria-hidden="true">⌕</span>
             <span className="sr-only">Search admin tools</span>
             <input
+              ref={searchInputRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
