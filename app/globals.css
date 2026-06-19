@@ -221,14 +221,14 @@ body {
 }
 
 .fc-admin-sidebar-top {
-  min-height: 84px;
+  min-height: 54px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-  padding: 12px 12px 12px 16px;
+  padding: 10px 12px;
 }
 
 .fc-admin-sidebar-brand {
@@ -441,26 +441,12 @@ body {
   letter-spacing: 0.12em;
 }
 
-.fc-admin-sidebar-permission-label > span,
-.fc-admin-sidebar-permission-key span {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 999px;
+.fc-admin-sidebar-permission.is-edit .fc-admin-sidebar-permission-label {
+  color: #24733a;
 }
 
-.fc-admin-sidebar-permission.is-edit .fc-admin-sidebar-permission-label > span,
-.fc-admin-sidebar-permission-key .is-edit {
-  background: var(--fc-admin-success-bg);
-}
-
-.fc-admin-sidebar-permission.is-view .fc-admin-sidebar-permission-label > span,
-.fc-admin-sidebar-permission-key .is-view {
-  background: var(--fc-admin-warning-bg);
-}
-
-.fc-admin-sidebar-permission-key .is-none {
-  background: #a5a5aa;
+.fc-admin-sidebar-permission.is-view .fc-admin-sidebar-permission-label {
+  color: #8a6500;
 }
 
 .fc-admin-sidebar-link-list {
@@ -473,7 +459,7 @@ body {
   min-height: 36px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 7px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -505,17 +491,6 @@ body {
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.fc-admin-sidebar-link-access {
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-radius: 999px;
-  padding: 3px 4px;
-  font-size: 7px;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  opacity: 0.72;
 }
 
 .fc-admin-sidebar-no-results {
@@ -586,7 +561,7 @@ body {
 
 .fc-admin-sidebar-footer-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 7px;
 }
 
@@ -622,7 +597,7 @@ body {
 }
 
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-top {
-  min-height: 84px;
+  min-height: 54px;
   justify-content: center;
   padding: 10px 7px;
 }
@@ -676,11 +651,13 @@ body {
 }
 
 .fc-admin-login-panel .fc-admin-logo-link {
-  margin-bottom: 8px;
+  margin-bottom: 24px;
 }
 
-.fc-admin-login-panel .fc-admin-logo {
-  height: 118px;
+.fc-admin-login-logo {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
 }
 
 .fc-admin-login-heading {
@@ -744,32 +721,6 @@ body {
   text-align: center;
 }
 
-.fc-admin-welcome-mark {
-  width: 78px;
-  height: 78px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #c7d8cf;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 14px 34px rgba(53, 94, 82, 0.1);
-}
-
-.fc-admin-welcome-mark img {
-  width: 60px;
-  height: 60px;
-  object-fit: contain;
-}
-
-.fc-admin-welcome-kicker {
-  margin: 25px 0 11px;
-  color: #56756c;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.2em;
-}
-
 .fc-admin-welcome-content h1 {
   margin: 0;
   color: var(--fc-admin-heading);
@@ -784,43 +735,6 @@ body {
   color: var(--fc-admin-muted);
   font-size: clamp(17px, 2vw, 21px);
   line-height: 1.5;
-}
-
-.fc-admin-welcome-hint {
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid var(--fc-admin-border);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--fc-admin-muted);
-  margin-top: 34px;
-  padding: 10px 13px 10px 16px;
-  font-size: 12px;
-  font-weight: 700;
-  box-shadow: 0 10px 28px rgba(29, 29, 31, 0.05);
-}
-
-.fc-admin-welcome-hint > span {
-  color: #355e52;
-  font-size: 18px;
-}
-
-.fc-admin-welcome-hint kbd {
-  min-width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--fc-admin-border);
-  border-bottom-width: 2px;
-  border-radius: 6px;
-  background: var(--fc-admin-button-bg);
-  color: var(--fc-admin-button-text);
-  font-family: var(--fc-admin-font);
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .fc-admin-folder-page {
@@ -1175,9 +1089,9 @@ body {
   }
 
   .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-top {
-    min-height: 84px;
-    justify-content: space-between;
-    padding: 12px 12px 12px 16px;
+    min-height: 54px;
+    justify-content: flex-end;
+    padding: 10px 12px;
   }
 
   .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-brand,

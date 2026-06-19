@@ -4,6 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import {
+  clearAdminClientCache,
+  fetchAdminClientJson,
+  OUTLOOK_TEMPLATES_CACHE_KEY,
+  readAdminClientCache,
+} from "@/lib/adminClientCache"
 
 type EmailTemplate = {
   id: string
@@ -173,6 +179,19 @@ function getFolderParts(folder: string) {
     .filter(Boolean)
 }
 
+function expandFolderPathValue(
+  folderPath: string,
+  current: Record<string, boolean> = {},
+) {
+  const next: Record<string, boolean> = { ...current, "": true }
+  let cursor = ""
+  getFolderParts(folderPath).forEach((part) => {
+    cursor = cursor ? `${cursor} / ${part}` : part
+    next[cursor] = true
+  })
+  return next
+}
+
 function buildFolderTree(templates: EmailTemplate[]) {
   const root = createFolderNode("All templates", "", 0)
   const index: Record<string, FolderNode> = { "": root }
@@ -329,14 +348,28 @@ export default function EmailTemplatesAdminPage() {
   const router = useRouter()
   const isMobile = useIsMobile()
   const { loading, authenticated } = useSimpleAdminAuth()
+  const [initialLibrary] = useState(() =>
+    readAdminClientCache<TemplateLibraryResponse>(OUTLOOK_TEMPLATES_CACHE_KEY),
+  )
+  const initialTemplates = initialLibrary?.templates || []
+  const initialTree = buildFolderTree(initialTemplates)
+  const initialFolder = initialTree.index["Outgoing / Bunker"]
+    ? "Outgoing / Bunker"
+    : Object.keys(initialTree.index).find((folder) => folder) || ""
   const editorRef = useRef<HTMLDivElement | null>(null)
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyVersionRef = useRef(0)
   const pendingTemplateRef = useRef<EmailTemplate | null>(null)
-  const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [selectedFolder, setSelectedFolder] = useState("")
-  const [selectedId, setSelectedId] = useState("")
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ "": true })
+  const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates)
+  const [selectedFolder, setSelectedFolder] = useState(initialFolder)
+  const [selectedId, setSelectedId] = useState(
+    initialTemplates.find((template) => folderContains(template, initialFolder))?.id ||
+      initialTemplates[0]?.id ||
+      "",
+  )
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>(() =>
+    expandFolderPathValue(initialFolder, { "": true }),
+  )
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [customFolders, setCustomFolders] = useState<string[]>([])
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
@@ -345,15 +378,17 @@ export default function EmailTemplatesAdminPage() {
   const [folderNameDraft, setFolderNameDraft] = useState("")
   const [draggedTemplateId, setDraggedTemplateId] = useState("")
   const [dropTargetFolder, setDropTargetFolder] = useState("")
-  const [contacts, setContacts] = useState<AddressContact[]>([])
-  const [groups, setGroups] = useState<AddressGroup[]>([])
+  const [contacts, setContacts] = useState<AddressContact[]>(initialLibrary?.contacts || [])
+  const [groups, setGroups] = useState<AddressGroup[]>(initialLibrary?.groups || [])
   const [recipientPickerField, setRecipientPickerField] = useState<RecipientField | null>(null)
   const [recipientSearch, setRecipientSearch] = useState("")
   const [search, setSearch] = useState("")
   const [message, setMessage] = useState("")
-  const [saveState, setSaveState] = useState<SaveState>("idle")
+  const [saveState, setSaveState] = useState<SaveState>(initialLibrary ? "saved" : "idle")
   const [saveRevision, setSaveRevision] = useState(0)
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(
+    initialLibrary?.lastUpdatedAt || null,
+  )
 
   useEffect(() => {
     document.title = "Outlook Templates - FC Uno"
@@ -406,10 +441,10 @@ export default function EmailTemplatesAdminPage() {
 
     async function loadTemplates() {
       try {
-        const response = await fetch("/api/admin/email-templates", { cache: "no-store" })
-        if (!response.ok) throw new Error("Failed to load templates.")
-
-        const data = (await response.json()) as TemplateLibraryResponse
+        const data = await fetchAdminClientJson<TemplateLibraryResponse>(
+          OUTLOOK_TEMPLATES_CACHE_KEY,
+          "/api/admin/email-templates",
+        )
         const loadedTemplates = data.templates || []
         const built = buildFolderTree(loadedTemplates)
         const preferredFolder = built.index["Outgoing / Bunker"]
@@ -456,16 +491,11 @@ export default function EmailTemplatesAdminPage() {
   }, [authenticated, saveRevision, saveState])
 
   function expandFolderPath(folderPath: string, current: Record<string, boolean> = {}) {
-    const next: Record<string, boolean> = { ...current, "": true }
-    let cursor = ""
-    getFolderParts(folderPath).forEach((part) => {
-      cursor = cursor ? `${cursor} / ${part}` : part
-      next[cursor] = true
-    })
-    return next
+    return expandFolderPathValue(folderPath, current)
   }
 
   function markDirty(template: EmailTemplate) {
+    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
     dirtyVersionRef.current += 1
     pendingTemplateRef.current = template
     setSaveState("dirty")
@@ -539,6 +569,7 @@ export default function EmailTemplatesAdminPage() {
 
   async function saveTemplates(templatesToSave: EmailTemplate[]) {
     if (templatesToSave.length === 0) return
+    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
     setSaveState("saving")
     setMessage("")
 
@@ -572,6 +603,7 @@ export default function EmailTemplatesAdminPage() {
   }
 
   async function deleteTemplate(templateId: string) {
+    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     pendingTemplateRef.current = null
     dirtyVersionRef.current += 1

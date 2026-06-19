@@ -175,8 +175,19 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
       const method =
         init?.method?.toUpperCase() ||
         (input instanceof Request ? input.method.toUpperCase() : "GET")
+      const requestUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url
+      const requestPath = new URL(requestUrl, window.location.origin).pathname
 
-      if (!canEdit && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+      if (
+        !canEdit &&
+        requestPath !== "/api/admin/logout" &&
+        !["GET", "HEAD", "OPTIONS"].includes(method)
+      ) {
         return Promise.resolve(
           new Response(
             JSON.stringify({

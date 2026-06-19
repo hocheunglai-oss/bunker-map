@@ -1,10 +1,15 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
+import {
+  clearAdminClientCache,
+  fetchAdminClientJson,
+  OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
+  OUTLOOK_TEMPLATES_CACHE_KEY,
+} from "@/lib/adminClientCache"
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
@@ -102,11 +107,21 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!authenticated || loading) return
 
-    const accessiblePaths = pages
+    const accessiblePages = pages
       .filter(
         (page) =>
           isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"),
       )
+    const priorityIds = ["outlook-addressbook", "email-templates"]
+    const accessiblePaths = [...accessiblePages]
+      .sort((a, b) => {
+        const aPriority = priorityIds.indexOf(a.id)
+        const bPriority = priorityIds.indexOf(b.id)
+        if (aPriority === bPriority) return 0
+        if (aPriority === -1) return 1
+        if (bPriority === -1) return -1
+        return aPriority - bPriority
+      })
       .map((page) => page.path)
       .filter((path) => path !== pathname)
 
@@ -130,9 +145,25 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       timer = window.setTimeout(prefetchNext, 500)
     }
 
+    const warmTimer = window.setTimeout(() => {
+      if (accessiblePages.some((page) => page.id === "outlook-addressbook")) {
+        void fetchAdminClientJson(
+          OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
+          "/api/outlook-addressbook/bootstrap",
+        ).catch(() => undefined)
+      }
+      if (accessiblePages.some((page) => page.id === "email-templates")) {
+        void fetchAdminClientJson(
+          OUTLOOK_TEMPLATES_CACHE_KEY,
+          "/api/admin/email-templates",
+        ).catch(() => undefined)
+      }
+    }, 350)
+
     return () => {
       cancelled = true
       if (timer !== undefined) window.clearTimeout(timer)
+      window.clearTimeout(warmTimer)
       if (idleCallback !== undefined && "cancelIdleCallback" in window) {
         window.cancelIdleCallback(idleCallback)
       }
@@ -208,23 +239,21 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
 
   async function handleLogout() {
     await fetch("/api/admin/logout", { method: "POST" })
+    clearAdminClientCache()
     window.localStorage.removeItem("bunker_admin_actor")
-    router.push("/admin")
-    router.refresh()
+    window.location.assign("/admin")
   }
 
   function renderPermissionSection(
-    label: "EDIT" | "VIEW",
+    permission: VisiblePermission,
+    label: "EDITOR" | "VIEWER",
     entries: Array<{ page: AdminPageDefinition; permission: VisiblePermission }>,
   ) {
     if (entries.length === 0) return null
 
     return (
-      <div className={`fc-admin-sidebar-permission is-${label.toLowerCase()}`}>
-        <div className="fc-admin-sidebar-permission-label">
-          <span aria-hidden="true" />
-          {label}
-        </div>
+      <div className={`fc-admin-sidebar-permission is-${permission}`}>
+        <div className="fc-admin-sidebar-permission-label">{label}</div>
         <div className="fc-admin-sidebar-link-list">
           {entries.map(({ page }) => {
             const active =
@@ -241,7 +270,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                 aria-current={active ? "page" : undefined}
               >
                 <span>{page.label}</span>
-                <span className="fc-admin-sidebar-link-access">{label}</span>
               </Link>
             )
           })}
@@ -283,14 +311,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         data-admin-view-safe="true"
       >
         <div className="fc-admin-sidebar-top">
-          <Link href="/admin" className="fc-admin-sidebar-brand" aria-label="Admin dashboard">
-            <Image src="/uno-transparent.png" alt="" width={48} height={56} />
-            <span>
-              <strong>FC UNO</strong>
-              <small>ADMIN TOOLS</small>
-            </span>
-          </Link>
-
           <div className="fc-admin-sidebar-controls">
             <button
               type="button"
@@ -346,8 +366,8 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                   </button>
                   {expanded ? (
                     <div className="fc-admin-sidebar-folder-body">
-                      {renderPermissionSection("EDIT", folder.editPages)}
-                      {renderPermissionSection("VIEW", folder.viewPages)}
+                      {renderPermissionSection("edit", "EDITOR", folder.editPages)}
+                      {renderPermissionSection("view", "VIEWER", folder.viewPages)}
                     </div>
                   ) : null}
                 </section>
@@ -359,11 +379,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
             ) : null}
           </nav>
 
-          <div className="fc-admin-sidebar-permission-key" aria-label="Permission key">
-            <div><span className="is-edit" /> EDIT — changes allowed</div>
-            <div><span className="is-view" /> VIEW — read only</div>
-            <div><span className="is-none" /> NONE — tool hidden</div>
-          </div>
         </div>
 
         <div className="fc-admin-sidebar-footer">
@@ -371,13 +386,9 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
             <span>{(displayName || "U").slice(0, 1).toUpperCase()}</span>
             <div>
               <strong>{displayName || "Admin user"}</strong>
-              <small>{isAdminRole(role) ? "ADMIN · FULL EDIT" : "PERMISSION CONTROLLED"}</small>
             </div>
           </div>
           <div className="fc-admin-sidebar-footer-actions">
-            <Link href="/admin" className="fc-admin-sidebar-footer-link">
-              Dashboard
-            </Link>
             <button type="button" onClick={handleLogout}>
               Logout
             </button>

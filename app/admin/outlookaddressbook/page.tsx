@@ -6,6 +6,12 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import type { AuditLogRecord } from "@/lib/auditLog"
+import {
+  clearAdminClientCache,
+  fetchAdminClientJson,
+  OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
+  readAdminClientCache,
+} from "@/lib/adminClientCache"
 
 type SharedContact = {
   id: string
@@ -34,6 +40,12 @@ type GroupMember = {
   group_id: string
   contact_id: string
   source_book: string
+}
+
+type OutlookAddressBookBootstrap = {
+  contacts: SharedContact[]
+  groups: SharedGroup[]
+  members: GroupMember[]
 }
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
@@ -496,9 +508,12 @@ export default function OutlookAddressBookPage() {
   const router = useRouter()
   const isMobile = useIsMobile()
   const { loading: authLoading, authenticated, username, displayName } = useSimpleAdminAuth()
-  const [contacts, setContacts] = useState<SharedContact[]>([])
-  const [groups, setGroups] = useState<SharedGroup[]>([])
-  const [members, setMembers] = useState<GroupMember[]>([])
+  const [initialBootstrap] = useState(() =>
+    readAdminClientCache<OutlookAddressBookBootstrap>(OUTLOOK_ADDRESS_BOOK_CACHE_KEY),
+  )
+  const [contacts, setContacts] = useState<SharedContact[]>(initialBootstrap?.contacts || [])
+  const [groups, setGroups] = useState<SharedGroup[]>(initialBootstrap?.groups || [])
+  const [members, setMembers] = useState<GroupMember[]>(initialBootstrap?.members || [])
   const [activeView, setActiveView] = useState<ActiveView>("contacts")
   const [selectedContactId, setSelectedContactId] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState("")
@@ -519,7 +534,7 @@ export default function OutlookAddressBookPage() {
   const [recentActivityLogs, setRecentActivityLogs] = useState<AuditLogRecord[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [undoingActivityId, setUndoingActivityId] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initialBootstrap)
   const [saving, setSaving] = useState<SaveState>("idle")
   const [message, setMessage] = useState("")
   const [exchangeSyncStatus, setExchangeSyncStatus] = useState<ExchangeSyncStatus | null>(null)
@@ -717,6 +732,7 @@ export default function OutlookAddressBookPage() {
   }
 
   function markExchangeNeedsSync() {
+    clearAdminClientCache(OUTLOOK_ADDRESS_BOOK_CACHE_KEY)
     if (!exchangeSyncing) setExchangeButtonLabel("Sync Exchange")
     setExchangeSyncStartedAt(null)
   }
@@ -733,16 +749,13 @@ export default function OutlookAddressBookPage() {
   }
 
   async function loadAll(options: { loadSecondary?: boolean } = {}) {
-    setLoading(true)
+    setLoading(!readAdminClientCache(OUTLOOK_ADDRESS_BOOK_CACHE_KEY))
     setMessage("")
     try {
-      const response = await fetch("/api/outlook-addressbook/bootstrap", {
-        cache: "no-store",
-      })
-      const payload = await response.json()
-      if (!response.ok) {
-        throw new Error(payload.message || "Unable to load Outlook address book.")
-      }
+      const payload = await fetchAdminClientJson<OutlookAddressBookBootstrap>(
+        OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
+        "/api/outlook-addressbook/bootstrap",
+      )
       contactDraftsRef.current = {}
       groupDraftsRef.current = {}
       contactSaveChainsRef.current = {}
@@ -836,8 +849,7 @@ export default function OutlookAddressBookPage() {
   function queueEntitySave(chainsRef: { current: Record<string, Promise<void>> }, entityId: string, operation: () => Promise<void>) {
     const previous = chainsRef.current[entityId] || Promise.resolve()
     const chained = previous.catch(() => undefined).then(operation)
-    let tracked: Promise<void>
-    tracked = chained.finally(() => {
+    const tracked: Promise<void> = chained.finally(() => {
       if (chainsRef.current[entityId] === tracked) {
         delete chainsRef.current[entityId]
       }

@@ -65,19 +65,10 @@ export default function AdminPage() {
     return (
       <section className="fc-admin-welcome-page">
         <div className="fc-admin-welcome-content">
-          <div className="fc-admin-welcome-mark" aria-hidden="true">
-            <Image src="/uno-transparent.png" alt="" width={72} height={72} priority />
-          </div>
-          <p className="fc-admin-welcome-kicker">FC UNO ADMIN</p>
           <h1>Welcome{displayName ? `, ${displayName}` : ""}</h1>
           <p className="fc-admin-welcome-message">
             What would you like to work on?
           </p>
-          <div className="fc-admin-welcome-hint">
-            <span aria-hidden="true">⌕</span>
-            Select a tool or search from the sidebar
-            <kbd>/</kbd>
-          </div>
         </div>
       </section>
     )
@@ -85,23 +76,17 @@ export default function AdminPage() {
 
   return (
     <div className="fc-admin-login-page">
-      <section className="fc-admin-login-panel" aria-labelledby="admin-login-title">
+      <section className="fc-admin-login-panel" aria-label="Sign in">
         <Link href="/" className="fc-admin-logo-link">
           <Image
-            src="/uno-transparent.png"
-            alt="FC Uno"
-            className="fc-admin-logo"
-            width={180}
-            height={156}
+            src="/uno-logo.png"
+            alt="UNO"
+            className="fc-admin-login-logo"
+            width={636}
+            height={636}
             priority
           />
         </Link>
-
-        <div className="fc-admin-login-heading">
-          <p>FC UNO</p>
-          <h1 id="admin-login-title">Admin login</h1>
-          <span>Sign in to access your assigned tools.</span>
-        </div>
 
         <form onSubmit={handleLogin} className="fc-admin-login-form">
           <label className="fc-admin-auth-field">
