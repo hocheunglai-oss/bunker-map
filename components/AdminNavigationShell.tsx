@@ -76,12 +76,6 @@ function readStoredGroups() {
   }
 }
 
-function adminHeaderTitle(label: string) {
-  return label
-    .toLowerCase()
-    .replace(/\b\w/g, (character) => character.toUpperCase())
-}
-
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -318,16 +312,31 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         }
 
         const matched = ACTION_PATTERNS.find(({ pattern }) => pattern.test(label))
-        if (matched) element.dataset.adminAction = matched.action
+        if (matched) {
+          element.dataset.adminAction = matched.action
+          if (/\bundo(?:ing)?\b/i.test(label)) {
+            element.dataset.adminUndoButton = "true"
+            element.setAttribute("aria-label", label)
+            element.setAttribute("title", label)
+          }
+        }
         element.dataset.adminUniversalButton = "true"
       })
+
+      if (currentPage?.id === "ccinfo") {
+        content.querySelectorAll<HTMLElement>("div, p, span").forEach((element) => {
+          if (element.textContent?.trim().toLowerCase() === "country and company info") {
+            element.dataset.adminDuplicateTitle = "true"
+          }
+        })
+      }
     }
 
     applyUniversalAdminUi()
     const observer = new MutationObserver(applyUniversalAdminUi)
     observer.observe(content, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [authenticated, currentFolderLabel, loading, pathname])
+  }, [authenticated, currentFolderLabel, currentPage?.id, loading, pathname])
 
   if (loading || !authenticated) {
     return <>{children}</>
@@ -523,12 +532,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       </aside>
 
       <div className="fc-admin-app-content">
-        {currentPage && pathname !== "/admin" ? (
-          <header className="fc-admin-universal-page-header">
-            <div>{currentFolderLabel}</div>
-            <h1>{adminHeaderTitle(currentPage.label)}</h1>
-          </header>
-        ) : null}
         {children}
       </div>
     </div>

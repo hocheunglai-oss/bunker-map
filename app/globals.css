@@ -600,33 +600,10 @@ body {
   min-height: 100vh;
 }
 
-.fc-admin-universal-page-header {
-  display: grid;
-  gap: 4px;
-  border-bottom: 1px solid var(--fc-admin-border);
-  background: var(--fc-admin-panel-bg);
-  padding: 16px 20px;
-}
-
-.fc-admin-universal-page-header > div {
-  color: var(--fc-admin-link);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.fc-admin-universal-page-header h1 {
-  margin: 0;
-  color: var(--fc-admin-heading);
-  font-size: 25px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
 .fc-admin-app-content [data-admin-legacy-back="true"],
 .fc-admin-app-content [data-admin-legacy-heading="true"],
-.fc-admin-app-content [data-admin-legacy-folder="true"] {
+.fc-admin-app-content [data-admin-legacy-folder="true"],
+.fc-admin-app-content [data-admin-duplicate-title="true"] {
   display: none !important;
 }
 
@@ -668,6 +645,21 @@ body {
   border-color: var(--fc-admin-warning-border) !important;
   background: var(--fc-admin-warning-bg) !important;
   color: var(--fc-admin-warning-text) !important;
+}
+
+.fc-admin-app-content [data-admin-undo-button="true"] {
+  width: 36px !important;
+  min-width: 36px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  font-size: 0 !important;
+}
+
+.fc-admin-app-content [data-admin-undo-button="true"]::before {
+  content: "↶";
+  font-size: 21px;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .fc-admin-mobile-menu,
