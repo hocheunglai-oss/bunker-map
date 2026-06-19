@@ -976,7 +976,7 @@ export default function EmailTemplatesAdminPage() {
               style={inputStyle}
             />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px" }}>
-              <button type="button" onClick={() => openCreateFolderDialog(selectedFolder)} style={primaryButtonStyle}>
+              <button type="button" onClick={() => openCreateFolderDialog(selectedFolder)} style={primaryButtonStyle} data-admin-button-style="preserve">
                 New Folder
               </button>
               <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle}>

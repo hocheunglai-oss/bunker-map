@@ -1386,7 +1386,7 @@ export default function OutlookAddressBookPage() {
               onMouseEnter={clearCreateMenuHideTimer}
               onMouseLeave={scheduleCreateMenuHide}
             >
-              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group">
+              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group" data-admin-button-style="preserve">
                 +
               </button>
               {createMenuOpen ? (

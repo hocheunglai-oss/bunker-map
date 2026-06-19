@@ -34,17 +34,24 @@ const SIDEBAR_COLLAPSED_KEY = "fc-admin-sidebar-collapsed"
 const SIDEBAR_GROUPS_KEY = "fc-admin-sidebar-groups"
 
 const ACTION_PATTERNS: Array<{
-  action: "save" | "sync" | "backup" | "delete" | "undo" | "add" | "publish" | "check"
+  action: "commit" | "delete" | "proceed" | "caution"
   pattern: RegExp
 }> = [
-  { action: "save", pattern: /\b(save|apply)\b/i },
-  { action: "sync", pattern: /\bsync(?:ing)?\b/i },
-  { action: "backup", pattern: /\bback\s*up\b|\bbackup\b/i },
-  { action: "delete", pattern: /\bdelete\b/i },
-  { action: "undo", pattern: /\bundo\b/i },
-  { action: "add", pattern: /\b(add|new|create|insert|upload)\b|^\+$/i },
-  { action: "publish", pattern: /\bpublish\b/i },
-  { action: "check", pattern: /\bcheck\b/i },
+  {
+    action: "commit",
+    pattern:
+      /\b(save|saved|saving|apply|sync|syncing|synced|backup|back\s*up|upload|uploading|import|importing|add|create|creating|new|insert)\b|^\+$/i,
+  },
+  { action: "delete", pattern: /\b(delete|deleting|remove|removing)\b/i },
+  {
+    action: "caution",
+    pattern: /\b(check|undo|undoing|rebuild|restore)\b/i,
+  },
+  {
+    action: "proceed",
+    pattern:
+      /\b(refresh|refreshing|send|sending|sent|notify|close|cancel|done|download|export|publish|publishing|published|open|next|previous|retry)\b/i,
+  },
 ]
 
 function defaultExpandedGroups() {
@@ -291,6 +298,12 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
 
         if (/^(back|back to admin)$/i.test(label)) {
           element.dataset.adminLegacyBack = "true"
+          return
+        }
+
+        if (/^(show|hide)\s+delete/i.test(label)) {
+          delete element.dataset.adminAction
+          element.dataset.adminUniversalButton = "true"
           return
         }
 
