@@ -1,63 +1,55 @@
-.page,
-.loading {
+.page {
   min-height: 100vh;
   padding: 24px;
+  overflow-x: auto;
   background: var(--fc-admin-page-bg);
-  color: #171717;
+  color: #111;
   font-family: var(--fc-admin-font), Roboto, Arial, sans-serif;
 }
 
-.loading {
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-}
-
 .toolbar {
-  width: min(920px, 100%);
+  width: min(210mm, 100%);
   min-height: 42px;
   margin: 0 auto 16px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.toolbar button {
+.toolbar button,
+.modalActions button,
+.modalHeader button {
   min-height: 36px;
   border: 1px solid var(--fc-admin-button-border);
   border-radius: 999px;
   padding: 7px 16px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
   cursor: pointer;
 }
 
-.toolbar .neutralButton {
-  background: #fff;
-  color: #303630;
-}
-
-.toolbar span {
-  margin-left: auto;
-  color: #5d655f;
-  font-size: 12px;
-  font-weight: 700;
+.toolbar button:disabled,
+.modalActions button:disabled,
+.modalHeader button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .sheet {
+  position: relative;
   box-sizing: border-box;
-  width: min(210mm, 100%);
-  min-height: 280mm;
+  width: 210mm;
+  height: 297mm;
   margin: 0 auto;
-  padding: 11mm 10mm 8mm;
-  display: flex;
-  flex-direction: column;
-  gap: 7mm;
   background: #fff;
-  border: 1px solid #d8d8d8;
+  border: 1px solid #777;
   box-shadow: 0 12px 30px rgba(30, 35, 31, 0.08);
-  font-size: 10pt;
+  font-size: 7pt;
+  line-height: 1.05;
 }
 
 .sheet input,
@@ -76,53 +68,88 @@
   background: #fff8cf;
 }
 
-.topLine {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 12mm;
+.capsInput {
+  text-transform: uppercase;
 }
 
-.imoField {
+.vesselLine {
+  position: absolute;
+  top: 10mm;
+  left: 13.2mm;
   display: flex;
   align-items: center;
-  gap: 3mm;
-  font-size: 22pt;
+  gap: 1.6mm;
+  font-size: 12pt;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.vesselLine input {
+  width: 92mm;
+  font-size: 12pt;
   font-weight: 900;
 }
 
-.imoField::before {
-  content: "–";
+.vesselLine input::placeholder {
+  color: #111;
+  opacity: 0.32;
 }
 
-.imoField input {
-  width: 55mm;
-  border-bottom: 1.5px solid #111;
-  font-size: 16pt;
-  font-weight: 800;
+.smallSquare {
+  width: 3mm;
+  height: 3mm;
+  border: 1.2px solid #111;
 }
 
-.identityFields {
+.topRight {
+  position: absolute;
+  top: 9.6mm;
+  right: 12mm;
   display: grid;
-  grid-template-columns: 30mm 13mm;
-  gap: 2mm;
+  grid-template-columns: 20mm auto auto;
+  align-items: center;
+  gap: 1.5mm;
+  font-size: 5.5pt;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
-.identityFields input {
-  width: 100%;
-  border-bottom: 1px solid #111;
-  text-align: center;
+.imoStamp {
+  box-sizing: border-box;
+  height: 8.8mm;
+  padding: 1mm 1.2mm;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.8mm;
+  border: 1.4px dashed #777;
+}
+
+.imoStamp span {
+  font-size: 4.8pt;
+  color: #555;
+}
+
+.imoStamp input {
+  width: 12mm;
+  font-size: 6pt;
   font-weight: 800;
 }
 
 .detailsTable {
+  position: absolute;
+  top: 21mm;
+  left: 14.4mm;
+  width: 169.2mm;
   border: 1px solid #111;
 }
 
 .detailsTable label {
+  box-sizing: border-box;
+  height: 4.2mm;
   display: grid;
-  grid-template-columns: 43mm 1fr;
-  min-height: 8mm;
+  grid-template-columns: 35mm 1fr;
+  align-items: center;
 }
 
 .detailsTable label + label {
@@ -130,130 +157,303 @@
 }
 
 .detailsTable span {
-  display: flex;
-  align-items: center;
-  padding: 1mm 2.5mm;
-  border-right: 1px solid #111;
-  font-weight: 700;
+  padding-left: 2mm;
+  font-weight: 800;
 }
 
 .detailsTable input {
-  padding: 1mm 2.5mm;
+  height: 100%;
+  padding: 0 1.5mm;
+  font-size: 7pt;
+  font-weight: 800;
 }
 
 .workingArea {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 165mm;
-  border: 1.5px solid #111;
+  position: absolute;
+  top: 32mm;
+  left: 14.4mm;
+  box-sizing: border-box;
+  width: 181.3mm;
+  height: 218.6mm;
+  border: 1.2px solid #111;
 }
 
 .workingArea textarea {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  min-height: 165mm;
   resize: none;
   padding: 4mm;
-  line-height: 1.35;
+  font-size: 8.5pt;
+  line-height: 1.25;
   white-space: pre-wrap;
 }
 
 .compensation {
   position: absolute;
-  right: 2mm;
-  bottom: 2mm;
-  width: 80mm;
-  min-height: 28mm;
-  margin: 0;
-  padding: 4mm;
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  gap: 4mm;
-  border: 1px solid #888;
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.compensation legend {
-  float: left;
-  margin-right: auto;
-  padding: 0;
-  color: #555;
-  font-size: 9pt;
-  font-weight: 800;
-}
-
-.compensation label {
-  display: flex;
-  gap: 1mm;
-  color: #555;
-  font-size: 9pt;
-  font-weight: 800;
-}
-
-.workflow {
+  right: 1.6mm;
+  bottom: 1.6mm;
+  box-sizing: border-box;
+  width: 84.2mm;
+  height: 29.5mm;
+  padding: 2.1mm 2.4mm;
   display: grid;
-  gap: 1.5mm;
+  grid-template-columns: 1fr 18mm;
+  align-items: start;
+  gap: 2mm;
+  border: 1px solid #9a9a9a;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.workflowHead,
+.compensation span {
+  color: #555;
+  font-size: 5.6pt;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.compensation input {
+  width: 100%;
+  color: #555;
+  font-size: 5.6pt;
+  font-weight: 900;
+  text-align: right;
+}
+
+.compensation input::placeholder {
+  color: #555;
+  opacity: 1;
+}
+
+.workflowLeft {
+  position: absolute;
+  top: 253.8mm;
+  left: 14.2mm;
+  width: 87mm;
+}
+
+.workflowHeader,
 .workflowRow {
   display: grid;
-  grid-template-columns: 21mm repeat(4, 16mm) 31mm minmax(40mm, 1fr);
+  grid-template-columns: 16mm repeat(4, 17.3mm);
   align-items: center;
-  gap: 1mm;
+  column-gap: 0.6mm;
 }
 
-.workflowHead {
+.workflowHeader {
+  height: 5.4mm;
   color: #555;
-  font-size: 8pt;
+  font-size: 5.1pt;
   font-weight: 900;
   text-align: center;
 }
 
 .workflowRow {
-  min-height: 6mm;
+  height: 6.1mm;
 }
 
 .workflowRow strong {
-  font-size: 9pt;
+  font-size: 5.6pt;
+  font-weight: 900;
 }
 
-.workflowRow input[type="checkbox"] {
-  width: 4mm;
-  height: 4mm;
-  margin: auto;
-  accent-color: #111;
+.workflowCheck {
+  display: grid;
+  grid-template-columns: 3.3mm 1fr;
+  align-items: center;
+  gap: 1mm;
 }
 
-.workflowRow input[type="text"],
-.workflowRow input:not([type]) {
-  border-bottom: 1px solid #777;
+.workflowCheck input[type="checkbox"] {
+  width: 3.2mm;
+  height: 3.2mm;
+  margin: 0;
+  appearance: none;
+  border: 1px solid #888;
+  background: #fff;
+}
+
+.workflowCheck input[type="checkbox"]:checked {
+  background: #8d8d8d;
+  box-shadow: inset 0 0 0 1px #fff;
+}
+
+.workflowCheck input[type="text"],
+.workflowCheck input:not([type]) {
+  height: 3.8mm;
+  border-bottom: 1px solid #888;
+  font-size: 5.8pt;
+  font-weight: 800;
+}
+
+.notesArea {
+  position: absolute;
+  top: 253.6mm;
+  left: 110.5mm;
+  width: 85.3mm;
+}
+
+.notesTitle {
+  height: 5.6mm;
+  color: #555;
+  font-size: 5.2pt;
+  font-weight: 900;
+}
+
+.noteRow {
+  height: 6.1mm;
+  display: grid;
+  grid-template-columns: 14mm 1fr;
+  align-items: center;
+}
+
+.noteRow span {
+  font-size: 5.6pt;
+  font-weight: 900;
+}
+
+.noteRow input {
+  height: 3.8mm;
+  border-bottom: 1px solid #888;
+  font-size: 5.8pt;
+  font-weight: 800;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(18, 20, 22, 0.38);
+}
+
+.modal {
+  box-sizing: border-box;
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 22px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+  padding: 18px;
+  color: var(--fc-admin-panel-text);
+  font-family: var(--fc-admin-font), Roboto, Arial, sans-serif;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.modalHeader button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #222;
+}
+
+.generatorText {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 280px;
+  resize: vertical;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.modalActions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modalActions .neutralButton {
+  background: #fff;
+  color: #222;
+}
+
+.confirmGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.confirmGrid label {
+  display: grid;
+  gap: 5px;
+}
+
+.confirmGrid span {
+  color: #5d655f;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.confirmGrid input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-weight: 800;
+}
+
+.modalNote {
+  margin: 12px 0 0;
+  color: #5d655f;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 @media (max-width: 900px) {
   .page {
     padding: 64px 10px 20px;
-    overflow-x: auto;
   }
 
   .toolbar,
   .sheet {
-    min-width: 760px;
+    margin-left: 0;
+    margin-right: 0;
   }
 }
 
 @page {
   size: A4 portrait;
-  margin: 7mm;
+  margin: 0;
 }
 
 @media print {
   :global(.fc-admin-app-shell):has(.page) :global(.fc-admin-sidebar),
   :global(.fc-admin-app-shell):has(.page) :global(.fc-admin-mobile-menu),
   :global(.fc-admin-app-shell):has(.page) :global(.fc-admin-sidebar-backdrop),
-  .toolbar {
+  :global(.fc-admin-app-shell):has(.page) :global(.fc-admin-universal-page-header),
+  .toolbar,
+  .modalBackdrop {
     display: none !important;
   }
 
@@ -270,26 +470,19 @@
   .page {
     min-height: 0;
     padding: 0;
+    overflow: hidden;
     background: #fff;
   }
 
   .sheet {
-    width: 196mm;
-    height: 283mm;
-    min-height: 283mm;
+    width: 210mm;
+    height: 297mm;
     margin: 0;
-    padding: 7mm 8mm 5mm;
-    gap: 5mm;
     overflow: hidden;
-    border: 0;
+    border-color: #777;
     box-shadow: none;
     break-inside: avoid;
     page-break-inside: avoid;
-  }
-
-  .workingArea,
-  .workingArea textarea {
-    min-height: 158mm;
   }
 
   .sheet input:focus,
