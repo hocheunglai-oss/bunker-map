@@ -47,6 +47,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     matchPrefixes: ["/admin/ccinfo"],
   },
   {
+    id: "enquiry-worksheet",
+    label: "ENQUIRY WORKSHEET",
+    group: "trading",
+    path: "/admin/enquiryworksheet",
+  },
+  {
     id: "phonebook",
     label: "PHONEBOOK",
     group: "contacts",

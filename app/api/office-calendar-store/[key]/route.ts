@@ -10,7 +10,7 @@ import {
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
 
-const allowedKeys = new Set(["event-calendar", "task-calendar"])
+const allowedKeys = new Set(["event-calendar", "task-calendar", "enquiry-worksheet"])
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -39,7 +39,9 @@ function normalizeKey(key: string) {
 }
 
 function getPageId(storeKey: string) {
-  return storeKey === "event-calendar" ? "event-calendar" : "task-calendar"
+  if (storeKey === "event-calendar") return "event-calendar"
+  if (storeKey === "task-calendar") return "task-calendar"
+  return "enquiry-worksheet"
 }
 
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
