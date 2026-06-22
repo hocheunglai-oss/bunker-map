@@ -17,7 +17,7 @@ const VESSEL_LABEL_PATTERN =
   /\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\b/i
 
 const BUYER_LABEL_PATTERN =
-  /^\s*(?:buyer|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i

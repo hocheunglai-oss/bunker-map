@@ -55,14 +55,14 @@
   display: flex;
   align-items: center;
   gap: 1.6mm;
-  font-size: 12pt;
+  font-size: 14pt;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
 
 .vesselLine input {
   width: 128mm;
-  font-size: 12pt;
+  font-size: 14pt;
   font-weight: 900;
 }
 
@@ -79,7 +79,7 @@
   grid-template-columns: 20mm auto auto;
   align-items: center;
   gap: 1.5mm;
-  font-size: 7pt;
+  font-size: 9pt;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
@@ -102,7 +102,7 @@
 
 .detailsTable label {
   box-sizing: border-box;
-  height: 4.2mm;
+  height: 5.2mm;
   display: grid;
   grid-template-columns: 35mm 1fr;
   align-items: center;
@@ -114,13 +114,14 @@
 
 .detailsTable span {
   padding-left: 2mm;
+  font-size: 9pt;
   font-weight: 800;
 }
 
 .detailsTable input {
   height: 100%;
   padding: 0 1.5mm;
-  font-size: 7pt;
+  font-size: 9pt;
   font-weight: 800;
 }
 
