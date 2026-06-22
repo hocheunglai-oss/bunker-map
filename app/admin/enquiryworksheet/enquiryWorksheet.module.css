@@ -430,6 +430,15 @@
   font-weight: 700;
 }
 
+.parserWarnings {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 @media (max-width: 900px) {
   .page {
     padding: 64px 10px 20px;

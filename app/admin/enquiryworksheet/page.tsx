@@ -1,6 +1,10 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import {
+  parseEnquiryWorksheetGuess,
+  type EnquiryWorksheetGuess,
+} from "@/lib/enquiryWorksheetParser"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./enquiryWorksheet.module.css"
 
@@ -30,21 +34,12 @@ type Worksheet = {
   workflow: Record<WorkflowKey, WorkflowRow>
 }
 
-type GuessState = {
-  vesselName: string
-  imo: string
-  buyer: string
-}
-
 const workflowLabels: Array<[WorkflowKey, string]> = [
   ["bumain", "BUMAIN"],
   ["nom", "NOM"],
   ["con", "CON"],
   ["bno", "BNO"],
 ]
-
-const vesselSkipWords =
-  /\b(BUNKER|BUNKERS|ENQUIRY|INQUIRY|FUEL|QUOTE|QUOTATION|PRICE|PORT|ETA|ETD|DATE|QTY|QUANTITY|BUYER|SELLER|SUPPLIER|PAYMENT|CREDIT|IFO|VLSFO|HSFO|MGO|LSMGO|ULSFO|EMAIL|PHONE|MOBILE)\b/i
 
 function toCaps(value: string) {
   return value.toUpperCase()
@@ -108,46 +103,13 @@ function deriveNickname(displayName: string | null, username: string | null) {
   return source.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase()
 }
 
-function cleanGuess(value: string) {
-  return value.replace(/\s+/g, " ").replace(/^[\s:;\-,./]+|[\s:;\-,./]+$/g, "")
-}
-
-function guessVesselName(text: string) {
-  const labelledMatch = text.match(
-    /\b(?:vessel|vsl|ship|m[./\s-]*v|m[./\s-]*t)\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9 '\-./()]{2,60})/i
-  )
-  if (labelledMatch?.[1]) return cleanGuess(labelledMatch[1])
-
-  const prefixedMatch = text.match(
-    /\b((?:M[./\s-]*V|M[./\s-]*T|MV|MT)\s+[A-Za-z0-9][A-Za-z0-9 '\-./()]{2,55})\b/i
-  )
-  if (prefixedMatch?.[1]) return cleanGuess(prefixedMatch[1])
-
-  const candidate = text
-    .split(/\r?\n/)
-    .map(cleanGuess)
-    .find((line) => {
-      if (line.length < 3 || line.length > 45) return false
-      if (/\d{7}/.test(line)) return false
-      if (/[,:;]/.test(line)) return false
-      if (vesselSkipWords.test(line)) return false
-      return /[A-Za-z]/.test(line)
-    })
-
-  return candidate || ""
-}
-
-function guessBuyer(text: string) {
-  const match = text.match(/\b(?:buyer|client|account|customer)\s*[:#\-]\s*([^\n\r,;]{2,60})/i)
-  return match?.[1] ? cleanGuess(match[1]) : ""
-}
-
-function guessEnquiry(text: string): GuessState {
-  const imoMatch = text.match(/\bIMO\s*[:#\-]?\s*(\d{7})\b/i) || text.match(/\b(\d{7})\b/)
+function emptyGuess(): EnquiryWorksheetGuess {
   return {
-    vesselName: toCaps(guessVesselName(text)),
-    imo: imoMatch?.[1] || "",
-    buyer: toCaps(guessBuyer(text)),
+    vesselName: "",
+    imo: "",
+    buyer: "",
+    confidence: "low",
+    warnings: [],
   }
 }
 
@@ -157,7 +119,7 @@ export default function EnquiryWorksheetPage() {
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
   const [generatorStep, setGeneratorStep] = useState<"paste" | "confirm" | null>("paste")
   const [enquiryText, setEnquiryText] = useState("")
-  const [guesses, setGuesses] = useState<GuessState>({ vesselName: "", imo: "", buyer: "" })
+  const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -195,6 +157,7 @@ export default function EnquiryWorksheetPage() {
   function openGenerator() {
     setEnquiryText("")
     setGuesses({
+      ...emptyGuess(),
       vesselName: worksheet.vesselName,
       imo: worksheet.imo,
       buyer: worksheet.buyer,
@@ -203,11 +166,13 @@ export default function EnquiryWorksheetPage() {
   }
 
   function goToConfirmStep() {
-    const parsed = guessEnquiry(enquiryText)
+    const parsed = parseEnquiryWorksheetGuess(enquiryText)
     setGuesses((current) => ({
       vesselName: parsed.vesselName || current.vesselName,
       imo: parsed.imo || current.imo,
       buyer: current.buyer || parsed.buyer,
+      confidence: parsed.confidence,
+      warnings: parsed.warnings,
     }))
     setGeneratorStep("confirm")
   }
@@ -432,6 +397,13 @@ export default function EnquiryWorksheetPage() {
                   </label>
                 </div>
                 <p className={styles.modalNote}>IMO is optional. Correct the guess before generating.</p>
+                {guesses.warnings.length > 0 ? (
+                  <ul className={styles.parserWarnings}>
+                    {guesses.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className={styles.modalActions}>
                   <button type="button" className={styles.neutralButton} onClick={() => setGeneratorStep("paste")}>
                     Back
