@@ -1,0 +1,478 @@
+import { createHmac, timingSafeEqual } from "crypto"
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import {
+  createAdminAuditedSupabaseClient,
+  type AdminAuditContext,
+} from "@/lib/adminAudit"
+
+export type WhatsAppConversation = {
+  id: string
+  phone_e164: string
+  display_name: string | null
+  company: string | null
+  assigned_to: string | null
+  status: string
+  tags: string[] | null
+  last_message_preview: string | null
+  last_message_at: string | null
+  unread_count: number
+  metadata: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export type WhatsAppMessage = {
+  id: string
+  conversation_id: string
+  whatsapp_message_id: string | null
+  direction: "inbound" | "outbound" | "status"
+  message_type: string
+  body: string | null
+  media_url: string | null
+  status: string
+  from_phone: string | null
+  to_phone: string | null
+  payload: Record<string, unknown> | null
+  sent_at: string
+  created_at: string
+}
+
+export type WhatsAppInboxPayload = {
+  conversations: WhatsAppConversation[]
+  messages: WhatsAppMessage[]
+  selectedConversationId: string | null
+  storageReady: boolean
+  storageMessage: string | null
+}
+
+type SupabaseErrorLike = {
+  code?: string
+  message?: string
+}
+
+type IncomingWhatsAppMessage = {
+  contacts?: Array<{
+    profile?: { name?: string }
+    wa_id?: string
+  }>
+  messages?: Array<{
+    id?: string
+    from?: string
+    timestamp?: string
+    type?: string
+    text?: { body?: string }
+    button?: { text?: string }
+    interactive?: {
+      button_reply?: { title?: string }
+      list_reply?: { title?: string; description?: string }
+    }
+    image?: { caption?: string; id?: string }
+    document?: { caption?: string; filename?: string; id?: string }
+    audio?: { id?: string }
+    video?: { caption?: string; id?: string }
+    sticker?: { id?: string }
+  }>
+  statuses?: Array<{
+    id?: string
+    status?: string
+    timestamp?: string
+    recipient_id?: string
+  }>
+}
+
+const DEFAULT_GRAPH_API_VERSION = "v23.0"
+const TABLE_SETUP_MESSAGE = "Run supabase/whatsapp_schema.sql to enable WhatsApp storage."
+
+function optionalEnv(name: string) {
+  return process.env[name]?.trim() || ""
+}
+
+function requireEnv(name: string) {
+  const value = optionalEnv(name)
+  if (!value) throw new Error(`${name} is not configured.`)
+  return value
+}
+
+export function getWhatsAppConfigStatus() {
+  const accessToken = optionalEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneNumberId = optionalEnv("WHATSAPP_PHONE_NUMBER_ID")
+  const businessAccountId = optionalEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
+  const verifyToken = optionalEnv("WHATSAPP_VERIFY_TOKEN")
+  const appSecret = optionalEnv("WHATSAPP_APP_SECRET")
+  const graphApiVersion = optionalEnv("WHATSAPP_GRAPH_API_VERSION") || DEFAULT_GRAPH_API_VERSION
+
+  return {
+    configured: Boolean(accessToken && phoneNumberId && verifyToken),
+    hasAccessToken: Boolean(accessToken),
+    hasPhoneNumberId: Boolean(phoneNumberId),
+    hasBusinessAccountId: Boolean(businessAccountId),
+    hasVerifyToken: Boolean(verifyToken),
+    hasAppSecret: Boolean(appSecret),
+    graphApiVersion,
+  }
+}
+
+export function getWhatsAppWebhookVerifyToken() {
+  return optionalEnv("WHATSAPP_VERIFY_TOKEN")
+}
+
+export function getWhatsAppAppSecret() {
+  return optionalEnv("WHATSAPP_APP_SECRET")
+}
+
+export function getWhatsAppGraphApiVersion() {
+  return optionalEnv("WHATSAPP_GRAPH_API_VERSION") || DEFAULT_GRAPH_API_VERSION
+}
+
+export function getServiceSupabaseClient(auditContext?: AdminAuditContext) {
+  if (auditContext) {
+    return createAdminAuditedSupabaseClient(auditContext, { useServiceRole: true })
+  }
+
+  return createClient(
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+  )
+}
+
+function isMissingTableError(error: SupabaseErrorLike | null | undefined) {
+  if (!error) return false
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    /relation .*whatsapp_/i.test(error.message || "") ||
+    /could not find .*whatsapp_/i.test(error.message || "")
+  )
+}
+
+function normalisePhone(value: string) {
+  const cleaned = value.replace(/[^\d+]/g, "")
+  if (cleaned.startsWith("+")) return cleaned
+  return cleaned ? `+${cleaned}` : ""
+}
+
+function messageTimestamp(value: string | undefined) {
+  if (!value) return new Date().toISOString()
+  const seconds = Number(value)
+  if (!Number.isFinite(seconds)) return new Date().toISOString()
+  return new Date(seconds * 1000).toISOString()
+}
+
+function messageBody(message: NonNullable<IncomingWhatsAppMessage["messages"]>[number]) {
+  if (message.text?.body) return message.text.body
+  if (message.button?.text) return message.button.text
+  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title
+  if (message.interactive?.list_reply?.title) {
+    return [message.interactive.list_reply.title, message.interactive.list_reply.description]
+      .filter(Boolean)
+      .join(" - ")
+  }
+  if (message.image?.caption) return message.image.caption
+  if (message.document?.caption) return message.document.caption
+  if (message.video?.caption) return message.video.caption
+  if (message.document?.filename) return message.document.filename
+  return `[${message.type || "message"}]`
+}
+
+function tableSetupPayload(): WhatsAppInboxPayload {
+  return {
+    conversations: [],
+    messages: [],
+    selectedConversationId: null,
+    storageReady: false,
+    storageMessage: TABLE_SETUP_MESSAGE,
+  }
+}
+
+export async function loadWhatsAppInbox(selectedConversationId?: string | null): Promise<WhatsAppInboxPayload> {
+  const supabase = getServiceSupabaseClient()
+  const conversationsResult = await supabase
+    .from("whatsapp_conversations")
+    .select("*")
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(80)
+
+  if (conversationsResult.error) {
+    if (isMissingTableError(conversationsResult.error)) return tableSetupPayload()
+    throw conversationsResult.error
+  }
+
+  const conversations = (conversationsResult.data || []) as WhatsAppConversation[]
+  const fallbackConversationId = conversations[0]?.id || null
+  const resolvedConversationId =
+    selectedConversationId && conversations.some((conversation) => conversation.id === selectedConversationId)
+      ? selectedConversationId
+      : fallbackConversationId
+
+  if (!resolvedConversationId) {
+    return {
+      conversations,
+      messages: [],
+      selectedConversationId: null,
+      storageReady: true,
+      storageMessage: null,
+    }
+  }
+
+  const messagesResult = await supabase
+    .from("whatsapp_messages")
+    .select("*")
+    .eq("conversation_id", resolvedConversationId)
+    .order("sent_at", { ascending: true })
+    .limit(220)
+
+  if (messagesResult.error) {
+    if (isMissingTableError(messagesResult.error)) return tableSetupPayload()
+    throw messagesResult.error
+  }
+
+  return {
+    conversations,
+    messages: (messagesResult.data || []) as WhatsAppMessage[],
+    selectedConversationId: resolvedConversationId,
+    storageReady: true,
+    storageMessage: null,
+  }
+}
+
+async function ensureConversation(
+  supabase: SupabaseClient,
+  phone: string,
+  values: Partial<WhatsAppConversation> = {},
+) {
+  const phone_e164 = normalisePhone(phone)
+  if (!phone_e164) throw new Error("WhatsApp phone number is required.")
+
+  const { data: existing, error: existingError } = await supabase
+    .from("whatsapp_conversations")
+    .select("*")
+    .eq("phone_e164", phone_e164)
+    .maybeSingle()
+
+  if (existingError) throw existingError
+
+  const now = new Date().toISOString()
+  if (existing) {
+    const updateValues: Record<string, unknown> = { updated_at: now }
+    if (values.display_name !== undefined && values.display_name !== null) updateValues.display_name = values.display_name
+    if (values.company !== undefined) updateValues.company = values.company
+    if (values.assigned_to !== undefined) updateValues.assigned_to = values.assigned_to
+    if (values.status !== undefined) updateValues.status = values.status
+    if (values.tags !== undefined) updateValues.tags = values.tags
+    if (values.last_message_preview !== undefined) updateValues.last_message_preview = values.last_message_preview
+    if (values.last_message_at !== undefined) updateValues.last_message_at = values.last_message_at
+    if (values.metadata !== undefined) updateValues.metadata = values.metadata
+
+    const { data, error } = await supabase
+      .from("whatsapp_conversations")
+      .update(updateValues)
+      .eq("id", existing.id)
+      .select("*")
+      .single()
+
+    if (error) throw error
+    return data as WhatsAppConversation
+  }
+
+  const { data, error } = await supabase
+    .from("whatsapp_conversations")
+    .insert({
+      phone_e164,
+      display_name: values.display_name || null,
+      company: values.company || null,
+      assigned_to: values.assigned_to || null,
+      status: values.status || "open",
+      tags: values.tags || [],
+      last_message_preview: values.last_message_preview || null,
+      last_message_at: values.last_message_at || null,
+      metadata: values.metadata || {},
+      updated_at: now,
+    })
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return data as WhatsAppConversation
+}
+
+export async function storeOutgoingMessage(params: {
+  to: string
+  body: string
+  whatsappMessageId?: string | null
+  payload?: Record<string, unknown>
+  auditContext?: AdminAuditContext
+}) {
+  try {
+    const supabase = getServiceSupabaseClient(params.auditContext)
+    const toPhone = normalisePhone(params.to)
+    const now = new Date().toISOString()
+    const conversation = await ensureConversation(supabase, toPhone, {
+      last_message_preview: params.body,
+      last_message_at: now,
+    } as Partial<WhatsAppConversation>)
+
+    await supabase.from("whatsapp_conversations").update({
+      last_message_preview: params.body,
+      last_message_at: now,
+      updated_at: now,
+    }).eq("id", conversation.id)
+
+    const { error } = await supabase.from("whatsapp_messages").insert({
+      conversation_id: conversation.id,
+      whatsapp_message_id: params.whatsappMessageId || null,
+      direction: "outbound",
+      message_type: "text",
+      body: params.body,
+      media_url: null,
+      status: params.whatsappMessageId ? "sent" : "queued",
+      from_phone: null,
+      to_phone: toPhone,
+      payload: params.payload || {},
+      sent_at: now,
+    })
+
+    if (error && !isMissingTableError(error)) throw error
+  } catch (error) {
+    if (isMissingTableError(error as SupabaseErrorLike)) return
+    throw error
+  }
+}
+
+export async function sendWhatsAppTextMessage(params: {
+  to: string
+  body: string
+  auditContext?: AdminAuditContext
+}) {
+  const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneNumberId = requireEnv("WHATSAPP_PHONE_NUMBER_ID")
+  const graphApiVersion = getWhatsAppGraphApiVersion()
+  const to = normalisePhone(params.to).replace(/^\+/, "")
+
+  if (!to) throw new Error("Recipient phone number is required.")
+  if (!params.body.trim()) throw new Error("Message body is required.")
+
+  const response = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "text",
+      text: {
+        preview_url: false,
+        body: params.body.trim(),
+      },
+    }),
+  })
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>
+
+  if (!response.ok) {
+    const error = data.error as { message?: string } | undefined
+    throw new Error(error?.message || "WhatsApp send failed.")
+  }
+
+  const messageId =
+    Array.isArray(data.messages) && data.messages[0] && typeof data.messages[0] === "object"
+      ? String((data.messages[0] as { id?: unknown }).id || "")
+      : ""
+
+  await storeOutgoingMessage({
+    to: params.to,
+    body: params.body.trim(),
+    whatsappMessageId: messageId || null,
+    payload: data,
+    auditContext: params.auditContext,
+  })
+
+  return { messageId, response: data }
+}
+
+export function verifyWhatsAppSignature(rawBody: string, signature: string | null) {
+  const appSecret = getWhatsAppAppSecret()
+  if (!appSecret) return true
+  if (!signature?.startsWith("sha256=")) return false
+
+  const expected = `sha256=${createHmac("sha256", appSecret).update(rawBody).digest("hex")}`
+  const expectedBuffer = Buffer.from(expected)
+  const signatureBuffer = Buffer.from(signature)
+  if (expectedBuffer.length !== signatureBuffer.length) return false
+  return timingSafeEqual(expectedBuffer, signatureBuffer)
+}
+
+export async function storeInboundWebhook(payload: Record<string, unknown>) {
+  const supabase = getServiceSupabaseClient()
+  const entries = Array.isArray(payload.entry) ? payload.entry : []
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue
+    const changes = Array.isArray((entry as { changes?: unknown }).changes)
+      ? ((entry as { changes: unknown[] }).changes)
+      : []
+
+    for (const change of changes) {
+      if (!change || typeof change !== "object") continue
+      const value = (change as { value?: IncomingWhatsAppMessage }).value || {}
+      const contactsByPhone = new Map(
+        (value.contacts || []).map((contact) => [
+          normalisePhone(contact.wa_id || ""),
+          contact.profile?.name || null,
+        ]),
+      )
+
+      for (const message of value.messages || []) {
+        const fromPhone = normalisePhone(message.from || "")
+        if (!fromPhone) continue
+        const sentAt = messageTimestamp(message.timestamp)
+        const body = messageBody(message)
+        const displayName = contactsByPhone.get(fromPhone) || null
+        const conversation = await ensureConversation(supabase, fromPhone, {
+          display_name: displayName,
+          last_message_preview: body,
+          last_message_at: sentAt,
+        } as Partial<WhatsAppConversation>)
+
+        await supabase.from("whatsapp_conversations").update({
+          display_name: displayName || conversation.display_name,
+          last_message_preview: body,
+          last_message_at: sentAt,
+          unread_count: (conversation.unread_count || 0) + 1,
+          updated_at: new Date().toISOString(),
+        }).eq("id", conversation.id)
+
+        const { error } = await supabase.from("whatsapp_messages").upsert(
+          {
+            conversation_id: conversation.id,
+            whatsapp_message_id: message.id || null,
+            direction: "inbound",
+            message_type: message.type || "message",
+            body,
+            media_url: null,
+            status: "received",
+            from_phone: fromPhone,
+            to_phone: null,
+            payload: message,
+            sent_at: sentAt,
+          },
+          { onConflict: "whatsapp_message_id" },
+        )
+
+        if (error && !isMissingTableError(error)) throw error
+      }
+
+      for (const status of value.statuses || []) {
+        if (!status.id) continue
+        await supabase
+          .from("whatsapp_messages")
+          .update({
+            status: status.status || "status",
+            payload: status,
+          })
+          .eq("whatsapp_message_id", status.id)
+      }
+    }
+  }
+}

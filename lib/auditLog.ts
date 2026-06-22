@@ -84,6 +84,8 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   shared_addressbook_groups: "outlook-addressbook",
   shared_addressbook_group_members: "outlook-addressbook",
   email_templates: "email-templates",
+  whatsapp_conversations: "whatsapp",
+  whatsapp_messages: "whatsapp",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
 }
@@ -111,6 +113,8 @@ const ENTITY_NAMES: Record<string, string> = {
   shared_addressbook_group_members: "group member",
   office_calendar_store: "calendar",
   email_templates: "email template",
+  whatsapp_conversations: "WhatsApp conversation",
+  whatsapp_messages: "WhatsApp message",
   admin_users: "user",
   admin_role_defaults: "role defaults",
 }
@@ -149,6 +153,13 @@ const FIELD_LABELS: Record<string, string> = {
   folder_name: "folder name",
   group_name: "group name",
   type: "type",
+  phone_e164: "phone",
+  direction: "direction",
+  message_type: "message type",
+  status: "status",
+  unread_count: "unread count",
+  assigned_to: "assigned to",
+  whatsapp_message_id: "WhatsApp message id",
   content: "content",
   body: "content",
 }
@@ -159,6 +170,8 @@ const HIDDEN_FIELDS = new Set([
   "updated_at",
   "deleted_at",
   "source_key",
+  "payload",
+  "metadata",
 ])
 
 const NON_CREATION_INSERT_TABLES = new Set([
@@ -402,6 +415,8 @@ function getRecordLabel(record: AuditLogRecord, portNames: Map<string, string>) 
     "file_name",
     "folder_name",
     "group_name",
+    "phone_e164",
+    "body",
   ]
 
   for (const key of preferredKeys) {

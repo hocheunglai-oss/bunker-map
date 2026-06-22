@@ -38,6 +38,7 @@ const SERVICES = [
   ["PHONEBOOK SYNC", "CARDDAV / NEXTCLOUD", "THE GOOD CLOUD", "USE22.THEGOOD.CLOUD"],
   ["CALENDAR SYNC", "GOOGLE CALENDAR API", "GOOGLE", "FCB.BUNKER@GMAIL.COM"],
   ["MAIL DIRECTORY", "EXCHANGE ONLINE / GRAPH", "MICROSOFT 365", "AZURE AUTOMATION"],
+  ["WHATSAPP", "META WHATSAPP BUSINESS PLATFORM", "META", "CONFIGURED IN VERCEL"],
   ["TRANSACTIONAL EMAIL", "RESEND API", "RESEND", "CONFIGURED IN VERCEL"],
   ["MAPS", "MAPTILER SDK / LEAFLET", "MAPTILER", "PUBLIC CLIENT KEY"],
 ] as const
@@ -68,6 +69,8 @@ const DATABASE_GROUPS = [
       "shared_addressbook_groups",
       "shared_addressbook_group_members",
       "outlook_exchange_sync_queue",
+      "whatsapp_conversations",
+      "whatsapp_messages",
     ],
   },
   {
