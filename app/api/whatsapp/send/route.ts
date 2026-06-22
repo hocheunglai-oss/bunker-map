@@ -21,6 +21,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to send WhatsApp message."
     const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500
+    console.error("whatsapp send failed", error)
     return NextResponse.json({ message }, { status })
   }
 }

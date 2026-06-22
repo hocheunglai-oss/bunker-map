@@ -377,12 +377,15 @@ export default function WhatsAppAdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to, message: body }),
       })
-      const data = (await response.json().catch(() => ({}))) as { message?: string }
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string
+        storageWarning?: string
+      }
       if (!response.ok) throw new Error(data.message || "Unable to send WhatsApp message.")
 
       setComposeBody("")
-      setMessage("Message sent.")
       await loadInbox(selectedConversationId)
+      setMessage(data.storageWarning || "Message sent.")
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Unable to send WhatsApp message.")
     } finally {

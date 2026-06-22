@@ -45,6 +45,12 @@ export type WhatsAppInboxPayload = {
   storageMessage: string | null
 }
 
+export type WhatsAppSendResult = {
+  messageId: string
+  response: Record<string, unknown>
+  storageWarning?: string
+}
+
 type SupabaseErrorLike = {
   code?: string
   message?: string
@@ -342,7 +348,7 @@ export async function sendWhatsAppTextMessage(params: {
   to: string
   body: string
   auditContext?: AdminAuditContext
-}) {
+}): Promise<WhatsAppSendResult> {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
   const phoneNumberId = requireEnv("WHATSAPP_PHONE_NUMBER_ID")
   const graphApiVersion = getWhatsAppGraphApiVersion()
@@ -371,8 +377,22 @@ export async function sendWhatsAppTextMessage(params: {
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>
 
   if (!response.ok) {
-    const error = data.error as { message?: string } | undefined
-    throw new Error(error?.message || "WhatsApp send failed.")
+    const error = data.error as
+      | {
+          message?: string
+          type?: string
+          code?: number | string
+          error_subcode?: number | string
+          fbtrace_id?: string
+        }
+      | undefined
+    const details = [
+      error?.message || "WhatsApp send failed.",
+      error?.code ? `code ${error.code}` : "",
+      error?.error_subcode ? `subcode ${error.error_subcode}` : "",
+      error?.fbtrace_id ? `trace ${error.fbtrace_id}` : "",
+    ].filter(Boolean)
+    throw new Error(`Meta WhatsApp API: ${details.join(" / ")}`)
   }
 
   const messageId =
@@ -380,15 +400,24 @@ export async function sendWhatsAppTextMessage(params: {
       ? String((data.messages[0] as { id?: unknown }).id || "")
       : ""
 
-  await storeOutgoingMessage({
-    to: params.to,
-    body: params.body.trim(),
-    whatsappMessageId: messageId || null,
-    payload: data,
-    auditContext: params.auditContext,
-  })
+  let storageWarning: string | undefined
+  try {
+    await storeOutgoingMessage({
+      to: params.to,
+      body: params.body.trim(),
+      whatsappMessageId: messageId || null,
+      payload: data,
+      auditContext: params.auditContext,
+    })
+  } catch (error) {
+    storageWarning =
+      error instanceof Error
+        ? `Message accepted by Meta, but local WhatsApp storage failed: ${error.message}`
+        : "Message accepted by Meta, but local WhatsApp storage failed."
+    console.error("whatsapp outgoing storage failed", error)
+  }
 
-  return { messageId, response: data }
+  return { messageId, response: data, storageWarning }
 }
 
 export function verifyWhatsAppSignature(rawBody: string, signature: string | null) {
