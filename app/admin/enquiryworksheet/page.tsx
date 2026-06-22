@@ -8,6 +8,9 @@ import {
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./enquiryWorksheet.module.css"
 
+type WorkflowAction = "register" | "draft" | "approval" | "send"
+type WorkflowKey = "bumain" | "nom" | "con" | "bno"
+
 type WorkflowRow = {
   register: boolean
   draft: boolean
@@ -19,8 +22,6 @@ type WorkflowRow = {
   sendText: string
   note: string
 }
-
-type WorkflowKey = "bumain" | "nom" | "con" | "bno"
 
 type Worksheet = {
   vesselName: string
@@ -41,6 +42,20 @@ const workflowLabels: Array<[WorkflowKey, string]> = [
   ["bno", "BNO"],
 ]
 
+const workflowActions: Array<[WorkflowAction, string]> = [
+  ["register", "REGISTER"],
+  ["draft", "DRAFT"],
+  ["approval", "APPROVAL"],
+  ["send", "SEND"],
+]
+
+const workflowCells: Record<WorkflowKey, Partial<Record<WorkflowAction, { suffix?: string }>>> = {
+  bumain: { register: {} },
+  nom: { draft: {}, approval: {}, send: {} },
+  con: { draft: { suffix: "BOX" }, approval: {}, send: {} },
+  bno: { send: {} },
+}
+
 function toCaps(value: string) {
   return value.toUpperCase()
 }
@@ -53,7 +68,7 @@ function todayShort() {
   return `${day}/${month}/${year}`
 }
 
-function emptyRow(): WorkflowRow {
+function emptyRow(note = ""): WorkflowRow {
   return {
     register: false,
     draft: false,
@@ -63,7 +78,7 @@ function emptyRow(): WorkflowRow {
     draftText: "",
     approvalText: "",
     sendText: "",
-    note: "",
+    note,
   }
 }
 
@@ -80,7 +95,7 @@ function blankWorksheet(initials = ""): Worksheet {
     workflow: {
       bumain: emptyRow(),
       nom: emptyRow(),
-      con: emptyRow(),
+      con: emptyRow("SPECIAL TERM"),
       bno: emptyRow(),
     },
   }
@@ -108,16 +123,21 @@ function emptyGuess(): EnquiryWorksheetGuess {
     vesselName: "",
     imo: "",
     buyer: "",
+    simplifiedEnquiry: "",
     confidence: "low",
     warnings: [],
   }
+}
+
+function getWorksheetHeader(worksheet: Worksheet) {
+  if (worksheet.vesselName && worksheet.imo) return `${worksheet.vesselName} - ${worksheet.imo}`
+  return worksheet.vesselName || worksheet.imo
 }
 
 export default function EnquiryWorksheetPage() {
   const { displayName, username } = useSimpleAdminAuth()
   const userNickname = useMemo(() => deriveNickname(displayName, username), [displayName, username])
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
-  const [generatorStep, setGeneratorStep] = useState<"paste" | "confirm" | null>("paste")
   const [enquiryText, setEnquiryText] = useState("")
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
 
@@ -154,269 +174,272 @@ export default function EnquiryWorksheetPage() {
     }))
   }
 
-  function openGenerator() {
-    setEnquiryText("")
-    setGuesses({
-      ...emptyGuess(),
-      vesselName: worksheet.vesselName,
-      imo: worksheet.imo,
-      buyer: worksheet.buyer,
-    })
-    setGeneratorStep("paste")
+  function updateWorksheetHeader(value: string) {
+    const next = toCaps(value)
+    const imoMatch = next.match(/(?:^|\s+-\s+|\s+)(\d{7})\s*$/)
+    const nextImo = imoMatch?.[1] || ""
+    const imoIndex = imoMatch?.index ?? next.length
+    const nextVessel = nextImo
+      ? next.slice(0, imoIndex).replace(/\s*-\s*$/, "").trim()
+      : next.trim()
+
+    setWorksheet((current) => ({
+      ...current,
+      vesselName: nextVessel,
+      imo: nextImo,
+    }))
   }
 
-  function goToConfirmStep() {
+  function handleEnquiryTextChange(value: string) {
+    setEnquiryText(value)
+    setGuesses(value.trim() ? parseEnquiryWorksheetGuess(value) : emptyGuess())
+  }
+
+  function guessDetails() {
     const parsed = parseEnquiryWorksheetGuess(enquiryText)
     setGuesses((current) => ({
       vesselName: parsed.vesselName || current.vesselName,
       imo: parsed.imo || current.imo,
       buyer: current.buyer || parsed.buyer,
+      simplifiedEnquiry: parsed.simplifiedEnquiry,
       confidence: parsed.confidence,
       warnings: parsed.warnings,
     }))
-    setGeneratorStep("confirm")
   }
 
   function generateWorksheet() {
+    const parsed = parseEnquiryWorksheetGuess(enquiryText)
+    const nextGuess: EnquiryWorksheetGuess = {
+      vesselName: guesses.vesselName || parsed.vesselName,
+      imo: guesses.imo || parsed.imo,
+      buyer: guesses.buyer || parsed.buyer,
+      simplifiedEnquiry: parsed.simplifiedEnquiry,
+      confidence: parsed.confidence,
+      warnings: parsed.warnings,
+    }
+
+    setGuesses(nextGuess)
     setWorksheet({
       ...blankWorksheet(userNickname),
-      vesselName: toCaps(guesses.vesselName),
-      imo: guesses.imo.replace(/\D/g, "").slice(0, 7),
-      buyer: toCaps(guesses.buyer),
+      vesselName: toCaps(nextGuess.vesselName),
+      imo: nextGuess.imo.replace(/\D/g, "").slice(0, 7),
+      buyer: toCaps(nextGuess.buyer),
       workingNotes: enquiryText,
     })
-    setGeneratorStep(null)
   }
 
   function startBlankWorksheet() {
     setWorksheet(blankWorksheet(userNickname))
-    setGeneratorStep(null)
+    setEnquiryText("")
+    setGuesses(emptyGuess())
   }
 
   return (
     <main className={styles.page}>
-      <div className={styles.toolbar}>
-        <button type="button" onClick={openGenerator} aria-label="New enquiry worksheet">
-          New enquiry
-        </button>
-        <button type="button" onClick={() => window.print()} data-admin-view-safe="true">
-          Print
-        </button>
-      </div>
-
-      <section className={styles.sheet} aria-label="Enquiry worksheet">
-        <div className={styles.vesselLine}>
-          <span aria-hidden="true">-</span>
-          <input
-            value={worksheet.vesselName}
-            onChange={(event) => updateCapsField("vesselName", event.target.value)}
-            aria-label="Vessel name"
-            placeholder="VESSEL NAME"
-            className={styles.capsInput}
-          />
-          <span className={styles.smallSquare} aria-hidden="true" />
-        </div>
-
-        <div className={styles.topRight}>
-          <label className={styles.imoStamp}>
-            <span>IMO</span>
+      <div className={styles.workspace}>
+        <section className={styles.sheet} aria-label="Enquiry worksheet">
+          <div className={styles.vesselLine}>
+            <span aria-hidden="true">-</span>
             <input
-              value={worksheet.imo}
-              onChange={(event) => updateCapsField("imo", event.target.value.replace(/\D/g, "").slice(0, 7))}
-              aria-label="IMO number"
-              inputMode="numeric"
-              maxLength={7}
-            />
-          </label>
-          <span>{worksheet.date}</span>
-          <span>{worksheet.initials || userNickname}</span>
-        </div>
-
-        <div className={styles.detailsTable}>
-          <label>
-            <span>BUYER</span>
-            <input
-              value={worksheet.buyer}
-              onChange={(event) => updateCapsField("buyer", event.target.value)}
+              value={getWorksheetHeader(worksheet)}
+              onChange={(event) => updateWorksheetHeader(event.target.value)}
+              aria-label="Vessel name and IMO"
+              placeholder="VESSEL NAME - IMO"
               className={styles.capsInput}
             />
-          </label>
-          <label>
-            <span>CREDIT USED / CL</span>
-            <input
-              value={worksheet.credit}
-              onChange={(event) => updateCapsField("credit", event.target.value)}
-              className={styles.capsInput}
-            />
-          </label>
-        </div>
-
-        <div className={styles.workingArea}>
-          <textarea
-            value={worksheet.workingNotes}
-            onChange={(event) => updateField("workingNotes", event.target.value)}
-            aria-label="Enquiry working notes"
-          />
-          <label className={styles.compensation}>
-            <span>UNOFFICIAL COMPENSATION?</span>
-            <input
-              value={worksheet.unofficialCompensation}
-              onChange={(event) => updateCapsField("unofficialCompensation", event.target.value)}
-              aria-label="Unofficial compensation yes or no"
-              placeholder="YES / NO"
-              className={styles.capsInput}
-            />
-          </label>
-        </div>
-
-        <div className={styles.workflowLeft}>
-          <div className={styles.workflowHeader}>
-            <span />
-            <span>REGISTER</span>
-            <span>DRAFT</span>
-            <span>APPROVAL</span>
-            <span>SEND</span>
           </div>
-          {workflowLabels.map(([key, label]) => {
-            const row = worksheet.workflow[key]
-            return (
-              <div className={styles.workflowRow} key={key}>
-                <strong>{label}</strong>
-                {(["register", "draft", "approval", "send"] as const).map((field) => (
-                  <label className={styles.workflowCheck} key={field}>
-                    <input
-                      type="checkbox"
-                      checked={row[field]}
-                      onChange={(event) => updateWorkflow(key, field, event.target.checked)}
-                      aria-label={`${label} ${field}`}
-                    />
-                    <input
-                      value={row[`${field}Text`]}
-                      onChange={(event) => updateWorkflow(key, `${field}Text`, event.target.value)}
-                      aria-label={`${label} ${field} text`}
-                      className={styles.capsInput}
-                    />
-                  </label>
-                ))}
-              </div>
-            )
-          })}
-        </div>
 
-        <div className={styles.notesArea}>
-          <div className={styles.notesTitle}>NOTES B</div>
-          {workflowLabels.map(([key, label]) => (
-            <label className={styles.noteRow} key={key}>
-              <span>{label}</span>
+          <div className={styles.topRight}>
+            <span className={styles.emptyStamp} aria-hidden="true" />
+            <span>{worksheet.date}</span>
+            <span>{worksheet.initials || userNickname}</span>
+          </div>
+
+          <div className={styles.detailsTable}>
+            <label>
+              <span>BUYER</span>
               <input
-                value={worksheet.workflow[key].note}
-                onChange={(event) => updateWorkflow(key, "note", event.target.value)}
+                value={worksheet.buyer}
+                onChange={(event) => updateCapsField("buyer", event.target.value)}
                 className={styles.capsInput}
               />
             </label>
-          ))}
-        </div>
-      </section>
-
-      {generatorStep ? (
-        <div className={styles.modalBackdrop} role="presentation">
-          <div className={styles.modal} role="dialog" aria-modal="true" aria-label="Generate enquiry worksheet">
-            {generatorStep === "paste" ? (
-              <>
-                <div className={styles.modalHeader}>
-                  <h2>Paste enquiry</h2>
-                  <button type="button" onClick={() => setGeneratorStep(null)} aria-label="Close generator">
-                    ×
-                  </button>
-                </div>
-                <textarea
-                  value={enquiryText}
-                  onChange={(event) => setEnquiryText(event.target.value)}
-                  placeholder="Paste the full enquiry here."
-                  aria-label="Enquiry text"
-                  className={styles.generatorText}
-                  autoFocus
-                />
-                <div className={styles.modalActions}>
-                  <button
-                    type="button"
-                    className={styles.neutralButton}
-                    onClick={startBlankWorksheet}
-                    aria-label="New blank worksheet"
-                  >
-                    Blank worksheet
-                  </button>
-                  <button type="button" onClick={goToConfirmStep} aria-label="Create worksheet next step">
-                    Next
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className={styles.modalHeader}>
-                  <h2>Check enquiry details</h2>
-                  <button type="button" onClick={() => setGeneratorStep(null)} aria-label="Close generator">
-                    ×
-                  </button>
-                </div>
-                <div className={styles.confirmGrid}>
-                  <label>
-                    <span>VESSEL NAME</span>
-                    <input
-                      value={guesses.vesselName}
-                      onChange={(event) =>
-                        setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
-                      }
-                      className={styles.capsInput}
-                      autoFocus
-                    />
-                  </label>
-                  <label>
-                    <span>IMO</span>
-                    <input
-                      value={guesses.imo}
-                      onChange={(event) =>
-                        setGuesses((current) => ({
-                          ...current,
-                          imo: event.target.value.replace(/\D/g, "").slice(0, 7),
-                        }))
-                      }
-                      inputMode="numeric"
-                      maxLength={7}
-                    />
-                  </label>
-                  <label>
-                    <span>BUYER</span>
-                    <input
-                      value={guesses.buyer}
-                      onChange={(event) =>
-                        setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
-                      }
-                      className={styles.capsInput}
-                    />
-                  </label>
-                </div>
-                <p className={styles.modalNote}>IMO is optional. Correct the guess before generating.</p>
-                {guesses.warnings.length > 0 ? (
-                  <ul className={styles.parserWarnings}>
-                    {guesses.warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className={styles.modalActions}>
-                  <button type="button" className={styles.neutralButton} onClick={() => setGeneratorStep("paste")}>
-                    Back
-                  </button>
-                  <button type="button" onClick={generateWorksheet} aria-label="Generate new worksheet">
-                    Generate
-                  </button>
-                </div>
-              </>
-            )}
+            <label>
+              <span>CREDIT USED / CL</span>
+              <input
+                value={worksheet.credit}
+                onChange={(event) => updateCapsField("credit", event.target.value)}
+                className={styles.capsInput}
+              />
+            </label>
           </div>
-        </div>
-      ) : null}
+
+          <div className={styles.workingArea}>
+            <textarea
+              value={worksheet.workingNotes}
+              onChange={(event) => updateField("workingNotes", event.target.value)}
+              aria-label="Enquiry working notes"
+            />
+            <label className={styles.compensation}>
+              <span>UNOFFICIAL COMPENSATION?</span>
+              <input
+                value={worksheet.unofficialCompensation}
+                onChange={(event) => updateCapsField("unofficialCompensation", event.target.value)}
+                aria-label="Unofficial compensation yes or no"
+                placeholder="YES / NO"
+                className={styles.capsInput}
+              />
+            </label>
+          </div>
+
+          <div className={styles.workflowLayout}>
+            <div className={styles.workflowHeaderCell} />
+            {workflowActions.map(([, label]) => (
+              <div className={styles.workflowHeaderCell} key={label}>
+                {label}
+              </div>
+            ))}
+            <div className={`${styles.workflowHeaderCell} ${styles.notesHeader}`}>NOTES</div>
+            {workflowLabels.map(([key, label]) => {
+              const row = worksheet.workflow[key]
+              return (
+                <div className={styles.workflowRowContents} key={key}>
+                  <strong>{label}</strong>
+                  {workflowActions.map(([field]) => {
+                    const cell = workflowCells[key][field]
+                    if (!cell) return <span className={styles.workflowBlankCell} key={field} />
+                    return (
+                      <label className={styles.workflowCheck} key={field}>
+                        <input
+                          type="checkbox"
+                          checked={row[field]}
+                          onChange={(event) => updateWorkflow(key, field, event.target.checked)}
+                          aria-label={`${label} ${field}`}
+                        />
+                        <input
+                          value={row[`${field}Text`]}
+                          onChange={(event) => updateWorkflow(key, `${field}Text`, event.target.value)}
+                          aria-label={`${label} ${field} text`}
+                          className={styles.capsInput}
+                        />
+                        {cell.suffix ? <span>{cell.suffix}</span> : null}
+                      </label>
+                    )
+                  })}
+                  <label className={styles.workflowNote}>
+                    <span>{label}</span>
+                    <input
+                      value={row.note}
+                      onChange={(event) => updateWorkflow(key, "note", event.target.value)}
+                      className={styles.capsInput}
+                    />
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <aside className={styles.sidePanel} aria-label="Enquiry worksheet generator">
+          <div className={styles.panelHeader}>
+            <span>ENQUIRY WORKSHEET</span>
+            <h2>Paste and generate</h2>
+          </div>
+
+          <label className={styles.panelField}>
+            <span>PASTE ENQUIRY</span>
+            <textarea
+              value={enquiryText}
+              onChange={(event) => handleEnquiryTextChange(event.target.value)}
+              placeholder="Paste the full enquiry here."
+              aria-label="Enquiry text"
+              className={styles.generatorText}
+            />
+          </label>
+
+          <div className={styles.panelActions}>
+            <button type="button" className={styles.primaryPanelButton} onClick={guessDetails}>
+              Guess details
+            </button>
+            <button type="button" className={styles.primaryPanelButton} onClick={generateWorksheet}>
+              Generate worksheet
+            </button>
+            <button
+              type="button"
+              className={styles.neutralButton}
+              onClick={startBlankWorksheet}
+              aria-label="New blank worksheet"
+            >
+              Blank
+            </button>
+            <button
+              type="button"
+              className={styles.primaryPanelButton}
+              onClick={() => window.print()}
+              data-admin-view-safe="true"
+            >
+              Print
+            </button>
+          </div>
+
+          <div className={styles.confirmGrid}>
+            <label>
+              <span>VESSEL NAME</span>
+              <input
+                value={guesses.vesselName}
+                onChange={(event) =>
+                  setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
+                }
+                className={styles.capsInput}
+              />
+            </label>
+            <label>
+              <span>IMO</span>
+              <input
+                value={guesses.imo}
+                onChange={(event) =>
+                  setGuesses((current) => ({
+                    ...current,
+                    imo: event.target.value.replace(/\D/g, "").slice(0, 7),
+                  }))
+                }
+                inputMode="numeric"
+                maxLength={7}
+              />
+            </label>
+            <label>
+              <span>BUYER</span>
+              <input
+                value={guesses.buyer}
+                onChange={(event) =>
+                  setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
+                }
+                className={styles.capsInput}
+              />
+            </label>
+          </div>
+
+          <label className={styles.panelField}>
+            <span>SIMPLIFIED ENQUIRY</span>
+            <textarea
+              value={guesses.simplifiedEnquiry}
+              readOnly
+              placeholder="Example: panda 006 / 9677026 / port klang 8 jun / lsfo 650mts"
+              className={styles.simplifiedText}
+              aria-label="Simplified enquiry"
+            />
+          </label>
+
+          <p className={styles.modalNote}>IMO is optional. Check the guess before generating.</p>
+          {guesses.warnings.length > 0 ? (
+            <ul className={styles.parserWarnings}>
+              {guesses.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </aside>
+      </div>
     </main>
   )
 }

@@ -2,6 +2,7 @@ export type EnquiryWorksheetGuess = {
   vesselName: string
   imo: string
   buyer: string
+  simplifiedEnquiry: string
   confidence: "high" | "medium" | "low"
   warnings: string[]
 }
@@ -19,6 +20,54 @@ const VESSEL_LABEL_PATTERN =
 const BUYER_PATTERN =
   /^\s*buyer\s*(?:[:#\-\t]|\s{2,})?\s*([A-Za-z0-9][^\n\r,;]{1,80})/im
 
+const MONTHS: Record<string, string> = {
+  "1": "jan",
+  "01": "jan",
+  "2": "feb",
+  "02": "feb",
+  "3": "mar",
+  "03": "mar",
+  "4": "apr",
+  "04": "apr",
+  "5": "may",
+  "05": "may",
+  "6": "jun",
+  "06": "jun",
+  "7": "jul",
+  "07": "jul",
+  "8": "aug",
+  "08": "aug",
+  "9": "sep",
+  "09": "sep",
+  "10": "oct",
+  "11": "nov",
+  "12": "dec",
+  jan: "jan",
+  january: "jan",
+  feb: "feb",
+  february: "feb",
+  mar: "mar",
+  march: "mar",
+  apr: "apr",
+  april: "apr",
+  may: "may",
+  jun: "jun",
+  june: "jun",
+  jul: "jul",
+  july: "jul",
+  aug: "aug",
+  august: "aug",
+  sep: "sep",
+  sept: "sep",
+  september: "sep",
+  oct: "oct",
+  october: "oct",
+  nov: "nov",
+  november: "nov",
+  dec: "dec",
+  december: "dec",
+}
+
 function normalizeInput(text: string) {
   return text
     .replace(/\r\n?/g, "\n")
@@ -34,6 +83,10 @@ function cleanSpaces(value: string) {
 
 function stripOuterNoise(value: string) {
   return cleanSpaces(value).replace(/^[\s:;,\-./"'()]+|[\s:;,\-./"'()]+$/g, "")
+}
+
+function cleanLabeledValue(line: string) {
+  return stripOuterNoise(line.replace(/^[^:]+:\s*/i, ""))
 }
 
 export function isValidImo(value: string) {
@@ -150,6 +203,103 @@ function extractBuyer(text: string) {
   return match?.[1] ? stripOuterNoise(match[1]).toUpperCase() : ""
 }
 
+function extractPort(lines: string[], imo: string) {
+  const labelled = lines.find((line) => /^\s*[-•]*\s*port(?:\s*\/\s*(?:location|berth))?\b/i.test(line))
+  if (labelled) return cleanLabeledValue(labelled).toLowerCase()
+
+  if (!imo) return ""
+  const imoLine = getCandidateLine(lines, imo)
+  if (!imoLine.includes("/")) return ""
+
+  const parts = imoLine.split("/").map(stripOuterNoise).filter(Boolean)
+  const imoPartIndex = parts.findIndex((part) => part.includes(imo))
+  const possiblePort = parts[imoPartIndex + 1]
+  if (!possiblePort || /\b\d{1,2}\b/.test(possiblePort)) return ""
+  if (/\b(?:mt|mts|vlsfo|lsfo|mgo|hfo|ifo|rmg|dma|dmb)\b/i.test(possiblePort)) return ""
+
+  return possiblePort.toLowerCase()
+}
+
+function normalizeDate(day: string, month: string) {
+  const normalizedMonth = MONTHS[month.toLowerCase()]
+  if (!normalizedMonth) return ""
+  return `${Number(day)} ${normalizedMonth}`
+}
+
+function findDates(value: string) {
+  const normalized = normalizeInput(value)
+  const dates: string[] = []
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b/g)) {
+    const date = normalizeDate(match[1], match[2])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi)) {
+    const date = normalizeDate(match[1], match[2])
+    if (date) dates.push(date)
+  }
+
+  return Array.from(new Set(dates))
+}
+
+function extractDelivery(lines: string[]) {
+  const labelledLines = lines.filter((line) =>
+    /\b(?:delivery|window|date|eta|etd|ets)\b/i.test(line)
+  )
+  const dates = findDates(labelledLines.join(" ") || lines.join(" "))
+
+  if (dates.length >= 2) return `${dates[0]} - ${dates[1]}`
+  return dates[0] || ""
+}
+
+function inferProduct(text: string) {
+  if (/\b(?:lsmgo|mgo|mdo|dma|dmb)\b/i.test(text)) return "mgo"
+  if (/\b(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\b/i.test(text)) {
+    return "lsfo"
+  }
+  if (/\b(?:hfo|hsfo|ifo|3\s*[,.]\s*5)\b/i.test(text)) return "hfo"
+  return ""
+}
+
+function normalizeQuantityNumber(value: string) {
+  const trimmed = value.trim()
+  if (/^\d+\.0+$/.test(trimmed)) return trimmed.split(".")[0]
+  return trimmed
+}
+
+function extractQuantity(text: string) {
+  const normalized = normalizeInput(text)
+  const range =
+    normalized.match(/\b(\d{1,3}(?:[,.]\d{3})?|\d+)\s*(?:-|to)\s*(\d{1,3}(?:[,.]\d{3})?|\d+)\s*(?:m\s*t|mt|mts|tons?)\b/i) ||
+    normalized.match(/\b(\d{1,3}(?:[,.]\d{3})?|\d+)\s*(?:-|to)\s*(\d{1,3}(?:[,.]\d{3})?|\d+)\b/i)
+
+  if (range) {
+    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+  }
+
+  const single = normalized.match(/\b(\d{1,3}(?:[,.]\d{3})?|\d+)\s*(?:m\s*t|mt|mts|tons?)\b/i)
+  return single ? `${normalizeQuantityNumber(single[1])}mts` : ""
+}
+
+function buildSimplifiedEnquiry(
+  text: string,
+  lines: string[],
+  vesselName: string,
+  imo: string,
+) {
+  const port = extractPort(lines, imo)
+  const delivery = extractDelivery(lines)
+  const product = inferProduct(text)
+  const quantity = extractQuantity(text)
+  const portDelivery = [port, delivery].filter(Boolean).join(" ")
+  const productQuantity = [product, quantity].filter(Boolean).join(" ")
+
+  return [vesselName.toLowerCase(), imo, portDelivery, productQuantity]
+    .filter(Boolean)
+    .join(" / ")
+}
+
 export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess {
   const normalized = normalizeInput(text)
   const lines = normalized
@@ -180,6 +330,7 @@ export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess 
     vesselName,
     imo,
     buyer: extractBuyer(normalized),
+    simplifiedEnquiry: buildSimplifiedEnquiry(normalized, lines, vesselName, imo),
     confidence,
     warnings,
   }
