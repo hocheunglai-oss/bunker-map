@@ -123,7 +123,6 @@ function emptyGuess(): EnquiryWorksheetGuess {
     vesselName: "",
     imo: "",
     buyer: "",
-    simplifiedEnquiry: "",
     confidence: "low",
     warnings: [],
   }
@@ -197,28 +196,20 @@ export default function EnquiryWorksheetPage() {
 
   function guessDetails() {
     const parsed = parseEnquiryWorksheetGuess(enquiryText)
-    setGuesses((current) => ({
-      vesselName: parsed.vesselName || current.vesselName,
-      imo: parsed.imo || current.imo,
-      buyer: current.buyer || parsed.buyer,
-      simplifiedEnquiry: parsed.simplifiedEnquiry,
-      confidence: parsed.confidence,
-      warnings: parsed.warnings,
-    }))
-  }
-
-  function generateWorksheet() {
-    const parsed = parseEnquiryWorksheetGuess(enquiryText)
     const nextGuess: EnquiryWorksheetGuess = {
       vesselName: guesses.vesselName || parsed.vesselName,
       imo: guesses.imo || parsed.imo,
       buyer: guesses.buyer || parsed.buyer,
-      simplifiedEnquiry: parsed.simplifiedEnquiry,
       confidence: parsed.confidence,
       warnings: parsed.warnings,
     }
 
     setGuesses(nextGuess)
+    return nextGuess
+  }
+
+  function generateWorksheet() {
+    const nextGuess = guessDetails()
     setWorksheet({
       ...blankWorksheet(userNickname),
       vesselName: toCaps(nextGuess.vesselName),
@@ -228,15 +219,81 @@ export default function EnquiryWorksheetPage() {
     })
   }
 
-  function startBlankWorksheet() {
-    setWorksheet(blankWorksheet(userNickname))
-    setEnquiryText("")
-    setGuesses(emptyGuess())
-  }
-
   return (
     <main className={styles.page}>
       <div className={styles.workspace}>
+        <aside className={styles.sidePanel} aria-label="Enquiry worksheet generator">
+          <label className={styles.panelField}>
+            <span>PASTE ENQUIRY</span>
+            <textarea
+              value={enquiryText}
+              onChange={(event) => handleEnquiryTextChange(event.target.value)}
+              placeholder="Paste the full enquiry here."
+              aria-label="Enquiry text"
+              className={styles.generatorText}
+            />
+          </label>
+
+          <div className={styles.confirmGrid}>
+            <label>
+              <span>VESSEL NAME</span>
+              <input
+                value={guesses.vesselName}
+                onChange={(event) =>
+                  setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
+                }
+                className={styles.capsInput}
+              />
+            </label>
+            <label>
+              <span>IMO</span>
+              <input
+                value={guesses.imo}
+                onChange={(event) =>
+                  setGuesses((current) => ({
+                    ...current,
+                    imo: event.target.value.replace(/\D/g, "").slice(0, 7),
+                  }))
+                }
+                inputMode="numeric"
+                maxLength={7}
+              />
+            </label>
+            <label>
+              <span>BUYER</span>
+              <input
+                value={guesses.buyer}
+                onChange={(event) =>
+                  setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
+                }
+                className={styles.capsInput}
+              />
+            </label>
+          </div>
+
+          <div className={styles.panelActions}>
+            <button type="button" className={styles.primaryPanelButton} onClick={generateWorksheet}>
+              Generate worksheet
+            </button>
+            <button
+              type="button"
+              className={styles.primaryPanelButton}
+              onClick={() => window.print()}
+              data-admin-view-safe="true"
+            >
+              Print
+            </button>
+          </div>
+
+          {guesses.warnings.length > 0 ? (
+            <ul className={styles.parserWarnings}>
+              {guesses.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </aside>
+
         <section className={styles.sheet} aria-label="Enquiry worksheet">
           <div className={styles.vesselLine}>
             <span aria-hidden="true">-</span>
@@ -339,106 +396,6 @@ export default function EnquiryWorksheetPage() {
             })}
           </div>
         </section>
-
-        <aside className={styles.sidePanel} aria-label="Enquiry worksheet generator">
-          <div className={styles.panelHeader}>
-            <span>ENQUIRY WORKSHEET</span>
-            <h2>Paste and generate</h2>
-          </div>
-
-          <label className={styles.panelField}>
-            <span>PASTE ENQUIRY</span>
-            <textarea
-              value={enquiryText}
-              onChange={(event) => handleEnquiryTextChange(event.target.value)}
-              placeholder="Paste the full enquiry here."
-              aria-label="Enquiry text"
-              className={styles.generatorText}
-            />
-          </label>
-
-          <div className={styles.panelActions}>
-            <button type="button" className={styles.primaryPanelButton} onClick={guessDetails}>
-              Guess details
-            </button>
-            <button type="button" className={styles.primaryPanelButton} onClick={generateWorksheet}>
-              Generate worksheet
-            </button>
-            <button
-              type="button"
-              className={styles.neutralButton}
-              onClick={startBlankWorksheet}
-              aria-label="New blank worksheet"
-            >
-              Blank
-            </button>
-            <button
-              type="button"
-              className={styles.primaryPanelButton}
-              onClick={() => window.print()}
-              data-admin-view-safe="true"
-            >
-              Print
-            </button>
-          </div>
-
-          <div className={styles.confirmGrid}>
-            <label>
-              <span>VESSEL NAME</span>
-              <input
-                value={guesses.vesselName}
-                onChange={(event) =>
-                  setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
-                }
-                className={styles.capsInput}
-              />
-            </label>
-            <label>
-              <span>IMO</span>
-              <input
-                value={guesses.imo}
-                onChange={(event) =>
-                  setGuesses((current) => ({
-                    ...current,
-                    imo: event.target.value.replace(/\D/g, "").slice(0, 7),
-                  }))
-                }
-                inputMode="numeric"
-                maxLength={7}
-              />
-            </label>
-            <label>
-              <span>BUYER</span>
-              <input
-                value={guesses.buyer}
-                onChange={(event) =>
-                  setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
-                }
-                className={styles.capsInput}
-              />
-            </label>
-          </div>
-
-          <label className={styles.panelField}>
-            <span>SIMPLIFIED ENQUIRY</span>
-            <textarea
-              value={guesses.simplifiedEnquiry}
-              readOnly
-              placeholder="Example: panda 006 / 9677026 / port klang 8 jun / lsfo 650mts"
-              className={styles.simplifiedText}
-              aria-label="Simplified enquiry"
-            />
-          </label>
-
-          <p className={styles.modalNote}>IMO is optional. Check the guess before generating.</p>
-          {guesses.warnings.length > 0 ? (
-            <ul className={styles.parserWarnings}>
-              {guesses.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          ) : null}
-        </aside>
       </div>
     </main>
   )

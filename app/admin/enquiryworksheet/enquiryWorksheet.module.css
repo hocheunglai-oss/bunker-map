@@ -290,26 +290,12 @@
   color: var(--fc-admin-panel-text);
 }
 
-.panelHeader {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 14px;
-}
-
-.panelHeader span,
 .panelField > span,
 .confirmGrid span {
   color: #5d655f;
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.05em;
-}
-
-.panelHeader h2 {
-  margin: 0;
-  color: #171717;
-  font-size: 20px;
-  line-height: 1.15;
 }
 
 .panelField {
@@ -319,7 +305,6 @@
 }
 
 .generatorText,
-.simplifiedText,
 .confirmGrid input {
   box-sizing: border-box;
   width: 100%;
@@ -335,14 +320,6 @@
   min-height: 230px;
   resize: vertical;
   padding: 12px;
-  line-height: 1.45;
-}
-
-.simplifiedText {
-  min-height: 92px;
-  resize: vertical;
-  padding: 10px;
-  color: #303630;
   line-height: 1.45;
 }
 
@@ -369,11 +346,6 @@
   color: var(--fc-admin-button-text);
 }
 
-.neutralButton {
-  background: #fff;
-  color: #303630;
-}
-
 .confirmGrid {
   margin-top: 14px;
   display: grid;
@@ -388,13 +360,6 @@
 .confirmGrid input {
   min-height: 38px;
   padding: 8px 10px;
-}
-
-.modalNote {
-  margin: 12px 0 0;
-  color: #5d655f;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .parserWarnings {
