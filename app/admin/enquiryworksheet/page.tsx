@@ -35,6 +35,13 @@ type Worksheet = {
   workflow: Record<WorkflowKey, WorkflowRow>
 }
 
+type EnquiryWorksheetCache = {
+  enquiryText: string
+  cleanedEnquiryText: string
+  guesses: EnquiryWorksheetGuess
+  worksheet: Worksheet
+}
+
 const workflowLabels: Array<[WorkflowKey, string]> = [
   ["bumain", "BUMAIN"],
   ["nom", "NOM"],
@@ -60,6 +67,50 @@ const ENQUIRY_WORKSHEET_CACHE_KEY = "fc-admin-enquiry-worksheet-draft-v1"
 
 function toCaps(value: string) {
   return value.toUpperCase()
+}
+
+function normalizeEnquiryText(value: string) {
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
+    .replace(/\u00ad/g, "")
+    .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
+}
+
+function cleanEnquiryLine(value: string) {
+  return value.replace(/[^\S\n]+/g, " ").trim()
+}
+
+function isLabelOnlyLine(value: string) {
+  return /^[A-Za-z][A-Za-z0-9\s/&().,-]{0,48}:\s*$/.test(value)
+}
+
+function isLabelLine(value: string) {
+  return /^[A-Za-z][A-Za-z0-9\s/&().,-]{0,48}:/.test(value)
+}
+
+function cleanEnquiryForReading(value: string) {
+  const lines = normalizeEnquiryText(value)
+    .split("\n")
+    .map(cleanEnquiryLine)
+    .filter(Boolean)
+
+  const cleaned: string[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const nextLine = lines[index + 1] || ""
+
+    if (isLabelOnlyLine(line) && nextLine && !isLabelLine(nextLine)) {
+      cleaned.push(`${line} ${nextLine}`)
+      index += 1
+      continue
+    }
+
+    cleaned.push(line)
+  }
+
+  return cleaned.join("\n")
 }
 
 function todayShort() {
@@ -174,6 +225,23 @@ function restoreGuess(value: unknown): EnquiryWorksheetGuess | null {
   }
 }
 
+function restoreCache(value: unknown): EnquiryWorksheetCache | null {
+  if (!isRecord(value)) return null
+
+  const enquiryText = readString(value, "enquiryText")
+  const cleanedEnquiryText = readString(value, "cleanedEnquiryText")
+  const sourceText = cleanedEnquiryText || (enquiryText ? cleanEnquiryForReading(enquiryText) : "")
+  const guesses = restoreGuess(value.guesses) || (sourceText.trim() ? parseEnquiryWorksheetGuess(sourceText) : emptyGuess())
+  const worksheet = restoreWorksheet(value.worksheet) || blankWorksheet()
+
+  return {
+    enquiryText,
+    cleanedEnquiryText: sourceText,
+    guesses,
+    worksheet,
+  }
+}
+
 function deriveNickname(displayName: string | null, username: string | null) {
   const source = (displayName || username || "").trim()
   if (!source) return ""
@@ -211,6 +279,7 @@ export default function EnquiryWorksheetPage() {
   const userNickname = useMemo(() => deriveNickname(displayName, username), [displayName, username])
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
   const [enquiryText, setEnquiryText] = useState("")
+  const [cleanedEnquiryText, setCleanedEnquiryText] = useState("")
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
   const [cacheReady, setCacheReady] = useState(false)
 
@@ -226,18 +295,13 @@ export default function EnquiryWorksheetPage() {
       const parsed: unknown = JSON.parse(cached)
       if (!isRecord(parsed)) return
 
-      const cachedEnquiryText = readString(parsed, "enquiryText")
-      const cachedGuess = restoreGuess(parsed.guesses)
-      const cachedWorksheet = restoreWorksheet(parsed.worksheet)
+      const restored = restoreCache(parsed)
+      if (!restored) return
 
-      setEnquiryText(cachedEnquiryText)
-      setGuesses(
-        cachedGuess ||
-          (cachedEnquiryText.trim()
-            ? parseEnquiryWorksheetGuess(cachedEnquiryText)
-            : emptyGuess()),
-      )
-      if (cachedWorksheet) setWorksheet(cachedWorksheet)
+      setEnquiryText(restored.enquiryText)
+      setCleanedEnquiryText(restored.cleanedEnquiryText)
+      setGuesses(restored.guesses)
+      setWorksheet(restored.worksheet)
     } catch {
       window.localStorage.removeItem(ENQUIRY_WORKSHEET_CACHE_KEY)
     } finally {
@@ -253,6 +317,7 @@ export default function EnquiryWorksheetPage() {
         ENQUIRY_WORKSHEET_CACHE_KEY,
         JSON.stringify({
           enquiryText,
+          cleanedEnquiryText,
           guesses,
           worksheet,
         }),
@@ -260,7 +325,7 @@ export default function EnquiryWorksheetPage() {
     } catch {
       // If browser storage is blocked/full, keep the worksheet usable without persistence.
     }
-  }, [cacheReady, enquiryText, guesses, worksheet])
+  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, worksheet])
 
   useEffect(() => {
     if (!userNickname) return
@@ -309,11 +374,22 @@ export default function EnquiryWorksheetPage() {
 
   function handleEnquiryTextChange(value: string) {
     setEnquiryText(value)
+    const nextCleaned = cleanEnquiryForReading(value)
+    setCleanedEnquiryText(nextCleaned)
+    setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned) : emptyGuess())
+  }
+
+  function handleCleanedEnquiryTextChange(value: string) {
+    setCleanedEnquiryText(value)
     setGuesses(value.trim() ? parseEnquiryWorksheetGuess(value) : emptyGuess())
   }
 
+  function getParserSourceText() {
+    return cleanedEnquiryText.trim() ? cleanedEnquiryText : enquiryText
+  }
+
   function guessDetails() {
-    const parsed = parseEnquiryWorksheetGuess(enquiryText)
+    const parsed = parseEnquiryWorksheetGuess(getParserSourceText())
     const nextGuess: EnquiryWorksheetGuess = {
       vesselName: guesses.vesselName || parsed.vesselName,
       imo: guesses.imo || parsed.imo,
@@ -333,7 +409,7 @@ export default function EnquiryWorksheetPage() {
       vesselName: toCaps(nextGuess.vesselName),
       imo: nextGuess.imo.replace(/\D/g, "").slice(0, 7),
       buyer: toCaps(nextGuess.buyer),
-      workingNotes: enquiryText,
+      workingNotes: getParserSourceText(),
     })
   }
 
@@ -344,6 +420,7 @@ export default function EnquiryWorksheetPage() {
       // Ignore storage failures; the visible draft still resets.
     }
     setEnquiryText("")
+    setCleanedEnquiryText("")
     setGuesses(emptyGuess())
     setWorksheet(blankWorksheet(userNickname))
   }
@@ -362,6 +439,20 @@ export default function EnquiryWorksheetPage() {
               className={styles.generatorText}
             />
           </label>
+
+          <label className={styles.panelField}>
+            <span>CLEANED ENQUIRY</span>
+            <textarea
+              value={cleanedEnquiryText}
+              onChange={(event) => handleCleanedEnquiryTextChange(event.target.value)}
+              placeholder="Cleaned version appears here. Numbers are preserved."
+              aria-label="Cleaned enquiry text"
+              className={styles.cleanedText}
+            />
+          </label>
+          <p className={styles.cleaningNote}>
+            Removes blank/invisible-space lines only. Standalone numbers are kept.
+          </p>
 
           <div className={styles.confirmGrid}>
             <label>

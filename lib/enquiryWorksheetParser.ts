@@ -28,7 +28,9 @@ function normalizeInput(text: string) {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/[–—]/g, "-")
-    .replace(/\u00a0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
+    .replace(/\u00ad/g, "")
+    .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
 }
 
 function cleanSpaces(value: string) {
