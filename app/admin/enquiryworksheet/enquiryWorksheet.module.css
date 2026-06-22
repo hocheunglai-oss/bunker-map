@@ -79,8 +79,9 @@
   grid-template-columns: 20mm auto auto;
   align-items: center;
   gap: 1.5mm;
-  font-size: 5.5pt;
-  font-weight: 800;
+  font-size: 7pt;
+  font-weight: 900;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -326,7 +327,7 @@
 .panelActions {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -345,6 +346,12 @@
   border-color: var(--fc-admin-primary-button-bg) !important;
   background: var(--fc-admin-primary-button-bg) !important;
   color: var(--fc-admin-primary-button-text) !important;
+}
+
+.secondaryPanelButton {
+  border-color: var(--fc-admin-button-border) !important;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
 }
 
 .confirmGrid {

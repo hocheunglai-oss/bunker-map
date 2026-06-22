@@ -56,6 +56,8 @@ const workflowCells: Record<WorkflowKey, Partial<Record<WorkflowAction, { suffix
   bno: { send: {} },
 }
 
+const ENQUIRY_WORKSHEET_CACHE_KEY = "fc-admin-enquiry-worksheet-draft-v1"
+
 function toCaps(value: string) {
   return value.toUpperCase()
 }
@@ -101,6 +103,77 @@ function blankWorksheet(initials = ""): Worksheet {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function readString(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === "string" ? value : ""
+}
+
+function readBoolean(record: Record<string, unknown>, key: string) {
+  return record[key] === true
+}
+
+function restoreWorkflowRow(value: unknown, fallback: WorkflowRow): WorkflowRow {
+  if (!isRecord(value)) return fallback
+
+  return {
+    register: readBoolean(value, "register"),
+    draft: readBoolean(value, "draft"),
+    approval: readBoolean(value, "approval"),
+    send: readBoolean(value, "send"),
+    registerText: readString(value, "registerText"),
+    draftText: readString(value, "draftText"),
+    approvalText: readString(value, "approvalText"),
+    sendText: readString(value, "sendText"),
+    note: typeof value.note === "string" ? value.note : fallback.note,
+  }
+}
+
+function restoreWorksheet(value: unknown): Worksheet | null {
+  if (!isRecord(value)) return null
+
+  const fallback = blankWorksheet()
+  const workflow = isRecord(value.workflow) ? value.workflow : {}
+
+  return {
+    vesselName: readString(value, "vesselName"),
+    imo: readString(value, "imo"),
+    date: readString(value, "date") || fallback.date,
+    initials: readString(value, "initials"),
+    buyer: readString(value, "buyer"),
+    credit: readString(value, "credit"),
+    workingNotes: readString(value, "workingNotes"),
+    unofficialCompensation: readString(value, "unofficialCompensation"),
+    workflow: {
+      bumain: restoreWorkflowRow(workflow.bumain, fallback.workflow.bumain),
+      nom: restoreWorkflowRow(workflow.nom, fallback.workflow.nom),
+      con: restoreWorkflowRow(workflow.con, fallback.workflow.con),
+      bno: restoreWorkflowRow(workflow.bno, fallback.workflow.bno),
+    },
+  }
+}
+
+function restoreGuess(value: unknown): EnquiryWorksheetGuess | null {
+  if (!isRecord(value)) return null
+
+  const confidence = value.confidence
+  return {
+    vesselName: readString(value, "vesselName"),
+    imo: readString(value, "imo"),
+    buyer: readString(value, "buyer"),
+    confidence:
+      confidence === "high" || confidence === "medium" || confidence === "low"
+        ? confidence
+        : "low",
+    warnings: Array.isArray(value.warnings)
+      ? value.warnings.filter((warning): warning is string => typeof warning === "string")
+      : [],
+  }
+}
+
 function deriveNickname(displayName: string | null, username: string | null) {
   const source = (displayName || username || "").trim()
   if (!source) return ""
@@ -139,10 +212,55 @@ export default function EnquiryWorksheetPage() {
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
   const [enquiryText, setEnquiryText] = useState("")
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
+  const [cacheReady, setCacheReady] = useState(false)
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
   }, [])
+
+  useEffect(() => {
+    try {
+      const cached = window.localStorage.getItem(ENQUIRY_WORKSHEET_CACHE_KEY)
+      if (!cached) return
+
+      const parsed: unknown = JSON.parse(cached)
+      if (!isRecord(parsed)) return
+
+      const cachedEnquiryText = readString(parsed, "enquiryText")
+      const cachedGuess = restoreGuess(parsed.guesses)
+      const cachedWorksheet = restoreWorksheet(parsed.worksheet)
+
+      setEnquiryText(cachedEnquiryText)
+      setGuesses(
+        cachedGuess ||
+          (cachedEnquiryText.trim()
+            ? parseEnquiryWorksheetGuess(cachedEnquiryText)
+            : emptyGuess()),
+      )
+      if (cachedWorksheet) setWorksheet(cachedWorksheet)
+    } catch {
+      window.localStorage.removeItem(ENQUIRY_WORKSHEET_CACHE_KEY)
+    } finally {
+      setCacheReady(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!cacheReady) return
+
+    try {
+      window.localStorage.setItem(
+        ENQUIRY_WORKSHEET_CACHE_KEY,
+        JSON.stringify({
+          enquiryText,
+          guesses,
+          worksheet,
+        }),
+      )
+    } catch {
+      // If browser storage is blocked/full, keep the worksheet usable without persistence.
+    }
+  }, [cacheReady, enquiryText, guesses, worksheet])
 
   useEffect(() => {
     if (!userNickname) return
@@ -219,12 +337,23 @@ export default function EnquiryWorksheetPage() {
     })
   }
 
+  function clearDraft() {
+    try {
+      window.localStorage.removeItem(ENQUIRY_WORKSHEET_CACHE_KEY)
+    } catch {
+      // Ignore storage failures; the visible draft still resets.
+    }
+    setEnquiryText("")
+    setGuesses(emptyGuess())
+    setWorksheet(blankWorksheet(userNickname))
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.workspace}>
         <aside className={styles.sidePanel} aria-label="Enquiry worksheet generator">
           <label className={styles.panelField}>
-            <span>PASTE ENQUIRY</span>
+            <span>ENQUIRY</span>
             <textarea
               value={enquiryText}
               onChange={(event) => handleEnquiryTextChange(event.target.value)}
@@ -288,6 +417,14 @@ export default function EnquiryWorksheetPage() {
               data-admin-button-style="preserve"
             >
               Print
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryPanelButton}
+              onClick={clearDraft}
+              data-admin-button-style="preserve"
+            >
+              Clear
             </button>
           </div>
 

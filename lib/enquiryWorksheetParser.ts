@@ -16,8 +16,11 @@ type ImoCandidate = {
 const VESSEL_LABEL_PATTERN =
   /\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\b/i
 
-const BUYER_PATTERN =
-  /^\s*buyer\s*(?:[:#\-\t]|\s{2,})?\s*([A-Za-z0-9][^\n\r,;]{1,80})/im
+const BUYER_LABEL_PATTERN =
+  /^\s*(?:buyer|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
+
+const NON_BUYER_LABEL_PATTERN =
+  /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 function normalizeInput(text: string) {
   return text
@@ -159,9 +162,39 @@ function extractSlashPrefixVessel(lines: string[]) {
   return ""
 }
 
+function cleanBuyerName(value: string) {
+  return stripOuterNoise(value)
+    .replace(/^(?:is|are)\s+/i, "")
+    .replace(/\s*\/\/.*$/g, "")
+    .toUpperCase()
+}
+
+function isPlausibleBuyerName(value: string) {
+  if (!value) return false
+  if (value.length < 2 || value.length > 100) return false
+  if (!/[A-Z]/.test(value)) return false
+  if (NON_BUYER_LABEL_PATTERN.test(value)) return false
+  return true
+}
+
 function extractBuyer(text: string) {
-  const match = normalizeInput(text).match(BUYER_PATTERN)
-  return match?.[1] ? stripOuterNoise(match[1]).toUpperCase() : ""
+  const lines = normalizeInput(text)
+    .split("\n")
+    .map((line) => cleanSpaces(line))
+    .filter(Boolean)
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(BUYER_LABEL_PATTERN)
+    if (!match) continue
+
+    const inlineValue = cleanBuyerName(match[1] || "")
+    if (isPlausibleBuyerName(inlineValue)) return inlineValue
+
+    const nextLine = cleanBuyerName(lines[index + 1] || "")
+    if (isPlausibleBuyerName(nextLine)) return nextLine
+  }
+
+  return ""
 }
 
 export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess {
