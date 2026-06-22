@@ -211,7 +211,7 @@ export async function loadWhatsAppInbox(selectedConversationId?: string | null):
     .from("whatsapp_conversations")
     .select("*")
     .order("last_message_at", { ascending: false, nullsFirst: false })
-    .limit(80)
+    .limit(200)
 
   if (conversationsResult.error) {
     if (isMissingTableError(conversationsResult.error)) return tableSetupPayload()
@@ -309,6 +309,64 @@ async function ensureConversation(
       metadata: values.metadata || {},
       updated_at: now,
     })
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return data as WhatsAppConversation
+}
+
+export async function assignWhatsAppContact(params: {
+  phone: string
+  displayName?: string | null
+  company?: string | null
+  contactId?: string | null
+  auditContext?: AdminAuditContext
+}) {
+  const supabase = getServiceSupabaseClient(params.auditContext)
+  const conversation = await ensureConversation(supabase, params.phone, {
+    display_name: params.displayName || null,
+    company: params.company || null,
+    status: "open",
+  })
+  const now = new Date().toISOString()
+  const tags = Array.from(new Set([...(conversation.tags || []), "assigned"]))
+  const metadata = {
+    ...(conversation.metadata || {}),
+    source: "phonebook",
+    phonebook_contact_id: params.contactId || null,
+  }
+
+  const { data, error } = await supabase
+    .from("whatsapp_conversations")
+    .update({
+      display_name: params.displayName || conversation.display_name,
+      company: params.company || conversation.company,
+      tags,
+      metadata,
+      updated_at: now,
+    })
+    .eq("id", conversation.id)
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return data as WhatsAppConversation
+}
+
+export async function markWhatsAppConversationRead(
+  conversationId: string,
+  auditContext?: AdminAuditContext,
+) {
+  if (!conversationId) throw new Error("Conversation id is required.")
+  const supabase = getServiceSupabaseClient(auditContext)
+  const { data, error } = await supabase
+    .from("whatsapp_conversations")
+    .update({
+      unread_count: 0,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", conversationId)
     .select("*")
     .single()
 

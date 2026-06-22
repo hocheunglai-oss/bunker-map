@@ -136,7 +136,7 @@ const appShellStyle: CSSProperties = {
   height: "100vh",
   minHeight: "720px",
   display: "grid",
-  gridTemplateColumns: "390px minmax(460px, 1fr) 310px",
+  gridTemplateColumns: "330px 320px minmax(460px, 1fr)",
   background: "#efeae2",
   overflow: "hidden",
 }
@@ -167,21 +167,6 @@ const iconButtonStyle: CSSProperties = {
   fontWeight: 800,
   textDecoration: "none",
   boxShadow: "none",
-}
-
-const avatarStyle: CSSProperties = {
-  width: "40px",
-  height: "40px",
-  borderRadius: "999px",
-  background: "#dfe5e7",
-  color: "#54656f",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: "15px",
-  fontWeight: 900,
-  flex: "0 0 auto",
-  textTransform: "uppercase",
 }
 
 const searchBoxStyle: CSSProperties = {
@@ -301,13 +286,6 @@ function conversationTitle(
   return conversation.display_name || conversation.phone_e164
 }
 
-function initials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0].slice(0, 2)
-  return `${parts[0][0]}${parts[1][0]}`
-}
-
 function storageReadyMessage(inbox: WhatsAppInboxResponse) {
   if (inbox.storageReady) return ""
   return inbox.storageMessage || "WhatsApp storage is not ready."
@@ -342,7 +320,8 @@ export default function WhatsAppAdminPage() {
   })
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [selectedContact, setSelectedContact] = useState<ContactOption | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
+  const [chatSearchQuery, setChatSearchQuery] = useState("")
+  const [contactSearchQuery, setContactSearchQuery] = useState("")
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [contactMatches, setContactMatches] = useState<Record<string, ContactOption>>({})
   const [composeTo, setComposeTo] = useState("")
@@ -350,6 +329,7 @@ export default function WhatsAppAdminPage() {
   const [loading, setLoading] = useState(true)
   const [contactLoading, setContactLoading] = useState(false)
   const [sending, setSending] = useState(false)
+  const [assigningContactId, setAssigningContactId] = useState<string | null>(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
 
@@ -442,11 +422,11 @@ export default function WhatsAppAdminPage() {
   useEffect(() => {
     if (authLoading || !authenticated || !canView) return
     const timer = window.setTimeout(() => {
-      void loadContacts(searchQuery)
-    }, searchQuery ? 220 : 0)
+      void loadContacts(contactSearchQuery)
+    }, contactSearchQuery ? 220 : 0)
 
     return () => window.clearTimeout(timer)
-  }, [authLoading, authenticated, canView, loadContacts, searchQuery])
+  }, [authLoading, authenticated, canView, contactSearchQuery, loadContacts])
 
   const selectedConversation = useMemo(
     () =>
@@ -475,8 +455,9 @@ export default function WhatsAppAdminPage() {
   )
 
   const conversationItems = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase()
+    const normalizedQuery = chatSearchQuery.trim().toLowerCase()
     return inbox.conversations.filter((conversation) => {
+      if (!conversation.last_message_at && !conversation.last_message_preview) return false
       if (!normalizedQuery) return true
       const match = contactMatches[phoneDigits(conversation.phone_e164)]
       return [
@@ -492,12 +473,20 @@ export default function WhatsAppAdminPage() {
         .toLowerCase()
         .includes(normalizedQuery)
     })
-  }, [contactMatches, inbox.conversations, searchQuery])
+  }, [chatSearchQuery, contactMatches, inbox.conversations])
 
-  const contactItems = useMemo(() => {
-    const conversationPhones = new Set(inbox.conversations.map((item) => phoneDigits(item.phone_e164)))
-    return contacts.filter((contact) => !conversationPhones.has(contact.phoneDigits))
-  }, [contacts, inbox.conversations])
+  const assignedConversations = useMemo(
+    () =>
+      inbox.conversations.filter((conversation) =>
+        (conversation.tags || []).includes("assigned"),
+      ),
+    [inbox.conversations],
+  )
+
+  const unassignedContactItems = useMemo(() => {
+    const assignedPhones = new Set(assignedConversations.map((item) => phoneDigits(item.phone_e164)))
+    return contacts.filter((contact) => !assignedPhones.has(contact.phoneDigits))
+  }, [assignedConversations, contacts])
 
   const activeTitle = conversationTitle(selectedConversation, activeContact)
   const activeSubtitle =
@@ -514,14 +503,37 @@ export default function WhatsAppAdminPage() {
       }
     : {}
 
-  function selectConversation(conversationId: string) {
+  const markConversationRead = useCallback(async (conversationId: string) => {
+    if (!conversationId) return
+    setInbox((current) => ({
+      ...current,
+      conversations: current.conversations.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, unread_count: 0 }
+          : conversation,
+      ),
+    }))
+
+    try {
+      await fetch("/api/whatsapp/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId }),
+      })
+    } catch {
+      // Reading a chat should not block the operator if the background write fails.
+    }
+  }, [])
+
+  async function selectConversation(conversationId: string) {
     const conversation = inbox.conversations.find((item) => item.id === conversationId)
     setSelectedConversationId(conversationId)
     setSelectedContact(null)
     setError("")
     setMessage("")
     if (conversation?.phone_e164) setComposeTo(conversation.phone_e164)
-    void loadInbox(conversationId)
+    await markConversationRead(conversationId)
+    await loadInbox(conversationId)
   }
 
   function selectContact(contact: ContactOption) {
@@ -529,7 +541,7 @@ export default function WhatsAppAdminPage() {
       (conversation) => phoneDigits(conversation.phone_e164) === contact.phoneDigits,
     )
     if (existing) {
-      selectConversation(existing.id)
+      void selectConversation(existing.id)
       return
     }
 
@@ -538,6 +550,61 @@ export default function WhatsAppAdminPage() {
     setComposeTo(contact.phone)
     setError("")
     setMessage("")
+  }
+
+  useEffect(() => {
+    if (!selectedConversation?.id || !selectedConversation.unread_count) return
+    void markConversationRead(selectedConversation.id)
+  }, [markConversationRead, selectedConversation?.id, selectedConversation?.unread_count])
+
+  async function assignContact(contact: ContactOption) {
+    if (assigningContactId || !canEdit) return
+    setAssigningContactId(contact.id)
+    setError("")
+    setMessage("")
+
+    try {
+      const response = await fetch("/api/whatsapp/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: contact.phone,
+          displayName: contact.name,
+          company: contact.company,
+          contactId: contact.id,
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as {
+        conversation?: WhatsAppConversation
+        message?: string
+      }
+      if (!response.ok || !data.conversation) {
+        throw new Error(data.message || "Unable to assign WhatsApp contact.")
+      }
+      const assignedConversation = data.conversation
+
+      mergeContactMatches([contact])
+      setInbox((current) => {
+        const exists = current.conversations.some((conversation) => conversation.id === assignedConversation.id)
+        return {
+          ...current,
+          conversations: exists
+            ? current.conversations.map((conversation) =>
+                conversation.id === assignedConversation.id ? assignedConversation : conversation,
+              )
+            : [...current.conversations, assignedConversation],
+        }
+      })
+      setSelectedContact(null)
+      setSelectedConversationId(assignedConversation.id)
+      setComposeTo(assignedConversation.phone_e164)
+      await loadInbox(assignedConversation.id)
+      setMessage("Contact assigned.")
+    } catch (assignError) {
+      setError(assignError instanceof Error ? assignError.message : "Unable to assign WhatsApp contact.")
+    } finally {
+      setAssigningContactId(null)
+    }
   }
 
   async function sendMessage() {
@@ -593,12 +660,13 @@ export default function WhatsAppAdminPage() {
     const match = contactMatches[phoneDigits(conversation.phone_e164)] || null
     const title = conversationTitle(conversation, match)
     const detail = match?.detail || conversation.company || conversation.phone_e164
+    const unread = conversation.unread_count > 0
 
     return (
       <button
         key={conversation.id}
         type="button"
-        onClick={() => selectConversation(conversation.id)}
+        onClick={() => void selectConversation(conversation.id)}
         style={{
           width: "100%",
           minHeight: "72px",
@@ -608,15 +676,14 @@ export default function WhatsAppAdminPage() {
           color: "#111b21",
           cursor: "pointer",
           display: "grid",
-          gridTemplateColumns: "50px minmax(0, 1fr) auto",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
           gap: "12px",
           alignItems: "center",
-          padding: "10px 14px",
+          padding: "11px 14px 11px 18px",
           textAlign: "left",
           boxShadow: "none",
         }}
       >
-        <span style={avatarStyle}>{initials(title)}</span>
         <span style={{ minWidth: 0, display: "grid", gap: "4px" }}>
           <span
             style={{
@@ -626,7 +693,7 @@ export default function WhatsAppAdminPage() {
               whiteSpace: "nowrap",
               color: "#111b21",
               fontSize: "16px",
-              fontWeight: 500,
+              fontWeight: unread ? 700 : 500,
             }}
           >
             {title}
@@ -637,8 +704,9 @@ export default function WhatsAppAdminPage() {
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
-              color: "#667781",
+              color: unread ? "#111b21" : "#667781",
               fontSize: "13px",
+              fontWeight: unread ? 600 : 400,
             }}
           >
             {displayPreview(conversation.last_message_preview) || detail}
@@ -646,7 +714,7 @@ export default function WhatsAppAdminPage() {
         </span>
         <span style={{ display: "grid", gap: "7px", justifyItems: "end", alignSelf: "stretch" }}>
           <span style={{ color: "#667781", fontSize: "12px" }}>{formatTime(conversation.last_message_at)}</span>
-          {conversation.unread_count > 0 ? (
+          {unread ? (
             <span
               style={{
                 minWidth: "20px",
@@ -670,33 +738,100 @@ export default function WhatsAppAdminPage() {
     )
   }
 
-  function renderContactRow(contact: ContactOption) {
+  function renderAssignedRow(conversation: WhatsAppConversation) {
+    const selected = conversation.id === selectedConversationId
+    const match = contactMatches[phoneDigits(conversation.phone_e164)] || null
+    const title = conversationTitle(conversation, match)
+    const detail = match?.company || conversation.company || conversation.phone_e164
+
     return (
       <button
-        key={contact.id}
+        key={conversation.id}
         type="button"
-        onClick={() => selectContact(contact)}
+        onClick={() => void selectConversation(conversation.id)}
         style={{
           width: "100%",
-          minHeight: "72px",
+          minHeight: "66px",
           border: "none",
           borderBottom: "1px solid #e9edef",
-          background: selectedContact?.id === contact.id ? "#f0f2f5" : "#ffffff",
+          background: selected ? "#f0f2f5" : "#ffffff",
           color: "#111b21",
           cursor: "pointer",
           display: "grid",
-          gridTemplateColumns: "50px minmax(0, 1fr)",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
           gap: "12px",
           alignItems: "center",
-          padding: "10px 14px",
+          padding: "10px 14px 10px 18px",
           textAlign: "left",
           boxShadow: "none",
         }}
       >
-        <span style={{ ...avatarStyle, background: "#d9fdd3", color: "#008069" }}>
-          {initials(contact.name)}
-        </span>
         <span style={{ minWidth: 0, display: "grid", gap: "4px" }}>
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "#111b21",
+              fontSize: "15px",
+              fontWeight: 600,
+            }}
+          >
+            {title}
+          </span>
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "#667781",
+              fontSize: "13px",
+            }}
+          >
+            {detail}
+          </span>
+        </span>
+        <span style={{ color: "#008069", fontSize: "12px", fontWeight: 800 }}>Assigned</span>
+      </button>
+    )
+  }
+
+  function renderContactRow(contact: ContactOption) {
+    const assigning = assigningContactId === contact.id
+    return (
+      <div
+        key={contact.id}
+        style={{
+          width: "100%",
+          minHeight: "72px",
+          borderBottom: "1px solid #e9edef",
+          background: selectedContact?.id === contact.id ? "#f0f2f5" : "#ffffff",
+          color: "#111b21",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: "12px",
+          alignItems: "center",
+          padding: "10px 14px 10px 18px",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => selectContact(contact)}
+          style={{
+            minWidth: 0,
+            border: "none",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            display: "grid",
+            gap: "4px",
+            padding: 0,
+            textAlign: "left",
+            boxShadow: "none",
+          }}
+        >
           <span
             style={{
               minWidth: 0,
@@ -722,8 +857,30 @@ export default function WhatsAppAdminPage() {
           >
             {contact.company || contact.phone}
           </span>
-        </span>
-      </button>
+        </button>
+        <button
+          type="button"
+          onClick={() => void assignContact(contact)}
+          disabled={!canEdit || assigning}
+          aria-label={`Assign ${contact.name}`}
+          title={`Assign ${contact.name}`}
+          style={{
+            width: "34px",
+            height: "34px",
+            border: "none",
+            borderRadius: "999px",
+            background: !canEdit || assigning ? "#d1d7db" : "#00a884",
+            color: "#ffffff",
+            cursor: !canEdit || assigning ? "not-allowed" : "pointer",
+            fontSize: "18px",
+            fontWeight: 800,
+            lineHeight: 1,
+            boxShadow: "none",
+          }}
+        >
+          {assigning ? "…" : "+"}
+        </button>
+      </div>
     )
   }
 
@@ -744,24 +901,15 @@ export default function WhatsAppAdminPage() {
           }}
         >
           <div style={headerBarStyle} data-admin-button-style="preserve">
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-              <Link
-                href="/admin"
-                className="fc-admin-nav-button"
-                style={iconButtonStyle}
-                aria-label="Return to admin"
-                title="Return to admin"
-              >
-                ‹
-              </Link>
-              <span style={{ ...avatarStyle, background: "#00a884", color: "#ffffff" }}>FC</span>
-              <div style={{ minWidth: 0, display: "grid", gap: "2px" }}>
-                <strong style={{ color: "#111b21", fontSize: "15px" }}>FC UNO WhatsApp</strong>
-                <span style={{ color: "#667781", fontSize: "12px" }}>
-                  {inbox.conversations.length} chats · {contacts.length} contacts
-                </span>
-              </div>
-            </div>
+            <Link
+              href="/admin"
+              className="fc-admin-nav-button"
+              style={iconButtonStyle}
+              aria-label="Return to admin"
+              title="Return to admin"
+            >
+              ‹
+            </Link>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               {renderSetupDot(config.configured, config.configured ? "API ready" : "API setup required")}
               {renderSetupDot(inbox.storageReady, inbox.storageReady ? "Storage ready" : "Storage setup required")}
@@ -794,9 +942,9 @@ export default function WhatsAppAdminPage() {
               </span>
               <input
                 type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search or start new chat"
+                value={chatSearchQuery}
+                onChange={(event) => setChatSearchQuery(event.target.value)}
+                placeholder="Search chats"
                 style={searchBoxStyle}
               />
             </label>
@@ -809,7 +957,61 @@ export default function WhatsAppAdminPage() {
               </div>
             ) : null}
             {conversationItems.map(renderConversationRow)}
-            {contactItems.length > 0 ? (
+            {loading ? (
+              <div style={{ padding: "16px", color: "#667781", fontSize: "13px" }}>Loading...</div>
+            ) : null}
+            {!loading && conversationItems.length === 0 ? (
+              <div style={{ padding: "16px", color: "#667781", fontSize: "13px" }}>
+                No chats found.
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <aside
+          style={{
+            minWidth: 0,
+            background: "#ffffff",
+            borderRight: "1px solid #d1d7db",
+            display: "grid",
+            gridTemplateRows: "auto auto minmax(0, 1fr)",
+          }}
+          aria-label="Assigned contacts"
+        >
+          <div style={headerBarStyle}>
+            <strong style={{ color: "#111b21", fontSize: "16px" }}>Assigned contacts</strong>
+            <span style={{ color: "#667781", fontSize: "12px", fontWeight: 700 }}>
+              {assignedConversations.length}
+            </span>
+          </div>
+
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid #e9edef", background: "#ffffff" }}>
+            <label style={{ position: "relative", display: "block" }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: "14px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "#667781",
+                  fontSize: "15px",
+                }}
+              >
+                ⌕
+              </span>
+              <input
+                type="search"
+                value={contactSearchQuery}
+                onChange={(event) => setContactSearchQuery(event.target.value)}
+                placeholder="Search phonebook"
+                style={searchBoxStyle}
+              />
+            </label>
+          </div>
+
+          <div data-admin-button-style="preserve" style={{ minHeight: 0, overflowY: "auto" }}>
+            {assignedConversations.length > 0 ? (
               <div
                 style={{
                   padding: "11px 16px 7px",
@@ -819,16 +1021,29 @@ export default function WhatsAppAdminPage() {
                   textTransform: "uppercase",
                 }}
               >
-                Phonebook contacts
+                Always shown
               </div>
             ) : null}
-            {contactItems.map(renderContactRow)}
-            {loading || contactLoading ? (
-              <div style={{ padding: "16px", color: "#667781", fontSize: "13px" }}>Loading...</div>
+            {assignedConversations.map(renderAssignedRow)}
+
+            <div
+              style={{
+                padding: "11px 16px 7px",
+                color: "#008069",
+                fontSize: "12px",
+                fontWeight: 700,
+                textTransform: "uppercase",
+              }}
+            >
+              Phonebook
+            </div>
+            {unassignedContactItems.map(renderContactRow)}
+            {contactLoading ? (
+              <div style={{ padding: "16px", color: "#667781", fontSize: "13px" }}>Loading contacts...</div>
             ) : null}
-            {!loading && !contactLoading && conversationItems.length === 0 && contactItems.length === 0 ? (
+            {!contactLoading && unassignedContactItems.length === 0 ? (
               <div style={{ padding: "16px", color: "#667781", fontSize: "13px" }}>
-                No chats or phonebook contacts found.
+                No matching phonebook contacts.
               </div>
             ) : null}
           </div>
@@ -845,9 +1060,6 @@ export default function WhatsAppAdminPage() {
         >
           <div style={headerBarStyle}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-              <span style={{ ...avatarStyle, background: "#d9fdd3", color: "#008069" }}>
-                {initials(activeTitle)}
-              </span>
               <div style={{ minWidth: 0, display: "grid", gap: "2px" }}>
                 <strong
                   style={{
@@ -879,7 +1091,7 @@ export default function WhatsAppAdminPage() {
               <button
                 type="button"
                 style={iconButtonStyle}
-                onClick={() => setSearchQuery(activePhone || "")}
+                onClick={() => setContactSearchQuery(activePhone || "")}
                 aria-label="Find this contact"
                 title="Find this contact"
               >
@@ -933,22 +1145,6 @@ export default function WhatsAppAdminPage() {
                   lineHeight: 1.5,
                 }}
               >
-                <div
-                  style={{
-                    width: "78px",
-                    height: "78px",
-                    margin: "0 auto 18px",
-                    borderRadius: "999px",
-                    background: "#d9fdd3",
-                    color: "#008069",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "34px",
-                  }}
-                >
-                  ☎
-                </div>
                 Search the phonebook or select an existing chat.
               </div>
             ) : selectedMessages.length === 0 ? (
@@ -1019,7 +1215,7 @@ export default function WhatsAppAdminPage() {
               background: "#f0f2f5",
               borderTop: "1px solid #d1d7db",
               display: "grid",
-              gridTemplateColumns: "auto minmax(0, 1fr) auto",
+              gridTemplateColumns: activePhone ? "minmax(0, 1fr) auto" : "160px minmax(0, 1fr) auto",
               gap: "10px",
               alignItems: "end",
               padding: "10px 14px",
@@ -1047,8 +1243,9 @@ export default function WhatsAppAdminPage() {
             <textarea
               value={composeBody}
               onChange={(event) => setComposeBody(event.target.value)}
-              placeholder="Type a message"
+              placeholder={activePhone ? "Type a message" : "Select or assign a contact"}
               rows={1}
+              disabled={!activePhone || sending}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
@@ -1069,6 +1266,7 @@ export default function WhatsAppAdminPage() {
                 resize: "none",
                 boxSizing: "border-box",
                 lineHeight: 1.35,
+                opacity: activePhone ? 1 : 0.7,
               }}
             />
             <button
@@ -1093,72 +1291,6 @@ export default function WhatsAppAdminPage() {
             </button>
           </div>
         </section>
-
-        {!isMobile ? (
-          <aside
-            style={{
-              minWidth: 0,
-              background: "#ffffff",
-              borderLeft: "1px solid #d1d7db",
-              display: "grid",
-              gridTemplateRows: "auto minmax(0, 1fr)",
-            }}
-            aria-label="Contact information"
-          >
-            <div style={headerBarStyle}>
-              <strong style={{ color: "#111b21", fontSize: "16px" }}>Contact info</strong>
-              <span style={{ color: "#667781", fontSize: "12px" }}>
-                {selectedConversation?.status?.toUpperCase() || "OPEN"}
-              </span>
-            </div>
-            <div style={{ minHeight: 0, overflowY: "auto", padding: "28px 24px", display: "grid", gap: "22px" }}>
-              <div style={{ textAlign: "center", display: "grid", gap: "10px", justifyItems: "center" }}>
-                <span style={{ ...avatarStyle, width: "92px", height: "92px", fontSize: "30px" }}>
-                  {initials(activeTitle)}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      color: "#111b21",
-                      fontSize: "20px",
-                      fontWeight: 500,
-                      overflowWrap: "anywhere",
-                    }}
-                  >
-                    {activeTitle}
-                  </div>
-                  <div style={{ color: "#667781", fontSize: "13px", marginTop: "4px", overflowWrap: "anywhere" }}>
-                    {activePhone || "No phone selected"}
-                  </div>
-                </div>
-              </div>
-
-              {[
-                ["Company", activeContact?.company || selectedConversation?.company || "Not set"],
-                ["Position", activeContact?.raw.position || "Not set"],
-                ["Department", activeContact?.raw.department || "Not set"],
-                ["Email", activeContact?.raw.personal_email || activeContact?.raw.general_email || activeContact?.raw.private_email || "Not set"],
-                ["Assigned to", selectedConversation?.assigned_to || "Not assigned"],
-                ["Last message", displayPreview(selectedConversation?.last_message_preview) || "No message preview"],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  style={{
-                    borderTop: "1px solid #e9edef",
-                    paddingTop: "14px",
-                    display: "grid",
-                    gap: "5px",
-                  }}
-                >
-                  <span style={{ color: "#008069", fontSize: "12px", fontWeight: 700 }}>{label}</span>
-                  <span style={{ color: "#111b21", fontSize: "14px", lineHeight: 1.45, overflowWrap: "anywhere" }}>
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </aside>
-        ) : null}
       </main>
     </div>
   )
