@@ -313,6 +313,22 @@ function storageReadyMessage(inbox: WhatsAppInboxResponse) {
   return inbox.storageMessage || "WhatsApp storage is not ready."
 }
 
+function displayMessageText(message: Pick<WhatsAppMessage, "body" | "message_type">) {
+  const body = (message.body || "").trim()
+  if (message.message_type === "unsupported" || body === "[unsupported]") {
+    return "Unsupported WhatsApp message"
+  }
+  return body || `[${message.message_type}]`
+}
+
+function displayPreview(value: string | null | undefined) {
+  const preview = (value || "").trim()
+  if (preview === "[unsupported]" || preview.toLowerCase().startsWith("unsupported message:")) {
+    return "Unsupported WhatsApp message"
+  }
+  return preview
+}
+
 export default function WhatsAppAdminPage() {
   const isMobile = useIsMobile(980)
   const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
@@ -625,7 +641,7 @@ export default function WhatsAppAdminPage() {
               fontSize: "13px",
             }}
           >
-            {conversation.last_message_preview || detail}
+            {displayPreview(conversation.last_message_preview) || detail}
           </span>
         </span>
         <span style={{ display: "grid", gap: "7px", justifyItems: "end", alignSelf: "stretch" }}>
@@ -973,7 +989,7 @@ export default function WhatsAppAdminPage() {
                       }}
                     >
                       <div style={{ fontSize: "14px", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                        {chatMessage.body || `[${chatMessage.message_type}]`}
+                        {displayMessageText(chatMessage)}
                       </div>
                       <div
                         style={{
@@ -1123,7 +1139,7 @@ export default function WhatsAppAdminPage() {
                 ["Department", activeContact?.raw.department || "Not set"],
                 ["Email", activeContact?.raw.personal_email || activeContact?.raw.general_email || activeContact?.raw.private_email || "Not set"],
                 ["Assigned to", selectedConversation?.assigned_to || "Not assigned"],
-                ["Last message", selectedConversation?.last_message_preview || "No message preview"],
+                ["Last message", displayPreview(selectedConversation?.last_message_preview) || "No message preview"],
               ].map(([label, value]) => (
                 <div
                   key={label}

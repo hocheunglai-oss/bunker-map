@@ -66,6 +66,12 @@ type IncomingWhatsAppMessage = {
     from?: string
     timestamp?: string
     type?: string
+    errors?: Array<{
+      code?: string | number
+      title?: string
+      message?: string
+      error_data?: { details?: string }
+    }>
     text?: { body?: string }
     button?: { text?: string }
     interactive?: {
@@ -177,6 +183,15 @@ function messageBody(message: NonNullable<IncomingWhatsAppMessage["messages"]>[n
   if (message.document?.caption) return message.document.caption
   if (message.video?.caption) return message.video.caption
   if (message.document?.filename) return message.document.filename
+  if (message.type === "unsupported") {
+    const error = message.errors?.[0]
+    const detail =
+      error?.error_data?.details ||
+      error?.message ||
+      error?.title ||
+      "This WhatsApp message type is not supported by the API."
+    return `Unsupported message: ${detail}`
+  }
   return `[${message.type || "message"}]`
 }
 
