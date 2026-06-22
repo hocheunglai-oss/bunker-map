@@ -3867,6 +3867,8 @@ export default function CountryCompanyInfoPage() {
                   {suggestions.map((item, index) => (
                     <button
                       key={`${item.kind}-${item.id}`}
+                      type="button"
+                      aria-pressed={index === activeSuggestion}
                       ref={(node) => {
                         suggestionRefs.current[index] = node
                       }}
@@ -3983,6 +3985,7 @@ export default function CountryCompanyInfoPage() {
                                 <button
                                   type="button"
                                   key={country.id}
+                                  aria-pressed={country.id === currentCountry.id}
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
                                     setCurrentCountry((prev) => ({ ...prev, id: country.id, name: country.name }))
@@ -4636,6 +4639,7 @@ export default function CountryCompanyInfoPage() {
                       <button
                         type="button"
                         key={country.id}
+                        aria-pressed={country.id === addPortDraft.countryId}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => {
                           setAddPortDraft((prev) => ({ ...prev, countryId: country.id, countryName: country.name }))

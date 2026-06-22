@@ -294,6 +294,7 @@ export default function TaskCalendarPage() {
               <button
                 key={person}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setSelectedPerson(person)}
                 style={{
                   ...buttonStyle,
@@ -385,6 +386,7 @@ export default function TaskCalendarPage() {
                   <button
                     key={scheduleType}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setDraftTask((current) => ({ ...current, scheduleType }))}
                     style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}
                   >
@@ -398,7 +400,7 @@ export default function TaskCalendarPage() {
                 {weekDays.map((day, index) => {
                   const active = draftTask.dayOfWeek === index
                   return (
-                    <button key={day} type="button" onClick={() => setDraftTask((current) => ({ ...current, dayOfWeek: index }))} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
+                    <button key={day} type="button" aria-pressed={active} onClick={() => setDraftTask((current) => ({ ...current, dayOfWeek: index }))} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
                       {day.slice(0, 3)}
                     </button>
                   )
@@ -421,7 +423,7 @@ export default function TaskCalendarPage() {
                   const value = index + 1
                   const active = (draftTask.months || []).includes(value)
                   return (
-                    <button key={month} type="button" onClick={() => toggleDraftMonth(value)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
+                    <button key={month} type="button" aria-pressed={active} onClick={() => toggleDraftMonth(value)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)" }}>
                       {month}
                     </button>
                   )
@@ -435,7 +437,7 @@ export default function TaskCalendarPage() {
                   {people.map((person) => {
                     const active = draftTask[field].includes(person)
                     return (
-                      <button key={person} type="button" onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)", color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)", minWidth: "42px" }}>
+                      <button key={person} type="button" aria-pressed={active} onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)", color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)", minWidth: "42px" }}>
                         {person}
                       </button>
                     )

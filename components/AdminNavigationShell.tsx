@@ -82,6 +82,14 @@ function clearUniversalButtonAttrs(element: HTMLElement) {
   delete element.dataset.adminUndoButton
 }
 
+function hasStatefulButtonStyle(element: HTMLElement) {
+  return (
+    element.hasAttribute("aria-pressed") ||
+    element.hasAttribute("aria-selected") ||
+    element.dataset.adminStatefulButton === "true"
+  )
+}
+
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -313,6 +321,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           element.classList.contains("fc-admin-menu-button") ||
           element.getAttribute("role") === "tab" ||
           element.closest("[role='tablist']") ||
+          hasStatefulButtonStyle(element) ||
           element.style.borderRadius.includes("0 0") ||
           element.closest("[data-admin-button-style='preserve']")
         ) {

@@ -974,6 +974,8 @@ export default function AdminPage() {
               {(["All", "Primary Ports", "Secondary Ports"] as PortGroupMode[]).map((group) => (
                 <button
                   key={group}
+                  type="button"
+                  aria-pressed={selectedPortGroup === group}
                   onClick={() => switchPortGroup(group)}
                   style={{
                     ...tabButtonStyle,
@@ -988,6 +990,8 @@ export default function AdminPage() {
                 </button>
               ))}
               <button
+                type="button"
+                aria-pressed={hideTertiary}
                 onClick={() => setHideTertiary((prev) => !prev)}
                 style={{
                   ...tabButtonStyle,
@@ -1014,6 +1018,8 @@ export default function AdminPage() {
             {priceSetterTabs.map((tab) => (
                 <button
                   key={tab.label}
+                  type="button"
+                  aria-pressed={selectedTab === tab.label}
                   onClick={() => setSelectedTab(tab.label)}
                   style={{
                     ...tabButtonStyle,

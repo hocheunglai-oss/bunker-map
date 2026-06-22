@@ -1041,6 +1041,7 @@ export default function EventCalendarPage() {
                   <button
                     key={mode}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setViewMode(mode)}
                     style={{
                       ...buttonStyle,
@@ -1204,6 +1205,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => togglePersonFilter(person)}
                     style={{
                       minWidth: "34px",
@@ -1490,6 +1492,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
+                    aria-pressed={attending || uncertain}
                     onClick={() => cycleDraftPerson(person)}
                     style={{
                       ...buttonStyle,
@@ -1579,6 +1582,7 @@ export default function EventCalendarPage() {
                     <button
                       key={frequency}
                       type="button"
+                      aria-pressed={active}
                       onClick={() => setDraftRecurrentEvent((current) => ({ ...current, frequency }))}
                       style={{
                         ...buttonStyle,
@@ -1605,6 +1609,7 @@ export default function EventCalendarPage() {
                       <button
                         key={day.value}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => toggleDraftWeeklyDay(day.value)}
                         style={{
                           ...buttonStyle,
@@ -1648,6 +1653,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
+                    aria-pressed={attending}
                     onClick={() =>
                       setDraftRecurrentEvent((current) => ({
                         ...current,
@@ -1716,6 +1722,7 @@ export default function EventCalendarPage() {
                   <button
                     key={type}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setLeaveRequestDraft((current) => ({ ...current, type }))}
                     style={{
                       ...buttonStyle,
@@ -1746,6 +1753,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setLeaveRequestDraft((current) => ({ ...current, person }))}
                     style={{
                       ...buttonStyle,

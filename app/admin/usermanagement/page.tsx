@@ -710,6 +710,7 @@ export default function UserManagementPage() {
                     <button
                       key={group.role}
                       type="button"
+                      aria-pressed={active}
                       onClick={() => setSelectedRole(group.role)}
                       style={{
                         ...buttonStyle,
@@ -835,6 +836,7 @@ export default function UserManagementPage() {
                                     <button
                                       key={option}
                                       type="button"
+                                      aria-pressed={active}
                                       onClick={() => updateRolePermission(page.id, option)}
                                       disabled={locked}
                                       style={{
