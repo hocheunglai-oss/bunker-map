@@ -342,8 +342,9 @@
 }
 
 .primaryPanelButton {
-  background: var(--fc-admin-button-bg);
-  color: var(--fc-admin-button-text);
+  border-color: var(--fc-admin-primary-button-bg) !important;
+  background: var(--fc-admin-primary-button-bg) !important;
+  color: var(--fc-admin-primary-button-text) !important;
 }
 
 .confirmGrid {

@@ -272,14 +272,20 @@ export default function EnquiryWorksheetPage() {
           </div>
 
           <div className={styles.panelActions}>
-            <button type="button" className={styles.primaryPanelButton} onClick={generateWorksheet}>
-              Generate worksheet
+            <button
+              type="button"
+              className={styles.primaryPanelButton}
+              onClick={generateWorksheet}
+              data-admin-button-style="preserve"
+            >
+              Generate
             </button>
             <button
               type="button"
               className={styles.primaryPanelButton}
               onClick={() => window.print()}
               data-admin-view-safe="true"
+              data-admin-button-style="preserve"
             >
               Print
             </button>
@@ -296,7 +302,6 @@ export default function EnquiryWorksheetPage() {
 
         <section className={styles.sheet} aria-label="Enquiry worksheet">
           <div className={styles.vesselLine}>
-            <span aria-hidden="true">-</span>
             <input
               value={getWorksheetHeader(worksheet)}
               onChange={(event) => updateWorksheetHeader(event.target.value)}

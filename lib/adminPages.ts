@@ -48,7 +48,7 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
   },
   {
     id: "enquiry-worksheet",
-    label: "ENQUIRY WORKSHEET (UNDER CONSTRUCTION)",
+    label: "ENQUIRY WORKSHEET",
     group: "trading",
     path: "/admin/enquiryworksheet",
   },
