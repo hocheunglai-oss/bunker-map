@@ -2179,10 +2179,12 @@ export default function PhonebookPage() {
               value={query}
               onChange={(event) => {
                 const nextValue = event.target.value
-                startTransition(() => {
-                  setQuery(nextValue)
-                  if (selectedCompany) setSelectedCompany("")
-                })
+                setQuery(nextValue)
+                if (selectedCompany) {
+                  startTransition(() => {
+                    setSelectedCompany("")
+                  })
+                }
               }}
               onFocus={() => {
                 setQuery("")
@@ -2242,6 +2244,7 @@ export default function PhonebookPage() {
                 <button
                   type="button"
                   onClick={clearSearchAndSelection}
+                  data-admin-button-style="preserve"
                   style={{
                     ...buttonStyle,
                     width: "100%",
@@ -2254,6 +2257,7 @@ export default function PhonebookPage() {
                 </button>
                 <button
                   onClick={() => void addCompany()}
+                  data-admin-button-style="preserve"
                   style={{
                     ...buttonStyle,
                     background: "var(--fc-admin-primary-button-bg)",
@@ -2279,6 +2283,7 @@ export default function PhonebookPage() {
                     companyRefs.current[company.id] = node
                   }}
                   type="button"
+                  data-admin-button-style="preserve"
                   onClick={() => setSelectedCompany(company.name)}
                   onDoubleClick={() => void openCompanyModal(company)}
                   onKeyDown={(event) => onCompanyKeyDown(event, company.id)}
@@ -2353,6 +2358,8 @@ export default function PhonebookPage() {
               {visibleContacts.map((contact) => (
                 <button
                   key={contact.id}
+                  type="button"
+                  data-admin-button-style="preserve"
                   ref={(node) => {
                     contactRefs.current[contact.id] = node
                   }}

@@ -76,6 +76,12 @@ function readStoredGroups() {
   }
 }
 
+function clearUniversalButtonAttrs(element: HTMLElement) {
+  delete element.dataset.adminUniversalButton
+  delete element.dataset.adminAction
+  delete element.dataset.adminUndoButton
+}
+
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -291,12 +297,14 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           .trim()
 
         if (/^(back|back to admin)$/i.test(label)) {
+          clearUniversalButtonAttrs(element)
           element.dataset.adminLegacyBack = "true"
           return
         }
 
         if (/^(show|hide)\s+delete/i.test(label)) {
           delete element.dataset.adminAction
+          delete element.dataset.adminUndoButton
           element.dataset.adminUniversalButton = "true"
           return
         }
@@ -308,9 +316,12 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           element.style.borderRadius.includes("0 0") ||
           element.closest("[data-admin-button-style='preserve']")
         ) {
+          clearUniversalButtonAttrs(element)
           return
         }
 
+        delete element.dataset.adminAction
+        delete element.dataset.adminUndoButton
         const matched = ACTION_PATTERNS.find(({ pattern }) => pattern.test(label))
         if (matched) {
           element.dataset.adminAction = matched.action

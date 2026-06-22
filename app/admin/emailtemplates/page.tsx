@@ -806,6 +806,7 @@ export default function EmailTemplatesAdminPage() {
       <div key={node.path || "root"}>
         <button
           type="button"
+          data-admin-button-style="preserve"
           onClick={() => selectFolder(node.path)}
           onDoubleClick={() => openEditFolderDialog(node.path)}
           onDragOver={(event) => {
@@ -867,6 +868,7 @@ export default function EmailTemplatesAdminPage() {
       <div key={`picker-${node.path || "root"}`}>
         <button
           type="button"
+          data-admin-button-style="preserve"
           onClick={() => moveSelectedToFolder(node.path)}
           style={{
             width: "100%",
@@ -979,7 +981,7 @@ export default function EmailTemplatesAdminPage() {
               <button type="button" onClick={() => openCreateFolderDialog(selectedFolder)} style={primaryButtonStyle} data-admin-button-style="preserve">
                 New Folder
               </button>
-              <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle}>
+              <button type="button" onClick={handleCreateTemplate} style={primaryButtonStyle} data-admin-button-style="preserve">
                 New Template
               </button>
             </div>
@@ -1001,6 +1003,7 @@ export default function EmailTemplatesAdminPage() {
                 <button
                   key={template.id}
                   type="button"
+                  data-admin-button-style="preserve"
                   draggable
                   onClick={() => setSelectedId(template.id)}
                   onDragStart={(event) => {
@@ -1280,6 +1283,7 @@ export default function EmailTemplatesAdminPage() {
                     <button
                       key={recipient}
                       type="button"
+                      data-admin-button-style="preserve"
                       onClick={() =>
                         updateSelectedTemplate({
                           [recipientPickerField]: joinRecipients(
@@ -1309,6 +1313,7 @@ export default function EmailTemplatesAdminPage() {
                 <button
                   key={option.id}
                   type="button"
+                  data-admin-button-style="preserve"
                   onClick={() => addRecipient(option)}
                   style={{
                     width: "100%",

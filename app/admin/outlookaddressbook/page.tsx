@@ -1427,6 +1427,7 @@ export default function OutlookAddressBookPage() {
                 <button
                   key={`${item.type}-${item.id}`}
                   type="button"
+                  data-admin-button-style="preserve"
                   onClick={() => {
                     if (item.type === "contact") {
                       setActiveView("contacts")
@@ -1574,7 +1575,13 @@ export default function OutlookAddressBookPage() {
             <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "52vh" : "420px", overflow: "auto" }}>
               {addableContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching contacts.</div> : null}
               {addableContacts.map((contact) => (
-                <button key={contact.id} type="button" onClick={() => void addMember(contact)} style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}>
+                <button
+                  key={contact.id}
+                  type="button"
+                  data-admin-button-style="preserve"
+                  onClick={() => void addMember(contact)}
+                  style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}
+                >
                   <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>
                   <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.primary_email}</span>
                 </button>
