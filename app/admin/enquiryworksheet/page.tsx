@@ -290,6 +290,10 @@ function getWorksheetHeader(worksheet: Worksheet) {
   return worksheet.vesselName || worksheet.imo
 }
 
+function hasViscosityCaution(value: string) {
+  return /(^|\D)(?:180|120)(?!\d)/.test(value)
+}
+
 export default function EnquiryWorksheetPage() {
   const { displayName, username } = useSimpleAdminAuth()
   const userNickname = useMemo(() => deriveNickname(displayName, username), [displayName, username])
@@ -399,11 +403,6 @@ export default function EnquiryWorksheetPage() {
     setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned) : emptyGuess())
   }
 
-  function handleCleanedEnquiryTextChange(value: string) {
-    setCleanedEnquiryText(value)
-    setGuesses(value.trim() ? parseEnquiryWorksheetGuess(value) : emptyGuess())
-  }
-
   function getParserSourceText() {
     return cleanedEnquiryText.trim() ? cleanedEnquiryText : enquiryText
   }
@@ -418,6 +417,7 @@ export default function EnquiryWorksheetPage() {
       ),
     [cleanedEnquiryText, enquiryText, guesses.imo, guesses.vesselName, vlsfoMaxRemarks],
   )
+  const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
 
   useEffect(() => {
     setCopyStatus("idle")
@@ -481,20 +481,6 @@ export default function EnquiryWorksheetPage() {
     setWorksheet(blankWorksheet(userNickname))
   }
 
-  function renderShortenedEnquiry(value: string) {
-    if (!value) return <span className={styles.shortenedPlaceholder}>No shortened enquiry yet.</span>
-
-    return value.split(/(180|120)/g).map((part, index) =>
-      part === "180" || part === "120" ? (
-        <strong className={styles.shortenedDanger} key={`${part}-${index}`}>
-          {part}
-        </strong>
-      ) : (
-        <span key={`${part}-${index}`}>{part}</span>
-      ),
-    )
-  }
-
   return (
     <main className={styles.page}>
       <div className={styles.workspace}>
@@ -509,21 +495,15 @@ export default function EnquiryWorksheetPage() {
               className={styles.generatorText}
             />
           </label>
-
-          <label className={styles.panelField}>
-            <span>CLEANED ENQUIRY</span>
-            <textarea
-              value={cleanedEnquiryText}
-              onChange={(event) => handleCleanedEnquiryTextChange(event.target.value)}
-              placeholder="Cleaned version appears here. Numbers are preserved."
-              aria-label="Cleaned enquiry text"
-              className={styles.cleanedText}
-            />
-          </label>
+          {viscosityCautionDetected ? (
+            <div className={styles.cautionAlert}>
+              CAUTION: 180 / 120 detected. Check whether VLSFO 180cst max or 120cst max applies.
+            </div>
+          ) : null}
 
           <section className={styles.shortenedPanel} aria-label="Shortened enquiry">
             <div className={styles.shortenedHeader}>
-              <span>SHORTENED ENQUIRY (USE WITH CARE)</span>
+              <span>SHORTENED ENQUIRY (USE WITH CAUTION)</span>
               <button
                 type="button"
                 className={styles.copyButton}
@@ -537,7 +517,9 @@ export default function EnquiryWorksheetPage() {
               </button>
             </div>
             <div className={styles.shortenedBox}>
-              {renderShortenedEnquiry(shortenedEnquiry)}
+              {shortenedEnquiry || (
+                <span className={styles.shortenedPlaceholder}>No shortened enquiry yet.</span>
+              )}
             </div>
             <div className={styles.vlsfoRemarkButtons}>
               {vlsfoRemarkOptions.map((remark) => {

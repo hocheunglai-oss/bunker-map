@@ -307,7 +307,6 @@
 }
 
 .generatorText,
-.cleanedText,
 .confirmGrid input {
   box-sizing: border-box;
   width: 100%;
@@ -321,13 +320,6 @@
 
 .generatorText {
   min-height: 160px;
-  resize: vertical;
-  padding: 12px;
-  line-height: 1.45;
-}
-
-.cleanedText {
-  min-height: 230px;
   resize: vertical;
   padding: 12px;
   line-height: 1.45;
@@ -419,11 +411,6 @@
   color: var(--fc-admin-muted);
 }
 
-.shortenedDanger {
-  color: #d70015;
-  font-weight: 1000;
-}
-
 .vlsfoRemarkButtons {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -490,6 +477,18 @@
   color: #8a5a00;
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.35;
+}
+
+.cautionAlert {
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--fc-admin-danger-bg) 70%, #ffffff);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fc-admin-danger-bg) 10%, #ffffff);
+  color: #b00020;
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 900;
   line-height: 1.35;
 }
 

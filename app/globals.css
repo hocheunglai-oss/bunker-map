@@ -511,7 +511,8 @@ body {
   border-radius: 0;
   background: var(--fc-folder-sticker);
   color: #27313b;
-  padding: 7px 8px 7px 0;
+  margin-left: -15px;
+  padding: 7px 8px 7px 15px;
   text-decoration: none;
   transition: background 0.15s ease, color 0.15s ease;
 }
@@ -528,7 +529,6 @@ body {
 .fc-admin-sidebar-link.is-active {
   background: color-mix(in srgb, var(--fc-folder-tab) 66%, #ffffff);
   color: var(--fc-folder-accent);
-  box-shadow: inset 2px 0 0 var(--fc-folder-accent);
 }
 
 .fc-admin-sidebar-link-main {
