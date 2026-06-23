@@ -16,83 +16,41 @@ type AdminFolderStyle = CSSProperties & {
   "--fc-folder-accent": string
 }
 
-export const ADMIN_FOLDER_THEME_KEY = "fc-admin-folder-theme"
-export const ADMIN_FOLDER_THEME_EVENT = "fc-admin-folder-theme-change"
-
-export const ADMIN_FOLDER_THEME_OPTIONS = [
-  {
-    id: "italia-minimal",
-    label: "Italia Minimal",
-    description: "Off-white panels with quiet red and green accents.",
-  },
-  {
-    id: "cosulich-classic",
-    label: "Cosulich Classic",
-    description: "FC red-green accents with restrained slate text.",
-  },
-  {
-    id: "codex-graphite",
-    label: "Codex Graphite",
-    description: "Neutral graphite with tiny Italian colour markers.",
-  },
-  {
-    id: "ligurian-mist",
-    label: "Ligurian Mist",
-    description: "Soft maritime blue-green on an off-white base.",
-  },
-  {
-    id: "rosso-verde",
-    label: "Rosso Verde",
-    description: "Sharper red and green accents, still minimal.",
-  },
-  {
-    id: "harbour-night",
-    label: "Harbour Night",
-    description: "Deep navigation ink with Cosulich colour details.",
-  },
-] as const
-
-export type AdminFolderThemeId = (typeof ADMIN_FOLDER_THEME_OPTIONS)[number]["id"]
-
-const ADMIN_FOLDER_THEME_IDS = new Set<string>(
-  ADMIN_FOLDER_THEME_OPTIONS.map((option) => option.id),
-)
-
 const ADMIN_FOLDER_TONES: AdminFolderTone[] = [
   {
-    cover: "#fbfbf8",
-    tab: "#f2f5f1",
-    sticker: "#f6f8f5",
-    edge: "#d8ded8",
-    accent: "#235846",
+    cover: "#ffffff",
+    tab: "#f6faf7",
+    sticker: "#ffffff",
+    edge: "#d7e4dc",
+    accent: "#177245",
   },
   {
-    cover: "#fbfaf7",
-    tab: "#f6f2ee",
-    sticker: "#f8f5f1",
-    edge: "#e1d9d1",
-    accent: "#7b332f",
+    cover: "#ffffff",
+    tab: "#fff6f6",
+    sticker: "#ffffff",
+    edge: "#f0d5d2",
+    accent: "#d52b1e",
   },
   {
-    cover: "#fbfbf8",
-    tab: "#f1f4f4",
-    sticker: "#f6f8f8",
-    edge: "#d5dddf",
-    accent: "#24495d",
+    cover: "#ffffff",
+    tab: "#fafafa",
+    sticker: "#ffffff",
+    edge: "#eadfd3",
+    accent: "#b07935",
   },
   {
-    cover: "#fbfaf7",
-    tab: "#f3f5f1",
-    sticker: "#f7f8f5",
-    edge: "#d9dfd5",
-    accent: "#315846",
+    cover: "#ffffff",
+    tab: "#f7faff",
+    sticker: "#ffffff",
+    edge: "#d6e0ea",
+    accent: "#24466d",
   },
   {
-    cover: "#fbfbf8",
-    tab: "#f4f4f1",
-    sticker: "#f8f8f5",
-    edge: "#ddddda",
-    accent: "#3f4642",
+    cover: "#ffffff",
+    tab: "#fafafa",
+    sticker: "#ffffff",
+    edge: "#dedede",
+    accent: "#4a4f55",
   },
 ]
 
@@ -106,10 +64,4 @@ export function getAdminFolderStyle(index: number): AdminFolderStyle {
     "--fc-folder-edge": tone.edge,
     "--fc-folder-accent": tone.accent,
   }
-}
-
-export function normaliseAdminFolderThemeId(value: string | null): AdminFolderThemeId {
-  return ADMIN_FOLDER_THEME_IDS.has(value || "")
-    ? (value as AdminFolderThemeId)
-    : ADMIN_FOLDER_THEME_OPTIONS[0].id
 }

@@ -4,13 +4,6 @@ import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
-import {
-  ADMIN_FOLDER_THEME_EVENT,
-  ADMIN_FOLDER_THEME_KEY,
-  ADMIN_FOLDER_THEME_OPTIONS,
-  normaliseAdminFolderThemeId,
-  type AdminFolderThemeId,
-} from "@/lib/adminFolderTones"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const HOLIDAY_MARKET_CODES = "HK CN SG KR JP VN US"
@@ -348,54 +341,6 @@ function AdminTyphoonMapModal({
   )
 }
 
-function AdminFolderThemeChooser() {
-  const [selectedTheme, setSelectedTheme] = useState<AdminFolderThemeId>(
-    normaliseAdminFolderThemeId(null),
-  )
-
-  useEffect(() => {
-    setSelectedTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
-  }, [])
-
-  function selectTheme(theme: AdminFolderThemeId) {
-    setSelectedTheme(theme)
-    window.localStorage.setItem(ADMIN_FOLDER_THEME_KEY, theme)
-    window.dispatchEvent(new CustomEvent(ADMIN_FOLDER_THEME_EVENT, { detail: theme }))
-  }
-
-  return (
-    <section className="fc-admin-folder-theme-chooser" aria-label="Left panel folder options">
-      <div className="fc-admin-folder-theme-heading">
-        <span>Left Panel Folders</span>
-        <strong>6 options</strong>
-      </div>
-      <div className="fc-admin-folder-theme-grid">
-        {ADMIN_FOLDER_THEME_OPTIONS.map((option, index) => (
-          <button
-            key={option.id}
-            type="button"
-            className="fc-admin-folder-theme-option"
-            data-theme-option={option.id}
-            aria-pressed={selectedTheme === option.id}
-            aria-label={`${option.label} folder style`}
-            onClick={() => selectTheme(option.id)}
-          >
-            <span className="fc-admin-folder-theme-preview" aria-hidden="true">
-              <span className="fc-admin-folder-theme-tab" />
-              <span className="fc-admin-folder-theme-body">
-                <span />
-                <span />
-                <span />
-              </span>
-            </span>
-            <span>{index + 1}. {option.label}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 function AdminOilWidget() {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -691,8 +636,6 @@ export default function AdminPage() {
               <AdminOilWidget />
             </section>
           </div>
-
-          <AdminFolderThemeChooser />
         </div>
         {selectedTyphoonStorm ? (
           <AdminTyphoonMapModal

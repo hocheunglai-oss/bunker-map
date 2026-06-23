@@ -3,13 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import {
-  ADMIN_FOLDER_THEME_EVENT,
-  ADMIN_FOLDER_THEME_KEY,
-  getAdminFolderStyle,
-  normaliseAdminFolderThemeId,
-  type AdminFolderThemeId,
-} from "@/lib/adminFolderTones"
+import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
@@ -60,6 +54,150 @@ function readStoredGroups() {
   }
 }
 
+function AdminFolderIcon({ group }: { group: AdminPageGroup }) {
+  if (group === "office") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 7V5.8C8 4.8 8.8 4 9.8 4h4.4c1 0 1.8.8 1.8 1.8V7" />
+        <path d="M4.5 8.5h15v9.7c0 1-.8 1.8-1.8 1.8H6.3c-1 0-1.8-.8-1.8-1.8V8.5Z" />
+        <path d="M4.5 12h15M10 12v1.8h4V12" />
+      </svg>
+    )
+  }
+
+  if (group === "trading") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M4.5 12h15M12 4c2 2.2 3 4.9 3 8s-1 5.8-3 8M12 4c-2 2.2-3 4.9-3 8s1 5.8 3 8" />
+      </svg>
+    )
+  }
+
+  if (group === "contacts") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7.5 10.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16.5 11a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z" />
+        <path d="M3.5 19c.6-3.3 2-5 4-5s3.4 1.7 4 5M13.1 18.7c.5-2.4 1.7-3.7 3.4-3.7 1.8 0 3 1.3 3.5 3.7" />
+      </svg>
+    )
+  }
+
+  if (group === "reports") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 3.8h7l3 3v13.4H7V3.8Z" />
+        <path d="M14 3.8V7h3M9.5 11.5h5M9.5 14.5h5M9.5 17.5h3" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.3a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4Z" />
+      <path d="m19.2 13.3.1-1.3-.1-1.3 2-1.5-2-3.4-2.4 1a8 8 0 0 0-2.2-1.3L14.2 3h-4.4l-.4 2.5a8 8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.5-.1 1.3.1 1.3-2 1.5 2 3.4 2.4-1a8 8 0 0 0 2.2 1.3l.4 2.5h4.4l.4-2.5a8 8 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.5Z" />
+    </svg>
+  )
+}
+
+function AdminPageIcon({ page }: { page: AdminPageDefinition }) {
+  if (page.id.includes("calendar")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 4.5v3M18 4.5v3M4.5 8.5h15M6.5 6h11c1.1 0 2 .9 2 2v10.5c0 1.1-.9 2-2 2h-11c-1.1 0-2-.9-2-2V8c0-1.1.9-2 2-2Z" />
+        <path d="M8 12h2M12 12h2M16 12h1M8 16h2M12 16h2" />
+      </svg>
+    )
+  }
+
+  if (page.id === "ccinfo") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M4.5 12h15M12 4c2 2.2 3 4.9 3 8s-1 5.8-3 8M12 4c-2 2.2-3 4.9-3 8s1 5.8 3 8" />
+      </svg>
+    )
+  }
+
+  if (page.id === "enquiry-worksheet") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 4.5h8M9 3.5h6v3H9v-3ZM6 6h12v14H6V6Z" />
+        <path d="M8.8 11h6.4M8.8 14h6.4M8.8 17h4.2" />
+      </svg>
+    )
+  }
+
+  if (page.id === "phonebook" || page.id === "outlook-addressbook") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 4h10v16H7V4Z" />
+        <path d="M9.3 8.5h5.4M9.3 16h5.4M12 13.4a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+      </svg>
+    )
+  }
+
+  if (page.id === "email-templates") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.5 7h15v10.5h-15V7Z" />
+        <path d="m5 8 7 5 7-5" />
+      </svg>
+    )
+  }
+
+  if (page.id === "whatsapp") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5.2 19.2 6.4 16A7.5 7.5 0 1 1 9 18.1l-3.8 1.1Z" />
+        <path d="M9.2 9.5c.7 2 2 3.4 4 4l1.2-1.2 2.1.8c-.2 1.5-1.1 2.4-2.6 2.4-3.4-.2-5.6-2.3-6.4-6.3.1-1.4.9-2.2 2.2-2.5l.9 2-1.4.8Z" />
+      </svg>
+    )
+  }
+
+  if (page.id === "audit-log") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 4.5h10v15H7v-15Z" />
+        <path d="M9.5 8.5h5M9.5 12h5M9.5 15.5h3.5" />
+      </svg>
+    )
+  }
+
+  if (page.id === "user-management") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4.5 19c.6-3.3 2.1-5 4.5-5s3.9 1.7 4.5 5" />
+        <path d="M16.2 7.2a2.5 2.5 0 0 1 0 4.6M16 14.2c1.8.4 3 1.9 3.5 4.3" />
+      </svg>
+    )
+  }
+
+  if (page.id === "system-health") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 13h4l2-5 4 10 2-5h4" />
+      </svg>
+    )
+  }
+
+  if (page.id === "tech-stack") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m12 4 8 4-8 4-8-4 8-4Z" />
+        <path d="m4 12 8 4 8-4M4 16l8 4 8-4" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 3.8h7l3 3v13.4H7V3.8Z" />
+      <path d="M14 3.8V7h3M9.5 11.5h5M9.5 14.5h5M9.5 17.5h3" />
+    </svg>
+  )
+}
+
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -69,38 +207,11 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
-  const [folderTheme, setFolderTheme] = useState<AdminFolderThemeId>(
-    normaliseAdminFolderThemeId(null),
-  )
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
-    setFolderTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
-  }, [])
-
-  useEffect(() => {
-    const applyStoredTheme = () => {
-      setFolderTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
-    }
-    const handleThemeEvent = (event: Event) => {
-      const nextTheme = (event as CustomEvent<string>).detail
-      setFolderTheme(normaliseAdminFolderThemeId(nextTheme || null))
-    }
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === ADMIN_FOLDER_THEME_KEY) {
-        setFolderTheme(normaliseAdminFolderThemeId(event.newValue))
-      }
-    }
-
-    applyStoredTheme()
-    window.addEventListener(ADMIN_FOLDER_THEME_EVENT, handleThemeEvent)
-    window.addEventListener("storage", handleStorage)
-    return () => {
-      window.removeEventListener(ADMIN_FOLDER_THEME_EVENT, handleThemeEvent)
-      window.removeEventListener("storage", handleStorage)
-    }
   }, [])
 
   useEffect(() => {
@@ -305,23 +416,13 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                 href={page.path}
                 className={`fc-admin-sidebar-link${active ? " is-active" : ""}`}
                 aria-current={active ? "page" : undefined}
+                title={`${page.label} (${permission === "edit" ? "Edit access" : "View access"})`}
               >
-                <span>{page.label}</span>
-                <span
-                  className="fc-admin-sidebar-access-icon"
-                  title={permission === "edit" ? "Edit access" : "View access"}
-                  aria-label={permission === "edit" ? "Edit access" : "View access"}
-                >
-                  {permission === "edit" ? (
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M4 20h4l10.7-10.7a2.1 2.1 0 0 0 0-3L17.7 5.3a2.1 2.1 0 0 0-3 0L4 16v4Zm11.8-12.8 1 1" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
-                      <circle cx="12" cy="12" r="2.8" />
-                    </svg>
-                  )}
+                <span className="fc-admin-sidebar-link-main">
+                  <span className="fc-admin-sidebar-page-icon">
+                    <AdminPageIcon page={page} />
+                  </span>
+                  <span>{page.label}</span>
                 </span>
               </Link>
             )
@@ -336,7 +437,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       className={`fc-admin-app-shell${collapsed ? " is-collapsed" : ""}${
         mobileOpen ? " is-mobile-open" : ""
       }`}
-      data-folder-theme={folderTheme}
     >
       <button
         type="button"
@@ -414,6 +514,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                 <section
                   key={folder.group}
                   className={`fc-admin-sidebar-folder${expanded ? " is-expanded" : ""}`}
+                  data-folder-group={folder.group}
                   style={getAdminFolderStyle(folder.index)}
                 >
                   <button
@@ -422,8 +523,15 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                     onClick={() => toggleGroup(folder.group)}
                     aria-expanded={expanded}
                   >
-                    <span>{folder.label}</span>
-                    <span aria-hidden="true">{expanded ? "−" : "+"}</span>
+                    <span className="fc-admin-sidebar-folder-tab-main">
+                      <span className="fc-admin-sidebar-folder-icon">
+                        <AdminFolderIcon group={folder.group} />
+                      </span>
+                      <span>{folder.label}</span>
+                    </span>
+                    <span className="fc-admin-sidebar-folder-toggle" aria-hidden="true">
+                      {expanded ? "−" : "+"}
+                    </span>
                   </button>
                   {expanded ? (
                     <div className="fc-admin-sidebar-folder-body">
