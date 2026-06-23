@@ -114,37 +114,42 @@ const appleSecondaryButtonStyle: React.CSSProperties = {
 }
 
 const settingsButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
-  width: "44px",
-  minWidth: "44px",
+  appearance: "none",
+  WebkitAppearance: "none",
+  width: "36px",
+  minWidth: "36px",
   height: "36px",
   minHeight: "36px",
-  border: "1px solid transparent",
+  border: 0,
   background: "transparent",
   color: "var(--fc-admin-panel-text)",
   padding: 0,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  borderRadius: "999px",
-  fontSize: "24px",
-  fontWeight: 500,
+  borderRadius: 0,
+  boxShadow: "none",
+  cursor: "pointer",
   lineHeight: 1,
 }
 
 const menuItemButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
+  appearance: "none",
+  WebkitAppearance: "none",
   display: "flex",
   alignItems: "center",
   width: "100%",
+  minHeight: "34px",
   justifyContent: "flex-start",
   border: "1px solid transparent",
   borderRadius: "10px",
-  background: "transparent",
+  background: "#ffffff",
   color: "var(--fc-admin-panel-text)",
+  cursor: "pointer",
   fontSize: "13px",
   fontWeight: 700,
   padding: "9px 10px",
+  boxShadow: "none",
   textAlign: "left",
 }
 
@@ -1145,12 +1150,9 @@ export default function EventCalendarPage() {
                   setAddMenuOpen((current) => !current)
                 }}
                 aria-expanded={addMenuOpen}
-                style={{ ...appleActionButtonStyle, display: "inline-flex", alignItems: "center", gap: "7px" }}
+                style={{ ...appleActionButtonStyle, display: "inline-flex", alignItems: "center" }}
               >
                 Add Event
-                <span aria-hidden="true" style={{ fontSize: "12px", lineHeight: 1 }}>
-                  ▾
-                </span>
               </button>
               {addMenuOpen && (
                 <div
@@ -1195,7 +1197,20 @@ export default function EventCalendarPage() {
                 title="Settings"
                 style={settingsButtonStyle}
               >
-                <span aria-hidden="true" style={{ transform: "translateY(-1px)" }}>⚙</span>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  width="19"
+                  height="19"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+                  <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7A2 2 0 1 1 7.1 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
+                </svg>
               </button>
               {toolsMenuOpen && (
                 <div
