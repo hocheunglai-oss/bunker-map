@@ -332,7 +332,11 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       >
         <div className="fc-admin-sidebar-top">
           <Link href="/admin" className="fc-admin-sidebar-title">
-            FC UNO
+            <img
+              src="/fc-uno-sidebar-logo.png"
+              alt="FC UNO"
+              className="fc-admin-sidebar-logo"
+            />
           </Link>
           <div className="fc-admin-sidebar-controls">
             <button

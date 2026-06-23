@@ -232,11 +232,25 @@ body {
 }
 
 .fc-admin-sidebar-title {
+  min-width: 0;
+  width: min(168px, 100%);
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
   color: var(--fc-admin-heading);
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   text-decoration: none;
+}
+
+.fc-admin-sidebar-logo {
+  width: 162px;
+  max-width: 100%;
+  max-height: 32px;
+  display: block;
+  object-fit: contain;
+  object-position: left center;
 }
 
 .fc-admin-sidebar-brand {
@@ -731,7 +745,7 @@ body {
 }
 
 .fc-admin-welcome-content {
-  width: min(700px, 100%);
+  width: min(1180px, 100%);
   display: flex;
   align-items: center;
   flex-direction: column;
@@ -752,6 +766,221 @@ body {
   color: var(--fc-admin-muted);
   font-size: clamp(17px, 2vw, 21px);
   line-height: 1.5;
+}
+
+.fc-admin-dashboard-swatches {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 34px;
+  text-align: left;
+}
+
+.fc-admin-swatch-card {
+  min-height: 306px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(95, 103, 114, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(29, 29, 31, 0.08);
+  padding: 18px;
+}
+
+.fc-admin-swatch-card.is-holiday {
+  background: linear-gradient(135deg, #ffffff 0%, #eef6ff 58%, #f7fbff 100%);
+}
+
+.fc-admin-swatch-card.is-typhoon {
+  border-color: rgba(214, 226, 238, 0.18);
+  background: linear-gradient(135deg, #25364b 0%, #3a4250 100%);
+  color: #f8fbff;
+}
+
+.fc-admin-swatch-card.is-crude {
+  border-color: rgba(109, 174, 255, 0.26);
+  background: linear-gradient(135deg, #071b31 0%, #111827 100%);
+  color: #edf7ff;
+}
+
+.fc-admin-swatch-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fc-admin-swatch-heading span {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  opacity: 0.66;
+  text-transform: uppercase;
+}
+
+.fc-admin-swatch-heading strong {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.fc-admin-holiday-list,
+.fc-admin-typhoon-list {
+  display: grid;
+  gap: 10px;
+}
+
+.fc-admin-holiday-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(0, 102, 204, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  padding: 10px;
+}
+
+.fc-admin-holiday-code {
+  width: 34px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.fc-admin-holiday-item div,
+.fc-admin-typhoon-item div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.fc-admin-holiday-item strong,
+.fc-admin-typhoon-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-admin-holiday-item div span,
+.fc-admin-typhoon-item div span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0.68;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-admin-holiday-item time {
+  display: grid;
+  gap: 3px;
+  color: #004c99;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fc-admin-holiday-item time span {
+  color: #6e6e73;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.fc-admin-swatch-empty {
+  margin: auto 0;
+  color: var(--fc-admin-muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.fc-admin-swatch-card.is-typhoon .fc-admin-swatch-empty,
+.fc-admin-swatch-card.is-crude .fc-admin-swatch-empty {
+  color: rgba(248, 251, 255, 0.72);
+}
+
+.fc-admin-typhoon-warning {
+  border: 1px solid rgba(255, 210, 102, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 199, 44, 0.16);
+  color: #fff3bd;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.fc-admin-typhoon-item {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px;
+}
+
+.fc-admin-typhoon-item dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.fc-admin-typhoon-item dl div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.fc-admin-typhoon-item dt {
+  color: rgba(248, 251, 255, 0.56);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.fc-admin-typhoon-item dd {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-admin-crude-widget {
+  min-height: 216px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .fc-admin-folder-page {
@@ -1162,6 +1391,17 @@ body {
   .fc-admin-logo {
     height: 123px;
   }
+
+  .fc-admin-dashboard-swatches {
+    max-width: 680px;
+    grid-template-columns: 1fr;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .fc-admin-swatch-card {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1183,6 +1423,28 @@ body {
 
   .fc-admin-welcome-content h1 {
     font-size: 36px;
+  }
+
+  .fc-admin-dashboard-swatches {
+    gap: 12px;
+    margin-top: 26px;
+  }
+
+  .fc-admin-swatch-card {
+    padding: 14px;
+  }
+
+  .fc-admin-holiday-item {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .fc-admin-holiday-item time {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .fc-admin-typhoon-item dl {
+    grid-template-columns: 1fr;
   }
 
   .fc-admin-welcome-hint {
