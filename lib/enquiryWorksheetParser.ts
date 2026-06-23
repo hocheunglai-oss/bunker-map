@@ -86,7 +86,7 @@ function findBestImo(lines: string[]) {
 
 function removeVesselLabel(value: string) {
   return value.replace(
-    /^\s*(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\s*(?:\/\s*imo)?\s*[:#\-/]?\s*/i,
+    /^\s*(?:performing\s+vessel|vessel\s*(?:\/\s*imo|\(\s*imo\s*\))?|vsl|ship)\s*[:#\-/]?\s*/i,
     ""
   )
 }
@@ -110,9 +110,10 @@ function isPlausibleVesselName(value: string) {
   if (!value) return false
   if (value.length < 2 || value.length > 60) return false
   if (!/[A-Z]/.test(value)) return false
-  if (/^(PORT|LOCATION|ETA|ETD|DATE|PRODUCT|SPEC|QUANTITY|BUYER|AGENT|BUNKER ONLY)$/i.test(value)) {
+  if (/^(?:PORT|LOCATION|ETA|ETB|ETD|ETS|DATE|DELIVERY|PRODUCT|SPEC|QUANTITY|BUYER|AGENT|ACCOUNT|CLIENT|TERMS|PAYMENT|REMARKS|SUPPLY RESTRICTIONS|BUNKER ONLY)\b/i.test(value)) {
     return false
   }
+  if (/\b\d{1,2}\s*(?:[./-]\s*\d{1,2}|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/i.test(value)) return false
   if (/\b(?:LSMGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)\b/i.test(value)) return false
   return true
 }
