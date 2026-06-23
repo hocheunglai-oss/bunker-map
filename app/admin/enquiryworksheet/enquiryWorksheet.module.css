@@ -96,7 +96,7 @@
   position: absolute;
   top: 21mm;
   left: 14.4mm;
-  width: 169.2mm;
+  width: 181.3mm;
   border: 1px solid #111;
 }
 
@@ -141,8 +141,8 @@
   height: 100%;
   resize: none;
   padding: 4mm;
-  font-size: 8.5pt;
-  line-height: 1.25;
+  font-size: 10.5pt;
+  line-height: 1.35;
   white-space: pre-wrap;
 }
 
@@ -281,7 +281,7 @@
   position: sticky;
   top: 18px;
   box-sizing: border-box;
-  width: 360px;
+  width: 480px;
   max-height: calc(100vh - 48px);
   overflow: auto;
   padding: 16px;
@@ -333,14 +333,6 @@
   line-height: 1.45;
 }
 
-.cleaningNote {
-  margin: 7px 0 0;
-  color: var(--fc-admin-muted);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
 .panelActions {
   margin-top: 12px;
   display: grid;
@@ -369,6 +361,111 @@
   border-color: var(--fc-admin-button-border) !important;
   background: var(--fc-admin-button-bg) !important;
   color: var(--fc-admin-button-text) !important;
+}
+
+.shortenedPanel {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.shortenedHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortenedHeader > span {
+  color: #5d655f;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.copyButton {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--fc-admin-primary-button-bg) !important;
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg) !important;
+  color: var(--fc-admin-primary-button-text) !important;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.copyButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.shortenedBox {
+  min-height: 62px;
+  box-sizing: border-box;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 14px;
+  background: #fff;
+  color: #171717;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.shortenedPlaceholder {
+  color: var(--fc-admin-muted);
+}
+
+.shortenedDanger {
+  color: #d70015;
+  font-weight: 1000;
+}
+
+.vlsfoRemarkButtons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.remarkButton,
+.remarkButtonActive {
+  min-height: 34px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.remarkButton {
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
+}
+
+.remarkButtonActive {
+  border-color: var(--fc-admin-selected-border) !important;
+  background: var(--fc-admin-selected-bg) !important;
+  color: var(--fc-admin-selected-text) !important;
+}
+
+.copyStatus,
+.copyError {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.copyStatus {
+  color: var(--fc-admin-success-bg);
+}
+
+.copyError {
+  color: var(--fc-admin-danger-bg);
 }
 
 .confirmGrid {

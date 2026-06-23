@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import {
+  buildShortenedEnquiry,
+  type VlsfoMaxRemark,
+} from "@/lib/enquiryShortener"
+import {
   parseEnquiryWorksheetGuess,
   type EnquiryWorksheetGuess,
 } from "@/lib/enquiryWorksheetParser"
@@ -38,6 +42,7 @@ type Worksheet = {
 type EnquiryWorksheetCache = {
   enquiryText: string
   cleanedEnquiryText: string
+  vlsfoMaxRemarks: VlsfoMaxRemark[]
   guesses: EnquiryWorksheetGuess
   worksheet: Worksheet
 }
@@ -64,6 +69,7 @@ const workflowCells: Record<WorkflowKey, Partial<Record<WorkflowAction, { suffix
 }
 
 const ENQUIRY_WORKSHEET_CACHE_KEY = "fc-admin-enquiry-worksheet-draft-v1"
+const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["180cst max", "120cst max"]
 
 function toCaps(value: string) {
   return value.toUpperCase()
@@ -225,6 +231,15 @@ function restoreGuess(value: unknown): EnquiryWorksheetGuess | null {
   }
 }
 
+function restoreVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
+  if (!Array.isArray(value)) return []
+
+  return value.filter(
+    (remark): remark is VlsfoMaxRemark =>
+      remark === "180cst max" || remark === "120cst max",
+  )
+}
+
 function restoreCache(value: unknown): EnquiryWorksheetCache | null {
   if (!isRecord(value)) return null
 
@@ -237,6 +252,7 @@ function restoreCache(value: unknown): EnquiryWorksheetCache | null {
   return {
     enquiryText,
     cleanedEnquiryText: sourceText,
+    vlsfoMaxRemarks: restoreVlsfoMaxRemarks(value.vlsfoMaxRemarks),
     guesses,
     worksheet,
   }
@@ -280,8 +296,10 @@ export default function EnquiryWorksheetPage() {
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
   const [enquiryText, setEnquiryText] = useState("")
   const [cleanedEnquiryText, setCleanedEnquiryText] = useState("")
+  const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
   const [cacheReady, setCacheReady] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -300,6 +318,7 @@ export default function EnquiryWorksheetPage() {
 
       setEnquiryText(restored.enquiryText)
       setCleanedEnquiryText(restored.cleanedEnquiryText)
+      setVlsfoMaxRemarks(restored.vlsfoMaxRemarks)
       setGuesses(restored.guesses)
       setWorksheet(restored.worksheet)
     } catch {
@@ -318,6 +337,7 @@ export default function EnquiryWorksheetPage() {
         JSON.stringify({
           enquiryText,
           cleanedEnquiryText,
+          vlsfoMaxRemarks,
           guesses,
           worksheet,
         }),
@@ -325,7 +345,7 @@ export default function EnquiryWorksheetPage() {
     } catch {
       // If browser storage is blocked/full, keep the worksheet usable without persistence.
     }
-  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, worksheet])
+  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, vlsfoMaxRemarks, worksheet])
 
   useEffect(() => {
     if (!userNickname) return
@@ -388,6 +408,40 @@ export default function EnquiryWorksheetPage() {
     return cleanedEnquiryText.trim() ? cleanedEnquiryText : enquiryText
   }
 
+  const shortenedEnquiry = useMemo(
+    () =>
+      buildShortenedEnquiry(
+        getParserSourceText(),
+        guesses.vesselName,
+        guesses.imo,
+        vlsfoMaxRemarks,
+      ),
+    [cleanedEnquiryText, enquiryText, guesses.imo, guesses.vesselName, vlsfoMaxRemarks],
+  )
+
+  useEffect(() => {
+    setCopyStatus("idle")
+  }, [shortenedEnquiry])
+
+  function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
+    setVlsfoMaxRemarks((current) =>
+      current.includes(remark)
+        ? current.filter((item) => item !== remark)
+        : [...current, remark],
+    )
+  }
+
+  async function copyShortenedEnquiry() {
+    if (!shortenedEnquiry) return
+
+    try {
+      await navigator.clipboard.writeText(shortenedEnquiry)
+      setCopyStatus("copied")
+    } catch {
+      setCopyStatus("failed")
+    }
+  }
+
   function guessDetails() {
     const parsed = parseEnquiryWorksheetGuess(getParserSourceText())
     const nextGuess: EnquiryWorksheetGuess = {
@@ -421,8 +475,24 @@ export default function EnquiryWorksheetPage() {
     }
     setEnquiryText("")
     setCleanedEnquiryText("")
+    setVlsfoMaxRemarks([])
+    setCopyStatus("idle")
     setGuesses(emptyGuess())
     setWorksheet(blankWorksheet(userNickname))
+  }
+
+  function renderShortenedEnquiry(value: string) {
+    if (!value) return <span className={styles.shortenedPlaceholder}>No shortened enquiry yet.</span>
+
+    return value.split(/(180|120)/g).map((part, index) =>
+      part === "180" || part === "120" ? (
+        <strong className={styles.shortenedDanger} key={`${part}-${index}`}>
+          {part}
+        </strong>
+      ) : (
+        <span key={`${part}-${index}`}>{part}</span>
+      ),
+    )
   }
 
   return (
@@ -450,9 +520,45 @@ export default function EnquiryWorksheetPage() {
               className={styles.cleanedText}
             />
           </label>
-          <p className={styles.cleaningNote}>
-            Removes blank/invisible-space lines only. Standalone numbers are kept.
-          </p>
+
+          <section className={styles.shortenedPanel} aria-label="Shortened enquiry">
+            <div className={styles.shortenedHeader}>
+              <span>SHORTENED ENQUIRY (USE WITH CARE)</span>
+              <button
+                type="button"
+                className={styles.copyButton}
+                onClick={copyShortenedEnquiry}
+                disabled={!shortenedEnquiry}
+                aria-label="Copy shortened enquiry"
+                title="Copy shortened enquiry"
+                data-admin-button-style="preserve"
+              >
+                ⧉
+              </button>
+            </div>
+            <div className={styles.shortenedBox}>
+              {renderShortenedEnquiry(shortenedEnquiry)}
+            </div>
+            <div className={styles.vlsfoRemarkButtons}>
+              {vlsfoRemarkOptions.map((remark) => {
+                const active = vlsfoMaxRemarks.includes(remark)
+                return (
+                  <button
+                    key={remark}
+                    type="button"
+                    aria-pressed={active}
+                    className={active ? styles.remarkButtonActive : styles.remarkButton}
+                    onClick={() => toggleVlsfoMaxRemark(remark)}
+                    data-admin-button-style="preserve"
+                  >
+                    Add {remark}
+                  </button>
+                )
+              })}
+            </div>
+            {copyStatus === "copied" ? <p className={styles.copyStatus}>Copied.</p> : null}
+            {copyStatus === "failed" ? <p className={styles.copyError}>Copy failed.</p> : null}
+          </section>
 
           <div className={styles.confirmGrid}>
             <label>
