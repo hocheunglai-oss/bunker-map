@@ -116,8 +116,8 @@ const appleSecondaryButtonStyle: React.CSSProperties = {
 const settingsButtonStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
-  width: "36px",
-  minWidth: "36px",
+  width: "auto",
+  minWidth: "0",
   height: "36px",
   minHeight: "36px",
   border: 0,
@@ -127,9 +127,12 @@ const settingsButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
+  gap: "7px",
   borderRadius: 0,
   boxShadow: "none",
   cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: 500,
   lineHeight: 1,
 }
 
@@ -141,9 +144,9 @@ const menuItemButtonStyle: React.CSSProperties = {
   width: "100%",
   minHeight: "34px",
   justifyContent: "flex-start",
-  border: "1px solid transparent",
+  border: "1px solid var(--fc-admin-border)",
   borderRadius: "10px",
-  background: "#ffffff",
+  background: "var(--fc-admin-button-bg)",
   color: "var(--fc-admin-panel-text)",
   cursor: "pointer",
   fontSize: "13px",
@@ -1128,6 +1131,7 @@ export default function EventCalendarPage() {
             </div>
           </div>
           <div
+            data-admin-button-style="preserve"
             style={{
               display: "flex",
               alignItems: "center",
@@ -1211,6 +1215,7 @@ export default function EventCalendarPage() {
                   <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
                   <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7A2 2 0 1 1 7.1 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
                 </svg>
+                <span>Settings</span>
               </button>
               {toolsMenuOpen && (
                 <div
