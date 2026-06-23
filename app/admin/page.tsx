@@ -3,6 +3,7 @@
 import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
+import "leaflet/dist/leaflet.css"
 import {
   ADMIN_FOLDER_THEME_EVENT,
   ADMIN_FOLDER_THEME_KEY,
@@ -14,12 +15,6 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const HOLIDAY_MARKET_CODES = "HK CN SG KR JP VN US"
 const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
-const TYPHOON_MAP_BOUNDS = {
-  minLat: 7,
-  maxLat: 36,
-  minLon: 100,
-  maxLon: 140,
-}
 
 type AdminHoliday = {
   countryCode: string
@@ -138,36 +133,150 @@ function getTyphoonGrade(intensity: string | null) {
   return { label: intensity || "Track active", color: "#8a8f98", className: "is-low" }
 }
 
-function projectTyphoonPoint(point: AdminTrackPoint) {
-  if (typeof point.lat !== "number" || typeof point.lon !== "number") return null
-
-  const x =
-    ((point.lon - TYPHOON_MAP_BOUNDS.minLon) /
-      (TYPHOON_MAP_BOUNDS.maxLon - TYPHOON_MAP_BOUNDS.minLon)) *
-    100
-  const y =
-    ((TYPHOON_MAP_BOUNDS.maxLat - point.lat) /
-      (TYPHOON_MAP_BOUNDS.maxLat - TYPHOON_MAP_BOUNDS.minLat)) *
-    70
-
-  return {
-    ...point,
-    x: Math.max(0, Math.min(100, x)),
-    y: Math.max(0, Math.min(70, y)),
-  }
-}
-
-function toPolyline(points: Array<ReturnType<typeof projectTyphoonPoint>>) {
-  return points
-    .filter((point): point is NonNullable<typeof point> => Boolean(point))
-    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-    .join(" ")
-}
-
 function typhoonStyle(color: string) {
   return { "--tc-grade-color": color } as React.CSSProperties & {
     "--tc-grade-color": string
   }
+}
+
+type MappableTrackPoint = AdminTrackPoint & {
+  lat: number
+  lon: number
+}
+
+function getMappableTrackPoints(storm: AdminTyphoonStorm): MappableTrackPoint[] {
+  return (storm.trackPoints || []).filter(
+    (point): point is MappableTrackPoint =>
+      typeof point.lat === "number" && typeof point.lon === "number",
+  )
+}
+
+function toLatLng(points: MappableTrackPoint[]) {
+  return points.map((point) => [point.lat, point.lon] as [number, number])
+}
+
+function escapeHtml(value: string | null | undefined) {
+  return (value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+function AdminTyphoonMap({
+  storm,
+  gradeColor,
+}: {
+  storm: AdminTyphoonStorm
+  gradeColor: string
+}) {
+  const mapRef = useRef<HTMLDivElement | null>(null)
+  const points = getMappableTrackPoints(storm)
+  const pastPoints = points.filter((point) => point.kind === "past" || point.kind === "analysis")
+  const forecastPoints = points.filter((point) => point.kind === "forecast")
+  const currentPoint =
+    [...points].reverse().find((point) => point.kind === "analysis") ||
+    [...pastPoints].reverse()[0] ||
+    points[0]
+  const center: [number, number] = currentPoint ? [currentPoint.lat, currentPoint.lon] : [21.5, 122]
+
+  useEffect(() => {
+    const container = mapRef.current
+    if (!container || !points.length) return
+
+    let cancelled = false
+    let map: import("leaflet").Map | null = null
+
+    async function mountMap() {
+      const L = await import("leaflet")
+      if (cancelled || !container) return
+
+      if ("_leaflet_id" in container) {
+        delete (container as HTMLDivElement & { _leaflet_id?: number })._leaflet_id
+      }
+
+      map = L.map(container, {
+        attributionControl: true,
+        scrollWheelZoom: false,
+        zoomControl: true,
+      })
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 18,
+      }).addTo(map)
+
+      const pointBounds = toLatLng(points)
+
+      if (pointBounds.length > 1) {
+        map.fitBounds(L.latLngBounds(pointBounds), {
+          animate: false,
+          maxZoom: 6,
+          padding: [34, 34],
+        })
+      } else {
+        map.setView(center, 5, { animate: false })
+      }
+
+      if (pastPoints.length > 1) {
+        L.polyline(toLatLng(pastPoints), {
+          color: gradeColor,
+          opacity: 0.96,
+          weight: 5,
+        }).addTo(map)
+      }
+
+      if (forecastPoints.length > 1) {
+        L.polyline(toLatLng(forecastPoints), {
+          color: gradeColor,
+          dashArray: "8 8",
+          opacity: 0.74,
+          weight: 4,
+        }).addTo(map)
+      }
+
+      for (const point of points) {
+        L.circleMarker([point.lat, point.lon], {
+          color: gradeColor,
+          fillColor: point.kind === "forecast" ? "#ffffff" : gradeColor,
+          fillOpacity: point.kind === "forecast" ? 0.82 : 0.95,
+          opacity: 1,
+          radius: point.kind === "analysis" ? 8 : 5,
+          weight: point.kind === "analysis" ? 3 : 2,
+        })
+          .bindPopup(
+            `<strong>${escapeHtml(storm.name)}</strong><br>${escapeHtml(
+              point.intensity || storm.latest.intensity || "Track point",
+            )}<br>${escapeHtml([point.latitude, point.longitude].filter(Boolean).join(", "))}`,
+          )
+          .addTo(map)
+      }
+
+      window.setTimeout(() => map?.invalidateSize(), 0)
+    }
+
+    void mountMap()
+
+    return () => {
+      cancelled = true
+      map?.remove()
+    }
+  }, [center, forecastPoints, gradeColor, pastPoints, points, storm.latest.intensity, storm.name])
+
+  if (!points.length) {
+    return (
+      <div className="fc-admin-typhoon-map-fallback">
+        <p>Track map unavailable for this storm.</p>
+        <Link href={HKO_TROPICAL_CYCLONE_MAP_URL} target="_blank" rel="noreferrer">
+          Open HKO GIS map
+        </Link>
+      </div>
+    )
+  }
+
+  return <div ref={mapRef} className="fc-admin-typhoon-leaflet-map" />
 }
 
 function AdminTyphoonMapModal({
@@ -178,17 +287,6 @@ function AdminTyphoonMapModal({
   onClose: () => void
 }) {
   const grade = getTyphoonGrade(storm.latest.intensity)
-  const projectedPoints = (storm.trackPoints || [])
-    .map(projectTyphoonPoint)
-    .filter((point): point is NonNullable<typeof point> => Boolean(point))
-  const pastPoints = projectedPoints.filter(
-    (point) => point.kind === "past" || point.kind === "analysis",
-  )
-  const forecastPoints = projectedPoints.filter((point) => point.kind === "forecast")
-  const currentPoint =
-    [...projectedPoints].reverse().find((point) => point.kind === "analysis") ||
-    [...pastPoints].reverse()[0] ||
-    projectedPoints[0]
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -219,60 +317,7 @@ function AdminTyphoonMapModal({
         </div>
 
         <div className="fc-admin-typhoon-map-body" style={typhoonStyle(grade.color)}>
-          <svg viewBox="0 0 100 70" role="img" aria-label={`${storm.name} track map`}>
-            <defs>
-              <linearGradient id="typhoonSea" x1="0" x2="1" y1="0" y2="1">
-                <stop offset="0%" stopColor="#dcecf4" />
-                <stop offset="100%" stopColor="#9fb9c8" />
-              </linearGradient>
-            </defs>
-            <rect width="100" height="70" rx="4" fill="url(#typhoonSea)" />
-            <path
-              d="M0 2 C14 4 17 13 27 15 C33 16 35 21 31 27 C27 35 34 42 42 43 C53 45 55 54 50 70 L0 70 Z"
-              className="fc-admin-typhoon-map-land"
-            />
-            <path
-              d="M58 2 C63 8 66 17 64 25 C61 37 67 47 76 54 C82 59 84 65 83 70 L100 70 L100 0 Z"
-              className="fc-admin-typhoon-map-land is-east"
-            />
-            <path d="M47 28 C50 32 50 39 47 44 C44 39 44 33 47 28 Z" className="fc-admin-typhoon-map-island" />
-            {[20, 40, 60, 80].map((x) => (
-              <line key={`x-${x}`} x1={x} x2={x} y1="0" y2="70" className="fc-admin-typhoon-map-grid" />
-            ))}
-            {[14, 28, 42, 56].map((y) => (
-              <line key={`y-${y}`} x1="0" x2="100" y1={y} y2={y} className="fc-admin-typhoon-map-grid" />
-            ))}
-            <text x="8" y="17">CHINA</text>
-            <text x="38" y="38">TAIWAN</text>
-            <text x="63" y="61">PHILIPPINES</text>
-            <text x="7" y="57">VIETNAM</text>
-
-            {pastPoints.length > 1 ? (
-              <polyline points={toPolyline(pastPoints)} className="fc-admin-typhoon-map-track is-past" />
-            ) : null}
-            {forecastPoints.length > 1 ? (
-              <polyline points={toPolyline(forecastPoints)} className="fc-admin-typhoon-map-track is-forecast" />
-            ) : null}
-            {projectedPoints.map((point, index) =>
-              point ? (
-                <circle
-                  key={`${point.kind}-${index}`}
-                  cx={point.x}
-                  cy={point.y}
-                  r={point.kind === "analysis" ? 1.7 : 1.05}
-                  className={`fc-admin-typhoon-map-dot is-${point.kind}`}
-                />
-              ) : null,
-            )}
-            {currentPoint ? (
-              <circle
-                cx={currentPoint.x}
-                cy={currentPoint.y}
-                r="3.2"
-                className="fc-admin-typhoon-map-current"
-              />
-            ) : null}
-          </svg>
+          <AdminTyphoonMap storm={storm} gradeColor={grade.color} />
 
           <div className="fc-admin-typhoon-map-meta">
             <span className={`fc-admin-typhoon-grade-pill ${grade.className}`}>{grade.label}</span>
@@ -360,50 +405,53 @@ function AdminOilWidget() {
 
     container.innerHTML = ""
 
-    const widgetHost = document.createElement("div")
-    widgetHost.className = "tradingview-widget-container__widget"
-    widgetHost.style.height = "216px"
-    widgetHost.style.width = "100%"
+    const timer = window.setTimeout(() => {
+      const widgetHost = document.createElement("div")
+      widgetHost.className = "tradingview-widget-container__widget"
+      widgetHost.style.height = "216px"
+      widgetHost.style.width = "100%"
 
-    const script = document.createElement("script")
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
-    script.type = "text/javascript"
-    script.async = true
-    script.innerHTML = JSON.stringify({
-      colorTheme: "dark",
-      dateRange: "1D",
-      showChart: true,
-      locale: "en",
-      width: "100%",
-      height: 216,
-      largeChartUrl: "",
-      isTransparent: true,
-      showSymbolLogo: false,
-      showFloatingTooltip: false,
-      plotLineColorGrowing: "rgba(41, 98, 255, 1)",
-      plotLineColorFalling: "rgba(41, 98, 255, 1)",
-      gridLineColor: "rgba(255, 255, 255, 0.08)",
-      scaleFontColor: "rgba(237, 247, 255, 0.78)",
-      belowLineFillColorGrowing: "rgba(30, 144, 255, 0.18)",
-      belowLineFillColorFalling: "rgba(30, 144, 255, 0.12)",
-      belowLineFillColorGrowingBottom: "rgba(30, 144, 255, 0.01)",
-      belowLineFillColorFallingBottom: "rgba(30, 144, 255, 0.01)",
-      symbolActiveColor: "rgba(143, 215, 255, 0.18)",
-      tabs: [
-        {
-          title: "Energy",
-          symbols: [
-            { s: "TVC:UKOIL", d: "Brent" },
-            { s: "TVC:USOIL", d: "WTI / Nymex" },
-          ],
-        },
-      ],
-    })
+      const script = document.createElement("script")
+      script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
+      script.type = "text/javascript"
+      script.async = true
+      script.innerHTML = JSON.stringify({
+        colorTheme: "light",
+        dateRange: "1D",
+        showChart: true,
+        locale: "en",
+        width: "100%",
+        height: 216,
+        largeChartUrl: "",
+        isTransparent: true,
+        showSymbolLogo: false,
+        showFloatingTooltip: false,
+        plotLineColorGrowing: "rgba(41, 98, 255, 1)",
+        plotLineColorFalling: "rgba(41, 98, 255, 1)",
+        gridLineColor: "rgba(29, 29, 31, 0.08)",
+        scaleFontColor: "rgba(29, 29, 31, 0.72)",
+        belowLineFillColorGrowing: "rgba(0, 113, 227, 0.12)",
+        belowLineFillColorFalling: "rgba(0, 113, 227, 0.08)",
+        belowLineFillColorGrowingBottom: "rgba(0, 113, 227, 0.01)",
+        belowLineFillColorFallingBottom: "rgba(0, 113, 227, 0.01)",
+        symbolActiveColor: "rgba(0, 113, 227, 0.12)",
+        tabs: [
+          {
+            title: "Energy",
+            symbols: [
+              { s: "TVC:UKOIL", d: "Brent" },
+              { s: "TVC:USOIL", d: "WTI / Nymex" },
+            ],
+          },
+        ],
+      })
 
-    container.appendChild(widgetHost)
-    container.appendChild(script)
+      container.appendChild(widgetHost)
+      container.appendChild(script)
+    }, 0)
 
     return () => {
+      window.clearTimeout(timer)
       container.innerHTML = ""
     }
   }, [])
@@ -553,7 +601,7 @@ export default function AdminPage() {
                 </div>
               ) : (
                 <p className="fc-admin-swatch-empty">
-                  No public holidays in the selected markets right now.
+                  No public holidays in the upcoming 3 days.
                 </p>
               )}
             </section>
