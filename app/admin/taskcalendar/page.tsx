@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import {
   getTaskScheduleText,
   monthNames,
-  resolveTaskRecipients,
   TaskCalendarTask,
   TaskScheduleType,
   taskCalendarTasks,
@@ -37,6 +36,20 @@ const buttonStyle: React.CSSProperties = {
   padding: "8px 12px",
   boxShadow: "none",
 }
+
+const appleActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  minHeight: "36px",
+  borderRadius: "980px",
+  borderColor: "var(--fc-admin-primary-button-bg)",
+  background: "var(--fc-admin-primary-button-bg)",
+  color: "var(--fc-admin-primary-button-text)",
+  fontSize: "14px",
+  fontWeight: 700,
+  lineHeight: 1,
+  padding: "0 17px",
+}
+
 const panelStyle: React.CSSProperties = {
   overflow: "auto",
   background: "var(--fc-admin-panel-bg)",
@@ -50,22 +63,24 @@ const thStyle: React.CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 2,
-  padding: "7px",
+  padding: "7px 7px",
   borderBottom: "1px solid var(--fc-admin-border-soft)",
   background: "var(--fc-table-head-bg)",
   color: "var(--fc-table-head-text)",
-  fontSize: "10px",
+  fontSize: "11px",
   fontWeight: 900,
-  letterSpacing: "0.08em",
+  letterSpacing: "0.04em",
   textTransform: "uppercase",
   textAlign: "left",
 }
 const tdStyle: React.CSSProperties = {
-  padding: "4px 7px",
+  height: "20px",
+  padding: "2px 7px",
   borderBottom: "1px solid var(--fc-admin-border-soft)",
   fontSize: "12px",
-  lineHeight: "16px",
+  lineHeight: "17px",
   verticalAlign: "middle",
+  boxSizing: "border-box",
 }
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -145,11 +160,16 @@ function normalizeTasks(value: unknown) {
   return tasks.length ? tasks : taskCalendarTasks
 }
 
+function taskHasSelectedPeople(task: TaskCalendarTask, selectedPeople: string[]) {
+  if (!selectedPeople.length) return false
+  return selectedPeople.some((person) => task.notify.includes(person) || task.cc.includes(person))
+}
+
 export default function TaskCalendarPage() {
   const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const [tasks, setTasks] = useState<TaskCalendarTask[]>(taskCalendarTasks)
-  const [selectedPerson, setSelectedPerson] = useState("All")
+  const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [draftTask, setDraftTask] = useState<TaskCalendarTask>(buildBlankTask)
   const loadedRef = useRef(false)
@@ -261,6 +281,12 @@ export default function TaskCalendarPage() {
     }))
   }
 
+  function togglePersonHighlight(person: string) {
+    setSelectedPeople((current) =>
+      current.includes(person) ? current.filter((item) => item !== person) : [...current, person]
+    )
+  }
+
   function toggleDraftMonth(month: number) {
     setDraftTask((current) => {
       const months = current.months || []
@@ -277,64 +303,137 @@ export default function TaskCalendarPage() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
-        <header style={{ marginBottom: "12px" }}>
-          <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>Office Tools</div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
-            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>Back</button>
-            <h1 style={{ margin: 0, fontSize: "34px", lineHeight: 1, color: "var(--fc-admin-panel-text)" }}>Task Calendar</h1>
-            <button type="button" onClick={openAddModal} aria-label="Add task" style={{ ...buttonStyle, width: "34px", height: "34px", padding: 0, fontSize: "22px" }}>+</button>
-            <span style={{ color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>{tasks.length} recurring reminders</span>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: "16px",
+            flexWrap: "wrap",
+            marginBottom: "12px",
+          }}
+        >
+          <div>
+            <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+              Office Tools
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
+              <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>
+                Back
+              </button>
+              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: "36px", color: "var(--fc-admin-panel-text)" }}>
+                TASK CALENDAR
+              </h1>
+            </div>
+          </div>
+          <div data-admin-button-style="preserve" style={{ marginLeft: "auto" }}>
+            <button type="button" onClick={openAddModal} style={appleActionButtonStyle}>
+              Add New Task
+            </button>
           </div>
         </header>
 
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "12px" }}>
-          {["All", ...people].map((person) => {
-            const active = selectedPerson === person
-            return (
+        <div style={panelStyle}>
+          {selectedPeople.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                flexWrap: "wrap",
+                marginBottom: "10px",
+                padding: "8px 10px",
+                border: "1px solid var(--fc-admin-border-soft)",
+                borderRadius: "12px",
+                background: "var(--fc-admin-panel-soft-bg)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+                <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
+                  Highlighting
+                </span>
+                {selectedPeople.map((person) => (
+                  <span
+                    key={person}
+                    style={{
+                      border: "1px solid var(--fc-admin-selected-border)",
+                      borderRadius: "999px",
+                      background: "var(--fc-admin-selected-bg)",
+                      color: "var(--fc-admin-selected-text)",
+                      fontSize: "12px",
+                      fontWeight: 900,
+                      lineHeight: 1,
+                      padding: "5px 8px",
+                    }}
+                  >
+                    {person}
+                  </span>
+                ))}
+              </div>
               <button
-                key={person}
                 type="button"
-                aria-pressed={active}
-                onClick={() => setSelectedPerson(person)}
+                onClick={() => setSelectedPeople([])}
                 style={{
                   ...buttonStyle,
-                  background: active ? "var(--fc-admin-selected-bg)" : buttonStyle.background,
-                  color: active ? "var(--fc-admin-selected-text)" : buttonStyle.color,
-                  boxShadow: "none",
+                  borderColor: "transparent",
+                  background: "transparent",
+                  color: "var(--fc-admin-link)",
+                  padding: "5px 8px",
+                  fontSize: "12px",
                 }}
               >
-                {person}
+                Clear
               </button>
-            )
-          })}
-        </div>
-
-        <div style={panelStyle}>
+            </div>
+          )}
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th style={thStyle}>Task / Email Subject</th>
+                <th style={thStyle}>Task</th>
                 <th style={{ ...thStyle, width: "210px" }}>Schedule</th>
-                {people.map((person) => (
-                  <th key={person} style={{ ...thStyle, width: "38px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>{person}</th>
-                ))}
-                <th style={{ ...thStyle, width: "80px" }}>Email</th>
+                {people.map((person) => {
+                  const active = selectedPeople.includes(person)
+                  return (
+                    <th key={person} style={{ ...thStyle, width: "40px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
+                      <button
+                        type="button"
+                        aria-pressed={active}
+                        title={`Highlight ${person}`}
+                        onClick={() => togglePersonHighlight(person)}
+                        style={{
+                          width: "34px",
+                          minHeight: "26px",
+                          border: active ? "1px solid var(--fc-admin-link)" : "1px solid #cfd7e6",
+                          borderRadius: "7px",
+                          background: active ? "var(--fc-admin-link)" : "#ffffff",
+                          color: active ? "#ffffff" : "var(--fc-admin-panel-text)",
+                          cursor: "pointer",
+                          fontSize: "11px",
+                          fontWeight: 900,
+                          lineHeight: 1,
+                          padding: 0,
+                          boxShadow: active ? "0 1px 3px #0066cc3a" : "0 1px 2px #00000012",
+                        }}
+                      >
+                        {person}
+                      </button>
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
               {tasks.map((task) => {
-                const to = resolveTaskRecipients(task.notify)
-                const cc = resolveTaskRecipients(task.cc)
-                const rowHighlighted = selectedPerson !== "All" && (task.notify.includes(selectedPerson) || task.cc.includes(selectedPerson))
+                const rowHighlighted = taskHasSelectedPeople(task, selectedPeople)
                 return (
                   <tr
                     key={task.id}
                     onDoubleClick={() => openEditModal(task)}
                     style={{
-                      background: rowHighlighted ? "var(--fc-admin-selected-bg)" : "var(--fc-row-bg)",
-                      boxShadow: rowHighlighted ? "inset 0 0 0 2px var(--fc-admin-selected-border)" : "none",
+                      background: rowHighlighted ? "#edf6ff" : "var(--fc-row-bg)",
+                      boxShadow: rowHighlighted ? "inset 0 0 0 1px #b8d5ff, inset 4px 0 0 var(--fc-admin-link)" : "none",
                       cursor: "pointer",
-                      opacity: selectedPerson !== "All" && !rowHighlighted ? 0.46 : 1,
                     }}
                   >
                     <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: 900 }}>***** {task.task}</td>
@@ -342,26 +441,26 @@ export default function TaskCalendarPage() {
                     {people.map((person) => {
                       const notify = task.notify.includes(person)
                       const copied = task.cc.includes(person)
-                      const personBackground = notify ? "#ffffff" : copied ? "#fff8e5" : rowHighlighted ? "var(--fc-admin-selected-bg)" : "var(--fc-row-bg)"
+                      const personBackground = notify ? "#ffe8e8" : copied ? "#fff8e5" : rowHighlighted ? "#edf6ff" : "var(--fc-row-bg)"
+                      const personBorder = notify ? "#ffc4c4" : copied ? "#f3dfaa" : "transparent"
                       return (
                         <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
                           <span style={{
                             display: "inline-grid",
                             placeItems: "center",
-                            width: "28px",
+                            width: "30px",
+                            border: `1px solid ${personBorder}`,
                             borderRadius: "999px",
                             background: personBackground,
-                            color: notify ? "var(--fc-admin-panel-text)" : copied ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
-                            fontSize: "10px",
+                            color: notify ? "#b4232a" : copied ? "var(--fc-admin-warning-text)" : "var(--fc-admin-muted)",
+                            fontSize: "11px",
                             fontWeight: notify || copied ? 900 : 500,
+                            lineHeight: "13px",
+                            padding: "2px 0",
                           }}>{notify ? "TO" : copied ? "CC" : person}</span>
                         </td>
                       )
                     })}
-                    <td style={tdStyle}>
-                      <span style={{ color: to.length ? "var(--fc-admin-success-text)" : "var(--fc-admin-danger-text)", fontWeight: 900 }}>TO {to.length}</span>
-                      <span style={{ color: "var(--fc-admin-muted)", fontWeight: 900 }}> / CC {cc.length}</span>
-                    </td>
                   </tr>
                 )
               })}

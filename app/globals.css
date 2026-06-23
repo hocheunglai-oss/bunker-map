@@ -610,10 +610,7 @@ body {
 .fc-admin-app-content [data-admin-universal-button="true"] {
   min-height: 36px !important;
   height: auto !important;
-  border: 1px solid var(--fc-admin-button-border) !important;
   border-radius: 10px !important;
-  background: var(--fc-admin-button-bg) !important;
-  color: var(--fc-admin-button-text) !important;
   padding: 8px 13px !important;
   font-family: var(--fc-admin-font) !important;
   font-size: 12px !important;
@@ -621,45 +618,6 @@ body {
   line-height: 1.1 !important;
   text-decoration: none !important;
   box-shadow: none !important;
-}
-
-.fc-admin-app-content [data-admin-action="commit"] {
-  border-color: var(--fc-admin-success-border) !important;
-  background: var(--fc-admin-success-bg) !important;
-  color: var(--fc-admin-success-text) !important;
-}
-
-.fc-admin-app-content [data-admin-action="delete"] {
-  border-color: var(--fc-admin-danger-border) !important;
-  background: var(--fc-admin-danger-bg) !important;
-  color: var(--fc-admin-danger-text) !important;
-}
-
-.fc-admin-app-content [data-admin-action="proceed"] {
-  border-color: var(--fc-admin-primary-button-bg) !important;
-  background: var(--fc-admin-primary-button-bg) !important;
-  color: var(--fc-admin-primary-button-text) !important;
-}
-
-.fc-admin-app-content [data-admin-action="caution"] {
-  border-color: var(--fc-admin-warning-border) !important;
-  background: var(--fc-admin-warning-bg) !important;
-  color: var(--fc-admin-warning-text) !important;
-}
-
-.fc-admin-app-content [data-admin-undo-button="true"] {
-  width: 36px !important;
-  min-width: 36px !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  font-size: 0 !important;
-}
-
-.fc-admin-app-content [data-admin-undo-button="true"]::before {
-  content: "↶";
-  font-size: 21px;
-  font-weight: 900;
-  line-height: 1;
 }
 
 .fc-admin-mobile-menu,

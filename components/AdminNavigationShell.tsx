@@ -33,27 +33,6 @@ const ADMIN_GROUP_ORDER: AdminPageGroup[] = [
 const SIDEBAR_COLLAPSED_KEY = "fc-admin-sidebar-collapsed"
 const SIDEBAR_GROUPS_KEY = "fc-admin-sidebar-groups"
 
-const ACTION_PATTERNS: Array<{
-  action: "commit" | "delete" | "proceed" | "caution"
-  pattern: RegExp
-}> = [
-  {
-    action: "commit",
-    pattern:
-      /\b(save|saved|saving|apply|sync|syncing|synced|backup|back\s*up|upload|uploading|import|importing|add|create|creating|new|insert)\b|^\+$/i,
-  },
-  { action: "delete", pattern: /\b(delete|deleting|remove|removing)\b/i },
-  {
-    action: "caution",
-    pattern: /\b(check|undo|undoing|rebuild|restore)\b/i,
-  },
-  {
-    action: "proceed",
-    pattern:
-      /\b(refresh|refreshing|send|sending|sent|notify|close|cancel|done|download|export|publish|publishing|published|open|next|previous|retry)\b/i,
-  },
-]
-
 function defaultExpandedGroups() {
   return ADMIN_GROUP_ORDER.reduce<Record<AdminPageGroup, boolean>>(
     (groups, group) => {
@@ -78,8 +57,6 @@ function readStoredGroups() {
 
 function clearUniversalButtonAttrs(element: HTMLElement) {
   delete element.dataset.adminUniversalButton
-  delete element.dataset.adminAction
-  delete element.dataset.adminUndoButton
 }
 
 function hasStatefulButtonStyle(element: HTMLElement) {
@@ -310,13 +287,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           return
         }
 
-        if (/^(show|hide)\s+delete/i.test(label)) {
-          delete element.dataset.adminAction
-          delete element.dataset.adminUndoButton
-          element.dataset.adminUniversalButton = "true"
-          return
-        }
-
         if (
           element.classList.contains("fc-admin-menu-button") ||
           element.getAttribute("role") === "tab" ||
@@ -329,17 +299,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           return
         }
 
-        delete element.dataset.adminAction
-        delete element.dataset.adminUndoButton
-        const matched = ACTION_PATTERNS.find(({ pattern }) => pattern.test(label))
-        if (matched) {
-          element.dataset.adminAction = matched.action
-          if (/\bundo(?:ing)?\b/i.test(label)) {
-            element.dataset.adminUndoButton = "true"
-            element.setAttribute("aria-label", label)
-            element.setAttribute("title", label)
-          }
-        }
         element.dataset.adminUniversalButton = "true"
       })
 
