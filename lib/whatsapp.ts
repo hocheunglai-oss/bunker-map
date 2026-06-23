@@ -51,6 +51,22 @@ export type WhatsAppSendResult = {
   storageWarning?: string
 }
 
+export type WhatsAppTemplateComponent = {
+  type?: string
+  format?: string
+  text?: string
+  example?: Record<string, unknown>
+}
+
+export type WhatsAppTemplate = {
+  id?: string
+  name: string
+  language: string
+  status: string
+  category?: string
+  components: WhatsAppTemplateComponent[]
+}
+
 type SupabaseErrorLike = {
   code?: string
   message?: string
@@ -161,6 +177,74 @@ function normalisePhone(value: string) {
   const cleaned = value.replace(/[^\d+]/g, "")
   if (cleaned.startsWith("+")) return cleaned
   return cleaned ? `+${cleaned}` : ""
+}
+
+function graphErrorMessage(data: Record<string, unknown>, fallback: string) {
+  const error = data.error as
+    | {
+        message?: string
+        type?: string
+        code?: number | string
+        error_subcode?: number | string
+        fbtrace_id?: string
+      }
+    | undefined
+  return [
+    error?.message || fallback,
+    error?.code ? `code ${error.code}` : "",
+    error?.error_subcode ? `subcode ${error.error_subcode}` : "",
+    error?.fbtrace_id ? `trace ${error.fbtrace_id}` : "",
+  ].filter(Boolean).join(" / ")
+}
+
+function bodyVariableNames(text: string) {
+  const names: string[] = []
+  for (const match of text.matchAll(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g)) {
+    const name = match[1]
+    if (!names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+function templateBodyComponent(template: WhatsAppTemplate) {
+  return template.components.find((component) => component.type?.toUpperCase() === "BODY") || null
+}
+
+function renderTemplateMessagePreview(template: WhatsAppTemplate, variableText: string) {
+  const lines: string[] = []
+  for (const component of template.components) {
+    const type = component.type?.toUpperCase()
+    if ((type === "HEADER" || type === "BODY" || type === "FOOTER") && component.text) {
+      lines.push(
+        component.text.replace(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g, variableText.trim()),
+      )
+    }
+  }
+  return lines.filter(Boolean).join("\n\n").trim() || template.name
+}
+
+function buildTemplateComponents(template: WhatsAppTemplate, variableText: string) {
+  const body = templateBodyComponent(template)
+  const variables = body?.text ? bodyVariableNames(body.text) : []
+  if (variables.length === 0) return []
+  if (!variableText.trim()) throw new Error("Template variable text is required.")
+  if (variables.length > 1) {
+    throw new Error("This WhatsApp page currently supports templates with one body variable.")
+  }
+
+  const variable = variables[0]
+  return [
+    {
+      type: "body",
+      parameters: [
+        {
+          type: "text",
+          ...(/^\d+$/.test(variable) ? {} : { parameter_name: variable }),
+          text: variableText.trim(),
+        },
+      ],
+    },
+  ]
 }
 
 function messageTimestamp(value: string | undefined) {
@@ -472,6 +556,7 @@ export async function storeOutgoingMessage(params: {
   to: string
   body: string
   whatsappMessageId?: string | null
+  messageType?: string
   payload?: Record<string, unknown>
   auditContext?: AdminAuditContext
 }) {
@@ -494,7 +579,7 @@ export async function storeOutgoingMessage(params: {
       conversation_id: conversation.id,
       whatsapp_message_id: params.whatsappMessageId || null,
       direction: "outbound",
-      message_type: "text",
+      message_type: params.messageType || "text",
       body: params.body,
       media_url: null,
       status: params.whatsappMessageId ? "sent" : "queued",
@@ -509,6 +594,54 @@ export async function storeOutgoingMessage(params: {
     if (isMissingTableError(error as SupabaseErrorLike)) return
     throw error
   }
+}
+
+export async function loadWhatsAppTemplates() {
+  const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
+  const businessAccountId = requireEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
+  const graphApiVersion = getWhatsAppGraphApiVersion()
+  const url = new URL(`https://graph.facebook.com/${graphApiVersion}/${businessAccountId}/message_templates`)
+  url.searchParams.set("fields", "id,name,language,status,category,components")
+  url.searchParams.set("limit", "100")
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  })
+  const data = (await response.json().catch(() => ({}))) as {
+    data?: unknown[]
+    error?: unknown
+  } & Record<string, unknown>
+
+  if (!response.ok) {
+    throw new Error(`Meta WhatsApp API: ${graphErrorMessage(data, "Unable to load WhatsApp templates.")}`)
+  }
+
+  return (data.data || [])
+    .map((item) => {
+      const template = item as {
+        id?: unknown
+        name?: unknown
+        language?: unknown
+        status?: unknown
+        category?: unknown
+        components?: unknown
+      }
+      const parsed: WhatsAppTemplate = {
+        name: typeof template.name === "string" ? template.name : "",
+        language: typeof template.language === "string" ? template.language : "",
+        status: typeof template.status === "string" ? template.status : "",
+        components: Array.isArray(template.components)
+          ? template.components.map((component) => component as WhatsAppTemplateComponent)
+          : [],
+      }
+      if (typeof template.id === "string") parsed.id = template.id
+      if (typeof template.category === "string") parsed.category = template.category
+      return parsed
+    })
+    .filter((template): template is WhatsAppTemplate => Boolean(template.name && template.language))
 }
 
 export async function sendWhatsAppTextMessage(params: {
@@ -582,6 +715,92 @@ export async function sendWhatsAppTextMessage(params: {
         ? `Message accepted by Meta, but local WhatsApp storage failed: ${error.message}`
         : "Message accepted by Meta, but local WhatsApp storage failed."
     console.error("whatsapp outgoing storage failed", error)
+  }
+
+  return { messageId, response: data, storageWarning }
+}
+
+export async function sendWhatsAppTemplateMessage(params: {
+  to: string
+  templateName: string
+  language: string
+  variableText: string
+  auditContext?: AdminAuditContext
+}): Promise<WhatsAppSendResult> {
+  const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneNumberId = requireEnv("WHATSAPP_PHONE_NUMBER_ID")
+  const graphApiVersion = getWhatsAppGraphApiVersion()
+  const to = normalisePhone(params.to).replace(/^\+/, "")
+  const templateName = params.templateName.trim()
+  const language = params.language.trim()
+
+  if (!to) throw new Error("Recipient phone number is required.")
+  if (!templateName) throw new Error("Template name is required.")
+  if (!language) throw new Error("Template language is required.")
+
+  const templates = await loadWhatsAppTemplates()
+  const template = templates.find(
+    (item) => item.name === templateName && item.language === language,
+  )
+  if (!template) throw new Error("Selected WhatsApp template was not found in Meta.")
+  if (template.status.toUpperCase() !== "APPROVED") {
+    throw new Error(`Selected WhatsApp template is ${template.status || "not approved"}.`)
+  }
+
+  const components = buildTemplateComponents(template, params.variableText)
+  const requestBody = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "template",
+    template: {
+      name: template.name,
+      language: {
+        code: template.language,
+      },
+      ...(components.length > 0 ? { components } : {}),
+    },
+  }
+
+  const response = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestBody),
+  })
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>
+
+  if (!response.ok) {
+    throw new Error(`Meta WhatsApp API: ${graphErrorMessage(data, "WhatsApp template send failed.")}`)
+  }
+
+  const messageId =
+    Array.isArray(data.messages) && data.messages[0] && typeof data.messages[0] === "object"
+      ? String((data.messages[0] as { id?: unknown }).id || "")
+      : ""
+  const preview = renderTemplateMessagePreview(template, params.variableText)
+
+  let storageWarning: string | undefined
+  try {
+    await storeOutgoingMessage({
+      to: params.to,
+      body: preview,
+      whatsappMessageId: messageId || null,
+      messageType: "template",
+      payload: {
+        request: requestBody,
+        response: data,
+      },
+      auditContext: params.auditContext,
+    })
+  } catch (error) {
+    storageWarning =
+      error instanceof Error
+        ? `Template accepted by Meta, but local WhatsApp storage failed: ${error.message}`
+        : "Template accepted by Meta, but local WhatsApp storage failed."
+    console.error("whatsapp template storage failed", error)
   }
 
   return { messageId, response: data, storageWarning }

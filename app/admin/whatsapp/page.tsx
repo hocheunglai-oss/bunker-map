@@ -49,6 +49,21 @@ type WhatsAppConfig = {
   graphApiVersion: string
 }
 
+type WhatsAppTemplateComponent = {
+  type?: string
+  format?: string
+  text?: string
+}
+
+type WhatsAppTemplate = {
+  id?: string
+  name: string
+  language: string
+  status: string
+  category?: string
+  components: WhatsAppTemplateComponent[]
+}
+
 type WhatsAppInboxResponse = {
   conversations: WhatsAppConversation[]
   messages: WhatsAppMessage[]
@@ -312,6 +327,29 @@ function displayPreview(value: string | null | undefined) {
   return preview
 }
 
+function templateKey(template: Pick<WhatsAppTemplate, "name" | "language">) {
+  return `${template.name}|||${template.language}`
+}
+
+function templateHeader(template: WhatsAppTemplate) {
+  return template.components.find((component) => component.type?.toUpperCase() === "HEADER")?.text?.trim() || ""
+}
+
+function templateLabel(template: WhatsAppTemplate) {
+  return templateHeader(template) || template.name.replace(/_/g, " ")
+}
+
+function templateBodyVariables(template: WhatsAppTemplate) {
+  const body = template.components.find((component) => component.type?.toUpperCase() === "BODY")
+  const text = body?.text || ""
+  const names: string[] = []
+  for (const match of text.matchAll(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g)) {
+    const name = match[1]
+    if (!names.includes(name)) names.push(name)
+  }
+  return names
+}
+
 function metadataNumber(conversation: WhatsAppConversation, key: string) {
   const value = conversation.metadata?.[key]
   const numberValue = typeof value === "number" ? value : Number(value)
@@ -380,10 +418,13 @@ export default function WhatsAppAdminPage() {
   const [leftSearchQuery, setLeftSearchQuery] = useState("")
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [contactMatches, setContactMatches] = useState<Record<string, ContactOption>>({})
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>([])
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState("")
   const [composeTo, setComposeTo] = useState("")
   const [composeBody, setComposeBody] = useState("")
   const [loading, setLoading] = useState(true)
   const [contactLoading, setContactLoading] = useState(false)
+  const [templateLoading, setTemplateLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
@@ -452,6 +493,23 @@ export default function WhatsAppAdminPage() {
     }
   }, [contactMatches, mergeContactMatches])
 
+  const loadTemplates = useCallback(async () => {
+    setTemplateLoading(true)
+    try {
+      const response = await fetch("/api/whatsapp/templates", { cache: "no-store" })
+      const data = (await response.json().catch(() => ({}))) as {
+        templates?: WhatsAppTemplate[]
+        message?: string
+      }
+      if (!response.ok) throw new Error(data.message || "Unable to load WhatsApp templates.")
+      setTemplates(data.templates || [])
+    } catch (templateError) {
+      setError(templateError instanceof Error ? templateError.message : "Unable to load WhatsApp templates.")
+    } finally {
+      setTemplateLoading(false)
+    }
+  }, [])
+
   const loadInbox = useCallback(async (conversationId?: string | null) => {
     setError("")
     setMessage("")
@@ -477,6 +535,11 @@ export default function WhatsAppAdminPage() {
     if (authLoading || !authenticated || !canView) return
     void loadInbox(selectedConversationId)
   }, [authLoading, authenticated, canView, loadInbox])
+
+  useEffect(() => {
+    if (authLoading || !authenticated || !canView) return
+    void loadTemplates()
+  }, [authLoading, authenticated, canView, loadTemplates])
 
   useEffect(() => {
     if (authLoading || !authenticated || !canView) return
@@ -554,6 +617,33 @@ export default function WhatsAppAdminPage() {
     selectedConversation?.phone_e164 ||
     "Search phonebook contacts to start a chat"
   const activePhone = selectedConversation?.phone_e164 || selectedContact?.phone || composeTo
+
+  const approvedTemplates = useMemo(
+    () =>
+      templates
+        .filter((template) => template.status.toUpperCase() === "APPROVED")
+        .sort((first, second) =>
+          `${templateLabel(first)} ${first.language}`.localeCompare(`${templateLabel(second)} ${second.language}`),
+        ),
+    [templates],
+  )
+  const selectedTemplate = useMemo(
+    () => approvedTemplates.find((template) => templateKey(template) === selectedTemplateKey) || null,
+    [approvedTemplates, selectedTemplateKey],
+  )
+  const selectedTemplateVariables = useMemo(
+    () => (selectedTemplate ? templateBodyVariables(selectedTemplate) : []),
+    [selectedTemplate],
+  )
+  const templateNeedsText = selectedTemplateVariables.length > 0
+  const canSendMessage = Boolean(
+    canEdit &&
+      config.configured &&
+      activePhone &&
+      !sending &&
+      (selectedTemplate ? !templateNeedsText || composeBody.trim() : composeBody.trim()),
+  )
+
   const mobileGridStyle: CSSProperties = isMobile
     ? {
         gridTemplateColumns: "1fr",
@@ -790,17 +880,26 @@ export default function WhatsAppAdminPage() {
   async function sendMessage() {
     const to = (selectedConversation?.phone_e164 || selectedContact?.phone || composeTo).trim()
     const body = composeBody.trim()
-    if (!to || !body || sending) return
+    if (!to || !canSendMessage || sending) return
 
     setSending(true)
     setError("")
     setMessage("")
 
     try {
-      const response = await fetch("/api/whatsapp/send", {
+      const response = await fetch(selectedTemplate ? "/api/whatsapp/send-template" : "/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, message: body }),
+        body: JSON.stringify(
+          selectedTemplate
+            ? {
+                to,
+                templateName: selectedTemplate.name,
+                language: selectedTemplate.language,
+                variableText: body,
+              }
+            : { to, message: body },
+        ),
       })
       const data = (await response.json().catch(() => ({}))) as {
         message?: string
@@ -811,7 +910,7 @@ export default function WhatsAppAdminPage() {
       setComposeBody("")
       await loadInbox(selectedConversationId)
       setSelectedContact(null)
-      setMessage(data.storageWarning || "Message sent.")
+      setMessage(data.storageWarning || (selectedTemplate ? "Template sent." : "Message sent."))
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Unable to send WhatsApp message.")
     } finally {
@@ -1421,7 +1520,9 @@ export default function WhatsAppAdminPage() {
               background: "#f0f2f5",
               borderTop: "1px solid #d1d7db",
               display: "grid",
-              gridTemplateColumns: activePhone ? "minmax(0, 1fr) auto" : "160px minmax(0, 1fr) auto",
+              gridTemplateColumns: activePhone
+                ? "210px minmax(0, 1fr) auto"
+                : "160px 210px minmax(0, 1fr) auto",
               gap: "10px",
               alignItems: "end",
               padding: "10px 14px",
@@ -1446,13 +1547,57 @@ export default function WhatsAppAdminPage() {
                 display: selectedConversation || selectedContact ? "none" : "block",
               }}
             />
+            <select
+              value={selectedTemplateKey}
+              onChange={(event) => {
+                setSelectedTemplateKey(event.target.value)
+                focusComposer()
+              }}
+              disabled={templateLoading || approvedTemplates.length === 0 || sending}
+              title="WhatsApp template"
+              aria-label="WhatsApp template"
+              style={{
+                width: "210px",
+                minHeight: "42px",
+                border: "none",
+                borderRadius: "8px",
+                background: "#ffffff",
+                color: "#111b21",
+                fontSize: "13px",
+                outline: "none",
+                padding: "0 10px",
+                boxSizing: "border-box",
+                opacity: templateLoading || approvedTemplates.length === 0 ? 0.7 : 1,
+              }}
+            >
+              <option value="">
+                {templateLoading
+                  ? "Loading templates"
+                  : approvedTemplates.length === 0
+                    ? "Text message"
+                    : "Text message"}
+              </option>
+              {approvedTemplates.map((template) => (
+                <option key={templateKey(template)} value={templateKey(template)}>
+                  {templateLabel(template)} · {template.language}
+                </option>
+              ))}
+            </select>
             <textarea
               ref={composeRef}
               value={composeBody}
               onChange={(event) => setComposeBody(event.target.value)}
-              placeholder={activePhone ? "Type a message" : "Select or assign a contact"}
+              placeholder={
+                activePhone
+                  ? selectedTemplate
+                    ? templateNeedsText
+                      ? `Type ${selectedTemplateVariables[0]}`
+                      : "Template has no variable"
+                    : "Type a message"
+                  : "Select or assign a contact"
+              }
               rows={1}
-              disabled={!activePhone || sending}
+              disabled={!activePhone || sending || Boolean(selectedTemplate && !templateNeedsText)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
@@ -1479,17 +1624,15 @@ export default function WhatsAppAdminPage() {
             <button
               type="button"
               onClick={() => void sendMessage()}
-              disabled={!canEdit || !config.configured || !composeBody.trim() || !activePhone || sending}
-              aria-label="Send message"
-              title="Send message"
+              disabled={!canSendMessage}
+              aria-label={selectedTemplate ? "Send template" : "Send message"}
+              title={selectedTemplate ? "Send template" : "Send message"}
               style={{
                 ...iconButtonStyle,
                 width: "44px",
                 height: "44px",
                 background:
-                  !canEdit || !config.configured || !composeBody.trim() || !activePhone || sending
-                    ? "#c7d0d4"
-                    : "#00a884",
+                  !canSendMessage ? "#c7d0d4" : "#00a884",
                 color: "#ffffff",
                 fontSize: "17px",
               }}
