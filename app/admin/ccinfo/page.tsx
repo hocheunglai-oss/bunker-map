@@ -138,28 +138,101 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
 }
 
-const menuButtonStyle: React.CSSProperties = {
+const primaryButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  width: "54px",
+  borderColor: "var(--fc-admin-primary-button-bg)",
+  background: "var(--fc-admin-primary-button-bg)",
+  color: "var(--fc-admin-primary-button-text)",
+}
+
+const settingsButtonStyle: React.CSSProperties = {
+  appearance: "none",
+  WebkitAppearance: "none",
+  width: "auto",
+  minWidth: 0,
   height: "36px",
+  minHeight: "36px",
+  border: 0,
+  background: "transparent",
+  color: "var(--fc-admin-panel-text)",
   padding: 0,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  borderRadius: "999px",
-  background: "var(--fc-admin-selected-bg)",
-  color: "var(--fc-admin-panel-text)",
-  border: "1px solid var(--fc-admin-selected-border)",
+  gap: "7px",
+  borderRadius: 0,
+  boxShadow: "none",
+  cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: 500,
   lineHeight: 1,
 }
 
-function MenuGlyph() {
+const menuItemButtonStyle: React.CSSProperties = {
+  appearance: "none",
+  WebkitAppearance: "none",
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  minHeight: "34px",
+  justifyContent: "flex-start",
+  border: "1px solid var(--fc-admin-border)",
+  borderRadius: "10px",
+  background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-panel-text)",
+  padding: "8px 10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 800,
+  lineHeight: 1.1,
+  textDecoration: "none",
+  boxShadow: "none",
+  textAlign: "left",
+}
+
+const undoButtonStyle: React.CSSProperties = {
+  appearance: "none",
+  WebkitAppearance: "none",
+  width: "34px",
+  height: "28px",
+  minWidth: "34px",
+  border: 0,
+  borderRadius: 0,
+  background: "transparent",
+  color: "#2f2f31",
+  padding: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  boxShadow: "none",
+}
+
+function SettingsGlyph() {
   return (
-    <span aria-hidden="true" style={{ display: "grid", gap: "3px", width: "18px" }}>
-      {[0, 1, 2].map((index) => (
-        <span key={index} style={{ display: "block", height: "2px", borderRadius: "999px", background: "currentColor" }} />
-      ))}
-    </span>
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="19"
+      height="19"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7A2 2 0 1 1 7.1 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
+    </svg>
+  )
+}
+
+function UndoGlyph() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 80 48" width="30" height="22" fill="currentColor">
+      <path d="M23.6 4.3 4.8 18.2l18.8 14v-9.5h28.6c7.4 0 13.4 6 13.4 13.4 0 2.2-.5 4.3-1.5 6.2h10.6a23 23 0 0 0 1-6.8c0-12.8-10.4-23.2-23.2-23.2H23.6v-8Z" />
+      <path d="M23.6 34.7h29.8c2.7 0 5.1-.9 7.1-2.4 1.2 5.7-3.3 11-9.2 11H23.6v-8.6Z" />
+    </svg>
   )
 }
 
@@ -1388,7 +1461,6 @@ export default function CountryCompanyInfoPage() {
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
-  const [backingUp, setBackingUp] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
 
   useEffect(() => {
@@ -1398,6 +1470,8 @@ export default function CountryCompanyInfoPage() {
   const [matchIndex, setMatchIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuCloseTimerRef = useRef<number | null>(null)
+  const [newEntityMenuOpen, setNewEntityMenuOpen] = useState(false)
+  const newEntityMenuCloseTimerRef = useRef<number | null>(null)
   const [files, setFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
   const [deletedFiles, setDeletedFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
   const [folders, setFolders] = useState<EntryFolderRecord[]>([])
@@ -3248,33 +3322,6 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
-  async function downloadBackup() {
-    try {
-      setBackingUp(true)
-      setMessage("")
-      const response = await fetch("/api/ccinfo/backup")
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({ message: "Backup failed." }))
-        throw new Error(data.message || "Backup failed.")
-      }
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `ccinfo-backup-${new Date().toISOString().slice(0, 10)}.json`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-      setMessage("Backup downloaded.")
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Backup failed.")
-    } finally {
-      setBackingUp(false)
-    }
-  }
-
-
   async function pickSuggestion(item: SearchRecord) {
     await loadSelected(item.kind, item.id)
     if (typeof window !== "undefined") {
@@ -3287,6 +3334,7 @@ export default function CountryCompanyInfoPage() {
     setSuggestions([])
     setSearchInPage("")
     setMenuOpen(false)
+    setNewEntityMenuOpen(false)
   }
 
   async function openPortInline(id: string) {
@@ -3652,6 +3700,55 @@ export default function CountryCompanyInfoPage() {
   const filteredCountryOptions = countryOptions
     .filter((country) => country.name.includes(currentCountry.name.trim().toUpperCase()))
     .slice(0, 12)
+  const settingsMenu = (
+    <div
+      style={{ ...panelStyle, position: "absolute", left: 0, bottom: "44px", padding: "7px", display: "grid", gap: "4px", minWidth: "178px", zIndex: 30 }}
+      onMouseEnter={() => {
+        if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
+      }}
+      onMouseLeave={() => {
+        menuCloseTimerRef.current = window.setTimeout(() => setMenuOpen(false), 650)
+      }}
+    >
+      <a href="/admin/ccinfo/countries" style={menuItemButtonStyle}>Country Index</a>
+      <a href="/admin/ccinfo/ports" style={menuItemButtonStyle}>Port Index</a>
+      <a href="/admin/ccinfo/companies" style={menuItemButtonStyle}>Company Index</a>
+    </div>
+  )
+  const settingsControl = (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => {
+          if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
+          setNewEntityMenuOpen(false)
+          setMenuOpen((prev) => !prev)
+        }}
+        aria-label="CCINFO settings"
+        title="Settings"
+        style={settingsButtonStyle}
+      >
+        <SettingsGlyph />
+        <span>Settings</span>
+      </button>
+      {menuOpen && settingsMenu}
+    </div>
+  )
+  const newEntityMenu = (
+    <div
+      style={{ ...panelStyle, position: "absolute", right: 0, top: "42px", padding: "7px", display: "grid", gap: "4px", minWidth: "178px", zIndex: 30 }}
+      onMouseEnter={() => {
+        if (newEntityMenuCloseTimerRef.current) window.clearTimeout(newEntityMenuCloseTimerRef.current)
+      }}
+      onMouseLeave={() => {
+        newEntityMenuCloseTimerRef.current = window.setTimeout(() => setNewEntityMenuOpen(false), 650)
+      }}
+    >
+      <button type="button" onClick={() => { setNewEntityMenuOpen(false); void createNew("country") }} style={menuItemButtonStyle}>New Country</button>
+      <button type="button" onClick={() => { setNewEntityMenuOpen(false); void createNew("port") }} style={menuItemButtonStyle}>New Port</button>
+      <button type="button" onClick={() => { setNewEntityMenuOpen(false); void createNew("company") }} style={menuItemButtonStyle}>New Company</button>
+    </div>
+  )
 
   return (
     <div style={pageShellStyle}>
@@ -3668,46 +3765,7 @@ export default function CountryCompanyInfoPage() {
         {!isMobile && (
           <aside style={{ ...sidebarStyle, height: "100vh", overflow: "hidden" }}>
             <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 36px)" }}>
-              <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "12px" }}>
-                Country And Company Info
-              </div>
               <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 54px", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
-                <a href="/admin" className="fc-admin-nav-button" style={{ ...buttonStyle, display: "block", textAlign: "center" }}>
-                  Back
-                </a>
-                <div style={{ position: "relative" }}>
-                  <button
-                    onClick={() => setMenuOpen((prev) => !prev)}
-                    className="fc-admin-menu-button"
-                    aria-label="Open menu"
-                    style={menuButtonStyle}
-                  >
-                    <MenuGlyph />
-                  </button>
-                  {menuOpen && (
-                    <div
-                      style={{ ...panelStyle, position: "absolute", right: 0, top: "48px", padding: "8px", display: "grid", gap: "6px", minWidth: "150px", zIndex: 20 }}
-                      onMouseEnter={() => {
-                        if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
-                      }}
-                      onMouseLeave={() => {
-                        menuCloseTimerRef.current = window.setTimeout(() => setMenuOpen(false), 650)
-                      }}
-                    >
-                      <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
-                      <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
-                      <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
-                      <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
-                      <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
-                      <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
-                      <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
-                        {backingUp ? "Preparing Backup..." : "Download Backup"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
 
               {!initialMode && (
                 <div style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px" }}>
@@ -3748,7 +3806,7 @@ export default function CountryCompanyInfoPage() {
                         const actionId = entry.type === "audit" ? entry.id : `deleted-file:${entry.id}`
                         const actionBusy = auditActionId === actionId || (entry.type === "audit" && auditActionId === entry.id)
                         return (
-                        <div key={`${entry.type}-${entry.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: entry.type === "deleted-file" ? "var(--fc-tool-input-bg)" : "var(--fc-admin-panel-soft-bg)", border: entry.type === "deleted-file" ? "1px solid var(--fc-admin-warning-border)" : "1px solid transparent" }}>
+                        <div key={`${entry.type}-${entry.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center", padding: "6px 7px", borderRadius: "10px", background: entry.type === "deleted-file" ? "var(--fc-tool-input-bg)" : "var(--fc-admin-panel-soft-bg)", border: "1px solid transparent" }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ color: "var(--fc-admin-panel-text)", fontSize: "11px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {entry.subject}
@@ -3773,9 +3831,9 @@ export default function CountryCompanyInfoPage() {
                                 }
                               }}
                               disabled={actionBusy}
-                              style={{ ...buttonStyle, width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "14px", opacity: actionBusy ? 0.6 : 1 }}
+                              style={{ ...undoButtonStyle, opacity: actionBusy ? 0.6 : 1 }}
                             >
-                              {actionBusy ? "..." : "↩"}
+                              {actionBusy ? "..." : <UndoGlyph />}
                             </button>
                           ) : null}
                         </div>
@@ -3786,38 +3844,8 @@ export default function CountryCompanyInfoPage() {
                 </div>
               )}
 
-              <div style={{ marginTop: "auto", display: "none", justifyContent: "flex-end" }}>
-                <div style={{ position: "relative" }}>
-                  <button
-                    onClick={() => setMenuOpen((prev) => !prev)}
-                    className="fc-admin-menu-button"
-                    aria-label="Open menu"
-                    style={menuButtonStyle}
-                  >
-                    <MenuGlyph />
-                  </button>
-                  {menuOpen && (
-                    <div
-                      style={{ ...panelStyle, position: "absolute", right: 0, bottom: "48px", padding: "8px", display: "grid", gap: "6px", minWidth: "150px", zIndex: 20 }}
-                      onMouseEnter={() => {
-                        if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
-                      }}
-                      onMouseLeave={() => {
-                        menuCloseTimerRef.current = window.setTimeout(() => setMenuOpen(false), 650)
-                      }}
-                    >
-                      <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
-                      <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
-                      <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
-                      <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
-                      <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
-                      <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
-                      <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
-                        {backingUp ? "Preparing Backup..." : "Download Backup"}
-                      </button>
-                    </div>
-                  )}
-                </div>
+              <div style={{ marginTop: "auto", display: "flex", justifyContent: "flex-start", paddingTop: "14px" }}>
+                {settingsControl}
               </div>
             </div>
           </aside>
@@ -3826,7 +3854,7 @@ export default function CountryCompanyInfoPage() {
         <main style={{ padding: isMobile ? "12px" : "0 22px 22px", height: isMobile ? "auto" : "100vh", overflowY: isMobile ? "visible" : "auto", minWidth: 0, maxWidth: "100vw", boxSizing: "border-box", scrollbarWidth: "thin", scrollbarColor: "#b9cde6 #f5f5f7" }}>
           <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
             <div style={{ ...panelStyle, padding: isMobile ? "10px" : "14px", position: "sticky", top: 0, zIndex: 10, minWidth: 0, borderTopLeftRadius: isMobile ? "18px" : 0, borderTopRightRadius: isMobile ? "18px" : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr) 54px" : "1fr", gap: "8px", alignItems: "center" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "8px", alignItems: "center" }}>
                 <input
                   value={query}
                   onClick={() => {
@@ -3838,16 +3866,21 @@ export default function CountryCompanyInfoPage() {
                   placeholder={isMobile ? "Search..." : "Search company, country or port..."}
                   style={searchInputStyle}
                 />
-                {isMobile && (
+                <div style={{ position: "relative" }}>
                   <button
-                    onClick={() => setMenuOpen((prev) => !prev)}
-                    className="fc-admin-menu-button"
-                    aria-label="Open menu"
-                    style={menuButtonStyle}
+                    type="button"
+                    onClick={() => {
+                      if (newEntityMenuCloseTimerRef.current) window.clearTimeout(newEntityMenuCloseTimerRef.current)
+                      setMenuOpen(false)
+                      setNewEntityMenuOpen((prev) => !prev)
+                    }}
+                    aria-expanded={newEntityMenuOpen}
+                    style={{ ...primaryButtonStyle, minHeight: "36px", padding: isMobile ? "0 14px" : "0 17px", whiteSpace: "nowrap" }}
                   >
-                    <MenuGlyph />
+                    New Entity
                   </button>
-                )}
+                  {newEntityMenuOpen && newEntityMenu}
+                </div>
               </div>
               {suggestions.length > 0 && query.trim() && (
                 <div
@@ -3904,19 +3937,6 @@ export default function CountryCompanyInfoPage() {
                 <>
                   {isMobile && (
                     <div>
-                      {menuOpen && (
-                        <div style={{ ...panelStyle, padding: "8px", display: "grid", gap: "6px", marginBottom: "10px" }}>
-                          <button onClick={() => void createNew("country")} style={{ ...buttonStyle, textAlign: "left" }}>New Country</button>
-                          <button onClick={() => void createNew("port")} style={{ ...buttonStyle, textAlign: "left" }}>New Port</button>
-                          <button onClick={() => void createNew("company")} style={{ ...buttonStyle, textAlign: "left" }}>New Company</button>
-                          <a href="/admin/ccinfo/countries" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Country Index</a>
-                          <a href="/admin/ccinfo/ports" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Port Index</a>
-                          <a href="/admin/ccinfo/companies" style={{ ...buttonStyle, textAlign: "left", display: "block" }}>Company Index</a>
-                          <button onClick={() => void downloadBackup()} disabled={backingUp} style={{ ...buttonStyle, textAlign: "left" }}>
-                            {backingUp ? "Preparing Backup..." : "Download Backup"}
-                          </button>
-                        </div>
-                      )}
                       <input ref={filePickerRef} type="file" multiple style={{ display: "none" }} onChange={handleUploadSelection} />
                       <div style={{ marginBottom: "10px" }}>
                         <div style={{ fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700, marginBottom: "8px" }}>Search In Page</div>
@@ -4304,7 +4324,7 @@ export default function CountryCompanyInfoPage() {
                   {selectedKind === "country" && activeInfoTab === "ports" && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                        <button onClick={openAddPortForCurrentCountry} style={{ ...buttonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1, background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}>
+                        <button onClick={openAddPortForCurrentCountry} style={{ ...primaryButtonStyle, padding: "4px 10px", fontSize: "11px", lineHeight: 1 }}>
                           Add Port
                         </button>
                       </div>
@@ -4365,7 +4385,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}
+                      style={{ ...primaryButtonStyle, padding: "6px 12px", fontSize: "11px" }}
                     >
                       Add Section
                     </button>
@@ -4381,7 +4401,7 @@ export default function CountryCompanyInfoPage() {
                         setHighlightModalOpen(true)
                       }}
                       disabled={!selectedId}
-                      style={{ ...buttonStyle, padding: "6px 12px", fontSize: "11px", background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}
+                      style={{ ...primaryButtonStyle, padding: "6px 12px", fontSize: "11px" }}
                     >
                       Add Table
                     </button>
@@ -4396,6 +4416,11 @@ export default function CountryCompanyInfoPage() {
         </main>
         {!isMobile && <aside style={{ ...sidebarStyle, width: "320px", height: "100vh", overflow: "hidden" }}>{fileSection}</aside>}
       </div>
+      {isMobile && (
+        <div style={{ position: "fixed", left: "14px", bottom: "14px", zIndex: 35 }}>
+          {settingsControl}
+        </div>
+      )}
       {filePanelEditTarget && (
         <div
           style={{ position: "fixed", inset: 0, background: "#1d1d1f", display: "grid", placeItems: "center", padding: "20px", zIndex: 46 }}
@@ -4545,10 +4570,7 @@ export default function CountryCompanyInfoPage() {
                 type="button"
                 onClick={saveHighlightCard}
                 style={{
-                  ...buttonStyle,
-                  background: "var(--fc-admin-warning-bg)",
-                  color: "var(--fc-admin-warning-text)",
-                  border: "1px solid var(--fc-admin-warning-border)",
+                  ...primaryButtonStyle,
                 }}
               >
                 Add
@@ -4660,7 +4682,7 @@ export default function CountryCompanyInfoPage() {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
               <button type="button" onClick={() => setAddPortModalOpen(false)} style={buttonStyle}>Cancel</button>
-              <button type="button" onClick={() => void addPort()} style={{ ...buttonStyle, background: "var(--fc-admin-warning-bg)", color: "var(--fc-admin-warning-text)", border: "1px solid var(--fc-admin-warning-border)" }}>Save Port</button>
+              <button type="button" onClick={() => void addPort()} style={primaryButtonStyle}>Save Port</button>
             </div>
           </div>
         </div>
