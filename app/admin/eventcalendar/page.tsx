@@ -93,6 +93,73 @@ const buttonStyle: React.CSSProperties = {
   boxShadow: "none",
 }
 
+const appleActionButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  minHeight: "36px",
+  borderRadius: "980px",
+  borderColor: "var(--fc-admin-primary-button-bg)",
+  background: "var(--fc-admin-primary-button-bg)",
+  color: "var(--fc-admin-primary-button-text)",
+  fontSize: "14px",
+  fontWeight: 700,
+  lineHeight: 1,
+  padding: "0 17px",
+}
+
+const appleSecondaryButtonStyle: React.CSSProperties = {
+  ...appleActionButtonStyle,
+  borderColor: "var(--fc-admin-border)",
+  background: "var(--fc-admin-panel-bg)",
+  color: "var(--fc-admin-panel-text)",
+}
+
+const settingsButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  width: "36px",
+  minWidth: "36px",
+  height: "36px",
+  padding: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "999px",
+  fontSize: "18px",
+  fontWeight: 500,
+  lineHeight: 1,
+}
+
+const menuItemButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  justifyContent: "flex-start",
+  border: "1px solid transparent",
+  borderRadius: "10px",
+  background: "transparent",
+  color: "var(--fc-admin-panel-text)",
+  fontSize: "13px",
+  fontWeight: 700,
+  padding: "9px 10px",
+  textAlign: "left",
+}
+
+const tabButtonBaseStyle: React.CSSProperties = {
+  border: "1px solid var(--fc-admin-border)",
+  borderBottom: "1px solid var(--fc-admin-border)",
+  borderRadius: "13px 13px 0 0",
+  background: "#e8e8ed",
+  color: "var(--fc-admin-muted)",
+  cursor: "pointer",
+  fontSize: "13px",
+  fontWeight: 800,
+  lineHeight: 1,
+  padding: "11px 17px 10px",
+  minHeight: "38px",
+  boxShadow: "none",
+  whiteSpace: "nowrap",
+}
+
 const tableStyle: React.CSSProperties = {
   borderCollapse: "collapse",
   width: "100%",
@@ -107,19 +174,19 @@ const thStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--fc-admin-border-soft)",
   background: "var(--fc-table-head-bg)",
   color: "var(--fc-table-head-text)",
-  fontSize: "10px",
+  fontSize: "11px",
   fontWeight: 900,
-  letterSpacing: "0.08em",
+  letterSpacing: "0.04em",
   textTransform: "uppercase",
   textAlign: "left",
 }
 
 const tdStyle: React.CSSProperties = {
-  height: "18px",
-  padding: "1px 7px",
+  height: "20px",
+  padding: "2px 7px",
   borderBottom: "1px solid var(--fc-admin-border-soft)",
-  fontSize: "11px",
-  lineHeight: "16px",
+  fontSize: "12px",
+  lineHeight: "17px",
   verticalAlign: "middle",
   boxSizing: "border-box",
 }
@@ -402,7 +469,6 @@ export default function EventCalendarPage() {
   const [leaveModalOpen, setLeaveModalOpen] = useState(false)
   const [peopleModalOpen, setPeopleModalOpen] = useState(false)
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
-  const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<ManagedEvent>(() => buildBlankEvent(todayKey))
 
   useEffect(() => {
@@ -423,7 +489,6 @@ export default function EventCalendarPage() {
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -611,7 +676,6 @@ export default function EventCalendarPage() {
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
       if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
-      if (addMenuCloseTimerRef.current) clearTimeout(addMenuCloseTimerRef.current)
     }
   }, [])
 
@@ -633,6 +697,11 @@ export default function EventCalendarPage() {
 
     return events
       .filter((event) => (viewMode === "past" ? isPastEvent(event, todayKey) : !isPastEvent(event, todayKey)))
+      .filter((event) => {
+        if (!selectedPeople.length) return true
+        const uncertainPeople = event.uncertainPeople || []
+        return selectedPeople.some((person) => event.people.includes(person) || uncertainPeople.includes(person))
+      })
       .sort(
         (a, b) =>
           (viewMode === "past" ? b.endDate.localeCompare(a.endDate) : a.startDate.localeCompare(b.startDate)) ||
@@ -642,23 +711,23 @@ export default function EventCalendarPage() {
             : (a.sourceRow || Number.MAX_SAFE_INTEGER) - (b.sourceRow || Number.MAX_SAFE_INTEGER)) ||
           a.title.localeCompare(b.title)
       )
-  }, [events, todayKey, viewMode])
+  }, [events, selectedPeople, todayKey, viewMode])
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
-    setAddMenuOpen(false)
+    setToolsMenuOpen(false)
     setEventModalMode("add")
   }
 
   function openRecurrentModal() {
     setDraftRecurrentEvent(buildBlankRecurrentEvent(todayKey))
-    setAddMenuOpen(false)
+    setToolsMenuOpen(false)
     setRecurrentModalOpen(true)
   }
 
   function openLeaveModal() {
     setLeaveRequestDraft(buildBlankLeaveRequest(todayKey, people))
-    setAddMenuOpen(false)
+    setToolsMenuOpen(false)
     setLeaveModalOpen(true)
   }
 
@@ -890,20 +959,6 @@ export default function EventCalendarPage() {
     }, 650)
   }
 
-  function cancelAddMenuClose() {
-    if (addMenuCloseTimerRef.current) {
-      clearTimeout(addMenuCloseTimerRef.current)
-      addMenuCloseTimerRef.current = null
-    }
-  }
-
-  function scheduleAddMenuClose() {
-    cancelAddMenuClose()
-    addMenuCloseTimerRef.current = setTimeout(() => {
-      setAddMenuOpen(false)
-    }, 650)
-  }
-
   function savePeople() {
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
     setPeople(nextPeople)
@@ -1005,8 +1060,8 @@ export default function EventCalendarPage() {
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
+            alignItems: "flex-start",
+            gap: "16px",
             flexWrap: "wrap",
             marginBottom: "12px",
           }}
@@ -1035,202 +1090,139 @@ export default function EventCalendarPage() {
               <h1 style={{ margin: 0, fontSize: "34px", lineHeight: "36px", color: "var(--fc-admin-panel-text)" }}>
                 EVENT CALENDAR
               </h1>
-              {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
-                const active = viewMode === mode
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setViewMode(mode)}
-                    style={{
-                      ...buttonStyle,
-                      background: active
-                        ? "var(--fc-admin-primary-button-bg)"
-                        : buttonStyle.background,
-                      color: active ? "var(--fc-admin-primary-button-text)" : buttonStyle.color,
-                      borderColor: active ? "var(--fc-admin-primary-button-bg)" : "var(--fc-admin-border)",
-                      padding: "7px 11px",
-                    }}
-                  >
-                    {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Meeting Room"}
-                  </button>
-                )
-              })}
-              <div
-                style={{ position: "relative" }}
-                onMouseEnter={cancelToolsMenuClose}
-                onMouseLeave={scheduleToolsMenuClose}
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: "8px",
+              flexWrap: "wrap",
+              marginLeft: "auto",
+            }}
+          >
+            <button type="button" onClick={openAddModal} style={appleActionButtonStyle}>
+              Add Event
+            </button>
+            <button type="button" onClick={openLeaveModal} style={appleSecondaryButtonStyle}>
+              Send Leave Request
+            </button>
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={cancelToolsMenuClose}
+              onMouseLeave={scheduleToolsMenuClose}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  cancelToolsMenuClose()
+                  setToolsMenuOpen((current) => !current)
+                }}
+                aria-label="Event calendar settings"
+                title="Settings"
+                style={settingsButtonStyle}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    cancelToolsMenuClose()
-                    setToolsMenuOpen((current) => !current)
-                  }}
-                  aria-label="Event calendar menu"
-                  className="fc-admin-menu-button"
+                <span aria-hidden="true">⚙</span>
+              </button>
+              {toolsMenuOpen && (
+                <div
                   style={{
-                    ...buttonStyle,
-                    minWidth: "54px",
-                    height: "36px",
-                    padding: "0 16px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    position: "absolute",
+                    top: "42px",
+                    right: 0,
+                    zIndex: 30,
+                    minWidth: "246px",
+                    padding: "7px",
+                    border: "1px solid var(--fc-admin-border)",
+                    borderRadius: "14px",
+                    background: "var(--fc-admin-panel-bg)",
+                    boxShadow: "0 16px 36px #00000018",
                   }}
                 >
-                  <span style={{ display: "grid", gap: "4px", width: "16px" }} aria-hidden="true">
-                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
-                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
-                    <span style={{ height: "2px", borderRadius: "999px", background: "currentColor" }} />
-                  </span>
-                </button>
-                {toolsMenuOpen && (
-                  <div
+                  <button type="button" onClick={openEmailModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                    Edit Email List
+                  </button>
+                  <button type="button" onClick={openPeopleModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                    Edit People List
+                  </button>
+                  <button type="button" onClick={openRecurrentModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                    Add Recurrent Event
+                  </button>
+                  <button
+                    type="button"
+                    onClick={importNextYearPublicHolidays}
+                    disabled={holidayImporting}
                     style={{
-                      position: "absolute",
-                      top: "42px",
-                      right: 0,
-                      zIndex: 30,
-                      minWidth: "220px",
-                      padding: "7px",
-                      border: "1px solid var(--fc-admin-border)",
-                      borderRadius: "14px",
-                      background: "var(--fc-admin-panel-bg)",
-                      boxShadow: "0 16px 36px #00000018",
+                      ...menuItemButtonStyle,
+                      whiteSpace: "normal",
+                      marginBottom: "3px",
+                      opacity: holidayImporting ? 0.58 : 1,
+                      cursor: holidayImporting ? "not-allowed" : "pointer",
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={openEmailModal}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}
-                    >
-                      Edit Email List
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openPeopleModal}
-                      style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}
-                    >
-                      Edit People List
-                    </button>
-                    <button
-                      type="button"
-                      onClick={importNextYearPublicHolidays}
-                      disabled={holidayImporting}
-                      style={{
-                        ...buttonStyle,
-                        width: "100%",
-                        justifyContent: "flex-start",
-                        whiteSpace: "normal",
-                        marginBottom: "6px",
-                        opacity: holidayImporting ? 0.58 : 1,
-                        cursor: holidayImporting ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Add USA, Taiwan, Singapore Holidays
-                    </button>
-                    <button
-                      type="button"
-                      onClick={importNextYearHongKongHolidays}
-                      disabled={holidayImporting}
-                      style={{
-                        ...buttonStyle,
-                        width: "100%",
-                        justifyContent: "flex-start",
-                        whiteSpace: "normal",
-                        opacity: holidayImporting ? 0.58 : 1,
-                        cursor: holidayImporting ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Add HK Holidays
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div
-                style={{ position: "relative" }}
-                onMouseEnter={cancelAddMenuClose}
-                onMouseLeave={scheduleAddMenuClose}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    cancelAddMenuClose()
-                    setAddMenuOpen((current) => !current)
-                  }}
-                  aria-label="Add"
-                  style={{ ...buttonStyle, minWidth: "54px", height: "36px", padding: "0 16px", fontSize: "20px", fontWeight: 400 }}
-                >
-                  +
-                </button>
-                {addMenuOpen && (
-                  <div
+                    Add USA, Taiwan, Singapore Holidays
+                  </button>
+                  <button
+                    type="button"
+                    onClick={importNextYearHongKongHolidays}
+                    disabled={holidayImporting}
                     style={{
-                      position: "absolute",
-                      top: "42px",
-                      right: 0,
-                      zIndex: 30,
-                      minWidth: "190px",
-                      padding: "7px",
-                      border: "1px solid var(--fc-admin-border)",
-                      borderRadius: "14px",
-                      background: "var(--fc-admin-panel-bg)",
-                      boxShadow: "0 16px 36px #00000018",
+                      ...menuItemButtonStyle,
+                      whiteSpace: "normal",
+                      opacity: holidayImporting ? 0.58 : 1,
+                      cursor: holidayImporting ? "not-allowed" : "pointer",
                     }}
                   >
-                    <button type="button" onClick={openAddModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}>
-                      Add New Event
-                    </button>
-                    <button type="button" onClick={openRecurrentModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start", marginBottom: "6px" }}>
-                      Add Recurrent Event
-                    </button>
-                    <button type="button" onClick={openLeaveModal} style={{ ...buttonStyle, width: "100%", justifyContent: "flex-start" }}>
-                      Send Leave Request
-                    </button>
-                  </div>
-                )}
-              </div>
+                    Add HK Holidays
+                  </button>
+                  {holidayImportStatus && (
+                    <div style={{ marginTop: "5px", padding: "7px 9px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 700 }}>
+                      {holidayImportStatus}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </header>
 
-        {viewMode !== "google" && (
-          <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              {people.map((person) => {
-                const active = selectedPeople.includes(person)
-                return (
-                  <button
-                    key={person}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => togglePersonFilter(person)}
-                    style={{
-                      minWidth: "34px",
-                      border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid var(--fc-admin-button-border)",
-                      borderRadius: "999px",
-                      background: active
-                        ? "var(--fc-admin-selected-bg)"
-                        : "var(--fc-admin-button-bg)",
-                      color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)",
-                      cursor: "pointer",
-                      fontSize: "11px",
-                      fontWeight: 900,
-                      boxShadow: "none",
-                      padding: "5px 9px",
-                    }}
-                  >
-                    {person}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "3px",
+            marginBottom: "-1px",
+            paddingLeft: "10px",
+            overflowX: "auto",
+          }}
+        >
+          {(["upcoming", "past", "google"] as ViewMode[]).map((mode) => {
+            const active = viewMode === mode
+            return (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setViewMode(mode)}
+                style={{
+                  ...tabButtonBaseStyle,
+                  position: "relative",
+                  zIndex: active ? 2 : 1,
+                  background: active ? "var(--fc-admin-panel-bg)" : "#e8e8ed",
+                  borderBottomColor: active ? "var(--fc-admin-panel-bg)" : "var(--fc-admin-border)",
+                  color: active ? "var(--fc-admin-panel-text)" : "var(--fc-admin-muted)",
+                  paddingTop: active ? "12px" : "10px",
+                  paddingBottom: active ? "11px" : "9px",
+                }}
+              >
+                {mode === "upcoming" ? "Upcoming Events" : mode === "past" ? "Past Events" : "Meeting Room"}
+              </button>
+            )
+          })}
+        </div>
 
-        <div style={panelStyle}>
+        <div style={{ ...panelStyle, borderTopLeftRadius: "18px" }}>
           {viewMode === "google" ? (
             <table style={{ ...tableStyle, minWidth: "760px" }}>
               <thead>
@@ -1269,7 +1261,7 @@ export default function EventCalendarPage() {
                       <td style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: meetingStyle.fontWeight }}>
                         {event.title}
                         {event.sourceTitle && event.sourceTitle.toUpperCase() !== event.title.toUpperCase() && (
-                          <span style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, marginLeft: "8px" }}>
+                          <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 800, marginLeft: "8px" }}>
                             {event.sourceTitle}
                           </span>
                         )}
@@ -1287,7 +1279,64 @@ export default function EventCalendarPage() {
               </tbody>
             </table>
           ) : (
-            <table style={tableStyle}>
+            <>
+              {selectedPeople.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    marginBottom: "10px",
+                    padding: "8px 10px",
+                    border: "1px solid var(--fc-admin-border-soft)",
+                    borderRadius: "12px",
+                    background: "var(--fc-admin-panel-soft-bg)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+                    <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
+                      Filtered
+                    </span>
+                    {selectedPeople.map((person) => (
+                      <span
+                        key={person}
+                        style={{
+                          border: "1px solid var(--fc-admin-selected-border)",
+                          borderRadius: "999px",
+                          background: "var(--fc-admin-selected-bg)",
+                          color: "var(--fc-admin-selected-text)",
+                          fontSize: "12px",
+                          fontWeight: 900,
+                          lineHeight: 1,
+                          padding: "5px 8px",
+                        }}
+                      >
+                        {person}
+                      </span>
+                    ))}
+                    <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
+                      {visibleEvents.length} {visibleEvents.length === 1 ? "event" : "events"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPeople([])}
+                    style={{
+                      ...buttonStyle,
+                      borderColor: "transparent",
+                      background: "transparent",
+                      color: "var(--fc-admin-link)",
+                      padding: "5px 8px",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+              <table style={tableStyle}>
               <thead>
                 <tr>
                   <th style={{ ...thStyle, width: "150px" }}>
@@ -1296,18 +1345,40 @@ export default function EventCalendarPage() {
                   <th style={thStyle}>
                     Event
                   </th>
-                  {people.map((person) => (
-                    <th key={person} style={{ ...thStyle, width: "38px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
-                      {person}
-                    </th>
-                  ))}
+                  {people.map((person) => {
+                    const active = selectedPeople.includes(person)
+                    return (
+                      <th key={person} style={{ ...thStyle, width: "40px", textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
+                        <button
+                          type="button"
+                          aria-pressed={active}
+                          title={`Filter ${person}`}
+                          onClick={() => togglePersonFilter(person)}
+                          style={{
+                            width: "32px",
+                            minHeight: "24px",
+                            border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid transparent",
+                            borderRadius: "999px",
+                            background: active ? "var(--fc-admin-selected-bg)" : "transparent",
+                            color: active ? "var(--fc-admin-selected-text)" : "var(--fc-table-head-text)",
+                            cursor: "pointer",
+                            fontSize: "11px",
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            padding: 0,
+                            boxShadow: "none",
+                          }}
+                        >
+                          {person}
+                        </button>
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {visibleEvents.map((event) => {
                   const meetingRoomBooked = isMeetingRoomBooked(event)
-                  const rowHighlighted =
-                    selectedPeople.length > 0 && selectedPeople.some((person) => event.people.includes(person))
                   const isTodayEvent = event.startDate <= todayKey && event.endDate >= todayKey
                   const isTomorrowEvent = !isTodayEvent && event.startDate <= tomorrowKey && event.endDate >= tomorrowKey
                   const rowBackground = isTodayEvent
@@ -1330,12 +1401,7 @@ export default function EventCalendarPage() {
                       onClick={() => setSelectedRowId(`event:${event.id}`)}
                       style={{
                         background: rowDisplayBackground,
-                        opacity: selectedPeople.length && !rowHighlighted ? 0.46 : 1,
-                        boxShadow: rowHighlighted
-                          ? "inset 0 0 0 2px var(--fc-admin-selected-border)"
-                          : rowSelected
-                            ? "inset 0 0 0 1px #cfe4ff"
-                            : "none",
+                        boxShadow: rowSelected ? "inset 0 0 0 1px #cfe4ff" : "none",
                       }}
                     >
                       <td
@@ -1356,7 +1422,7 @@ export default function EventCalendarPage() {
                       >
                         {event.title}
                         {meetingRoomBooked && (
-                          <span style={{ color: "var(--fc-admin-link)", fontSize: "10px", fontWeight: 900, marginLeft: "8px" }}>
+                          <span style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, marginLeft: "8px" }}>
                             MEETING ROOM BOOKED
                           </span>
                         )}
@@ -1364,7 +1430,7 @@ export default function EventCalendarPage() {
                       {people.map((person) => {
                         const attending = event.people.includes(person)
                         const uncertain = (event.uncertainPeople || []).includes(person)
-                        const highlighted = selectedPeople.includes(person)
+                        const highlighted = selectedPeople.includes(person) && (attending || uncertain)
                         return (
                           <td
                             key={person}
@@ -1377,7 +1443,7 @@ export default function EventCalendarPage() {
                                 display: "inline-block",
                                 pointerEvents: "none",
                                 userSelect: "none",
-                                width: "28px",
+                                width: "30px",
                                 border: highlighted
                                   ? "1px solid var(--fc-admin-selected-border)"
                                   : uncertain || attending
@@ -1395,9 +1461,9 @@ export default function EventCalendarPage() {
                                     ? "var(--fc-admin-warning-text)"
                                     : "color-mix(in srgb, var(--fc-row-bg) 78%, var(--fc-admin-panel-text) 22%)",
                                 cursor: "default",
-                                fontSize: "10px",
+                                fontSize: "11px",
                                 fontWeight: attending || uncertain ? 900 : 400,
-                                lineHeight: "12px",
+                                lineHeight: "13px",
                                 padding: "2px 0",
                               }}
                             >
@@ -1409,8 +1475,27 @@ export default function EventCalendarPage() {
                     </tr>
                   )
                 })}
+                {!visibleEvents.length && (
+                  <tr>
+                    <td
+                      colSpan={2 + people.length}
+                      style={{
+                        ...tdStyle,
+                        height: "46px",
+                        color: "var(--fc-admin-muted)",
+                        fontWeight: 800,
+                        textAlign: "center",
+                      }}
+                    >
+                      {selectedPeople.length
+                        ? `No ${viewMode === "past" ? "past" : "upcoming"} events for ${selectedPeople.join(", ")}`
+                        : "No events"}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+            </>
           )}
         </div>
       </div>
