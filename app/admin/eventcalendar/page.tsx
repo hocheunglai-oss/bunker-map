@@ -115,15 +115,19 @@ const appleSecondaryButtonStyle: React.CSSProperties = {
 
 const settingsButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  width: "36px",
-  minWidth: "36px",
+  width: "44px",
+  minWidth: "44px",
   height: "36px",
+  minHeight: "36px",
+  border: "1px solid transparent",
+  background: "transparent",
+  color: "var(--fc-admin-panel-text)",
   padding: 0,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
   borderRadius: "999px",
-  fontSize: "18px",
+  fontSize: "24px",
   fontWeight: 500,
   lineHeight: 1,
 }
@@ -392,6 +396,12 @@ function isPastEvent(event: ManagedEvent, todayKey: string) {
   return event.endDate < todayKey
 }
 
+function eventHasSelectedPeople(event: ManagedEvent, selectedPeople: string[]) {
+  if (!selectedPeople.length) return false
+  const uncertainPeople = event.uncertainPeople || []
+  return selectedPeople.some((person) => event.people.includes(person) || uncertainPeople.includes(person))
+}
+
 function buildBlankEvent(todayKey: string): ManagedEvent {
   return {
     id: `office-${Date.now()}`,
@@ -469,6 +479,7 @@ export default function EventCalendarPage() {
   const [leaveModalOpen, setLeaveModalOpen] = useState(false)
   const [peopleModalOpen, setPeopleModalOpen] = useState(false)
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<ManagedEvent>(() => buildBlankEvent(todayKey))
 
   useEffect(() => {
@@ -489,6 +500,7 @@ export default function EventCalendarPage() {
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -676,6 +688,7 @@ export default function EventCalendarPage() {
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
       if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
+      if (addMenuCloseTimerRef.current) clearTimeout(addMenuCloseTimerRef.current)
     }
   }, [])
 
@@ -697,11 +710,6 @@ export default function EventCalendarPage() {
 
     return events
       .filter((event) => (viewMode === "past" ? isPastEvent(event, todayKey) : !isPastEvent(event, todayKey)))
-      .filter((event) => {
-        if (!selectedPeople.length) return true
-        const uncertainPeople = event.uncertainPeople || []
-        return selectedPeople.some((person) => event.people.includes(person) || uncertainPeople.includes(person))
-      })
       .sort(
         (a, b) =>
           (viewMode === "past" ? b.endDate.localeCompare(a.endDate) : a.startDate.localeCompare(b.startDate)) ||
@@ -711,22 +719,30 @@ export default function EventCalendarPage() {
             : (a.sourceRow || Number.MAX_SAFE_INTEGER) - (b.sourceRow || Number.MAX_SAFE_INTEGER)) ||
           a.title.localeCompare(b.title)
       )
-  }, [events, selectedPeople, todayKey, viewMode])
+  }, [events, todayKey, viewMode])
+
+  const highlightedEventCount = useMemo(() => {
+    if (!selectedPeople.length) return 0
+    return visibleEvents.filter((event) => eventHasSelectedPeople(event, selectedPeople)).length
+  }, [selectedPeople, visibleEvents])
 
   function openAddModal() {
     setDraftEvent(buildBlankEvent(todayKey))
+    setAddMenuOpen(false)
     setToolsMenuOpen(false)
     setEventModalMode("add")
   }
 
   function openRecurrentModal() {
     setDraftRecurrentEvent(buildBlankRecurrentEvent(todayKey))
+    setAddMenuOpen(false)
     setToolsMenuOpen(false)
     setRecurrentModalOpen(true)
   }
 
   function openLeaveModal() {
     setLeaveRequestDraft(buildBlankLeaveRequest(todayKey, people))
+    setAddMenuOpen(false)
     setToolsMenuOpen(false)
     setLeaveModalOpen(true)
   }
@@ -959,6 +975,20 @@ export default function EventCalendarPage() {
     }, 650)
   }
 
+  function cancelAddMenuClose() {
+    if (addMenuCloseTimerRef.current) {
+      clearTimeout(addMenuCloseTimerRef.current)
+      addMenuCloseTimerRef.current = null
+    }
+  }
+
+  function scheduleAddMenuClose() {
+    cancelAddMenuClose()
+    addMenuCloseTimerRef.current = setTimeout(() => {
+      setAddMenuOpen(false)
+    }, 650)
+  }
+
   function savePeople() {
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
     setPeople(nextPeople)
@@ -1102,9 +1132,50 @@ export default function EventCalendarPage() {
               marginLeft: "auto",
             }}
           >
-            <button type="button" onClick={openAddModal} style={appleActionButtonStyle}>
-              Add Event
-            </button>
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={cancelAddMenuClose}
+              onMouseLeave={scheduleAddMenuClose}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  cancelAddMenuClose()
+                  setToolsMenuOpen(false)
+                  setAddMenuOpen((current) => !current)
+                }}
+                aria-expanded={addMenuOpen}
+                style={{ ...appleActionButtonStyle, display: "inline-flex", alignItems: "center", gap: "7px" }}
+              >
+                Add Event
+                <span aria-hidden="true" style={{ fontSize: "12px", lineHeight: 1 }}>
+                  ▾
+                </span>
+              </button>
+              {addMenuOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "42px",
+                    right: 0,
+                    zIndex: 30,
+                    minWidth: "198px",
+                    padding: "7px",
+                    border: "1px solid var(--fc-admin-border)",
+                    borderRadius: "14px",
+                    background: "var(--fc-admin-panel-bg)",
+                    boxShadow: "0 16px 36px #00000018",
+                  }}
+                >
+                  <button type="button" onClick={openAddModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                    Add New Event
+                  </button>
+                  <button type="button" onClick={openRecurrentModal} style={menuItemButtonStyle}>
+                    Add Recurrent Event
+                  </button>
+                </div>
+              )}
+            </div>
             <button type="button" onClick={openLeaveModal} style={appleSecondaryButtonStyle}>
               Send Leave Request
             </button>
@@ -1117,13 +1188,14 @@ export default function EventCalendarPage() {
                 type="button"
                 onClick={() => {
                   cancelToolsMenuClose()
+                  setAddMenuOpen(false)
                   setToolsMenuOpen((current) => !current)
                 }}
                 aria-label="Event calendar settings"
                 title="Settings"
                 style={settingsButtonStyle}
               >
-                <span aria-hidden="true">⚙</span>
+                <span aria-hidden="true" style={{ transform: "translateY(-1px)" }}>⚙</span>
               </button>
               {toolsMenuOpen && (
                 <div
@@ -1145,9 +1217,6 @@ export default function EventCalendarPage() {
                   </button>
                   <button type="button" onClick={openPeopleModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
                     Edit People List
-                  </button>
-                  <button type="button" onClick={openRecurrentModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
-                    Add Recurrent Event
                   </button>
                   <button
                     type="button"
@@ -1297,7 +1366,7 @@ export default function EventCalendarPage() {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
                     <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-                      Filtered
+                      Highlighting
                     </span>
                     {selectedPeople.map((person) => (
                       <span
@@ -1317,7 +1386,7 @@ export default function EventCalendarPage() {
                       </span>
                     ))}
                     <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-                      {visibleEvents.length} {visibleEvents.length === 1 ? "event" : "events"}
+                      {highlightedEventCount} highlighted
                     </span>
                   </div>
                   <button
@@ -1352,21 +1421,21 @@ export default function EventCalendarPage() {
                         <button
                           type="button"
                           aria-pressed={active}
-                          title={`Filter ${person}`}
+                          title={`Highlight ${person}`}
                           onClick={() => togglePersonFilter(person)}
                           style={{
-                            width: "32px",
-                            minHeight: "24px",
-                            border: active ? "1px solid var(--fc-admin-selected-border)" : "1px solid transparent",
-                            borderRadius: "999px",
-                            background: active ? "var(--fc-admin-selected-bg)" : "transparent",
-                            color: active ? "var(--fc-admin-selected-text)" : "var(--fc-table-head-text)",
+                            width: "34px",
+                            minHeight: "26px",
+                            border: active ? "1px solid var(--fc-admin-link)" : "1px solid #cfd7e6",
+                            borderRadius: "7px",
+                            background: active ? "var(--fc-admin-link)" : "#ffffff",
+                            color: active ? "#ffffff" : "var(--fc-admin-panel-text)",
                             cursor: "pointer",
                             fontSize: "11px",
                             fontWeight: 900,
                             lineHeight: 1,
                             padding: 0,
-                            boxShadow: "none",
+                            boxShadow: active ? "0 1px 3px #0066cc3a" : "0 1px 2px #00000012",
                           }}
                         >
                           {person}
@@ -1379,6 +1448,7 @@ export default function EventCalendarPage() {
               <tbody>
                 {visibleEvents.map((event) => {
                   const meetingRoomBooked = isMeetingRoomBooked(event)
+                  const rowHighlighted = eventHasSelectedPeople(event, selectedPeople)
                   const isTodayEvent = event.startDate <= todayKey && event.endDate >= todayKey
                   const isTomorrowEvent = !isTodayEvent && event.startDate <= tomorrowKey && event.endDate >= tomorrowKey
                   const rowBackground = isTodayEvent
@@ -1392,8 +1462,8 @@ export default function EventCalendarPage() {
                       ? "#ff9f1c"
                       : "var(--fc-row-border)"
                   const rowSelected = selectedRowId === `event:${event.id}`
-                  const rowDisplayBackground = rowSelected ? "#eaf4ff" : rowBackground
-                  const rowDisplayBorder = rowSelected ? "#cfe4ff" : rowBorder
+                  const rowDisplayBackground = rowSelected ? "#eaf4ff" : rowHighlighted ? "#edf6ff" : rowBackground
+                  const rowDisplayBorder = rowSelected ? "#cfe4ff" : rowHighlighted ? "var(--fc-admin-selected-border)" : rowBorder
 
                   return (
                     <tr
@@ -1401,7 +1471,11 @@ export default function EventCalendarPage() {
                       onClick={() => setSelectedRowId(`event:${event.id}`)}
                       style={{
                         background: rowDisplayBackground,
-                        boxShadow: rowSelected ? "inset 0 0 0 1px #cfe4ff" : "none",
+                        boxShadow: rowSelected
+                          ? "inset 0 0 0 1px #cfe4ff"
+                          : rowHighlighted
+                            ? "inset 0 0 0 1px #b8d5ff, inset 4px 0 0 var(--fc-admin-link)"
+                            : "none",
                       }}
                     >
                       <td
@@ -1487,9 +1561,7 @@ export default function EventCalendarPage() {
                         textAlign: "center",
                       }}
                     >
-                      {selectedPeople.length
-                        ? `No ${viewMode === "past" ? "past" : "upcoming"} events for ${selectedPeople.join(", ")}`
-                        : "No events"}
+                      No events
                     </td>
                   </tr>
                 )}
