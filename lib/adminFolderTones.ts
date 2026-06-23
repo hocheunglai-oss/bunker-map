@@ -16,6 +16,48 @@ type AdminFolderStyle = CSSProperties & {
   "--fc-folder-accent": string
 }
 
+export const ADMIN_FOLDER_THEME_KEY = "fc-admin-folder-theme"
+export const ADMIN_FOLDER_THEME_EVENT = "fc-admin-folder-theme-change"
+
+export const ADMIN_FOLDER_THEME_OPTIONS = [
+  {
+    id: "italia-ledger",
+    label: "Italia Ledger",
+    description: "Warm paper, disciplined tabs, red and green rail.",
+  },
+  {
+    id: "cosulich-ribbon",
+    label: "Cosulich Ribbon",
+    description: "Clean files with a stronger house-colour ribbon.",
+  },
+  {
+    id: "trieste-index",
+    label: "Trieste Index",
+    description: "Compact index cards with quiet port-office structure.",
+  },
+  {
+    id: "genoa-stack",
+    label: "Genoa Stack",
+    description: "Layered document stack with subtle Italian accents.",
+  },
+  {
+    id: "naval-archive",
+    label: "Naval Archive",
+    description: "Navy archive tabs with restrained maritime contrast.",
+  },
+  {
+    id: "rosso-verde",
+    label: "Rosso Verde",
+    description: "Sharper red and green dividers on a pale cover.",
+  },
+] as const
+
+export type AdminFolderThemeId = (typeof ADMIN_FOLDER_THEME_OPTIONS)[number]["id"]
+
+const ADMIN_FOLDER_THEME_IDS = new Set<string>(
+  ADMIN_FOLDER_THEME_OPTIONS.map((option) => option.id),
+)
+
 const ADMIN_FOLDER_TONES: AdminFolderTone[] = [
   {
     cover: "#f4f8f5",
@@ -64,4 +106,10 @@ export function getAdminFolderStyle(index: number): AdminFolderStyle {
     "--fc-folder-edge": tone.edge,
     "--fc-folder-accent": tone.accent,
   }
+}
+
+export function normaliseAdminFolderThemeId(value: string | null): AdminFolderThemeId {
+  return ADMIN_FOLDER_THEME_IDS.has(value || "")
+    ? (value as AdminFolderThemeId)
+    : ADMIN_FOLDER_THEME_OPTIONS[0].id
 }

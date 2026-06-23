@@ -3,7 +3,13 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import { getAdminFolderStyle } from "@/lib/adminFolderTones"
+import {
+  ADMIN_FOLDER_THEME_EVENT,
+  ADMIN_FOLDER_THEME_KEY,
+  getAdminFolderStyle,
+  normaliseAdminFolderThemeId,
+  type AdminFolderThemeId,
+} from "@/lib/adminFolderTones"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
@@ -63,11 +69,38 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
+  const [folderTheme, setFolderTheme] = useState<AdminFolderThemeId>(
+    normaliseAdminFolderThemeId(null),
+  )
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
+    setFolderTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
+  }, [])
+
+  useEffect(() => {
+    const applyStoredTheme = () => {
+      setFolderTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
+    }
+    const handleThemeEvent = (event: Event) => {
+      const nextTheme = (event as CustomEvent<string>).detail
+      setFolderTheme(normaliseAdminFolderThemeId(nextTheme || null))
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === ADMIN_FOLDER_THEME_KEY) {
+        setFolderTheme(normaliseAdminFolderThemeId(event.newValue))
+      }
+    }
+
+    applyStoredTheme()
+    window.addEventListener(ADMIN_FOLDER_THEME_EVENT, handleThemeEvent)
+    window.addEventListener("storage", handleStorage)
+    return () => {
+      window.removeEventListener(ADMIN_FOLDER_THEME_EVENT, handleThemeEvent)
+      window.removeEventListener("storage", handleStorage)
+    }
   }, [])
 
   useEffect(() => {
@@ -303,6 +336,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       className={`fc-admin-app-shell${collapsed ? " is-collapsed" : ""}${
         mobileOpen ? " is-mobile-open" : ""
       }`}
+      data-folder-theme={folderTheme}
     >
       <button
         type="button"

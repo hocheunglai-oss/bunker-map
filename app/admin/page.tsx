@@ -3,7 +3,23 @@
 import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
+import {
+  ADMIN_FOLDER_THEME_EVENT,
+  ADMIN_FOLDER_THEME_KEY,
+  ADMIN_FOLDER_THEME_OPTIONS,
+  normaliseAdminFolderThemeId,
+  type AdminFolderThemeId,
+} from "@/lib/adminFolderTones"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+
+const HOLIDAY_MARKET_CODES = "HK CN SG KR JP VN US"
+const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
+const TYPHOON_MAP_BOUNDS = {
+  minLat: 7,
+  maxLat: 36,
+  minLon: 100,
+  maxLon: 140,
+}
 
 type AdminHoliday = {
   countryCode: string
@@ -12,6 +28,17 @@ type AdminHoliday = {
   name: string
   localName: string | null
   daysUntil: number
+}
+
+type AdminTrackPoint = {
+  kind: "past" | "analysis" | "forecast"
+  intensity: string | null
+  maximumWind: string | null
+  time: string | null
+  latitude: string | null
+  longitude: string | null
+  lat: number | null
+  lon: number | null
 }
 
 type AdminTyphoonStorm = {
@@ -27,6 +54,7 @@ type AdminTyphoonStorm = {
     latitude: string | null
     longitude: string | null
   }
+  trackPoints: AdminTrackPoint[]
 }
 
 type AdminDashboardData = {
@@ -83,6 +111,244 @@ function formatDaysUntil(daysUntil: number) {
   if (daysUntil === 0) return "Today"
   if (daysUntil === 1) return "Tomorrow"
   return `In ${daysUntil} days`
+}
+
+function getTyphoonGrade(intensity: string | null) {
+  const normalized = (intensity || "").toLowerCase()
+
+  if (normalized.includes("super typhoon")) {
+    return { label: "Super Typhoon", color: "#8b1a79", className: "is-super-typhoon" }
+  }
+  if (normalized.includes("severe typhoon")) {
+    return { label: "Severe Typhoon", color: "#f48ac8", className: "is-severe-typhoon" }
+  }
+  if (normalized === "typhoon" || normalized.includes(" typhoon")) {
+    return { label: "Typhoon", color: "#ff1f2d", className: "is-typhoon" }
+  }
+  if (normalized.includes("severe tropical storm")) {
+    return { label: "Severe Tropical Storm", color: "#174cff", className: "is-severe-storm" }
+  }
+  if (normalized.includes("tropical storm")) {
+    return { label: "Tropical Storm", color: "#00a640", className: "is-tropical-storm" }
+  }
+  if (normalized.includes("tropical depression")) {
+    return { label: "Tropical Depression", color: "#111111", className: "is-depression" }
+  }
+
+  return { label: intensity || "Track active", color: "#8a8f98", className: "is-low" }
+}
+
+function projectTyphoonPoint(point: AdminTrackPoint) {
+  if (typeof point.lat !== "number" || typeof point.lon !== "number") return null
+
+  const x =
+    ((point.lon - TYPHOON_MAP_BOUNDS.minLon) /
+      (TYPHOON_MAP_BOUNDS.maxLon - TYPHOON_MAP_BOUNDS.minLon)) *
+    100
+  const y =
+    ((TYPHOON_MAP_BOUNDS.maxLat - point.lat) /
+      (TYPHOON_MAP_BOUNDS.maxLat - TYPHOON_MAP_BOUNDS.minLat)) *
+    70
+
+  return {
+    ...point,
+    x: Math.max(0, Math.min(100, x)),
+    y: Math.max(0, Math.min(70, y)),
+  }
+}
+
+function toPolyline(points: Array<ReturnType<typeof projectTyphoonPoint>>) {
+  return points
+    .filter((point): point is NonNullable<typeof point> => Boolean(point))
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(" ")
+}
+
+function typhoonStyle(color: string) {
+  return { "--tc-grade-color": color } as React.CSSProperties & {
+    "--tc-grade-color": string
+  }
+}
+
+function AdminTyphoonMapModal({
+  storm,
+  onClose,
+}: {
+  storm: AdminTyphoonStorm
+  onClose: () => void
+}) {
+  const grade = getTyphoonGrade(storm.latest.intensity)
+  const projectedPoints = (storm.trackPoints || [])
+    .map(projectTyphoonPoint)
+    .filter((point): point is NonNullable<typeof point> => Boolean(point))
+  const pastPoints = projectedPoints.filter(
+    (point) => point.kind === "past" || point.kind === "analysis",
+  )
+  const forecastPoints = projectedPoints.filter((point) => point.kind === "forecast")
+  const currentPoint =
+    [...projectedPoints].reverse().find((point) => point.kind === "analysis") ||
+    [...pastPoints].reverse()[0] ||
+    projectedPoints[0]
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+
+    document.addEventListener("keydown", closeOnEscape)
+    return () => document.removeEventListener("keydown", closeOnEscape)
+  }, [onClose])
+
+  return (
+    <div className="fc-admin-typhoon-map-backdrop" onClick={onClose}>
+      <section
+        className="fc-admin-typhoon-map-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${storm.name} typhoon map`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="fc-admin-typhoon-map-header">
+          <div>
+            <span>Asia Typhoon Watch</span>
+            <h2>{storm.name}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close typhoon map">
+            x
+          </button>
+        </div>
+
+        <div className="fc-admin-typhoon-map-body" style={typhoonStyle(grade.color)}>
+          <svg viewBox="0 0 100 70" role="img" aria-label={`${storm.name} track map`}>
+            <defs>
+              <linearGradient id="typhoonSea" x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0%" stopColor="#dcecf4" />
+                <stop offset="100%" stopColor="#9fb9c8" />
+              </linearGradient>
+            </defs>
+            <rect width="100" height="70" rx="4" fill="url(#typhoonSea)" />
+            <path
+              d="M0 2 C14 4 17 13 27 15 C33 16 35 21 31 27 C27 35 34 42 42 43 C53 45 55 54 50 70 L0 70 Z"
+              className="fc-admin-typhoon-map-land"
+            />
+            <path
+              d="M58 2 C63 8 66 17 64 25 C61 37 67 47 76 54 C82 59 84 65 83 70 L100 70 L100 0 Z"
+              className="fc-admin-typhoon-map-land is-east"
+            />
+            <path d="M47 28 C50 32 50 39 47 44 C44 39 44 33 47 28 Z" className="fc-admin-typhoon-map-island" />
+            {[20, 40, 60, 80].map((x) => (
+              <line key={`x-${x}`} x1={x} x2={x} y1="0" y2="70" className="fc-admin-typhoon-map-grid" />
+            ))}
+            {[14, 28, 42, 56].map((y) => (
+              <line key={`y-${y}`} x1="0" x2="100" y1={y} y2={y} className="fc-admin-typhoon-map-grid" />
+            ))}
+            <text x="8" y="17">CHINA</text>
+            <text x="38" y="38">TAIWAN</text>
+            <text x="63" y="61">PHILIPPINES</text>
+            <text x="7" y="57">VIETNAM</text>
+
+            {pastPoints.length > 1 ? (
+              <polyline points={toPolyline(pastPoints)} className="fc-admin-typhoon-map-track is-past" />
+            ) : null}
+            {forecastPoints.length > 1 ? (
+              <polyline points={toPolyline(forecastPoints)} className="fc-admin-typhoon-map-track is-forecast" />
+            ) : null}
+            {projectedPoints.map((point, index) =>
+              point ? (
+                <circle
+                  key={`${point.kind}-${index}`}
+                  cx={point.x}
+                  cy={point.y}
+                  r={point.kind === "analysis" ? 1.7 : 1.05}
+                  className={`fc-admin-typhoon-map-dot is-${point.kind}`}
+                />
+              ) : null,
+            )}
+            {currentPoint ? (
+              <circle
+                cx={currentPoint.x}
+                cy={currentPoint.y}
+                r="3.2"
+                className="fc-admin-typhoon-map-current"
+              />
+            ) : null}
+          </svg>
+
+          <div className="fc-admin-typhoon-map-meta">
+            <span className={`fc-admin-typhoon-grade-pill ${grade.className}`}>{grade.label}</span>
+            <dl>
+              <div>
+                <dt>Wind</dt>
+                <dd>{storm.latest.maximumWind || "--"}</dd>
+              </div>
+              <div>
+                <dt>Position</dt>
+                <dd>
+                  {[storm.latest.latitude, storm.latest.longitude].filter(Boolean).join(", ") ||
+                    "--"}
+                </dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{formatShortDateTime(storm.bulletinTime || storm.latest.time) || "--"}</dd>
+              </div>
+            </dl>
+            <Link href={HKO_TROPICAL_CYCLONE_MAP_URL} target="_blank" rel="noreferrer">
+              Open HKO GIS map
+            </Link>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AdminFolderThemeChooser() {
+  const [selectedTheme, setSelectedTheme] = useState<AdminFolderThemeId>(
+    normaliseAdminFolderThemeId(null),
+  )
+
+  useEffect(() => {
+    setSelectedTheme(normaliseAdminFolderThemeId(window.localStorage.getItem(ADMIN_FOLDER_THEME_KEY)))
+  }, [])
+
+  function selectTheme(theme: AdminFolderThemeId) {
+    setSelectedTheme(theme)
+    window.localStorage.setItem(ADMIN_FOLDER_THEME_KEY, theme)
+    window.dispatchEvent(new CustomEvent(ADMIN_FOLDER_THEME_EVENT, { detail: theme }))
+  }
+
+  return (
+    <section className="fc-admin-folder-theme-chooser" aria-label="Left panel folder options">
+      <div className="fc-admin-folder-theme-heading">
+        <span>Left Panel Folders</span>
+        <strong>6 options</strong>
+      </div>
+      <div className="fc-admin-folder-theme-grid">
+        {ADMIN_FOLDER_THEME_OPTIONS.map((option, index) => (
+          <button
+            key={option.id}
+            type="button"
+            className="fc-admin-folder-theme-option"
+            data-theme-option={option.id}
+            aria-pressed={selectedTheme === option.id}
+            aria-label={`${option.label} folder style`}
+            onClick={() => selectTheme(option.id)}
+          >
+            <span className="fc-admin-folder-theme-preview" aria-hidden="true">
+              <span className="fc-admin-folder-theme-tab" />
+              <span className="fc-admin-folder-theme-body">
+                <span />
+                <span />
+                <span />
+              </span>
+            </span>
+            <span>{index + 1}. {option.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 function AdminOilWidget() {
@@ -159,6 +425,8 @@ export default function AdminPage() {
   const [message, setMessage] = useState("")
   const [dashboardData, setDashboardData] = useState<AdminDashboardData | null>(null)
   const [dashboardError, setDashboardError] = useState("")
+  const [selectedTyphoonStorm, setSelectedTyphoonStorm] =
+    useState<AdminTyphoonStorm | null>(null)
 
   useEffect(() => {
     document.title = "Admin - FC Uno"
@@ -252,8 +520,10 @@ export default function AdminPage() {
           <div className="fc-admin-dashboard-swatches" aria-label="Admin dashboard watch">
             <section className="fc-admin-swatch-card is-holiday" aria-label="Upcoming holidays">
               <div className="fc-admin-swatch-heading">
-                <span>Public Holidays</span>
-                <strong>Next 3 days</strong>
+                <div>
+                  <span>Public Holidays</span>
+                  <small>{HOLIDAY_MARKET_CODES}</small>
+                </div>
               </div>
 
               {dashboardError ? (
@@ -283,7 +553,7 @@ export default function AdminPage() {
                 </div>
               ) : (
                 <p className="fc-admin-swatch-empty">
-                  No public holidays in the selected markets over the next 3 days.
+                  No public holidays in the selected markets right now.
                 </p>
               )}
             </section>
@@ -312,35 +582,49 @@ export default function AdminPage() {
 
                   {dashboardData.typhoon.storms.length ? (
                     <div className="fc-admin-typhoon-list">
-                      {dashboardData.typhoon.storms.map((storm) => (
-                        <article key={storm.id || storm.name} className="fc-admin-typhoon-item">
-                          <div>
-                            <strong>{storm.name}</strong>
-                            <span>{storm.latest.intensity || "Track active"}</span>
-                          </div>
-                          <dl>
+                      {dashboardData.typhoon.storms.map((storm) => {
+                        const grade = getTyphoonGrade(storm.latest.intensity)
+
+                        return (
+                          <button
+                            key={storm.id || storm.name}
+                            type="button"
+                            className="fc-admin-typhoon-item"
+                            style={typhoonStyle(grade.color)}
+                            onClick={() => setSelectedTyphoonStorm(storm)}
+                            aria-label={`Open ${storm.name} typhoon map`}
+                          >
                             <div>
-                              <dt>Wind</dt>
-                              <dd>{storm.latest.maximumWind || "--"}</dd>
+                              <strong>{storm.name}</strong>
+                              <span>{storm.latest.intensity || "Track active"}</span>
                             </div>
-                            <div>
-                              <dt>Position</dt>
-                              <dd>
-                                {[storm.latest.latitude, storm.latest.longitude]
-                                  .filter(Boolean)
-                                  .join(", ") || "--"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Updated</dt>
-                              <dd>
-                                {formatShortDateTime(storm.bulletinTime || storm.latest.time) ||
-                                  "--"}
-                              </dd>
-                            </div>
-                          </dl>
-                        </article>
-                      ))}
+                            <span className={`fc-admin-typhoon-grade-pill ${grade.className}`}>
+                              {grade.label}
+                            </span>
+                            <dl>
+                              <div>
+                                <dt>Wind</dt>
+                                <dd>{storm.latest.maximumWind || "--"}</dd>
+                              </div>
+                              <div>
+                                <dt>Position</dt>
+                                <dd>
+                                  {[storm.latest.latitude, storm.latest.longitude]
+                                    .filter(Boolean)
+                                    .join(", ") || "--"}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Updated</dt>
+                                <dd>
+                                  {formatShortDateTime(storm.bulletinTime || storm.latest.time) ||
+                                    "--"}
+                                </dd>
+                              </div>
+                            </dl>
+                          </button>
+                        )
+                      })}
                     </div>
                   ) : (
                     <p className="fc-admin-swatch-empty">
@@ -359,7 +643,15 @@ export default function AdminPage() {
               <AdminOilWidget />
             </section>
           </div>
+
+          <AdminFolderThemeChooser />
         </div>
+        {selectedTyphoonStorm ? (
+          <AdminTyphoonMapModal
+            storm={selectedTyphoonStorm}
+            onClose={() => setSelectedTyphoonStorm(null)}
+          />
+        ) : null}
       </section>
     )
   }

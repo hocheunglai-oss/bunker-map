@@ -7,12 +7,12 @@ const REQUEST_TIMEOUT_MS = 8000
 
 const HOLIDAY_COUNTRIES = [
   { code: "HK", label: "Hong Kong" },
-  { code: "TW", label: "Taiwan" },
-  { code: "SG", label: "Singapore" },
-  { code: "US", label: "USA" },
   { code: "CN", label: "China" },
+  { code: "SG", label: "Singapore" },
   { code: "KR", label: "Korea" },
   { code: "JP", label: "Japan" },
+  { code: "VN", label: "Vietnam" },
+  { code: "US", label: "USA" },
 ] as const
 
 type TallyfyHoliday = {
@@ -205,8 +205,10 @@ async function fetchUpcomingHolidays() {
 }
 
 function parseLatestTrackPoint(trackXml: string) {
+  const analysisInformation = blocksBetween(trackXml, "AnalysisInformation")
   const pastInformation = blocksBetween(trackXml, "PastInformation")
-  const latest = pastInformation[pastInformation.length - 1] || ""
+  const latest =
+    analysisInformation[0] || pastInformation[pastInformation.length - 1] || ""
 
   return {
     intensity: textBetween(latest, "Intensity") || null,
@@ -215,6 +217,49 @@ function parseLatestTrackPoint(trackXml: string) {
     latitude: textBetween(latest, "Latitude") || null,
     longitude: textBetween(latest, "Longitude") || null,
   }
+}
+
+function parseCoordinate(value: string | null) {
+  if (!value) return null
+  const match = value.match(/^([0-9]+(?:\.[0-9]+)?)([NSEW])$/i)
+  if (!match) return null
+
+  const coordinate = Number(match[1])
+  if (!Number.isFinite(coordinate)) return null
+
+  return ["S", "W"].includes(match[2].toUpperCase()) ? -coordinate : coordinate
+}
+
+function parseTrackPoint(block: string, kind: "past" | "analysis" | "forecast") {
+  const latitude = textBetween(block, "Latitude") || null
+  const longitude = textBetween(block, "Longitude") || null
+
+  return {
+    kind,
+    intensity: textBetween(block, "Intensity") || null,
+    maximumWind: textBetween(block, "MaximumWind") || null,
+    time: textBetween(block, "Time") || null,
+    latitude,
+    longitude,
+    lat: parseCoordinate(latitude),
+    lon: parseCoordinate(longitude),
+  }
+}
+
+function parseTrackPoints(trackXml: string) {
+  const past = blocksBetween(trackXml, "PastInformation").map((block) =>
+    parseTrackPoint(block, "past"),
+  )
+  const analysis = blocksBetween(trackXml, "AnalysisInformation").map((block) =>
+    parseTrackPoint(block, "analysis"),
+  )
+  const forecast = blocksBetween(trackXml, "ForecastInformation").map((block) =>
+    parseTrackPoint(block, "forecast"),
+  )
+
+  return [...past, ...analysis, ...forecast].filter(
+    (point) => point.lat !== null && point.lon !== null,
+  )
 }
 
 async function fetchTyphoonInfo() {
@@ -243,6 +288,7 @@ async function fetchTyphoonInfo() {
         bulletinTime: textBetween(trackXml, "BulletinTime") || null,
         trackUrl: trackUrl || null,
         latest: parseLatestTrackPoint(trackXml),
+        trackPoints: parseTrackPoints(trackXml),
       }
     }),
   )
