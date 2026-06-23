@@ -321,6 +321,7 @@ export async function assignWhatsAppContact(params: {
   displayName?: string | null
   company?: string | null
   contactId?: string | null
+  assignedOrder?: number | null
   auditContext?: AdminAuditContext
 }) {
   const supabase = getServiceSupabaseClient(params.auditContext)
@@ -331,10 +332,21 @@ export async function assignWhatsAppContact(params: {
   })
   const now = new Date().toISOString()
   const tags = Array.from(new Set([...(conversation.tags || []), "assigned"]))
+  const existingOrder = Number((conversation.metadata || {}).whatsapp_assigned_order)
+  const requestedOrder = params.assignedOrder === null || params.assignedOrder === undefined
+    ? Number.NaN
+    : Number(params.assignedOrder)
+  const assignedOrder = Number.isFinite(requestedOrder)
+    ? requestedOrder
+    : Number.isFinite(existingOrder)
+      ? existingOrder
+      : Date.now()
   const metadata = {
     ...(conversation.metadata || {}),
     source: "phonebook",
     phonebook_contact_id: params.contactId || null,
+    whatsapp_assigned_at: (conversation.metadata || {}).whatsapp_assigned_at || now,
+    whatsapp_assigned_order: assignedOrder,
   }
 
   const { data, error } = await supabase
@@ -352,6 +364,88 @@ export async function assignWhatsAppContact(params: {
 
   if (error) throw error
   return data as WhatsAppConversation
+}
+
+export async function unassignWhatsAppContact(
+  conversationId: string,
+  auditContext?: AdminAuditContext,
+) {
+  if (!conversationId) throw new Error("Conversation id is required.")
+  const supabase = getServiceSupabaseClient(auditContext)
+  const { data: existing, error: existingError } = await supabase
+    .from("whatsapp_conversations")
+    .select("*")
+    .eq("id", conversationId)
+    .single()
+
+  if (existingError) throw existingError
+
+  const conversation = existing as WhatsAppConversation
+  const metadata = { ...(conversation.metadata || {}) }
+  delete metadata.whatsapp_assigned_at
+  delete metadata.whatsapp_assigned_order
+
+  const { data, error } = await supabase
+    .from("whatsapp_conversations")
+    .update({
+      tags: (conversation.tags || []).filter((tag) => tag !== "assigned"),
+      metadata,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", conversation.id)
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return data as WhatsAppConversation
+}
+
+export async function reorderWhatsAppAssignedContacts(
+  items: Array<{ conversationId: string; order: number }>,
+  auditContext?: AdminAuditContext,
+) {
+  const supabase = getServiceSupabaseClient(auditContext)
+  const safeItems = items
+    .map((item) => ({
+      conversationId: item.conversationId.trim(),
+      order: Number(item.order),
+    }))
+    .filter((item) => item.conversationId && Number.isFinite(item.order))
+
+  if (safeItems.length === 0) return []
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("whatsapp_conversations")
+    .select("*")
+    .in("id", safeItems.map((item) => item.conversationId))
+
+  if (existingError) throw existingError
+
+  const orderById = new Map(safeItems.map((item) => [item.conversationId, item.order]))
+  const updated: WhatsAppConversation[] = []
+  for (const row of (existingRows || []) as WhatsAppConversation[]) {
+    const order = orderById.get(row.id)
+    if (!Number.isFinite(order)) continue
+
+    const { data, error } = await supabase
+      .from("whatsapp_conversations")
+      .update({
+        tags: Array.from(new Set([...(row.tags || []), "assigned"])),
+        metadata: {
+          ...(row.metadata || {}),
+          whatsapp_assigned_order: order,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id)
+      .select("*")
+      .single()
+
+    if (error) throw error
+    updated.push(data as WhatsAppConversation)
+  }
+
+  return updated
 }
 
 export async function markWhatsAppConversationRead(
