@@ -600,26 +600,6 @@ body {
   min-height: 100vh;
 }
 
-.fc-admin-app-content [data-admin-legacy-back="true"],
-.fc-admin-app-content [data-admin-legacy-heading="true"],
-.fc-admin-app-content [data-admin-legacy-folder="true"],
-.fc-admin-app-content [data-admin-duplicate-title="true"] {
-  display: none !important;
-}
-
-.fc-admin-app-content [data-admin-universal-button="true"] {
-  min-height: 36px !important;
-  height: auto !important;
-  border-radius: 10px !important;
-  padding: 8px 13px !important;
-  font-family: var(--fc-admin-font) !important;
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  line-height: 1.1 !important;
-  text-decoration: none !important;
-  box-shadow: none !important;
-}
-
 .fc-admin-mobile-menu,
 .fc-admin-sidebar-backdrop {
   display: none;

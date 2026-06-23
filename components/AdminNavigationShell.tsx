@@ -13,7 +13,6 @@ import {
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
-  getAdminPageByPath,
   isAdminRole,
   type AdminPageDefinition,
   type AdminPagePermission,
@@ -53,18 +52,6 @@ function readStoredGroups() {
   } catch {
     return defaultExpandedGroups()
   }
-}
-
-function clearUniversalButtonAttrs(element: HTMLElement) {
-  delete element.dataset.adminUniversalButton
-}
-
-function hasStatefulButtonStyle(element: HTMLElement) {
-  return (
-    element.hasAttribute("aria-pressed") ||
-    element.hasAttribute("aria-selected") ||
-    element.dataset.adminStatefulButton === "true"
-  )
 }
 
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
@@ -235,87 +222,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
           )),
     )
   }, [pages, permissions, query, role])
-
-  const currentPage = getAdminPageByPath(pathname)
-  const currentFolderLabel = currentPage
-    ? ADMIN_PAGE_GROUP_LABELS[currentPage.group]
-    : ""
-
-  useEffect(() => {
-    if (!authenticated || loading || pathname === "/admin") return
-
-    const content = document.querySelector<HTMLElement>(".fc-admin-app-content")
-    if (!content) return
-
-    const applyUniversalAdminUi = () => {
-      const firstHeading = Array.from(
-        content.querySelectorAll<HTMLElement>("h1"),
-      ).find((heading) => !heading.closest(".fc-admin-universal-page-header"))
-      if (firstHeading) firstHeading.dataset.adminLegacyHeading = "true"
-      if (currentFolderLabel) {
-        const legacyFolderLabel = Array.from(
-          content.querySelectorAll<HTMLElement>("div, p, span"),
-        ).find(
-          (element) =>
-            !element.closest(".fc-admin-universal-page-header") &&
-            element.textContent?.trim().toLowerCase() ===
-              currentFolderLabel.toLowerCase() &&
-            (!firstHeading ||
-              Boolean(
-                element.compareDocumentPosition(firstHeading) &
-                  Node.DOCUMENT_POSITION_FOLLOWING,
-              )),
-        )
-        if (legacyFolderLabel) legacyFolderLabel.dataset.adminLegacyFolder = "true"
-      }
-
-      content.querySelectorAll<HTMLElement>("button, a").forEach((element) => {
-        if (element.closest(".fc-admin-sidebar")) return
-        const label = [
-          element.getAttribute("aria-label"),
-          element.getAttribute("title"),
-          element.textContent,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim()
-
-        if (/^(back|back to admin)$/i.test(label)) {
-          clearUniversalButtonAttrs(element)
-          element.dataset.adminLegacyBack = "true"
-          return
-        }
-
-        if (
-          element.classList.contains("fc-admin-menu-button") ||
-          element.getAttribute("role") === "tab" ||
-          element.closest("[role='tablist']") ||
-          hasStatefulButtonStyle(element) ||
-          element.style.borderRadius.includes("0 0") ||
-          element.closest("[data-admin-button-style='preserve']")
-        ) {
-          clearUniversalButtonAttrs(element)
-          return
-        }
-
-        element.dataset.adminUniversalButton = "true"
-      })
-
-      if (currentPage?.id === "ccinfo") {
-        content.querySelectorAll<HTMLElement>("div, p, span").forEach((element) => {
-          if (element.textContent?.trim().toLowerCase() === "country and company info") {
-            element.dataset.adminDuplicateTitle = "true"
-          }
-        })
-      }
-    }
-
-    applyUniversalAdminUi()
-    const observer = new MutationObserver(applyUniversalAdminUi)
-    observer.observe(content, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [authenticated, currentFolderLabel, currentPage?.id, loading, pathname])
 
   if (loading || !authenticated) {
     return <>{children}</>
