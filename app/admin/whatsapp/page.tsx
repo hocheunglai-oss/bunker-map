@@ -44,6 +44,7 @@ type WhatsAppConfig = {
   hasAccessToken: boolean
   hasPhoneNumberId: boolean
   hasBusinessAccountId: boolean
+  hasTemplateBusinessAccountId: boolean
   hasVerifyToken: boolean
   hasAppSecret: boolean
   graphApiVersion: string
@@ -108,16 +109,24 @@ type ContactOption = {
   raw: PhonebookContact
 }
 
+type ManualListType = "supplier" | "buyer"
+
 type DragState =
   | { kind: "contact"; contactId: string }
   | { kind: "conversation"; conversationId: string }
-  | { kind: "assigned"; conversationId: string }
+  | { kind: "manual"; conversationId: string; listType: ManualListType }
+
+type DropTarget = {
+  listType: ManualListType
+  index: number
+}
 
 const EMPTY_CONFIG: WhatsAppConfig = {
   configured: false,
   hasAccessToken: false,
   hasPhoneNumberId: false,
   hasBusinessAccountId: false,
+  hasTemplateBusinessAccountId: false,
   hasVerifyToken: false,
   hasAppSecret: false,
   graphApiVersion: "v23.0",
@@ -145,18 +154,20 @@ const COUNTRY_CODES: Record<string, string> = {
 }
 
 const pageStyle: CSSProperties = {
-  minHeight: "100vh",
+  height: "100dvh",
+  minHeight: 0,
   background: "#111b21",
   color: "#111b21",
   fontFamily: "var(--fc-admin-font)",
   padding: 0,
+  overflow: "hidden",
 }
 
 const appShellStyle: CSSProperties = {
-  height: "100vh",
-  minHeight: "720px",
+  height: "100dvh",
+  minHeight: 0,
   display: "grid",
-  gridTemplateColumns: "390px 260px minmax(460px, 1fr)",
+  gridTemplateColumns: "390px 230px minmax(460px, 1fr) 230px",
   background: "#efeae2",
   overflow: "hidden",
 }
@@ -350,40 +361,78 @@ function templateBodyVariables(template: WhatsAppTemplate) {
   return names
 }
 
+function templateOptionLabel(template: WhatsAppTemplate) {
+  const variables = templateBodyVariables(template)
+  const variableText = variables.length > 0 ? ` · ${variables.join(", ")}` : ""
+  return `${templateLabel(template)} · ${template.name} · ${template.language}${variableText}`
+}
+
 function metadataNumber(conversation: WhatsAppConversation, key: string) {
   const value = conversation.metadata?.[key]
   const numberValue = typeof value === "number" ? value : Number(value)
   return Number.isFinite(numberValue) ? numberValue : null
 }
 
-function assignedSortValue(conversation: WhatsAppConversation) {
-  const savedOrder = metadataNumber(conversation, "whatsapp_assigned_order")
+function listTag(listType: ManualListType) {
+  return listType
+}
+
+function listOrderKey(listType: ManualListType) {
+  return `whatsapp_${listType}_order`
+}
+
+function listAtKey(listType: ManualListType) {
+  return `whatsapp_${listType}_at`
+}
+
+function conversationInList(conversation: WhatsAppConversation, listType: ManualListType) {
+  const tags = conversation.tags || []
+  if (listType === "supplier") return tags.includes("supplier") || tags.includes("assigned")
+  return tags.includes("buyer")
+}
+
+function manualSortValue(conversation: WhatsAppConversation, listType: ManualListType) {
+  const savedOrder =
+    metadataNumber(conversation, listOrderKey(listType)) ??
+    (listType === "supplier" ? metadataNumber(conversation, "whatsapp_assigned_order") : null)
   if (savedOrder !== null) return savedOrder
-  const assignedAt = conversation.metadata?.whatsapp_assigned_at
-  const assignedTime = typeof assignedAt === "string" ? Date.parse(assignedAt) : Number.NaN
-  if (Number.isFinite(assignedTime)) return assignedTime
+  const listedAt =
+    conversation.metadata?.[listAtKey(listType)] ||
+    (listType === "supplier" ? conversation.metadata?.whatsapp_assigned_at : null)
+  const listedTime = typeof listedAt === "string" ? Date.parse(listedAt) : Number.NaN
+  if (Number.isFinite(listedTime)) return listedTime
   const updatedTime = Date.parse(conversation.updated_at || conversation.created_at)
   return Number.isFinite(updatedTime) ? updatedTime : Number.MAX_SAFE_INTEGER
 }
 
-function withAssignedOrder(conversations: WhatsAppConversation[]) {
+function withManualOrder(conversations: WhatsAppConversation[], listType: ManualListType) {
   return conversations.map((conversation, index) => ({
     ...conversation,
-    tags: Array.from(new Set([...(conversation.tags || []), "assigned"])),
+    tags: Array.from(new Set([
+      ...(conversation.tags || []),
+      listTag(listType),
+      ...(listType === "supplier" ? ["assigned"] : []),
+    ])),
     metadata: {
       ...(conversation.metadata || {}),
-      whatsapp_assigned_order: (index + 1) * 1000,
+      [listOrderKey(listType)]: (index + 1) * 1000,
+      ...(listType === "supplier" ? { whatsapp_assigned_order: (index + 1) * 1000 } : {}),
     },
   }))
 }
 
-function withoutAssignment(conversation: WhatsAppConversation) {
+function withoutManualList(conversation: WhatsAppConversation, listType: ManualListType) {
   const metadata = { ...(conversation.metadata || {}) }
-  delete metadata.whatsapp_assigned_at
-  delete metadata.whatsapp_assigned_order
+  delete metadata[listAtKey(listType)]
+  delete metadata[listOrderKey(listType)]
+  if (listType === "supplier") {
+    delete metadata.whatsapp_assigned_at
+    delete metadata.whatsapp_assigned_order
+  }
+  const removeTags = new Set([listTag(listType), ...(listType === "supplier" ? ["assigned"] : [])])
   return {
     ...conversation,
-    tags: (conversation.tags || []).filter((tag) => tag !== "assigned"),
+    tags: (conversation.tags || []).filter((tag) => !removeTags.has(tag)),
     metadata,
   }
 }
@@ -427,11 +476,12 @@ export default function WhatsAppAdminPage() {
   const [templateLoading, setTemplateLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [dragState, setDragState] = useState<DragState | null>(null)
-  const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [savingList, setSavingList] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const composeRef = useRef<HTMLTextAreaElement | null>(null)
+  const contactRequestIdRef = useRef(0)
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "view")
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "edit")
@@ -449,6 +499,8 @@ export default function WhatsAppAdminPage() {
   }, [])
 
   const loadContacts = useCallback(async (query: string) => {
+    const requestId = contactRequestIdRef.current + 1
+    contactRequestIdRef.current = requestId
     setContactLoading(true)
     try {
       const url = new URL("/api/whatsapp/contacts", window.location.origin)
@@ -462,12 +514,14 @@ export default function WhatsAppAdminPage() {
       const nextContacts = (data.contacts || [])
         .map(buildContactOption)
         .filter((item): item is ContactOption => Boolean(item))
+      if (contactRequestIdRef.current !== requestId) return
       setContacts(nextContacts)
       mergeContactMatches(nextContacts)
     } catch (contactError) {
+      if (contactRequestIdRef.current !== requestId) return
       setError(contactError instanceof Error ? contactError.message : "Unable to load phonebook contacts.")
     } finally {
-      setContactLoading(false)
+      if (contactRequestIdRef.current === requestId) setContactLoading(false)
     }
   }, [mergeContactMatches])
 
@@ -597,18 +651,36 @@ export default function WhatsAppAdminPage() {
     })
   }, [contactMatches, inbox.conversations, leftSearchQuery])
 
-  const assignedConversations = useMemo(
+  const supplierConversations = useMemo(
     () =>
-      inbox.conversations.filter((conversation) =>
-        (conversation.tags || []).includes("assigned"),
-      ).sort((first, second) => assignedSortValue(first) - assignedSortValue(second)),
+      inbox.conversations
+        .filter((conversation) => conversationInList(conversation, "supplier"))
+        .sort((first, second) => manualSortValue(first, "supplier") - manualSortValue(second, "supplier")),
     [inbox.conversations],
   )
 
+  const buyerConversations = useMemo(
+    () =>
+      inbox.conversations
+        .filter((conversation) => conversationInList(conversation, "buyer"))
+        .sort((first, second) => manualSortValue(first, "buyer") - manualSortValue(second, "buyer")),
+    [inbox.conversations],
+  )
+
+  const manualConversationsByType = useMemo(
+    () => ({
+      supplier: supplierConversations,
+      buyer: buyerConversations,
+    }),
+    [buyerConversations, supplierConversations],
+  )
+
   const phonebookItems = useMemo(() => {
-    const assignedPhones = new Set(assignedConversations.map((item) => phoneDigits(item.phone_e164)))
-    return contacts.filter((contact) => !assignedPhones.has(contact.phoneDigits))
-  }, [assignedConversations, contacts])
+    const listedPhones = new Set(
+      [...supplierConversations, ...buyerConversations].map((item) => phoneDigits(item.phone_e164)),
+    )
+    return contacts.filter((contact) => !listedPhones.has(contact.phoneDigits))
+  }, [buyerConversations, contacts, supplierConversations])
 
   const activeTitle = conversationTitle(selectedConversation, activeContact)
   const activeSubtitle =
@@ -627,15 +699,26 @@ export default function WhatsAppAdminPage() {
         ),
     [templates],
   )
+  const variableTemplates = useMemo(
+    () => approvedTemplates.filter((template) => templateBodyVariables(template).length > 0),
+    [approvedTemplates],
+  )
   const selectedTemplate = useMemo(
-    () => approvedTemplates.find((template) => templateKey(template) === selectedTemplateKey) || null,
-    [approvedTemplates, selectedTemplateKey],
+    () => variableTemplates.find((template) => templateKey(template) === selectedTemplateKey) || null,
+    [selectedTemplateKey, variableTemplates],
   )
   const selectedTemplateVariables = useMemo(
     () => (selectedTemplate ? templateBodyVariables(selectedTemplate) : []),
     [selectedTemplate],
   )
   const templateNeedsText = selectedTemplateVariables.length > 0
+  useEffect(() => {
+    if (!selectedTemplateKey) return
+    if (!variableTemplates.some((template) => templateKey(template) === selectedTemplateKey)) {
+      setSelectedTemplateKey("")
+    }
+  }, [selectedTemplateKey, variableTemplates])
+
   const canSendMessage = Boolean(
     canEdit &&
       config.configured &&
@@ -648,13 +731,13 @@ export default function WhatsAppAdminPage() {
     ? {
         gridTemplateColumns: "1fr",
         height: "auto",
-        minHeight: "100vh",
+        minHeight: "100dvh",
       }
     : {}
 
   const focusComposer = useCallback(() => {
     window.requestAnimationFrame(() => {
-      composeRef.current?.focus()
+      composeRef.current?.focus({ preventScroll: true })
     })
   }, [])
 
@@ -728,24 +811,37 @@ export default function WhatsAppAdminPage() {
     })
   }
 
-  async function saveAssignedOrder(conversations: WhatsAppConversation[]) {
-    const ordered = withAssignedOrder(conversations)
+  function manualConversations(listType: ManualListType) {
+    return manualConversationsByType[listType]
+  }
+
+  async function saveManualOrder(conversations: WhatsAppConversation[], listType: ManualListType) {
+    const ordered = withManualOrder(conversations, listType)
     applyConversationUpdates(ordered)
     const response = await fetch("/api/whatsapp/assigned-order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        listType,
         items: ordered.map((conversation, index) => ({
           conversationId: conversation.id,
           order: (index + 1) * 1000,
         })),
       }),
     })
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
+    const data = (await response.json().catch(() => ({}))) as {
+      conversations?: WhatsAppConversation[]
+      message?: string
+    }
     if (!response.ok) throw new Error(data.message || "Unable to save contact order.")
+    if (data.conversations?.length) applyConversationUpdates(data.conversations)
   }
 
-  async function assignContact(contact: ContactOption, index = assignedConversations.length) {
+  async function assignContact(
+    contact: ContactOption,
+    listType: ManualListType,
+    index = manualConversations(listType).length,
+  ) {
     if (savingList || !canEdit) return
     setSavingList(true)
     setError("")
@@ -762,6 +858,7 @@ export default function WhatsAppAdminPage() {
           company: contact.company,
           contactId: contact.id,
           assignedOrder,
+          listType,
         }),
       })
       const data = (await response.json().catch(() => ({}))) as {
@@ -774,8 +871,8 @@ export default function WhatsAppAdminPage() {
       const assignedConversation = data.conversation
 
       mergeContactMatches([contact])
-      const nextAssigned = insertConversationAt(assignedConversations, assignedConversation, index)
-      await saveAssignedOrder(nextAssigned)
+      const nextList = insertConversationAt(manualConversations(listType), assignedConversation, index)
+      await saveManualOrder(nextList, listType)
       setSelectedContact(null)
       setSelectedConversationId(assignedConversation.id)
       setComposeTo(assignedConversation.phone_e164)
@@ -788,19 +885,20 @@ export default function WhatsAppAdminPage() {
     }
   }
 
-  async function reorderAssignedContact(conversationId: string, index: number) {
+  async function reorderManualContact(conversationId: string, index: number, listType: ManualListType) {
     if (savingList || !canEdit) return
-    const conversation = assignedConversations.find((item) => item.id === conversationId)
+    const listItems = manualConversations(listType)
+    const conversation = listItems.find((item) => item.id === conversationId)
     if (!conversation) return
-    const currentIndex = assignedConversations.findIndex((item) => item.id === conversationId)
+    const currentIndex = listItems.findIndex((item) => item.id === conversationId)
     const adjustedIndex = currentIndex >= 0 && currentIndex < index ? index - 1 : index
 
     setSavingList(true)
     setError("")
     setMessage("")
     try {
-      const nextAssigned = insertConversationAt(assignedConversations, conversation, adjustedIndex)
-      await saveAssignedOrder(nextAssigned)
+      const nextList = insertConversationAt(listItems, conversation, adjustedIndex)
+      await saveManualOrder(nextList, listType)
     } catch (orderError) {
       setError(orderError instanceof Error ? orderError.message : "Unable to save contact order.")
     } finally {
@@ -808,20 +906,21 @@ export default function WhatsAppAdminPage() {
     }
   }
 
-  async function removeAssignedContact(conversationId: string) {
+  async function removeManualContact(conversationId: string, listType: ManualListType) {
     if (savingList || !canEdit) return
-    const conversation = assignedConversations.find((item) => item.id === conversationId)
+    const listItems = manualConversations(listType)
+    const conversation = listItems.find((item) => item.id === conversationId)
     if (!conversation) return
 
     setSavingList(true)
     setError("")
     setMessage("")
     try {
-      applyConversationUpdates([withoutAssignment(conversation)])
+      applyConversationUpdates([withoutManualList(conversation, listType)])
       const response = await fetch("/api/whatsapp/unassign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId }),
+        body: JSON.stringify({ conversationId, listType }),
       })
       const data = (await response.json().catch(() => ({}))) as {
         conversation?: WhatsAppConversation
@@ -831,12 +930,8 @@ export default function WhatsAppAdminPage() {
         throw new Error(data.message || "Unable to remove WhatsApp contact.")
       }
       applyConversationUpdates([data.conversation])
-      const remaining = assignedConversations.filter((item) => item.id !== conversationId)
-      await saveAssignedOrder(remaining)
-      if (selectedConversationId === conversationId) {
-        setSelectedConversationId(null)
-        setSelectedContact(null)
-      }
+      const remaining = listItems.filter((item) => item.id !== conversationId)
+      await saveManualOrder(remaining, listType)
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Unable to remove WhatsApp contact.")
       applyConversationUpdates([conversation])
@@ -845,24 +940,25 @@ export default function WhatsAppAdminPage() {
     }
   }
 
-  async function dropOnAssignedPanel(index: number) {
+  async function dropOnManualPanel(listType: ManualListType, index: number) {
     if (!dragState) return
-    const boundedIndex = Math.max(0, Math.min(index, assignedConversations.length))
+    const listItems = manualConversations(listType)
+    const boundedIndex = Math.max(0, Math.min(index, listItems.length))
     if (dragState.kind === "contact") {
       const contact = contacts.find((item) => item.id === dragState.contactId)
-      if (contact) await assignContact(contact, boundedIndex)
+      if (contact) await assignContact(contact, listType, boundedIndex)
     } else if (dragState.kind === "conversation") {
       const conversation = inbox.conversations.find((item) => item.id === dragState.conversationId)
       if (conversation) {
-        if ((conversation.tags || []).includes("assigned")) {
-          await reorderAssignedContact(conversation.id, boundedIndex)
+        if (conversationInList(conversation, listType)) {
+          await reorderManualContact(conversation.id, boundedIndex, listType)
         } else {
           setSavingList(true)
           setError("")
           setMessage("")
           try {
-            const nextAssigned = insertConversationAt(assignedConversations, conversation, boundedIndex)
-            await saveAssignedOrder(nextAssigned)
+            const nextList = insertConversationAt(listItems, conversation, boundedIndex)
+            await saveManualOrder(nextList, listType)
           } catch (orderError) {
             setError(orderError instanceof Error ? orderError.message : "Unable to save contact order.")
           } finally {
@@ -871,10 +967,50 @@ export default function WhatsAppAdminPage() {
         }
       }
     } else {
-      await reorderAssignedContact(dragState.conversationId, boundedIndex)
+      if (dragState.listType === listType) {
+        await reorderManualContact(dragState.conversationId, boundedIndex, listType)
+      } else {
+        const sourceItems = manualConversations(dragState.listType)
+        const conversation =
+          sourceItems.find((item) => item.id === dragState.conversationId) ||
+          inbox.conversations.find((item) => item.id === dragState.conversationId)
+        if (conversation) {
+          setSavingList(true)
+          setError("")
+          setMessage("")
+          try {
+            const nextTarget = insertConversationAt(listItems, conversation, boundedIndex)
+            await saveManualOrder(nextTarget, listType)
+            const response = await fetch("/api/whatsapp/unassign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                conversationId: conversation.id,
+                listType: dragState.listType,
+              }),
+            })
+            const data = (await response.json().catch(() => ({}))) as {
+              conversation?: WhatsAppConversation
+              message?: string
+            }
+            if (!response.ok || !data.conversation) {
+              throw new Error(data.message || "Unable to move WhatsApp contact.")
+            }
+            applyConversationUpdates([data.conversation])
+            await saveManualOrder(
+              sourceItems.filter((item) => item.id !== conversation.id),
+              dragState.listType,
+            )
+          } catch (moveError) {
+            setError(moveError instanceof Error ? moveError.message : "Unable to move WhatsApp contact.")
+          } finally {
+            setSavingList(false)
+          }
+        }
+      }
     }
     setDragState(null)
-    setDropIndex(null)
+    setDropTarget(null)
   }
 
   async function sendMessage() {
@@ -935,11 +1071,11 @@ export default function WhatsAppAdminPage() {
           event.dataTransfer.effectAllowed = "copyMove"
           event.dataTransfer.setData("text/plain", `conversation:${conversation.id}`)
           setDragState({ kind: "conversation", conversationId: conversation.id })
-          setDropIndex(assignedConversations.length)
+          setDropTarget({ listType: "supplier", index: supplierConversations.length })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropIndex(null)
+          setDropTarget(null)
         }}
         style={{
           width: "100%",
@@ -1012,8 +1148,8 @@ export default function WhatsAppAdminPage() {
     )
   }
 
-  function renderDropIndicator(index: number) {
-    const active = dropIndex === index && Boolean(dragState)
+  function renderDropIndicator(listType: ManualListType, index: number) {
+    const active = dropTarget?.listType === listType && dropTarget.index === index && Boolean(dragState)
     return (
       <div
         aria-hidden="true"
@@ -1038,7 +1174,7 @@ export default function WhatsAppAdminPage() {
     )
   }
 
-  function renderAssignedRow(conversation: WhatsAppConversation, index: number) {
+  function renderManualRow(conversation: WhatsAppConversation, index: number, listType: ManualListType) {
     const selected = conversation.id === selectedConversationId
     const match = contactMatches[phoneDigits(conversation.phone_e164)] || null
     const title = conversationTitle(conversation, match)
@@ -1049,20 +1185,20 @@ export default function WhatsAppAdminPage() {
         draggable={canEdit}
         onDragStart={(event) => {
           event.dataTransfer.effectAllowed = "move"
-          event.dataTransfer.setData("text/plain", `assigned:${conversation.id}`)
-          setDragState({ kind: "assigned", conversationId: conversation.id })
-          setDropIndex(index)
+          event.dataTransfer.setData("text/plain", `${listType}:${conversation.id}`)
+          setDragState({ kind: "manual", conversationId: conversation.id, listType })
+          setDropTarget({ listType, index })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropIndex(null)
+          setDropTarget(null)
         }}
         onDragOver={(event) => {
           if (!dragState) return
           event.preventDefault()
           const bounds = event.currentTarget.getBoundingClientRect()
           const nextIndex = event.clientY > bounds.top + bounds.height / 2 ? index + 1 : index
-          setDropIndex(nextIndex)
+          setDropTarget({ listType, index: nextIndex })
         }}
         style={{
           width: "100%",
@@ -1110,7 +1246,7 @@ export default function WhatsAppAdminPage() {
         </button>
         <button
           type="button"
-          onClick={() => void removeAssignedContact(conversation.id)}
+          onClick={() => void removeManualContact(conversation.id, listType)}
           disabled={!canEdit || savingList}
           aria-label={`Remove ${title}`}
           title={`Remove ${title}`}
@@ -1143,11 +1279,11 @@ export default function WhatsAppAdminPage() {
           event.dataTransfer.effectAllowed = "copyMove"
           event.dataTransfer.setData("text/plain", `contact:${contact.id}`)
           setDragState({ kind: "contact", contactId: contact.id })
-          setDropIndex(assignedConversations.length)
+          setDropTarget({ listType: "supplier", index: supplierConversations.length })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropIndex(null)
+          setDropTarget(null)
         }}
         style={{
           width: "100%",
@@ -1206,6 +1342,59 @@ export default function WhatsAppAdminPage() {
           </span>
         </button>
       </div>
+    )
+  }
+
+  function renderManualPanel(listType: ManualListType, label: string, borderSide: "left" | "right") {
+    const listItems = manualConversations(listType)
+
+    return (
+      <aside
+        style={{
+          minWidth: 0,
+          background: "#ffffff",
+          borderLeft: borderSide === "left" ? "1px solid #d1d7db" : undefined,
+          borderRight: borderSide === "right" ? "1px solid #d1d7db" : undefined,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr)",
+        }}
+        aria-label={label}
+      >
+        <div style={headerBarStyle}>
+          <strong style={{ color: "#111b21", fontSize: "16px" }}>{label}</strong>
+          {savingList ? <span style={{ color: "#667781", fontSize: "12px", fontWeight: 700 }}>Saving</span> : null}
+        </div>
+
+        <div
+          data-admin-button-style="preserve"
+          onDragOver={(event) => {
+            if (!dragState) return
+            event.preventDefault()
+            if (!dropTarget || dropTarget.listType !== listType) {
+              setDropTarget({ listType, index: listItems.length })
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault()
+            const index = dropTarget?.listType === listType ? dropTarget.index : listItems.length
+            void dropOnManualPanel(listType, index)
+          }}
+          style={{ minHeight: 0, overflowY: "auto", paddingTop: "4px" }}
+        >
+          {listItems.map((conversation, index) => (
+            <div key={conversation.id}>
+              {renderDropIndicator(listType, index)}
+              {renderManualRow(conversation, index, listType)}
+            </div>
+          ))}
+          {renderDropIndicator(listType, listItems.length)}
+          {listItems.length === 0 ? (
+            <div style={{ padding: "16px", color: "#667781", fontSize: "13px", lineHeight: 1.45 }}>
+              Drag phonebook contacts here.
+            </div>
+          ) : null}
+        </div>
+      </aside>
     )
   }
 
@@ -1311,48 +1500,7 @@ export default function WhatsAppAdminPage() {
           </div>
         </aside>
 
-        <aside
-          style={{
-            minWidth: 0,
-            background: "#ffffff",
-            borderRight: "1px solid #d1d7db",
-            display: "grid",
-            gridTemplateRows: "auto minmax(0, 1fr)",
-          }}
-          aria-label="Manual list"
-        >
-          <div style={headerBarStyle}>
-            <strong style={{ color: "#111b21", fontSize: "16px" }}>Manual list</strong>
-            {savingList ? <span style={{ color: "#667781", fontSize: "12px", fontWeight: 700 }}>Saving</span> : null}
-          </div>
-
-          <div
-            data-admin-button-style="preserve"
-            onDragOver={(event) => {
-              if (!dragState) return
-              event.preventDefault()
-              if (dropIndex === null) setDropIndex(assignedConversations.length)
-            }}
-            onDrop={(event) => {
-              event.preventDefault()
-              void dropOnAssignedPanel(dropIndex ?? assignedConversations.length)
-            }}
-            style={{ minHeight: 0, overflowY: "auto", paddingTop: "4px" }}
-          >
-            {assignedConversations.map((conversation, index) => (
-              <div key={conversation.id}>
-                {renderDropIndicator(index)}
-                {renderAssignedRow(conversation, index)}
-              </div>
-            ))}
-            {renderDropIndicator(assignedConversations.length)}
-            {assignedConversations.length === 0 ? (
-              <div style={{ padding: "16px", color: "#667781", fontSize: "13px", lineHeight: 1.45 }}>
-                Drag phonebook contacts here.
-              </div>
-            ) : null}
-          </div>
-        </aside>
+        {renderManualPanel("supplier", "Supplier", "right")}
 
         <section
           style={{
@@ -1553,7 +1701,7 @@ export default function WhatsAppAdminPage() {
                 setSelectedTemplateKey(event.target.value)
                 focusComposer()
               }}
-              disabled={templateLoading || approvedTemplates.length === 0 || sending}
+              disabled={templateLoading || variableTemplates.length === 0 || sending}
               title="WhatsApp template"
               aria-label="WhatsApp template"
               style={{
@@ -1567,19 +1715,21 @@ export default function WhatsAppAdminPage() {
                 outline: "none",
                 padding: "0 10px",
                 boxSizing: "border-box",
-                opacity: templateLoading || approvedTemplates.length === 0 ? 0.7 : 1,
+                opacity: templateLoading || variableTemplates.length === 0 ? 0.7 : 1,
               }}
             >
               <option value="">
                 {templateLoading
                   ? "Loading templates"
-                  : approvedTemplates.length === 0
-                    ? "Text message"
+                  : variableTemplates.length === 0
+                    ? approvedTemplates.length === 0
+                      ? "Text message"
+                      : "No editable templates"
                     : "Text message"}
               </option>
-              {approvedTemplates.map((template) => (
+              {variableTemplates.map((template) => (
                 <option key={templateKey(template)} value={templateKey(template)}>
-                  {templateLabel(template)} · {template.language}
+                  {templateOptionLabel(template)}
                 </option>
               ))}
             </select>
@@ -1591,13 +1741,13 @@ export default function WhatsAppAdminPage() {
                 activePhone
                   ? selectedTemplate
                     ? templateNeedsText
-                      ? `Type ${selectedTemplateVariables[0]}`
-                      : "Template has no variable"
+                      ? `Type ${selectedTemplateVariables.join(", ")}`
+                      : "Type a message"
                     : "Type a message"
                   : "Select or assign a contact"
               }
               rows={1}
-              disabled={!activePhone || sending || Boolean(selectedTemplate && !templateNeedsText)}
+              disabled={!activePhone || sending}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
@@ -1641,6 +1791,8 @@ export default function WhatsAppAdminPage() {
             </button>
           </div>
         </section>
+
+        {renderManualPanel("buyer", "Buyer", "left")}
       </main>
     </div>
   )

@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     const auditContext = createAdminAuditContext(session, request, "whatsapp")
     const body = (await request.json()) as {
       items?: unknown
+      listType?: unknown
     }
     const items = Array.isArray(body.items)
       ? body.items.map((item) => {
@@ -22,7 +23,8 @@ export async function POST(request: Request) {
         })
       : []
 
-    const conversations = await reorderWhatsAppAssignedContacts(items, auditContext)
+    const listType = body.listType === "buyer" ? "buyer" : "supplier"
+    const conversations = await reorderWhatsAppAssignedContacts(items, auditContext, listType)
     return NextResponse.json({ success: true, conversations })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save WhatsApp contact order."

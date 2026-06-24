@@ -37,7 +37,13 @@ function normalizeText(value: string | null | undefined) {
 }
 
 function buildSearchTokens(value: string) {
-  return value.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6)
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[%,()]/g, ""))
+    .filter(Boolean)
+    .slice(0, 6)
 }
 
 function phoneDigits(value: string | null | undefined) {
@@ -82,8 +88,30 @@ export async function GET(request: Request) {
       )
     } else {
       const tokens = buildSearchTokens(query)
+      const searchFields = [
+        "search_text",
+        "full_name",
+        "company",
+        "title",
+        "position",
+        "department",
+        "mobile_area",
+        "mobile_1",
+        "mobile_2",
+        "mobile_phone",
+        "business_phone",
+        "business_phone_2",
+        "direct_line",
+        "other_phone",
+        "instant_messaging",
+        "personal_email",
+        "general_email",
+        "private_email",
+      ]
       for (const token of tokens) {
-        contactQuery = contactQuery.ilike("search_text", `%${token}%`)
+        contactQuery = contactQuery.or(
+          searchFields.map((field) => `${field}.ilike.%${token}%`).join(","),
+        )
       }
     }
 

@@ -67,6 +67,8 @@ export type WhatsAppTemplate = {
   components: WhatsAppTemplateComponent[]
 }
 
+export type WhatsAppManualListType = "supplier" | "buyer"
+
 type SupabaseErrorLike = {
   code?: string
   message?: string
@@ -125,6 +127,7 @@ export function getWhatsAppConfigStatus() {
   const accessToken = optionalEnv("WHATSAPP_ACCESS_TOKEN")
   const phoneNumberId = optionalEnv("WHATSAPP_PHONE_NUMBER_ID")
   const businessAccountId = optionalEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
+  const templateBusinessAccountId = optionalEnv("WHATSAPP_TEMPLATE_BUSINESS_ACCOUNT_ID")
   const verifyToken = optionalEnv("WHATSAPP_VERIFY_TOKEN")
   const appSecret = optionalEnv("WHATSAPP_APP_SECRET")
   const graphApiVersion = optionalEnv("WHATSAPP_GRAPH_API_VERSION") || DEFAULT_GRAPH_API_VERSION
@@ -134,6 +137,7 @@ export function getWhatsAppConfigStatus() {
     hasAccessToken: Boolean(accessToken),
     hasPhoneNumberId: Boolean(phoneNumberId),
     hasBusinessAccountId: Boolean(businessAccountId),
+    hasTemplateBusinessAccountId: Boolean(templateBusinessAccountId),
     hasVerifyToken: Boolean(verifyToken),
     hasAppSecret: Boolean(appSecret),
     graphApiVersion,
@@ -245,6 +249,23 @@ function buildTemplateComponents(template: WhatsAppTemplate, variableText: strin
       ],
     },
   ]
+}
+
+function normaliseManualListType(value: string | null | undefined): WhatsAppManualListType {
+  return value === "buyer" ? "buyer" : "supplier"
+}
+
+function manualListConfig(value: string | null | undefined) {
+  const listType = normaliseManualListType(value)
+  return {
+    listType,
+    tag: listType,
+    orderKey: `whatsapp_${listType}_order`,
+    atKey: `whatsapp_${listType}_at`,
+    legacyTags: listType === "supplier" ? ["assigned"] : [],
+    legacyOrderKey: listType === "supplier" ? "whatsapp_assigned_order" : "",
+    legacyAtKey: listType === "supplier" ? "whatsapp_assigned_at" : "",
+  }
 }
 
 function messageTimestamp(value: string | undefined) {
@@ -406,17 +427,26 @@ export async function assignWhatsAppContact(params: {
   company?: string | null
   contactId?: string | null
   assignedOrder?: number | null
+  listType?: WhatsAppManualListType | null
   auditContext?: AdminAuditContext
 }) {
   const supabase = getServiceSupabaseClient(params.auditContext)
+  const listConfig = manualListConfig(params.listType)
   const conversation = await ensureConversation(supabase, params.phone, {
     display_name: params.displayName || null,
     company: params.company || null,
     status: "open",
   })
   const now = new Date().toISOString()
-  const tags = Array.from(new Set([...(conversation.tags || []), "assigned"]))
-  const existingOrder = Number((conversation.metadata || {}).whatsapp_assigned_order)
+  const tags = Array.from(new Set([
+    ...(conversation.tags || []),
+    listConfig.tag,
+    ...listConfig.legacyTags,
+  ]))
+  const existingOrder = Number(
+    (conversation.metadata || {})[listConfig.orderKey] ||
+    (listConfig.legacyOrderKey ? (conversation.metadata || {})[listConfig.legacyOrderKey] : undefined),
+  )
   const requestedOrder = params.assignedOrder === null || params.assignedOrder === undefined
     ? Number.NaN
     : Number(params.assignedOrder)
@@ -429,8 +459,12 @@ export async function assignWhatsAppContact(params: {
     ...(conversation.metadata || {}),
     source: "phonebook",
     phonebook_contact_id: params.contactId || null,
-    whatsapp_assigned_at: (conversation.metadata || {}).whatsapp_assigned_at || now,
-    whatsapp_assigned_order: assignedOrder,
+    [listConfig.atKey]: (conversation.metadata || {})[listConfig.atKey] || now,
+    [listConfig.orderKey]: assignedOrder,
+  }
+  if (listConfig.legacyAtKey && listConfig.legacyOrderKey) {
+    metadata[listConfig.legacyAtKey] = metadata[listConfig.legacyAtKey] || metadata[listConfig.atKey] || now
+    metadata[listConfig.legacyOrderKey] = assignedOrder
   }
 
   const { data, error } = await supabase
@@ -452,10 +486,12 @@ export async function assignWhatsAppContact(params: {
 
 export async function unassignWhatsAppContact(
   conversationId: string,
+  listType: WhatsAppManualListType | null = "supplier",
   auditContext?: AdminAuditContext,
 ) {
   if (!conversationId) throw new Error("Conversation id is required.")
   const supabase = getServiceSupabaseClient(auditContext)
+  const listConfig = manualListConfig(listType)
   const { data: existing, error: existingError } = await supabase
     .from("whatsapp_conversations")
     .select("*")
@@ -466,13 +502,16 @@ export async function unassignWhatsAppContact(
 
   const conversation = existing as WhatsAppConversation
   const metadata = { ...(conversation.metadata || {}) }
-  delete metadata.whatsapp_assigned_at
-  delete metadata.whatsapp_assigned_order
+  delete metadata[listConfig.atKey]
+  delete metadata[listConfig.orderKey]
+  if (listConfig.legacyAtKey) delete metadata[listConfig.legacyAtKey]
+  if (listConfig.legacyOrderKey) delete metadata[listConfig.legacyOrderKey]
+  const removeTags = new Set([listConfig.tag, ...listConfig.legacyTags])
 
   const { data, error } = await supabase
     .from("whatsapp_conversations")
     .update({
-      tags: (conversation.tags || []).filter((tag) => tag !== "assigned"),
+      tags: (conversation.tags || []).filter((tag) => !removeTags.has(tag)),
       metadata,
       updated_at: new Date().toISOString(),
     })
@@ -487,8 +526,10 @@ export async function unassignWhatsAppContact(
 export async function reorderWhatsAppAssignedContacts(
   items: Array<{ conversationId: string; order: number }>,
   auditContext?: AdminAuditContext,
+  listType: WhatsAppManualListType | null = "supplier",
 ) {
   const supabase = getServiceSupabaseClient(auditContext)
+  const listConfig = manualListConfig(listType)
   const safeItems = items
     .map((item) => ({
       conversationId: item.conversationId.trim(),
@@ -514,10 +555,15 @@ export async function reorderWhatsAppAssignedContacts(
     const { data, error } = await supabase
       .from("whatsapp_conversations")
       .update({
-        tags: Array.from(new Set([...(row.tags || []), "assigned"])),
+        tags: Array.from(new Set([
+          ...(row.tags || []),
+          listConfig.tag,
+          ...listConfig.legacyTags,
+        ])),
         metadata: {
           ...(row.metadata || {}),
-          whatsapp_assigned_order: order,
+          [listConfig.orderKey]: order,
+          ...(listConfig.legacyOrderKey ? { [listConfig.legacyOrderKey]: order } : {}),
         },
         updated_at: new Date().toISOString(),
       })
@@ -598,7 +644,7 @@ export async function storeOutgoingMessage(params: {
 
 export async function loadWhatsAppTemplates() {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
-  const businessAccountId = requireEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
+  const businessAccountId = optionalEnv("WHATSAPP_TEMPLATE_BUSINESS_ACCOUNT_ID") || requireEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
   const graphApiVersion = getWhatsAppGraphApiVersion()
   const url = new URL(`https://graph.facebook.com/${graphApiVersion}/${businessAccountId}/message_templates`)
   url.searchParams.set("fields", "id,name,language,status,category,components")
