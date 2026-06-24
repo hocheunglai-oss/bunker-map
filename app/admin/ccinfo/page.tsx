@@ -562,9 +562,15 @@ function normalizeSectionTitle(value: string) {
   return value.trim().toUpperCase()
 }
 
-function getPreviewUrl(file: { drive_file_id?: string | null; drive_url?: string | null }) {
-  if (file.drive_file_id) return `https://drive.google.com/file/d/${file.drive_file_id}/preview`
+function getFcUnoFileUrl(file: { drive_file_id?: string | null; drive_url?: string | null }, disposition: "inline" | "attachment" = "inline") {
+  if (file.drive_file_id) return `/api/ccinfo/drive-file/${encodeURIComponent(file.drive_file_id)}?disposition=${disposition}`
   return file.drive_url || ""
+}
+
+function getDriveUrl(file: { drive_file_id?: string | null; drive_url?: string | null }) {
+  if (file.drive_url) return file.drive_url
+  if (file.drive_file_id) return `https://drive.google.com/file/d/${encodeURIComponent(file.drive_file_id)}/view`
+  return ""
 }
 
 function joinFolderPath(folderPath: string, name: string) {
@@ -3393,7 +3399,9 @@ export default function CountryCompanyInfoPage() {
   const userTabBackground = "var(--fc-admin-button-bg)"
   const userTabActiveBackground = "var(--fc-admin-selected-bg)"
   const countryInformationLabel = selectedKind === "port" ? "General Information" : "Country Information"
-  const previewUrl = selectedPreviewFile ? getPreviewUrl(selectedPreviewFile) : ""
+  const selectedFileUrl = selectedPreviewFile ? getFcUnoFileUrl(selectedPreviewFile) : ""
+  const selectedDriveUrl = selectedPreviewFile ? getDriveUrl(selectedPreviewFile) : ""
+  const previewUrl = selectedFileUrl
   const draggingFolder = draggingFolderPath ? folders.find((folder) => joinFolderPath(folder.folder_path, folder.name) === draggingFolderPath) : null
   const hasNativeFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types || []).includes("Files")
   const canDropOnFolderPath = (targetFolderPath: string) => Boolean(draggingFileId) || Boolean(draggingFolderPath && canMoveFolderToPath(draggingFolderPath, targetFolderPath))
@@ -3599,11 +3607,8 @@ export default function CountryCompanyInfoPage() {
                 onClick={() => setSelectedPreviewFile(file)}
                 onDoubleClick={() => {
                   setSelectedPreviewFile(file)
-                  if (file.drive_url) {
-                    window.open(file.drive_url, "_blank", "noopener,noreferrer")
-                    return
-                  }
-                  setPreviewModalOpen(true)
+                  const fileUrl = getFcUnoFileUrl(file)
+                  if (fileUrl) setPreviewModalOpen(true)
                 }}
                 draggable
                 onDragStart={(event) => {
@@ -3674,24 +3679,44 @@ export default function CountryCompanyInfoPage() {
           </>
         )}
       </div>
-      <a
-        href={selectedPreviewFile?.drive_url || "#"}
-        target={selectedPreviewFile?.drive_url ? "_blank" : undefined}
-        rel={selectedPreviewFile?.drive_url ? "noreferrer" : undefined}
-        onClick={(event) => {
-          if (!selectedPreviewFile?.drive_url) event.preventDefault()
-        }}
-        aria-disabled={selectedPreviewFile?.drive_url ? undefined : true}
-        style={{
-          ...buttonStyle,
-          display: "block",
-          textAlign: "center",
-          opacity: selectedPreviewFile?.drive_url ? 1 : 0.55,
-          pointerEvents: "auto",
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
+        <a
+          href={selectedFileUrl || "#"}
+          target={selectedFileUrl ? "_blank" : undefined}
+          rel={selectedFileUrl ? "noreferrer" : undefined}
+          onClick={(event) => {
+            if (!selectedFileUrl) event.preventDefault()
+          }}
+          aria-disabled={selectedFileUrl ? undefined : true}
+          style={{
+            ...buttonStyle,
+            display: "block",
+            textAlign: "center",
+            opacity: selectedFileUrl ? 1 : 0.55,
+            pointerEvents: "auto",
+          }}
+        >
+          Open File
+        </a>
+        <a
+          href={selectedDriveUrl || "#"}
+          target={selectedDriveUrl ? "_blank" : undefined}
+          rel={selectedDriveUrl ? "noreferrer" : undefined}
+          onClick={(event) => {
+            if (!selectedDriveUrl) event.preventDefault()
+          }}
+          aria-disabled={selectedDriveUrl ? undefined : true}
+          style={{
+            ...buttonStyle,
+            display: "block",
+            textAlign: "center",
+            opacity: selectedDriveUrl ? 1 : 0.55,
+            pointerEvents: "auto",
+          }}
+        >
           Open In Drive
-      </a>
+        </a>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
         <button type="button" onClick={() => void createFolder()} style={{ ...buttonStyle, width: "100%" }}>
           New Folder
@@ -4499,8 +4524,13 @@ export default function CountryCompanyInfoPage() {
                 <div style={{ fontWeight: 700, color: "var(--fc-admin-panel-text)", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPreviewFile.file_name}</div>
               </div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                {selectedPreviewFile.drive_url && (
-                  <a href={selectedPreviewFile.drive_url} target="_blank" rel="noreferrer" style={buttonStyle}>
+                {selectedFileUrl && (
+                  <a href={selectedFileUrl} target="_blank" rel="noreferrer" style={buttonStyle}>
+                    Open File
+                  </a>
+                )}
+                {selectedDriveUrl && (
+                  <a href={selectedDriveUrl} target="_blank" rel="noreferrer" style={buttonStyle}>
                     Open In Drive
                   </a>
                 )}
