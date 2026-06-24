@@ -61,6 +61,7 @@ type AiDraft = {
   phonebookCompanies: PhonebookCompanyDraft[]
   phonebookContacts: PhonebookContactDraft[]
   warnings: string[]
+  provider?: "gemini" | "openai"
   availableTools?: {
     eventCalendar: boolean
     phonebook: boolean
@@ -366,6 +367,23 @@ function getHongKongDateKey() {
   return `${year}-${month}-${day}`
 }
 
+function buildAiInstructions(access: ReturnType<typeof getAccess>) {
+  const today = getHongKongDateKey()
+  const enabledWorkflows = [
+    access.eventCalendar ? "event calendar" : "",
+    access.phonebook ? "phonebook" : "",
+  ].filter(Boolean).join(", ")
+
+  return [
+    "You extract office admin work from pasted text into reviewable database drafts.",
+    `Today is ${today} in Asia/Hong_Kong. Resolve relative dates against this date.`,
+    `Only use these enabled workflows: ${enabledWorkflows || "none"}.`,
+    "For event calendar work, return concise uppercase calendar titles, YYYY-MM-DD dates, people initials, tags, and one event type.",
+    "For phonebook work, extract company and contact fields exactly from the input. Do not invent missing phone numbers, emails, names, companies, or countries.",
+    "If a date, company, or contact name is unclear, omit that draft and add a warning.",
+  ].join("\n")
+}
+
 function extractOutputText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return ""
   const source = payload as Record<string, unknown>
@@ -386,18 +404,42 @@ function extractOutputText(payload: unknown): string {
   return chunks.join("\n").trim()
 }
 
-async function createAiDraft(prompt: string, access: ReturnType<typeof getAccess>) {
+function getProvider() {
+  const configured = cleanText(process.env.AI_PROVIDER).toLowerCase()
+  if (configured === "openai") return "openai" as const
+  if (configured === "gemini") return "gemini" as const
+  if (process.env.GEMINI_API_KEY) return "gemini" as const
+  return "openai" as const
+}
+
+function stripUnsupportedGeminiSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUnsupportedGeminiSchema)
+  if (!value || typeof value !== "object") return value
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "additionalProperties")
+      .map(([key, item]) => [key, stripUnsupportedGeminiSchema(item)]),
+  )
+}
+
+function getAiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback
+  const error = (payload as Record<string, unknown>).error
+  if (error && typeof error === "object") {
+    const message = cleanText((error as Record<string, unknown>).message)
+    if (message) return message
+  }
+  return fallback
+}
+
+async function createOpenAiDraft(prompt: string, access: ReturnType<typeof getAccess>) {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
     throw new HttpError("OPENAI_API_KEY is not configured.", 503)
   }
 
   const model = process.env.OPENAI_ADMIN_MODEL || "gpt-5.4-mini"
-  const today = getHongKongDateKey()
-  const enabledWorkflows = [
-    access.eventCalendar ? "event calendar" : "",
-    access.phonebook ? "phonebook" : "",
-  ].filter(Boolean).join(", ")
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -408,14 +450,7 @@ async function createAiDraft(prompt: string, access: ReturnType<typeof getAccess
     body: JSON.stringify({
       model,
       store: false,
-      instructions: [
-        "You extract office admin work from pasted text into reviewable database drafts.",
-        `Today is ${today} in Asia/Hong_Kong. Resolve relative dates against this date.`,
-        `Only use these enabled workflows: ${enabledWorkflows || "none"}.`,
-        "For event calendar work, return concise uppercase calendar titles, YYYY-MM-DD dates, people initials, tags, and one event type.",
-        "For phonebook work, extract company and contact fields exactly from the input. Do not invent missing phone numbers, emails, names, companies, or countries.",
-        "If a date, company, or contact name is unclear, omit that draft and add a warning.",
-      ].join("\n"),
+      instructions: buildAiInstructions(access),
       input: prompt,
       text: {
         format: {
@@ -430,10 +465,7 @@ async function createAiDraft(prompt: string, access: ReturnType<typeof getAccess
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const message =
-      cleanText((payload as Record<string, unknown>)?.error && ((payload as Record<string, unknown>).error as Record<string, unknown>).message) ||
-      "OpenAI request failed."
-    throw new HttpError(message, response.status)
+    throw new HttpError(getAiErrorMessage(payload, "OpenAI request failed."), response.status)
   }
 
   const outputText = extractOutputText(payload)
@@ -448,7 +480,60 @@ async function createAiDraft(prompt: string, access: ReturnType<typeof getAccess
 
   const draft = normalizeAiDraft(parsed, access)
   draft.model = model
+  draft.provider = "openai"
   return draft
+}
+
+async function createGeminiDraft(prompt: string, access: ReturnType<typeof getAccess>) {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new HttpError("GEMINI_API_KEY is not configured.", 503)
+  }
+
+  const model = process.env.GEMINI_ADMIN_MODEL || "gemini-3-flash-preview"
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      input: `${buildAiInstructions(access)}\n\nUser input:\n${prompt}`,
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: stripUnsupportedGeminiSchema(AI_SCHEMA),
+      },
+    }),
+  })
+
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new HttpError(getAiErrorMessage(payload, "Gemini request failed."), response.status)
+  }
+
+  const outputText = extractOutputText(payload)
+  if (!outputText) throw new Error("Gemini returned no draft.")
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(outputText)
+  } catch {
+    throw new Error("Gemini returned an unreadable draft.")
+  }
+
+  const draft = normalizeAiDraft(parsed, access)
+  draft.model = model
+  draft.provider = "gemini"
+  return draft
+}
+
+async function createAiDraft(prompt: string, access: ReturnType<typeof getAccess>) {
+  return getProvider() === "openai"
+    ? createOpenAiDraft(prompt, access)
+    : createGeminiDraft(prompt, access)
 }
 
 function normalizeStoredEvents(value: unknown): OfficeCalendarEvent[] {

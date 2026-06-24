@@ -48,6 +48,7 @@ type AiDraft = {
   phonebookCompanies: PhonebookCompanyDraft[]
   phonebookContacts: PhonebookContactDraft[]
   warnings: string[]
+  provider?: string
   model?: string
 }
 
@@ -118,7 +119,14 @@ export function AdminAiWorkbench() {
       setDraft(nextDraft)
       setSelection(initialSelection(nextDraft))
       setMessageKind("success")
-      setMessage(nextDraft.summary || "Draft ready.")
+      setMessage(
+        [
+          nextDraft.summary || "Draft ready.",
+          nextDraft.provider || nextDraft.model
+            ? `Provider: ${[nextDraft.provider, nextDraft.model].filter(Boolean).join(" / ")}.`
+            : "",
+        ].filter(Boolean).join(" "),
+      )
     } catch (error) {
       setMessageKind("error")
       setMessage(error instanceof Error ? error.message : "Could not generate draft.")
