@@ -194,12 +194,12 @@ const undoButtonStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
   width: "34px",
-  height: "28px",
+  height: "34px",
   minWidth: "34px",
   border: 0,
   borderRadius: 0,
   background: "transparent",
-  color: "#2f2f31",
+  color: "#000000",
   padding: 0,
   display: "inline-flex",
   alignItems: "center",
@@ -229,9 +229,14 @@ function SettingsGlyph() {
 
 function UndoGlyph() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 80 48" width="30" height="22" fill="currentColor">
-      <path d="M23.6 4.3 4.8 18.2l18.8 14v-9.5h28.6c7.4 0 13.4 6 13.4 13.4 0 2.2-.5 4.3-1.5 6.2h10.6a23 23 0 0 0 1-6.8c0-12.8-10.4-23.2-23.2-23.2H23.6v-8Z" />
-      <path d="M23.6 34.7h29.8c2.7 0 5.1-.9 7.1-2.4 1.2 5.7-3.3 11-9.2 11H23.6v-8.6Z" />
+    <svg aria-hidden="true" viewBox="0 0 256 256" width="30" height="30" fill="none">
+      <path
+        d="M32 134a94 94 0 1 0 94-94"
+        stroke="currentColor"
+        strokeWidth="22"
+        strokeLinecap="butt"
+      />
+      <path d="M112 0 54 58l58 58V74h22V40h-22V0Z" fill="currentColor" />
     </svg>
   )
 }
