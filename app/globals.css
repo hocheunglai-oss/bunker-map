@@ -813,6 +813,210 @@ body {
   line-height: 1.08;
 }
 
+.fc-admin-ai-workbench {
+  width: min(920px, 100%);
+  margin-top: 24px;
+  display: grid;
+  gap: 12px;
+  text-align: left;
+}
+
+.fc-admin-ai-workbench h2 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.fc-admin-ai-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.fc-admin-ai-input {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
+  color: var(--fc-admin-panel-text);
+  font-family: var(--fc-admin-font);
+  font-size: 14px;
+  line-height: 1.45;
+  outline: none;
+  padding: 12px 14px;
+  box-shadow: 0 14px 34px rgba(29, 29, 31, 0.07);
+}
+
+.fc-admin-ai-input:focus-visible {
+  border-color: var(--fc-admin-selected-border);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.14);
+}
+
+.fc-admin-ai-primary-button,
+.fc-admin-ai-secondary-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+.fc-admin-ai-secondary-button {
+  border-color: var(--fc-admin-button-border);
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+}
+
+.fc-admin-ai-message {
+  margin: 0;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 10px 12px;
+}
+
+.fc-admin-ai-message.is-success {
+  border-color: color-mix(in srgb, var(--fc-admin-success-bg) 35%, #ffffff);
+  color: var(--fc-admin-success-bg);
+}
+
+.fc-admin-ai-message.is-error {
+  border-color: color-mix(in srgb, var(--fc-admin-danger-bg) 36%, #ffffff);
+  color: var(--fc-admin-danger-bg);
+}
+
+.fc-admin-ai-results {
+  display: grid;
+  gap: 12px;
+}
+
+.fc-admin-ai-warning-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fc-admin-ai-warning-list span {
+  border: 1px solid color-mix(in srgb, var(--fc-admin-warning-bg) 42%, #ffffff);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fc-admin-warning-bg) 12%, #ffffff);
+  color: var(--fc-admin-panel-text);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 8px 10px;
+}
+
+.fc-admin-ai-result-section {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
+  padding: 12px;
+}
+
+.fc-admin-ai-result-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fc-admin-ai-result-heading h3 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fc-admin-ai-result-heading a {
+  color: var(--fc-admin-link);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.fc-admin-ai-draft-list {
+  display: grid;
+  gap: 6px;
+}
+
+.fc-admin-ai-draft-row {
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 9px;
+  align-items: flex-start;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-soft-bg);
+  color: var(--fc-admin-panel-text);
+  cursor: pointer;
+  padding: 10px;
+}
+
+.fc-admin-ai-draft-row input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: var(--fc-admin-primary-button-bg);
+}
+
+.fc-admin-ai-draft-row span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.fc-admin-ai-draft-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.fc-admin-ai-draft-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.fc-admin-ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .fc-admin-dashboard-swatches {
   width: 100%;
   display: grid;
@@ -1686,6 +1890,23 @@ body {
 
   .fc-admin-welcome-content h1 {
     font-size: 36px;
+  }
+
+  .fc-admin-ai-workbench {
+    margin-top: 20px;
+  }
+
+  .fc-admin-ai-workbench h2 {
+    font-size: 18px;
+  }
+
+  .fc-admin-ai-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .fc-admin-ai-primary-button,
+  .fc-admin-ai-secondary-button {
+    width: 100%;
   }
 
   .fc-admin-dashboard-swatches {

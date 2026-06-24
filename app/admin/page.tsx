@@ -4,6 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
+import { AdminAiWorkbench } from "@/components/AdminAiWorkbench"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
@@ -506,6 +507,7 @@ export default function AdminPage() {
       <section className="fc-admin-welcome-page">
         <div className="fc-admin-welcome-content">
           <h1>Welcome{displayName ? `, ${displayName}` : ""}</h1>
+          <AdminAiWorkbench />
 
           <div className="fc-admin-dashboard-swatches" aria-label="Admin dashboard watch">
             <section className="fc-admin-swatch-card is-holiday" aria-label="Upcoming holidays">
