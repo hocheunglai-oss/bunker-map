@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import {
   getTaskScheduleText,
   monthNames,
@@ -166,7 +165,6 @@ function taskHasSelectedPeople(task: TaskCalendarTask, selectedPeople: string[])
 }
 
 export default function TaskCalendarPage() {
-  const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const [tasks, setTasks] = useState<TaskCalendarTask[]>(taskCalendarTasks)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
@@ -298,7 +296,15 @@ export default function TaskCalendarPage() {
   }
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
-  if (!authenticated) return <div style={pageStyle}><button onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>Go To Admin</button></div>
+  if (!authenticated) {
+    return (
+      <div style={{ ...pageStyle, display: "grid", placeItems: "center" }}>
+        <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+          Please log in from the admin homepage first.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div style={pageStyle}>
@@ -306,27 +312,14 @@ export default function TaskCalendarPage() {
         <header
           style={{
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
+            justifyContent: "flex-start",
+            alignItems: "center",
             gap: "16px",
             flexWrap: "wrap",
             marginBottom: "12px",
           }}
         >
-          <div>
-            <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase" }}>
-              Office Tools
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
-              <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}>
-                Back
-              </button>
-              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: "36px", color: "var(--fc-admin-panel-text)" }}>
-                TASK CALENDAR
-              </h1>
-            </div>
-          </div>
-          <div data-admin-button-style="preserve" style={{ marginLeft: "auto" }}>
+          <div data-admin-button-style="preserve">
             <button type="button" onClick={openAddModal} style={appleActionButtonStyle}>
               Add New Task
             </button>

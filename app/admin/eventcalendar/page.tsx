@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import {
   OfficeCalendarEvent,
   officeCalendarSeedEvents,
@@ -473,7 +472,6 @@ function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) 
 }
 
 export default function EventCalendarPage() {
-  const router = useRouter()
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
   const tomorrowKey = addDaysToKey(todayKey, 1)
@@ -1082,10 +1080,9 @@ export default function EventCalendarPage() {
     return (
       <div style={{ ...pageStyle, display: "grid", placeItems: "center" }}>
         <div style={modalStyle}>
-          <h1 style={{ margin: "0 0 12px", fontSize: "24px", color: "var(--fc-admin-panel-text)" }}>Event Calendar</h1>
-          <button onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Go To Admin
-          </button>
+          <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+            Please log in from the admin homepage first.
+          </p>
         </div>
       </div>
     )
@@ -1098,47 +1095,20 @@ export default function EventCalendarPage() {
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "flex-start",
+            alignItems: "center",
             gap: "16px",
             flexWrap: "wrap",
             marginBottom: "12px",
           }}
         >
-          <div>
-            <div
-              style={{
-                color: "var(--fc-admin-link)",
-                fontSize: "12px",
-                fontWeight: 800,
-                letterSpacing: "0.16em",
-                textTransform: "uppercase",
-              }}
-            >
-              Office Tools
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
-              <button
-                type="button"
-                onClick={() => router.push("/admin")}
-                className="fc-admin-nav-button"
-                style={{ ...buttonStyle, height: "36px", padding: "7px 12px" }}
-              >
-                Back
-              </button>
-              <h1 style={{ margin: 0, fontSize: "34px", lineHeight: "36px", color: "var(--fc-admin-panel-text)" }}>
-                EVENT CALENDAR
-              </h1>
-            </div>
-          </div>
           <div
             data-admin-button-style="preserve"
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "flex-end",
+              justifyContent: "flex-start",
               gap: "8px",
               flexWrap: "wrap",
-              marginLeft: "auto",
             }}
           >
             <div
@@ -1163,7 +1133,7 @@ export default function EventCalendarPage() {
                   style={{
                     position: "absolute",
                     top: "42px",
-                    right: 0,
+                    left: 0,
                     zIndex: 30,
                     minWidth: "198px",
                     padding: "7px",
@@ -1185,6 +1155,18 @@ export default function EventCalendarPage() {
             <button type="button" onClick={openLeaveModal} style={appleSecondaryButtonStyle}>
               Send Leave Request
             </button>
+          </div>
+          <div
+            data-admin-button-style="preserve"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: "8px",
+              flexWrap: "wrap",
+              marginLeft: "auto",
+            }}
+          >
             <div
               style={{ position: "relative" }}
               onMouseEnter={cancelToolsMenuClose}

@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
@@ -163,7 +162,6 @@ function getErrorMessage(data: unknown, fallback: string) {
 }
 
 export default function UserManagementPage() {
-  const router = useRouter()
   const isMobile = useIsMobile(920)
   const { loading: authLoading, authenticated, permissions, role, username } = useSimpleAdminAuth()
   const [users, setUsers] = useState<ManagedAdminUser[]>([])
@@ -479,9 +477,9 @@ export default function UserManagementPage() {
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
-          Go To Admin
-        </button>
+        <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+          Please log in from the admin homepage first.
+        </p>
       </div>
     )
   }
@@ -489,24 +487,6 @@ export default function UserManagementPage() {
   return (
     <div style={pageStyle}>
       <div style={{ display: "grid", gap: "16px", maxWidth: "1500px", margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button type="button" onClick={() => router.push("/admin")} style={buttonStyle}>
-            Back
-          </button>
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                color: "var(--fc-admin-heading)",
-                fontSize: isMobile ? "22px" : "26px",
-                letterSpacing: "0.02em",
-              }}
-            >
-              USER MANAGEMENT
-            </h1>
-          </div>
-        </div>
-
         {message ? (
           <div
             role="status"

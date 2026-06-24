@@ -176,23 +176,6 @@ export default function SystemHealthPage() {
       <div className={styles.shell}>
         <section className={styles.panel}>
           <div className={styles.pageHeader}>
-            <div className={styles.titleGroup}>
-              <button
-                type="button"
-                className={styles.backButton}
-                onClick={() => router.push("/admin")}
-                aria-label="Back to admin"
-                title="Back to admin"
-              >
-                ←
-              </button>
-              <div>
-                <h1 className={styles.pageTitle}>SYSTEM HEALTH</h1>
-                <p className={styles.checkedAt}>
-                  {health ? `CHECKED ${formatDate(health.checkedAt)}` : "CHECKING..."}
-                </p>
-              </div>
-            </div>
             <div className={styles.headerActions}>
               <button type="button" onClick={createBackup} disabled={backingUp || loading} className={styles.backupButton}>
                 {backingUp ? "BACKING UP..." : "BACK UP NOW"}

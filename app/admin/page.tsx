@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
-const HOLIDAY_MARKET_CODES = "HK CN SG KR JP VN US"
+const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
 const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
 
 type AdminHoliday = {
@@ -506,9 +506,6 @@ export default function AdminPage() {
       <section className="fc-admin-welcome-page">
         <div className="fc-admin-welcome-content">
           <h1>Welcome{displayName ? `, ${displayName}` : ""}</h1>
-          <p className="fc-admin-welcome-message">
-            What would you like to work on?
-          </p>
 
           <div className="fc-admin-dashboard-swatches" aria-label="Admin dashboard watch">
             <section className="fc-admin-swatch-card is-holiday" aria-label="Upcoming holidays">
@@ -696,9 +693,6 @@ export default function AdminPage() {
           {message ? <p className="fc-admin-auth-message">{message}</p> : null}
         </form>
 
-        <Link href="/" className="fc-admin-login-back">
-          Back
-        </Link>
       </section>
     </div>
   )

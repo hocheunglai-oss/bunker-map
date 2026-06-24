@@ -128,16 +128,6 @@ export default function TechStackPage() {
   return (
     <div className={styles.page}>
       <main className={styles.shell}>
-        <header className={styles.header}>
-          <button type="button" onClick={() => router.push("/admin")} className={styles.backButton} aria-label="Back to admin">
-            ←
-          </button>
-          <div>
-            <h1>TECH STACK</h1>
-            <p>{data ? `INVENTORY CHECKED ${displayDate(data.generatedAt).toUpperCase()}` : "LOADING INVENTORY..."}</p>
-          </div>
-        </header>
-
         {message ? <div className={styles.error}>{message}</div> : null}
 
         <section className={styles.section}>

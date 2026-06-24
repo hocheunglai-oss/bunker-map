@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -505,7 +504,6 @@ Write-Host "Done."
 }
 
 export default function OutlookAddressBookPage() {
-  const router = useRouter()
   const isMobile = useIsMobile()
   const { loading: authLoading, authenticated, username, displayName } = useSimpleAdminAuth()
   const [initialBootstrap] = useState(() =>
@@ -1299,11 +1297,7 @@ export default function OutlookAddressBookPage() {
     return (
       <div style={pageStyle}>
         <section style={{ ...panelStyle, padding: "24px", maxWidth: "560px", margin: "0 auto" }}>
-          <h1 style={{ marginTop: 0 }}>Outlook Address Book</h1>
           <p>Please log in from the admin homepage first.</p>
-          <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Back
-          </button>
         </section>
       </div>
     )
@@ -1311,16 +1305,7 @@ export default function OutlookAddressBookPage() {
 
   return (
     <div style={pageStyle}>
-      <header style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "flex", alignItems: "end", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "4px" }}>Contact Tools</div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-              Back
-            </button>
-            <h1 style={{ margin: 0, color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK ADDRESS BOOK</h1>
-          </div>
-        </div>
+      <header style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "flex", alignItems: "end", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
             Sync only when all changes are made.

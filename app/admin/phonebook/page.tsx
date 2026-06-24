@@ -2088,13 +2088,8 @@ export default function PhonebookPage() {
   return (
     <div style={pageStyle}>
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>Contact Tools</div>
-            <h1 style={{ margin: "4px 0 0", color: "var(--fc-admin-panel-text)", fontSize: "28px", letterSpacing: 0 }}>PHONEBOOK</h1>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
-            <a href="/admin" className="fc-admin-nav-button" style={buttonStyle}>Back</a>
             <button
               onClick={() => void syncPhoneContacts(false)}
               disabled={contactSyncing}

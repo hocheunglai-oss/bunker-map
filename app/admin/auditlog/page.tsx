@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
@@ -157,7 +156,6 @@ function operationStyle(operation: AuditOperation): React.CSSProperties {
 }
 
 export default function AuditLogPage() {
-  const router = useRouter()
   const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
   const [logs, setLogs] = useState<AuditLogRecord[]>([])
   const [pages, setPages] = useState<AuditPageOption[]>([])
@@ -259,14 +257,9 @@ export default function AuditLogPage() {
   if (!authenticated) {
     return (
       <div style={pageStyle}>
-        <button
-          type="button"
-          onClick={() => router.push("/admin")}
-          className="fc-admin-nav-button"
-          style={buttonStyle}
-        >
-          Go To Admin
-        </button>
+        <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+          Please log in from the admin homepage first.
+        </p>
       </div>
     )
   }
@@ -274,27 +267,6 @@ export default function AuditLogPage() {
   return (
     <div style={pageStyle}>
       <div style={{ display: "grid", gap: "14px" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            flexWrap: "wrap",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => router.push("/admin")}
-            className="fc-admin-nav-button"
-            style={buttonStyle}
-          >
-            Back
-          </button>
-          <h1 style={{ margin: 0, fontSize: "24px", color: "var(--fc-admin-heading)" }}>
-            AUDIT LOG
-          </h1>
-        </div>
-
         <div style={panelStyle}>
           <div
             style={{

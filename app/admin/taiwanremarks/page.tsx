@@ -192,26 +192,7 @@ export default function AdminRemarks() {
             flexWrap: "wrap",
           }}
         >
-          <h1
-            style={{
-              fontSize: "30px",
-              margin: 0,
-              lineHeight: 1,
-              textTransform: "uppercase",
-            }}
-          >
-            Taiwan Market Report Remarks
-          </h1>
-
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <a
-              href="/admin"
-              className="fc-admin-nav-button"
-              style={pillButtonStyle}
-            >
-              Back
-            </a>
-
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               onClick={addMemo}
               style={{

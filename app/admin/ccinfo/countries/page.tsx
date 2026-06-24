@@ -79,13 +79,8 @@ export default function CountryIndexPage() {
   return (
     <div style={pageStyle}>
       <div style={{ maxWidth: "1480px", margin: "0 auto", display: "grid", gap: "14px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: "12px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 700 }}>Country And Company Info</div>
-            <h1 style={{ margin: "6px 0 0", fontSize: "28px", lineHeight: 1.05 }}>Country Index</h1>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-            <a href="/admin/ccinfo" className="fc-admin-nav-button" style={{ padding: "10px 14px", borderRadius: "999px", border: "1px solid var(--fc-admin-border)", background: "var(--fc-admin-button-bg)", color: "var(--fc-admin-button-text)", textDecoration: "none", fontSize: "13px", fontWeight: 700 }}>Back</a>
             <div style={{ color: "var(--fc-admin-link)", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Count: {totalCount}</div>
           </div>
         </div>

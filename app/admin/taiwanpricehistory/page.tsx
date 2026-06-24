@@ -436,22 +436,7 @@ export default function TaiwanPriceHistoryPage() {
             flexWrap: "wrap",
           }}
         >
-          <h1
-            style={{
-              fontSize: "30px",
-              margin: 0,
-              lineHeight: 1,
-              textTransform: "uppercase",
-            }}
-          >
-            Taiwan Price History
-          </h1>
-
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <a href="/admin" className="fc-admin-nav-button" style={secondaryButtonStyle}>
-              Back
-            </a>
-
             <a
               href="/reports/taiwan"
               target="_blank"

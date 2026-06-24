@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import {
@@ -345,7 +344,6 @@ function createBlankTemplate(folder: string): EmailTemplate {
 }
 
 export default function EmailTemplatesAdminPage() {
-  const router = useRouter()
   const isMobile = useIsMobile()
   const { loading, authenticated } = useSimpleAdminAuth()
   const [initialLibrary] = useState(() =>
@@ -912,11 +910,7 @@ export default function EmailTemplatesAdminPage() {
     return (
       <div style={pageStyle}>
         <div style={{ ...panelStyle, padding: "22px", maxWidth: "520px", margin: "0 auto" }}>
-          <h1 style={{ marginTop: 0 }}>Outlook Templates</h1>
           <p>Please log in from the admin homepage first.</p>
-          <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-            Back
-          </button>
         </div>
       </div>
     )
@@ -930,24 +924,11 @@ export default function EmailTemplatesAdminPage() {
           margin: "0 auto 12px",
           display: "flex",
           alignItems: "end",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           gap: "12px",
           flexWrap: "wrap",
         }}
       >
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
-              Back
-            </button>
-            <div>
-              <div style={{ color: "var(--fc-accent)", fontSize: "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase" }}>
-                Contact Tools
-              </div>
-              <h1 style={{ margin: "4px 0 0", color: "var(--fc-text)", fontSize: "28px", letterSpacing: 0 }}>OUTLOOK TEMPLATES</h1>
-            </div>
-          </div>
-        </div>
         <a
           href="/api/outlook-addin/manifest"
           download="fratelli-cosulich-templates-manifest.xml"

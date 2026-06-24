@@ -768,32 +768,16 @@ export default function AdminPage() {
               marginBottom: "14px",
             }}
           >
-            <div>
-              <h1
-                style={{
-                  fontSize: "30px",
-                  margin: 0,
-                  lineHeight: 1,
-                  textTransform: "uppercase",
-                }}
-              >
-                Price Setter
-              </h1>
-            </div>
-
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: isMobile
                   ? "1fr"
-                  : "200px repeat(4, 188px) 72px",
+                  : "repeat(4, 188px) 72px",
                 gap: "10px",
                 alignItems: "center",
               }}
             >
-              <a href="/admin" className="fc-admin-nav-button" style={{ ...toolbarButtonStyle, textDecoration: "none" }}>
-                Back
-              </a>
               <button
                 onClick={handlePublishChina}
                 disabled={publishingChina}
