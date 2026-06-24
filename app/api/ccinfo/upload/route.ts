@@ -140,7 +140,8 @@ export async function POST(request: Request) {
     // who can access CCINFO, while text/table edits still go through edit-only APIs.
     const session = await requireAdminPagePermission("ccinfo", "view")
     const supabase = createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "ccinfo")
+      createAdminAuditContext(session, request, "ccinfo"),
+      { useServiceRole: true },
     )
     const formData = await request.formData()
     const entryKind = String(formData.get("entryKind") || "")

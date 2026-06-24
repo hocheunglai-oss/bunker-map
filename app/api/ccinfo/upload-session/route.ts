@@ -301,7 +301,8 @@ export async function PATCH(request: Request) {
   try {
     const session = await requireAdminPagePermission("ccinfo", "view")
     const supabase = createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "ccinfo")
+      createAdminAuditContext(session, request, "ccinfo"),
+      { useServiceRole: true },
     )
     const body = await request.json()
     const entryKind = String(body.entryKind || "")

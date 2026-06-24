@@ -172,7 +172,8 @@ async function requireCcinfoFileAccess(request: Request) {
   // the page-level edit checks used by the Supabase mutation proxy.
   const session = await requireAdminPagePermission("ccinfo", "view")
   return createAdminAuditedSupabaseClient(
-    createAdminAuditContext(session, request, "ccinfo")
+    createAdminAuditContext(session, request, "ccinfo"),
+    { useServiceRole: true },
   )
 }
 
