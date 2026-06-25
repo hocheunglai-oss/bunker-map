@@ -14,11 +14,20 @@ export async function POST(request: Request) {
       templateName?: unknown
       language?: unknown
       variableText?: unknown
+      variableValues?: unknown
     }
     const to = typeof body.to === "string" ? body.to.trim() : ""
     const templateName = typeof body.templateName === "string" ? body.templateName.trim() : ""
     const language = typeof body.language === "string" ? body.language.trim() : ""
     const variableText = typeof body.variableText === "string" ? body.variableText.trim() : ""
+    const variableValues =
+      body.variableValues && typeof body.variableValues === "object" && !Array.isArray(body.variableValues)
+        ? Object.fromEntries(
+            Object.entries(body.variableValues as Record<string, unknown>).flatMap(([key, value]) =>
+              key && typeof value === "string" ? [[key, value.trim()]] : [],
+            ),
+          )
+        : undefined
 
     if (!to) return NextResponse.json({ message: "Recipient phone number is required." }, { status: 400 })
     if (!templateName) return NextResponse.json({ message: "Template is required." }, { status: 400 })
@@ -29,6 +38,7 @@ export async function POST(request: Request) {
       templateName,
       language,
       variableText,
+      variableValues,
       auditContext,
     })
     return NextResponse.json({ success: true, ...result })

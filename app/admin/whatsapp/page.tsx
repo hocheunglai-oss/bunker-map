@@ -158,6 +158,9 @@ const COUNTRY_CODES: Record<string, string> = {
   "UNITED KINGDOM": "44",
 }
 const DEFAULT_PHONE_COUNTRY_CODE = "852"
+const CONTACT_SESSION_CACHE_KEY = "fc-whatsapp-contacts-v1"
+const TEMPLATE_SESSION_CACHE_KEY = "fc-whatsapp-templates-v1"
+const SESSION_CACHE_MS = 5 * 60 * 1000
 
 const pageStyle: CSSProperties = {
   height: "100dvh",
@@ -385,15 +388,42 @@ function templateOptionLabel(template: WhatsAppTemplate) {
   return `${templateLabel(template)} · ${template.name} · ${template.language}${variableText}`
 }
 
-function renderTemplatePreview(template: WhatsAppTemplate, variableText: string) {
-  const replacement = variableText.trim()
+function splitTemplateEntries(value: string) {
+  const normalized = value.replace(/\r\n?/g, "\n").trim()
+  if (!normalized) return []
+  const separator = /\n\s*\n/.test(normalized) ? /\n\s*\n+/ : /\n+/
+  return normalized
+    .split(separator)
+    .map((entry) => entry.replace(/\s*\n\s*/g, " ").replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+}
+
+function buildTemplateVariableValues(template: WhatsAppTemplate, variableText: string) {
+  const variables = templateBodyVariables(template)
+  if (variables.length === 0) return {}
+  if (variables.length === 1) return { [variables[0]]: variableText.trim() }
+
+  const entries = splitTemplateEntries(variableText)
+  return Object.fromEntries(
+    variables.map((variable, index) => [variable, entries[index] || ""]),
+  )
+}
+
+function renderTemplatePreview(
+  template: WhatsAppTemplate,
+  variableText: string,
+  variableValues = buildTemplateVariableValues(template, variableText),
+) {
   const lines: string[] = []
 
   for (const component of template.components) {
     const type = component.type?.toUpperCase()
     if ((type === "HEADER" || type === "BODY" || type === "FOOTER") && component.text) {
       lines.push(
-        component.text.replace(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g, replacement),
+        component.text.replace(
+          /{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g,
+          (_placeholder, variable: string) => variableValues[variable] || "",
+        ),
       )
     }
   }
@@ -550,10 +580,32 @@ export default function WhatsAppAdminPage() {
   const loadContacts = useCallback(async (query: string) => {
     const requestId = contactRequestIdRef.current + 1
     contactRequestIdRef.current = requestId
-    setContactLoading(true)
+    const normalizedQuery = query.trim()
+    let usedCache = false
+
+    if (!normalizedQuery) {
+      try {
+        const cached = window.sessionStorage.getItem(CONTACT_SESSION_CACHE_KEY)
+        if (cached) {
+          const parsed = JSON.parse(cached) as { at?: number; contacts?: PhonebookContact[] }
+          if (parsed.at && Date.now() - parsed.at < SESSION_CACHE_MS && Array.isArray(parsed.contacts)) {
+            const cachedContacts = parsed.contacts
+              .map(buildContactOption)
+              .filter((item): item is ContactOption => Boolean(item))
+            setContacts(cachedContacts)
+            mergeContactMatches(cachedContacts)
+            usedCache = true
+          }
+        }
+      } catch {
+        window.sessionStorage.removeItem(CONTACT_SESSION_CACHE_KEY)
+      }
+    }
+
+    setContactLoading(!usedCache)
     try {
       const url = new URL("/api/whatsapp/contacts", window.location.origin)
-      if (query.trim()) url.searchParams.set("query", query.trim())
+      if (normalizedQuery) url.searchParams.set("query", normalizedQuery)
       const response = await fetch(url, { cache: "no-store" })
       const data = (await response.json().catch(() => ({}))) as {
         contacts?: PhonebookContact[]
@@ -564,6 +616,14 @@ export default function WhatsAppAdminPage() {
         .map(buildContactOption)
         .filter((item): item is ContactOption => Boolean(item))
       if (contactRequestIdRef.current !== requestId) return
+      if (!normalizedQuery) {
+        try {
+          window.sessionStorage.setItem(
+            CONTACT_SESSION_CACHE_KEY,
+            JSON.stringify({ at: Date.now(), contacts: data.contacts || [] }),
+          )
+        } catch {}
+      }
       setContacts(nextContacts)
       mergeContactMatches(nextContacts)
     } catch (contactError) {
@@ -598,7 +658,21 @@ export default function WhatsAppAdminPage() {
   }, [contactMatches, mergeContactMatches])
 
   const loadTemplates = useCallback(async () => {
-    setTemplateLoading(true)
+    let usedCache = false
+    try {
+      const cached = window.sessionStorage.getItem(TEMPLATE_SESSION_CACHE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached) as { at?: number; templates?: WhatsAppTemplate[] }
+        if (parsed.at && Date.now() - parsed.at < SESSION_CACHE_MS && Array.isArray(parsed.templates)) {
+          setTemplates(parsed.templates)
+          usedCache = true
+        }
+      }
+    } catch {
+      window.sessionStorage.removeItem(TEMPLATE_SESSION_CACHE_KEY)
+    }
+
+    setTemplateLoading(!usedCache)
     try {
       const response = await fetch("/api/whatsapp/templates", { cache: "no-store" })
       const data = (await response.json().catch(() => ({}))) as {
@@ -607,8 +681,16 @@ export default function WhatsAppAdminPage() {
       }
       if (!response.ok) throw new Error(data.message || "Unable to load WhatsApp templates.")
       setTemplates(data.templates || [])
+      try {
+        window.sessionStorage.setItem(
+          TEMPLATE_SESSION_CACHE_KEY,
+          JSON.stringify({ at: Date.now(), templates: data.templates || [] }),
+        )
+      } catch {}
     } catch (templateError) {
-      setError(templateError instanceof Error ? templateError.message : "Unable to load WhatsApp templates.")
+      if (!usedCache) {
+        setError(templateError instanceof Error ? templateError.message : "Unable to load WhatsApp templates.")
+      }
     } finally {
       setTemplateLoading(false)
     }
@@ -663,6 +745,7 @@ export default function WhatsAppAdminPage() {
     if (authLoading || !authenticated || !canView || selectedContact || sending) return
 
     const pollInbox = async () => {
+      if (document.hidden) return
       if (inboxPollRef.current) return
       inboxPollRef.current = true
       try {
@@ -786,6 +869,30 @@ export default function WhatsAppAdminPage() {
     () => (selectedTemplate ? templateBodyVariables(selectedTemplate) : []),
     [selectedTemplate],
   )
+  const selectedTemplateValues = useMemo(
+    () => (selectedTemplate ? buildTemplateVariableValues(selectedTemplate, composeBody) : {}),
+    [composeBody, selectedTemplate],
+  )
+  const selectedTemplateEntryCount = useMemo(
+    () => Object.values(selectedTemplateValues).filter(Boolean).length,
+    [selectedTemplateValues],
+  )
+  const selectedTemplateInputCount = useMemo(
+    () =>
+      selectedTemplate && selectedTemplateVariables.length > 1
+        ? splitTemplateEntries(composeBody).length
+        : selectedTemplateEntryCount,
+    [composeBody, selectedTemplate, selectedTemplateEntryCount, selectedTemplateVariables.length],
+  )
+  const selectedTemplateOverLimit =
+    selectedTemplateVariables.length > 0 && selectedTemplateInputCount > selectedTemplateVariables.length
+  const selectedTemplatePreview = useMemo(
+    () =>
+      selectedTemplate
+        ? renderTemplatePreview(selectedTemplate, composeBody, selectedTemplateValues)
+        : "",
+    [composeBody, selectedTemplate, selectedTemplateValues],
+  )
   const templateNeedsText = selectedTemplateVariables.length > 0
   useEffect(() => {
     if (!selectedTemplateKey) return
@@ -799,7 +906,10 @@ export default function WhatsAppAdminPage() {
       config.configured &&
       activePhone &&
       !sending &&
-      (selectedTemplate ? !templateNeedsText || composeBody.trim() : composeBody.trim()),
+      !selectedTemplateOverLimit &&
+      (selectedTemplate
+        ? !templateNeedsText || selectedTemplateEntryCount > 0
+        : composeBody.trim()),
   )
 
   const mobileGridStyle: CSSProperties = isMobile
@@ -1042,7 +1152,7 @@ export default function WhatsAppAdminPage() {
       setSelectedContact(null)
       setSelectedConversationId(assignedConversation.id)
       setComposeTo(assignedConversation.phone_e164)
-      await loadInbox(assignedConversation.id)
+      void loadInbox(assignedConversation.id, { silent: true, keepNotice: true })
       focusComposer()
     } catch (assignError) {
       setError(assignError instanceof Error ? assignError.message : "Unable to assign WhatsApp contact.")
@@ -1184,7 +1294,7 @@ export default function WhatsAppAdminPage() {
     const body = composeBody.trim()
     if (!to || !canSendMessage || sending) return
 
-    const preview = selectedTemplate ? renderTemplatePreview(selectedTemplate, body) : body
+    const preview = selectedTemplate ? selectedTemplatePreview : body
     const targetConversationId = selectedConversation?.id || null
     const { optimisticMessageId } = addOptimisticMessage(
       to,
@@ -1208,6 +1318,7 @@ export default function WhatsAppAdminPage() {
                 templateName: selectedTemplate.name,
                 language: selectedTemplate.language,
                 variableText: body,
+                variableValues: selectedTemplateValues,
               }
             : { to, message: body },
         ),
@@ -1859,11 +1970,10 @@ export default function WhatsAppAdminPage() {
               background: "#f0f2f5",
               borderTop: "1px solid #d1d7db",
               display: "grid",
-              gridTemplateColumns: activePhone
-                ? "210px minmax(0, 1fr) auto"
-                : "160px 210px minmax(0, 1fr) auto",
-              gap: "10px",
-              alignItems: "end",
+              gridTemplateRows: selectedTemplate ? "auto auto" : "auto",
+              gridTemplateColumns: "minmax(0, 1fr)",
+              gap: "8px",
+              alignItems: "stretch",
               padding: "10px 14px",
               position: "sticky",
               bottom: 0,
@@ -1871,120 +1981,188 @@ export default function WhatsAppAdminPage() {
             }}
             data-admin-button-style="preserve"
           >
-            <input
-              type="text"
-              value={composeTo}
-              onChange={(event) => setComposeTo(event.target.value)}
-              placeholder="+852..."
+            {selectedTemplate ? (
+              <div
+                style={{
+                  minWidth: 0,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  gap: "10px",
+                  alignItems: "start",
+                }}
+              >
+                <pre
+                  aria-label="Template preview"
+                  style={{
+                    minWidth: 0,
+                    maxHeight: "150px",
+                    overflowY: "auto",
+                    margin: 0,
+                    borderRadius: "8px",
+                    background: "#ffffff",
+                    color: "#111b21",
+                    fontFamily: "inherit",
+                    fontSize: "13px",
+                    lineHeight: 1.42,
+                    padding: "10px 12px",
+                    whiteSpace: "pre-wrap",
+                    boxShadow: "inset 0 0 0 1px #e9edef",
+                  }}
+                >
+                  {selectedTemplatePreview}
+                </pre>
+                <span
+                  style={{
+                    minWidth: "52px",
+                    borderRadius: "8px",
+                    background: "#ffffff",
+                    color: selectedTemplateOverLimit ? "#b42318" : "#008069",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    padding: "10px 8px",
+                    textAlign: "center",
+                    boxShadow: "inset 0 0 0 1px #e9edef",
+                  }}
+                >
+                  {selectedTemplateInputCount}/{selectedTemplateVariables.length}
+                </span>
+              </div>
+            ) : null}
+
+            <div
               style={{
-                width: "160px",
-                minHeight: "42px",
-                border: "none",
-                borderRadius: "8px",
-                background: "#ffffff",
-                color: "#111b21",
-                fontSize: "13px",
-                outline: "none",
-                padding: "0 12px",
-                display: selectedConversation || selectedContact ? "none" : "block",
-              }}
-            />
-            <select
-              value={selectedTemplateKey}
-              onChange={(event) => {
-                setSelectedTemplateKey(event.target.value)
-                focusComposer()
-              }}
-              disabled={templateLoading || variableTemplates.length === 0 || sending}
-              title="WhatsApp template"
-              aria-label="WhatsApp template"
-              style={{
-                width: "210px",
-                minHeight: "42px",
-                border: "none",
-                borderRadius: "8px",
-                background: "#ffffff",
-                color: "#111b21",
-                fontSize: "13px",
-                outline: "none",
-                padding: "0 10px",
-                boxSizing: "border-box",
-                opacity: templateLoading || variableTemplates.length === 0 ? 0.7 : 1,
+                minWidth: 0,
+                display: "grid",
+                gridTemplateColumns: activePhone
+                  ? "210px minmax(0, 1fr) auto"
+                  : "160px 210px minmax(0, 1fr) auto",
+                gap: "10px",
+                alignItems: "end",
               }}
             >
-              <option value="">
-                {templateLoading
-                  ? "Loading templates"
-                  : variableTemplates.length === 0
-                    ? approvedTemplates.length === 0
-                      ? "Text message"
-                      : "No editable templates"
-                    : "Text message"}
-              </option>
-              {variableTemplates.map((template) => (
-                <option key={templateKey(template)} value={templateKey(template)}>
-                  {templateOptionLabel(template)}
+              <input
+                type="text"
+                value={composeTo}
+                onChange={(event) => setComposeTo(event.target.value)}
+                placeholder="+852..."
+                style={{
+                  width: "160px",
+                  minHeight: "42px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#ffffff",
+                  color: "#111b21",
+                  fontSize: "13px",
+                  outline: "none",
+                  padding: "0 12px",
+                  display: selectedConversation || selectedContact ? "none" : "block",
+                }}
+              />
+              <select
+                value={selectedTemplateKey}
+                onChange={(event) => {
+                  setSelectedTemplateKey(event.target.value)
+                  focusComposer()
+                }}
+                disabled={templateLoading || variableTemplates.length === 0 || sending}
+                title="WhatsApp template"
+                aria-label="WhatsApp template"
+                style={{
+                  width: "210px",
+                  minHeight: "42px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#ffffff",
+                  color: "#111b21",
+                  fontSize: "13px",
+                  outline: "none",
+                  padding: "0 10px",
+                  boxSizing: "border-box",
+                  opacity: templateLoading || variableTemplates.length === 0 ? 0.7 : 1,
+                }}
+              >
+                <option value="">
+                  {templateLoading
+                    ? "Loading templates"
+                    : variableTemplates.length === 0
+                      ? approvedTemplates.length === 0
+                        ? "Text message"
+                        : "No editable templates"
+                      : "Text message"}
                 </option>
-              ))}
-            </select>
-            <textarea
-              ref={composeRef}
-              value={composeBody}
-              onChange={(event) => setComposeBody(event.target.value)}
-              onInput={adjustComposerHeight}
-              placeholder={
-                activePhone
-                  ? selectedTemplate
-                    ? templateNeedsText
-                      ? `Type ${selectedTemplateVariables.join(", ")}`
+                {variableTemplates.map((template) => (
+                  <option key={templateKey(template)} value={templateKey(template)}>
+                    {templateOptionLabel(template)}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                ref={composeRef}
+                value={composeBody}
+                onChange={(event) => setComposeBody(event.target.value)}
+                onInput={adjustComposerHeight}
+                placeholder={
+                  activePhone
+                    ? selectedTemplate
+                      ? selectedTemplateVariables.length > 1
+                        ? "Paste enquiries"
+                        : templateNeedsText
+                          ? `Type ${selectedTemplateVariables.join(", ")}`
+                          : "Type a message"
                       : "Type a message"
-                    : "Type a message"
-                  : "Select or assign a contact"
-              }
-              rows={1}
-              disabled={!activePhone || sending}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  void sendMessage()
+                    : "Select or assign a contact"
                 }
-              }}
-              style={{
-                width: "100%",
-                minHeight: "42px",
-                maxHeight: "120px",
-                border: "none",
-                borderRadius: "8px",
-                background: "#ffffff",
-                color: "#111b21",
-                fontSize: "15px",
-                outline: "none",
-                padding: "11px 14px",
-                resize: "none",
-                boxSizing: "border-box",
-                lineHeight: 1.35,
-                overflowY: "hidden",
-                opacity: activePhone ? 1 : 0.7,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => void sendMessage()}
-              disabled={!canSendMessage}
-              aria-label={selectedTemplate ? "Send template" : "Send message"}
-              title={selectedTemplate ? "Send template" : "Send message"}
-              style={{
-                ...iconButtonStyle,
-                width: "44px",
-                height: "44px",
-                background:
-                  !canSendMessage ? "#c7d0d4" : "#00a884",
-                color: "#ffffff",
-                fontSize: "17px",
-              }}
-            >
-              {sending ? "…" : "➤"}
-            </button>
+                rows={1}
+                disabled={!activePhone || sending}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault()
+                    void sendMessage()
+                    return
+                  }
+                  if (event.key === "Enter" && !event.shiftKey && selectedTemplateVariables.length <= 1) {
+                    event.preventDefault()
+                    void sendMessage()
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: "42px",
+                  maxHeight: selectedTemplateVariables.length > 1 ? "150px" : "120px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#ffffff",
+                  color: "#111b21",
+                  fontSize: "15px",
+                  outline: "none",
+                  padding: "11px 14px",
+                  resize: "none",
+                  boxSizing: "border-box",
+                  lineHeight: 1.35,
+                  overflowY: "hidden",
+                  opacity: activePhone ? 1 : 0.7,
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void sendMessage()}
+                disabled={!canSendMessage}
+                aria-label={selectedTemplate ? "Send template" : "Send message"}
+                title={selectedTemplate ? "Send template" : "Send message"}
+                style={{
+                  ...iconButtonStyle,
+                  width: "44px",
+                  height: "44px",
+                  background:
+                    !canSendMessage ? "#c7d0d4" : "#00a884",
+                  color: "#ffffff",
+                  fontSize: "17px",
+                }}
+              >
+                {sending ? "…" : "➤"}
+              </button>
+            </div>
           </div>
         </section>
 

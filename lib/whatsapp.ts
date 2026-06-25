@@ -67,6 +67,7 @@ export type WhatsAppTemplate = {
   components: WhatsAppTemplateComponent[]
 }
 
+export type WhatsAppTemplateVariableValues = Record<string, string>
 export type WhatsAppManualListType = "supplier" | "buyer"
 
 type SupabaseErrorLike = {
@@ -112,7 +113,14 @@ type IncomingWhatsAppMessage = {
 
 const DEFAULT_GRAPH_API_VERSION = "v23.0"
 const DEFAULT_WHATSAPP_COUNTRY_CODE = "852"
+const TEMPLATE_EMPTY_VARIABLE_VALUE = "\u00a0"
+const TEMPLATE_CACHE_MS = 5 * 60 * 1000
 const TABLE_SETUP_MESSAGE = "Run supabase/whatsapp_schema.sql to enable WhatsApp storage."
+let templateCache: {
+  cacheKey: string
+  expiresAt: number
+  templates: WhatsAppTemplate[]
+} | null = null
 
 function optionalEnv(name: string) {
   return process.env[name]?.trim() || ""
@@ -345,39 +353,65 @@ function templateBodyComponent(template: WhatsAppTemplate) {
   return template.components.find((component) => component.type?.toUpperCase() === "BODY") || null
 }
 
-function renderTemplateMessagePreview(template: WhatsAppTemplate, variableText: string) {
+function templateVariableValues(
+  variables: string[],
+  variableText: string,
+  variableValues?: WhatsAppTemplateVariableValues,
+) {
+  const values: WhatsAppTemplateVariableValues = {}
+  for (const variable of variables) {
+    values[variable] = (variableValues?.[variable] || "").trim()
+  }
+
+  if (variables.length === 1 && !values[variables[0]]) {
+    values[variables[0]] = variableText.trim()
+  }
+
+  return values
+}
+
+function renderTemplateMessagePreview(
+  template: WhatsAppTemplate,
+  variableText: string,
+  variableValues?: WhatsAppTemplateVariableValues,
+) {
+  const body = templateBodyComponent(template)
+  const variables = body?.text ? bodyVariableNames(body.text) : []
+  const values = templateVariableValues(variables, variableText, variableValues)
   const lines: string[] = []
   for (const component of template.components) {
     const type = component.type?.toUpperCase()
     if ((type === "HEADER" || type === "BODY" || type === "FOOTER") && component.text) {
       lines.push(
-        component.text.replace(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g, variableText.trim()),
+        component.text.replace(
+          /{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g,
+          (_placeholder, variable: string) => values[variable] || "",
+        ),
       )
     }
   }
   return lines.filter(Boolean).join("\n\n").trim() || template.name
 }
 
-function buildTemplateComponents(template: WhatsAppTemplate, variableText: string) {
+function buildTemplateComponents(
+  template: WhatsAppTemplate,
+  variableText: string,
+  variableValues?: WhatsAppTemplateVariableValues,
+) {
   const body = templateBodyComponent(template)
   const variables = body?.text ? bodyVariableNames(body.text) : []
   if (variables.length === 0) return []
-  if (!variableText.trim()) throw new Error("Template variable text is required.")
-  if (variables.length > 1) {
-    throw new Error("This WhatsApp page currently supports templates with one body variable.")
-  }
+  const values = templateVariableValues(variables, variableText, variableValues)
+  if (!variables.some((variable) => values[variable])) throw new Error("Template variable text is required.")
 
-  const variable = variables[0]
   return [
     {
       type: "body",
-      parameters: [
-        {
-          type: "text",
-          ...(/^\d+$/.test(variable) ? {} : { parameter_name: variable }),
-          text: variableText.trim(),
-        },
-      ],
+      parameters: variables.map((variable) => ({
+        type: "text",
+        ...(/^\d+$/.test(variable) ? {} : { parameter_name: variable }),
+        text: values[variable] || TEMPLATE_EMPTY_VARIABLE_VALUE,
+      })),
     },
   ]
 }
@@ -787,6 +821,13 @@ export async function loadWhatsAppTemplates() {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
   const businessAccountId = optionalEnv("WHATSAPP_TEMPLATE_BUSINESS_ACCOUNT_ID") || requireEnv("WHATSAPP_BUSINESS_ACCOUNT_ID")
   const graphApiVersion = getWhatsAppGraphApiVersion()
+  const cacheKey = `${graphApiVersion}:${businessAccountId}`
+  const now = Date.now()
+
+  if (templateCache && templateCache.cacheKey === cacheKey && templateCache.expiresAt > now) {
+    return templateCache.templates
+  }
+
   const url = new URL(`https://graph.facebook.com/${graphApiVersion}/${businessAccountId}/message_templates`)
   url.searchParams.set("fields", "id,name,language,status,category,components")
   url.searchParams.set("limit", "100")
@@ -806,7 +847,7 @@ export async function loadWhatsAppTemplates() {
     throw new Error(`Meta WhatsApp API: ${graphErrorMessage(data, "Unable to load WhatsApp templates.")}`)
   }
 
-  return (data.data || [])
+  const templates = (data.data || [])
     .map((item) => {
       const template = item as {
         id?: unknown
@@ -829,6 +870,13 @@ export async function loadWhatsAppTemplates() {
       return parsed
     })
     .filter((template): template is WhatsAppTemplate => Boolean(template.name && template.language))
+
+  templateCache = {
+    cacheKey,
+    expiresAt: now + TEMPLATE_CACHE_MS,
+    templates,
+  }
+  return templates
 }
 
 export async function sendWhatsAppTextMessage(params: {
@@ -912,6 +960,7 @@ export async function sendWhatsAppTemplateMessage(params: {
   templateName: string
   language: string
   variableText: string
+  variableValues?: WhatsAppTemplateVariableValues
   auditContext?: AdminAuditContext
 }): Promise<WhatsAppSendResult> {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
@@ -934,7 +983,7 @@ export async function sendWhatsAppTemplateMessage(params: {
     throw new Error(`Selected WhatsApp template is ${template.status || "not approved"}.`)
   }
 
-  const components = buildTemplateComponents(template, params.variableText)
+  const components = buildTemplateComponents(template, params.variableText, params.variableValues)
   const requestBody = {
     messaging_product: "whatsapp",
     recipient_type: "individual",
@@ -967,7 +1016,7 @@ export async function sendWhatsAppTemplateMessage(params: {
     Array.isArray(data.messages) && data.messages[0] && typeof data.messages[0] === "object"
       ? String((data.messages[0] as { id?: unknown }).id || "")
       : ""
-  const preview = renderTemplateMessagePreview(template, params.variableText)
+  const preview = renderTemplateMessagePreview(template, params.variableText, params.variableValues)
 
   let storageWarning: string | undefined
   try {
