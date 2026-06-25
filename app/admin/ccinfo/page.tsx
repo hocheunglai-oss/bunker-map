@@ -193,13 +193,13 @@ const menuItemButtonStyle: React.CSSProperties = {
 const undoButtonStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
-  width: "34px",
-  height: "34px",
-  minWidth: "34px",
+  width: "20px",
+  height: "20px",
+  minWidth: "20px",
   border: 0,
   borderRadius: 0,
   background: "transparent",
-  color: "#000000",
+  color: "#111111",
   padding: 0,
   display: "inline-flex",
   alignItems: "center",
@@ -229,14 +229,21 @@ function SettingsGlyph() {
 
 function UndoGlyph() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 256 256" width="30" height="30" fill="none">
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path
-        d="M32 134a94 94 0 1 0 94-94"
-        stroke="currentColor"
-        strokeWidth="22"
-        strokeLinecap="butt"
+        d="M8.5 7.5 4 12l4.5 4.5"
       />
-      <path d="M112 0 54 58l58 58V74h22V40h-22V0Z" fill="currentColor" />
+      <path d="M4.8 12h9.4a5.8 5.8 0 0 1 5.8 5.8c0 1.1-.3 2.1-.8 3" />
     </svg>
   )
 }
