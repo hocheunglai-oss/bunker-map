@@ -621,7 +621,7 @@ export async function storeOutgoingMessage(params: {
       updated_at: now,
     }).eq("id", conversation.id)
 
-    const { error } = await supabase.from("whatsapp_messages").insert({
+    const storedMessage = {
       conversation_id: conversation.id,
       whatsapp_message_id: params.whatsappMessageId || null,
       direction: "outbound",
@@ -633,7 +633,13 @@ export async function storeOutgoingMessage(params: {
       to_phone: toPhone,
       payload: params.payload || {},
       sent_at: now,
-    })
+    }
+
+    const { error } = params.whatsappMessageId
+      ? await supabase
+          .from("whatsapp_messages")
+          .upsert(storedMessage, { onConflict: "whatsapp_message_id" })
+      : await supabase.from("whatsapp_messages").insert(storedMessage)
 
     if (error && !isMissingTableError(error)) throw error
   } catch (error) {

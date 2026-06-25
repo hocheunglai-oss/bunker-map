@@ -75,6 +75,11 @@ type WhatsAppInboxResponse = {
   message?: string
 }
 
+type InboxLoadOptions = {
+  silent?: boolean
+  keepNotice?: boolean
+}
+
 type PhonebookContact = {
   id: string
   full_name: string
@@ -483,7 +488,9 @@ export default function WhatsAppAdminPage() {
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const composeRef = useRef<HTMLTextAreaElement | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const contactRequestIdRef = useRef(0)
+  const inboxPollRef = useRef(false)
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "view")
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "edit")
@@ -566,10 +573,15 @@ export default function WhatsAppAdminPage() {
     }
   }, [])
 
-  const loadInbox = useCallback(async (conversationId?: string | null) => {
-    setError("")
-    setMessage("")
-    setLoading(true)
+  const loadInbox = useCallback(async (
+    conversationId?: string | null,
+    options: InboxLoadOptions = {},
+  ) => {
+    if (!options.silent) {
+      setError("")
+      if (!options.keepNotice) setMessage("")
+      setLoading(true)
+    }
 
     try {
       const url = new URL("/api/whatsapp/inbox", window.location.origin)
@@ -583,7 +595,7 @@ export default function WhatsAppAdminPage() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load WhatsApp inbox.")
     } finally {
-      setLoading(false)
+      if (!options.silent) setLoading(false)
     }
   }, [])
 
@@ -605,6 +617,26 @@ export default function WhatsAppAdminPage() {
 
     return () => window.clearTimeout(timer)
   }, [authLoading, authenticated, canView, leftSearchQuery, loadContacts])
+
+  useEffect(() => {
+    if (authLoading || !authenticated || !canView || selectedContact) return
+
+    const pollInbox = async () => {
+      if (inboxPollRef.current) return
+      inboxPollRef.current = true
+      try {
+        await loadInbox(selectedConversationId, { silent: true, keepNotice: true })
+      } finally {
+        inboxPollRef.current = false
+      }
+    }
+
+    const timer = window.setInterval(() => {
+      void pollInbox()
+    }, 3500)
+
+    return () => window.clearInterval(timer)
+  }, [authLoading, authenticated, canView, loadInbox, selectedContact, selectedConversationId])
 
   const selectedConversation = useMemo(
     () =>
@@ -742,6 +774,24 @@ export default function WhatsAppAdminPage() {
       composeRef.current?.focus({ preventScroll: true })
     })
   }, [])
+
+  const adjustComposerHeight = useCallback(() => {
+    const textarea = composeRef.current
+    if (!textarea) return
+
+    textarea.style.height = "auto"
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 42), 120)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > 120 ? "auto" : "hidden"
+  }, [])
+
+  useEffect(() => {
+    adjustComposerHeight()
+  }, [adjustComposerHeight, composeBody])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" })
+  }, [selectedConversationId, selectedMessages.length])
 
   const markConversationRead = useCallback(async (conversationId: string) => {
     if (!conversationId) return
@@ -1672,6 +1722,7 @@ export default function WhatsAppAdminPage() {
                 )
               })
             )}
+            <div ref={messagesEndRef} aria-hidden="true" />
           </div>
 
           <div
@@ -1752,6 +1803,7 @@ export default function WhatsAppAdminPage() {
               ref={composeRef}
               value={composeBody}
               onChange={(event) => setComposeBody(event.target.value)}
+              onInput={adjustComposerHeight}
               placeholder={
                 activePhone
                   ? selectedTemplate
@@ -1783,6 +1835,7 @@ export default function WhatsAppAdminPage() {
                 resize: "none",
                 boxSizing: "border-box",
                 lineHeight: 1.35,
+                overflowY: "hidden",
                 opacity: activePhone ? 1 : 0.7,
               }}
             />
