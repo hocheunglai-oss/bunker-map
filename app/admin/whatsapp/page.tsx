@@ -157,6 +157,7 @@ const COUNTRY_CODES: Record<string, string> = {
   UK: "44",
   "UNITED KINGDOM": "44",
 }
+const DEFAULT_PHONE_COUNTRY_CODE = "852"
 
 const pageStyle: CSSProperties = {
   height: "100dvh",
@@ -224,6 +225,12 @@ function phoneDigits(value: string | null | undefined) {
   return (value || "").replace(/\D/g, "")
 }
 
+function phoneMatchKey(value: string | null | undefined) {
+  const digits = phoneDigits(value)
+  if (digits.length === 8) return `${DEFAULT_PHONE_COUNTRY_CODE}${digits}`
+  return digits
+}
+
 function countryCode(value: string | null | undefined) {
   const normalized = (value || "")
     .trim()
@@ -238,13 +245,17 @@ function countryCode(value: string | null | undefined) {
 function normalizePhone(value: string | null | undefined, area?: string | null) {
   const trimmed = (value || "").trim()
   if (!trimmed) return ""
-  if (trimmed.startsWith("+")) return `+${phoneDigits(trimmed)}`
+  if (trimmed.startsWith("+")) {
+    const digits = phoneDigits(trimmed)
+    if (digits.length === 8) return `+${DEFAULT_PHONE_COUNTRY_CODE}${digits}`
+    return `+${digits}`
+  }
   if (trimmed.startsWith("00")) return `+${phoneDigits(trimmed.slice(2))}`
 
   const digits = phoneDigits(trimmed)
   if (!digits) return ""
   const code = countryCode(area)
-  if (digits.length <= 8 && code) return `+${code}${digits}`
+  if (digits.length === 8) return `+${code || DEFAULT_PHONE_COUNTRY_CODE}${digits}`
   if (digits.length > 8) return `+${digits}`
   return digits
 }
@@ -286,7 +297,7 @@ function buildContactOption(contact: PhonebookContact): ContactOption | null {
     name: contactName(contact),
     company: contact.company || "",
     phone,
-    phoneDigits: phoneDigits(phone),
+    phoneDigits: phoneMatchKey(phone),
     detail: contactDetail(contact),
     source: "phonebook",
     favorite: Boolean(contact.favorite),
@@ -372,6 +383,33 @@ function templateOptionLabel(template: WhatsAppTemplate) {
   const variables = templateBodyVariables(template)
   const variableText = variables.length > 0 ? ` · ${variables.join(", ")}` : ""
   return `${templateLabel(template)} · ${template.name} · ${template.language}${variableText}`
+}
+
+function renderTemplatePreview(template: WhatsAppTemplate, variableText: string) {
+  const replacement = variableText.trim()
+  const lines: string[] = []
+
+  for (const component of template.components) {
+    const type = component.type?.toUpperCase()
+    if ((type === "HEADER" || type === "BODY" || type === "FOOTER") && component.text) {
+      lines.push(
+        component.text.replace(/{{\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*}}/g, replacement),
+      )
+    }
+  }
+
+  return lines.filter(Boolean).join("\n\n").trim() || template.name
+}
+
+function conversationPreviewTime(value: string | null | undefined) {
+  const time = Date.parse(value || "")
+  return Number.isFinite(time) ? time : 0
+}
+
+function sortConversations(conversations: WhatsAppConversation[]) {
+  return [...conversations].sort(
+    (first, second) => conversationPreviewTime(second.last_message_at) - conversationPreviewTime(first.last_message_at),
+  )
 }
 
 function metadataNumber(conversation: WhatsAppConversation, key: string) {
@@ -502,6 +540,8 @@ export default function WhatsAppAdminPage() {
       const next = { ...current }
       for (const item of items) {
         if (item.phoneDigits) next[item.phoneDigits] = item
+        const key = phoneMatchKey(item.phone)
+        if (key) next[key] = item
       }
       return next
     })
@@ -536,7 +576,8 @@ export default function WhatsAppAdminPage() {
 
   const loadContactByPhone = useCallback(async (phone: string) => {
     const digits = phoneDigits(phone)
-    if (!digits || contactMatches[digits]) return
+    const key = phoneMatchKey(phone)
+    if (!digits || contactMatches[key]) return
 
     try {
       const url = new URL("/api/whatsapp/contacts", window.location.origin)
@@ -619,7 +660,7 @@ export default function WhatsAppAdminPage() {
   }, [authLoading, authenticated, canView, leftSearchQuery, loadContacts])
 
   useEffect(() => {
-    if (authLoading || !authenticated || !canView || selectedContact) return
+    if (authLoading || !authenticated || !canView || selectedContact || sending) return
 
     const pollInbox = async () => {
       if (inboxPollRef.current) return
@@ -636,7 +677,7 @@ export default function WhatsAppAdminPage() {
     }, 3500)
 
     return () => window.clearInterval(timer)
-  }, [authLoading, authenticated, canView, loadInbox, selectedContact, selectedConversationId])
+  }, [authLoading, authenticated, canView, loadInbox, selectedContact, selectedConversationId, sending])
 
   const selectedConversation = useMemo(
     () =>
@@ -653,7 +694,7 @@ export default function WhatsAppAdminPage() {
   }, [loadContactByPhone, selectedConversation?.phone_e164])
 
   const selectedConversationContact = selectedConversation
-    ? contactMatches[phoneDigits(selectedConversation.phone_e164)] || null
+    ? contactMatches[phoneMatchKey(selectedConversation.phone_e164)] || null
     : null
   const activeContact = selectedConversationContact || selectedContact
   const selectedMessages = useMemo(
@@ -669,7 +710,7 @@ export default function WhatsAppAdminPage() {
     return inbox.conversations.filter((conversation) => {
       if (!conversation.last_message_at && !conversation.last_message_preview) return false
       if (!normalizedQuery) return true
-      const match = contactMatches[phoneDigits(conversation.phone_e164)]
+      const match = contactMatches[phoneMatchKey(conversation.phone_e164)]
       return [
         conversation.display_name,
         conversation.phone_e164,
@@ -711,7 +752,7 @@ export default function WhatsAppAdminPage() {
 
   const phonebookItems = useMemo(() => {
     const listedPhones = new Set(
-      [...supplierConversations, ...buyerConversations].map((item) => phoneDigits(item.phone_e164)),
+      [...supplierConversations, ...buyerConversations].map((item) => phoneMatchKey(item.phone_e164)),
     )
     return contacts.filter((contact) => !listedPhones.has(contact.phoneDigits))
   }, [buyerConversations, contacts, supplierConversations])
@@ -822,14 +863,14 @@ export default function WhatsAppAdminPage() {
     setError("")
     setMessage("")
     if (conversation?.phone_e164) setComposeTo(conversation.phone_e164)
-    await markConversationRead(conversationId)
-    await loadInbox(conversationId)
+    void markConversationRead(conversationId)
+    await loadInbox(conversationId, { silent: true, keepNotice: true })
     focusComposer()
   }
 
   function selectContact(contact: ContactOption) {
     const existing = inbox.conversations.find(
-      (conversation) => phoneDigits(conversation.phone_e164) === contact.phoneDigits,
+      (conversation) => phoneMatchKey(conversation.phone_e164) === contact.phoneDigits,
     )
     if (existing) {
       void selectConversation(existing.id)
@@ -855,12 +896,85 @@ export default function WhatsAppAdminPage() {
       const existingIds = new Set(current.conversations.map((conversation) => conversation.id))
       return {
         ...current,
-        conversations: [
+        conversations: sortConversations([
           ...current.conversations.map((conversation) => byId.get(conversation.id) || conversation),
           ...conversations.filter((conversation) => !existingIds.has(conversation.id)),
-        ],
+        ]),
       }
     })
+  }
+
+  function addOptimisticMessage(to: string, preview: string, messageType: string) {
+    const now = new Date().toISOString()
+    const normalizedTo = normalizePhone(to) || to
+    const conversationId = selectedConversation?.id || `local-${phoneDigits(normalizedTo) || Date.now()}`
+    const optimisticMessageId = `optimistic-${conversationId}-${Date.now()}`
+    const baseConversation: WhatsAppConversation = selectedConversation || {
+      id: conversationId,
+      phone_e164: normalizedTo,
+      display_name: selectedContact?.name || normalizedTo,
+      company: selectedContact?.company || null,
+      assigned_to: null,
+      status: "open",
+      tags: [],
+      last_message_preview: null,
+      last_message_at: null,
+      unread_count: 0,
+      metadata: { optimistic: true },
+      created_at: now,
+      updated_at: now,
+    }
+    const optimisticConversation: WhatsAppConversation = {
+      ...baseConversation,
+      phone_e164: normalizedTo,
+      last_message_preview: preview,
+      last_message_at: now,
+      unread_count: 0,
+      updated_at: now,
+    }
+    const optimisticMessage: WhatsAppMessage = {
+      id: optimisticMessageId,
+      conversation_id: conversationId,
+      whatsapp_message_id: null,
+      direction: "outbound",
+      message_type: messageType,
+      body: preview,
+      media_url: null,
+      status: "sending",
+      from_phone: null,
+      to_phone: normalizedTo,
+      payload: { optimistic: true },
+      sent_at: now,
+      created_at: now,
+    }
+
+    setInbox((current) => ({
+      ...current,
+      selectedConversationId: conversationId,
+      conversations: sortConversations([
+        optimisticConversation,
+        ...current.conversations.filter((conversation) => conversation.id !== conversationId),
+      ]),
+      messages: [
+        ...current.messages.filter((messageItem) => messageItem.id !== optimisticMessageId),
+        optimisticMessage,
+      ],
+    }))
+    setSelectedConversationId(conversationId)
+    setSelectedContact(null)
+    setComposeTo(normalizedTo)
+    return { conversationId, optimisticMessageId }
+  }
+
+  function markOptimisticMessageFailed(messageId: string) {
+    setInbox((current) => ({
+      ...current,
+      messages: current.messages.map((messageItem) =>
+        messageItem.id === messageId
+          ? { ...messageItem, status: "failed" }
+          : messageItem,
+      ),
+    }))
   }
 
   function manualConversations(listType: ManualListType) {
@@ -1070,9 +1184,18 @@ export default function WhatsAppAdminPage() {
     const body = composeBody.trim()
     if (!to || !canSendMessage || sending) return
 
+    const preview = selectedTemplate ? renderTemplatePreview(selectedTemplate, body) : body
+    const targetConversationId = selectedConversation?.id || null
+    const { optimisticMessageId } = addOptimisticMessage(
+      to,
+      preview,
+      selectedTemplate ? "template" : "text",
+    )
+
     setSending(true)
     setError("")
     setMessage("")
+    setComposeBody("")
 
     try {
       const response = await fetch(selectedTemplate ? "/api/whatsapp/send-template" : "/api/whatsapp/send", {
@@ -1095,11 +1218,10 @@ export default function WhatsAppAdminPage() {
       }
       if (!response.ok) throw new Error(data.message || "Unable to send WhatsApp message.")
 
-      setComposeBody("")
-      await loadInbox(selectedConversationId)
-      setSelectedContact(null)
+      await loadInbox(targetConversationId)
       setMessage(data.storageWarning || (selectedTemplate ? "Template sent." : "Message sent."))
     } catch (sendError) {
+      markOptimisticMessageFailed(optimisticMessageId)
       setError(sendError instanceof Error ? sendError.message : "Unable to send WhatsApp message.")
     } finally {
       setSending(false)
@@ -1108,7 +1230,7 @@ export default function WhatsAppAdminPage() {
 
   function renderConversationRow(conversation: WhatsAppConversation) {
     const selected = conversation.id === selectedConversationId
-    const match = contactMatches[phoneDigits(conversation.phone_e164)] || null
+    const match = contactMatches[phoneMatchKey(conversation.phone_e164)] || null
     const title = conversationTitle(conversation, match)
     const detail = match?.detail || conversation.company || conversation.phone_e164
     const unread = conversation.unread_count > 0
@@ -1228,7 +1350,7 @@ export default function WhatsAppAdminPage() {
 
   function renderManualRow(conversation: WhatsAppConversation, index: number, listType: ManualListType) {
     const selected = conversation.id === selectedConversationId
-    const match = contactMatches[phoneDigits(conversation.phone_e164)] || null
+    const match = contactMatches[phoneMatchKey(conversation.phone_e164)] || null
     const title = conversationTitle(conversation, match)
 
     return (
@@ -1714,7 +1836,13 @@ export default function WhatsAppAdminPage() {
                       >
                         <span>{formatTime(chatMessage.sent_at)}</span>
                         {outbound ? (
-                          <span style={{ color: chatMessage.status === "read" ? "#53bdeb" : "#667781" }}>✓✓</span>
+                          chatMessage.status === "sending" ? (
+                            <span style={{ color: "#667781" }}>…</span>
+                          ) : chatMessage.status === "failed" ? (
+                            <span style={{ color: "#d92d20", fontWeight: 800 }}>!</span>
+                          ) : (
+                            <span style={{ color: chatMessage.status === "read" ? "#53bdeb" : "#667781" }}>✓✓</span>
+                          )
                         ) : null}
                       </div>
                     </div>

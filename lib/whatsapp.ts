@@ -111,6 +111,7 @@ type IncomingWhatsAppMessage = {
 }
 
 const DEFAULT_GRAPH_API_VERSION = "v23.0"
+const DEFAULT_WHATSAPP_COUNTRY_CODE = "852"
 const TABLE_SETUP_MESSAGE = "Run supabase/whatsapp_schema.sql to enable WhatsApp storage."
 
 function optionalEnv(name: string) {
@@ -177,10 +178,140 @@ function isMissingTableError(error: SupabaseErrorLike | null | undefined) {
   )
 }
 
+function phoneDigits(value: string | null | undefined) {
+  return (value || "").replace(/\D/g, "")
+}
+
+function defaultCountryCode() {
+  return phoneDigits(optionalEnv("WHATSAPP_DEFAULT_COUNTRY_CODE")) || DEFAULT_WHATSAPP_COUNTRY_CODE
+}
+
 function normalisePhone(value: string) {
-  const cleaned = value.replace(/[^\d+]/g, "")
-  if (cleaned.startsWith("+")) return cleaned
-  return cleaned ? `+${cleaned}` : ""
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+
+  const countryCode = defaultCountryCode()
+  const localLength = countryCode === "852" ? 8 : 0
+  const digits = phoneDigits(trimmed)
+  if (!digits) return ""
+  if (localLength && digits.length === localLength) return `+${countryCode}${digits}`
+  if (trimmed.startsWith("00")) return `+${digits.replace(/^00/, "")}`
+  return `+${digits}`
+}
+
+function conversationPhoneVariants(phone: string) {
+  const normalised = normalisePhone(phone)
+  const digits = phoneDigits(normalised)
+  const countryCode = defaultCountryCode()
+  const localLength = countryCode === "852" ? 8 : 0
+  const variants = new Set<string>()
+  if (normalised) variants.add(normalised)
+  if (localLength && digits.startsWith(countryCode) && digits.length === countryCode.length + localLength) {
+    variants.add(`+${digits.slice(countryCode.length)}`)
+  }
+  if (localLength && digits.length === localLength) {
+    variants.add(`+${countryCode}${digits}`)
+  }
+  return Array.from(variants)
+}
+
+function latestConversation(conversations: WhatsAppConversation[]) {
+  return conversations.reduce<WhatsAppConversation | null>((latest, conversation) => {
+    if (!latest) return conversation
+    const latestTime = Date.parse(latest.last_message_at || latest.updated_at || latest.created_at)
+    const currentTime = Date.parse(conversation.last_message_at || conversation.updated_at || conversation.created_at)
+    return currentTime > latestTime ? conversation : latest
+  }, null)
+}
+
+function preferredConversationName(conversations: WhatsAppConversation[], fallback: string | null) {
+  return (
+    conversations.find((conversation) => conversation.company && conversation.display_name)?.display_name ||
+    fallback ||
+    conversations.find((conversation) => conversation.display_name)?.display_name ||
+    null
+  )
+}
+
+function preferredConversationCompany(conversations: WhatsAppConversation[], fallback: string | null) {
+  return fallback || conversations.find((conversation) => conversation.company)?.company || null
+}
+
+async function mergeConversationDuplicates(
+  supabase: SupabaseClient,
+  conversations: WhatsAppConversation[],
+  canonicalPhone: string,
+) {
+  if (conversations.length <= 1) {
+    const only = conversations[0] || null
+    if (!only || only.phone_e164 === canonicalPhone) return only
+
+    const { data, error } = await supabase
+      .from("whatsapp_conversations")
+      .update({
+        phone_e164: canonicalPhone,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", only.id)
+      .select("*")
+      .single()
+
+    if (error) throw error
+    return data as WhatsAppConversation
+  }
+
+  const keeper =
+    conversations.find((conversation) => conversation.phone_e164 === canonicalPhone) ||
+    latestConversation(conversations) ||
+    conversations[0]
+  const duplicates = conversations.filter((conversation) => conversation.id !== keeper.id)
+  const duplicateIds = duplicates.map((conversation) => conversation.id)
+
+  if (duplicateIds.length) {
+    const messagesMove = await supabase
+      .from("whatsapp_messages")
+      .update({ conversation_id: keeper.id })
+      .in("conversation_id", duplicateIds)
+    if (messagesMove.error && !isMissingTableError(messagesMove.error)) throw messagesMove.error
+  }
+
+  const latest = latestConversation(conversations) || keeper
+  const mergedMetadata = conversations.reduce<Record<string, unknown>>(
+    (metadata, conversation) => ({ ...metadata, ...(conversation.metadata || {}) }),
+    {},
+  )
+  const mergedTags = Array.from(new Set(conversations.flatMap((conversation) => conversation.tags || [])))
+  const unreadCount = conversations.reduce((total, conversation) => total + (conversation.unread_count || 0), 0)
+  const now = new Date().toISOString()
+
+  const { data, error } = await supabase
+    .from("whatsapp_conversations")
+    .update({
+      phone_e164: canonicalPhone,
+      display_name: preferredConversationName(conversations, keeper.display_name),
+      company: preferredConversationCompany(conversations, keeper.company),
+      tags: mergedTags,
+      last_message_preview: latest.last_message_preview,
+      last_message_at: latest.last_message_at,
+      unread_count: unreadCount,
+      metadata: mergedMetadata,
+      updated_at: now,
+    })
+    .eq("id", keeper.id)
+    .select("*")
+    .single()
+
+  if (error) throw error
+
+  if (duplicateIds.length) {
+    const deleteResult = await supabase
+      .from("whatsapp_conversations")
+      .delete()
+      .in("id", duplicateIds)
+    if (deleteResult.error && !isMissingTableError(deleteResult.error)) throw deleteResult.error
+  }
+
+  return data as WhatsAppConversation
 }
 
 function graphErrorMessage(data: Record<string, unknown>, fallback: string) {
@@ -369,13 +500,17 @@ async function ensureConversation(
   const phone_e164 = normalisePhone(phone)
   if (!phone_e164) throw new Error("WhatsApp phone number is required.")
 
-  const { data: existing, error: existingError } = await supabase
+  const { data: existingRows, error: existingError } = await supabase
     .from("whatsapp_conversations")
     .select("*")
-    .eq("phone_e164", phone_e164)
-    .maybeSingle()
+    .in("phone_e164", conversationPhoneVariants(phone_e164))
 
   if (existingError) throw existingError
+  const existing = await mergeConversationDuplicates(
+    supabase,
+    ((existingRows || []) as WhatsAppConversation[]),
+    phone_e164,
+  )
 
   const now = new Date().toISOString()
   if (existing) {
