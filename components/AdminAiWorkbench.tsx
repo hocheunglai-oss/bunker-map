@@ -189,14 +189,10 @@ export function AdminAiWorkbench() {
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           className="fc-admin-ai-input"
-          placeholder="Do anything"
+          placeholder="Under Construction"
           rows={3}
         />
         <div className="fc-admin-ai-toolbar">
-          <div className="fc-admin-ai-toolbar-left">
-            <span className="fc-admin-ai-tool-plus">+</span>
-            <span className="fc-admin-ai-access-pill">Review first</span>
-          </div>
           <div className="fc-admin-ai-toolbar-right">
             <span>Gemini free</span>
             <button
@@ -211,12 +207,6 @@ export function AdminAiWorkbench() {
             </button>
           </div>
         </div>
-      </div>
-      <div className="fc-admin-ai-context-row" aria-label="AI workbench context">
-        <span>bunker-map</span>
-        <span>Event Calendar</span>
-        <span>Phonebook</span>
-        <span>main</span>
       </div>
 
       {message ? (

@@ -875,12 +875,11 @@ body {
   min-height: 48px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 14px;
   padding: 8px 8px 8px 14px;
 }
 
-.fc-admin-ai-toolbar-left,
 .fc-admin-ai-toolbar-right {
   min-width: 0;
   display: flex;
@@ -892,40 +891,6 @@ body {
   color: #7c7f86;
   font-size: 12px;
   font-weight: 500;
-}
-
-.fc-admin-ai-tool-plus {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #9699a1;
-  font-size: 24px;
-  font-weight: 300;
-  line-height: 1;
-}
-
-.fc-admin-ai-access-pill {
-  display: inline-flex;
-  align-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #ef5b1f;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.fc-admin-ai-access-pill::before {
-  width: 7px;
-  height: 7px;
-  margin-right: 7px;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-  content: "";
 }
 
 .fc-admin-ai-send-button {
@@ -953,40 +918,6 @@ body {
 
 .fc-admin-ai-send-button:disabled {
   opacity: 0.45;
-}
-
-.fc-admin-ai-context-row {
-  width: calc(100% - 4px);
-  min-height: 44px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 20px;
-  margin: -8px auto 0;
-  border-radius: 0 0 18px 18px;
-  background: #f1f1f2;
-  color: #777a80;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 16px 16px 11px;
-}
-
-.fc-admin-ai-context-row span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.fc-admin-ai-context-row span::before {
-  width: 13px;
-  height: 9px;
-  display: inline-block;
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  opacity: 0.75;
-  content: "";
 }
 
 .fc-admin-ai-primary-button,
@@ -2037,18 +1968,12 @@ body {
     width: 100%;
   }
 
-  .fc-admin-ai-toolbar,
-  .fc-admin-ai-context-row {
+  .fc-admin-ai-toolbar {
     gap: 10px;
   }
 
   .fc-admin-ai-toolbar-right > span {
     display: none;
-  }
-
-  .fc-admin-ai-context-row {
-    min-height: 40px;
-    padding: 14px 12px 10px;
   }
 
   .fc-admin-dashboard-swatches {
