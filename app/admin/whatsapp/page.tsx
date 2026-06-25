@@ -156,6 +156,7 @@ const COUNTRY_CODES: Record<string, string> = {
 const pageStyle: CSSProperties = {
   height: "100dvh",
   minHeight: 0,
+  maxHeight: "100dvh",
   background: "#111b21",
   color: "#111b21",
   fontFamily: "var(--fc-admin-font)",
@@ -166,6 +167,7 @@ const pageStyle: CSSProperties = {
 const appShellStyle: CSSProperties = {
   height: "100dvh",
   minHeight: 0,
+  maxHeight: "100dvh",
   display: "grid",
   gridTemplateColumns: "390px 230px minmax(460px, 1fr) 230px",
   background: "#efeae2",
@@ -1352,6 +1354,9 @@ export default function WhatsAppAdminPage() {
       <aside
         style={{
           minWidth: 0,
+          minHeight: 0,
+          height: "100%",
+          overflow: "hidden",
           background: "#ffffff",
           borderLeft: borderSide === "left" ? "1px solid #d1d7db" : undefined,
           borderRight: borderSide === "right" ? "1px solid #d1d7db" : undefined,
@@ -1408,6 +1413,9 @@ export default function WhatsAppAdminPage() {
         <aside
           style={{
             minWidth: 0,
+            minHeight: 0,
+            height: "100%",
+            overflow: "hidden",
             background: "#ffffff",
             borderRight: "1px solid #d1d7db",
             display: "grid",
@@ -1505,6 +1513,9 @@ export default function WhatsAppAdminPage() {
         <section
           style={{
             minWidth: 0,
+            minHeight: 0,
+            height: "100%",
+            overflow: "hidden",
             display: "grid",
             gridTemplateRows: "auto minmax(0, 1fr) auto",
             background: "#efeae2",
@@ -1564,6 +1575,7 @@ export default function WhatsAppAdminPage() {
               display: "flex",
               flexDirection: "column",
               gap: "8px",
+              overscrollBehavior: "contain",
               background:
                 "linear-gradient(rgba(239,234,226,0.94), rgba(239,234,226,0.94)), repeating-linear-gradient(45deg, #d9d1c6 0 1px, transparent 1px 28px)",
             }}
@@ -1674,6 +1686,9 @@ export default function WhatsAppAdminPage() {
               gap: "10px",
               alignItems: "end",
               padding: "10px 14px",
+              position: "sticky",
+              bottom: 0,
+              zIndex: 5,
             }}
             data-admin-button-style="preserve"
           >
