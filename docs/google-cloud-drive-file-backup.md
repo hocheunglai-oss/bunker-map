@@ -9,7 +9,7 @@ This backs up all CCINFO file contents under `GOOGLE_DRIVE_COMPANY_FOLDER_ID` to
 - Runner: Cloud Run Job
 - Region: `us-central1` by default
 - Backup bucket: `US-CENTRAL1` by default, so the first 5 GB-months of Standard storage are eligible for the Google Cloud Storage Always Free limit
-- Schedule: Cloud Scheduler, weekly at `0 20 * * 6` UTC by default, which is Sunday 04:00 in Hong Kong
+- Schedule: Cloud Scheduler, daily at `0 0 * * *` UTC by default, which is 08:00 in Hong Kong
 - Manifest copy: Google Drive folder `Bunker Map Backups / Drive File Backup Manifests`
 - Health check: `/admin/systemhealth` reads the latest Drive manifest
 
@@ -53,7 +53,7 @@ GCP_REGION=us-central1
 GCS_BUCKET_LOCATION=US-CENTRAL1
 GCS_BACKUP_BUCKET=YOUR_PROJECT_ID-bunker-map-drive-file-backups
 GCS_BACKUP_PREFIX=ccinfo-drive
-DRIVE_FILE_BACKUP_SCHEDULE="0 20 * * 6"
+DRIVE_FILE_BACKUP_SCHEDULE="0 0 * * *"
 EXECUTE_NOW=1
 ```
 
