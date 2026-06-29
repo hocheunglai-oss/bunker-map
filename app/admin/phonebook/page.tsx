@@ -2680,8 +2680,13 @@ export default function PhonebookPage() {
       </div>
 
       {companyModalOpen && companyDraft ? (
-        <div style={modalOverlayStyle} onClick={closeCompanyModal}>
-          <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={modalOverlayStyle}>
+          <div
+            style={modalCardStyle}
+            role="dialog"
+            aria-modal="true"
+            aria-label={creatingCompany ? "New company" : "Company details"}
+          >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
               <div>
                 <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
@@ -2785,8 +2790,13 @@ export default function PhonebookPage() {
       ) : null}
 
       {contactModalOpen && draft ? (
-        <div style={modalOverlayStyle} onClick={closeContactModal}>
-          <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={modalOverlayStyle}>
+          <div
+            style={modalCardStyle}
+            role="dialog"
+            aria-modal="true"
+            aria-label={creatingContact ? "New contact" : "Contact details"}
+          >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
               <div>
                 <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Contact</div>
