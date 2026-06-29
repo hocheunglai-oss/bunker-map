@@ -50,6 +50,19 @@ function phoneDigits(value: string | null | undefined) {
   return (value || "").replace(/\D/g, "")
 }
 
+function phoneSearchClause(value: string) {
+  const tail = value.slice(-8)
+  return [
+    `mobile_1.ilike.%${tail}%`,
+    `mobile_2.ilike.%${tail}%`,
+    `mobile_phone.ilike.%${tail}%`,
+    `business_phone.ilike.%${tail}%`,
+    `direct_line.ilike.%${tail}%`,
+    `other_phone.ilike.%${tail}%`,
+    `instant_messaging.ilike.%${tail}%`,
+  ].join(",")
+}
+
 export async function GET(request: Request) {
   try {
     await requireAdminPagePermission("whatsapp", "view")
@@ -74,39 +87,21 @@ export async function GET(request: Request) {
       .limit(limit)
 
     if (phone) {
-      const tail = phone.slice(-8)
-      contactQuery = contactQuery.or(
-        [
-          `mobile_1.ilike.%${tail}%`,
-          `mobile_2.ilike.%${tail}%`,
-          `mobile_phone.ilike.%${tail}%`,
-          `business_phone.ilike.%${tail}%`,
-          `direct_line.ilike.%${tail}%`,
-          `other_phone.ilike.%${tail}%`,
-          `instant_messaging.ilike.%${tail}%`,
-        ].join(","),
-      )
+      contactQuery = contactQuery.or(phoneSearchClause(phone))
     } else {
       const tokens = buildSearchTokens(query)
+      const queryDigits = phoneDigits(query)
+      if (queryDigits.length >= 4) {
+        contactQuery = contactQuery.or(phoneSearchClause(queryDigits))
+      }
       const searchFields = [
         "search_text",
         "full_name",
         "company",
-        "title",
-        "position",
-        "department",
         "mobile_area",
         "mobile_1",
-        "mobile_2",
         "mobile_phone",
-        "business_phone",
-        "business_phone_2",
-        "direct_line",
-        "other_phone",
         "instant_messaging",
-        "personal_email",
-        "general_email",
-        "private_email",
       ]
       for (const token of tokens) {
         contactQuery = contactQuery.or(

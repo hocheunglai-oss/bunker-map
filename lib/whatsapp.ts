@@ -116,6 +116,35 @@ const DEFAULT_WHATSAPP_COUNTRY_CODE = "852"
 const TEMPLATE_EMPTY_VARIABLE_VALUE = "\u00a0"
 const TEMPLATE_CACHE_MS = 5 * 60 * 1000
 const TABLE_SETUP_MESSAGE = "Run supabase/whatsapp_schema.sql to enable WhatsApp storage."
+const WHATSAPP_CONVERSATION_SELECT = [
+  "id",
+  "phone_e164",
+  "display_name",
+  "company",
+  "assigned_to",
+  "status",
+  "tags",
+  "last_message_preview",
+  "last_message_at",
+  "unread_count",
+  "metadata",
+  "created_at",
+  "updated_at",
+].join(",")
+const WHATSAPP_MESSAGE_SELECT = [
+  "id",
+  "conversation_id",
+  "whatsapp_message_id",
+  "direction",
+  "message_type",
+  "body",
+  "media_url",
+  "status",
+  "from_phone",
+  "to_phone",
+  "sent_at",
+  "created_at",
+].join(",")
 let templateCache: {
   cacheKey: string
   expiresAt: number
@@ -479,7 +508,7 @@ export async function loadWhatsAppInbox(selectedConversationId?: string | null):
   const supabase = getServiceSupabaseClient()
   const conversationsResult = await supabase
     .from("whatsapp_conversations")
-    .select("*")
+    .select(WHATSAPP_CONVERSATION_SELECT)
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(200)
 
@@ -488,7 +517,7 @@ export async function loadWhatsAppInbox(selectedConversationId?: string | null):
     throw conversationsResult.error
   }
 
-  const conversations = (conversationsResult.data || []) as WhatsAppConversation[]
+  const conversations = ((conversationsResult.data || []) as unknown) as WhatsAppConversation[]
   const fallbackConversationId = conversations[0]?.id || null
   const resolvedConversationId =
     selectedConversationId && conversations.some((conversation) => conversation.id === selectedConversationId)
@@ -507,7 +536,7 @@ export async function loadWhatsAppInbox(selectedConversationId?: string | null):
 
   const messagesResult = await supabase
     .from("whatsapp_messages")
-    .select("*")
+    .select(WHATSAPP_MESSAGE_SELECT)
     .eq("conversation_id", resolvedConversationId)
     .order("sent_at", { ascending: true })
     .limit(220)
@@ -519,11 +548,29 @@ export async function loadWhatsAppInbox(selectedConversationId?: string | null):
 
   return {
     conversations,
-    messages: (messagesResult.data || []) as WhatsAppMessage[],
+    messages: ((messagesResult.data || []) as unknown) as WhatsAppMessage[],
     selectedConversationId: resolvedConversationId,
     storageReady: true,
     storageMessage: null,
   }
+}
+
+export async function loadWhatsAppConversationMessages(conversationId: string) {
+  if (!conversationId) throw new Error("Conversation id is required.")
+  const supabase = getServiceSupabaseClient()
+  const messagesResult = await supabase
+    .from("whatsapp_messages")
+    .select(WHATSAPP_MESSAGE_SELECT)
+    .eq("conversation_id", conversationId)
+    .order("sent_at", { ascending: true })
+    .limit(220)
+
+  if (messagesResult.error) {
+    if (isMissingTableError(messagesResult.error)) return []
+    throw messagesResult.error
+  }
+
+  return ((messagesResult.data || []) as unknown) as WhatsAppMessage[]
 }
 
 async function ensureConversation(
@@ -716,10 +763,9 @@ export async function reorderWhatsAppAssignedContacts(
   if (existingError) throw existingError
 
   const orderById = new Map(safeItems.map((item) => [item.conversationId, item.order]))
-  const updated: WhatsAppConversation[] = []
-  for (const row of (existingRows || []) as WhatsAppConversation[]) {
+  const updates = ((existingRows || []) as WhatsAppConversation[]).map(async (row) => {
     const order = orderById.get(row.id)
-    if (!Number.isFinite(order)) continue
+    if (!Number.isFinite(order)) return null
 
     const { data, error } = await supabase
       .from("whatsapp_conversations")
@@ -741,10 +787,11 @@ export async function reorderWhatsAppAssignedContacts(
       .single()
 
     if (error) throw error
-    updated.push(data as WhatsAppConversation)
-  }
+    return data as WhatsAppConversation
+  })
 
-  return updated
+  const updated = await Promise.all(updates)
+  return updated.filter((row): row is WhatsAppConversation => Boolean(row))
 }
 
 export async function markWhatsAppConversationRead(

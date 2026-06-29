@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties } from "react"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -72,6 +72,11 @@ type WhatsAppInboxResponse = {
   storageReady: boolean
   storageMessage: string | null
   config: WhatsAppConfig
+  message?: string
+}
+
+type WhatsAppMessagesResponse = {
+  messages: WhatsAppMessage[]
   message?: string
 }
 
@@ -442,6 +447,25 @@ function sortConversations(conversations: WhatsAppConversation[]) {
   )
 }
 
+function inboxSignature(inbox: WhatsAppInboxResponse) {
+  return JSON.stringify({
+    selected: inbox.selectedConversationId,
+    conversations: inbox.conversations.map((conversation) => [
+      conversation.id,
+      conversation.last_message_at,
+      conversation.updated_at,
+      conversation.unread_count,
+      conversation.last_message_preview,
+    ]),
+    messages: inbox.messages.map((messageItem) => [
+      messageItem.id,
+      messageItem.status,
+      messageItem.sent_at,
+      messageItem.body,
+    ]),
+  })
+}
+
 function metadataNumber(conversation: WhatsAppConversation, key: string) {
   const value = conversation.metadata?.[key]
   const numberValue = typeof value === "number" ? value : Number(value)
@@ -540,6 +564,7 @@ export default function WhatsAppAdminPage() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [selectedContact, setSelectedContact] = useState<ContactOption | null>(null)
   const [leftSearchQuery, setLeftSearchQuery] = useState("")
+  const deferredLeftSearchQuery = useDeferredValue(leftSearchQuery)
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [contactMatches, setContactMatches] = useState<Record<string, ContactOption>>({})
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([])
@@ -558,7 +583,11 @@ export default function WhatsAppAdminPage() {
   const composeRef = useRef<HTMLTextAreaElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const contactRequestIdRef = useRef(0)
+  const messageRequestIdRef = useRef(0)
   const inboxPollRef = useRef(false)
+  const inboxSignatureRef = useRef("")
+  const contactMatchesRef = useRef<Record<string, ContactOption>>({})
+  const contactLookupRef = useRef(new Set<string>())
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "view")
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "edit")
@@ -573,6 +602,7 @@ export default function WhatsAppAdminPage() {
         const key = phoneMatchKey(item.phone)
         if (key) next[key] = item
       }
+      contactMatchesRef.current = next
       return next
     })
   }, [])
@@ -637,7 +667,8 @@ export default function WhatsAppAdminPage() {
   const loadContactByPhone = useCallback(async (phone: string) => {
     const digits = phoneDigits(phone)
     const key = phoneMatchKey(phone)
-    if (!digits || contactMatches[key]) return
+    if (!digits || contactMatchesRef.current[key] || contactLookupRef.current.has(key)) return
+    contactLookupRef.current.add(key)
 
     try {
       const url = new URL("/api/whatsapp/contacts", window.location.origin)
@@ -653,9 +684,14 @@ export default function WhatsAppAdminPage() {
         .filter((item): item is ContactOption => Boolean(item))
       mergeContactMatches(matches)
     } catch {
+      contactLookupRef.current.delete(key)
       // Contact enrichment should never block the chat.
     }
-  }, [contactMatches, mergeContactMatches])
+  }, [mergeContactMatches])
+
+  useEffect(() => {
+    contactMatchesRef.current = contactMatches
+  }, [contactMatches])
 
   const loadTemplates = useCallback(async () => {
     let usedCache = false
@@ -713,12 +749,38 @@ export default function WhatsAppAdminPage() {
       const data = (await response.json().catch(() => ({}))) as WhatsAppInboxResponse
       if (!response.ok) throw new Error(data.message || "Unable to load WhatsApp inbox.")
 
+      const nextSignature = inboxSignature(data)
+      if (options.silent && nextSignature === inboxSignatureRef.current) return
+      inboxSignatureRef.current = nextSignature
       setInbox(data)
       setSelectedConversationId(data.selectedConversationId)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load WhatsApp inbox.")
     } finally {
       if (!options.silent) setLoading(false)
+    }
+  }, [])
+
+  const loadConversationMessages = useCallback(async (conversationId: string) => {
+    if (!conversationId) return
+    const requestId = messageRequestIdRef.current + 1
+    messageRequestIdRef.current = requestId
+
+    try {
+      const url = new URL("/api/whatsapp/messages", window.location.origin)
+      url.searchParams.set("conversationId", conversationId)
+      const response = await fetch(url, { cache: "no-store" })
+      const data = (await response.json().catch(() => ({}))) as WhatsAppMessagesResponse
+      if (!response.ok) throw new Error(data.message || "Unable to load WhatsApp messages.")
+      if (messageRequestIdRef.current !== requestId) return
+
+      setInbox((current) => ({
+        ...current,
+        selectedConversationId: conversationId,
+        messages: data.messages || [],
+      }))
+    } catch (messagesError) {
+      setError(messagesError instanceof Error ? messagesError.message : "Unable to load WhatsApp messages.")
     }
   }, [])
 
@@ -735,17 +797,18 @@ export default function WhatsAppAdminPage() {
   useEffect(() => {
     if (authLoading || !authenticated || !canView) return
     const timer = window.setTimeout(() => {
-      void loadContacts(leftSearchQuery)
-    }, leftSearchQuery ? 220 : 0)
+      void loadContacts(deferredLeftSearchQuery)
+    }, deferredLeftSearchQuery ? 180 : 0)
 
     return () => window.clearTimeout(timer)
-  }, [authLoading, authenticated, canView, leftSearchQuery, loadContacts])
+  }, [authLoading, authenticated, canView, deferredLeftSearchQuery, loadContacts])
 
   useEffect(() => {
-    if (authLoading || !authenticated || !canView || selectedContact || sending) return
+    if (authLoading || !authenticated || !canView || selectedContact || sending || savingList || dragState) return
 
     const pollInbox = async () => {
       if (document.hidden) return
+      if (composeRef.current && document.activeElement === composeRef.current) return
       if (inboxPollRef.current) return
       inboxPollRef.current = true
       try {
@@ -757,10 +820,20 @@ export default function WhatsAppAdminPage() {
 
     const timer = window.setInterval(() => {
       void pollInbox()
-    }, 3500)
+    }, 5000)
 
     return () => window.clearInterval(timer)
-  }, [authLoading, authenticated, canView, loadInbox, selectedContact, selectedConversationId, sending])
+  }, [
+    authLoading,
+    authenticated,
+    canView,
+    dragState,
+    loadInbox,
+    savingList,
+    selectedContact,
+    selectedConversationId,
+    sending,
+  ])
 
   const selectedConversation = useMemo(
     () =>
@@ -789,7 +862,7 @@ export default function WhatsAppAdminPage() {
   )
 
   const conversationItems = useMemo(() => {
-    const normalizedQuery = leftSearchQuery.trim().toLowerCase()
+    const normalizedQuery = deferredLeftSearchQuery.trim().toLowerCase()
     return inbox.conversations.filter((conversation) => {
       if (!conversation.last_message_at && !conversation.last_message_preview) return false
       if (!normalizedQuery) return true
@@ -807,7 +880,7 @@ export default function WhatsAppAdminPage() {
         .toLowerCase()
         .includes(normalizedQuery)
     })
-  }, [contactMatches, inbox.conversations, leftSearchQuery])
+  }, [contactMatches, deferredLeftSearchQuery, inbox.conversations])
 
   const supplierConversations = useMemo(
     () =>
@@ -926,6 +999,21 @@ export default function WhatsAppAdminPage() {
     })
   }, [])
 
+  const updateDropTarget = useCallback((nextTarget: DropTarget | null) => {
+    setDropTarget((current) => {
+      if (!current && !nextTarget) return current
+      if (
+        current &&
+        nextTarget &&
+        current.listType === nextTarget.listType &&
+        current.index === nextTarget.index
+      ) {
+        return current
+      }
+      return nextTarget
+    })
+  }, [])
+
   const adjustComposerHeight = useCallback(() => {
     const textarea = composeRef.current
     if (!textarea) return
@@ -974,7 +1062,7 @@ export default function WhatsAppAdminPage() {
     setMessage("")
     if (conversation?.phone_e164) setComposeTo(conversation.phone_e164)
     void markConversationRead(conversationId)
-    await loadInbox(conversationId, { silent: true, keepNotice: true })
+    void loadConversationMessages(conversationId)
     focusComposer()
   }
 
@@ -1015,6 +1103,7 @@ export default function WhatsAppAdminPage() {
   }
 
   function addOptimisticMessage(to: string, preview: string, messageType: string) {
+    messageRequestIdRef.current += 1
     const now = new Date().toISOString()
     const normalizedTo = normalizePhone(to) || to
     const conversationId = selectedConversation?.id || `local-${phoneDigits(normalizedTo) || Date.now()}`
@@ -1148,12 +1237,12 @@ export default function WhatsAppAdminPage() {
 
       mergeContactMatches([contact])
       const nextList = insertConversationAt(manualConversations(listType), assignedConversation, index)
-      await saveManualOrder(nextList, listType)
       setSelectedContact(null)
       setSelectedConversationId(assignedConversation.id)
       setComposeTo(assignedConversation.phone_e164)
-      void loadInbox(assignedConversation.id, { silent: true, keepNotice: true })
+      void loadConversationMessages(assignedConversation.id)
       focusComposer()
+      await saveManualOrder(nextList, listType)
     } catch (assignError) {
       setError(assignError instanceof Error ? assignError.message : "Unable to assign WhatsApp contact.")
     } finally {
@@ -1286,7 +1375,7 @@ export default function WhatsAppAdminPage() {
       }
     }
     setDragState(null)
-    setDropTarget(null)
+    updateDropTarget(null)
   }
 
   async function sendMessage() {
@@ -1329,7 +1418,11 @@ export default function WhatsAppAdminPage() {
       }
       if (!response.ok) throw new Error(data.message || "Unable to send WhatsApp message.")
 
-      await loadInbox(targetConversationId)
+      if (targetConversationId) {
+        void loadConversationMessages(targetConversationId)
+      } else {
+        await loadInbox(null)
+      }
       setMessage(data.storageWarning || (selectedTemplate ? "Template sent." : "Message sent."))
     } catch (sendError) {
       markOptimisticMessageFailed(optimisticMessageId)
@@ -1356,11 +1449,11 @@ export default function WhatsAppAdminPage() {
           event.dataTransfer.effectAllowed = "copyMove"
           event.dataTransfer.setData("text/plain", `conversation:${conversation.id}`)
           setDragState({ kind: "conversation", conversationId: conversation.id })
-          setDropTarget({ listType: "supplier", index: supplierConversations.length })
+          updateDropTarget({ listType: "supplier", index: supplierConversations.length })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropTarget(null)
+          updateDropTarget(null)
         }}
         style={{
           width: "100%",
@@ -1472,18 +1565,18 @@ export default function WhatsAppAdminPage() {
           event.dataTransfer.effectAllowed = "move"
           event.dataTransfer.setData("text/plain", `${listType}:${conversation.id}`)
           setDragState({ kind: "manual", conversationId: conversation.id, listType })
-          setDropTarget({ listType, index })
+          updateDropTarget({ listType, index })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropTarget(null)
+          updateDropTarget(null)
         }}
         onDragOver={(event) => {
           if (!dragState) return
           event.preventDefault()
           const bounds = event.currentTarget.getBoundingClientRect()
           const nextIndex = event.clientY > bounds.top + bounds.height / 2 ? index + 1 : index
-          setDropTarget({ listType, index: nextIndex })
+          updateDropTarget({ listType, index: nextIndex })
         }}
         style={{
           width: "100%",
@@ -1564,11 +1657,11 @@ export default function WhatsAppAdminPage() {
           event.dataTransfer.effectAllowed = "copyMove"
           event.dataTransfer.setData("text/plain", `contact:${contact.id}`)
           setDragState({ kind: "contact", contactId: contact.id })
-          setDropTarget({ listType: "supplier", index: supplierConversations.length })
+          updateDropTarget({ listType: "supplier", index: supplierConversations.length })
         }}
         onDragEnd={() => {
           setDragState(null)
-          setDropTarget(null)
+          updateDropTarget(null)
         }}
         style={{
           width: "100%",
@@ -1659,7 +1752,7 @@ export default function WhatsAppAdminPage() {
             if (!dragState) return
             event.preventDefault()
             if (!dropTarget || dropTarget.listType !== listType) {
-              setDropTarget({ listType, index: listItems.length })
+              updateDropTarget({ listType, index: listItems.length })
             }
           }}
           onDrop={(event) => {
