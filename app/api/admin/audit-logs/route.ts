@@ -30,6 +30,9 @@ const PAGE_TABLES: Record<string, string[]> = {
   ],
   "email-templates": ["email_templates"],
   "user-management": ["admin_users", "admin_role_defaults"],
+  "spc-user-management": ["spc_users"],
+  "spc-buyer-enquiries": ["spc_enquiries"],
+  "spc-whatsapp": ["whatsapp_conversations", "whatsapp_messages"],
   "event-calendar": ["office_calendar_store"],
   "task-calendar": ["office_calendar_store"],
   pricesetter: ["ports", "price_history", "remarks"],
@@ -43,6 +46,27 @@ const PAGE_ALIASES: Record<string, string> = {
   outlooktemplates: "email-templates",
   emailtemplates: "email-templates",
 }
+
+const SPC_AUDIT_PAGES = [
+  {
+    id: "spc-user-management",
+    label: "SPC USER MANAGEMENT",
+    group: "management" as const,
+    path: "/spc/usermanagement",
+  },
+  {
+    id: "spc-buyer-enquiries",
+    label: "SPC BUYER ENQUIRIES",
+    group: "trading" as const,
+    path: "/spc/buyer",
+  },
+  {
+    id: "spc-whatsapp",
+    label: "SPC WHATSAPP",
+    group: "contacts" as const,
+    path: "/spc/supplier",
+  },
+]
 
 let managedUsersCache:
   | {
@@ -108,7 +132,7 @@ export async function GET(request: Request) {
       : null
     const operation = url.searchParams.get("operation")?.toUpperCase()
     const actor = url.searchParams.get("actor")
-    const pages = await getDiscoveredAdminPages()
+    const pages = [...(await getDiscoveredAdminPages()), ...SPC_AUDIT_PAGES]
     const tableNames =
       pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
     const operations = rawOperationsForDisplay(operation)

@@ -443,7 +443,9 @@ begin
     'office_calendar_store',
     'email_templates',
     'admin_users',
-    'admin_role_defaults'
+    'admin_role_defaults',
+    'spc_users',
+    'spc_enquiries'
   ]
   loop
     table_reg := to_regclass('public.' || table_name);

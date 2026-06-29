@@ -88,11 +88,16 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   whatsapp_messages: "whatsapp",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
+  spc_users: "spc-user-management",
+  spc_enquiries: "spc-buyer-enquiries",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
   "hongkong-price-history": "HONG KONG PRICE HISTORY",
   "taiwan-price-history": "TAIWAN PRICE HISTORY",
+  "spc-user-management": "SPC USER MANAGEMENT",
+  "spc-buyer-enquiries": "SPC BUYER ENQUIRIES",
+  "spc-whatsapp": "SPC WHATSAPP",
 }
 
 const ENTITY_NAMES: Record<string, string> = {
@@ -117,6 +122,8 @@ const ENTITY_NAMES: Record<string, string> = {
   whatsapp_messages: "WhatsApp message",
   admin_users: "user",
   admin_role_defaults: "role defaults",
+  spc_users: "SPC user",
+  spc_enquiries: "SPC enquiry",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -160,6 +167,11 @@ const FIELD_LABELS: Record<string, string> = {
   unread_count: "unread count",
   assigned_to: "assigned to",
   whatsapp_message_id: "WhatsApp message id",
+  enquiry_number: "enquiry number",
+  vessel_name: "vessel name",
+  supplier_name: "supplier",
+  created_by_username: "created by",
+  created_by_display_name: "created by",
   content: "content",
   body: "content",
 }

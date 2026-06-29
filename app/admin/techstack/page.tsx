@@ -39,6 +39,7 @@ const SERVICES = [
   ["CALENDAR SYNC", "GOOGLE CALENDAR API", "GOOGLE", "FCB.BUNKER@GMAIL.COM"],
   ["MAIL DIRECTORY", "EXCHANGE ONLINE / GRAPH", "MICROSOFT 365", "AZURE AUTOMATION"],
   ["WHATSAPP", "META WHATSAPP BUSINESS PLATFORM", "META", "CONFIGURED IN VERCEL"],
+  ["SINGAPORE PURCHASING CENTER", "NEXT.JS SUBDOMAIN APP / SPC AUTH", "VERCEL", "SPC.FCUNO.COM"],
   ["ADMIN AI WORKBENCH", "GEMINI INTERACTIONS API", "GOOGLE AI", "CONFIGURED IN VERCEL"],
   ["TRANSACTIONAL EMAIL", "RESEND API", "RESEND", "CONFIGURED IN VERCEL"],
   ["MAPS", "MAPTILER SDK / LEAFLET", "MAPTILER", "PUBLIC CLIENT KEY"],
@@ -47,7 +48,7 @@ const SERVICES = [
 const DATABASE_GROUPS = [
   {
     title: "ADMINISTRATION",
-    tables: ["admin_users", "admin_role_defaults", "admin_audit_logs"],
+    tables: ["admin_users", "admin_role_defaults", "admin_audit_logs", "spc_users"],
   },
   {
     title: "CCINFO",
@@ -76,7 +77,7 @@ const DATABASE_GROUPS = [
   },
   {
     title: "OPERATIONS",
-    tables: ["office_calendar_store", "email_templates", "ports", "remarks", "price_history"],
+    tables: ["office_calendar_store", "email_templates", "ports", "remarks", "price_history", "spc_enquiries"],
   },
 ] as const
 
