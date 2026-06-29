@@ -30,7 +30,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   ],
   "email-templates": ["email_templates"],
   "user-management": ["admin_users", "admin_role_defaults"],
-  "spc-user-management": ["spc_users"],
+  "spc-user-management": ["spc_users", "office_calendar_store"],
   "spc-buyer-enquiries": ["spc_enquiries"],
   "spc-whatsapp": ["whatsapp_conversations", "whatsapp_messages"],
   "event-calendar": ["office_calendar_store"],
@@ -65,6 +65,24 @@ const SPC_AUDIT_PAGES = [
     label: "SPC WHATSAPP",
     group: "contacts" as const,
     path: "/spc/supplier",
+  },
+  {
+    id: "spc-audit-log",
+    label: "SPC AUDIT LOG",
+    group: "management" as const,
+    path: "/spc/auditlog",
+  },
+  {
+    id: "spc-system-health",
+    label: "SPC SYSTEM HEALTH",
+    group: "management" as const,
+    path: "/spc/systemhealth",
+  },
+  {
+    id: "spc-tech-stack",
+    label: "SPC TECH STACK",
+    group: "management" as const,
+    path: "/spc/techstack",
   },
 ]
 

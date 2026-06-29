@@ -1,11 +1,15 @@
 import { cookies } from "next/headers"
 import {
   getDatabaseSpcUserByUsername,
-  normaliseSpcRole,
   type AuthenticatedSpcUser,
-  type SpcRoleId,
   validateDatabaseSpcUser,
 } from "@/lib/spcUsers"
+import {
+  canAccessSpcPage,
+  normaliseSpcRole,
+  type SpcPagePermissionMap,
+  type SpcRoleId,
+} from "@/lib/spcPages"
 
 export const SPC_COOKIE_NAME = "spc_auth"
 export const SPC_USER_COOKIE_NAME = "spc_user"
@@ -18,6 +22,7 @@ export type SpcSession = {
   username: string | null
   displayName: string | null
   role: SpcRoleId | null
+  permissions: SpcPagePermissionMap
 }
 
 type DatabaseSpcUser = Awaited<ReturnType<typeof getDatabaseSpcUserByUsername>>
@@ -113,6 +118,7 @@ function unauthenticatedSession(): SpcSession {
     username: null,
     displayName: null,
     role: null,
+    permissions: {},
   }
 }
 
@@ -136,6 +142,7 @@ export async function getSpcSession(): Promise<SpcSession> {
       username: databaseUser.username,
       displayName: databaseUser.displayName,
       role: normaliseSpcRole(databaseUser.role),
+      permissions: databaseUser.permissions,
     }
   }
 
@@ -158,5 +165,23 @@ export function hasSpcRole(session: SpcSession, roles: SpcRoleId | SpcRoleId[]) 
 export async function requireSpcRole(roles: SpcRoleId | SpcRoleId[]) {
   const session = await requireSpcSession()
   if (!hasSpcRole(session, roles)) throw new Error("Forbidden")
+  return session
+}
+
+export function hasSpcPagePermission(
+  session: SpcSession,
+  pageId: string,
+  access: "view" | "edit" = "view",
+) {
+  if (!session.authenticated) return false
+  return canAccessSpcPage(session.permissions, pageId, access)
+}
+
+export async function requireSpcPagePermission(
+  pageId: string,
+  access: "view" | "edit" = "view",
+) {
+  const session = await requireSpcSession()
+  if (!hasSpcPagePermission(session, pageId, access)) throw new Error("Forbidden")
   return session
 }

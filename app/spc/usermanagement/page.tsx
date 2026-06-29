@@ -4,7 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
-import type { SpcRoleId } from "@/lib/spcUsers"
+import {
+  canAccessSpcPage,
+  normaliseSpcPagePermissions,
+  normaliseSpcRole,
+  type SpcPageDefinition,
+  type SpcPagePermission,
+  type SpcPagePermissionMap,
+  type SpcRoleId,
+} from "@/lib/spcPages"
 
 type ManagedSpcUser = {
   id: string
@@ -12,20 +20,27 @@ type ManagedSpcUser = {
   displayName: string
   role: SpcRoleId
   roleLabel: string
+  permissions: SpcPagePermissionMap
   isActive: boolean
   createdAt: string
   updatedAt: string
 }
 
-type SpcRoleDefinition = {
-  id: SpcRoleId
+type ManagedSpcRoleDefault = {
+  role: SpcRoleId
   label: string
-  description: string
+  permissions: SpcPagePermissionMap
+  updatedAt: string | null
+  memberCount: number
+  persisted: boolean
+  isBuiltIn: boolean
 }
 
 type UsersResponse = {
   users?: ManagedSpcUser[]
-  roles?: SpcRoleDefinition[]
+  pages?: SpcPageDefinition[]
+  roleDefaults?: ManagedSpcRoleDefault[]
+  groupStorage?: string
   message?: string
 }
 
@@ -33,25 +48,12 @@ type DraftUser = {
   id?: string
   username: string
   displayName: string
-  role: SpcRoleId
+  role: string
   password: string
   isActive: boolean
 }
 
-const defaultRoles: SpcRoleDefinition[] = [
-  {
-    id: "buyer_trader",
-    label: "Buyer Trader",
-    description: "Create enquiries, review history, and manage SPC users.",
-  },
-  {
-    id: "supplier_trader",
-    label: "Supplier Trader",
-    description: "Use the SPC WhatsApp workspace.",
-  },
-]
-
-function createDraft(role: SpcRoleId): DraftUser {
+function createDraft(role = "BUYER TRADER"): DraftUser {
   return {
     username: "",
     displayName: "",
@@ -82,46 +84,62 @@ function displayDate(value: string) {
 
 export default function SpcUserManagementPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, role, username } = useSpcAuth()
+  const { loading: authLoading, authenticated, permissions, username } = useSpcAuth()
   const [users, setUsers] = useState<ManagedSpcUser[]>([])
-  const [roles, setRoles] = useState<SpcRoleDefinition[]>(defaultRoles)
-  const [selectedRole, setSelectedRole] = useState<SpcRoleId>("buyer_trader")
-  const [draft, setDraft] = useState<DraftUser>(() => createDraft("buyer_trader"))
+  const [pages, setPages] = useState<SpcPageDefinition[]>([])
+  const [roleDefaults, setRoleDefaults] = useState<ManagedSpcRoleDefault[]>([])
+  const [selectedRole, setSelectedRole] = useState<SpcRoleId>("BUYER TRADER")
+  const [draft, setDraft] = useState<DraftUser>(() => createDraft("BUYER TRADER"))
+  const [newGroupName, setNewGroupName] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [messageIsError, setMessageIsError] = useState(false)
 
+  const canView = canAccessSpcPage(permissions, "spc-user-management", "view")
+  const canEdit = canAccessSpcPage(permissions, "spc-user-management", "edit")
   const selectedRoleUsers = useMemo(
     () => users.filter((user) => user.role === selectedRole),
     [selectedRole, users],
   )
-  const selectedRoleDefinition = roles.find((item) => item.id === selectedRole) || roles[0]
+  const selectedGroup = roleDefaults.find((item) => item.role === selectedRole) || roleDefaults[0] || null
+  const selectedPermissions = selectedGroup
+    ? normaliseSpcPagePermissions(selectedGroup.permissions, "view", pages)
+    : normaliseSpcPagePermissions(null, "view", pages)
 
   const loadUsers = useCallback(async () => {
-    if (!authenticated || role !== "buyer_trader") return
+    if (!authenticated || !canView) return
+
     setLoading(true)
     try {
       const response = await fetch("/api/spc/users", { cache: "no-store" })
       const data = (await response.json()) as UsersResponse
       if (!response.ok) throw new Error(data.message || "Failed to load SPC users.")
+
+      const nextGroups = data.roleDefaults || []
       setUsers(data.users || [])
-      setRoles(data.roles || defaultRoles)
+      setPages(data.pages || [])
+      setRoleDefaults(nextGroups)
+      setSelectedRole((current) =>
+        nextGroups.some((group) => group.role === current)
+          ? current
+          : nextGroups.find((group) => group.role === "BUYER TRADER")?.role || nextGroups[0]?.role || "BUYER TRADER",
+      )
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load SPC users.")
       setMessageIsError(true)
     } finally {
       setLoading(false)
     }
-  }, [authenticated, role])
+  }, [authenticated, canView])
 
   useEffect(() => {
     document.title = "SPC User Management"
   }, [])
 
   useEffect(() => {
-    if (!authLoading && (!authenticated || role !== "buyer_trader")) router.replace("/spc")
-  }, [authLoading, authenticated, role, router])
+    if (!authLoading && (!authenticated || !canView)) router.replace("/spc")
+  }, [authLoading, authenticated, canView, router])
 
   useEffect(() => {
     void loadUsers()
@@ -143,6 +161,23 @@ export default function SpcUserManagementPage() {
     setDraft((current) => ({ ...current, [key]: value }))
   }
 
+  function updateRolePermission(pageId: string, permission: SpcPagePermission) {
+    if (!selectedGroup || !canEdit) return
+    setRoleDefaults((current) =>
+      current.map((group) =>
+        group.role === selectedGroup.role
+          ? {
+              ...group,
+              permissions: {
+                ...normaliseSpcPagePermissions(group.permissions, "view", pages),
+                [pageId]: permission,
+              },
+            }
+          : group,
+      ),
+    )
+  }
+
   async function saveUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSaving(true)
@@ -156,12 +191,7 @@ export default function SpcUserManagementPage() {
       })
       const data = (await response.json()) as { user?: ManagedSpcUser; message?: string }
       if (!response.ok || !data.user) throw new Error(data.message || "Failed to save SPC user.")
-      setUsers((current) => {
-        const exists = current.some((user) => user.id === data.user!.id)
-        return exists
-          ? current.map((user) => (user.id === data.user!.id ? data.user! : user))
-          : [...current, data.user!].sort((a, b) => a.username.localeCompare(b.username))
-      })
+      await loadUsers()
       setSelectedRole(data.user.role)
       setDraft(createDraft(data.user.role))
       setMessage("User saved.")
@@ -187,7 +217,7 @@ export default function SpcUserManagementPage() {
       })
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to delete SPC user.")
-      setUsers((current) => current.filter((item) => item.id !== user.id))
+      await loadUsers()
       if (draft.id === user.id) setDraft(createDraft(selectedRole))
       setMessage("User deleted.")
       setMessageIsError(false)
@@ -199,7 +229,110 @@ export default function SpcUserManagementPage() {
     }
   }
 
-  if (authLoading || !authenticated || role !== "buyer_trader") {
+  async function saveRoleDefault() {
+    if (!selectedGroup) return
+
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-role-default",
+          roleDefault: {
+            role: selectedGroup.role,
+            permissions: selectedPermissions,
+          },
+        }),
+      })
+      const data = (await response.json()) as { message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to save permission group.")
+      await loadUsers()
+      setMessage(`${selectedGroup.role} permissions saved.`)
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save permission group.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function createGroup() {
+    const requestedName = newGroupName.trim()
+    if (!requestedName) {
+      setMessage("Group name is required.")
+      setMessageIsError(true)
+      return
+    }
+
+    const nextRole = normaliseSpcRole(requestedName)
+    if (roleDefaults.some((group) => group.role === nextRole)) {
+      setMessage(`${nextRole} already exists.`)
+      setMessageIsError(true)
+      return
+    }
+
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-role-default",
+          roleDefault: {
+            role: requestedName,
+            permissions: normaliseSpcPagePermissions(null, "view", pages),
+          },
+        }),
+      })
+      const data = (await response.json()) as { roleDefault?: ManagedSpcRoleDefault; message?: string }
+      if (!response.ok || !data.roleDefault) throw new Error(data.message || "Failed to create permission group.")
+      setNewGroupName("")
+      setSelectedRole(data.roleDefault.role)
+      await loadUsers()
+      setMessage(`${data.roleDefault.role} group created.`)
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to create permission group.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteGroup() {
+    if (!selectedGroup || selectedGroup.isBuiltIn) return
+    if (!window.confirm(`Delete the ${selectedGroup.role} permission group?`)) return
+
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete-role-default",
+          roleDefault: { role: selectedGroup.role },
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to delete permission group.")
+      setSelectedRole("BUYER TRADER")
+      await loadUsers()
+      setMessage(`${selectedGroup.role} group deleted.`)
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete permission group.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (authLoading || !authenticated || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
@@ -208,7 +341,7 @@ export default function SpcUserManagementPage() {
       <div className="spc-page-heading">
         <div>
           <h1>User Management</h1>
-          <p>{users.length} SPC users</p>
+          <p>{users.length} SPC users · {roleDefaults.length} groups</p>
         </div>
       </div>
 
@@ -221,32 +354,41 @@ export default function SpcUserManagementPage() {
       <div className="spc-user-grid">
         <section className="spc-panel">
           <div className="spc-group-list">
-            {roles.map((item) => {
-              const count = users.filter((user) => user.role === item.id).length
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => selectRole(item.id)}
-                  className={selectedRole === item.id ? "is-active" : ""}
-                >
-                  <span>
-                    <strong>{item.label}</strong>
-                    <small>{item.description}</small>
-                  </span>
-                  <em>{count}</em>
+            {roleDefaults.map((item) => (
+              <button
+                key={item.role}
+                type="button"
+                onClick={() => selectRole(item.role)}
+                className={selectedRole === item.role ? "is-active" : ""}
+              >
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>{item.isBuiltIn ? "Built-in SPC group" : "Custom SPC group"}</small>
+                </span>
+                <em>{item.memberCount}</em>
+              </button>
+            ))}
+            {canEdit ? (
+              <div className="spc-group-create">
+                <input
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="New group name"
+                />
+                <button type="button" onClick={() => void createGroup()} disabled={saving}>
+                  Add Group
                 </button>
-              )
-            })}
+              </div>
+            ) : null}
           </div>
         </section>
 
         <section className="spc-panel">
           <div className="spc-panel-header">
             <div>
-              <h2>{selectedRoleDefinition?.label || "SPC Users"}</h2>
+              <h2>{selectedGroup?.label || "SPC Users"}</h2>
             </div>
-            <button type="button" onClick={() => setDraft(createDraft(selectedRole))}>
+            <button type="button" onClick={() => setDraft(createDraft(selectedRole))} disabled={!canEdit}>
               New User
             </button>
           </div>
@@ -262,7 +404,7 @@ export default function SpcUserManagementPage() {
                 <button
                   type="button"
                   onClick={() => void deleteUser(user)}
-                  disabled={saving || user.username === username}
+                  disabled={saving || !canEdit || (user.username === username && user.username !== "spcadmin")}
                   aria-label={`Delete ${user.displayName}`}
                   title={`Delete ${user.displayName}`}
                 >
@@ -288,6 +430,7 @@ export default function SpcUserManagementPage() {
                 onChange={(event) => updateDraft("username", event.target.value)}
                 autoComplete="username"
                 required
+                disabled={!canEdit}
               />
             </label>
             <label>
@@ -295,16 +438,18 @@ export default function SpcUserManagementPage() {
               <input
                 value={draft.displayName}
                 onChange={(event) => updateDraft("displayName", event.target.value)}
+                disabled={!canEdit}
               />
             </label>
             <label>
               <span>Group</span>
               <select
                 value={draft.role}
-                onChange={(event) => updateDraft("role", event.target.value as SpcRoleId)}
+                onChange={(event) => updateDraft("role", event.target.value)}
+                disabled={!canEdit}
               >
-                {roles.map((item) => (
-                  <option key={item.id} value={item.id}>{item.label}</option>
+                {roleDefaults.map((item) => (
+                  <option key={item.role} value={item.role}>{item.label}</option>
                 ))}
               </select>
             </label>
@@ -316,6 +461,7 @@ export default function SpcUserManagementPage() {
                 onChange={(event) => updateDraft("password", event.target.value)}
                 autoComplete="new-password"
                 required={!draft.id}
+                disabled={!canEdit}
               />
             </label>
             <label className="spc-checkbox-field">
@@ -323,15 +469,51 @@ export default function SpcUserManagementPage() {
                 type="checkbox"
                 checked={draft.isActive}
                 onChange={(event) => updateDraft("isActive", event.target.checked)}
+                disabled={!canEdit}
               />
               <span>Active account</span>
             </label>
             <div className="spc-form-actions">
-              <button type="submit" disabled={saving}>
+              <button type="submit" disabled={saving || !canEdit}>
                 {saving ? "Saving..." : "Save User"}
               </button>
             </div>
           </form>
+        </section>
+
+        <section className="spc-panel spc-authority-panel">
+          <div className="spc-panel-header">
+            <h2>Authority</h2>
+            <div className="spc-authority-actions">
+              <button type="button" onClick={() => void saveRoleDefault()} disabled={!canEdit || saving || !selectedGroup}>
+                Save Authority
+              </button>
+              {selectedGroup && !selectedGroup.isBuiltIn ? (
+                <button type="button" onClick={() => void deleteGroup()} disabled={!canEdit || saving}>
+                  Delete Group
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="spc-authority-list">
+            {pages.map((page) => (
+              <label key={page.id}>
+                <span>
+                  <strong>{page.label}</strong>
+                  <small>{page.group.replace("-", " ")}</small>
+                </span>
+                <select
+                  value={selectedPermissions[page.id] || "none"}
+                  onChange={(event) => updateRolePermission(page.id, event.target.value as SpcPagePermission)}
+                  disabled={!canEdit}
+                >
+                  <option value="none">None</option>
+                  <option value="view">View</option>
+                  <option value="edit">Edit</option>
+                </select>
+              </label>
+            ))}
+          </div>
         </section>
       </div>
     </SpcShell>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { createSpcEnquiry, listSpcEnquiries } from "@/lib/spcEnquiries"
 
 type EnquiryPayload = {
@@ -28,7 +28,7 @@ function errorResponse(error: unknown, fallback: string) {
 
 export async function GET() {
   try {
-    const session = await requireSpcRole("buyer_trader")
+    const session = await requireSpcPagePermission("spc-buyer-enquiries", "view")
     const enquiries = await listSpcEnquiries(session)
     return NextResponse.json({ enquiries })
   } catch (error) {
@@ -38,7 +38,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSpcRole("buyer_trader")
+    const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
     const payload = (await request.json()) as EnquiryPayload
     const enquiry = await createSpcEnquiry(payload, session, request)
     return NextResponse.json({ success: true, enquiry })

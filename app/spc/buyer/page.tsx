@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
+import { canAccessSpcPage } from "@/lib/spcPages"
 
 type SpcEnquiry = {
   id: string
@@ -64,7 +65,7 @@ function displayDate(value: string | null) {
 
 export default function SpcBuyerPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, role } = useSpcAuth()
+  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const [draft, setDraft] = useState<DraftEnquiry>(emptyDraft)
   const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
   const [loading, setLoading] = useState(false)
@@ -75,7 +76,7 @@ export default function SpcBuyerPage() {
   const recentCount = useMemo(() => enquiries.length, [enquiries.length])
 
   const loadEnquiries = useCallback(async () => {
-    if (!authenticated || role !== "buyer_trader") return
+    if (!authenticated || !canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")) return
     setLoading(true)
     try {
       const response = await fetch("/api/spc/enquiries", { cache: "no-store" })
@@ -88,15 +89,15 @@ export default function SpcBuyerPage() {
     } finally {
       setLoading(false)
     }
-  }, [authenticated, role])
+  }, [authenticated, permissions])
 
   useEffect(() => {
     document.title = "SPC Buyer Enquiries"
   }, [])
 
   useEffect(() => {
-    if (!authLoading && (!authenticated || role !== "buyer_trader")) router.replace("/spc")
-  }, [authLoading, authenticated, role, router])
+    if (!authLoading && (!authenticated || !canAccessSpcPage(permissions, "spc-buyer-enquiries", "view"))) router.replace("/spc")
+  }, [authLoading, authenticated, permissions, router])
 
   useEffect(() => {
     void loadEnquiries()
@@ -133,7 +134,7 @@ export default function SpcBuyerPage() {
     }
   }
 
-  if (authLoading || !authenticated || role !== "buyer_trader") {
+  if (authLoading || !authenticated || !canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")) {
     return <div className="spc-loading">Loading...</div>
   }
 

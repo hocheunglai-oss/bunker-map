@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { getServiceSupabaseClient } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
@@ -20,7 +20,7 @@ function conversationId(payload: RealtimePayload) {
 
 export async function GET(request: Request) {
   try {
-    await requireSpcRole("supplier_trader")
+    await requireSpcPagePermission("spc-whatsapp", "view")
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized"
     return Response.json(

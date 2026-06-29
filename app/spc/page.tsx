@@ -4,10 +4,11 @@ import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSpcAuth } from "@/lib/useSpcAuth"
+import { getDefaultSpcLandingPath } from "@/lib/spcPages"
 
 export default function SpcLoginPage() {
   const router = useRouter()
-  const { loading, authenticated, role } = useSpcAuth()
+  const { loading, authenticated, permissions } = useSpcAuth()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -20,9 +21,9 @@ export default function SpcLoginPage() {
 
   useEffect(() => {
     if (!loading && authenticated) {
-      router.replace(role === "supplier_trader" ? "/spc/supplier" : "/spc/buyer")
+      router.replace(getDefaultSpcLandingPath(permissions))
     }
-  }, [authenticated, loading, role, router])
+  }, [authenticated, loading, permissions, router])
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -48,53 +49,64 @@ export default function SpcLoginPage() {
       window.localStorage.setItem(
         "spc_actor",
         JSON.stringify({
-          username: data.user.username,
-          displayName: data.user.displayName || data.user.username,
-          role: data.user.role || null,
-        }),
+            username: data.user.username,
+            displayName: data.user.displayName || data.user.username,
+            role: data.user.role || null,
+            permissions: data.user.permissions || {},
+            pages: data.pages || [],
+          }),
       )
     }
 
-    router.replace(data.user?.role === "supplier_trader" ? "/spc/supplier" : "/spc/buyer")
+    router.replace(data.redirectTo || getDefaultSpcLandingPath(data.user?.permissions || {}))
     router.refresh()
   }
 
   return (
     <div className="spc-login-page">
       <section className="spc-login-card" aria-label="Singapore Purchasing Center login">
-        <div className="spc-skyline" aria-hidden="true">
-          <span />
+        <div className="spc-login-art-wrap" aria-hidden="true">
+          <Image
+            src="/spc-login-art.png"
+            alt=""
+            className="spc-login-art"
+            width={1024}
+            height={1536}
+            priority
+          />
         </div>
-
-        <Image
-          src="/logo.png"
-          alt="Fratelli Cosulich"
-          className="spc-login-logo"
-          width={968}
-          height={440}
-          priority
-        />
-
-        <div className="spc-login-title">
-          <h1>Singapore</h1>
-          <p>Purchasing Center</p>
-        </div>
+        <h1 className="sr-only">Singapore Purchasing Center</h1>
 
         <form onSubmit={handleLogin} className="spc-login-form">
           <label className="spc-login-field">
             <span>Username</span>
-            <input
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username"
-              placeholder="Enter your username"
-              required
-            />
+            <span className="spc-input-wrap">
+              <span className="spc-field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                  <path d="M4.5 21c.9-4.6 3.4-7 7.5-7s6.6 2.4 7.5 7" />
+                </svg>
+              </span>
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                placeholder="Enter your username"
+                required
+              />
+            </span>
           </label>
 
           <label className="spc-login-field">
             <span>Password</span>
             <span className="spc-password-wrap">
+              <span className="spc-field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 10V8a5 5 0 0 1 10 0v2" />
+                  <path d="M6 10h12v10H6V10Z" />
+                  <path d="M12 14.2v2.6" />
+                </svg>
+              </span>
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
@@ -109,7 +121,10 @@ export default function SpcLoginPage() {
                 aria-label={showPassword ? "Hide password" : "Show password"}
                 title={showPassword ? "Hide password" : "Show password"}
               >
-                {showPassword ? "Hide" : "Show"}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3.5 12s3-5 8.5-5 8.5 5 8.5 5-3 5-8.5 5-8.5-5-8.5-5Z" />
+                  <circle cx="12" cy="12" r="2.6" />
+                </svg>
               </button>
             </span>
           </label>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { createSpcAuditContext } from "@/lib/spcAudit"
 import { assignWhatsAppContact } from "@/lib/whatsapp"
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSpcRole("supplier_trader")
+    const session = await requireSpcPagePermission("spc-whatsapp", "edit")
     const auditContext = createSpcAuditContext(session, request, "spc-whatsapp")
     const body = (await request.json()) as {
       phone?: unknown

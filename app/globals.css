@@ -2178,12 +2178,11 @@ body {
   align-items: center;
   justify-content: center;
   background: #f7f9fb;
-  padding: 28px;
+  padding: 26px;
 }
 
 .spc-login-card {
-  width: min(960px, 100%);
-  min-height: calc(100vh - 56px);
+  width: min(520px, 100%);
   display: grid;
   align-content: start;
   justify-items: center;
@@ -2191,7 +2190,8 @@ body {
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 24px 54px rgba(6, 40, 74, 0.1);
-  padding: clamp(18px, 3vw, 30px) clamp(22px, 7vw, 92px);
+  overflow: hidden;
+  padding: 0 0 clamp(26px, 3.4vw, 40px);
 }
 
 .spc-skyline {
@@ -2239,45 +2239,21 @@ body {
   border-radius: 999px;
 }
 
-.spc-login-logo {
-  width: min(330px, 76%);
+.spc-login-art-wrap {
+  width: 100%;
+  aspect-ratio: 1024 / 860;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.spc-login-art {
+  width: 100%;
   height: auto;
   display: block;
-  border-radius: 2px;
-  object-fit: contain;
-  margin-bottom: 18px;
-}
-
-.spc-login-title {
-  display: grid;
-  gap: 8px;
-  justify-items: center;
-  margin-bottom: 22px;
-  color: var(--spc-navy-dark);
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.spc-login-title h1 {
-  margin: 0;
-  color: var(--spc-navy-dark);
-  font-size: clamp(30px, 5vw, 44px);
-  font-weight: 400;
-  letter-spacing: 0.18em;
-  line-height: 1;
-}
-
-.spc-login-title p {
-  margin: 0;
-  color: #5f6675;
-  font-size: clamp(12px, 1.6vw, 16px);
-  font-weight: 500;
-  letter-spacing: 0.32em;
-  line-height: 1.2;
 }
 
 .spc-login-form {
-  width: min(640px, 100%);
+  width: min(456px, calc(100% - 64px));
   display: grid;
   gap: 14px;
 }
@@ -2290,7 +2266,7 @@ body {
   font-weight: 500;
 }
 
-.spc-login-field > input,
+.spc-input-wrap,
 .spc-password-wrap {
   width: 100%;
   min-height: 52px;
@@ -2302,21 +2278,39 @@ body {
   box-shadow: none;
 }
 
-.spc-login-field > input {
-  padding: 0 28px;
-}
-
 .spc-login-field input::placeholder {
   color: #707684;
 }
 
+.spc-input-wrap,
 .spc-password-wrap {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
-  padding: 0 12px 0 28px;
+  padding: 0 12px 0 16px;
 }
 
+.spc-field-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #4f5968;
+}
+
+.spc-field-icon svg,
+.spc-password-wrap button svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.spc-input-wrap input,
 .spc-password-wrap input {
   min-width: 0;
   height: 48px;
@@ -2328,7 +2322,7 @@ body {
 }
 
 .spc-password-wrap button {
-  min-width: 72px;
+  min-width: 48px;
   min-height: 44px;
   border: 0;
   border-radius: 8px;
@@ -2484,6 +2478,18 @@ body {
   margin-bottom: 18px;
 }
 
+.spc-page-action {
+  min-height: 36px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 8px 14px;
+}
+
 .spc-page-heading h1 {
   margin: 0;
   color: var(--fc-admin-heading);
@@ -2611,6 +2617,231 @@ body {
   overflow-x: auto;
 }
 
+.spc-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.spc-filter-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.spc-filter-grid select {
+  min-height: 38px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  padding: 0 10px;
+}
+
+.spc-audit-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.spc-audit-list {
+  display: grid;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.spc-audit-list button {
+  display: grid;
+  gap: 5px;
+  border: 0;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: transparent;
+  color: var(--fc-admin-panel-text);
+  cursor: pointer;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.spc-audit-list button.is-active {
+  background: var(--fc-admin-selected-bg);
+}
+
+.spc-audit-list strong,
+.spc-audit-list span,
+.spc-audit-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spc-audit-list strong {
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.spc-audit-list span,
+.spc-audit-list small {
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+}
+
+.spc-audit-detail {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.spc-audit-detail h3 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 16px;
+}
+
+.spc-audit-detail p,
+.spc-audit-detail ul {
+  margin: 0;
+  color: var(--fc-admin-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.spc-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.spc-health-grid > div {
+  min-height: 86px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  border-right: 1px solid var(--fc-admin-border-soft);
+  padding: 14px;
+}
+
+.spc-health-grid > div:last-child {
+  border-right: 0;
+}
+
+.spc-health-grid span {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.spc-health-grid strong {
+  color: var(--fc-admin-heading);
+  font-size: 18px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.spc-check-grid,
+.spc-tech-database,
+.spc-secret-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.spc-check-grid article,
+.spc-tech-database article,
+.spc-secret-grid article {
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 14px;
+}
+
+.spc-check-grid article > div,
+.spc-secret-grid article {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spc-check-grid h3,
+.spc-tech-database h3,
+.spc-secret-grid h3 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.spc-check-grid article > div > span,
+.spc-secret-grid article > span {
+  border-radius: 999px;
+  background: #e9f8ee;
+  color: #146b2f;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.spc-check-grid article.is-warning > div > span,
+.spc-secret-grid article > span.is-missing {
+  background: #fff6dd;
+  color: #765400;
+}
+
+.spc-check-grid article.is-error > div > span {
+  background: #fff0f0;
+  color: #9f1c27;
+}
+
+.spc-check-grid p,
+.spc-secret-grid p {
+  color: var(--fc-admin-muted);
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.spc-check-grid dl {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.spc-check-grid dl > div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.spc-check-grid dt,
+.spc-check-grid dd,
+.spc-tech-database li {
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+}
+
+.spc-check-grid dt {
+  font-weight: 900;
+}
+
+.spc-check-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.spc-tech-database ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
 .spc-table {
   width: 100%;
   border-collapse: collapse;
@@ -2726,6 +2957,39 @@ body {
   font-weight: 900;
 }
 
+.spc-group-create {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  padding: 12px;
+}
+
+.spc-group-create input,
+.spc-authority-list select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.spc-group-create button,
+.spc-authority-actions button {
+  min-height: 34px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 8px 12px;
+}
+
 .spc-user-list {
   display: grid;
 }
@@ -2811,6 +3075,54 @@ body {
   min-height: 18px;
 }
 
+.spc-authority-panel {
+  grid-column: 2 / -1;
+}
+
+.spc-authority-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.spc-authority-list {
+  display: grid;
+}
+
+.spc-authority-list label {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  color: var(--fc-admin-panel-text);
+  padding: 10px 14px;
+}
+
+.spc-authority-list strong,
+.spc-authority-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-authority-list strong {
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.spc-authority-list small {
+  margin-top: 4px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 @media (max-width: 1040px) {
   .spc-topbar {
     grid-template-columns: 1fr;
@@ -2834,34 +3146,14 @@ body {
   }
 
   .spc-login-card {
-    min-height: calc(100vh - 28px);
-    padding: 24px 18px 32px;
-  }
-
-  .spc-skyline {
-    height: 82px;
-    margin-bottom: 18px;
-  }
-
-  .spc-login-title {
-    margin-bottom: 34px;
-  }
-
-  .spc-login-title h1 {
-    font-size: 34px;
-    letter-spacing: 0.12em;
-  }
-
-  .spc-login-title p {
-    font-size: 13px;
-    letter-spacing: 0.2em;
+    padding-bottom: 28px;
   }
 
   .spc-login-field {
     font-size: 16px;
   }
 
-  .spc-login-field > input,
+  .spc-input-wrap,
   .spc-password-wrap,
   .spc-login-submit {
     min-height: 58px;
@@ -2871,6 +3163,10 @@ body {
   .spc-password-wrap input {
     height: 54px;
     font-size: 18px;
+  }
+
+  .spc-login-form {
+    width: calc(100% - 36px);
   }
 
   .spc-main {
@@ -2886,6 +3182,28 @@ body {
   }
 
   .spc-enquiry-form {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-filter-grid,
+  .spc-audit-grid,
+  .spc-health-grid,
+  .spc-check-grid,
+  .spc-tech-database,
+  .spc-secret-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-health-grid > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--fc-admin-border-soft);
+  }
+
+  .spc-authority-panel {
+    grid-column: auto;
+  }
+
+  .spc-authority-list label {
     grid-template-columns: 1fr;
   }
 }

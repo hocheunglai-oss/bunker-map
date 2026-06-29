@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { getWhatsAppConfigStatus, loadWhatsAppInbox } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(request: Request) {
   try {
-    await requireSpcRole("supplier_trader")
+    await requireSpcPagePermission("spc-whatsapp", "view")
     const selectedConversationId = new URL(request.url).searchParams.get("conversationId")
     const inbox = await loadWhatsAppInbox(selectedConversationId)
 

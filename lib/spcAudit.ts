@@ -14,6 +14,9 @@ const SPC_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC BUYER ENQUIRIES",
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-whatsapp": "SPC WHATSAPP",
+  "spc-audit-log": "SPC AUDIT LOG",
+  "spc-system-health": "SPC SYSTEM HEALTH",
+  "spc-tech-stack": "SPC TECH STACK",
 }
 
 function requireEnv(name: string) {

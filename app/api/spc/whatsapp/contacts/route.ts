@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 
 const CONTACT_LIMIT = 80
 const CONTACT_COLUMNS = [
@@ -65,7 +65,7 @@ function phoneSearchClause(value: string) {
 
 export async function GET(request: Request) {
   try {
-    await requireSpcRole("supplier_trader")
+    await requireSpcPagePermission("spc-whatsapp", "view")
 
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { setSpcSession, validateSpcCredentials } from "@/lib/spcAuth"
+import { getDefaultSpcLandingPath, SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 
 export async function POST(request: Request) {
   const { username, password } = await request.json()
@@ -33,6 +34,9 @@ export async function POST(request: Request) {
       username: user.username,
       displayName: user.displayName || user.username,
       role: user.role,
+      permissions: user.permissions,
     },
+    pages: SPC_PAGE_DEFINITIONS,
+    redirectTo: getDefaultSpcLandingPath(user.permissions),
   })
 }

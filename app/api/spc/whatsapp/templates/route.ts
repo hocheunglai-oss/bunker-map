@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { requireSpcRole } from "@/lib/spcAuth"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { loadWhatsAppTemplates } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
-    await requireSpcRole("supplier_trader")
+    await requireSpcPagePermission("spc-whatsapp", "view")
     const templates = await loadWhatsAppTemplates()
     return NextResponse.json(
       { templates },

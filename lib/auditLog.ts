@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js"
-import type { AdminSession } from "@/lib/adminAuth"
 import type { AdminPageDefinition } from "@/lib/adminPages"
 
 export type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
@@ -90,6 +89,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   admin_role_defaults: "user-management",
   spc_users: "spc-user-management",
   spc_enquiries: "spc-buyer-enquiries",
+  spc_role_defaults: "spc-user-management",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -98,6 +98,9 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-buyer-enquiries": "SPC BUYER ENQUIRIES",
   "spc-whatsapp": "SPC WHATSAPP",
+  "spc-audit-log": "SPC AUDIT LOG",
+  "spc-system-health": "SPC SYSTEM HEALTH",
+  "spc-tech-stack": "SPC TECH STACK",
 }
 
 const ENTITY_NAMES: Record<string, string> = {
@@ -124,6 +127,7 @@ const ENTITY_NAMES: Record<string, string> = {
   admin_role_defaults: "role defaults",
   spc_users: "SPC user",
   spc_enquiries: "SPC enquiry",
+  spc_role_defaults: "SPC permission group",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -274,6 +278,7 @@ function inferRemarksPageId(record: AuditLogRecord) {
 function inferOfficeCalendarPageId(record: AuditLogRecord) {
   const row = record.afterRow || record.beforeRow || {}
   const key = typeof row.key === "string" ? row.key : ""
+  if (key === "spc-permission-groups") return "spc-user-management"
   return key === "task-calendar" ? "task-calendar" : "event-calendar"
 }
 
@@ -663,7 +668,7 @@ export function isUserAuditRecord(record: AuditLogRecord) {
 
   if (record.tableName === "office_calendar_store") {
     const row = record.afterRow || record.beforeRow || {}
-    return ["event-calendar", "task-calendar"].includes(String(row.key || ""))
+    return ["event-calendar", "task-calendar", "spc-permission-groups"].includes(String(row.key || ""))
   }
 
   return true
@@ -704,7 +709,10 @@ export async function listAuditLogs(options: {
     .filter(isUserAuditRecord)
 }
 
-export async function undoAuditLog(logId: string, session: AdminSession) {
+export async function undoAuditLog(
+  logId: string,
+  session: { username: string | null; displayName: string | null },
+) {
   const supabase = getSupabaseAuditClient()
   const actorId = session.username || "admin"
   const actorName = session.displayName || session.username || "Admin"

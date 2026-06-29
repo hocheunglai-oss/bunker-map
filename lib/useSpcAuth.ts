@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { SpcRoleId } from "@/lib/spcUsers"
+import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
 
 type SpcAuthState = {
   loading: boolean
@@ -9,6 +9,8 @@ type SpcAuthState = {
   username: string | null
   displayName: string | null
   role: SpcRoleId | null
+  permissions: SpcPagePermissionMap
+  pages: SpcPageDefinition[]
 }
 
 type SpcSessionPayload = {
@@ -16,6 +18,8 @@ type SpcSessionPayload = {
   username?: string | null
   displayName?: string | null
   role?: SpcRoleId | null
+  permissions?: SpcPagePermissionMap
+  pages?: SpcPageDefinition[]
 }
 
 let sharedSessionPromise: Promise<SpcSessionPayload> | null = null
@@ -67,6 +71,8 @@ export function useSpcAuth(): SpcAuthState {
   const [username, setUsername] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [role, setRole] = useState<SpcRoleId | null>(null)
+  const [permissions, setPermissions] = useState<SpcPagePermissionMap>({})
+  const [pages, setPages] = useState<SpcPageDefinition[]>([])
 
   useEffect(() => {
     const cachedActor = readCachedSpcActor()
@@ -76,12 +82,17 @@ export function useSpcAuth(): SpcAuthState {
       const nextUsername = typeof data.username === "string" ? data.username : null
       const nextDisplayName =
         typeof data.displayName === "string" ? data.displayName : nextUsername
-      const nextRole = data.role === "supplier_trader" ? "supplier_trader" : data.role === "buyer_trader" ? "buyer_trader" : null
+      const nextRole = typeof data.role === "string" ? data.role : null
+      const nextPermissions =
+        data.permissions && typeof data.permissions === "object" ? data.permissions : {}
+      const nextPages = Array.isArray(data.pages) ? data.pages : []
 
       setAuthenticated(isAuthenticated)
       setUsername(isAuthenticated ? nextUsername : null)
       setDisplayName(isAuthenticated ? nextDisplayName : null)
       setRole(isAuthenticated ? nextRole : null)
+      setPermissions(isAuthenticated ? nextPermissions : {})
+      setPages(isAuthenticated ? nextPages : [])
       setLoading(false)
 
       if (isAuthenticated && nextUsername) {
@@ -91,6 +102,8 @@ export function useSpcAuth(): SpcAuthState {
             username: nextUsername,
             displayName: nextDisplayName || nextUsername,
             role: nextRole,
+            permissions: nextPermissions,
+            pages: nextPages,
           }),
         )
       } else {
@@ -108,6 +121,8 @@ export function useSpcAuth(): SpcAuthState {
         setUsername(null)
         setDisplayName(null)
         setRole(null)
+        setPermissions({})
+        setPages([])
         if (typeof window !== "undefined") {
           window.localStorage.removeItem("spc_actor")
         }
@@ -120,5 +135,5 @@ export function useSpcAuth(): SpcAuthState {
     void checkSession()
   }, [])
 
-  return { loading, authenticated, username, displayName, role }
+  return { loading, authenticated, username, displayName, role, permissions, pages }
 }
