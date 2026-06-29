@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { clearSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import {
@@ -99,7 +99,6 @@ function FolderIcon() {
 
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
   const { loading, authenticated, displayName, permissions, pages } = useSpcAuth()
   const [query, setQuery] = useState("")
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -115,6 +114,42 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false)
+    }
+
+    document.addEventListener("keydown", closeOnEscape)
+    return () => document.removeEventListener("keydown", closeOnEscape)
+  }, [mobileOpen])
+
+  useEffect(() => {
+    if (!authenticated || loading) return
+
+    const focusSearch = (event: KeyboardEvent) => {
+      const target = event.target
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+
+      if (event.key === "/" && !typing) {
+        event.preventDefault()
+        setCollapsed(false)
+        if (window.matchMedia("(max-width: 980px)").matches) {
+          setMobileOpen(true)
+        }
+        window.requestAnimationFrame(() => searchInputRef.current?.focus())
+      }
+    }
+
+    document.addEventListener("keydown", focusSearch)
+    return () => document.removeEventListener("keydown", focusSearch)
+  }, [authenticated, loading])
 
   const navigationGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -172,10 +207,12 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   }
 
   async function handleLogout() {
-    await fetch("/api/spc/logout", { method: "POST" })
+    setCollapsed(false)
+    setMobileOpen(false)
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY)
+    await fetch("/api/spc/logout", { method: "POST" }).catch(() => undefined)
     clearSpcClientSessionCache()
-    router.push("/spc")
-    router.refresh()
+    window.location.assign("/spc")
   }
 
   function isActive(page: SpcPageDefinition) {
@@ -229,6 +266,19 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
         <span aria-hidden="true">☰</span>
         Tools
       </button>
+
+      {collapsed ? (
+        <button
+          type="button"
+          className="fc-admin-sidebar-reopen fc-admin-nav-button"
+          onClick={toggleCollapsed}
+          aria-label="Expand SPC navigation"
+          title="Expand navigation"
+          data-admin-view-safe="true"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      ) : null}
 
       <button
         type="button"

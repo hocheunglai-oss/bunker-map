@@ -388,7 +388,10 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   }
 
   async function handleLogout() {
-    await fetch("/api/admin/logout", { method: "POST" })
+    setCollapsed(false)
+    setMobileOpen(false)
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY)
+    await fetch("/api/admin/logout", { method: "POST" }).catch(() => undefined)
     clearAdminClientCache()
     window.localStorage.removeItem("bunker_admin_actor")
     window.location.assign("/admin")
@@ -450,6 +453,19 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         <span aria-hidden="true">☰</span>
         Tools
       </button>
+
+      {collapsed ? (
+        <button
+          type="button"
+          className="fc-admin-sidebar-reopen fc-admin-nav-button"
+          onClick={toggleCollapsed}
+          aria-label="Expand admin navigation"
+          title="Expand navigation"
+          data-admin-view-safe="true"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      ) : null}
 
       <button
         type="button"

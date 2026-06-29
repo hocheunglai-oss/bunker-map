@@ -191,7 +191,7 @@ const pageStyle: CSSProperties = {
   height: "100dvh",
   minHeight: 0,
   maxHeight: "100dvh",
-  background: "#111b21",
+  background: "#efeae2",
   color: "#111b21",
   fontFamily: "var(--fc-admin-font)",
   padding: 0,
@@ -199,6 +199,7 @@ const pageStyle: CSSProperties = {
 }
 
 const appShellStyle: CSSProperties = {
+  width: "100%",
   height: "100dvh",
   minHeight: 0,
   maxHeight: "100dvh",

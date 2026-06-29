@@ -667,12 +667,28 @@ body {
 }
 
 .fc-admin-mobile-menu,
-.fc-admin-sidebar-backdrop {
+.fc-admin-sidebar-backdrop,
+.fc-admin-sidebar-reopen {
   display: none;
 }
 
 .fc-admin-scope .fc-admin-mobile-menu {
   display: none !important;
+}
+
+.fc-admin-scope .fc-admin-sidebar-reopen {
+  position: fixed !important;
+  top: 12px;
+  left: calc(var(--fc-admin-sidebar-width) + 10px);
+  z-index: 95;
+  width: 36px !important;
+  min-width: 36px !important;
+  padding: 0 !important;
+  box-shadow: 0 5px 18px rgba(29, 29, 31, 0.14) !important;
+}
+
+.fc-admin-scope .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-reopen {
+  display: inline-flex !important;
 }
 
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-top {
@@ -1840,6 +1856,10 @@ body {
     z-index: 65;
     display: inline-flex !important;
     box-shadow: 0 5px 18px rgba(29, 29, 31, 0.16) !important;
+  }
+
+  .fc-admin-scope .fc-admin-sidebar-reopen {
+    display: none !important;
   }
 
   .fc-admin-app-content {
