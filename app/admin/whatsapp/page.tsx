@@ -85,6 +85,12 @@ type InboxLoadOptions = {
   keepNotice?: boolean
 }
 
+type WhatsAppRealtimeChange = {
+  table?: "whatsapp_conversations" | "whatsapp_messages"
+  eventType?: string
+  conversationId?: string | null
+}
+
 type PhonebookContact = {
   id: string
   full_name: string
@@ -588,6 +594,9 @@ export default function WhatsAppAdminPage() {
   const inboxSignatureRef = useRef("")
   const contactMatchesRef = useRef<Record<string, ContactOption>>({})
   const contactLookupRef = useRef(new Set<string>())
+  const selectedConversationIdRef = useRef<string | null>(null)
+  const selectedContactRef = useRef<ContactOption | null>(null)
+  const realtimeRefreshTimerRef = useRef<number | null>(null)
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "view")
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "whatsapp", "edit")
@@ -784,6 +793,26 @@ export default function WhatsAppAdminPage() {
     }
   }, [])
 
+  const scheduleRealtimeRefresh = useCallback((change: WhatsAppRealtimeChange) => {
+    if (realtimeRefreshTimerRef.current) {
+      window.clearTimeout(realtimeRefreshTimerRef.current)
+    }
+
+    realtimeRefreshTimerRef.current = window.setTimeout(() => {
+      realtimeRefreshTimerRef.current = null
+      if (selectedContactRef.current) return
+      void loadInbox(selectedConversationIdRef.current, { silent: true, keepNotice: true })
+    }, change.table === "whatsapp_messages" ? 80 : 120)
+  }, [loadInbox])
+
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversationId
+  }, [selectedConversationId])
+
+  useEffect(() => {
+    selectedContactRef.current = selectedContact
+  }, [selectedContact])
+
   useEffect(() => {
     if (authLoading || !authenticated || !canView) return
     void loadInbox(selectedConversationId)
@@ -820,7 +849,7 @@ export default function WhatsAppAdminPage() {
 
     const timer = window.setInterval(() => {
       void pollInbox()
-    }, 5000)
+    }, 15000)
 
     return () => window.clearInterval(timer)
   }, [
@@ -834,6 +863,31 @@ export default function WhatsAppAdminPage() {
     selectedConversationId,
     sending,
   ])
+
+  useEffect(() => {
+    if (authLoading || !authenticated || !canView) return
+
+    const events = new EventSource("/api/whatsapp/events")
+    const handleChange = (event: Event) => {
+      try {
+        const messageEvent = event as MessageEvent<string>
+        scheduleRealtimeRefresh(JSON.parse(messageEvent.data) as WhatsAppRealtimeChange)
+      } catch {
+        scheduleRealtimeRefresh({})
+      }
+    }
+
+    events.addEventListener("whatsapp-change", handleChange)
+
+    return () => {
+      events.removeEventListener("whatsapp-change", handleChange)
+      events.close()
+      if (realtimeRefreshTimerRef.current) {
+        window.clearTimeout(realtimeRefreshTimerRef.current)
+        realtimeRefreshTimerRef.current = null
+      }
+    }
+  }, [authLoading, authenticated, canView, scheduleRealtimeRefresh])
 
   const selectedConversation = useMemo(
     () =>
