@@ -11,7 +11,7 @@ export type SpcAuditContext = {
 }
 
 const SPC_PAGE_LABELS: Record<string, string> = {
-  "spc-buyer-enquiries": "SPC BUYER ENQUIRIES",
+  "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",

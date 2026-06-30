@@ -1,5 +1,6 @@
 import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
+import { formatSpcEnquiry } from "@/lib/spcEnquiryText"
 
 export type SpcEnquiry = {
   id: string
@@ -13,6 +14,7 @@ export type SpcEnquiry = {
   supplierName: string | null
   status: string
   notes: string | null
+  formattedText: string
   createdByUsername: string
   createdByDisplayName: string
   createdAt: string
@@ -29,6 +31,13 @@ export type SaveSpcEnquiryInput = {
   supplierName?: string
   notes?: string
 }
+
+export type SpcEnquiryListOptions = {
+  status?: string
+  limit?: number
+}
+
+export type SpcEnquiryOutcome = "stem" | "lost"
 
 type SpcEnquiryRow = {
   id: string
@@ -54,7 +63,7 @@ function cleanText(value: string | undefined) {
 }
 
 function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
-  return {
+  const mapped = {
     id: row.id,
     enquiryNumber: row.enquiry_number,
     title: row.title,
@@ -66,21 +75,31 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
     supplierName: row.supplier_name,
     status: row.status,
     notes: row.notes,
+    formattedText: "",
     createdByUsername: row.created_by_username,
     createdByDisplayName: row.created_by_display_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+  mapped.formattedText = formatSpcEnquiry(mapped)
+  return mapped
 }
 
-export async function listSpcEnquiries(session: SpcSession) {
+export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryListOptions = {}) {
   const context = createSpcAuditContext(session, undefined, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
-  const { data, error } = await supabase
+  const limit = Math.min(Math.max(Number(options.limit || 250), 1), 250)
+  let query = supabase
     .from("spc_enquiries")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(250)
+    .limit(limit)
+
+  if (options.status) {
+    query = query.eq("status", options.status)
+  }
+
+  const { data, error } = await query
 
   if (error) throw error
   return ((data || []) as unknown as SpcEnquiryRow[]).map(mapEnquiry)
@@ -108,9 +127,34 @@ export async function createSpcEnquiry(
       delivery_date: cleanText(input.deliveryDate),
       supplier_name: cleanText(input.supplierName),
       notes: cleanText(input.notes),
+      status: "sent",
       created_by_username: session.username,
       created_by_display_name: session.displayName || session.username,
     })
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return mapEnquiry(data as SpcEnquiryRow)
+}
+
+export async function updateSpcEnquiryOutcome(
+  id: string,
+  outcome: SpcEnquiryOutcome,
+  session: SpcSession,
+  request: Request,
+) {
+  const enquiryId = cleanText(id)
+  if (!enquiryId) throw new Error("Enquiry id is required.")
+
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const status = outcome === "stem" ? "quoted" : "cancelled"
+
+  const { data, error } = await supabase
+    .from("spc_enquiries")
+    .update({ status })
+    .eq("id", enquiryId)
     .select("*")
     .single()
 

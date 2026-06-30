@@ -283,7 +283,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
       <aside id="spc-sidebar" className="fc-admin-sidebar" data-admin-view-safe="true">
         <div className="fc-admin-sidebar-top">
           <Link href="/spc" className="fc-admin-sidebar-title">
-            <img src="/fc-uno-sidebar-logo.png" alt="FC UNO" className="fc-admin-sidebar-logo" />
+            <img src="/spc-sidebar-logo.png" alt="Singapore Purchasing Center" className="fc-admin-sidebar-logo is-spc-logo" />
           </Link>
           <div className="fc-admin-sidebar-controls">
             <button

@@ -2428,6 +2428,12 @@ body {
   object-fit: contain;
 }
 
+.fc-admin-sidebar-logo.is-spc-logo {
+  width: 188px;
+  max-height: 44px;
+  object-fit: contain;
+}
+
 .spc-topbar-brand span {
   min-width: 0;
   display: grid;
@@ -2635,6 +2641,167 @@ body {
   border-color: var(--fc-admin-primary-button-bg);
   background: var(--fc-admin-primary-button-bg);
   color: var(--fc-admin-primary-button-text);
+}
+
+.spc-enquiries-heading {
+  margin-bottom: 12px;
+}
+
+.spc-enquiries-layout {
+  min-height: calc(100vh - 150px);
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(360px, 460px);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.spc-enquiry-entry-panel,
+.spc-sent-enquiries-panel {
+  height: calc(100vh - 150px);
+}
+
+.spc-enquiry-entry-form {
+  height: calc(100% - 54px);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(116px, 0.8fr) auto minmax(98px, 0.7fr) auto;
+  gap: 10px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.spc-enquiry-entry-form label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spc-enquiry-entry-form input,
+.spc-enquiry-entry-form textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.spc-enquiry-entry-form textarea {
+  min-height: 0;
+  resize: none;
+}
+
+.spc-enquiry-raw textarea,
+.spc-enquiry-preview-field textarea {
+  height: 100%;
+}
+
+.spc-enquiry-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.spc-enquiry-fuels {
+  grid-column: span 2;
+}
+
+.spc-sent-enquiries-list {
+  height: calc(100% - 54px);
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.spc-sent-enquiry-card {
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.spc-sent-enquiry-card + .spc-sent-enquiry-card {
+  margin-top: 8px;
+}
+
+.spc-sent-enquiry-topline,
+.spc-sent-enquiry-meta,
+.spc-sent-enquiry-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spc-sent-enquiry-topline strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-sent-enquiry-card p {
+  margin: 8px 0;
+  color: var(--fc-admin-panel-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.spc-sent-enquiry-meta {
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.spc-sent-enquiry-actions {
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.spc-sent-enquiry-actions button {
+  min-height: 30px;
+  border: 1px solid #0f8a63;
+  border-radius: 999px;
+  background: #e8f7f1;
+  color: #006b4f;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 12px;
+}
+
+.spc-sent-enquiry-actions button.is-lost {
+  border-color: #d84a3f;
+  background: #fff0ef;
+  color: #b42318;
+}
+
+.spc-sent-enquiry-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.spc-status-pill.is-quoted {
+  background: #e8f7f1;
+  color: #006b4f !important;
+}
+
+.spc-status-pill.is-cancelled {
+  background: #fff0ef;
+  color: #b42318 !important;
 }
 
 .spc-table-wrap {
@@ -3184,6 +3351,39 @@ body {
 
   .spc-enquiry-form {
     grid-template-columns: 1fr;
+  }
+
+  .spc-enquiries-layout {
+    min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .spc-enquiry-entry-panel,
+  .spc-sent-enquiries-panel {
+    height: auto;
+  }
+
+  .spc-enquiry-entry-form {
+    height: auto;
+    grid-template-rows: auto;
+    overflow: visible;
+  }
+
+  .spc-enquiry-entry-form textarea {
+    min-height: 96px;
+  }
+
+  .spc-enquiry-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-enquiry-fuels {
+    grid-column: auto;
+  }
+
+  .spc-sent-enquiries-list {
+    height: auto;
+    max-height: 70vh;
   }
 
   .spc-filter-grid,

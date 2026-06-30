@@ -94,7 +94,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "hongkong-price-history": "HONG KONG PRICE HISTORY",
   "taiwan-price-history": "TAIWAN PRICE HISTORY",
   "spc-user-management": "SPC USER MANAGEMENT",
-  "spc-buyer-enquiries": "SPC BUYER ENQUIRIES",
+  "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",
   "spc-tech-stack": "SPC TECH STACK",

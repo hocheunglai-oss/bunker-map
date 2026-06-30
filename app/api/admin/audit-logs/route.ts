@@ -55,9 +55,9 @@ const SPC_AUDIT_PAGES = [
   },
   {
     id: "spc-buyer-enquiries",
-    label: "SPC BUYER ENQUIRIES",
+    label: "SPC ENQUIRIES",
     group: "trading" as const,
-    path: "/spc/buyer",
+    path: "/spc/enquiries",
   },
   {
     id: "spc-audit-log",

@@ -17,10 +17,10 @@ export type SpcPageDefinition = {
 export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   {
     id: "spc-buyer-enquiries",
-    label: "BUYER ENQUIRIES",
+    label: "ENQUIRIES",
     group: "trading",
-    path: "/spc/buyer",
-    matchPrefixes: ["/buyer", "/spc/buyer"],
+    path: "/spc/enquiries",
+    matchPrefixes: ["/buyer", "/spc/buyer", "/enquiries", "/spc/enquiries"],
   },
   {
     id: "spc-audit-log",
@@ -134,7 +134,7 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = "none"
+      permissions[page.id] = page.id === "spc-buyer-enquiries" ? "view" : "none"
       return permissions
     }, {})
   }
