@@ -63,11 +63,11 @@ export default function SpcLoginPage() {
       <section className="spc-login-card" aria-label="Singapore Purchasing Center login">
         <div className="spc-login-art-wrap" aria-hidden="true">
           <Image
-            src="/spc-login-art.png"
+            src="/spc-login-header-transparent.png"
             alt=""
             className="spc-login-art"
             width={1024}
-            height={1536}
+            height={860}
             priority
           />
         </div>

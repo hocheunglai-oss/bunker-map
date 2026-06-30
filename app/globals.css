@@ -2202,16 +2202,17 @@ body {
 }
 
 .spc-login-card {
-  width: min(488px, 100%);
+  --spc-login-frame-inset: 8px;
+  width: min(326px, 100%);
   display: grid;
   align-content: start;
   justify-items: center;
   border: 0;
   border-radius: 0;
-  background: #ffffff;
+  background: transparent;
   box-shadow: none;
   overflow: visible;
-  padding: 0 0 16px;
+  padding: 0;
 }
 
 .spc-skyline {
@@ -2263,7 +2264,7 @@ body {
   width: 100%;
   aspect-ratio: 1024 / 860;
   overflow: hidden;
-  background: #ffffff;
+  background: transparent;
 }
 
 .spc-login-art {
@@ -2273,28 +2274,49 @@ body {
 }
 
 .spc-login-form {
-  width: min(452px, calc(100% - 32px));
+  width: 100%;
+  position: relative;
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  margin-top: -1px;
+  padding: 0 12px 12px;
+  background: transparent;
+}
+
+.spc-login-form::before {
+  content: "";
+  position: absolute;
+  inset: -1px var(--spc-login-frame-inset) 0;
+  z-index: 0;
+  border-right: 1px solid var(--spc-navy-dark);
+  border-bottom: 1px solid var(--spc-navy-dark);
+  border-left: 1px solid var(--spc-navy-dark);
+  background: #ffffff;
+  pointer-events: none;
+}
+
+.spc-login-form > * {
+  position: relative;
+  z-index: 1;
 }
 
 .spc-login-field {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   color: var(--spc-navy-dark);
-  font-size: 14px;
+  font-size: 10px;
   font-weight: 500;
 }
 
 .spc-input-wrap,
 .spc-password-wrap {
   width: 100%;
-  min-height: 52px;
+  min-height: 35px;
   border: 1px solid #aeb7c4;
-  border-radius: 7px;
+  border-radius: 5px;
   background: #ffffff;
   color: #1c2738;
-  font-size: 14px;
+  font-size: 10px;
   box-shadow: none;
 }
 
@@ -2305,14 +2327,14 @@ body {
 .spc-input-wrap,
 .spc-password-wrap {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
-  padding: 0 10px 0 14px;
+  padding: 0 7px 0 9px;
 }
 
 .spc-field-icon {
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2321,46 +2343,46 @@ body {
 
 .spc-field-icon svg,
 .spc-password-wrap button svg {
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: 1.6;
 }
 
 .spc-input-wrap input,
 .spc-password-wrap input {
   min-width: 0;
-  height: 48px;
+  height: 32px;
   border: 0;
   background: transparent;
   color: #1c2738;
   outline: none;
-  font-size: 14px;
+  font-size: 10px;
 }
 
 .spc-password-wrap button {
-  min-width: 48px;
-  min-height: 44px;
+  min-width: 32px;
+  min-height: 30px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 5px;
   background: transparent;
   color: #4f5968;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 10px;
   font-weight: 800;
 }
 
 .spc-login-submit {
-  min-height: 52px;
+  min-height: 35px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--spc-navy);
   color: #ffffff;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 11px;
   font-weight: 500;
   box-shadow: none;
 }
@@ -3163,30 +3185,6 @@ body {
 @media (max-width: 760px) {
   .spc-login-page {
     padding: 14px;
-  }
-
-  .spc-login-card {
-    padding-bottom: 28px;
-  }
-
-  .spc-login-field {
-    font-size: 16px;
-  }
-
-  .spc-input-wrap,
-  .spc-password-wrap,
-  .spc-login-submit {
-    min-height: 58px;
-    font-size: 18px;
-  }
-
-  .spc-password-wrap input {
-    height: 54px;
-    font-size: 18px;
-  }
-
-  .spc-login-form {
-    width: calc(100% - 36px);
   }
 
   .spc-main {
