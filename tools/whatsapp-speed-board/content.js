@@ -6,6 +6,10 @@
     supplier: "Supplier",
     buyer: "Buyer",
   }
+  const LOGO_SRC =
+    typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
+      ? chrome.runtime.getURL("fc-uno-sidebar-logo.png")
+      : "https://fcuno.com/fc-uno-sidebar-logo.png"
 
   const state = {
     collapsed: false,
@@ -298,6 +302,7 @@
   function getSidePane() {
     return (
       document.querySelector("#pane-side") ||
+      document.querySelector("#side") ||
       document.querySelector("#side [role='grid']") ||
       document.querySelector("#side [aria-label='Chat list']") ||
       document.querySelector("#side [aria-label='Chats']")
@@ -314,22 +319,83 @@
     return false
   }
 
+  function isSearchChrome(element) {
+    if (!element) return true
+    return Boolean(
+      element.closest("label") ||
+        element.closest("[role='search']") ||
+        element.closest("[data-testid*='search']") ||
+        element.closest("[aria-label*='Search']") ||
+        element.closest("[aria-label*='search']") ||
+        element.closest("button[aria-label*='Search']") ||
+        element.matches("input, textarea, [contenteditable='true'], [role='textbox']"),
+    )
+  }
+
+  function getClickableChatRow(element) {
+    if (!element || isSearchChrome(element)) return null
+
+    const row =
+      element.closest("[data-testid='cell-frame-container']") ||
+      element.closest("[role='listitem']") ||
+      element.closest("[role='row']") ||
+      element.closest("div[tabindex='0']") ||
+      element.closest("div[tabindex='-1']")
+
+    if (!row || !isVisible(row) || isSearchChrome(row)) return null
+    return row
+  }
+
+  function activateChatRow(row) {
+    if (!row) return
+    row.scrollIntoView({ block: "center", inline: "nearest" })
+    row.focus?.()
+
+    const events = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]
+    events.forEach((type) => {
+      const EventCtor = type.startsWith("pointer") && typeof PointerEvent !== "undefined" ? PointerEvent : MouseEvent
+      row.dispatchEvent(
+        new EventCtor(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button: 0,
+          buttons: type.endsWith("down") ? 1 : 0,
+        }),
+      )
+    })
+  }
+
   function findVisibleChatRow(contact) {
     const pane = getSidePane()
     if (!pane) return null
 
-    const candidates = Array.from(
-      pane.querySelectorAll("[role='listitem'], [role='row'], [role='button'], div[tabindex='0'], div[tabindex='-1']"),
+    const textMatches = Array.from(
+      pane.querySelectorAll("span[title], [dir='auto'], [aria-label], [title]"),
     ).filter(isVisible)
 
-    return candidates.find((element) => {
+    for (const element of textMatches) {
       const text = cleanText(
         element.getAttribute("title") ||
           element.getAttribute("aria-label") ||
           element.textContent,
       )
-      return textMatchesContact(contact, text)
-    })
+      if (!textMatchesContact(contact, text)) continue
+      const row = getClickableChatRow(element)
+      if (row) return row
+    }
+
+    const rowMatches = Array.from(
+      pane.querySelectorAll("[data-testid='cell-frame-container'], [role='listitem'], [role='row'], div[tabindex='0'], div[tabindex='-1']"),
+    ).filter(isVisible)
+
+    return rowMatches.find((element) => {
+      if (isSearchChrome(element)) return false
+      return textMatchesContact(
+        contact,
+        cleanText(element.getAttribute("aria-label") || element.getAttribute("title") || element.textContent),
+      )
+    }) || null
   }
 
   function findSidebarSearchBox() {
@@ -373,6 +439,12 @@
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
   }
 
+  function pressKey(element, key) {
+    const code = key === "Enter" ? "Enter" : key
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key, code }))
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key, code }))
+  }
+
   async function openContactBySidebarSearch(contact) {
     const query = cleanText(contact.name) || phoneDigits(contact.phone)
     if (!query) return false
@@ -386,10 +458,19 @@
       await wait(80)
       const row = findVisibleChatRow(contact)
       if (row) {
-        row.click()
+        activateChatRow(row)
         setStatus(`Opened ${contact.name}.`)
         return true
       }
+    }
+
+    pressKey(searchBox, "Enter")
+    await wait(160)
+    const row = findVisibleChatRow(contact)
+    if (row) {
+      activateChatRow(row)
+      setStatus(`Opened ${contact.name}.`)
+      return true
     }
 
     return false
@@ -405,7 +486,7 @@
 
     const visibleRow = findVisibleChatRow(contact)
     if (visibleRow) {
-      visibleRow.click()
+      activateChatRow(visibleRow)
       setStatus(`Opened ${contact.name}.`)
       return
     }
@@ -458,11 +539,12 @@
     const contacts = contactsFor(list)
     const rows = contacts.map((contact) => {
       const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
+      const detailHtml = details ? `<span>${escapeHtml(details)}</span>` : ""
       return `
         <div class="fcuno-wa-row${state.dragging === contact.id ? " is-dragging" : ""}${state.dropTargetId === contact.id ? " is-drop-target" : ""}" draggable="true" data-id="${escapeHtml(contact.id)}" data-list="${list}">
           <button class="fcuno-wa-list-button" type="button" data-action="open" data-id="${escapeHtml(contact.id)}">
             <strong>${escapeHtml(contact.name)}</strong>
-            <span>${escapeHtml(details || "Saved chat")}</span>
+            ${detailHtml}
           </button>
           <div class="fcuno-wa-row-actions">
             ${state.unreadById[contact.id] ? `<span class="fcuno-wa-unread" title="${escapeHtml(state.unreadById[contact.id])} unread">${escapeHtml(state.unreadById[contact.id])}</span>` : ""}
@@ -475,7 +557,7 @@
     return `
       <section class="fcuno-wa-panel" data-panel="${list}">
         <div class="fcuno-wa-list" data-list="${list}">
-          ${rows || `<div class="fcuno-wa-empty">Add current WhatsApp chats here. No phonebook is loaded.</div>`}
+          ${rows}
         </div>
       </section>
     `
@@ -492,7 +574,7 @@
     host.innerHTML = `
       <div class="fcuno-wa-shell${state.collapsed ? " is-collapsed" : ""}">
         <div class="fcuno-wa-head">
-          <img class="fcuno-wa-logo" src="https://fcuno.com/fc-uno-sidebar-logo.png" alt="FC UNO" />
+          <img class="fcuno-wa-logo" src="${escapeHtml(LOGO_SRC)}" alt="FC UNO" />
           <button class="fcuno-wa-icon" type="button" data-action="toggle" title="${state.collapsed ? "Expand" : "Collapse"}">${state.collapsed ? "‹" : "›"}</button>
         </div>
         <div class="fcuno-wa-quick">
