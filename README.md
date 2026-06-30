@@ -79,6 +79,17 @@ Vercel runs `/api/admin/system-health/notify` daily at `30 0 * * *` UTC, which i
 
 Recipients come from `SYSTEM_HEALTH_EMAIL_RECIPIENTS`; if that is not set, the app falls back to `EVENT_CALENDAR_EMAIL_RECIPIENTS`.
 
+Email notices are sent through the Exchange Online mailbox `info@cosulich.com.hk`. The app defaults to Microsoft 365 SMTP submission at `smtp.office365.com:587`; production only needs the mailbox password configured unless the mailbox username or SMTP endpoint differs.
+
+```bash
+EXCHANGE_SMTP_PASSWORD=your_exchange_mailbox_or_app_password
+# Optional overrides:
+EMAIL_NOTICE_FROM="FC Uno <info@cosulich.com.hk>"
+EXCHANGE_SMTP_USER=info@cosulich.com.hk
+EXCHANGE_SMTP_HOST=smtp.office365.com
+EXCHANGE_SMTP_PORT=587
+```
+
 Before relying on production, run:
 
 ```bash

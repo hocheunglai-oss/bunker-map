@@ -2175,7 +2175,7 @@ export default function EventCalendarPage() {
           <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Email Reminders</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-              One email per line. New and edited events will be emailed to this list from the configured fcuno.com sender.
+              One email per line. New and edited events will be emailed to this list from info@cosulich.com.hk.
             </p>
             <textarea
               value={emailRecipientsText}

@@ -1,23 +1,10 @@
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
+import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
+
+export { normalizeEmailList }
 
 const TIME_ZONE = "Asia/Hong_Kong"
 const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
-
-export function normalizeEmailList(value: unknown) {
-  const raw = Array.isArray(value) ? value.join(",") : typeof value === "string" ? value : ""
-
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\n,;]+/)
-        .map((item) => {
-          const trimmed = item.trim().toLowerCase()
-          return trimmed.match(/<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>/)?.[1] || trimmed
-        })
-        .filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item))
-    )
-  )
-}
 
 function parseLocalDate(value: string) {
   const [year, month, day] = value.split("-").map(Number)
@@ -105,36 +92,5 @@ export async function sendCalendarEmail(input: {
   subject: string
   html: string
 }) {
-  const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.")
-
-  const from = process.env.EVENT_CALENDAR_EMAIL_FROM || "FC Event Calendar <calendar@fcuno.com>"
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: input.to,
-      ...(input.cc?.length ? { cc: input.cc } : {}),
-      subject: input.subject,
-      html: input.html,
-    }),
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    let detail = ""
-    try {
-      const payload = JSON.parse(message) as { message?: string; code?: string }
-      detail = payload.message || payload.code || ""
-    } catch {
-      detail = ""
-    }
-    throw new Error(detail || message || "Email send failed.")
-  }
-
-  return response.json()
+  return sendNoticeEmail(input)
 }

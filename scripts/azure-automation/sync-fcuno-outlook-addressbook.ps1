@@ -778,20 +778,82 @@ function Get-NotificationRecipients($WebhookPayload) {
   return @($recipients)
 }
 
+function Get-NoticeEmailFrom {
+  $from = Clean-Text (Get-OptionalAutomationSetting "EMAIL_NOTICE_FROM")
+  if (-not $from) { $from = "FC Uno <info@cosulich.com.hk>" }
+  return $from
+}
+
+function Get-NoticeEmailAddress($Value) {
+  $text = Clean-Text $Value
+  if ($text -match '<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>') { return $Matches[1].ToLower() }
+  if ($text -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $text.ToLower() }
+  return ""
+}
+
+function Get-NoticeSmtpPort {
+  $portText = Clean-Text (Get-OptionalAutomationSetting "EXCHANGE_SMTP_PORT")
+  if (-not $portText) { return 587 }
+
+  $port = 0
+  if (-not [int]::TryParse($portText, [ref]$port) -or $port -le 0 -or $port -gt 65535) {
+    throw "Automation variable EXCHANGE_SMTP_PORT must be a TCP port number."
+  }
+  return $port
+}
+
+function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
+  $hostName = Clean-Text (Get-OptionalAutomationSetting "EXCHANGE_SMTP_HOST")
+  if (-not $hostName) { $hostName = "smtp.office365.com" }
+  $port = Get-NoticeSmtpPort
+  $user = Clean-Text (Get-OptionalAutomationSetting "EXCHANGE_SMTP_USER")
+  if (-not $user) { $user = Get-NoticeEmailAddress $From }
+  if (-not $user) { $user = "info@cosulich.com.hk" }
+  $password = Get-OptionalAutomationSetting "EXCHANGE_SMTP_PASSWORD"
+
+  if (-not $password) {
+    Write-Warning "Exchange sync notification email was not sent because EXCHANGE_SMTP_PASSWORD is not configured in Azure Automation variables."
+    return
+  }
+
+  $message = [System.Net.Mail.MailMessage]::new()
+  try {
+    $message.From = [System.Net.Mail.MailAddress]::new($From)
+    foreach ($recipient in @($To)) {
+      $recipientText = Clean-Text $recipient
+      if ($recipientText) { [void]$message.To.Add($recipientText) }
+    }
+    if ($message.To.Count -le 0) { return }
+
+    $message.Subject = $Subject
+    $message.Body = $Html
+    $message.IsBodyHtml = $true
+
+    if ($password -is [System.Security.SecureString]) {
+      $credential = [System.Net.NetworkCredential]::new($user, $password)
+    } else {
+      $credential = [System.Net.NetworkCredential]::new($user, [string]$password)
+    }
+
+    $client = [System.Net.Mail.SmtpClient]::new($hostName, $port)
+    try {
+      $client.EnableSsl = $true
+      $client.Credentials = $credential
+      $client.Send($message)
+    } finally {
+      $client.Dispose()
+    }
+  } finally {
+    $message.Dispose()
+  }
+}
+
 function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayload) {
   $Details = Get-StatsObject $Details
   $recipients = Get-NotificationRecipients $WebhookPayload
   if (-not $recipients -or @($recipients).Count -le 0) { return }
 
-  $apiKey = Get-OptionalAutomationSetting "RESEND_API_KEY"
-  if (-not $apiKey) {
-    Write-Warning "Exchange sync notification email was not sent because RESEND_API_KEY is not configured in Azure Automation variables."
-    return
-  }
-
-  $from = Get-OptionalAutomationSetting "EXCHANGE_SYNC_EMAIL_FROM"
-  if (-not $from) { $from = Get-OptionalAutomationSetting "EVENT_CALENDAR_EMAIL_FROM" }
-  if (-not $from) { $from = "FC Uno <calendar@fcuno.com>" }
+  $from = Get-NoticeEmailFrom
 
   $requestedBy = Clean-Text $WebhookPayload.requestedBy
   if (-not $requestedBy) { $requestedBy = "Admin" }
@@ -846,18 +908,8 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 </div>
 "@
 
-  $payload = @{
-    from = $from
-    to = @($recipients)
-    subject = "Exchange address book sync $statusText"
-    html = $html
-  }
-
   try {
-    Invoke-RestMethod -Method "POST" -Uri "https://api.resend.com/emails" -Headers @{
-      Authorization = "Bearer $apiKey"
-      "Content-Type" = "application/json"
-    } -Body ($payload | ConvertTo-Json -Depth 10) | Out-Null
+    Send-ExchangeSmtpMail $from @($recipients) "Exchange address book sync $statusText" $html
   } catch {
     Write-Warning ("Exchange sync notification email failed: {0}" -f $_.Exception.Message)
   }

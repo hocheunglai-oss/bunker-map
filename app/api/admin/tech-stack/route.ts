@@ -35,20 +35,35 @@ const VERCEL_KEYS = [
   "MICROSOFT_GRAPH_REDIRECT_BASE_URL",
   "MICROSOFT_GRAPH_CONSENT_STATE",
   "GEMINI_API_KEY",
-  "RESEND_API_KEY",
-  "EVENT_CALENDAR_EMAIL_FROM",
+  "EMAIL_NOTICE_FROM",
+  "EXCHANGE_SMTP_HOST",
+  "EXCHANGE_SMTP_PORT",
+  "EXCHANGE_SMTP_USER",
+  "EXCHANGE_SMTP_PASSWORD",
   "EVENT_CALENDAR_EMAIL_RECIPIENTS",
   "SYSTEM_HEALTH_EMAIL_RECIPIENTS",
   "CRON_SECRET",
 ] as const
 
+const DEFAULTED_VERCEL_KEYS: Partial<Record<(typeof VERCEL_KEYS)[number], string>> = {
+  EMAIL_NOTICE_FROM: "FC Uno <info@cosulich.com.hk>",
+  EXCHANGE_SMTP_HOST: "smtp.office365.com",
+  EXCHANGE_SMTP_PORT: "587",
+  EXCHANGE_SMTP_USER: "info@cosulich.com.hk",
+}
+
 function secretInventory() {
-  return VERCEL_KEYS.map((name) => ({
-    name,
-    configured: Boolean(process.env[name]),
-    storage: "VERCEL ENVIRONMENT VARIABLES",
-    value: "MASKED",
-  }))
+  return VERCEL_KEYS.map((name) => {
+    const hasExplicitValue = Boolean(process.env[name])
+    const hasDefaultValue = Boolean(DEFAULTED_VERCEL_KEYS[name])
+
+    return {
+      name,
+      configured: hasExplicitValue || hasDefaultValue,
+      storage: hasExplicitValue ? "VERCEL ENVIRONMENT VARIABLES" : hasDefaultValue ? "APP DEFAULT" : "VERCEL ENVIRONMENT VARIABLES",
+      value: "MASKED",
+    }
+  })
 }
 
 export async function GET() {

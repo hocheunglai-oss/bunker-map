@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import { google } from "googleapis"
+import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -490,6 +491,22 @@ async function checkExchangeConfig(): Promise<HealthCheckResult> {
   }
 }
 
+async function checkEmailNoticeConfig(): Promise<HealthCheckResult> {
+  const config = getEmailNoticeConfigStatus()
+
+  return {
+    status: config.missing.length ? "warning" : "ok",
+    message: config.missing.length ? "Exchange notice email configuration incomplete" : "Exchange notice email configured",
+    details: {
+      from: config.from,
+      smtpHost: config.host,
+      smtpPort: config.port,
+      smtpUser: config.user,
+      missing: config.missing.join(", "),
+    },
+  }
+}
+
 async function checkCronConfig(): Promise<HealthCheckResult> {
   const missing = !process.env.CRON_SECRET
 
@@ -512,6 +529,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange", "Exchange Sync", checkExchangeConfig),
+    runCheck("email-notice", "Notice Email", checkEmailNoticeConfig),
     runCheck("cron", "Vercel Cron", checkCronConfig),
   ])
 
