@@ -50,6 +50,7 @@ type ManagedEvent = OfficeCalendarEvent & {
 const STORAGE_KEY = "bunker-map-office-calendar-events"
 const PEOPLE_STORAGE_KEY = "bunker-map-office-calendar-people"
 const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipients"
+const DELETED_REQUIRED_SEED_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-required-seed-ids"
 const SHARED_STORE_KEY = "event-calendar"
 const CALENDAR_ID = "fcb.bunker@gmail.com"
 const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
@@ -326,6 +327,10 @@ function normalizePeople(value: string[]) {
   return Array.from(new Set(value.map((item) => item.trim().toUpperCase()).filter(Boolean).filter((item) => item !== "??")))
 }
 
+function normalizeStringList(value: string[]) {
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)))
+}
+
 function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventCategory {
   const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
   if (storedEventType === "Meeting") return "Meeting Room"
@@ -457,13 +462,17 @@ const weekDayButtons = [
 
 const requiredSeedEventIds = ["fc-2026-024"]
 
-function ensureRequiredSeedEvents(events: ManagedEvent[]) {
+function ensureRequiredSeedEvents(events: ManagedEvent[], deletedRequiredSeedIds: string[]) {
   const requiredSeeds = officeCalendarSeedEvents.filter((event) => requiredSeedEventIds.includes(event.id))
+  const deletedIds = new Set(deletedRequiredSeedIds)
   const existingIds = new Set(events.map((event) => event.id))
-  if (requiredSeeds.every((event) => existingIds.has(event.id))) return events
+  const missingRequiredSeeds = normalizeStoredEvents(requiredSeeds).filter(
+    (event) => !existingIds.has(event.id) && !deletedIds.has(event.id)
+  )
+  if (!missingRequiredSeeds.length) return events
   return [
     ...events,
-    ...normalizeStoredEvents(requiredSeeds).filter((event) => !existingIds.has(event.id)),
+    ...missingRequiredSeeds,
   ]
 }
 
@@ -491,6 +500,7 @@ export default function EventCalendarPage() {
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
+  const [deletedRequiredSeedIds, setDeletedRequiredSeedIds] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
   const [recurrentModalOpen, setRecurrentModalOpen] = useState(false)
@@ -527,14 +537,17 @@ export default function EventCalendarPage() {
       let fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
       let fallbackPeople = defaultPeople
       let fallbackEmailRecipients = ""
+      let fallbackDeletedRequiredSeedIds: string[] = []
 
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
         const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
         const storedEmailRecipients = window.localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY)
+        const storedDeletedRequiredSeedIds = window.localStorage.getItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY)
         if (stored) fallbackEvents = normalizeStoredEvents(JSON.parse(stored))
         if (storedPeople) fallbackPeople = normalizePeople(JSON.parse(storedPeople))
         if (storedEmailRecipients) fallbackEmailRecipients = storedEmailRecipients
+        if (storedDeletedRequiredSeedIds) fallbackDeletedRequiredSeedIds = normalizeStringList(JSON.parse(storedDeletedRequiredSeedIds))
       } catch {
         fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
         fallbackPeople = defaultPeople
@@ -549,17 +562,21 @@ export default function EventCalendarPage() {
           if (Array.isArray(payload.events)) fallbackEvents = normalizeStoredEvents(payload.events)
           if (Array.isArray(payload.people)) fallbackPeople = normalizePeople(payload.people)
           if (typeof payload.emailRecipientsText === "string") fallbackEmailRecipients = payload.emailRecipientsText
+          if (Array.isArray(payload.deletedRequiredSeedIds)) {
+            fallbackDeletedRequiredSeedIds = normalizeStringList(payload.deletedRequiredSeedIds)
+          }
         }
       } catch {
         // Local storage remains the fallback when the shared store is unavailable.
       }
 
-      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents)
+      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, fallbackDeletedRequiredSeedIds)
 
       if (cancelled) return
       setEvents(fallbackEvents)
       setPeople(fallbackPeople)
       setEmailRecipientsText(fallbackEmailRecipients)
+      setDeletedRequiredSeedIds(fallbackDeletedRequiredSeedIds)
       loadedRef.current = true
     }
 
@@ -586,6 +603,11 @@ export default function EventCalendarPage() {
   }, [emailRecipientsText])
 
   useEffect(() => {
+    if (!loadedRef.current) return
+    window.localStorage.setItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(deletedRequiredSeedIds))
+  }, [deletedRequiredSeedIds])
+
+  useEffect(() => {
     if (!authenticated || !loadedRef.current) return
     if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
 
@@ -593,14 +615,14 @@ export default function EventCalendarPage() {
       void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ events, people, emailRecipientsText }),
+        body: JSON.stringify({ events, people, emailRecipientsText, deletedRequiredSeedIds }),
       })
     }, 700)
 
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
     }
-  }, [authenticated, emailRecipientsText, events, people])
+  }, [authenticated, deletedRequiredSeedIds, emailRecipientsText, events, people])
 
   useEffect(() => {
     if (!authenticated || !loadedRef.current) return
@@ -1085,6 +1107,11 @@ export default function EventCalendarPage() {
     if (!window.confirm("Are you sure you want to delete this event?")) return
 
     setEvents((current) => current.filter((event) => event.id !== draftEvent.id))
+    if (requiredSeedEventIds.includes(draftEvent.id)) {
+      setDeletedRequiredSeedIds((current) =>
+        current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
+      )
+    }
     setEventModalMode(null)
   }
 
