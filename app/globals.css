@@ -2804,6 +2804,178 @@ body {
   color: #b42318 !important;
 }
 
+.spc-outcome-note,
+.spc-enquiry-match {
+  border-radius: 7px;
+  margin: 8px 0;
+  padding: 8px 9px;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.spc-outcome-note {
+  background: #e8f7f1;
+  color: #006b4f;
+}
+
+.spc-outcome-note.is-lost {
+  background: #fff0ef;
+  color: #b42318;
+}
+
+.spc-enquiry-match {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #f4d37b;
+  background: #fff8db;
+  color: #745400;
+}
+
+.spc-enquiry-match strong,
+.spc-enquiry-match span {
+  display: block;
+}
+
+.spc-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.3);
+  padding: 20px;
+}
+
+.spc-dialog {
+  width: min(420px, 100%);
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 10px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.spc-dialog-header {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 12px 14px;
+}
+
+.spc-dialog-header h2 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.spc-dialog-header button,
+.spc-dialog-actions button,
+.spc-fixture-table button {
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.spc-dialog-header button {
+  width: 30px;
+  height: 30px;
+}
+
+.spc-dialog-field {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.spc-dialog-field select,
+.spc-fixture-table input,
+.spc-fixture-table select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.spc-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  padding: 12px 14px;
+}
+
+.spc-dialog-actions button,
+.spc-fixture-table button {
+  min-height: 32px;
+  padding: 7px 12px;
+}
+
+.spc-dialog-actions button.is-primary {
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
+.spc-dialog-actions button:disabled,
+.spc-fixture-table button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.spc-fixture-table {
+  min-width: 1320px;
+}
+
+.spc-fixture-table th,
+.spc-fixture-table td {
+  vertical-align: middle;
+}
+
+.spc-fixture-table th:first-child,
+.spc-fixture-table td:first-child {
+  width: 92px;
+}
+
+.spc-fixture-table th:nth-child(2),
+.spc-fixture-table td:nth-child(2) {
+  min-width: 180px;
+}
+
+.spc-fixture-table th:nth-child(5),
+.spc-fixture-table td:nth-child(5) {
+  min-width: 180px;
+}
+
+.spc-fixture-table input,
+.spc-fixture-table select {
+  min-width: 96px;
+}
+
+.spc-fixture-table button {
+  background: #e8f7f1;
+  color: #006b4f;
+}
+
 .spc-table-wrap {
   width: 100%;
   overflow-x: auto;

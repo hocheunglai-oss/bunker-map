@@ -1,4 +1,4 @@
-const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?status=sent&limit=120"
+const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false

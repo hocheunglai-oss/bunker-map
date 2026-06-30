@@ -23,6 +23,20 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/buyer", "/spc/buyer", "/enquiries", "/spc/enquiries"],
   },
   {
+    id: "spc-fixtures",
+    label: "FIXTURES",
+    group: "trading",
+    path: "/spc/fixtures",
+    matchPrefixes: ["/fixtures", "/spc/fixtures"],
+  },
+  {
+    id: "spc-lost-record",
+    label: "LOST RECORD",
+    group: "trading",
+    path: "/spc/lost-record",
+    matchPrefixes: ["/lost-record", "/spc/lost-record", "/lost", "/spc/lost"],
+  },
+  {
     id: "spc-audit-log",
     label: "AUDIT LOG",
     group: "management",
@@ -134,7 +148,10 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = page.id === "spc-buyer-enquiries" ? "view" : "none"
+      permissions[page.id] =
+        page.id === "spc-buyer-enquiries" || page.id === "spc-fixtures" || page.id === "spc-lost-record"
+          ? "view"
+          : "none"
       return permissions
     }, {})
   }
@@ -163,6 +180,8 @@ export function getSpcPageByPath(pathname: string) {
 export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | null | undefined) {
   const priority = [
     "spc-buyer-enquiries",
+    "spc-fixtures",
+    "spc-lost-record",
     "spc-user-management",
     "spc-audit-log",
     "spc-system-health",

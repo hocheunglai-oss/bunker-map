@@ -1,6 +1,11 @@
 import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
-import { formatSpcEnquiry } from "@/lib/spcEnquiryText"
+import {
+  formatSpcEnquiry,
+  readSpcEnquiryMeta,
+  writeSpcEnquiryNotes,
+  type SpcEnquiryMeta,
+} from "@/lib/spcEnquiryText"
 
 export type SpcEnquiry = {
   id: string
@@ -14,6 +19,7 @@ export type SpcEnquiry = {
   supplierName: string | null
   status: string
   notes: string | null
+  meta: SpcEnquiryMeta
   formattedText: string
   createdByUsername: string
   createdByDisplayName: string
@@ -39,6 +45,23 @@ export type SpcEnquiryListOptions = {
 
 export type SpcEnquiryOutcome = "stem" | "lost"
 
+export type SpcEnquiryOutcomeInput = {
+  outcome: SpcEnquiryOutcome
+  lostReason?: string
+  supplierTraderUsername?: string
+  supplierTraderDisplayName?: string
+}
+
+export type SpcFixtureInput = {
+  supplier?: string
+  eta?: string
+  hsfo?: string
+  vlsfo?: string
+  lsmgo?: string
+  price?: string
+  barging?: string
+}
+
 type SpcEnquiryRow = {
   id: string
   enquiry_number: string
@@ -63,6 +86,7 @@ function cleanText(value: string | undefined) {
 }
 
 function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
+  const meta = readSpcEnquiryMeta(row.notes)
   const mapped = {
     id: row.id,
     enquiryNumber: row.enquiry_number,
@@ -75,6 +99,7 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
     supplierName: row.supplier_name,
     status: row.status,
     notes: row.notes,
+    meta,
     formattedText: "",
     createdByUsername: row.created_by_username,
     createdByDisplayName: row.created_by_display_name,
@@ -83,6 +108,20 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
   }
   mapped.formattedText = formatSpcEnquiry(mapped)
   return mapped
+}
+
+async function loadSpcEnquiryRow(
+  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
+  enquiryId: string,
+) {
+  const { data, error } = await supabase
+    .from("spc_enquiries")
+    .select("*")
+    .eq("id", enquiryId)
+    .single()
+
+  if (error) throw error
+  return data as SpcEnquiryRow
 }
 
 export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryListOptions = {}) {
@@ -140,20 +179,90 @@ export async function createSpcEnquiry(
 
 export async function updateSpcEnquiryOutcome(
   id: string,
-  outcome: SpcEnquiryOutcome,
+  input: SpcEnquiryOutcomeInput,
+  session: SpcSession,
+  request: Request,
+) {
+  const enquiryId = cleanText(id)
+  if (!enquiryId) throw new Error("Enquiry id is required.")
+  const outcome = input.outcome
+  if (outcome !== "stem" && outcome !== "lost") throw new Error("Outcome is required.")
+  if (outcome === "lost" && !cleanText(input.lostReason)) {
+    throw new Error("Lost reason is required.")
+  }
+  if (outcome === "stem" && !cleanText(input.supplierTraderUsername)) {
+    throw new Error("Supplier trader is required.")
+  }
+
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const status = outcome === "stem" ? "quoted" : "cancelled"
+  const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  const now = new Date().toISOString()
+  const currentText = formatSpcEnquiry(existing)
+  const nextMeta: SpcEnquiryMeta = {
+    ...readSpcEnquiryMeta(existing.notes),
+    outcomeAt: now,
+  }
+
+  if (outcome === "lost") {
+    nextMeta.lostReason = cleanText(input.lostReason) || undefined
+    nextMeta.stemSupplierTraderUsername = undefined
+    nextMeta.stemSupplierTraderDisplayName = undefined
+  } else {
+    nextMeta.lostReason = undefined
+    nextMeta.stemSupplierTraderUsername = cleanText(input.supplierTraderUsername) || undefined
+    nextMeta.stemSupplierTraderDisplayName =
+      cleanText(input.supplierTraderDisplayName) || cleanText(input.supplierTraderUsername) || undefined
+  }
+
+  const { data, error } = await supabase
+    .from("spc_enquiries")
+    .update({
+      status,
+      notes: writeSpcEnquiryNotes(currentText, nextMeta),
+      updated_at: now,
+    })
+    .eq("id", enquiryId)
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return mapEnquiry(data as SpcEnquiryRow)
+}
+
+export async function updateSpcEnquiryFixture(
+  id: string,
+  fixture: SpcFixtureInput,
   session: SpcSession,
   request: Request,
 ) {
   const enquiryId = cleanText(id)
   if (!enquiryId) throw new Error("Enquiry id is required.")
 
-  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const context = createSpcAuditContext(session, request, "spc-fixtures")
   const supabase = createSpcAuditedSupabaseClient(context)
-  const status = outcome === "stem" ? "quoted" : "cancelled"
+  const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  const currentText = formatSpcEnquiry(existing)
+  const now = new Date().toISOString()
+  const nextMeta: SpcEnquiryMeta = {
+    ...readSpcEnquiryMeta(existing.notes),
+    fixtureSupplier: cleanText(fixture.supplier) || undefined,
+    eta: cleanText(fixture.eta) || undefined,
+    hsfo: cleanText(fixture.hsfo) || undefined,
+    vlsfo: cleanText(fixture.vlsfo) || undefined,
+    lsmgo: cleanText(fixture.lsmgo) || undefined,
+    price: cleanText(fixture.price) || undefined,
+    barging: cleanText(fixture.barging) || undefined,
+  }
 
   const { data, error } = await supabase
     .from("spc_enquiries")
-    .update({ status })
+    .update({
+      supplier_name: nextMeta.fixtureSupplier || existing.supplier_name,
+      notes: writeSpcEnquiryNotes(currentText, nextMeta),
+      updated_at: now,
+    })
     .eq("id", enquiryId)
     .select("*")
     .single()

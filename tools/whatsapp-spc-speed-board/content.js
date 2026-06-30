@@ -14,6 +14,7 @@
     unreadById: {},
     enquiries: [],
     selectedEnquiries: {},
+    hiddenEnquiryIds: {},
     lastSeenEnquiryAt: "",
     lastNotifiedEnquiryAt: "",
     loadingEnquiries: false,
@@ -81,6 +82,7 @@
     return {
       collapsed: state.collapsed,
       contacts: state.contacts,
+      hiddenEnquiryIds: state.hiddenEnquiryIds,
       lastSeenEnquiryAt: state.lastSeenEnquiryAt,
       lastNotifiedEnquiryAt: state.lastNotifiedEnquiryAt,
     }
@@ -92,6 +94,14 @@
       collapsed: Boolean(source.collapsed),
       lastSeenEnquiryAt: cleanText(source.lastSeenEnquiryAt),
       lastNotifiedEnquiryAt: cleanText(source.lastNotifiedEnquiryAt),
+      hiddenEnquiryIds:
+        source.hiddenEnquiryIds && typeof source.hiddenEnquiryIds === "object"
+          ? Object.fromEntries(
+              Object.entries(source.hiddenEnquiryIds)
+                .filter((entry) => entry[1])
+                .map((entry) => [String(entry[0]), true]),
+            )
+          : {},
       contacts: Array.isArray(source.contacts)
         ? source.contacts
             .filter((contact) => contact && typeof contact === "object")
@@ -121,6 +131,7 @@
     const saved = sanitizeSavedState(parsed)
     state.collapsed = saved.collapsed
     state.contacts = saved.contacts
+    state.hiddenEnquiryIds = saved.hiddenEnquiryIds
     state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt
     state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt
     normalizeOrders()
@@ -325,7 +336,7 @@
     if (state.loadingEnquiries) return
     state.loadingEnquiries = true
     state.enquiryError = ""
-    render()
+    if (state.enquiries.length === 0) render()
     chrome.runtime.sendMessage({ type: "load-spc-enquiries" }, (response) => {
       state.loadingEnquiries = false
       if (chrome.runtime.lastError || !response || !response.ok) {
@@ -334,27 +345,65 @@
         return
       }
       state.enquiries = Array.isArray(response.enquiries) ? response.enquiries : []
+      Object.keys(state.selectedEnquiries).forEach((id) => {
+        const enquiry = state.enquiries.find((item) => item.id === id)
+        if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
+          delete state.selectedEnquiries[id]
+        }
+      })
       notifyNewEnquiries()
       render()
     })
   }
 
+  function visibleEnquiries() {
+    return state.enquiries.filter((enquiry) => !state.hiddenEnquiryIds[enquiry.id])
+  }
+
+  function isSendableEnquiry(enquiry) {
+    return !enquiry.status || enquiry.status === "sent"
+  }
+
+  function enquiryCreatedAt(enquiry) {
+    return enquiry.createdAt || enquiry.created_at || ""
+  }
+
+  function markEnquirySeen(enquiry) {
+    const createdAt = enquiryCreatedAt(enquiry)
+    if (!createdAt || createdAt <= state.lastSeenEnquiryAt) return
+    state.lastSeenEnquiryAt = createdAt
+    saveState()
+    render()
+  }
+
+  function hideEnquiry(id) {
+    if (!id) return
+    state.hiddenEnquiryIds[id] = true
+    delete state.selectedEnquiries[id]
+    saveState()
+    render()
+  }
+
+  function clearVisibleEnquiries() {
+    visibleEnquiries().forEach((enquiry) => {
+      state.hiddenEnquiryIds[enquiry.id] = true
+      delete state.selectedEnquiries[enquiry.id]
+    })
+    saveState()
+    render()
+  }
+
   function latestEnquiryAt() {
-    return state.enquiries.reduce((latest, enquiry) => {
-      const value = enquiry.createdAt || enquiry.created_at || ""
+    return visibleEnquiries().reduce((latest, enquiry) => {
+      const value = enquiryCreatedAt(enquiry)
       return value > latest ? value : latest
     }, "")
   }
 
   function newEnquiryCount() {
-    if (!state.lastSeenEnquiryAt) return state.enquiries.length
-    return state.enquiries.filter((enquiry) => (enquiry.createdAt || enquiry.created_at || "") > state.lastSeenEnquiryAt).length
-  }
-
-  function markEnquiriesSeen() {
-    state.lastSeenEnquiryAt = latestEnquiryAt()
-    saveState()
-    render()
+    const visible = visibleEnquiries()
+    if (!state.lastSeenEnquiryAt) return visible.length
+    return visible.filter((enquiry) => enquiryCreatedAt(enquiry) > state.lastSeenEnquiryAt).length
   }
 
   function notifyNewEnquiries() {
@@ -367,8 +416,8 @@
     }
     if (latest <= state.lastNotifiedEnquiryAt) return
 
-    const count = state.enquiries.filter((enquiry) => {
-      const createdAt = enquiry.createdAt || enquiry.created_at || ""
+    const count = visibleEnquiries().filter((enquiry) => {
+      const createdAt = enquiryCreatedAt(enquiry)
       return createdAt > state.lastNotifiedEnquiryAt
     }).length
     state.lastNotifiedEnquiryAt = latest
@@ -379,8 +428,8 @@
   }
 
   function selectedEnquiryText() {
-    return state.enquiries
-      .filter((enquiry) => state.selectedEnquiries[enquiry.id])
+    return visibleEnquiries()
+      .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
       .map((enquiry) => cleanText(enquiry.formattedText || enquiry.notes || enquiry.title))
       .filter(Boolean)
       .join("\n\n")
@@ -456,18 +505,24 @@
 
   function renderEnquiries() {
     const count = newEnquiryCount()
-    const rows = state.enquiries.map((enquiry) => {
-      const createdAt = enquiry.createdAt || enquiry.created_at || ""
+    const rows = visibleEnquiries().map((enquiry) => {
+      const createdAt = enquiryCreatedAt(enquiry)
       const isNew = !state.lastSeenEnquiryAt || createdAt > state.lastSeenEnquiryAt
+      const sendable = isSendableEnquiry(enquiry)
+      const status = enquiry.status || "sent"
+      const statusText = status === "quoted" ? "STEM" : status === "cancelled" ? "LOST" : "SENT"
+      const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
+      const heading = enquiry.vesselName || enquiry.vessel_name || enquiry.title || "ENQUIRY"
       return `
-        <label class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}">
-          <input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""} is-${escapeHtml(status)}" data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
+          ${sendable ? `<input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />` : `<span class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</span>`}
           <span>
-            <strong>${escapeHtml(enquiry.enquiryNumber || enquiry.enquiry_number || "ENQUIRY")}</strong>
+            <strong>${escapeHtml(heading)}</strong>
             <em>${escapeHtml(enquiry.formattedText || enquiry.notes || enquiry.title || "")}</em>
-            <small>${escapeHtml(enquiry.createdByDisplayName || enquiry.created_by_display_name || "Unknown")} · ${escapeHtml(formatTime(createdAt))}</small>
+            <small>${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
-        </label>
+          <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
+        </div>
       `
     }).join("")
 
@@ -478,13 +533,12 @@
           ${count ? `<span class="fcuno-wa-spc-new">${count} new</span>` : ""}
         </div>
         <div class="fcuno-wa-spc-enquiry-actions">
-          <button type="button" data-action="refresh-enquiries">${state.loadingEnquiries ? "Loading..." : "Refresh"}</button>
-          <button type="button" data-action="mark-seen">Seen</button>
+          <button type="button" data-action="clear-enquiries">Clear All</button>
           <button type="button" class="is-primary" data-action="send-selected">Send Selected</button>
         </div>
         ${state.enquiryError ? `<div class="fcuno-wa-spc-error">${escapeHtml(state.enquiryError)}</div>` : ""}
         <div class="fcuno-wa-spc-enquiry-list">
-          ${rows || `<div class="fcuno-wa-spc-empty">No sent enquiries loaded.</div>`}
+          ${rows || `<div class="fcuno-wa-spc-empty">No enquiries loaded.</div>`}
         </div>
       </section>
     `
@@ -581,18 +635,29 @@
       })
     })
 
-    host.querySelectorAll("[data-action='refresh-enquiries']").forEach((button) => {
-      button.addEventListener("click", loadEnquiries)
-    })
-    host.querySelectorAll("[data-action='mark-seen']").forEach((button) => {
-      button.addEventListener("click", markEnquiriesSeen)
+    host.querySelectorAll("[data-action='clear-enquiries']").forEach((button) => {
+      button.addEventListener("click", clearVisibleEnquiries)
     })
     host.querySelectorAll("[data-action='send-selected']").forEach((button) => {
       button.addEventListener("click", sendSelectedToChat)
     })
+    host.querySelectorAll("[data-action='hide-enquiry']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        hideEnquiry(button.dataset.id || "")
+      })
+    })
+    host.querySelectorAll("[data-action='seen-enquiry']").forEach((row) => {
+      row.addEventListener("click", () => {
+        const enquiry = state.enquiries.find((item) => item.id === row.dataset.id)
+        if (enquiry) markEnquirySeen(enquiry)
+      })
+    })
     host.querySelectorAll("[data-action='toggle-enquiry']").forEach((checkbox) => {
       checkbox.addEventListener("change", () => {
         state.selectedEnquiries[checkbox.dataset.id || ""] = checkbox.checked
+        const enquiry = state.enquiries.find((item) => item.id === checkbox.dataset.id)
+        if (enquiry) markEnquirySeen(enquiry)
       })
     })
   }
@@ -605,7 +670,7 @@
     loadEnquiries()
     refreshUnreadIndicators()
     unreadTimer = window.setInterval(refreshUnreadIndicators, 1800)
-    enquiryTimer = window.setInterval(loadEnquiries, 30000)
+    enquiryTimer = window.setInterval(loadEnquiries, 2000)
   }
 
   window.addEventListener("beforeunload", () => {

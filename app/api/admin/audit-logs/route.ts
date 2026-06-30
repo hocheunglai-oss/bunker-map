@@ -32,6 +32,8 @@ const PAGE_TABLES: Record<string, string[]> = {
   "user-management": ["admin_users", "admin_role_defaults"],
   "spc-user-management": ["spc_users", "office_calendar_store"],
   "spc-buyer-enquiries": ["spc_enquiries"],
+  "spc-fixtures": ["spc_enquiries"],
+  "spc-lost-record": ["spc_enquiries"],
   "event-calendar": ["office_calendar_store"],
   "task-calendar": ["office_calendar_store"],
   pricesetter: ["ports", "price_history", "remarks"],
@@ -58,6 +60,18 @@ const SPC_AUDIT_PAGES = [
     label: "SPC ENQUIRIES",
     group: "trading" as const,
     path: "/spc/enquiries",
+  },
+  {
+    id: "spc-fixtures",
+    label: "SPC FIXTURES",
+    group: "trading" as const,
+    path: "/spc/fixtures",
+  },
+  {
+    id: "spc-lost-record",
+    label: "SPC LOST RECORD",
+    group: "trading" as const,
+    path: "/spc/lost-record",
   },
   {
     id: "spc-audit-log",

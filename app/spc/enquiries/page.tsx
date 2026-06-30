@@ -9,6 +9,7 @@ import {
   cleanSpcEnquiryText,
   parseSpcEnquiryText,
   type ParsedSpcEnquiry,
+  type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
 
 type SpcEnquiry = {
@@ -23,10 +24,16 @@ type SpcEnquiry = {
   supplierName: string | null
   status: string
   notes: string | null
+  meta: SpcEnquiryMeta
   formattedText: string
   createdByDisplayName: string
   createdAt: string
   updatedAt: string
+}
+
+type SupplierTrader = {
+  username: string
+  displayName: string
 }
 
 type EnquiriesResponse = {
@@ -37,6 +44,24 @@ type EnquiriesResponse = {
 type DraftEnquiry = ParsedSpcEnquiry & {
   supplierName: string
 }
+
+type OutcomeDraft = {
+  id: string
+  type: "stem" | "lost"
+  lostReason: string
+  supplierTraderUsername: string
+}
+
+const LOST_REASONS = [
+  "MINIMUM MARGIN",
+  "CREDIT OR PAYMENT TERMS",
+  "COVERAGE (SUPPLIER NOT COVERED)",
+  "COVERAGE (LIMITED BY CUSTOMER)",
+  "NOT TIMELY OFFERED",
+  "DOUBLE TRADING",
+  "T&C",
+  "UNKNOWN",
+] as const
 
 const emptyDraft: DraftEnquiry = {
   rawText: "",
@@ -77,11 +102,25 @@ function normaliseDraft(rawText: string, currentSupplier = ""): DraftEnquiry {
   }
 }
 
+function normaliseVesselName(value: string | null | undefined) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function isOutcome(status: string) {
+  return status === "quoted" || status === "cancelled"
+}
+
 export default function SpcEnquiriesPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const [draft, setDraft] = useState<DraftEnquiry>(emptyDraft)
   const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
+  const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
+  const [outcomeDraft, setOutcomeDraft] = useState<OutcomeDraft | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updatingId, setUpdatingId] = useState("")
@@ -92,11 +131,24 @@ export default function SpcEnquiriesPage() {
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
   const sentCount = useMemo(() => enquiries.length, [enquiries.length])
 
+  const outcomeMatchesByVessel = useMemo(() => {
+    const matches = new Map<string, SpcEnquiry[]>()
+    enquiries.forEach((enquiry) => {
+      if (!isOutcome(enquiry.status)) return
+      const key = normaliseVesselName(enquiry.vesselName || enquiry.title)
+      if (!key) return
+      const current = matches.get(key) || []
+      current.push(enquiry)
+      matches.set(key, current)
+    })
+    return matches
+  }, [enquiries])
+
   const loadEnquiries = useCallback(async () => {
     if (!canView) return
     setLoading(true)
     try {
-      const response = await fetch("/api/spc/enquiries?limit=150", { cache: "no-store" })
+      const response = await fetch("/api/spc/enquiries?limit=200", { cache: "no-store" })
       const data = (await response.json()) as EnquiriesResponse
       if (!response.ok) throw new Error(data.message || "Failed to load enquiries.")
       setEnquiries(data.enquiries || [])
@@ -107,6 +159,19 @@ export default function SpcEnquiriesPage() {
       setLoading(false)
     }
   }, [canView])
+
+  const loadSupplierTraders = useCallback(async () => {
+    if (!canEdit) return
+    try {
+      const response = await fetch("/api/spc/supplier-traders", { cache: "no-store" })
+      const data = (await response.json()) as { supplierTraders?: SupplierTrader[]; message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to load supplier traders.")
+      setSupplierTraders(data.supplierTraders || [])
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to load supplier traders.")
+      setMessageIsError(true)
+    }
+  }, [canEdit])
 
   useEffect(() => {
     document.title = "SPC Enquiries"
@@ -119,6 +184,10 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     void loadEnquiries()
   }, [loadEnquiries])
+
+  useEffect(() => {
+    void loadSupplierTraders()
+  }, [loadSupplierTraders])
 
   function updateDraft(key: keyof DraftEnquiry, value: string) {
     setDraft((current) => {
@@ -153,6 +222,7 @@ export default function SpcEnquiriesPage() {
       vesselName: draft.vesselName,
       port: draft.port,
       product: draft.fuels,
+      deliveryDate: draft.deliveryWindow,
       supplierName: draft.supplierName,
       notes: standardText,
     }
@@ -179,29 +249,56 @@ export default function SpcEnquiriesPage() {
     }
   }
 
-  async function markOutcome(enquiryId: string, outcome: "stem" | "lost") {
-    if (!canEdit) return
-    setUpdatingId(enquiryId)
+  function openOutcome(enquiry: SpcEnquiry, type: "stem" | "lost") {
+    setMessage("")
+    setOutcomeDraft({
+      id: enquiry.id,
+      type,
+      lostReason: LOST_REASONS[0],
+      supplierTraderUsername: supplierTraders[0]?.username || "",
+    })
+  }
+
+  async function confirmOutcome() {
+    if (!canEdit || !outcomeDraft) return
+    const supplierTrader = supplierTraders.find(
+      (user) => user.username === outcomeDraft.supplierTraderUsername,
+    )
+    setUpdatingId(outcomeDraft.id)
     setMessage("")
     try {
       const response = await fetch("/api/spc/enquiries", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: enquiryId, outcome }),
+        body: JSON.stringify({
+          id: outcomeDraft.id,
+          outcome: outcomeDraft.type,
+          lostReason: outcomeDraft.type === "lost" ? outcomeDraft.lostReason : "",
+          supplierTraderUsername:
+            outcomeDraft.type === "stem" ? outcomeDraft.supplierTraderUsername : "",
+          supplierTraderDisplayName: outcomeDraft.type === "stem" ? supplierTrader?.displayName || "" : "",
+        }),
       })
       const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
       if (!response.ok || !data.enquiry) {
         throw new Error(data.message || "Failed to update enquiry.")
       }
       setEnquiries((current) =>
-        current.map((enquiry) => (enquiry.id === enquiryId ? data.enquiry! : enquiry)),
+        current.map((enquiry) => (enquiry.id === outcomeDraft.id ? data.enquiry! : enquiry)),
       )
+      setOutcomeDraft(null)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to update enquiry.")
       setMessageIsError(true)
     } finally {
       setUpdatingId("")
     }
+  }
+
+  function matchesFor(enquiry: SpcEnquiry) {
+    const key = normaliseVesselName(enquiry.vesselName || enquiry.title)
+    if (!key) return []
+    return (outcomeMatchesByVessel.get(key) || []).filter((match) => match.id !== enquiry.id)
   }
 
   if (authLoading || !canView) {
@@ -293,42 +390,125 @@ export default function SpcEnquiriesPage() {
             <h2>Sent Enquiries</h2>
           </div>
           <div className="spc-sent-enquiries-list">
-            {enquiries.map((enquiry) => (
-              <article key={enquiry.id} className="spc-sent-enquiry-card">
-                <div className="spc-sent-enquiry-topline">
-                  <strong>{enquiry.enquiryNumber}</strong>
-                  <span className={`spc-status-pill is-${enquiry.status}`}>{statusLabel(enquiry.status)}</span>
-                </div>
-                <p>{enquiry.formattedText || enquiry.title}</p>
-                <div className="spc-sent-enquiry-meta">
-                  <span>{enquiry.createdByDisplayName}</span>
-                  <span>{displayTime(enquiry.createdAt)}</span>
-                </div>
-                <div className="spc-sent-enquiry-actions">
-                  <button
-                    type="button"
-                    onClick={() => void markOutcome(enquiry.id, "stem")}
-                    disabled={!canEdit || updatingId === enquiry.id}
-                  >
-                    STEM
-                  </button>
-                  <button
-                    type="button"
-                    className="is-lost"
-                    onClick={() => void markOutcome(enquiry.id, "lost")}
-                    disabled={!canEdit || updatingId === enquiry.id}
-                  >
-                    LOST
-                  </button>
-                </div>
-              </article>
-            ))}
+            {enquiries.map((enquiry) => {
+              const matches = matchesFor(enquiry)
+              return (
+                <article key={enquiry.id} className="spc-sent-enquiry-card">
+                  <div className="spc-sent-enquiry-topline">
+                    <strong>{enquiry.vesselName || enquiry.title || enquiry.enquiryNumber}</strong>
+                    <span className={`spc-status-pill is-${enquiry.status}`}>{statusLabel(enquiry.status)}</span>
+                  </div>
+                  <p>{enquiry.formattedText || enquiry.title}</p>
+                  {enquiry.status === "quoted" && enquiry.meta?.stemSupplierTraderDisplayName ? (
+                    <div className="spc-outcome-note">Stemmed to {enquiry.meta.stemSupplierTraderDisplayName}</div>
+                  ) : null}
+                  {enquiry.status === "cancelled" && enquiry.meta?.lostReason ? (
+                    <div className="spc-outcome-note is-lost">Lost: {enquiry.meta.lostReason}</div>
+                  ) : null}
+                  {matches.length > 0 ? (
+                    <div className="spc-enquiry-match">
+                      <strong>Previous vessel record</strong>
+                      {matches.slice(0, 3).map((match) => (
+                        <span key={match.id}>
+                          {statusLabel(match.status)} · {displayTime(match.meta?.outcomeAt || match.updatedAt)} ·{" "}
+                          {match.status === "cancelled"
+                            ? match.meta?.lostReason || "No reason"
+                            : match.meta?.stemSupplierTraderDisplayName || "No supplier trader"}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="spc-sent-enquiry-meta">
+                    <span>{enquiry.createdByDisplayName}</span>
+                    <span>{displayTime(enquiry.createdAt)}</span>
+                  </div>
+                  {enquiry.status === "sent" ? (
+                    <div className="spc-sent-enquiry-actions">
+                      <button
+                        type="button"
+                        onClick={() => openOutcome(enquiry, "stem")}
+                        disabled={!canEdit || updatingId === enquiry.id}
+                      >
+                        STEM
+                      </button>
+                      <button
+                        type="button"
+                        className="is-lost"
+                        onClick={() => openOutcome(enquiry, "lost")}
+                        disabled={!canEdit || updatingId === enquiry.id}
+                      >
+                        LOST
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              )
+            })}
             {!loading && enquiries.length === 0 ? (
               <div className="spc-empty">No enquiries yet.</div>
             ) : null}
           </div>
         </section>
       </div>
+
+      {outcomeDraft ? (
+        <div className="spc-dialog-backdrop" role="presentation">
+          <section className="spc-dialog" role="dialog" aria-modal="true" aria-label="Update enquiry outcome">
+            <div className="spc-dialog-header">
+              <h2>{outcomeDraft.type === "lost" ? "Lost Reason" : "Supplier Trader"}</h2>
+              <button type="button" onClick={() => setOutcomeDraft(null)}>×</button>
+            </div>
+            {outcomeDraft.type === "lost" ? (
+              <label className="spc-dialog-field">
+                <span>Reason</span>
+                <select
+                  value={outcomeDraft.lostReason}
+                  onChange={(event) =>
+                    setOutcomeDraft((current) =>
+                      current ? { ...current, lostReason: event.target.value } : current,
+                    )
+                  }
+                >
+                  {LOST_REASONS.map((reason) => (
+                    <option key={reason} value={reason}>{reason}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="spc-dialog-field">
+                <span>Supplier Trader</span>
+                <select
+                  value={outcomeDraft.supplierTraderUsername}
+                  onChange={(event) =>
+                    setOutcomeDraft((current) =>
+                      current ? { ...current, supplierTraderUsername: event.target.value } : current,
+                    )
+                  }
+                >
+                  <option value="">Select supplier trader</option>
+                  {supplierTraders.map((user) => (
+                    <option key={user.username} value={user.username}>{user.displayName}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="spc-dialog-actions">
+              <button type="button" onClick={() => setOutcomeDraft(null)}>Cancel</button>
+              <button
+                type="button"
+                className="is-primary"
+                onClick={() => void confirmOutcome()}
+                disabled={
+                  updatingId === outcomeDraft.id ||
+                  (outcomeDraft.type === "stem" && !outcomeDraft.supplierTraderUsername)
+                }
+              >
+                Confirm
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </SpcShell>
   )
 }

@@ -247,6 +247,25 @@ function getDatabaseRole(role: string) {
   return normaliseSpcRole(role) === "SUPPLIER TRADER" ? "supplier_trader" : "buyer_trader"
 }
 
+function mergeStoredPermissionsWithRoleDefaults(
+  role: string,
+  storedPermissions: Record<string, unknown> | null | undefined,
+  pages: SpcPageDefinition[],
+) {
+  const defaults = getDefaultSpcPermissionsForRole(role, pages)
+  const source =
+    storedPermissions && typeof storedPermissions === "object" ? storedPermissions : {}
+
+  return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
+    const value = source[page.id]
+    permissions[page.id] =
+      value === "edit" || value === "view" || value === "none"
+        ? value
+        : defaults[page.id] || "none"
+    return permissions
+  }, {})
+}
+
 function buildManagedRoleDefaults(
   storedRows: SpcRoleDefaultRow[],
   userRows: SpcUserRow[],
@@ -272,7 +291,7 @@ function buildManagedRoleDefaults(
   return roles.map<ManagedSpcRoleDefault>((role) => {
     const stored = storedByRole.get(role)
     const permissions = stored
-      ? normaliseSpcPagePermissions(stored.permissions, "view", pages)
+      ? mergeStoredPermissionsWithRoleDefaults(role, stored.permissions, pages)
       : getDefaultSpcPermissionsForRole(role, pages)
 
     return {
@@ -616,6 +635,20 @@ export async function listManagedSpcUsers(
   } catch (error) {
     throw friendlySpcUserError(error)
   }
+}
+
+export async function listSupplierTraderOptions(
+  roleDefaults?: ManagedSpcRoleDefault[],
+  pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
+) {
+  const users = await listManagedSpcUsers(roleDefaults, pages)
+  return users
+    .filter((user) => user.isActive && normaliseSpcRole(user.role) === "SUPPLIER TRADER")
+    .map((user) => ({
+      username: user.username,
+      displayName: user.displayName || user.username,
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
 }
 
 export async function saveManagedSpcUser(

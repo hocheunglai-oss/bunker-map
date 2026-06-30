@@ -12,6 +12,8 @@ import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 const PAGE_TABLES: Record<string, string[]> = {
   "spc-user-management": ["spc_users", "office_calendar_store"],
   "spc-buyer-enquiries": ["spc_enquiries"],
+  "spc-fixtures": ["spc_enquiries"],
+  "spc-lost-record": ["spc_enquiries"],
 }
 
 function rawOperationsForDisplay(operation: string | undefined) {

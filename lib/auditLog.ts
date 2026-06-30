@@ -95,6 +95,8 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "taiwan-price-history": "TAIWAN PRICE HISTORY",
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-buyer-enquiries": "SPC ENQUIRIES",
+  "spc-fixtures": "SPC FIXTURES",
+  "spc-lost-record": "SPC LOST RECORD",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",
   "spc-tech-stack": "SPC TECH STACK",
