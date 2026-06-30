@@ -107,7 +107,12 @@ export async function PATCH(request: Request) {
 
     const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
     const outcome: SpcEnquiryOutcome | null =
-      payload.outcome === "stem" || payload.outcome === "lost" ? payload.outcome : null
+      payload.outcome === "stem" ||
+      payload.outcome === "lost" ||
+      payload.outcome === "postpone" ||
+      payload.outcome === "cancel"
+        ? payload.outcome
+        : null
     if (!outcome) throw new Error("Outcome is required.")
 
     const enquiry = await updateSpcEnquiryOutcome(

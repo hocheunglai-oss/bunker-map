@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
-import { getDefaultSpcLandingPath } from "@/lib/spcPages"
+import { SpcShell } from "@/components/SpcShell"
 
 export default function SpcLoginPage() {
   const router = useRouter()
-  const { loading, authenticated, permissions } = useSpcAuth()
-  const [username, setUsername] = useState("")
+  const { loading, authenticated, displayName, username: sessionUsername } = useSpcAuth()
+  const [loginUsername, setLoginUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -17,12 +17,6 @@ export default function SpcLoginPage() {
   useEffect(() => {
     document.title = "Singapore Purchasing Center"
   }, [])
-
-  useEffect(() => {
-    if (!loading && authenticated) {
-      router.replace(getDefaultSpcLandingPath(permissions))
-    }
-  }, [authenticated, loading, permissions, router])
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -34,7 +28,7 @@ export default function SpcLoginPage() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: loginUsername, password }),
     })
 
     const data = await response.json()
@@ -53,8 +47,18 @@ export default function SpcLoginPage() {
       pages: data.pages || [],
     })
 
-    router.replace(data.redirectTo || getDefaultSpcLandingPath(data.user?.permissions || {}))
+    router.replace("/spc")
     router.refresh()
+  }
+
+  if (!loading && authenticated) {
+    return (
+      <SpcShell title="SPC Welcome">
+        <section className="spc-welcome-panel" aria-label="SPC welcome">
+          <h1>WELCOME, {displayName || sessionUsername}</h1>
+        </section>
+      </SpcShell>
+    )
   }
 
   return (
@@ -73,8 +77,8 @@ export default function SpcLoginPage() {
                 </svg>
               </span>
               <input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                value={loginUsername}
+                onChange={(event) => setLoginUsername(event.target.value)}
                 autoComplete="username"
                 aria-label="Username"
                 required

@@ -391,7 +391,21 @@
   }
 
   function isSendableEnquiry(enquiry) {
-    return !enquiry.status || enquiry.status === "sent"
+    return (!enquiry.status || enquiry.status === "sent") && !enquiry.meta?.postponedAt
+  }
+
+  function enquiryStatusKey(enquiry) {
+    if ((!enquiry.status || enquiry.status === "sent") && enquiry.meta?.postponedAt) return "postponed"
+    return enquiry.status || "sent"
+  }
+
+  function enquiryStatusText(enquiry) {
+    const status = enquiryStatusKey(enquiry)
+    if (status === "quoted") return "STEM"
+    if (status === "cancelled") return "LOST"
+    if (status === "closed") return "CANCELLED"
+    if (status === "postponed") return "POSTPONED"
+    return "SENT"
   }
 
   function enquiryCreatedAt(enquiry) {
@@ -539,8 +553,8 @@
       const createdAt = enquiryCreatedAt(enquiry)
       const isNew = !state.lastSeenEnquiryAt || createdAt > state.lastSeenEnquiryAt
       const sendable = isSendableEnquiry(enquiry)
-      const status = enquiry.status || "sent"
-      const statusText = status === "quoted" ? "STEM" : status === "cancelled" ? "LOST" : "SENT"
+      const status = enquiryStatusKey(enquiry)
+      const statusText = enquiryStatusText(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const heading = enquiry.vesselName || enquiry.vessel_name || enquiry.title || "ENQUIRY"
       return `

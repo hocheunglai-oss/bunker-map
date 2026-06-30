@@ -16,6 +16,8 @@ export type SpcEnquiryMeta = {
   stemSupplierTraderUsername?: string
   stemSupplierTraderDisplayName?: string
   outcomeAt?: string
+  postponedAt?: string
+  cancelledAt?: string
   fixtureSupplier?: string
   eta?: string
   hsfo?: string
@@ -46,6 +48,8 @@ const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "stemSupplierTraderUsername",
   "stemSupplierTraderDisplayName",
   "outcomeAt",
+  "postponedAt",
+  "cancelledAt",
   "fixtureSupplier",
   "eta",
   "hsfo",

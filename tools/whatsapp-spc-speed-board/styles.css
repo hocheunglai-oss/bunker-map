@@ -69,7 +69,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-logo {
-  width: 178px;
+  width: 238px;
   height: auto;
   display: block;
   object-fit: contain;
@@ -353,6 +353,16 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   background: #fff6f5;
 }
 
+.fcuno-wa-spc-enquiry.is-postponed {
+  border-color: #efd38b;
+  background: #fffaf0;
+}
+
+.fcuno-wa-spc-enquiry.is-closed {
+  border-color: #cfd6df;
+  background: #f7f9fb;
+}
+
 .fcuno-wa-spc-enquiry input {
   margin-top: 3px;
 }
@@ -405,6 +415,16 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 .fcuno-wa-spc-status.is-cancelled {
   background: #ffe1df;
   color: #b42318;
+}
+
+.fcuno-wa-spc-status.is-postponed {
+  background: #fff0bf;
+  color: #8a5a00;
+}
+
+.fcuno-wa-spc-status.is-closed {
+  background: #e4e7ec;
+  color: #344054;
 }
 
 .fcuno-wa-spc-enquiry-remove {

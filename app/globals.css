@@ -2369,6 +2369,7 @@ body {
 }
 
 .spc-login-submit {
+  appearance: none;
   min-height: 9.85cqw;
   border: 0;
   border-radius: 0.78cqw;
@@ -2378,6 +2379,11 @@ body {
   font-size: 3.3cqw;
   font-weight: 650;
   box-shadow: none;
+}
+
+.spc-login-submit:focus,
+.spc-login-submit:focus-visible {
+  outline: none;
 }
 
 .spc-login-submit:disabled {
@@ -2439,9 +2445,27 @@ body {
 }
 
 .fc-admin-sidebar-logo.is-spc-logo {
-  width: 188px;
+  width: 222px;
   max-height: 44px;
   object-fit: contain;
+}
+
+.spc-welcome-panel {
+  min-height: calc(100vh - 42px);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.spc-welcome-panel h1 {
+  margin: 0;
+  color: var(--spc-navy-dark);
+  font-size: clamp(30px, 4.2vw, 58px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-align: center;
 }
 
 .spc-topbar-brand span {
@@ -2777,6 +2801,7 @@ body {
 }
 
 .spc-sent-enquiry-actions {
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 10px;
 }
@@ -2799,6 +2824,18 @@ body {
   color: #b42318;
 }
 
+.spc-sent-enquiry-actions button.is-postpone {
+  border-color: #d49b22;
+  background: #fff8e6;
+  color: #8a5a00;
+}
+
+.spc-sent-enquiry-actions button.is-cancel {
+  border-color: #8f99a8;
+  background: #f2f4f7;
+  color: #344054;
+}
+
 .spc-sent-enquiry-actions button:disabled {
   cursor: default;
   opacity: 0.55;
@@ -2812,6 +2849,16 @@ body {
 .spc-status-pill.is-cancelled {
   background: #fff0ef;
   color: #b42318 !important;
+}
+
+.spc-status-pill.is-postponed {
+  background: #fff8e6;
+  color: #8a5a00 !important;
+}
+
+.spc-status-pill.is-closed {
+  background: #f2f4f7;
+  color: #344054 !important;
 }
 
 .spc-outcome-note,
@@ -2832,6 +2879,11 @@ body {
 .spc-outcome-note.is-lost {
   background: #fff0ef;
   color: #b42318;
+}
+
+.spc-outcome-note.is-postponed {
+  background: #fff8e6;
+  color: #8a5a00;
 }
 
 .spc-enquiry-match {

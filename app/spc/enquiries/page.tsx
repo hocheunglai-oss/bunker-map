@@ -44,13 +44,15 @@ type EnquiriesResponse = {
   message?: string
 }
 
+type EnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
+
 type DraftEnquiry = ParsedSpcEnquiry & {
   standardText: string
 }
 
 type OutcomeDraft = {
   id: string
-  type: "stem" | "lost"
+  type: Extract<EnquiryOutcome, "stem" | "lost">
   lostReason: string
   supplierTraderUsername: string
 }
@@ -95,7 +97,18 @@ function displayTime(value: string | null) {
 function statusLabel(status: string) {
   if (status === "quoted") return "STEM"
   if (status === "cancelled") return "LOST"
+  if (status === "closed") return "CANCELLED"
   return status || "sent"
+}
+
+function enquiryStatusLabel(enquiry: SpcEnquiry) {
+  if (enquiry.status === "sent" && enquiry.meta?.postponedAt) return "POSTPONED"
+  return statusLabel(enquiry.status)
+}
+
+function enquiryStatusClass(enquiry: SpcEnquiry) {
+  if (enquiry.status === "sent" && enquiry.meta?.postponedAt) return "postponed"
+  return enquiry.status || "sent"
 }
 
 function standardTextForDraft(draft: Pick<DraftEnquiry, "vesselName" | "imo" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">) {
@@ -119,7 +132,7 @@ function normaliseVesselName(value: string | null | undefined) {
 }
 
 function isOutcome(status: string) {
-  return status === "quoted" || status === "cancelled"
+  return status === "quoted" || status === "cancelled" || status === "closed"
 }
 
 export default function SpcEnquiriesPage() {
@@ -137,6 +150,10 @@ export default function SpcEnquiriesPage() {
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
+  const activeEnquiries = useMemo(
+    () => enquiries.filter((enquiry) => enquiry.status === "sent"),
+    [enquiries],
+  )
   const outcomeMatchesByVessel = useMemo(() => {
     const matches = new Map<string, SpcEnquiry[]>()
     enquiries.forEach((enquiry) => {
@@ -263,7 +280,7 @@ export default function SpcEnquiriesPage() {
     }
   }
 
-  function openOutcome(enquiry: SpcEnquiry, type: "stem" | "lost") {
+  function openOutcome(enquiry: SpcEnquiry, type: Extract<EnquiryOutcome, "stem" | "lost">) {
     setMessage("")
     setOutcomeDraft({
       id: enquiry.id,
@@ -271,6 +288,28 @@ export default function SpcEnquiriesPage() {
       lostReason: LOST_REASONS[0],
       supplierTraderUsername: supplierTraders[0]?.username || "",
     })
+  }
+
+  async function patchOutcome(payload: {
+    id: string
+    outcome: EnquiryOutcome
+    lostReason?: string
+    supplierTraderUsername?: string
+    supplierTraderDisplayName?: string
+  }) {
+    const response = await fetch("/api/spc/enquiries", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
+    if (!response.ok || !data.enquiry) {
+      throw new Error(data.message || "Failed to update enquiry.")
+    }
+    setEnquiries((current) =>
+      current.map((enquiry) => (enquiry.id === payload.id ? data.enquiry! : enquiry)),
+    )
+    return data.enquiry
   }
 
   async function confirmOutcome() {
@@ -281,26 +320,31 @@ export default function SpcEnquiriesPage() {
     setUpdatingId(outcomeDraft.id)
     setMessage("")
     try {
-      const response = await fetch("/api/spc/enquiries", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: outcomeDraft.id,
-          outcome: outcomeDraft.type,
-          lostReason: outcomeDraft.type === "lost" ? outcomeDraft.lostReason : "",
-          supplierTraderUsername:
-            outcomeDraft.type === "stem" ? outcomeDraft.supplierTraderUsername : "",
-          supplierTraderDisplayName: outcomeDraft.type === "stem" ? supplierTrader?.displayName || "" : "",
-        }),
+      await patchOutcome({
+        id: outcomeDraft.id,
+        outcome: outcomeDraft.type,
+        lostReason: outcomeDraft.type === "lost" ? outcomeDraft.lostReason : "",
+        supplierTraderUsername:
+          outcomeDraft.type === "stem" ? outcomeDraft.supplierTraderUsername : "",
+        supplierTraderDisplayName: outcomeDraft.type === "stem" ? supplierTrader?.displayName || "" : "",
       })
-      const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
-      if (!response.ok || !data.enquiry) {
-        throw new Error(data.message || "Failed to update enquiry.")
-      }
-      setEnquiries((current) =>
-        current.map((enquiry) => (enquiry.id === outcomeDraft.id ? data.enquiry! : enquiry)),
-      )
       setOutcomeDraft(null)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update enquiry.")
+      setMessageIsError(true)
+    } finally {
+      setUpdatingId("")
+    }
+  }
+
+  async function quickOutcome(enquiry: SpcEnquiry, outcome: Extract<EnquiryOutcome, "postpone" | "cancel">) {
+    if (!canEdit) return
+    setUpdatingId(enquiry.id)
+    setMessage("")
+    try {
+      await patchOutcome({ id: enquiry.id, outcome })
+      setMessage(outcome === "postpone" ? "Enquiry postponed." : "Enquiry cancelled.")
+      setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to update enquiry.")
       setMessageIsError(true)
@@ -400,15 +444,23 @@ export default function SpcEnquiriesPage() {
             <h2>Sent Enquiries</h2>
           </div>
           <div className="spc-sent-enquiries-list">
-            {enquiries.map((enquiry) => {
+            {activeEnquiries.map((enquiry) => {
               const matches = matchesFor(enquiry)
+              const postponed = Boolean(enquiry.meta?.postponedAt)
               return (
                 <article key={enquiry.id} className="spc-sent-enquiry-card">
                   <div className="spc-sent-enquiry-topline">
                     <strong>{enquiry.vesselName || enquiry.title || enquiry.enquiryNumber}</strong>
-                    <span className={`spc-status-pill is-${enquiry.status}`}>{statusLabel(enquiry.status)}</span>
+                    <span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>
+                      {enquiryStatusLabel(enquiry)}
+                    </span>
                   </div>
                   <p>{enquiry.formattedText || enquiry.title}</p>
+                  {postponed ? (
+                    <div className="spc-outcome-note is-postponed">
+                      Postponed {displayTime(enquiry.meta?.postponedAt || enquiry.updatedAt)}
+                    </div>
+                  ) : null}
                   {enquiry.status === "quoted" && enquiry.meta?.stemSupplierTraderDisplayName ? (
                     <div className="spc-outcome-note">Stemmed to {enquiry.meta.stemSupplierTraderDisplayName}</div>
                   ) : null}
@@ -449,12 +501,28 @@ export default function SpcEnquiriesPage() {
                       >
                         LOST
                       </button>
+                      <button
+                        type="button"
+                        className="is-postpone"
+                        onClick={() => void quickOutcome(enquiry, "postpone")}
+                        disabled={!canEdit || updatingId === enquiry.id || postponed}
+                      >
+                        {postponed ? "POSTPONED" : "POSTPONE"}
+                      </button>
+                      <button
+                        type="button"
+                        className="is-cancel"
+                        onClick={() => void quickOutcome(enquiry, "cancel")}
+                        disabled={!canEdit || updatingId === enquiry.id}
+                      >
+                        CANCEL
+                      </button>
                     </div>
                   ) : null}
                 </article>
               )
             })}
-            {!loading && enquiries.length === 0 ? (
+            {!loading && activeEnquiries.length === 0 ? (
               <div className="spc-empty">No enquiries yet.</div>
             ) : null}
           </div>
