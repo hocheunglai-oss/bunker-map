@@ -496,11 +496,12 @@ export default function EventCalendarPage() {
   const { loading, authenticated } = useSimpleAdminAuth()
   const todayKey = toDateKey(new Date())
   const tomorrowKey = addDaysToKey(todayKey, 1)
-  const [events, setEvents] = useState<ManagedEvent[]>(() => normalizeStoredEvents(officeCalendarSeedEvents))
+  const [events, setEvents] = useState<ManagedEvent[]>([])
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
   const [deletedRequiredSeedIds, setDeletedRequiredSeedIds] = useState<string[]>([])
+  const [calendarLoaded, setCalendarLoaded] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
   const [eventModalMode, setEventModalMode] = useState<ModalMode>(null)
   const [recurrentModalOpen, setRecurrentModalOpen] = useState(false)
@@ -578,6 +579,7 @@ export default function EventCalendarPage() {
       setEmailRecipientsText(fallbackEmailRecipients)
       setDeletedRequiredSeedIds(fallbackDeletedRequiredSeedIds)
       loadedRef.current = true
+      setCalendarLoaded(true)
     }
 
     loadCalendarData()
@@ -1106,11 +1108,17 @@ export default function EventCalendarPage() {
     if (eventModalMode !== "edit") return
     if (!window.confirm("Are you sure you want to delete this event?")) return
 
-    setEvents((current) => current.filter((event) => event.id !== draftEvent.id))
+    setEvents((current) => {
+      const nextEvents = current.filter((event) => event.id !== draftEvent.id)
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEvents))
+      return nextEvents
+    })
     if (requiredSeedEventIds.includes(draftEvent.id)) {
-      setDeletedRequiredSeedIds((current) =>
-        current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
-      )
+      setDeletedRequiredSeedIds((current) => {
+        const nextDeletedIds = current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
+        window.localStorage.setItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
+        return nextDeletedIds
+      })
     }
     setEventModalMode(null)
   }
@@ -1124,6 +1132,20 @@ export default function EventCalendarPage() {
           <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
             Please log in from the admin homepage first.
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!calendarLoaded) {
+    return (
+      <div style={pageStyle}>
+        <div style={shellStyle}>
+          <div style={panelStyle}>
+            <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>
+              Loading calendar...
+            </p>
+          </div>
         </div>
       </div>
     )
