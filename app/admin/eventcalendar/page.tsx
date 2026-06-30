@@ -455,6 +455,18 @@ const weekDayButtons = [
   { value: 6, label: "Sat" },
 ]
 
+const requiredSeedEventIds = ["fc-2026-024"]
+
+function ensureRequiredSeedEvents(events: ManagedEvent[]) {
+  const requiredSeeds = officeCalendarSeedEvents.filter((event) => requiredSeedEventIds.includes(event.id))
+  const existingIds = new Set(events.map((event) => event.id))
+  if (requiredSeeds.every((event) => existingIds.has(event.id))) return events
+  return [
+    ...events,
+    ...normalizeStoredEvents(requiredSeeds).filter((event) => !existingIds.has(event.id)),
+  ]
+}
+
 function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) {
   const seen = new Set(current.map((event) => `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`))
   const seenIds = new Set(current.map((event) => event.id))
@@ -541,6 +553,8 @@ export default function EventCalendarPage() {
       } catch {
         // Local storage remains the fallback when the shared store is unavailable.
       }
+
+      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents)
 
       if (cancelled) return
       setEvents(fallbackEvents)
