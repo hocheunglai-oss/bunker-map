@@ -32,13 +32,11 @@ const SERVICES = [
   ["AUTHENTICATION", "SPC MANAGED USERS / ROLE GROUPS", "SUPABASE", "SPC USERS"],
   ["USER AUTHORITY", "PAGE PERMISSIONS", "SHARED CONFIG STORE", "SPC GROUPS"],
   ["DATABASE", "POSTGRESQL", "SUPABASE", "SPC_USERS / SPC_ENQUIRIES"],
-  ["SUPPLIER MESSAGING", "WHATSAPP WEB SPEED BOARD", "CHROME EXTENSION", "LOCAL TRADER BROWSER"],
 ] as const
 
 const DATABASE_GROUPS = [
   { title: "SPC AUTH", tables: ["spc_users", "office_calendar_store: spc-permission-groups"] },
   { title: "SPC OPERATIONS", tables: ["spc_enquiries"] },
-  { title: "SPC WHATSAPP SPEED BOARD", tables: ["localStorage: fcuno-wa-speed-board-v1"] },
   { title: "SPC AUDIT", tables: ["audit_logs"] },
 ] as const
 

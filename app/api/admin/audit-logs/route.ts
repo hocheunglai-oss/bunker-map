@@ -32,7 +32,6 @@ const PAGE_TABLES: Record<string, string[]> = {
   "user-management": ["admin_users", "admin_role_defaults"],
   "spc-user-management": ["spc_users", "office_calendar_store"],
   "spc-buyer-enquiries": ["spc_enquiries"],
-  "spc-whatsapp": ["whatsapp_conversations", "whatsapp_messages"],
   "event-calendar": ["office_calendar_store"],
   "task-calendar": ["office_calendar_store"],
   pricesetter: ["ports", "price_history", "remarks"],
@@ -59,12 +58,6 @@ const SPC_AUDIT_PAGES = [
     label: "SPC BUYER ENQUIRIES",
     group: "trading" as const,
     path: "/spc/buyer",
-  },
-  {
-    id: "spc-whatsapp",
-    label: "SPC WHATSAPP",
-    group: "contacts" as const,
-    path: "/spc/supplier",
   },
   {
     id: "spc-audit-log",

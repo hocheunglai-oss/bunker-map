@@ -43,12 +43,30 @@
       .replace(/'/g, "&#039;")
   }
 
-  function loadState() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")
-      state.collapsed = Boolean(parsed.collapsed)
-      state.contacts = Array.isArray(parsed.contacts)
-        ? parsed.contacts
+  function getExtensionStorage() {
+    if (
+      typeof chrome === "undefined" ||
+      !chrome.storage ||
+      !chrome.storage.local
+    ) {
+      return null
+    }
+    return chrome.storage.local
+  }
+
+  function getStatePayload() {
+    return {
+      collapsed: state.collapsed,
+      contacts: state.contacts,
+    }
+  }
+
+  function sanitizeSavedState(parsed) {
+    const source = parsed && typeof parsed === "object" ? parsed : {}
+    return {
+      collapsed: Boolean(source.collapsed),
+      contacts: Array.isArray(source.contacts)
+        ? source.contacts
             .filter((contact) => contact && typeof contact === "object")
             .map((contact, index) => ({
               id: String(contact.id || uid()),
@@ -61,23 +79,63 @@
               createdAt: contact.createdAt || new Date().toISOString(),
               updatedAt: contact.updatedAt || new Date().toISOString(),
             }))
-        : []
-    } catch {
-      state.collapsed = false
-      state.contacts = []
+        : [],
     }
+  }
+
+  async function readExtensionState() {
+    const storage = getExtensionStorage()
+    if (!storage) return null
+
+    return new Promise((resolve) => {
+      storage.get([STORAGE_KEY], (items) => {
+        if (chrome.runtime.lastError) {
+          resolve(null)
+          return
+        }
+        resolve(items && items[STORAGE_KEY] ? items[STORAGE_KEY] : null)
+      })
+    })
+  }
+
+  function readLegacyPageState() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")
+    } catch {
+      return {}
+    }
+  }
+
+  async function persistState(payload) {
+    const storage = getExtensionStorage()
+    if (storage) {
+      await new Promise((resolve) => {
+        storage.set({ [STORAGE_KEY]: payload }, () => resolve())
+      })
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    } catch {
+      // Extension storage is the source of truth; page localStorage is only a migration backup.
+    }
+  }
+
+  async function loadState() {
+    const storedState = await readExtensionState()
+    const parsed = storedState || readLegacyPageState()
+    const sanitized = sanitizeSavedState(parsed)
+    state.collapsed = sanitized.collapsed
+    state.contacts = sanitized.contacts
     normalizeOrders()
+    if (!storedState && state.contacts.length) {
+      void persistState(getStatePayload())
+    }
   }
 
   function saveState() {
     normalizeOrders()
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        collapsed: state.collapsed,
-        contacts: state.contacts,
-      }),
-    )
+    void persistState(getStatePayload())
     document.body.classList.toggle("fcuno-wa-board-collapsed", state.collapsed)
     document.body.classList.toggle("fcuno-wa-board-active", !state.collapsed)
   }
@@ -662,9 +720,9 @@
     })
   }
 
-  function start() {
+  async function start() {
     if (document.getElementById(BOARD_ID)) return
-    loadState()
+    await loadState()
     saveState()
     render()
     refreshUnreadIndicators()

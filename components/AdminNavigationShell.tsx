@@ -146,15 +146,6 @@ function AdminPageIcon({ page }: { page: AdminPageDefinition }) {
     )
   }
 
-  if (page.id === "whatsapp") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5.2 19.2 6.4 16A7.5 7.5 0 1 1 9 18.1l-3.8 1.1Z" />
-        <path d="M9.2 9.5c.7 2 2 3.4 4 4l1.2-1.2 2.1.8c-.2 1.5-1.1 2.4-2.6 2.4-3.4-.2-5.6-2.3-6.4-6.3.1-1.4.9-2.2 2.2-2.5l.9 2-1.4.8Z" />
-      </svg>
-    )
-  }
-
   if (page.id === "audit-log") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -23,13 +23,6 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/buyer", "/spc/buyer"],
   },
   {
-    id: "spc-whatsapp",
-    label: "WHATSAPP SPEED BOARD",
-    group: "contacts",
-    path: "/spc/supplier",
-    matchPrefixes: ["/supplier", "/spc/supplier"],
-  },
-  {
     id: "spc-audit-log",
     label: "AUDIT LOG",
     group: "management",
@@ -134,14 +127,14 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "BUYER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = page.id === "spc-whatsapp" ? "none" : "edit"
+      permissions[page.id] = "edit"
       return permissions
     }, {})
   }
 
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = page.id === "spc-whatsapp" ? "edit" : "none"
+      permissions[page.id] = "none"
       return permissions
     }, {})
   }
@@ -170,7 +163,6 @@ export function getSpcPageByPath(pathname: string) {
 export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | null | undefined) {
   const priority = [
     "spc-buyer-enquiries",
-    "spc-whatsapp",
     "spc-user-management",
     "spc-audit-log",
     "spc-system-health",

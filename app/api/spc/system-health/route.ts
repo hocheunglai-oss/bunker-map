@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
-import { getWhatsAppConfigStatus } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -49,7 +48,6 @@ export async function GET() {
       countRows(supabase, "spc_users"),
       countRows(supabase, "spc_enquiries"),
     ])
-    const whatsapp = getWhatsAppConfigStatus()
     const checks = [
       {
         id: "spc-auth-users",
@@ -66,14 +64,6 @@ export async function GET() {
         message: "SPC enquiry table reachable",
         checkedAt,
         details: { enquiries },
-      },
-      {
-        id: "spc-whatsapp",
-        label: "SPC WHATSAPP",
-        status: whatsapp.configured ? "ok" as const : "warning" as const,
-        message: whatsapp.configured ? "WhatsApp configuration is available" : "WhatsApp configuration is incomplete",
-        checkedAt,
-        details: whatsapp,
       },
       {
         id: "spc-domain",

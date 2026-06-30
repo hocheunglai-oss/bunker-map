@@ -72,12 +72,6 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     matchPrefixes: ["/admin/emailtemplates", "/admin/outlooktemplates"],
   },
   {
-    id: "whatsapp",
-    label: "WHATSAPP SPEED BOARD",
-    group: "contacts",
-    path: "/admin/whatsapp",
-  },
-  {
     id: "event-calendar",
     label: "EVENT CALENDAR",
     group: "office",

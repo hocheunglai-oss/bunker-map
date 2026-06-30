@@ -49,7 +49,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 - TypeScript
 - Supabase
 - Leaflet / React Leaflet
-- Meta WhatsApp Business Platform
 
 ## Deployment
 

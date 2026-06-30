@@ -27,7 +27,7 @@ Local Chrome extension for the trading-hour WhatsApp workflow.
 - Click a contact to jump to the WhatsApp chat. Phone-number chats open directly with WhatsApp Web's `send?phone=` URL.
 - Name-only chats use WhatsApp Web's left chat search as a fallback; the extension does not use in-chat search.
 - Visible WhatsApp unread counts are mirrored as green badges on saved rows.
-- Everything is stored locally in the trader's browser under `fcuno-wa-speed-board-v1`.
+- Everything is stored in Chrome extension storage under `fcuno-wa-speed-board-v1`, so the board remains after WhatsApp Web logout/login.
 
 ## Notes
 
