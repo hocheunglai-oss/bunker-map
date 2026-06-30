@@ -24,7 +24,7 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   },
   {
     id: "spc-whatsapp",
-    label: "WHATSAPP",
+    label: "WHATSAPP SPEED BOARD",
     group: "contacts",
     path: "/spc/supplier",
     matchPrefixes: ["/supplier", "/spc/supplier"],

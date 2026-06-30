@@ -73,7 +73,7 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
   },
   {
     id: "whatsapp",
-    label: "WHATSAPP (UNDER CONSTRUCTION)",
+    label: "WHATSAPP SPEED BOARD",
     group: "contacts",
     path: "/admin/whatsapp",
   },

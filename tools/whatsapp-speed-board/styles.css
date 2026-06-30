@@ -1,0 +1,297 @@
+#fcuno-wa-board {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 2147483000;
+  width: 360px;
+  height: 100vh;
+  color: #111b21;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body.fcuno-wa-board-active #app {
+  width: calc(100% - 360px) !important;
+  max-width: calc(100% - 360px) !important;
+}
+
+body.fcuno-wa-board-collapsed #app {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+#fcuno-wa-board * {
+  box-sizing: border-box;
+}
+
+.fcuno-wa-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border-left: 1px solid #d1d7db;
+  background: #f0f2f5;
+  box-shadow: -8px 0 20px rgba(17, 27, 33, 0.14);
+}
+
+.fcuno-wa-shell.is-collapsed {
+  width: 46px;
+  margin-left: auto;
+}
+
+.fcuno-wa-shell.is-collapsed .fcuno-wa-body,
+.fcuno-wa-shell.is-collapsed .fcuno-wa-quick,
+.fcuno-wa-shell.is-collapsed .fcuno-wa-title {
+  display: none;
+}
+
+.fcuno-wa-head {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #d1d7db;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.fcuno-wa-title {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.fcuno-wa-title strong {
+  overflow: hidden;
+  color: #111b21;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcuno-wa-title span {
+  color: #667781;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fcuno-wa-icon,
+.fcuno-wa-button,
+.fcuno-wa-list-button,
+.fcuno-wa-remove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.fcuno-wa-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: #54656f;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.fcuno-wa-icon:hover {
+  background: #e9edef;
+}
+
+.fcuno-wa-quick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-bottom: 1px solid #d1d7db;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.fcuno-wa-button {
+  min-height: 32px;
+  border-radius: 7px;
+  background: #008069;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fcuno-wa-button.is-buyer {
+  background: #0b5cad;
+}
+
+.fcuno-wa-body {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.fcuno-wa-form {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d1d7db;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.fcuno-wa-form input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #d1d7db;
+  border-radius: 7px;
+  color: #111b21;
+  font-size: 12px;
+  outline: none;
+  padding: 0 8px;
+}
+
+.fcuno-wa-form input:focus {
+  border-color: #00a884;
+}
+
+.fcuno-wa-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.fcuno-wa-lists {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.fcuno-wa-panel {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #d1d7db;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.fcuno-wa-panel-head {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e9edef;
+  padding: 6px 8px;
+}
+
+.fcuno-wa-panel-head strong {
+  color: #111b21;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fcuno-wa-panel-head span {
+  color: #667781;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.fcuno-wa-list {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.fcuno-wa-empty {
+  color: #667781;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 12px 10px;
+}
+
+.fcuno-wa-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #e9edef;
+  background: #ffffff;
+  padding: 8px 7px 8px 9px;
+}
+
+.fcuno-wa-row:hover {
+  background: #f5f6f6;
+}
+
+.fcuno-wa-row.is-dragging {
+  opacity: 0.45;
+}
+
+.fcuno-wa-row.is-drop-target {
+  box-shadow: inset 0 2px 0 #00a884;
+}
+
+.fcuno-wa-list-button {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  text-align: left;
+}
+
+.fcuno-wa-list-button strong {
+  overflow: hidden;
+  color: #111b21;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcuno-wa-list-button span {
+  overflow: hidden;
+  color: #667781;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcuno-wa-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fcuno-wa-remove {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #667781;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.fcuno-wa-remove:hover {
+  background: #ffe7e7;
+  color: #b42318;
+}
+
+.fcuno-wa-status {
+  min-height: 20px;
+  color: #008069;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}

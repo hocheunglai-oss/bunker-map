@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "FCUNO WhatsApp Speed Board",
+  "version": "0.1.0",
+  "description": "Local Supplier and Buyer contact board for WhatsApp Web trading workflow.",
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://web.whatsapp.com/*"]
+}
