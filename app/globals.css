@@ -2206,11 +2206,11 @@ body {
   display: grid;
   align-content: start;
   justify-items: center;
-  border: 1.5px solid var(--spc-navy-dark);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   background: #ffffff;
-  box-shadow: 0 24px 52px rgba(6, 40, 74, 0.16);
-  overflow: hidden;
+  box-shadow: none;
+  overflow: visible;
   padding: 0 0 16px;
 }
 
