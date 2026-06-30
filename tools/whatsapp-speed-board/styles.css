@@ -4,9 +4,12 @@
   right: 0;
   z-index: 2147483000;
   width: 360px;
+  min-width: 360px;
+  max-width: 360px;
   height: 100vh;
   color: #111b21;
   font-family: Arial, Helvetica, sans-serif;
+  overflow: hidden;
 }
 
 body.fcuno-wa-board-active #app {
@@ -19,33 +22,45 @@ body.fcuno-wa-board-collapsed #app {
   max-width: 100% !important;
 }
 
+body.fcuno-wa-board-collapsed #fcuno-wa-board {
+  width: 46px;
+  min-width: 46px;
+  max-width: 46px;
+}
+
 #fcuno-wa-board * {
   box-sizing: border-box;
 }
 
 .fcuno-wa-shell {
+  width: 360px;
+  min-width: 360px;
+  max-width: 360px;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: 50px 48px 28px minmax(0, 1fr);
   border-left: 1px solid #d1d7db;
   background: #f0f2f5;
   box-shadow: -8px 0 20px rgba(17, 27, 33, 0.14);
+  overflow: hidden;
 }
 
 .fcuno-wa-shell.is-collapsed {
   width: 46px;
+  min-width: 46px;
+  max-width: 46px;
   margin-left: auto;
 }
 
 .fcuno-wa-shell.is-collapsed .fcuno-wa-body,
 .fcuno-wa-shell.is-collapsed .fcuno-wa-quick,
 .fcuno-wa-shell.is-collapsed .fcuno-wa-status,
-.fcuno-wa-shell.is-collapsed .fcuno-wa-title {
+.fcuno-wa-shell.is-collapsed .fcuno-wa-logo {
   display: none;
 }
 
 .fcuno-wa-head {
-  min-height: 50px;
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -55,27 +70,12 @@ body.fcuno-wa-board-collapsed #app {
   padding: 8px 10px;
 }
 
-.fcuno-wa-title {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.fcuno-wa-title strong {
-  overflow: hidden;
-  color: #111b21;
-  font-size: 14px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fcuno-wa-title span {
-  color: #667781;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.fcuno-wa-logo {
+  width: 142px;
+  height: auto;
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 
 .fcuno-wa-icon,
@@ -107,6 +107,7 @@ body.fcuno-wa-board-collapsed #app {
 }
 
 .fcuno-wa-quick {
+  height: 48px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -125,7 +126,7 @@ body.fcuno-wa-board-collapsed #app {
 }
 
 .fcuno-wa-button.is-buyer {
-  background: #0b5cad;
+  background: #c9352b;
 }
 
 .fcuno-wa-body {
@@ -144,34 +145,21 @@ body.fcuno-wa-board-collapsed #app {
 .fcuno-wa-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #d1d7db;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.fcuno-wa-panel-head {
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e9edef;
-  padding: 6px 8px;
+.fcuno-wa-panel[data-panel="supplier"] {
+  border-color: #b9e3d5;
+  background: #eaf7f2;
 }
 
-.fcuno-wa-panel-head strong {
-  color: #111b21;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.fcuno-wa-panel-head span {
-  color: #667781;
-  font-size: 11px;
-  font-weight: 800;
+.fcuno-wa-panel[data-panel="buyer"] {
+  border-color: #f1c2bd;
+  background: #fff0ef;
 }
 
 .fcuno-wa-list {
@@ -193,7 +181,7 @@ body.fcuno-wa-board-collapsed #app {
   align-items: center;
   gap: 6px;
   border-bottom: 1px solid #e9edef;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.82);
   padding: 8px 7px 8px 9px;
 }
 
@@ -237,7 +225,7 @@ body.fcuno-wa-board-collapsed #app {
 .fcuno-wa-row-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .fcuno-wa-remove {
@@ -257,17 +245,32 @@ body.fcuno-wa-board-collapsed #app {
   color: #b42318;
 }
 
+.fcuno-wa-unread {
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #25d366;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0 6px;
+}
+
 .fcuno-wa-status {
-  min-height: 0;
+  height: 28px;
+  min-height: 28px;
+  overflow: hidden;
   border-bottom: 1px solid #d1d7db;
   background: #ffffff;
   color: #008069;
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 16px;
   padding: 6px 10px;
-}
-
-.fcuno-wa-status:empty {
-  display: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

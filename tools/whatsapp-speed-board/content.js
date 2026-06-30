@@ -13,7 +13,10 @@
     dragging: null,
     dropTargetId: "",
     status: "",
+    unreadById: {},
   }
+
+  let unreadTimer = 0
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -117,6 +120,10 @@
         render()
       }
     }, 2200)
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms))
   }
 
   function isIgnoredHeaderText(value) {
@@ -257,6 +264,7 @@
 
   function removeContact(id) {
     state.contacts = state.contacts.filter((contact) => contact.id !== id)
+    delete state.unreadById[id]
     saveState()
     setStatus("Removed.")
   }
@@ -287,35 +295,107 @@
     return rect.width > 0 && rect.height > 0
   }
 
-  function findVisibleChatRow(contact) {
-    const pane =
+  function getSidePane() {
+    return (
       document.querySelector("#pane-side") ||
-      document.querySelector("#side") ||
-      document.querySelector("[aria-label='Chat list']") ||
-      document.querySelector("[aria-label='Chats']")
-    if (!pane) return null
+      document.querySelector("#side [role='grid']") ||
+      document.querySelector("#side [aria-label='Chat list']") ||
+      document.querySelector("#side [aria-label='Chats']")
+    )
+  }
 
+  function textMatchesContact(contact, value) {
+    const text = cleanText(value).toLowerCase()
+    if (!text) return false
     const name = cleanText(contact.name).toLowerCase()
     const digits = phoneDigits(contact.phone)
+    if (name && text.includes(name)) return true
+    if (digits && phoneDigits(text).includes(digits)) return true
+    return false
+  }
+
+  function findVisibleChatRow(contact) {
+    const pane = getSidePane()
+    if (!pane) return null
+
     const candidates = Array.from(
-      pane.querySelectorAll("[role='listitem'], [role='button'], div[tabindex='0'], div[tabindex='-1']"),
-    )
-      .filter(isVisible)
+      pane.querySelectorAll("[role='listitem'], [role='row'], [role='button'], div[tabindex='0'], div[tabindex='-1']"),
+    ).filter(isVisible)
 
     return candidates.find((element) => {
       const text = cleanText(
         element.getAttribute("title") ||
           element.getAttribute("aria-label") ||
           element.textContent,
-      ).toLowerCase()
-      if (!text) return false
-      if (name && text.includes(name)) return true
-      if (digits && phoneDigits(text).includes(digits)) return true
-      return false
+      )
+      return textMatchesContact(contact, text)
     })
   }
 
-  function openContact(contact) {
+  function findSidebarSearchBox() {
+    const side = document.querySelector("#side")
+    if (!side) return null
+
+    const candidates = Array.from(
+      side.querySelectorAll("input[type='search'], input[type='text'], div[contenteditable='true'], [role='textbox']"),
+    ).filter(isVisible)
+
+    return candidates.find((element) => {
+      const text = cleanText(
+        element.getAttribute("aria-label") ||
+          element.getAttribute("title") ||
+          element.getAttribute("placeholder") ||
+          element.getAttribute("data-testid") ||
+          element.closest("[aria-label]")?.getAttribute("aria-label") ||
+          "",
+      ).toLowerCase()
+      return text.includes("search") || text.includes("chat") || text.includes("搜尋") || text.includes("搜索")
+    }) || candidates[0] || null
+  }
+
+  function setSearchText(element, text) {
+    element.focus()
+
+    if ("value" in element) {
+      const prototype = Object.getPrototypeOf(element)
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, "value")
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(element, text)
+      } else {
+        element.value = text
+      }
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+      return
+    }
+
+    document.execCommand("selectAll", false)
+    document.execCommand("insertText", false, text)
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+  }
+
+  async function openContactBySidebarSearch(contact) {
+    const query = cleanText(contact.name) || phoneDigits(contact.phone)
+    if (!query) return false
+
+    const searchBox = findSidebarSearchBox()
+    if (!searchBox) return false
+
+    setSearchText(searchBox, query)
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await wait(80)
+      const row = findVisibleChatRow(contact)
+      if (row) {
+        row.click()
+        setStatus(`Opened ${contact.name}.`)
+        return true
+      }
+    }
+
+    return false
+  }
+
+  async function openContact(contact) {
     const directUrl = getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
     if (directUrl) {
       setStatus(`Opening ${contact.name}...`)
@@ -335,7 +415,43 @@
       return
     }
 
-    setStatus("No phone saved. Open this chat in WhatsApp, then press Add again.")
+    setStatus(`Searching ${contact.name}...`)
+    if (await openContactBySidebarSearch(contact)) return
+    setStatus("Chat not found in WhatsApp list.")
+  }
+
+  function getUnreadCountFromRow(row) {
+    const labels = Array.from(row.querySelectorAll("[aria-label], [title]"))
+      .map((element) => `${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""}`)
+      .map(cleanText)
+
+    const unreadLabel = labels.find((label) => {
+      const text = label.toLowerCase()
+      return text.includes("unread") || text.includes("未讀") || text.includes("未读")
+    })
+
+    if (!unreadLabel) return ""
+    const match = unreadLabel.match(/\d+/)
+    return match ? match[0] : "•"
+  }
+
+  function refreshUnreadIndicators() {
+    if (state.dragging) return
+
+    const next = {}
+    state.contacts.forEach((contact) => {
+      const row = findVisibleChatRow(contact)
+      if (!row) return
+      const unread = getUnreadCountFromRow(row)
+      if (unread) next[contact.id] = unread
+    })
+
+    const previous = JSON.stringify(state.unreadById)
+    const current = JSON.stringify(next)
+    if (previous === current) return
+
+    state.unreadById = next
+    render()
   }
 
   function renderList(list) {
@@ -349,7 +465,7 @@
             <span>${escapeHtml(details || "Saved chat")}</span>
           </button>
           <div class="fcuno-wa-row-actions">
-            <button class="fcuno-wa-remove" type="button" data-action="move" data-id="${escapeHtml(contact.id)}" data-list="${list === "supplier" ? "buyer" : "supplier"}" title="Move to ${list === "supplier" ? "Buyer" : "Supplier"}">${list === "supplier" ? "B" : "S"}</button>
+            ${state.unreadById[contact.id] ? `<span class="fcuno-wa-unread" title="${escapeHtml(state.unreadById[contact.id])} unread">${escapeHtml(state.unreadById[contact.id])}</span>` : ""}
             <button class="fcuno-wa-remove" type="button" data-action="remove" data-id="${escapeHtml(contact.id)}" title="Remove">×</button>
           </div>
         </div>
@@ -358,10 +474,6 @@
 
     return `
       <section class="fcuno-wa-panel" data-panel="${list}">
-        <div class="fcuno-wa-panel-head">
-          <strong>${LIST_LABELS[list]}</strong>
-          <span>${contacts.length}</span>
-        </div>
         <div class="fcuno-wa-list" data-list="${list}">
           ${rows || `<div class="fcuno-wa-empty">Add current WhatsApp chats here. No phonebook is loaded.</div>`}
         </div>
@@ -380,10 +492,7 @@
     host.innerHTML = `
       <div class="fcuno-wa-shell${state.collapsed ? " is-collapsed" : ""}">
         <div class="fcuno-wa-head">
-          <div class="fcuno-wa-title">
-            <strong>FCUNO WhatsApp</strong>
-            <span>Speed Board</span>
-          </div>
+          <img class="fcuno-wa-logo" src="https://fcuno.com/fc-uno-sidebar-logo.png" alt="FC UNO" />
           <button class="fcuno-wa-icon" type="button" data-action="toggle" title="${state.collapsed ? "Expand" : "Collapse"}">${state.collapsed ? "‹" : "›"}</button>
         </div>
         <div class="fcuno-wa-quick">
@@ -423,16 +532,12 @@
     host.querySelectorAll("[data-action='open']").forEach((button) => {
       button.addEventListener("click", () => {
         const contact = state.contacts.find((item) => item.id === button.dataset.id)
-        if (contact) openContact(contact)
+        if (contact) void openContact(contact)
       })
     })
 
     host.querySelectorAll("[data-action='remove']").forEach((button) => {
       button.addEventListener("click", () => removeContact(button.dataset.id || ""))
-    })
-
-    host.querySelectorAll("[data-action='move']").forEach((button) => {
-      button.addEventListener("click", () => moveContact(button.dataset.id || "", button.dataset.list || "supplier", ""))
     })
 
     host.querySelectorAll(".fcuno-wa-row").forEach((row) => {
@@ -481,6 +586,8 @@
     loadState()
     saveState()
     render()
+    refreshUnreadIndicators()
+    if (!unreadTimer) unreadTimer = window.setInterval(refreshUnreadIndicators, 1600)
   }
 
   if (document.readyState === "loading") {

@@ -25,6 +25,8 @@ Local Chrome extension for the trading-hour WhatsApp workflow.
 - Open a WhatsApp chat, then click `Add as Supplier` or `Add as Buyer`.
 - Drag contacts to reorder.
 - Click a contact to jump to the WhatsApp chat. Phone-number chats open directly with WhatsApp Web's `send?phone=` URL.
+- Name-only chats use WhatsApp Web's left chat search as a fallback; the extension does not use in-chat search.
+- Visible WhatsApp unread counts are mirrored as green badges on saved rows.
 - Everything is stored locally in the trader's browser under `fcuno-wa-speed-board-v1`.
 
 ## Notes
