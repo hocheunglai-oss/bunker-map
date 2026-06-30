@@ -64,7 +64,7 @@ export default function SpcLoginPage() {
 
         <form onSubmit={handleLogin} className="spc-login-form">
           <label className="spc-login-field">
-            <span>Username</span>
+            <span className="spc-login-hidden-label">Username</span>
             <span className="spc-input-wrap">
               <span className="spc-field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -76,14 +76,14 @@ export default function SpcLoginPage() {
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
                 autoComplete="username"
-                placeholder="Enter your username"
+                aria-label="Username"
                 required
               />
             </span>
           </label>
 
           <label className="spc-login-field">
-            <span>Password</span>
+            <span className="spc-login-hidden-label">Password</span>
             <span className="spc-password-wrap">
               <span className="spc-field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -97,7 +97,7 @@ export default function SpcLoginPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
-                placeholder="Enter your password"
+                aria-label="Password"
                 required
               />
               <button

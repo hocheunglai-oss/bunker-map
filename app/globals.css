@@ -2267,7 +2267,7 @@ body {
   left: 18.75%;
   z-index: 1;
   display: grid;
-  gap: 2.95cqw;
+  gap: 3.45cqw;
   margin: 0;
   padding: 0;
   background: transparent;
@@ -2284,22 +2284,31 @@ body {
 
 .spc-login-field {
   display: grid;
-  gap: 1.18cqw;
+  gap: 0;
   color: var(--spc-navy-dark);
-  font-size: 2.35cqw;
+  font-size: 3.05cqw;
   font-weight: 500;
   line-height: 1.1;
+}
+
+.spc-login-hidden-label {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .spc-input-wrap,
 .spc-password-wrap {
   width: 100%;
-  min-height: 8cqw;
+  min-height: 9.65cqw;
   border: 0.14cqw solid #aeb7c4;
   border-radius: 0.78cqw;
   background: #ffffff;
   color: #1c2738;
-  font-size: 2.35cqw;
+  font-size: 3.2cqw;
   box-shadow: none;
 }
 
@@ -2310,14 +2319,14 @@ body {
 .spc-input-wrap,
 .spc-password-wrap {
   display: grid;
-  grid-template-columns: 7.8cqw minmax(0, 1fr) auto;
+  grid-template-columns: 9.1cqw minmax(0, 1fr) auto;
   align-items: center;
-  padding: 0 1.95cqw 0 2.35cqw;
+  padding: 0 2.35cqw 0 2.65cqw;
 }
 
 .spc-field-icon {
-  width: 3.15cqw;
-  height: 3.15cqw;
+  width: 4.3cqw;
+  height: 4.3cqw;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2326,8 +2335,8 @@ body {
 
 .spc-field-icon svg,
 .spc-password-wrap button svg {
-  width: 3.15cqw;
-  height: 3.15cqw;
+  width: 4.3cqw;
+  height: 4.3cqw;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -2338,35 +2347,36 @@ body {
 .spc-input-wrap input,
 .spc-password-wrap input {
   min-width: 0;
-  height: 7.4cqw;
+  height: 9cqw;
   border: 0;
   background: transparent;
   color: #1c2738;
   outline: none;
-  font-size: 2.35cqw;
+  font-size: 3.05cqw;
+  font-weight: 650;
 }
 
 .spc-password-wrap button {
-  min-width: 7.2cqw;
-  min-height: 7.2cqw;
+  min-width: 8.4cqw;
+  min-height: 8.4cqw;
   border: 0;
   border-radius: 0.78cqw;
   background: transparent;
   color: #4f5968;
   cursor: pointer;
-  font-size: 2.35cqw;
+  font-size: 3.05cqw;
   font-weight: 800;
 }
 
 .spc-login-submit {
-  min-height: 8cqw;
+  min-height: 9.85cqw;
   border: 0;
   border-radius: 0.78cqw;
   background: var(--spc-navy);
   color: #ffffff;
   cursor: pointer;
-  font-size: 2.75cqw;
-  font-weight: 500;
+  font-size: 3.3cqw;
+  font-weight: 650;
   box-shadow: none;
 }
 
@@ -2648,7 +2658,7 @@ body {
 }
 
 .spc-enquiries-layout {
-  min-height: calc(100vh - 150px);
+  min-height: calc(100vh - 72px);
   display: grid;
   grid-template-columns: minmax(520px, 1fr) minmax(360px, 460px);
   gap: 14px;
@@ -2657,15 +2667,15 @@ body {
 
 .spc-enquiry-entry-panel,
 .spc-sent-enquiries-panel {
-  height: calc(100vh - 150px);
+  height: calc(100vh - 72px);
 }
 
 .spc-enquiry-entry-form {
   height: calc(100% - 54px);
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(116px, 0.8fr) auto minmax(98px, 0.7fr) auto;
-  gap: 10px;
+  grid-template-rows: minmax(142px, 0.9fr) auto minmax(92px, 0.48fr) auto;
+  gap: 11px;
   padding: 12px;
   overflow: hidden;
 }
@@ -2711,8 +2721,8 @@ body {
   gap: 9px;
 }
 
-.spc-enquiry-fuels {
-  grid-column: span 2;
+.spc-enquiry-remarks {
+  grid-column: 1 / -1;
 }
 
 .spc-sent-enquiries-list {
@@ -3549,7 +3559,7 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .spc-enquiry-fuels {
+  .spc-enquiry-remarks {
     grid-column: auto;
   }
 

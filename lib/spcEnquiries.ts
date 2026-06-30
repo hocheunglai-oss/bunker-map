@@ -85,6 +85,11 @@ function cleanText(value: string | undefined) {
   return trimmed || null
 }
 
+function cleanDateInput(value: string | undefined) {
+  const trimmed = value?.trim() || ""
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null
+}
+
 function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
   const meta = readSpcEnquiryMeta(row.notes)
   const mapped = {
@@ -163,7 +168,7 @@ export async function createSpcEnquiry(
       port: cleanText(input.port),
       product: cleanText(input.product),
       quantity: cleanText(input.quantity),
-      delivery_date: cleanText(input.deliveryDate),
+      delivery_date: cleanDateInput(input.deliveryDate),
       supplier_name: cleanText(input.supplierName),
       notes: cleanText(input.notes),
       status: "sent",

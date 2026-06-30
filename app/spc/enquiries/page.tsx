@@ -6,8 +6,11 @@ import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import {
+  buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
+  cleanSpcFuelValue,
   parseSpcEnquiryText,
+  writeSpcEnquiryNotes,
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
@@ -42,7 +45,7 @@ type EnquiriesResponse = {
 }
 
 type DraftEnquiry = ParsedSpcEnquiry & {
-  supplierName: string
+  standardText: string
 }
 
 type OutcomeDraft = {
@@ -68,11 +71,12 @@ const emptyDraft: DraftEnquiry = {
   title: "",
   vesselName: "",
   imo: "",
-  port: "",
-  deliveryWindow: "",
-  fuels: "",
+  eta: "",
+  hsfo: "",
+  vlsfo: "",
+  lsmgo: "",
+  remarks: "",
   standardText: "",
-  supplierName: "",
 }
 
 function displayTime(value: string | null) {
@@ -94,11 +98,15 @@ function statusLabel(status: string) {
   return status || "sent"
 }
 
-function normaliseDraft(rawText: string, currentSupplier = ""): DraftEnquiry {
+function standardTextForDraft(draft: Pick<DraftEnquiry, "vesselName" | "imo" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">) {
+  return buildSpcStandardEnquiry(draft)
+}
+
+function normaliseDraft(rawText: string): DraftEnquiry {
   const parsed = parseSpcEnquiryText(rawText)
   return {
     ...parsed,
-    supplierName: currentSupplier,
+    standardText: parsed.standardText,
   }
 }
 
@@ -129,8 +137,6 @@ export default function SpcEnquiriesPage() {
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
-  const sentCount = useMemo(() => enquiries.length, [enquiries.length])
-
   const outcomeMatchesByVessel = useMemo(() => {
     const matches = new Map<string, SpcEnquiry[]>()
     enquiries.forEach((enquiry) => {
@@ -192,17 +198,13 @@ export default function SpcEnquiriesPage() {
   function updateDraft(key: keyof DraftEnquiry, value: string) {
     setDraft((current) => {
       const next = { ...current, [key]: value }
-      if (key === "rawText") return normaliseDraft(value, current.supplierName)
+      if (key === "rawText") return normaliseDraft(value)
       if (key !== "standardText") {
-        const standardText = [
-          next.vesselName,
-          next.imo,
-          next.port,
-          next.deliveryWindow,
-          next.fuels,
-        ].filter(Boolean).join(" / ")
-        next.standardText = standardText
-        next.title = [next.vesselName || "New enquiry", next.port, next.deliveryWindow]
+        if (key === "hsfo") next.hsfo = cleanSpcFuelValue(value, "hsfo")
+        if (key === "vlsfo") next.vlsfo = cleanSpcFuelValue(value, "vlsfo")
+        if (key === "lsmgo") next.lsmgo = cleanSpcFuelValue(value, "lsmgo")
+        next.standardText = standardTextForDraft(next)
+        next.title = [next.vesselName || "new enquiry", next.eta]
           .filter(Boolean)
           .join(" / ")
       }
@@ -217,14 +219,26 @@ export default function SpcEnquiriesPage() {
     setMessage("")
 
     const standardText = cleanSpcEnquiryText(draft.standardText || draft.rawText)
+    const hasFuel = Boolean(draft.hsfo || draft.vlsfo || draft.lsmgo)
+    if (!draft.vesselName.trim() || !draft.imo.trim() || !draft.eta.trim() || !hasFuel) {
+      setMessage("VESSEL, IMO, ETA and at least one fuel are required.")
+      setMessageIsError(true)
+      setSaving(false)
+      return
+    }
+
     const payload = {
       title: draft.title || draft.vesselName || standardText.slice(0, 80),
       vesselName: draft.vesselName,
-      port: draft.port,
-      product: draft.fuels,
-      deliveryDate: draft.deliveryWindow,
-      supplierName: draft.supplierName,
-      notes: standardText,
+      product: [draft.hsfo && `hsfo ${draft.hsfo}`, draft.vlsfo && `vlsfo ${draft.vlsfo}`, draft.lsmgo && `lsmgo ${draft.lsmgo}`]
+        .filter(Boolean)
+        .join(" / "),
+      notes: writeSpcEnquiryNotes(standardText, {
+        eta: draft.eta,
+        hsfo: draft.hsfo,
+        vlsfo: draft.vlsfo,
+        lsmgo: draft.lsmgo,
+      }),
     }
 
     try {
@@ -307,16 +321,6 @@ export default function SpcEnquiriesPage() {
 
   return (
     <SpcShell title="SPC Enquiries">
-      <div className="spc-page-heading spc-enquiries-heading">
-        <div>
-          <h1>Enquiries</h1>
-          <p>{sentCount} enquiries</p>
-        </div>
-        <button type="button" className="spc-page-action" onClick={() => void loadEnquiries()} disabled={loading}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
       {message ? (
         <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>
           {message}
@@ -327,43 +331,49 @@ export default function SpcEnquiriesPage() {
         <section className="spc-panel spc-enquiry-entry-panel">
           <div className="spc-panel-header">
             <h2>New Enquiry</h2>
+            <button type="button" onClick={() => setDraft(emptyDraft)} disabled={!canEdit || saving}>
+              Clear
+            </button>
           </div>
           <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form">
             <label className="spc-enquiry-raw">
-              <span>Paste Buyer Text</span>
+              <span>Paste Your Enquiry Here</span>
               <textarea
                 value={draft.rawText}
                 onChange={(event) => updateDraft("rawText", event.target.value)}
-                placeholder="Allegra / 1014840 / Port Klang / 20 Jul - 03 Aug / Lsmgo 120-200mt"
+                placeholder=""
                 rows={4}
-                required
                 disabled={!canEdit}
               />
             </label>
             <div className="spc-enquiry-fields">
               <label>
                 <span>Vessel</span>
-                <input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} />
+                <input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} required />
               </label>
               <label>
                 <span>IMO</span>
-                <input value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} />
+                <input value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} required />
               </label>
               <label>
-                <span>Port</span>
-                <input value={draft.port} onChange={(event) => updateDraft("port", event.target.value)} disabled={!canEdit} />
+                <span>ETA</span>
+                <input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} required />
               </label>
               <label>
-                <span>Delivery</span>
-                <input value={draft.deliveryWindow} onChange={(event) => updateDraft("deliveryWindow", event.target.value)} disabled={!canEdit} />
-              </label>
-              <label className="spc-enquiry-fuels">
-                <span>Fuel / Quantity</span>
-                <input value={draft.fuels} onChange={(event) => updateDraft("fuels", event.target.value)} disabled={!canEdit} />
+                <span>HSFO</span>
+                <input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} />
               </label>
               <label>
-                <span>Supplier</span>
-                <input value={draft.supplierName} onChange={(event) => updateDraft("supplierName", event.target.value)} disabled={!canEdit} />
+                <span>VLSFO</span>
+                <input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} />
+              </label>
+              <label>
+                <span>LSMGO</span>
+                <input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} />
+              </label>
+              <label className="spc-enquiry-remarks">
+                <span>Remarks</span>
+                <input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} />
               </label>
             </div>
             <label className="spc-enquiry-preview-field">
@@ -373,7 +383,7 @@ export default function SpcEnquiriesPage() {
                 onChange={(event) => updateDraft("standardText", event.target.value)}
                 placeholder="Standard enquiry preview"
                 rows={3}
-                required
+                readOnly
                 disabled={!canEdit}
               />
             </label>

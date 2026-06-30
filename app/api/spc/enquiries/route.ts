@@ -20,7 +20,12 @@ type EnquiryPayload = {
 }
 
 function errorResponse(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : fallback
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : fallback
   const status =
     message === "Unauthorized"
       ? 401

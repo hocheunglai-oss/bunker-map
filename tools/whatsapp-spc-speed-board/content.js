@@ -180,9 +180,38 @@
       .filter((text) => {
         const key = text.toLowerCase()
         if (!text || seen.has(key)) return false
-        if (["search", "menu", "message", "typing", "online", "last seen"].some((item) => key.includes(item))) return false
+        if ([
+          "search",
+          "menu",
+          "message",
+          "typing",
+          "online",
+          "last seen",
+          "profile details",
+          "contact info",
+          "group info",
+          "click to see",
+          "open chat details",
+        ].some((item) => key.includes(item))) return false
         seen.add(key)
         return true
+      })
+  }
+
+  function headerTitleCandidates(header) {
+    return Array.from(header.querySelectorAll("span[title], div[title]"))
+      .filter(isVisible)
+      .map((element) => cleanText(element.getAttribute("title") || element.textContent))
+      .filter((text) => {
+        const key = text.toLowerCase()
+        if (!text) return false
+        return ![
+          "profile details",
+          "contact info",
+          "group info",
+          "click to see",
+          "open chat details",
+        ].some((item) => key.includes(item))
       })
   }
 
@@ -191,7 +220,8 @@
     const header = main && main.querySelector("header")
     if (!main || !header) return null
 
-    const candidates = textCandidates(header)
+    const titleCandidates = headerTitleCandidates(header)
+    const candidates = titleCandidates.length > 0 ? titleCandidates : textCandidates(header)
     const phoneText = candidates.find((text) => phoneDigits(text).length >= 7) || ""
     const phone = phoneDigits(phoneText)
     const name = candidates.find((text) => phoneDigits(text).length < 7) || phoneText || phone

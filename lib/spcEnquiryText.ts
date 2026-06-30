@@ -3,9 +3,11 @@ export type ParsedSpcEnquiry = {
   title: string
   vesselName: string
   imo: string
-  port: string
-  deliveryWindow: string
-  fuels: string
+  eta: string
+  hsfo: string
+  vlsfo: string
+  lsmgo: string
+  remarks: string
   standardText: string
 }
 
@@ -38,7 +40,7 @@ export type SpcEnquiryTextInput = {
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
-const FUEL_PATTERN = /\b(vlsfo|lsfo|hsfo|ifo|mgo|lsmgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm)\b/i
+const FUEL_PATTERN = /\b(vlsfo|lsfo|hsfo|hfo|ifo|mgo|lsmgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)\b/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "lostReason",
   "stemSupplierTraderUsername",
@@ -117,6 +119,16 @@ function oneLine(value: string | null | undefined) {
   return cleanSpcEnquiryText(value).replace(/\n+/g, " / ").trim()
 }
 
+function lowerText(value: string | null | undefined) {
+  return oneLine(value)
+    .replace(/[–—]/g, "-")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
+
 function isImoToken(value: string) {
   return /^\d{7}$/.test(value.trim())
 }
@@ -128,6 +140,95 @@ function looksLikeDateWindow(value: string) {
 
 function looksLikeFuel(value: string) {
   return FUEL_PATTERN.test(value.trim())
+}
+
+type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
+
+function classifyFuel(value: string): FuelKey | "" {
+  if (/\b(?:lsmgo|mgo|mdo|dma|dmb)\b/i.test(value)) return "lsmgo"
+  if (/\b(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst)\b/i.test(value)) {
+    return "vlsfo"
+  }
+  if (/\b(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b/i.test(value)) return "hsfo"
+  return ""
+}
+
+function normalizeQuantityNumber(value: string) {
+  const normalized = value.replace(/,/g, "")
+  if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
+  return normalized
+}
+
+function extractQuantity(value: string) {
+  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*t|mt|mts|tons?)\b/i)
+  if (range) {
+    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+  }
+
+  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*t|mt|mts|tons?)\b/gi))
+    .map((match) => match[1])
+  const quantity = matches.at(-1)
+  return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
+}
+
+function vlsfoRemarks(value: string) {
+  const remarks: string[] = []
+  if (/\b180\s*cst\b/i.test(value)) remarks.push("180cst max")
+  if (/\b120\s*cst\b/i.test(value)) remarks.push("120cst max")
+  return remarks
+}
+
+export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKey) {
+  let text = lowerText(value)
+  if (!text) return ""
+
+  text = text
+    .replace(/[()]/g, " ")
+    .replace(/\bmax(?:imum)?\b/gi, "max")
+    .replace(/\bvisc(?:osity)?\b/gi, "visc")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b\s*[:/-]?\s*/i, "")
+  if (fuel === "vlsfo") text = text.replace(/^\s*(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\b\s*[:/-]?\s*/i, "")
+  if (fuel === "lsmgo") text = text.replace(/^\s*(?:lsmgo|mgo|mdo|dma|dmb)\b\s*[:/-]?\s*/i, "")
+
+  const plainNumber = text.match(/^(\d+(?:[,.]\d+)?)$/)
+  if (plainNumber) return `${normalizeQuantityNumber(plainNumber[1])}mts`
+  const plainRange = text.match(/^(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)$/)
+  if (plainRange) {
+    return `${normalizeQuantityNumber(plainRange[1])}-${normalizeQuantityNumber(plainRange[2])}mts`
+  }
+
+  const quantity = extractQuantity(text)
+  const remarks = fuel === "vlsfo" ? vlsfoRemarks(text) : []
+  if (quantity) return [...remarks, quantity].join(" ")
+  return text
+}
+
+export function formatSpcFuelSegment(fuel: FuelKey, value: string | null | undefined) {
+  const cleaned = cleanSpcFuelValue(value, fuel)
+  return cleaned ? `${fuel} ${cleaned}` : ""
+}
+
+export function buildSpcStandardEnquiry(input: {
+  vesselName?: string | null
+  imo?: string | null
+  eta?: string | null
+  hsfo?: string | null
+  vlsfo?: string | null
+  lsmgo?: string | null
+  remarks?: string | null
+}) {
+  return [
+    lowerText(input.vesselName),
+    lowerText(input.imo),
+    lowerText(input.eta),
+    formatSpcFuelSegment("hsfo", input.hsfo),
+    formatSpcFuelSegment("vlsfo", input.vlsfo),
+    formatSpcFuelSegment("lsmgo", input.lsmgo),
+    lowerText(input.remarks),
+  ].filter(Boolean).join(" / ")
 }
 
 export function formatSpcEnquiry(input: SpcEnquiryTextInput) {
@@ -154,49 +255,56 @@ export function parseSpcEnquiryText(rawValue: string): ParsedSpcEnquiry {
 
   const vesselName = parts[0] || ""
   let imo = ""
-  let port = ""
-  let deliveryWindow = ""
-  const fuels: string[] = []
-  const other: string[] = []
+  let eta = ""
+  let hsfo = ""
+  let vlsfo = ""
+  let lsmgo = ""
+  const remarks: string[] = []
+  let seenTradingDetail = false
 
   parts.slice(1).forEach((part) => {
     if (!imo && isImoToken(part)) {
       imo = part
       return
     }
-    if (!deliveryWindow && looksLikeDateWindow(part)) {
-      deliveryWindow = part
+    if (!eta && looksLikeDateWindow(part)) {
+      eta = lowerText(part)
+      seenTradingDetail = true
       return
     }
     if (looksLikeFuel(part)) {
-      fuels.push(part)
+      const fuel = classifyFuel(part)
+      if (fuel === "hsfo") hsfo = cleanSpcFuelValue(part, "hsfo")
+      else if (fuel === "vlsfo") vlsfo = cleanSpcFuelValue(part, "vlsfo")
+      else if (fuel === "lsmgo") lsmgo = cleanSpcFuelValue(part, "lsmgo")
+      else remarks.push(lowerText(part))
+      seenTradingDetail = true
       return
     }
-    if (!port) {
-      port = part
-      return
-    }
-    other.push(part)
+    if (seenTradingDetail) remarks.push(lowerText(part))
   })
 
-  const fuelText = [...fuels, ...other].join(" / ")
-  const standardText = [
+  const standardText = buildSpcStandardEnquiry({
     vesselName,
     imo,
-    port,
-    deliveryWindow,
-    fuelText,
-  ].filter(Boolean).join(" / ")
-  const title = [vesselName || "New enquiry", port, deliveryWindow].filter(Boolean).join(" / ")
+    eta,
+    hsfo,
+    vlsfo,
+    lsmgo,
+    remarks: remarks.join(" / "),
+  })
+  const title = [lowerText(vesselName) || "new enquiry", eta].filter(Boolean).join(" / ")
 
   return {
     rawText,
     title,
-    vesselName,
+    vesselName: lowerText(vesselName),
     imo,
-    port,
-    deliveryWindow,
-    fuels: fuelText,
-    standardText: standardText || source,
+    eta,
+    hsfo,
+    vlsfo,
+    lsmgo,
+    remarks: remarks.join(" / "),
+    standardText: standardText || lowerText(source),
   }
 }
