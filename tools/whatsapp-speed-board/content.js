@@ -16,7 +16,6 @@
     contacts: [],
     dragging: null,
     dropTargetId: "",
-    status: "",
     unreadById: {},
   }
 
@@ -114,16 +113,8 @@
     }
   }
 
-  function setStatus(message) {
-    state.status = message
-    render()
-    if (!message) return
-    window.setTimeout(() => {
-      if (state.status === message) {
-        state.status = ""
-        render()
-      }
-    }, 2200)
+  function setStatus(_message) {
+    // Intentionally silent. The board is optimized for space and speed.
   }
 
   function wait(ms) {
@@ -238,6 +229,7 @@
       duplicate.directUrl = directUrl || duplicate.directUrl
       duplicate.updatedAt = new Date().toISOString()
       saveState()
+      render()
       setStatus(`Updated ${LIST_LABELS[list]}.`)
       return
     }
@@ -254,6 +246,7 @@
       updatedAt: new Date().toISOString(),
     })
     saveState()
+    render()
     setStatus(`Added to ${LIST_LABELS[list]}.`)
   }
 
@@ -270,6 +263,7 @@
     state.contacts = state.contacts.filter((contact) => contact.id !== id)
     delete state.unreadById[id]
     saveState()
+    render()
     setStatus("Removed.")
   }
 
@@ -581,7 +575,6 @@
           <button class="fcuno-wa-button" type="button" data-action="add-current" data-list="supplier">Add as Supplier</button>
           <button class="fcuno-wa-button is-buyer" type="button" data-action="add-current" data-list="buyer">Add as Buyer</button>
         </div>
-        <div class="fcuno-wa-status">${escapeHtml(state.status)}</div>
         <div class="fcuno-wa-body">
           <div class="fcuno-wa-lists">
             ${renderList("supplier")}
@@ -612,7 +605,8 @@
     })
 
     host.querySelectorAll("[data-action='open']").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
         const contact = state.contacts.find((item) => item.id === button.dataset.id)
         if (contact) void openContact(contact)
       })
@@ -623,6 +617,11 @@
     })
 
     host.querySelectorAll(".fcuno-wa-row").forEach((row) => {
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("[data-action='remove']")) return
+        const contact = state.contacts.find((item) => item.id === row.dataset.id)
+        if (contact) void openContact(contact)
+      })
       row.addEventListener("dragstart", (event) => {
         state.dragging = row.dataset.id || ""
         event.dataTransfer.effectAllowed = "move"
