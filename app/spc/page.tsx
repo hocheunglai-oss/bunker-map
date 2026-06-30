@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
@@ -61,16 +60,6 @@ export default function SpcLoginPage() {
   return (
     <div className="spc-login-page">
       <section className="spc-login-card" aria-label="Singapore Purchasing Center login">
-        <div className="spc-login-art-wrap" aria-hidden="true">
-          <Image
-            src="/spc-login-header-transparent.png"
-            alt=""
-            className="spc-login-art"
-            width={1024}
-            height={860}
-            priority
-          />
-        </div>
         <h1 className="sr-only">Singapore Purchasing Center</h1>
 
         <form onSubmit={handleLogin} className="spc-login-form">

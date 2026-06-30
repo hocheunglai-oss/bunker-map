@@ -2202,16 +2202,15 @@ body {
 }
 
 .spc-login-card {
-  --spc-login-frame-inset: 8px;
-  width: min(326px, 100%);
-  display: grid;
-  align-content: start;
-  justify-items: center;
+  width: min(520px, calc(100vw - 28px), calc((100vh - 48px) * 0.6667));
+  aspect-ratio: 1024 / 1536;
+  position: relative;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: #ffffff url("/spc-login-art.png") center / 100% 100% no-repeat;
   box-shadow: none;
-  overflow: visible;
+  container-type: inline-size;
+  overflow: hidden;
   padding: 0;
 }
 
@@ -2260,63 +2259,47 @@ body {
   border-radius: 999px;
 }
 
-.spc-login-art-wrap {
-  width: 100%;
-  aspect-ratio: 1024 / 860;
-  overflow: hidden;
-  background: transparent;
-}
-
-.spc-login-art {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
 .spc-login-form {
-  width: 100%;
+  width: 62.5%;
   position: relative;
+  position: absolute;
+  top: 59.6%;
+  left: 18.75%;
+  z-index: 1;
   display: grid;
-  gap: 8px;
-  margin-top: -1px;
-  padding: 0 12px 12px;
+  gap: 2.95cqw;
+  margin: 0;
+  padding: 0;
   background: transparent;
 }
 
 .spc-login-form::before {
   content: "";
   position: absolute;
-  inset: -1px var(--spc-login-frame-inset) 0;
-  z-index: 0;
-  border-right: 1px solid var(--spc-navy-dark);
-  border-bottom: 1px solid var(--spc-navy-dark);
-  border-left: 1px solid var(--spc-navy-dark);
+  inset: -2.2cqw -2cqw -3cqw;
+  z-index: -1;
   background: #ffffff;
   pointer-events: none;
 }
 
-.spc-login-form > * {
-  position: relative;
-  z-index: 1;
-}
-
 .spc-login-field {
   display: grid;
-  gap: 5px;
+  gap: 1.18cqw;
   color: var(--spc-navy-dark);
-  font-size: 10px;
+  font-size: 2.35cqw;
   font-weight: 500;
+  line-height: 1.1;
 }
 
 .spc-input-wrap,
 .spc-password-wrap {
   width: 100%;
-  min-height: 35px;
-  border: 1px solid #aeb7c4;
-  border-radius: 5px;
+  min-height: 8cqw;
+  border: 0.14cqw solid #aeb7c4;
+  border-radius: 0.78cqw;
   background: #ffffff;
   color: #1c2738;
-  font-size: 10px;
+  font-size: 2.35cqw;
   box-shadow: none;
 }
 
@@ -2327,14 +2310,14 @@ body {
 .spc-input-wrap,
 .spc-password-wrap {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 7.8cqw minmax(0, 1fr) auto;
   align-items: center;
-  padding: 0 7px 0 9px;
+  padding: 0 1.95cqw 0 2.35cqw;
 }
 
 .spc-field-icon {
-  width: 16px;
-  height: 16px;
+  width: 3.15cqw;
+  height: 3.15cqw;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2343,46 +2326,46 @@ body {
 
 .spc-field-icon svg,
 .spc-password-wrap button svg {
-  width: 16px;
-  height: 16px;
+  width: 3.15cqw;
+  height: 3.15cqw;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.6;
+  stroke-width: 1.55;
 }
 
 .spc-input-wrap input,
 .spc-password-wrap input {
   min-width: 0;
-  height: 32px;
+  height: 7.4cqw;
   border: 0;
   background: transparent;
   color: #1c2738;
   outline: none;
-  font-size: 10px;
+  font-size: 2.35cqw;
 }
 
 .spc-password-wrap button {
-  min-width: 32px;
-  min-height: 30px;
+  min-width: 7.2cqw;
+  min-height: 7.2cqw;
   border: 0;
-  border-radius: 5px;
+  border-radius: 0.78cqw;
   background: transparent;
   color: #4f5968;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 2.35cqw;
   font-weight: 800;
 }
 
 .spc-login-submit {
-  min-height: 35px;
+  min-height: 8cqw;
   border: 0;
-  border-radius: 5px;
+  border-radius: 0.78cqw;
   background: var(--spc-navy);
   color: #ffffff;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 2.75cqw;
   font-weight: 500;
   box-shadow: none;
 }
