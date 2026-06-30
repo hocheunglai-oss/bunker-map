@@ -26,7 +26,7 @@ body.fcuno-wa-board-collapsed #app {
 .fcuno-wa-shell {
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   border-left: 1px solid #d1d7db;
   background: #f0f2f5;
   box-shadow: -8px 0 20px rgba(17, 27, 33, 0.14);
@@ -39,6 +39,7 @@ body.fcuno-wa-board-collapsed #app {
 
 .fcuno-wa-shell.is-collapsed .fcuno-wa-body,
 .fcuno-wa-shell.is-collapsed .fcuno-wa-quick,
+.fcuno-wa-shell.is-collapsed .fcuno-wa-status,
 .fcuno-wa-shell.is-collapsed .fcuno-wa-title {
   display: none;
 }
@@ -129,44 +130,12 @@ body.fcuno-wa-board-collapsed #app {
 
 .fcuno-wa-body {
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
   padding: 8px;
-}
-
-.fcuno-wa-form {
-  display: grid;
-  gap: 6px;
-  border: 1px solid #d1d7db;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 8px;
-}
-
-.fcuno-wa-form input {
-  width: 100%;
-  min-height: 32px;
-  border: 1px solid #d1d7db;
-  border-radius: 7px;
-  color: #111b21;
-  font-size: 12px;
-  outline: none;
-  padding: 0 8px;
-}
-
-.fcuno-wa-form input:focus {
-  border-color: #00a884;
-}
-
-.fcuno-wa-form-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
 }
 
 .fcuno-wa-lists {
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
@@ -289,9 +258,16 @@ body.fcuno-wa-board-collapsed #app {
 }
 
 .fcuno-wa-status {
-  min-height: 20px;
+  min-height: 0;
+  border-bottom: 1px solid #d1d7db;
+  background: #ffffff;
   color: #008069;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
+  padding: 6px 10px;
+}
+
+.fcuno-wa-status:empty {
+  display: none;
 }

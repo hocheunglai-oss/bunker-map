@@ -49,6 +49,7 @@
               name: cleanText(contact.name) || "Unnamed chat",
               company: cleanText(contact.company),
               phone: cleanText(contact.phone),
+              directUrl: cleanText(contact.directUrl),
               list: contact.list === "buyer" ? "buyer" : "supplier",
               order: Number.isFinite(Number(contact.order)) ? Number(contact.order) : index + 1,
               createdAt: contact.createdAt || new Date().toISOString(),
@@ -89,6 +90,23 @@
       .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
   }
 
+  function getDirectUrl(phone) {
+    const digits = phoneDigits(phone)
+    return digits ? `https://web.whatsapp.com/send?phone=${digits}` : ""
+  }
+
+  function sanitizeDirectUrl(value) {
+    try {
+      const url = new URL(value, window.location.origin)
+      if (url.hostname !== "web.whatsapp.com") return ""
+      if (!url.pathname.startsWith("/send")) return ""
+      const phone = phoneDigits(url.searchParams.get("phone") || "")
+      return getDirectUrl(phone)
+    } catch {
+      return ""
+    }
+  }
+
   function setStatus(message) {
     state.status = message
     render()
@@ -101,35 +119,94 @@
     }, 2200)
   }
 
-  function getCurrentChatTitle() {
-    const header = document.querySelector("header")
-    const candidates = [
-      header && header.querySelector("[data-testid='conversation-info-header-chat-title']"),
-      header && header.querySelector("span[title]"),
-      header && header.querySelector("[dir='auto'][title]"),
-      header && header.querySelector("[role='button'] span[dir='auto']"),
-      header && header.querySelector("span[dir='auto']"),
-    ].filter(Boolean)
+  function isIgnoredHeaderText(value) {
+    const text = cleanText(value).toLowerCase()
+    if (!text || text.length < 2) return true
+    return [
+      "search",
+      "menu",
+      "more",
+      "voice call",
+      "video call",
+      "last seen",
+      "online",
+      "typing",
+      "click here for contact info",
+      "tap here for contact info",
+      "message",
+      "messages",
+      "encrypted",
+      "end-to-end encrypted",
+      "搜尋",
+      "搜索",
+    ].some((ignored) => text.includes(ignored))
+  }
 
-    for (const candidate of candidates) {
-      const title = cleanText(candidate.getAttribute("title") || candidate.textContent)
-      if (
-        title &&
-        title.length > 1 &&
-        title.toLowerCase() !== "search" &&
-        title.toLowerCase() !== "menu"
-      ) {
-        return title
+  function getTextCandidates(root) {
+    const selectors = [
+      "[data-testid='conversation-info-header-chat-title']",
+      "span[title]",
+      "div[title]",
+      "[dir='auto'][title]",
+      "[role='button'] [dir='auto']",
+      "[dir='auto']",
+      "[aria-label]",
+    ]
+    const seen = new Set()
+    return selectors
+      .flatMap((selector) => Array.from(root.querySelectorAll(selector)))
+      .filter(isVisible)
+      .map((element) =>
+        cleanText(
+          element.getAttribute("title") ||
+            element.getAttribute("aria-label") ||
+            element.textContent,
+        ),
+      )
+      .filter((text) => {
+        const key = text.toLowerCase()
+        if (seen.has(key) || isIgnoredHeaderText(text)) return false
+        seen.add(key)
+        return true
+      })
+  }
+
+  function getCurrentChat() {
+    const main =
+      document.querySelector("#main") ||
+      document.querySelector("[data-testid='conversation-panel-wrapper']") ||
+      document.querySelector("[role='main']")
+    const header = main && main.querySelector("header")
+
+    if (!main || !header) return null
+
+    const urlPhone = (() => {
+      try {
+        return phoneDigits(new URL(window.location.href).searchParams.get("phone") || "")
+      } catch {
+        return ""
       }
-    }
+    })()
+    const candidates = getTextCandidates(header)
+    const phoneFromHeader = candidates.find((text) => phoneDigits(text).length >= 7) || ""
+    const phone = urlPhone || phoneDigits(phoneFromHeader)
+    const name = candidates.find((text) => phoneDigits(text).length < 7) || phoneFromHeader || phone
 
-    return ""
+    if (!name && !phone) return null
+
+    return {
+      name: cleanText(name || phone),
+      company: "",
+      phone,
+      directUrl: getDirectUrl(phone),
+    }
   }
 
   function addContact(list, input = {}) {
     const name = cleanText(input.name)
     const phone = cleanText(input.phone)
     const company = cleanText(input.company)
+    const directUrl = sanitizeDirectUrl(input.directUrl) || getDirectUrl(phone)
 
     if (!name && !phone) {
       setStatus("Add a name or phone first.")
@@ -137,15 +214,20 @@
     }
 
     const lookupName = name || phone
-    const duplicate = state.contacts.find(
-      (contact) =>
-        contact.list === list &&
-        cleanText(contact.name).toLowerCase() === lookupName.toLowerCase() &&
-        phoneDigits(contact.phone) === phoneDigits(phone),
-    )
+    const duplicate = state.contacts.find((contact) => {
+      if (contact.list !== list) return false
+      if (phone && phoneDigits(contact.phone) && phoneDigits(contact.phone) === phoneDigits(phone)) return true
+      return cleanText(contact.name).toLowerCase() === lookupName.toLowerCase()
+    })
 
     if (duplicate) {
-      setStatus(`${lookupName} is already in ${LIST_LABELS[list]}.`)
+      duplicate.name = lookupName
+      duplicate.company = company || duplicate.company
+      duplicate.phone = phone || duplicate.phone
+      duplicate.directUrl = directUrl || duplicate.directUrl
+      duplicate.updatedAt = new Date().toISOString()
+      saveState()
+      setStatus(`Updated ${LIST_LABELS[list]}.`)
       return
     }
 
@@ -154,6 +236,7 @@
       name: lookupName,
       company,
       phone,
+      directUrl,
       list,
       order: contactsFor(list).length * 1000 + 1000,
       createdAt: new Date().toISOString(),
@@ -164,12 +247,12 @@
   }
 
   function addCurrentChat(list) {
-    const name = getCurrentChatTitle()
-    if (!name) {
+    const chat = getCurrentChat()
+    if (!chat) {
       setStatus("Open a WhatsApp chat first.")
       return
     }
-    addContact(list, { name })
+    addContact(list, chat)
   }
 
   function removeContact(id) {
@@ -204,116 +287,55 @@
     return rect.width > 0 && rect.height > 0
   }
 
-  function findSearchButton() {
-    const labels = ["Search", "搜尋", "搜索"]
-    const candidates = Array.from(
-      document.querySelectorAll("button,[role='button'],span[data-icon='search']"),
-    )
-    return candidates.find((element) => {
-      if (!isVisible(element)) return false
-      const text = `${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""} ${element.textContent || ""}`
-      return labels.some((label) => text.toLowerCase().includes(label.toLowerCase()))
-    })
-  }
+  function findVisibleChatRow(contact) {
+    const pane =
+      document.querySelector("#pane-side") ||
+      document.querySelector("#side") ||
+      document.querySelector("[aria-label='Chat list']") ||
+      document.querySelector("[aria-label='Chats']")
+    if (!pane) return null
 
-  function findSearchBox() {
-    const active = document.activeElement
-    if (
-      active &&
-      active.getAttribute &&
-      active.getAttribute("contenteditable") === "true" &&
-      isVisible(active) &&
-      !active.closest("footer")
-    ) {
-      return active
-    }
-
-    const boxes = Array.from(
-      document.querySelectorAll("div[contenteditable='true'], [role='textbox']"),
-    ).filter(isVisible)
-
-    const searchBox = boxes.find((element) => {
-      const text = `${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""} ${element.getAttribute("data-testid") || ""}`.toLowerCase()
-      return text.includes("search") || text.includes("搜尋") || text.includes("搜索")
-    })
-
-    return searchBox || null
-  }
-
-  function setEditableText(element, text) {
-    element.focus()
-    document.execCommand("selectAll", false)
-    document.execCommand("insertText", false, text)
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
-  }
-
-  function findChatResult(contact) {
     const name = cleanText(contact.name).toLowerCase()
     const digits = phoneDigits(contact.phone)
-    const candidates = Array.from(document.querySelectorAll("span[title], [dir='auto'], [aria-label]"))
+    const candidates = Array.from(
+      pane.querySelectorAll("[role='listitem'], [role='button'], div[tabindex='0'], div[tabindex='-1']"),
+    )
       .filter(isVisible)
 
-    const match = candidates.find((element) => {
+    return candidates.find((element) => {
       const text = cleanText(
         element.getAttribute("title") ||
           element.getAttribute("aria-label") ||
           element.textContent,
       ).toLowerCase()
       if (!text) return false
-      if (name && (text === name || text.includes(name))) return true
+      if (name && text.includes(name)) return true
       if (digits && phoneDigits(text).includes(digits)) return true
       return false
     })
-
-    if (!match) return null
-
-    return (
-      match.closest("[role='listitem']") ||
-      match.closest("div[tabindex='0']") ||
-      match.closest("div[tabindex='-1']") ||
-      match.closest("div[role='button']") ||
-      match
-    )
   }
 
-  async function wait(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms))
-  }
+  function openContact(contact) {
+    const directUrl = getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
+    if (directUrl) {
+      setStatus(`Opening ${contact.name}...`)
+      window.location.assign(directUrl)
+      return
+    }
 
-  async function openContact(contact) {
-    const query = phoneDigits(contact.phone) || cleanText(contact.name)
-    if (!query) {
+    const visibleRow = findVisibleChatRow(contact)
+    if (visibleRow) {
+      visibleRow.click()
+      setStatus(`Opened ${contact.name}.`)
+      return
+    }
+
+    if (!cleanText(contact.name)) {
       setStatus("Missing chat name or phone.")
       return
     }
 
-    setStatus(`Opening ${contact.name}...`)
-
-    const searchButton = findSearchButton()
-    if (searchButton) searchButton.click()
-    await wait(90)
-
-    const searchBox = findSearchBox()
-    if (searchBox) {
-      setEditableText(searchBox, query)
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        await wait(110)
-        const result = findChatResult(contact)
-        if (result) {
-          result.click()
-          setStatus(`Opened ${contact.name}.`)
-          return
-        }
-      }
-    }
-
-    const digits = phoneDigits(contact.phone)
-    if (digits) {
-      window.location.href = `https://web.whatsapp.com/send?phone=${digits}`
-      return
-    }
-
-    setStatus("Chat not found. Open it once, then save it again.")
+    setStatus("No phone saved. Open this chat in WhatsApp, then press Add again.")
   }
 
   function renderList(list) {
@@ -365,20 +387,11 @@
           <button class="fcuno-wa-icon" type="button" data-action="toggle" title="${state.collapsed ? "Expand" : "Collapse"}">${state.collapsed ? "‹" : "›"}</button>
         </div>
         <div class="fcuno-wa-quick">
-          <button class="fcuno-wa-button" type="button" data-action="add-current" data-list="supplier">+ Current Supplier</button>
-          <button class="fcuno-wa-button is-buyer" type="button" data-action="add-current" data-list="buyer">+ Current Buyer</button>
+          <button class="fcuno-wa-button" type="button" data-action="add-current" data-list="supplier">Add as Supplier</button>
+          <button class="fcuno-wa-button is-buyer" type="button" data-action="add-current" data-list="buyer">Add as Buyer</button>
         </div>
+        <div class="fcuno-wa-status">${escapeHtml(state.status)}</div>
         <div class="fcuno-wa-body">
-          <form class="fcuno-wa-form">
-            <input name="name" autocomplete="off" placeholder="Name or chat title" />
-            <input name="company" autocomplete="off" placeholder="Company / note" />
-            <input name="phone" autocomplete="off" placeholder="Phone optional, e.g. 85298472818" />
-            <div class="fcuno-wa-form-actions">
-              <button class="fcuno-wa-button" type="submit" data-list="supplier">Add Supplier</button>
-              <button class="fcuno-wa-button is-buyer" type="submit" data-list="buyer">Add Buyer</button>
-            </div>
-            <div class="fcuno-wa-status">${escapeHtml(state.status)}</div>
-          </form>
           <div class="fcuno-wa-lists">
             ${renderList("supplier")}
             ${renderList("buyer")}
@@ -407,26 +420,10 @@
       })
     })
 
-    const form = host.querySelector(".fcuno-wa-form")
-    if (form) {
-      form.addEventListener("submit", (event) => {
-        event.preventDefault()
-        const submitter = event.submitter
-        const list = submitter && submitter.dataset.list === "buyer" ? "buyer" : "supplier"
-        const data = new FormData(form)
-        addContact(list, {
-          name: data.get("name"),
-          company: data.get("company"),
-          phone: data.get("phone"),
-        })
-        form.reset()
-      })
-    }
-
     host.querySelectorAll("[data-action='open']").forEach((button) => {
       button.addEventListener("click", () => {
         const contact = state.contacts.find((item) => item.id === button.dataset.id)
-        if (contact) void openContact(contact)
+        if (contact) openContact(contact)
       })
     })
 

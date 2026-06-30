@@ -162,7 +162,7 @@ export function WhatsAppSpeedBoardSetup({
           <div>
             <h1 style={titleStyle}>{title}</h1>
             <p style={{ margin: "5px 0 0", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>
-              Trading-hour mode: local manual panels inside WhatsApp Web.
+              Trading-hour mode: save and jump between WhatsApp Web chats.
             </p>
           </div>
           <Link href={backHref} className="fc-admin-nav-button" style={actionStyle}>
@@ -220,9 +220,9 @@ export function WhatsAppSpeedBoardSetup({
           <div style={bodyStyle}>
             <ol style={stepsStyle}>
               <li>Open the WhatsApp chat once.</li>
-              <li>Click Current Supplier or Current Buyer in the FCUNO side panel.</li>
+              <li>Click Add as Supplier or Add as Buyer in the FCUNO side panel.</li>
               <li>Drag contacts into the order you want.</li>
-              <li>Click a saved contact to jump back to that chat.</li>
+              <li>Click a saved contact to jump back to that chat. Phone-number chats open directly.</li>
             </ol>
           </div>
         </section>
