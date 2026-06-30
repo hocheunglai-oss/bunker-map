@@ -3,7 +3,7 @@
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useSpcAuth } from "@/lib/useSpcAuth"
+import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import { getDefaultSpcLandingPath } from "@/lib/spcPages"
 
 export default function SpcLoginPage() {
@@ -45,18 +45,14 @@ export default function SpcLoginPage() {
       return
     }
 
-    if (data.user?.username) {
-      window.localStorage.setItem(
-        "spc_actor",
-        JSON.stringify({
-            username: data.user.username,
-            displayName: data.user.displayName || data.user.username,
-            role: data.user.role || null,
-            permissions: data.user.permissions || {},
-            pages: data.pages || [],
-          }),
-      )
-    }
+    primeSpcClientSessionCache({
+      authenticated: true,
+      username: data.user?.username || null,
+      displayName: data.user?.displayName || data.user?.username || null,
+      role: data.user?.role || null,
+      permissions: data.user?.permissions || {},
+      pages: data.pages || [],
+    })
 
     router.replace(data.redirectTo || getDefaultSpcLandingPath(data.user?.permissions || {}))
     router.refresh()

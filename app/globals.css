@@ -2197,21 +2197,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f7f9fb;
-  padding: 26px;
+  background: #f4f6f8;
+  padding: 24px 18px;
 }
 
 .spc-login-card {
-  width: min(520px, 100%);
+  width: min(488px, 100%);
   display: grid;
   align-content: start;
   justify-items: center;
-  border: 2px solid var(--spc-navy-dark);
-  border-radius: 16px;
+  border: 1.5px solid var(--spc-navy-dark);
+  border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 24px 54px rgba(6, 40, 74, 0.1);
+  box-shadow: 0 24px 52px rgba(6, 40, 74, 0.16);
   overflow: hidden;
-  padding: 0 0 clamp(26px, 3.4vw, 40px);
+  padding: 0 0 16px;
 }
 
 .spc-skyline {
@@ -2273,16 +2273,16 @@ body {
 }
 
 .spc-login-form {
-  width: min(456px, calc(100% - 64px));
+  width: min(452px, calc(100% - 32px));
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .spc-login-field {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   color: var(--spc-navy-dark);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -2291,10 +2291,10 @@ body {
   width: 100%;
   min-height: 52px;
   border: 1px solid #aeb7c4;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #ffffff;
   color: #1c2738;
-  font-size: 16px;
+  font-size: 14px;
   box-shadow: none;
 }
 
@@ -2307,7 +2307,7 @@ body {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
-  padding: 0 12px 0 16px;
+  padding: 0 10px 0 14px;
 }
 
 .spc-field-icon {
@@ -2338,14 +2338,14 @@ body {
   background: transparent;
   color: #1c2738;
   outline: none;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .spc-password-wrap button {
   min-width: 48px;
   min-height: 44px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: #4f5968;
   cursor: pointer;
@@ -2356,11 +2356,11 @@ body {
 .spc-login-submit {
   min-height: 52px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--spc-navy);
   color: #ffffff;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 500;
   box-shadow: none;
 }
