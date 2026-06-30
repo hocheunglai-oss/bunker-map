@@ -2202,12 +2202,12 @@ body {
 }
 
 .spc-login-card {
-  width: min(520px, calc(100vw - 28px), calc((100vh - 48px) * 0.6667));
+  width: min(416px, calc((100vw - 28px) * 0.8), calc((100vh - 48px) * 0.5333));
   aspect-ratio: 1024 / 1536;
   position: relative;
   border: 0;
   border-radius: 0;
-  background: #ffffff url("/spc-login-art.png") center / 100% 100% no-repeat;
+  background: transparent url("/spc-login-art-transparent.png") center / 100% 100% no-repeat;
   box-shadow: none;
   container-type: inline-size;
   overflow: hidden;
