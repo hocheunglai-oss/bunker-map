@@ -193,6 +193,7 @@
             .map((contact, index) => ({
               id: String(contact.id || uid()),
               name: cleanText(contact.name) || "Unnamed chat",
+              chatName: cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName),
               company: cleanText(contact.company),
               phone: cleanText(contact.phone),
               directUrl: cleanText(contact.directUrl),
@@ -252,9 +253,33 @@
   }
 
   function contactNameIsPhone(contact) {
-    const name = cleanText(contact?.name)
+    const name = cleanText(contact?.chatName || contact?.name)
     const digits = phoneDigits(name)
     return Boolean(digits.length >= 7 && digits === phoneDigits(contact?.phone || name))
+  }
+
+  function contactChatName(contact) {
+    return cleanText(contact?.chatName || contact?.searchName || contact?.whatsappName || contact?.originalName)
+  }
+
+  function contactSearchText(contact) {
+    return contactChatName(contact) || cleanText(contact?.phone) || cleanText(contact?.name)
+  }
+
+  function contactLookupNames(contact) {
+    const seen = new Set()
+    return [contactChatName(contact), contact?.name]
+      .map(cleanText)
+      .filter((name) => {
+        const key = name.toLowerCase()
+        if (!name || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  }
+
+  function allowsPartialDisplayMatch(contact) {
+    return !contactChatName(contact) && !phoneDigits(contact?.phone) && cleanText(contact?.name).length >= 3
   }
 
   function canUseDirectUrl(contact) {
@@ -348,11 +373,13 @@
     const duplicate = state.contacts.find((contact) => {
       if (contact.list !== list) return false
       if (chat.phone && phoneDigits(contact.phone) === phoneDigits(chat.phone)) return true
-      return cleanText(contact.name).toLowerCase() === keyName.toLowerCase()
+      return contactLookupNames(contact).some((name) => name.toLowerCase() === keyName.toLowerCase())
     })
 
     if (duplicate) {
-      duplicate.name = keyName
+      const wasUsingWhatsappName = !duplicate.chatName || cleanText(duplicate.name).toLowerCase() === cleanText(duplicate.chatName).toLowerCase()
+      duplicate.name = wasUsingWhatsappName ? keyName : duplicate.name
+      duplicate.chatName = keyName
       duplicate.phone = chat.phone || duplicate.phone
       duplicate.directUrl = chat.directUrl || duplicate.directUrl
       duplicate.updatedAt = new Date().toISOString()
@@ -360,6 +387,7 @@
       state.contacts.push({
         id: uid(),
         name: keyName,
+        chatName: keyName,
         company: "",
         phone: chat.phone,
         directUrl: chat.directUrl,
@@ -391,6 +419,7 @@
       render()
       return
     }
+    if (!contact.chatName) contact.chatName = contact.name
     contact.name = cleaned
     contact.updatedAt = new Date().toISOString()
     state.contactMenuId = ""
@@ -431,9 +460,15 @@
   function textMatchesContact(contact, value) {
     const text = cleanText(value).toLowerCase()
     if (!text) return false
-    const name = cleanText(contact.name).toLowerCase()
     const digits = phoneDigits(contact.phone)
-    return Boolean((name && text === name) || (digits && phoneDigits(text).includes(digits)))
+    if (digits && phoneDigits(text).includes(digits)) return true
+    const lookupNames = contactLookupNames(contact).map((name) => name.toLowerCase())
+    if (lookupNames.some((name) => text === name)) return true
+    if (allowsPartialDisplayMatch(contact)) {
+      const displayName = cleanText(contact.name).toLowerCase()
+      return Boolean(displayName && (text.includes(displayName) || displayName.includes(text)))
+    }
+    return false
   }
 
   function clickableRow(element) {
@@ -511,15 +546,29 @@
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
   }
 
+  function clearEditableText(element) {
+    if (!element) return
+    element.focus()
+    if ("value" in element) {
+      element.value = ""
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+      return
+    }
+    document.execCommand("selectAll", false)
+    document.execCommand("delete", false)
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+  }
+
   async function searchAndOpenContact(contact) {
     const searchBox = findSideSearchBox()
     if (!searchBox) return false
-    setEditableText(searchBox, contact.name || contact.phone)
+    setEditableText(searchBox, contactSearchText(contact))
     for (const delay of [250, 550, 950]) {
       await new Promise((resolve) => window.setTimeout(resolve, delay))
       const row = findVisibleChatRow(contact)
       if (row) {
         activateChatRow(row)
+        window.setTimeout(() => clearEditableText(searchBox), 120)
         return true
       }
     }
@@ -907,8 +956,12 @@
     const contactPhone = phoneDigits(contact.phone)
     if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
     const chatName = cleanText(chat.name).toLowerCase()
-    const contactName = cleanText(contact.name).toLowerCase()
-    return Boolean(chatName && contactName && chatName === contactName)
+    if (contactLookupNames(contact).some((name) => chatName && chatName === name.toLowerCase())) return true
+    if (allowsPartialDisplayMatch(contact)) {
+      const displayName = cleanText(contact.name).toLowerCase()
+      return Boolean(chatName && displayName && (chatName.includes(displayName) || displayName.includes(chatName)))
+    }
+    return false
   }
 
   function clearPendingSend() {
@@ -1363,6 +1416,7 @@
       contactNameIsPhone,
       contactsFor,
       contactDragId,
+      contactSearchText,
       currentChatMatchesContact,
       findSendButton,
       getCurrentChat,

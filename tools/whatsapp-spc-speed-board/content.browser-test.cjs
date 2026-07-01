@@ -15,6 +15,9 @@ const html = `<!doctype html>
     <title>SPC WhatsApp Send Harness</title>
     <style>
       body { font-family: Arial, sans-serif; margin: 0; }
+      #side { width: 360px; float: left; min-height: 540px; border-right: 1px solid #ddd; }
+      #search { width: 300px; margin: 16px; padding: 10px; }
+      #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 420px; background: #f6efe5; }
@@ -25,8 +28,14 @@ const html = `<!doctype html>
     </style>
   </head>
   <body>
+    <div id="side">
+      <input id="search" type="text" aria-label="Search input textbox" />
+      <div id="renamedRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')">
+        <span title="Otto Tone">Otto Tone</span>
+      </div>
+    </div>
     <div id="main">
-      <header><span title="Otto Tone">Otto Tone</span></header>
+      <header><span id="chatTitle" title="Otto Tone">Otto Tone</span></header>
       <div class="messages"></div>
       <div class="composer-row">
         <div id="composer" contenteditable="true" role="textbox"></div>
@@ -42,6 +51,15 @@ const html = `<!doctype html>
     <script>
       window.sentMessages = [];
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
+      window.setChatTitle = (name) => {
+        const title = document.getElementById("chatTitle");
+        title.textContent = name;
+        title.setAttribute("title", name);
+      };
+      document.getElementById("search").addEventListener("input", (event) => {
+        const value = String(event.target.value || "").toLowerCase();
+        document.getElementById("renamedRow").style.display = value === "otto" || value.includes("otto tone") ? "block" : "none";
+      });
       window.chrome = {
         runtime: {
           lastError: null,
@@ -124,6 +142,66 @@ async function main() {
       assert.equal(secondResult.sentText, expected)
       assert.equal(secondResult.composerText, "")
       assert.equal(secondResult.sentCount, 1)
+
+      await page.evaluate((message) => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const contact = { id: "renamed-contact", name: "OTTO", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }
+        api.state.contacts = [contact]
+        window.sentMessages = []
+        document.getElementById("sent").textContent = ""
+        document.getElementById("composer").replaceChildren()
+        document.getElementById("search").value = ""
+        document.getElementById("renamedRow").style.display = "none"
+        window.setChatTitle("Other Chat")
+        api.sendTextToContact(contact, message)
+      }, enquiry)
+
+      await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 5000 })
+      await page.waitForTimeout(250)
+
+      const renamedResult = await page.evaluate(() => ({
+        sentText: document.getElementById("sent").innerText,
+        composerText: document.getElementById("composer").innerText,
+        sentCount: window.sentMessages.length,
+        chatTitle: document.getElementById("chatTitle").getAttribute("title"),
+        searchText: document.getElementById("search").value,
+      }))
+
+      assert.equal(renamedResult.sentText, enquiry)
+      assert.equal(renamedResult.composerText, "")
+      assert.equal(renamedResult.sentCount, 1)
+      assert.equal(renamedResult.chatTitle, "Otto Tone")
+      assert.equal(renamedResult.searchText, "")
+
+      await page.evaluate((message) => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const contact = { id: "legacy-renamed-contact", name: "OTTO", phone: "", list: "buyer", order: 1000 }
+        api.state.contacts = [contact]
+        window.sentMessages = []
+        document.getElementById("sent").textContent = ""
+        document.getElementById("composer").replaceChildren()
+        document.getElementById("search").value = ""
+        document.getElementById("renamedRow").style.display = "none"
+        window.setChatTitle("Other Chat")
+        api.sendTextToContact(contact, message)
+      }, enquiry)
+
+      await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 5000 })
+      await page.waitForTimeout(250)
+
+      const legacyRenamedResult = await page.evaluate(() => ({
+        sentText: document.getElementById("sent").innerText,
+        composerText: document.getElementById("composer").innerText,
+        sentCount: window.sentMessages.length,
+        chatTitle: document.getElementById("chatTitle").getAttribute("title"),
+        searchText: document.getElementById("search").value,
+      }))
+
+      assert.equal(legacyRenamedResult.sentText, enquiry)
+      assert.equal(legacyRenamedResult.composerText, "")
+      assert.equal(legacyRenamedResult.sentCount, 1)
+      assert.equal(legacyRenamedResult.chatTitle, "Otto Tone")
+      assert.equal(legacyRenamedResult.searchText, "")
     } finally {
       await browser.close()
     }

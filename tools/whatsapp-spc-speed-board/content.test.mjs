@@ -353,10 +353,21 @@ assert.equal(api.canUseDirectUrl({ name: "KOREA", phone: "+60126994488" }), fals
 assert.equal(api.canUseDirectUrl({ name: "+85266885575", phone: "+85266885575" }), true)
 
 setHeaderTitles("SUMITOMO KOREA TAIWAN")
-assert.equal(api.currentChatMatchesContact({ name: "KOREA", phone: "" }), false)
+assert.equal(api.currentChatMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }), false)
 assert.equal(api.currentChatMatchesContact({ name: "SUMITOMO KOREA TAIWAN", phone: "" }), true)
-assert.equal(api.textMatchesContact({ name: "KOREA", phone: "" }, "SUMITOMO KOREA TAIWAN"), false)
-assert.equal(api.textMatchesContact({ name: "KOREA", phone: "" }, "KOREA"), true)
+assert.equal(api.textMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }, "SUMITOMO KOREA TAIWAN"), false)
+assert.equal(api.textMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }, "KOREA"), true)
+
+const renamedContact = { name: "OTTO", chatName: "Otto Tone", phone: "" }
+assert.equal(api.contactSearchText(renamedContact), "Otto Tone")
+assert.equal(api.textMatchesContact(renamedContact, "Otto Tone"), true)
+assert.equal(api.textMatchesContact(renamedContact, "OTTO"), true)
+setHeaderTitles("Otto Tone")
+assert.equal(api.currentChatMatchesContact(renamedContact), true)
+
+const legacyRenamedContact = { name: "OTTO", phone: "" }
+assert.equal(api.textMatchesContact(legacyRenamedContact, "Otto Tone"), true)
+assert.equal(api.currentChatMatchesContact(legacyRenamedContact), true)
 
 const enquiry = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 let composer = setComposer(enquiry)
