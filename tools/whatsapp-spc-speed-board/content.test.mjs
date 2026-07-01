@@ -25,6 +25,7 @@ class FakeElement {
   }
 
   get textContent() {
+    if (this.children.length) return this.children.map((child) => child.textContent).join(" ")
     return this._text
   }
 
@@ -33,7 +34,7 @@ class FakeElement {
   }
 
   get innerText() {
-    return this._text
+    return this.textContent
   }
 
   set innerText(value) {
@@ -43,6 +44,11 @@ class FakeElement {
   getAttribute(name) {
     if (name === "role") return this.role
     return this.attrs[name] || null
+  }
+
+  setAttribute(name, value) {
+    if (name === "role") this.role = String(value || "")
+    this.attrs[name] = String(value || "")
   }
 
   querySelector(selector) {
@@ -138,8 +144,11 @@ const document = {
   getElementById() {
     return elementsById.get("fcuno-wa-spc-board") || null
   },
-  createElement() {
-    return new FakeElement()
+  createElement(tag = "div") {
+    return new FakeElement({ tag })
+  },
+  createTextNode(text = "") {
+    return new FakeElement({ text, tag: "#text" })
   },
   createRange() {
     return {

@@ -37,6 +37,7 @@
   let templateSaveTimer = 0
   let lastEnquiryFingerprint = ""
   let recentSend = { key: "", at: 0 }
+  let memorySendLock = { key: "", at: 0 }
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -55,22 +56,25 @@
   }
 
   function readSendLock() {
+    if (memorySendLock.key) return memorySendLock
     try {
       const raw = window.sessionStorage?.getItem(SEND_LOCK_KEY)
       const parsed = raw ? JSON.parse(raw) : null
-      if (!parsed || typeof parsed !== "object") return null
-      return { key: cleanText(parsed.key), at: Number(parsed.at) || 0 }
+      if (parsed && typeof parsed === "object") return { key: cleanText(parsed.key), at: Number(parsed.at) || 0 }
     } catch {
-      return null
     }
+    const raw = document.documentElement?.getAttribute("data-fcuno-wa-spc-send-lock") || ""
+    const [key, at] = raw.split("|")
+    return key ? { key: cleanText(key), at: Number(at) || 0 } : null
   }
 
   function writeSendLock(lock) {
+    memorySendLock = lock
     try {
       window.sessionStorage?.setItem(SEND_LOCK_KEY, JSON.stringify(lock))
     } catch {
-      document.documentElement?.setAttribute("data-fcuno-wa-spc-send-lock", `${lock.key}|${lock.at}`)
     }
+    document.documentElement?.setAttribute("data-fcuno-wa-spc-send-lock", `${lock.key}|${lock.at}`)
   }
 
   function acquireSendLock(scope, text) {
@@ -750,6 +754,20 @@
     return cleanText(composer?.innerText || composer?.textContent || "")
   }
 
+  function setComposerDomText(composer, text) {
+    const lines = String(text || "").split("\n")
+    if (typeof composer.replaceChildren === "function") {
+      composer.replaceChildren()
+    } else {
+      composer.textContent = ""
+    }
+    lines.forEach((line, index) => {
+      if (index > 0) composer.appendChild(document.createElement("br"))
+      composer.appendChild(document.createTextNode(line))
+    })
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+  }
+
   function clearComposerText(composer) {
     composer.focus()
     const selection = window.getSelection()
@@ -774,11 +792,7 @@
 
   function replaceComposerText(composer, text) {
     clearComposerText(composer)
-    const inserted = document.execCommand("insertText", false, text)
-    if (!inserted) {
-      composer.textContent = text
-    }
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    setComposerDomText(composer, text)
     return composerText(composer) === cleanText(text)
   }
 
