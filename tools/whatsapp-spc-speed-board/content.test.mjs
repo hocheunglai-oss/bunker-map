@@ -52,33 +52,92 @@ class FakeElement {
   }
 
   querySelector(selector) {
-    if (selector === "header") return this.children.find((child) => child.tag === "header") || null
     if (selector === "button[aria-label='Send']") {
-      return this.children.find((child) => child.tag === "button" && child.attrs["aria-label"] === "Send") || null
+      return this.querySelectorAll(selector)[0] || null
     }
     return this.querySelectorAll(selector)[0] || null
   }
 
   querySelectorAll(selector) {
-    if (selector.includes("contenteditable") || selector.includes("[role='textbox']")) {
-      return this.children.filter((child) => child.attrs.contenteditable === "true" || child.role === "textbox")
+    const selectors = selector.split(",").map((item) => item.trim()).filter(Boolean)
+    const nodes = []
+    const visit = (node) => {
+      node.children.forEach((child) => {
+        nodes.push(child)
+        visit(child)
+      })
     }
-    if (selector.includes("[title]") || selector.includes("[dir='auto']") || selector.includes("[aria-label]")) {
-      return this.children.filter((child) => child.attrs.title || child.attrs["aria-label"] || child.attrs.dir === "auto")
+    visit(this)
+    if (selectors.length > 1) {
+      return nodes.filter((node) => selectors.some((part) => node.matches(part)))
+    }
+    if (selectors.length === 1 && !selector.includes("contenteditable") && !selector.includes("[role='textbox']")) {
+      return nodes.filter((node) => node.matches(selectors[0]))
+    }
+    if (selector.includes("contenteditable") || selector.includes("[role='textbox']")) {
+      return nodes.filter((child) => child.attrs.contenteditable === "true" || child.role === "textbox")
+    }
+    if (selector.includes("[title]") || selector.includes("[dir='auto']") || selector.includes("[aria-label")) {
+      return nodes.filter((child) => child.attrs.title || child.attrs["aria-label"] || child.attrs.dir === "auto")
     }
     return []
   }
 
   closest(selector) {
     let current = this
+    const selectors = selector.split(",").map((item) => item.trim()).filter(Boolean)
     while (current) {
       if (selector.startsWith("#") && current.id === selector.slice(1)) return current
+      if (selectors.some((part) => current.matches(part))) return current
       current = current.parentElement
     }
     return null
   }
 
-  matches() {
+  matches(selector) {
+    const value = String(selector || "").trim()
+    if (!value) return false
+    if (value === "header") return this.tag === "header"
+    if (value === "button") return this.tag === "button"
+    if (value === "span") return this.tag === "span"
+    if (value === "div") return this.tag === "div"
+    if (value === "[role='button']") return this.role === "button"
+    if (value === "[role='textbox']") return this.role === "textbox"
+    if (value === "[aria-label]") return Boolean(this.attrs["aria-label"])
+    if (value === "[title]") return Boolean(this.attrs.title)
+    if (value === "[data-testid]") return Boolean(this.attrs["data-testid"])
+    if (value === "[data-icon]") return Boolean(this.attrs["data-icon"])
+    if (value === "span[title]") return this.tag === "span" && Boolean(this.attrs.title)
+    if (value === "div[title]") return this.tag === "div" && Boolean(this.attrs.title)
+    if (value === "[dir='auto']") return this.attrs.dir === "auto"
+    if (value === "[aria-label]") return Boolean(this.attrs["aria-label"])
+    if (value === "span[data-icon]") return this.tag === "span" && Boolean(this.attrs["data-icon"])
+    if (value === "div[data-testid]") return this.tag === "div" && Boolean(this.attrs["data-testid"])
+    if (value === "button[data-testid]") return this.tag === "button" && Boolean(this.attrs["data-testid"])
+    if (value === "button[aria-label='Send']") return this.tag === "button" && this.attrs["aria-label"] === "Send"
+    if (value === "span[data-icon='send']") return this.tag === "span" && this.attrs["data-icon"] === "send"
+    if (value === "[data-testid='send']") return this.attrs["data-testid"] === "send"
+    if (value === "button[aria-label*='Send' i]") {
+      return this.tag === "button" && String(this.attrs["aria-label"] || "").toLowerCase().includes("send")
+    }
+    if (value === "[role='button'][aria-label*='Send' i]") {
+      return this.role === "button" && String(this.attrs["aria-label"] || "").toLowerCase().includes("send")
+    }
+    if (value === "button[title*='Send' i]") {
+      return this.tag === "button" && String(this.attrs.title || "").toLowerCase().includes("send")
+    }
+    if (value === "[role='button'][title*='Send' i]") {
+      return this.role === "button" && String(this.attrs.title || "").toLowerCase().includes("send")
+    }
+    if (value === "button[data-testid*='send' i]") {
+      return this.tag === "button" && String(this.attrs["data-testid"] || "").toLowerCase().includes("send")
+    }
+    if (value === "[role='button'][data-testid*='send' i]") {
+      return this.role === "button" && String(this.attrs["data-testid"] || "").toLowerCase().includes("send")
+    }
+    if (value === "span[data-icon*='send' i]") {
+      return this.tag === "span" && String(this.attrs["data-icon"] || "").toLowerCase().includes("send")
+    }
     return false
   }
 
@@ -262,6 +321,29 @@ function setChatWithComposer(title, text = "") {
   return { composer, sendButton }
 }
 
+function setChatWithIconSendButton(title, text = "") {
+  const header = new FakeElement({
+    tag: "header",
+    children: [new FakeElement({ text: title, attrs: { title } })],
+  })
+  const composer = new FakeElement({
+    text,
+    attrs: { contenteditable: "true" },
+    role: "textbox",
+  })
+  const sendIcon = new FakeElement({
+    tag: "span",
+    attrs: { "data-icon": "wds-ic-send-filled" },
+  })
+  const sendButton = new FakeElement({
+    tag: "div",
+    role: "button",
+    children: [sendIcon],
+  })
+  main = new FakeElement({ children: [header, composer, sendButton] })
+  return { composer, sendButton }
+}
+
 setHeaderTitles("KOREA", "+60 12-699 4488, You")
 const groupChat = api.getCurrentChat()
 assert.equal(groupChat.name, "KOREA")
@@ -318,6 +400,12 @@ api.sendTextToContact(contact, duplicateMessage)
 await new Promise((resolve) => setTimeout(resolve, 180))
 assert.equal(api.composerText(sendComposer), duplicateMessage)
 assert.equal(sendButton.clicked, 1, "duplicate sends for the same contact/message should be suppressed")
+
+sessionStore.clear()
+api.acquireSendLock("reset-lock", "different message")
+const { composer: iconComposer, sendButton: iconSendButton } = setChatWithIconSendButton("Icon Send")
+assert.equal(api.insertComposerText(duplicateMessage), true)
+assert.equal(api.findSendButton(), iconSendButton, "send button should be found from WhatsApp-style send icon")
 
 assert.equal(api.acquireSendLock("same-contact", "same message"), true)
 assert.equal(api.acquireSendLock("same-contact", "same message"), false)

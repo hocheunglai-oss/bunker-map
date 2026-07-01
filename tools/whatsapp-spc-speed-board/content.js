@@ -804,10 +804,77 @@
 
   function findSendButton() {
     const main = document.querySelector("#main") || document.querySelector("[role='main']")
-    return (
-      main?.querySelector("button[aria-label='Send']") ||
-      main?.querySelector("span[data-icon='send']")?.closest("button")
+    if (!main) return null
+
+    const directSelectors = [
+      "button[aria-label*='Send' i]",
+      "[role='button'][aria-label*='Send' i]",
+      "button[title*='Send' i]",
+      "[role='button'][title*='Send' i]",
+      "button[data-testid*='send' i]",
+      "[role='button'][data-testid*='send' i]",
+      "span[data-icon='send']",
+      "span[data-icon*='send' i]",
+      "[data-testid='send']",
+    ]
+
+    for (const selector of directSelectors) {
+      const match = main.querySelector(selector)
+      const button = match?.closest("button,[role='button']") || match
+      if (button && isVisible(button)) return button
+    }
+
+    const candidates = Array.from(
+      main.querySelectorAll("button,[role='button'],span[data-icon],div[data-testid],button[data-testid]"),
     )
+      .map((item) => item.closest("button,[role='button']") || item)
+      .filter((item, index, items) => item && items.indexOf(item) === index && isVisible(item))
+
+    const byLabel = candidates.find((item) => {
+      const ownLabel = [
+        item.getAttribute("aria-label"),
+        item.getAttribute("title"),
+        item.getAttribute("data-testid"),
+        item.getAttribute("data-icon"),
+      ].map(cleanText).join(" ").toLowerCase()
+      const childLabel = Array.from(item.querySelectorAll("[aria-label], [title], [data-testid], [data-icon]"))
+        .map((child) =>
+          [
+            child.getAttribute("aria-label"),
+            child.getAttribute("title"),
+            child.getAttribute("data-testid"),
+            child.getAttribute("data-icon"),
+          ].map(cleanText).join(" "),
+        )
+        .join(" ")
+        .toLowerCase()
+      return /\bsend\b|send-filled|wds-ic-send/.test(`${ownLabel} ${childLabel}`)
+    })
+    if (byLabel) return byLabel
+
+    const composer = findComposer()
+    if (!composer) return null
+    const composerRect = composer.getBoundingClientRect()
+    const rightSideButtons = candidates.filter((item) => {
+      const rect = item.getBoundingClientRect()
+      const verticallyAligned = rect.bottom >= composerRect.top - 8 && rect.top <= composerRect.bottom + 8
+      return verticallyAligned && rect.left >= composerRect.right - 12
+    })
+    return rightSideButtons[rightSideButtons.length - 1] || null
+  }
+
+  function clickSendButton(button) {
+    if (!button) return false
+    button.focus?.()
+    try {
+      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse" }))
+      button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }))
+      button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerType: "mouse" }))
+      button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }))
+    } catch {
+    }
+    button.click()
+    return true
   }
 
   function pressComposerEnter() {
@@ -825,8 +892,7 @@
     }
     const button = findSendButton()
     if (button) {
-      button.click()
-      return true
+      return clickSendButton(button)
     }
     if (attempt < 10) {
       window.setTimeout(() => sendComposerWhenReady(text, attempt + 1), 80)
@@ -1298,6 +1364,7 @@
       contactsFor,
       contactDragId,
       currentChatMatchesContact,
+      findSendButton,
       getCurrentChat,
       insertComposerText,
       moveContact,
