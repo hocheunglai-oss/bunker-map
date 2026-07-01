@@ -326,7 +326,7 @@ export default function Homepage() {
     async function loadHomepageData() {
       try {
         setMarketDataStatus("loading")
-        const response = await fetch("/api/homepage-data", { cache: "no-store" })
+        const response = await fetch("/api/homepage-data")
         const payload = (await response.json()) as HomepageDataResponse
 
         if (!response.ok) {
