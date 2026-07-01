@@ -34,6 +34,7 @@
   let enquiryTimer = 0
   let templateSaveTimer = 0
   let lastEnquiryFingerprint = ""
+  let recentSend = { key: "", at: 0 }
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -203,6 +204,17 @@
     return digits ? `https://web.whatsapp.com/send?phone=${digits}` : ""
   }
 
+  function contactNameIsPhone(contact) {
+    const name = cleanText(contact?.name)
+    const digits = phoneDigits(name)
+    return Boolean(digits.length >= 7 && digits === phoneDigits(contact?.phone || name))
+  }
+
+  function canUseDirectUrl(contact) {
+    const digits = phoneDigits(contact?.phone)
+    return Boolean(digits && (!cleanText(contact?.name) || contactNameIsPhone(contact)))
+  }
+
   function sanitizeDirectUrl(value) {
     try {
       const url = new URL(value, window.location.origin)
@@ -275,9 +287,8 @@
 
     const titleCandidates = headerTitleCandidates(header)
     const candidates = titleCandidates.length > 0 ? titleCandidates : textCandidates(header)
-    const phoneText = candidates.find((text) => phoneDigits(text).length >= 7) || ""
-    const phone = phoneDigits(phoneText)
-    const name = candidates.find((text) => phoneDigits(text).length < 7) || phoneText || phone
+    const name = candidates.find((text) => phoneDigits(text).length < 7) || candidates[0] || ""
+    const phone = phoneDigits(name).length >= 7 ? phoneDigits(name) : ""
     if (!name && !phone) return null
     return { name: cleanText(name || phone), company: "", phone, directUrl: getDirectUrl(phone) }
   }
@@ -374,7 +385,7 @@
     if (!text) return false
     const name = cleanText(contact.name).toLowerCase()
     const digits = phoneDigits(contact.phone)
-    return Boolean((name && text.includes(name)) || (digits && phoneDigits(text).includes(digits)))
+    return Boolean((name && text === name) || (digits && phoneDigits(text).includes(digits)))
   }
 
   function clickableRow(element) {
@@ -468,17 +479,17 @@
   }
 
   async function openContact(contact) {
-    const directUrl = getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
-    if (directUrl) {
-      window.location.assign(directUrl)
-      return
-    }
     const row = findVisibleChatRow(contact)
     if (row) {
       activateChatRow(row)
       return
     }
-    await searchAndOpenContact(contact)
+    if (await searchAndOpenContact(contact)) return
+
+    const directUrl = canUseDirectUrl(contact)
+      ? getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
+      : ""
+    if (directUrl) window.location.assign(directUrl)
   }
 
   function unreadCount(row) {
@@ -680,9 +691,11 @@
     return candidates[candidates.length - 1] || null
   }
 
-  function insertComposerText(text) {
-    const composer = findComposer()
-    if (!composer) return false
+  function composerText(composer) {
+    return cleanText(composer?.innerText || composer?.textContent || "")
+  }
+
+  function replaceComposerText(composer, text) {
     composer.focus()
     const selection = window.getSelection()
     if (selection) {
@@ -693,18 +706,22 @@
     } else {
       document.execCommand("selectAll", false)
     }
+    document.execCommand("delete", false)
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
     const inserted = document.execCommand("insertText", false, text)
-    if (!inserted) composer.textContent = text
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
-    const wanted = cleanText(text)
-    const actual = cleanText(composer.textContent)
-    if (wanted && (actual === `${wanted}${wanted}` || actual === `${wanted} ${wanted}`)) {
-      composer.textContent = ""
-      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
-      composer.focus()
-      document.execCommand("insertText", false, text)
-      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    if (!inserted || composerText(composer) !== cleanText(text)) {
+      composer.textContent = text
     }
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+  }
+
+  function insertComposerText(text) {
+    const composer = findComposer()
+    if (!composer) return false
+    replaceComposerText(composer, text)
+    const wanted = cleanText(text)
+    const actual = composerText(composer)
+    if (wanted && actual !== wanted) replaceComposerText(composer, text)
     return true
   }
 
@@ -724,14 +741,18 @@
     return true
   }
 
-  function sendComposerWhenReady(attempt = 0) {
+  function sendComposerWhenReady(text = "", attempt = 0) {
+    const composer = findComposer()
+    if (text && composer && composerText(composer) !== cleanText(text)) {
+      replaceComposerText(composer, text)
+    }
     const button = findSendButton()
     if (button) {
       button.click()
       return true
     }
     if (attempt < 10) {
-      window.setTimeout(() => sendComposerWhenReady(attempt + 1), 80)
+      window.setTimeout(() => sendComposerWhenReady(text, attempt + 1), 80)
       return false
     }
     return pressComposerEnter()
@@ -744,12 +765,7 @@
     if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
     const chatName = cleanText(chat.name).toLowerCase()
     const contactName = cleanText(contact.name).toLowerCase()
-    return Boolean(
-      chatName &&
-        contactName &&
-        (chatName === contactName ||
-          (contactName.length >= 4 && (chatName.includes(contactName) || contactName.includes(chatName)))),
-    )
+    return Boolean(chatName && contactName && chatName === contactName)
   }
 
   function clearPendingSend() {
@@ -767,7 +783,7 @@
     const contact = state.contacts.find((item) => item.id === pending.contactId)
     if (contact && currentChatMatchesContact(contact) && insertComposerText(pending.text)) {
       clearPendingSend()
-      window.setTimeout(() => sendComposerWhenReady(), 120)
+      window.setTimeout(() => sendComposerWhenReady(pending.text), 120)
       return
     }
 
@@ -784,9 +800,14 @@
   function sendTextToContact(contact, text) {
     const message = cleanTemplateText(text)
     if (!contact || !message) return
+    const sendKey = `${contact.id}|${message}`
+    const now = Date.now()
+    if (recentSend.key === sendKey && now - recentSend.at < 1200) return
+    recentSend = { key: sendKey, at: now }
+    if (state.pendingSend?.contactId === contact.id) clearPendingSend()
 
     if (currentChatMatchesContact(contact) && insertComposerText(message)) {
-      window.setTimeout(() => sendComposerWhenReady(), 120)
+      window.setTimeout(() => sendComposerWhenReady(message), 120)
       return
     }
 
@@ -805,7 +826,7 @@
     const text = selectedEnquiryText()
     if (!text) return
     if (!insertComposerText(text)) return
-    window.setTimeout(() => sendComposerWhenReady(), 120)
+    window.setTimeout(() => sendComposerWhenReady(text), 120)
   }
 
   function renderContactList(list) {
@@ -1151,6 +1172,22 @@
       })
       row.addEventListener("dragend", () => clearDragState(host))
     })
+  }
+
+  if (typeof window !== "undefined" && window.__FCUNO_WA_SPC_ENABLE_TEST_API__) {
+    window.__FCUNO_WA_SPC_TEST_API__ = {
+      state,
+      canUseDirectUrl,
+      cleanText,
+      composerText,
+      contactNameIsPhone,
+      currentChatMatchesContact,
+      getCurrentChat,
+      insertComposerText,
+      phoneDigits,
+      textMatchesContact,
+      withTemplate,
+    }
   }
 
   async function start() {
