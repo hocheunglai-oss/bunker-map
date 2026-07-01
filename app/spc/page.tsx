@@ -115,9 +115,21 @@ function SpcOilWidget() {
 
 export default function SpcLoginPage() {
   const router = useRouter()
-  const { loading, authenticated, displayName, username: sessionUsername } = useSpcAuth()
+  const {
+    loading,
+    authenticated,
+    displayName,
+    username: sessionUsername,
+    role,
+    office,
+    permissions,
+    pages,
+    mustChangePassword,
+  } = useSpcAuth()
   const [loginUsername, setLoginUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
@@ -179,12 +191,101 @@ export default function SpcLoginPage() {
       username: data.user?.username || null,
       displayName: data.user?.displayName || data.user?.username || null,
       role: data.user?.role || null,
+      office: data.user?.office || null,
+      mustChangePassword: data.user?.mustChangePassword === true,
       permissions: data.user?.permissions || {},
       pages: data.pages || [],
     })
 
     router.replace("/spc")
     router.refresh()
+  }
+
+  async function handlePasswordChange(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setMessage("")
+
+    if (newPassword !== confirmPassword) {
+      setMessage("Passwords do not match.")
+      setSubmitting(false)
+      return
+    }
+
+    try {
+      const response = await fetch("/api/spc/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newPassword }),
+      })
+      const data = (await response.json()) as {
+        user?: {
+          username?: string
+          displayName?: string
+          role?: string
+          office?: string
+          mustChangePassword?: boolean
+          permissions?: Record<string, "none" | "view" | "edit">
+        }
+        message?: string
+      }
+      if (!response.ok || !data.user) throw new Error(data.message || "Failed to update password.")
+
+      primeSpcClientSessionCache({
+        authenticated: true,
+        username: data.user.username || sessionUsername,
+        displayName: data.user.displayName || displayName || sessionUsername,
+        role: data.user.role || role,
+        office: data.user.office || office,
+        mustChangePassword: false,
+        permissions: data.user.permissions || permissions,
+        pages,
+      })
+      setNewPassword("")
+      setConfirmPassword("")
+      setMessage("")
+      router.refresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update password.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!loading && authenticated && mustChangePassword) {
+    return (
+      <SpcShell title="SPC Password Change">
+        <section className="spc-password-change-page" aria-label="Change SPC password">
+          <form onSubmit={handlePasswordChange} className="spc-password-change-panel">
+            <h1>Change Password</h1>
+            <label>
+              <span>New Password</span>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            <label>
+              <span>Confirm Password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            {message ? <p className="spc-login-message">{message}</p> : null}
+            <button type="submit" disabled={submitting}>
+              {submitting ? "Saving..." : "Save Password"}
+            </button>
+          </form>
+        </section>
+      </SpcShell>
+    )
   }
 
   if (!loading && authenticated) {

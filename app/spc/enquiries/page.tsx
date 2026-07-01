@@ -231,7 +231,7 @@ export default function SpcEnquiriesPage() {
 
   async function sendEnquiry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!canEdit) return
+    if (!canEdit || saving) return
     setSaving(true)
     setMessage("")
 
@@ -269,7 +269,10 @@ export default function SpcEnquiriesPage() {
         throw new Error(data.message || "Failed to send enquiry.")
       }
       setDraft(emptyDraft)
-      setEnquiries((current) => [data.enquiry!, ...current])
+      setEnquiries((current) => {
+        const withoutDuplicate = current.filter((enquiry) => enquiry.id !== data.enquiry!.id)
+        return [data.enquiry!, ...withoutDuplicate]
+      })
       setMessage("Enquiry sent.")
       setMessageIsError(false)
     } catch (error) {

@@ -22,6 +22,8 @@ export type SpcSession = {
   username: string | null
   displayName: string | null
   role: SpcRoleId | null
+  office: string | null
+  mustChangePassword: boolean
   permissions: SpcPagePermissionMap
 }
 
@@ -58,6 +60,13 @@ async function getCachedDatabaseSpcUser(username: string) {
 
   spcUserLookupPromises.set(username, lookup)
   return lookup
+}
+
+export function invalidateSpcUserLookupCache(username: string | null | undefined) {
+  const key = normaliseUsername(username || "")
+  if (!key) return
+  spcUserLookupCache.delete(key)
+  spcUserLookupPromises.delete(key)
 }
 
 export async function validateSpcCredentials(
@@ -118,6 +127,8 @@ function unauthenticatedSession(): SpcSession {
     username: null,
     displayName: null,
     role: null,
+    office: null,
+    mustChangePassword: false,
     permissions: {},
   }
 }
@@ -142,6 +153,8 @@ export async function getSpcSession(): Promise<SpcSession> {
       username: databaseUser.username,
       displayName: databaseUser.displayName,
       role: normaliseSpcRole(databaseUser.role),
+      office: databaseUser.office,
+      mustChangePassword: databaseUser.mustChangePassword,
       permissions: databaseUser.permissions,
     }
   }

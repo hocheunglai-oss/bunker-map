@@ -2,7 +2,7 @@ export type SpcPagePermission = "none" | "view" | "edit"
 
 export type SpcPagePermissionMap = Record<string, SpcPagePermission>
 
-export const SPC_BUILT_IN_ROLE_IDS = ["BUYER TRADER", "SUPPLIER TRADER"] as const
+export const SPC_BUILT_IN_ROLE_IDS = ["SUPPLIER TRADER", "BUYER TRADER", "ADMIN"] as const
 
 export type SpcRoleId = string
 
@@ -93,6 +93,9 @@ export function normaliseSpcRole(role: string | null | undefined): SpcRoleId {
   if (normalised === "SUPPLIER" || normalised === "SUPPLIER TRADER") {
     return "SUPPLIER TRADER"
   }
+  if (normalised === "ADMIN" || normalised === "ADMINISTRATOR") {
+    return "ADMIN"
+  }
   return normalised
 }
 
@@ -139,7 +142,7 @@ export function getDefaultSpcPermissionsForRole(
 ) {
   const roleId = normaliseSpcRole(role)
 
-  if (roleId === "BUYER TRADER") {
+  if (roleId === "BUYER TRADER" || roleId === "ADMIN") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
       permissions[page.id] = "edit"
       return permissions

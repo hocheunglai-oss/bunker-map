@@ -18,6 +18,7 @@
     selectedEnquiries: {},
     hiddenEnquiryIds: {},
     templateEnabled: true,
+    templateEditing: false,
     templateText: DEFAULT_TEMPLATE_TEXT,
     lastSeenEnquiryAt: "",
     lastNotifiedEnquiryAt: "",
@@ -392,6 +393,63 @@
     })
   }
 
+  function sideSearchRoot() {
+    return document.querySelector("#side") || document.body
+  }
+
+  function editableLabel(element) {
+    return cleanText(
+      element.getAttribute("aria-label") ||
+        element.getAttribute("title") ||
+        element.getAttribute("placeholder") ||
+        element.textContent,
+    ).toLowerCase()
+  }
+
+  function findSideSearchBox() {
+    const root = sideSearchRoot()
+    const candidates = Array.from(
+      root.querySelectorAll("input[type='text'], div[contenteditable='true'][role='textbox'], div[contenteditable='true'], [role='textbox']"),
+    ).filter(isVisible)
+    return (
+      candidates.find((element) => editableLabel(element).includes("search")) ||
+      candidates.find((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.top < 180 && rect.left < window.innerWidth / 2
+      }) ||
+      null
+    )
+  }
+
+  function setEditableText(element, text) {
+    element.focus()
+    if ("value" in element) {
+      element.value = ""
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+      element.value = text
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+      return
+    }
+    document.execCommand("selectAll", false)
+    document.execCommand("insertText", false, text)
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+  }
+
+  async function searchAndOpenContact(contact) {
+    const searchBox = findSideSearchBox()
+    if (!searchBox) return false
+    setEditableText(searchBox, contact.name || contact.phone)
+    for (const delay of [250, 550, 950]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const row = findVisibleChatRow(contact)
+      if (row) {
+        activateChatRow(row)
+        return true
+      }
+    }
+    return false
+  }
+
   async function openContact(contact) {
     const directUrl = getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
     if (directUrl) {
@@ -399,7 +457,11 @@
       return
     }
     const row = findVisibleChatRow(contact)
-    if (row) activateChatRow(row)
+    if (row) {
+      activateChatRow(row)
+      return
+    }
+    await searchAndOpenContact(contact)
   }
 
   function unreadCount(row) {
@@ -435,7 +497,7 @@
         render()
         return
       }
-      state.enquiries = Array.isArray(response.enquiries) ? response.enquiries : []
+      state.enquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
       Object.keys(state.selectedEnquiries).forEach((id) => {
         const enquiry = state.enquiries.find((item) => item.id === id)
         if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
@@ -451,11 +513,29 @@
     return state.enquiries.filter((enquiry) => !state.hiddenEnquiryIds[enquiry.id])
   }
 
+  function dedupeEnquiries(enquiries) {
+    const seenIds = new Set()
+    const seenBodies = new Set()
+    return enquiries.filter((enquiry) => {
+      if (!enquiry || typeof enquiry !== "object") return false
+      const id = cleanText(enquiry.id)
+      if (id && seenIds.has(id)) return false
+      if (id) seenIds.add(id)
+      const createdBucket = cleanText(enquiryCreatedAt(enquiry)).slice(0, 16)
+      const sender = cleanText(enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername)
+      const bodyKey = `${enquiryBodyText(enquiry).toLowerCase()}|${sender.toLowerCase()}|${createdBucket}`
+      if (bodyKey !== "||" && seenBodies.has(bodyKey)) return false
+      if (bodyKey !== "||") seenBodies.add(bodyKey)
+      return true
+    })
+  }
+
   function isSendableEnquiry(enquiry) {
-    return (!enquiry.status || enquiry.status === "sent") && !enquiry.meta?.postponedAt
+    return (!enquiry.status || enquiry.status === "sent") && !enquiry.meta?.postponedAt && !enquiry.meta?.cancelledAt
   }
 
   function enquiryStatusKey(enquiry) {
+    if ((!enquiry.status || enquiry.status === "sent") && enquiry.meta?.cancelledAt) return "closed"
     if ((!enquiry.status || enquiry.status === "sent") && enquiry.meta?.postponedAt) return "postponed"
     return enquiry.status || "sent"
   }
@@ -464,8 +544,8 @@
     const status = enquiryStatusKey(enquiry)
     if (status === "quoted") return "STEM"
     if (status === "cancelled") return "LOST"
-    if (status === "closed") return "CANCELLED"
-    if (status === "postponed") return "POSTPONED"
+    if (status === "closed") return "CANX"
+    if (status === "postponed") return "POST"
     return "SENT"
   }
 
@@ -695,11 +775,14 @@
   function renderTemplate() {
     return `
       <section class="fcuno-wa-spc-template" aria-label="SPC message template">
-        <label class="fcuno-wa-spc-template-toggle">
-          <input type="checkbox" data-action="toggle-template" ${state.templateEnabled ? "checked" : ""} />
-          <span>Use Template</span>
-        </label>
-        <textarea data-action="template-text" aria-label="Template text" ${state.templateEnabled ? "" : "disabled"}>${escapeHtml(state.templateText)}</textarea>
+        <div class="fcuno-wa-spc-template-toolbar">
+          <label class="fcuno-wa-spc-template-toggle">
+            <input type="checkbox" data-action="toggle-template" ${state.templateEnabled ? "checked" : ""} />
+            <span>Use Template</span>
+          </label>
+          <button type="button" data-action="edit-template">${state.templateEditing ? "Done" : "Edit"}</button>
+        </div>
+        ${state.templateEditing ? `<textarea data-action="template-text" aria-label="Template text" ${state.templateEnabled ? "" : "disabled"}>${escapeHtml(state.templateText)}</textarea>` : ""}
       </section>
     `
   }
@@ -713,13 +796,12 @@
       const status = enquiryStatusKey(enquiry)
       const statusText = enquiryStatusText(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
-      const heading = enquiry.vesselName || enquiry.vessel_name || enquiry.title || "ENQUIRY"
+      const body = enquiryBodyText(enquiry)
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
           ${sendable ? `<input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />` : `<span class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</span>`}
           <span>
-            <strong>${escapeHtml(heading)}</strong>
-            <em>${escapeHtml(enquiry.formattedText || enquiry.notes || enquiry.title || "")}</em>
+            <em>${escapeHtml(body || enquiry.title || "ENQUIRY")}</em>
             <small>${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
@@ -729,15 +811,11 @@
 
     return `
       <section class="fcuno-wa-spc-enquiry-panel">
-        ${renderTemplate()}
-        <div class="fcuno-wa-spc-enquiry-head">
-          <strong>ENQUIRIES</strong>
-          ${count ? `<span class="fcuno-wa-spc-new">${count} new</span>` : ""}
-        </div>
         <div class="fcuno-wa-spc-enquiry-actions">
           <button type="button" data-action="clear-enquiries">Clear All</button>
-          <button type="button" class="is-primary" data-action="send-selected">Send Selected</button>
+          <button type="button" class="is-primary" data-action="send-selected">Send${count ? ` · ${count} new` : ""}</button>
         </div>
+        ${renderTemplate()}
         <div class="fcuno-wa-spc-enquiry-list">
           ${state.enquiryError ? `<div class="fcuno-wa-spc-error">${escapeHtml(state.enquiryError)}</div>` : ""}
           ${rows || `<div class="fcuno-wa-spc-empty">No enquiries loaded.</div>`}
@@ -874,6 +952,12 @@
       checkbox.addEventListener("change", () => {
         state.templateEnabled = checkbox.checked
         saveState()
+        render()
+      })
+    })
+    host.querySelectorAll("[data-action='edit-template']").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.templateEditing = !state.templateEditing
         render()
       })
     })

@@ -17,6 +17,18 @@ import {
 
 const scryptAsync = promisify(scrypt)
 const SPC_PERMISSION_GROUPS_STORE_KEY = "spc-permission-groups"
+export const SPC_DEFAULT_PASSWORD = "Since1857"
+export const SPC_DEFAULT_OFFICES = [
+  "ITALY",
+  "HONG KONG",
+  "SINGAPORE",
+  "MONACO",
+  "FRANCE",
+  "USA",
+  "KOREA",
+  "JAPAN",
+  "VIETNAM",
+] as const
 
 type SpcUserRow = {
   id: string
@@ -53,6 +65,14 @@ type SpcPermissionGroupStorePayload = {
     role?: unknown
     updatedAt?: unknown
   }>
+  userProfiles?: Array<{
+    userId?: unknown
+    username?: unknown
+    office?: unknown
+    mustChangePassword?: unknown
+    updatedAt?: unknown
+  }>
+  offices?: unknown
 }
 
 type SpcUserRoleAssignment = {
@@ -62,12 +82,22 @@ type SpcUserRoleAssignment = {
   updatedAt: string | null
 }
 
+type SpcUserProfileAssignment = {
+  userId: string
+  username: string
+  office: string
+  mustChangePassword: boolean
+  updatedAt: string | null
+}
+
 export type ManagedSpcUser = {
   id: string
   username: string
   displayName: string
   role: SpcRoleId
   roleLabel: string
+  office: string
+  mustChangePassword: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
   createdAt: string
@@ -88,6 +118,8 @@ export type AuthenticatedSpcUser = {
   username: string
   displayName: string
   role: SpcRoleId
+  office: string
+  mustChangePassword: boolean
   permissions: SpcPagePermissionMap
   source: "database"
 }
@@ -97,6 +129,8 @@ export type SaveSpcUserInput = {
   username: string
   displayName?: string
   role?: string
+  office?: string
+  mustChangePassword?: boolean
   password?: string
   isActive?: boolean
 }
@@ -145,6 +179,26 @@ function getServiceClient(actor?: SpcActor) {
 
 function normaliseUsername(username: string) {
   return username.trim()
+}
+
+function normaliseOffice(value: string | null | undefined) {
+  return (value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase()
+}
+
+function normaliseOfficeList(values: unknown) {
+  const source = Array.isArray(values) ? values : [...SPC_DEFAULT_OFFICES]
+  const seen = new Set<string>()
+  const offices = source.flatMap((value) => {
+    const office = typeof value === "string" ? normaliseOffice(value) : ""
+    if (!office || seen.has(office)) return []
+    seen.add(office)
+    return [office]
+  })
+
+  return offices.length ? offices : [...SPC_DEFAULT_OFFICES]
 }
 
 function friendlySpcUserError(error: unknown) {
@@ -215,7 +269,38 @@ function parseUserRoleStore(payload: unknown): SpcUserRoleAssignment[] {
   })
 }
 
-function buildStorePayload(rows: SpcRoleDefaultRow[], userRoles: SpcUserRoleAssignment[] = []) {
+function parseUserProfileStore(payload: unknown): SpcUserProfileAssignment[] {
+  if (!payload || typeof payload !== "object") return []
+  const userProfiles = (payload as SpcPermissionGroupStorePayload).userProfiles
+  if (!Array.isArray(userProfiles)) return []
+
+  return userProfiles.flatMap((item) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.userId !== "string" ||
+      typeof item.username !== "string"
+    ) {
+      return []
+    }
+    return [
+      {
+        userId: item.userId,
+        username: item.username,
+        office: normaliseOffice(typeof item.office === "string" ? item.office : "") || SPC_DEFAULT_OFFICES[0],
+        mustChangePassword: item.mustChangePassword === true,
+        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : null,
+      },
+    ]
+  })
+}
+
+function buildStorePayload(
+  rows: SpcRoleDefaultRow[],
+  userRoles: SpcUserRoleAssignment[] = [],
+  userProfiles: SpcUserProfileAssignment[] = [],
+  offices: string[] = normaliseOfficeList(null),
+) {
   return {
     groups: rows.map((row) => ({
       role: row.role,
@@ -228,6 +313,14 @@ function buildStorePayload(rows: SpcRoleDefaultRow[], userRoles: SpcUserRoleAssi
       role: assignment.role,
       updatedAt: assignment.updatedAt,
     })),
+    userProfiles: userProfiles.map((profile) => ({
+      userId: profile.userId,
+      username: profile.username,
+      office: profile.office,
+      mustChangePassword: profile.mustChangePassword,
+      updatedAt: profile.updatedAt,
+    })),
+    offices,
   }
 }
 
@@ -235,6 +328,14 @@ function getUserRoleMap(userRoles: SpcUserRoleAssignment[]) {
   return userRoles.reduce<Record<string, string>>((map, assignment) => {
     map[assignment.userId] = normaliseSpcRole(assignment.role)
     map[`username:${assignment.username.toLowerCase()}`] = normaliseSpcRole(assignment.role)
+    return map
+  }, {})
+}
+
+function getUserProfileMap(userProfiles: SpcUserProfileAssignment[]) {
+  return userProfiles.reduce<Record<string, SpcUserProfileAssignment>>((map, assignment) => {
+    map[assignment.userId] = assignment
+    map[`username:${assignment.username.toLowerCase()}`] = assignment
     return map
   }, {})
 }
@@ -318,6 +419,8 @@ async function loadStoredRoleDefaults(supabase: ReturnType<typeof getServiceClie
     storeRow: (data as unknown as SpcStoreRow | null) || null,
     rows: parsePermissionGroupStore(data?.payload),
     userRoles: parseUserRoleStore(data?.payload),
+    userProfiles: parseUserProfileStore(data?.payload),
+    offices: normaliseOfficeList(data?.payload?.offices),
   }
 }
 
@@ -365,7 +468,7 @@ async function saveStoredRoleDefault(
   const nextRows = existing.rows.some((row) => normaliseSpcRole(row.role) === role)
     ? existing.rows.map((row) => (normaliseSpcRole(row.role) === role ? nextRow : row))
     : [...existing.rows, nextRow]
-  const payload = buildStorePayload(nextRows, existing.userRoles)
+  const payload = buildStorePayload(nextRows, existing.userRoles, existing.userProfiles, existing.offices)
   const afterRow: SpcStoreRow = {
     key: SPC_PERMISSION_GROUPS_STORE_KEY,
     payload,
@@ -395,7 +498,7 @@ async function deleteStoredRoleDefault(
   const updatedAt = new Date().toISOString()
   const afterRow: SpcStoreRow = {
     key: SPC_PERMISSION_GROUPS_STORE_KEY,
-    payload: buildStorePayload(nextRows, existing.userRoles),
+    payload: buildStorePayload(nextRows, existing.userRoles, existing.userProfiles, existing.offices),
     updated_at: updatedAt,
   }
 
@@ -404,15 +507,21 @@ async function deleteStoredRoleDefault(
   await writePermissionGroupAudit(supabase, actor, "UPDATE", existing.storeRow, afterRow)
 }
 
-async function saveStoredUserRoleAssignment(
+async function saveStoredUserMetadata(
   supabase: ReturnType<typeof getServiceClient>,
   row: SpcUserRow,
   role: string,
+  profile: {
+    office?: string
+    mustChangePassword?: boolean
+  },
   actor?: SpcActor,
 ) {
   const existing = await loadStoredRoleDefaults(supabase)
   const updatedAt = new Date().toISOString()
   const roleId = normaliseSpcRole(role)
+  const profileByUser = getUserProfileMap(existing.userProfiles)
+  const previousProfile = profileByUser[row.id] || profileByUser[`username:${row.username.toLowerCase()}`]
   const nextUserRoles = existing.userRoles
     .filter(
       (assignment) =>
@@ -429,9 +538,33 @@ async function saveStoredUserRoleAssignment(
     })
   }
 
+  const nextOffice =
+    normaliseOffice(profile.office) ||
+    previousProfile?.office ||
+    existing.offices[0] ||
+    SPC_DEFAULT_OFFICES[0]
+  const nextUserProfiles = existing.userProfiles
+    .filter(
+      (assignment) =>
+        assignment.userId !== row.id &&
+        assignment.username.toLowerCase() !== row.username.toLowerCase(),
+    )
+
+  nextUserProfiles.push({
+    userId: row.id,
+    username: row.username,
+    office: nextOffice,
+    mustChangePassword:
+      typeof profile.mustChangePassword === "boolean"
+        ? profile.mustChangePassword
+        : previousProfile?.mustChangePassword === true,
+    updatedAt,
+  })
+
+  const nextOffices = normaliseOfficeList([...existing.offices, nextOffice])
   const afterRow: SpcStoreRow = {
     key: SPC_PERMISSION_GROUPS_STORE_KEY,
-    payload: buildStorePayload(existing.rows, nextUserRoles),
+    payload: buildStorePayload(existing.rows, nextUserRoles, nextUserProfiles, nextOffices),
     updated_at: updatedAt,
   }
   const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
@@ -457,12 +590,22 @@ async function deleteStoredUserRoleAssignment(
       assignment.userId !== row.id &&
       assignment.username.toLowerCase() !== row.username.toLowerCase(),
   )
-  if (nextUserRoles.length === existing.userRoles.length) return
+  const nextUserProfiles = existing.userProfiles.filter(
+    (assignment) =>
+      assignment.userId !== row.id &&
+      assignment.username.toLowerCase() !== row.username.toLowerCase(),
+  )
+  if (
+    nextUserRoles.length === existing.userRoles.length &&
+    nextUserProfiles.length === existing.userProfiles.length
+  ) {
+    return
+  }
 
   const updatedAt = new Date().toISOString()
   const afterRow: SpcStoreRow = {
     key: SPC_PERMISSION_GROUPS_STORE_KEY,
-    payload: buildStorePayload(existing.rows, nextUserRoles),
+    payload: buildStorePayload(existing.rows, nextUserRoles, nextUserProfiles, existing.offices),
     updated_at: updatedAt,
   }
   const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
@@ -475,8 +618,10 @@ function mapSpcUser(
   roleDefaults: ManagedSpcRoleDefault[] = [],
   pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
   userRoleMap: Record<string, string> = {},
+  userProfileMap: Record<string, SpcUserProfileAssignment> = {},
 ): ManagedSpcUser {
   const role = getStoredSpcRole(row, userRoleMap)
+  const profile = userProfileMap[row.id] || userProfileMap[`username:${row.username.toLowerCase()}`]
   const roleDefault = getRoleDefaultMap(roleDefaults)[role]
   const permissions = roleDefault?.permissions || getDefaultSpcPermissionsForRole(role, pages)
 
@@ -486,6 +631,8 @@ function mapSpcUser(
     displayName: row.display_name || row.username,
     role,
     roleLabel: getSpcRoleLabel(role),
+    office: profile?.office || SPC_DEFAULT_OFFICES[0],
+    mustChangePassword: profile?.mustChangePassword === true,
     permissions,
     isActive: row.is_active !== false,
     createdAt: row.created_at,
@@ -567,12 +714,15 @@ export async function validateDatabaseSpcUser(
 
     const stored = await loadStoredRoleDefaults(supabase)
     const userRoleMap = getUserRoleMap(stored.userRoles)
+    const userProfileMap = getUserProfileMap(stored.userProfiles)
     const roleDefaults = buildManagedRoleDefaults(stored.rows, [row], pages, userRoleMap)
-    const user = mapSpcUser(row, roleDefaults, pages, userRoleMap)
+    const user = mapSpcUser(row, roleDefaults, pages, userRoleMap, userProfileMap)
     return {
       username: user.username,
       displayName: user.displayName,
       role: user.role,
+      office: user.office,
+      mustChangePassword: user.mustChangePassword,
       permissions: user.permissions,
       source: "database" as const,
     }
@@ -601,12 +751,15 @@ export async function getDatabaseSpcUserByUsername(
     const row = data as SpcUserRow
     const stored = await loadStoredRoleDefaults(supabase)
     const userRoleMap = getUserRoleMap(stored.userRoles)
+    const userProfileMap = getUserProfileMap(stored.userProfiles)
     const roleDefaults = buildManagedRoleDefaults(stored.rows, [row], pages, userRoleMap)
-    const user = mapSpcUser(row, roleDefaults, pages, userRoleMap)
+    const user = mapSpcUser(row, roleDefaults, pages, userRoleMap, userProfileMap)
     return {
       username: user.username,
       displayName: user.displayName,
       role: user.role,
+      office: user.office,
+      mustChangePassword: user.mustChangePassword,
       permissions: user.permissions,
       source: "database" as const,
     }
@@ -624,6 +777,7 @@ export async function listManagedSpcUsers(
     const defaults = roleDefaults || (await listManagedSpcRoleDefaults(pages))
     const stored = await loadStoredRoleDefaults(supabase)
     const userRoleMap = getUserRoleMap(stored.userRoles)
+    const userProfileMap = getUserProfileMap(stored.userProfiles)
     const { data, error } = await supabase
       .from("spc_users")
       .select("*")
@@ -631,7 +785,9 @@ export async function listManagedSpcUsers(
       .order("username", { ascending: true })
 
     if (error) throw error
-    return ((data || []) as unknown as SpcUserRow[]).map((row) => mapSpcUser(row, defaults, pages, userRoleMap))
+    return ((data || []) as unknown as SpcUserRow[]).map((row) =>
+      mapSpcUser(row, defaults, pages, userRoleMap, userProfileMap),
+    )
   } catch (error) {
     throw friendlySpcUserError(error)
   }
@@ -651,6 +807,146 @@ export async function listSupplierTraderOptions(
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
 }
 
+export async function listManagedSpcOffices() {
+  try {
+    const supabase = getServiceClient()
+    const stored = await loadStoredRoleDefaults(supabase)
+    return stored.offices
+  } catch (error) {
+    throw friendlySpcUserError(error)
+  }
+}
+
+async function writeOfficeStore(
+  supabase: ReturnType<typeof getServiceClient>,
+  offices: string[],
+  actor?: SpcActor,
+) {
+  const existing = await loadStoredRoleDefaults(supabase)
+  const updatedAt = new Date().toISOString()
+  const afterRow: SpcStoreRow = {
+    key: SPC_PERMISSION_GROUPS_STORE_KEY,
+    payload: buildStorePayload(
+      existing.rows,
+      existing.userRoles,
+      existing.userProfiles,
+      normaliseOfficeList(offices),
+    ),
+    updated_at: updatedAt,
+  }
+  const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
+  if (error) throw error
+  await writePermissionGroupAudit(
+    supabase,
+    actor,
+    existing.storeRow ? "UPDATE" : "INSERT",
+    existing.storeRow,
+    afterRow,
+  )
+  return normaliseOfficeList(offices)
+}
+
+export async function saveManagedSpcOffice(officeInput: string, actor?: SpcActor) {
+  const office = normaliseOffice(officeInput)
+  if (!office) throw new Error("Office is required.")
+
+  try {
+    const supabase = getServiceClient(actor)
+    const stored = await loadStoredRoleDefaults(supabase)
+    return await writeOfficeStore(supabase, [...stored.offices, office], actor)
+  } catch (error) {
+    throw friendlySpcUserError(error)
+  }
+}
+
+export async function deleteManagedSpcOffice(officeInput: string, actor?: SpcActor) {
+  const office = normaliseOffice(officeInput)
+  if (!office) throw new Error("Office is required.")
+
+  try {
+    const supabase = getServiceClient(actor)
+    const stored = await loadStoredRoleDefaults(supabase)
+    if (stored.userProfiles.some((profile) => profile.office === office)) {
+      throw new Error("Move users out of this office before removing it.")
+    }
+    return await writeOfficeStore(
+      supabase,
+      stored.offices.filter((item) => item !== office),
+      actor,
+    )
+  } catch (error) {
+    throw friendlySpcUserError(error)
+  }
+}
+
+export async function changeManagedSpcUserPassword(
+  usernameInput: string,
+  passwordInput: string,
+  actor?: SpcActor,
+) {
+  const username = normaliseUsername(usernameInput)
+  const password = passwordInput.trim()
+  if (!username) throw new Error("Username is required.")
+  if (password.length < 8) throw new Error("Password must be at least 8 characters.")
+
+  try {
+    const supabase = getServiceClient(actor)
+    const { data, error } = await supabase
+      .from("spc_users")
+      .select("*")
+      .eq("username", username)
+      .eq("is_active", true)
+      .maybeSingle()
+    if (error) throw error
+    if (!data) throw new Error("User not found.")
+
+    const row = data as SpcUserRow
+    const stored = await loadStoredRoleDefaults(supabase)
+    const userRoleMap = getUserRoleMap(stored.userRoles)
+    const userProfileMap = getUserProfileMap(stored.userProfiles)
+    const currentProfile = userProfileMap[row.id] || userProfileMap[`username:${row.username.toLowerCase()}`]
+    const role = getStoredSpcRole(row, userRoleMap)
+    const { data: updated, error: updateError } = await supabase
+      .from("spc_users")
+      .update({
+        password_hash: await hashPassword(password),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id)
+      .select("*")
+      .single()
+    if (updateError) throw updateError
+
+    await saveStoredUserMetadata(
+      supabase,
+      updated as SpcUserRow,
+      role,
+      {
+        office: currentProfile?.office || stored.offices[0] || SPC_DEFAULT_OFFICES[0],
+        mustChangePassword: false,
+      },
+      actor,
+    )
+
+    const nextStored = await loadStoredRoleDefaults(supabase)
+    const roleDefaults = buildManagedRoleDefaults(
+      nextStored.rows,
+      [updated as SpcUserRow],
+      SPC_PAGE_DEFINITIONS,
+      getUserRoleMap(nextStored.userRoles),
+    )
+    return mapSpcUser(
+      updated as SpcUserRow,
+      roleDefaults,
+      SPC_PAGE_DEFINITIONS,
+      getUserRoleMap(nextStored.userRoles),
+      getUserProfileMap(nextStored.userProfiles),
+    )
+  } catch (error) {
+    throw friendlySpcUserError(error)
+  }
+}
+
 export async function saveManagedSpcUser(
   input: SaveSpcUserInput,
   actor?: SpcActor,
@@ -666,6 +962,10 @@ export async function saveManagedSpcUser(
 
   try {
     const supabase = getServiceClient(actor)
+    const existing = input.id
+      ? await supabase.from("spc_users").select("*").eq("id", input.id).maybeSingle()
+      : null
+    if (existing?.error) throw existing.error
     const payload: Record<string, unknown> = {
       username,
       display_name: input.displayName?.trim() || username,
@@ -673,9 +973,10 @@ export async function saveManagedSpcUser(
       is_active: input.isActive !== false,
       updated_at: new Date().toISOString(),
     }
+    const passwordInput = input.password?.trim() || (!input.id ? SPC_DEFAULT_PASSWORD : "")
 
-    if (input.password?.trim()) {
-      payload.password_hash = await hashPassword(input.password)
+    if (passwordInput) {
+      payload.password_hash = await hashPassword(passwordInput)
     } else if (!input.id) {
       throw new Error("Password is required for a new user.")
     }
@@ -687,9 +988,27 @@ export async function saveManagedSpcUser(
     const { data, error } = await query.select("*").single()
     if (error) throw error
     const row = data as SpcUserRow
-    await saveStoredUserRoleAssignment(supabase, row, role, actor)
+    await saveStoredUserMetadata(
+      supabase,
+      row,
+      role,
+      {
+        office: input.office,
+        mustChangePassword:
+          typeof input.mustChangePassword === "boolean"
+            ? input.mustChangePassword
+            : Boolean(passwordInput) || !existing?.data,
+      },
+      actor,
+    )
     const stored = await loadStoredRoleDefaults(supabase)
-    return mapSpcUser(row, roleDefaults, pages, getUserRoleMap(stored.userRoles))
+    return mapSpcUser(
+      row,
+      roleDefaults,
+      pages,
+      getUserRoleMap(stored.userRoles),
+      getUserProfileMap(stored.userProfiles),
+    )
   } catch (error) {
     throw friendlySpcUserError(error)
   }

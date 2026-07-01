@@ -323,7 +323,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-enquiry-panel {
-  grid-template-rows: auto 42px 44px minmax(0, 1fr);
+  grid-template-rows: 44px auto minmax(0, 1fr);
   background: #ffffff;
 }
 
@@ -332,14 +332,22 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   gap: 6px;
   border-bottom: 1px solid #d1d7db;
   background: #fbfcfd;
-  padding: 8px;
+  padding: 7px 8px;
+}
+
+.fcuno-wa-spc-template-toolbar {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .fcuno-wa-spc-template-toggle {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #06284a;
+  color: #0a5bd3;
   font-size: 12px;
   font-weight: 900;
 }
@@ -348,7 +356,19 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: #008069;
+  accent-color: #0a84ff;
+}
+
+.fcuno-wa-spc-template-toolbar button {
+  min-height: 26px;
+  border: 1px solid #cfd8e3;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0a5bd3;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 4px 10px;
 }
 
 .fcuno-wa-spc-template textarea {
@@ -367,23 +387,6 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 .fcuno-wa-spc-template textarea:disabled {
   background: #f0f2f5;
   color: #667781;
-}
-
-.fcuno-wa-spc-enquiry-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid #d1d7db;
-  background: #f7f9fb;
-  padding: 8px 10px;
-}
-
-.fcuno-wa-spc-enquiry-head strong {
-  color: #06284a;
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
 }
 
 .fcuno-wa-spc-enquiry-actions {
@@ -465,7 +468,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 .fcuno-wa-spc-enquiry span {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 .fcuno-wa-spc-enquiry strong {
@@ -478,7 +481,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   color: #111b21;
   font-size: 12px;
   font-style: normal;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.35;
 }
 

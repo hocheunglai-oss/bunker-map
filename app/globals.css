@@ -3001,6 +3001,7 @@ body {
   text-transform: uppercase;
 }
 
+.spc-dialog-field input,
 .spc-dialog-field select,
 .spc-fixture-table input,
 .spc-fixture-table select {
@@ -3040,6 +3041,65 @@ body {
 .spc-fixture-table button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.spc-password-change-page {
+  min-height: calc(100vh - 44px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+
+.spc-password-change-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 18px 48px rgba(29, 29, 31, 0.1);
+  padding: 24px;
+}
+
+.spc-password-change-panel h1 {
+  margin: 0 0 4px;
+  color: var(--fc-admin-heading);
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.spc-password-change-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spc-password-change-panel input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.spc-password-change-panel button {
+  min-height: 38px;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .spc-fixture-table {
@@ -3352,6 +3412,246 @@ body {
   text-transform: uppercase;
 }
 
+.spc-user-compact {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  grid-template-columns: minmax(360px, 500px) minmax(280px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.spc-user-compact .spc-panel + .spc-panel {
+  margin-top: 0;
+}
+
+.spc-user-directory {
+  height: calc(100vh - 72px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.spc-user-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 8px;
+}
+
+.spc-user-tabs button {
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fc-admin-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 7px 7px;
+  text-align: left;
+}
+
+.spc-user-tabs button.is-active {
+  border-color: var(--fc-admin-selected-border);
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
+}
+
+.spc-user-tabs span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-user-tabs em {
+  min-width: 20px;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--fc-count-text);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 5px;
+}
+
+.spc-user-directory-toolbar {
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  padding: 8px;
+}
+
+.spc-user-directory-toolbar button {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.spc-compact-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.spc-compact-row {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: #ffffff;
+  padding: 9px 10px;
+}
+
+.spc-compact-row.is-disabled {
+  opacity: 0.56;
+}
+
+.spc-compact-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.spc-compact-row strong,
+.spc-compact-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-compact-row strong {
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.spc-compact-row small {
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.spc-compact-row > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spc-compact-row button {
+  min-height: 30px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 6px 10px;
+}
+
+.spc-compact-row button.is-danger {
+  border-color: #f0b8c0;
+  background: #fff7f8;
+  color: #b00020;
+}
+
+.spc-compact-row button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.spc-user-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.spc-user-overview-grid div {
+  min-height: 84px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 12px;
+}
+
+.spc-user-overview-grid strong {
+  color: var(--fc-admin-heading);
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.spc-user-overview-grid span {
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spc-user-dialog {
+  width: min(520px, 100%);
+}
+
+.spc-user-dialog-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.spc-user-dialog-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spc-user-dialog-fields input,
+.spc-user-dialog-fields select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.spc-user-dialog-fields .spc-checkbox-field {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  grid-column: 1 / -1;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .spc-user-grid {
   display: grid;
   grid-template-columns: 310px minmax(0, 1fr) minmax(320px, 420px);
@@ -3599,8 +3899,14 @@ body {
     flex-wrap: wrap;
   }
 
+  .spc-user-compact,
   .spc-user-grid {
     grid-template-columns: 1fr;
+  }
+
+  .spc-user-directory {
+    height: auto;
+    max-height: 72vh;
   }
 }
 
@@ -3646,6 +3952,14 @@ body {
   }
 
   .spc-enquiry-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-user-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .spc-user-dialog-fields {
     grid-template-columns: 1fr;
   }
 

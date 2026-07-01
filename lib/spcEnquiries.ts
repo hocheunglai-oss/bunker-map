@@ -160,6 +160,24 @@ export async function createSpcEnquiry(
 
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
+  const notes = cleanText(input.notes)
+  const duplicateWindow = new Date(Date.now() - 120000).toISOString()
+  const duplicateQuery = supabase
+    .from("spc_enquiries")
+    .select("*")
+    .eq("created_by_username", session.username)
+    .eq("status", "sent")
+    .gte("created_at", duplicateWindow)
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  const { data: duplicate, error: duplicateError } = notes
+    ? await duplicateQuery.eq("notes", notes).maybeSingle()
+    : await duplicateQuery.eq("title", title).maybeSingle()
+
+  if (duplicateError) throw duplicateError
+  if (duplicate) return mapEnquiry(duplicate as SpcEnquiryRow)
+
   const { data, error } = await supabase
     .from("spc_enquiries")
     .insert({
@@ -170,7 +188,7 @@ export async function createSpcEnquiry(
       quantity: cleanText(input.quantity),
       delivery_date: cleanDateInput(input.deliveryDate),
       supplier_name: cleanText(input.supplierName),
-      notes: cleanText(input.notes),
+      notes,
       status: "sent",
       created_by_username: session.username,
       created_by_display_name: session.displayName || session.username,

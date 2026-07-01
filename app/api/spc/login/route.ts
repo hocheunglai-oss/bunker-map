@@ -34,6 +34,8 @@ export async function POST(request: Request) {
       username: user.username,
       displayName: user.displayName || user.username,
       role: user.role,
+      office: user.office,
+      mustChangePassword: user.mustChangePassword,
       permissions: user.permissions,
     },
     pages: SPC_PAGE_DEFINITIONS,

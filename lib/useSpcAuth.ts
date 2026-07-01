@@ -9,6 +9,8 @@ type SpcAuthState = {
   username: string | null
   displayName: string | null
   role: SpcRoleId | null
+  office: string | null
+  mustChangePassword: boolean
   permissions: SpcPagePermissionMap
   pages: SpcPageDefinition[]
 }
@@ -18,6 +20,8 @@ type SpcSessionPayload = {
   username?: string | null
   displayName?: string | null
   role?: SpcRoleId | null
+  office?: string | null
+  mustChangePassword?: boolean
   permissions?: SpcPagePermissionMap
   pages?: SpcPageDefinition[]
 }
@@ -44,6 +48,8 @@ function writeCachedSpcActor(data: SpcSessionPayload) {
         username: data.username,
         displayName: data.displayName || data.username,
         role: data.role || null,
+        office: data.office || null,
+        mustChangePassword: data.mustChangePassword === true,
         permissions: data.permissions || {},
         pages: data.pages || [],
       }),
@@ -118,6 +124,8 @@ export function useSpcAuth(): SpcAuthState {
   const [username, setUsername] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [role, setRole] = useState<SpcRoleId | null>(null)
+  const [office, setOffice] = useState<string | null>(null)
+  const [mustChangePassword, setMustChangePassword] = useState(false)
   const [permissions, setPermissions] = useState<SpcPagePermissionMap>({})
   const [pages, setPages] = useState<SpcPageDefinition[]>([])
 
@@ -128,6 +136,8 @@ export function useSpcAuth(): SpcAuthState {
       const nextDisplayName =
         typeof data.displayName === "string" ? data.displayName : nextUsername
       const nextRole = typeof data.role === "string" ? data.role : null
+      const nextOffice = typeof data.office === "string" ? data.office : null
+      const nextMustChangePassword = data.mustChangePassword === true
       const nextPermissions =
         data.permissions && typeof data.permissions === "object" ? data.permissions : {}
       const nextPages = Array.isArray(data.pages) ? data.pages : []
@@ -136,6 +146,8 @@ export function useSpcAuth(): SpcAuthState {
       setUsername(isAuthenticated ? nextUsername : null)
       setDisplayName(isAuthenticated ? nextDisplayName : null)
       setRole(isAuthenticated ? nextRole : null)
+      setOffice(isAuthenticated ? nextOffice : null)
+      setMustChangePassword(isAuthenticated ? nextMustChangePassword : false)
       setPermissions(isAuthenticated ? nextPermissions : {})
       setPages(isAuthenticated ? nextPages : [])
       setLoading(false)
@@ -145,6 +157,8 @@ export function useSpcAuth(): SpcAuthState {
         username: nextUsername,
         displayName: nextDisplayName,
         role: nextRole,
+        office: nextOffice,
+        mustChangePassword: nextMustChangePassword,
         permissions: nextPermissions,
         pages: nextPages,
       })
@@ -155,6 +169,8 @@ export function useSpcAuth(): SpcAuthState {
       setUsername(null)
       setDisplayName(null)
       setRole(null)
+      setOffice(null)
+      setMustChangePassword(false)
       setPermissions({})
       setPages([])
       setLoading(false)
@@ -196,5 +212,5 @@ export function useSpcAuth(): SpcAuthState {
     }
   }, [])
 
-  return { loading, authenticated, username, displayName, role, permissions, pages }
+  return { loading, authenticated, username, displayName, role, office, mustChangePassword, permissions, pages }
 }

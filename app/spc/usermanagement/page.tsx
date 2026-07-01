@@ -4,15 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
-import {
-  canAccessSpcPage,
-  normaliseSpcPagePermissions,
-  normaliseSpcRole,
-  type SpcPageDefinition,
-  type SpcPagePermission,
-  type SpcPagePermissionMap,
-  type SpcRoleId,
-} from "@/lib/spcPages"
+import { canAccessSpcPage, type SpcPageDefinition, type SpcPagePermissionMap, type SpcRoleId } from "@/lib/spcPages"
 
 type ManagedSpcUser = {
   id: string
@@ -20,6 +12,8 @@ type ManagedSpcUser = {
   displayName: string
   role: SpcRoleId
   roleLabel: string
+  office: string
+  mustChangePassword: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
   createdAt: string
@@ -38,59 +32,84 @@ type ManagedSpcRoleDefault = {
 
 type UsersResponse = {
   users?: ManagedSpcUser[]
+  offices?: string[]
   pages?: SpcPageDefinition[]
   roleDefaults?: ManagedSpcRoleDefault[]
-  groupStorage?: string
   message?: string
 }
 
-type DraftUser = {
+type UserTab = "SUPPLIER TRADER" | "BUYER TRADER" | "ADMIN" | "OFFICE"
+
+type UserDraft = {
   id?: string
   username: string
   displayName: string
-  role: string
+  role: Exclude<UserTab, "OFFICE">
+  office: string
   password: string
+  mustChangePassword: boolean
   isActive: boolean
 }
 
-function createDraft(role = "BUYER TRADER"): DraftUser {
+const USER_TABS: Array<{ id: UserTab; label: string }> = [
+  { id: "SUPPLIER TRADER", label: "Supplier Trader" },
+  { id: "BUYER TRADER", label: "Buyer Trader" },
+  { id: "ADMIN", label: "Admin" },
+  { id: "OFFICE", label: "Office" },
+]
+
+const USER_ROLE_OPTIONS = USER_TABS.filter(
+  (tab): tab is { id: Exclude<UserTab, "OFFICE">; label: string } => tab.id !== "OFFICE",
+)
+const DEFAULT_PASSWORD = "Since1857"
+const DEFAULT_OFFICES = ["ITALY", "HONG KONG", "SINGAPORE", "MONACO", "FRANCE", "USA", "KOREA", "JAPAN", "VIETNAM"]
+
+function cleanOffice(value: string) {
+  return value.trim().replace(/\s+/g, " ").toUpperCase()
+}
+
+function roleLabel(role: string) {
+  return USER_TABS.find((tab) => tab.id === role)?.label || role
+}
+
+function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraft {
   return {
     username: "",
     displayName: "",
     role,
-    password: "",
+    office,
+    password: DEFAULT_PASSWORD,
+    mustChangePassword: true,
     isActive: true,
   }
 }
 
-function userToDraft(user: ManagedSpcUser): DraftUser {
+function userToDraft(user: ManagedSpcUser, fallbackOffice: string): UserDraft {
+  const role = USER_ROLE_OPTIONS.some((option) => option.id === user.role)
+    ? (user.role as Exclude<UserTab, "OFFICE">)
+    : "BUYER TRADER"
+
   return {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
-    role: user.role,
+    role,
+    office: user.office || fallbackOffice,
     password: "",
+    mustChangePassword: user.mustChangePassword,
     isActive: user.isActive,
   }
-}
-
-function displayDate(value: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value))
 }
 
 export default function SpcUserManagementPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions, username } = useSpcAuth()
   const [users, setUsers] = useState<ManagedSpcUser[]>([])
-  const [pages, setPages] = useState<SpcPageDefinition[]>([])
-  const [roleDefaults, setRoleDefaults] = useState<ManagedSpcRoleDefault[]>([])
-  const [selectedRole, setSelectedRole] = useState<SpcRoleId>("BUYER TRADER")
-  const [draft, setDraft] = useState<DraftUser>(() => createDraft("BUYER TRADER"))
-  const [newGroupName, setNewGroupName] = useState("")
+  const [offices, setOffices] = useState<string[]>(DEFAULT_OFFICES)
+  const [activeTab, setActiveTab] = useState<UserTab>("SUPPLIER TRADER")
+  const [userDraft, setUserDraft] = useState<UserDraft | null>(null)
+  const [officeDialogOpen, setOfficeDialogOpen] = useState(false)
+  const [officeDraft, setOfficeDraft] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
@@ -98,14 +117,24 @@ export default function SpcUserManagementPage() {
 
   const canView = canAccessSpcPage(permissions, "spc-user-management", "view")
   const canEdit = canAccessSpcPage(permissions, "spc-user-management", "edit")
-  const selectedRoleUsers = useMemo(
-    () => users.filter((user) => user.role === selectedRole),
-    [selectedRole, users],
+  const firstOffice = offices[0] || DEFAULT_OFFICES[0]
+  const activeUsers = useMemo(
+    () => users.filter((user) => user.role === activeTab),
+    [activeTab, users],
   )
-  const selectedGroup = roleDefaults.find((item) => item.role === selectedRole) || roleDefaults[0] || null
-  const selectedPermissions = selectedGroup
-    ? normaliseSpcPagePermissions(selectedGroup.permissions, "view", pages)
-    : normaliseSpcPagePermissions(null, "view", pages)
+  const usersByOffice = useMemo(() => {
+    return users.reduce<Record<string, number>>((map, user) => {
+      const office = cleanOffice(user.office || firstOffice)
+      map[office] = (map[office] || 0) + 1
+      return map
+    }, {})
+  }, [firstOffice, users])
+  const roleCounts = useMemo(() => {
+    return users.reduce<Record<string, number>>((map, user) => {
+      map[user.role] = (map[user.role] || 0) + 1
+      return map
+    }, {})
+  }, [users])
 
   const loadUsers = useCallback(async () => {
     if (!authenticated || !canView) return
@@ -116,15 +145,8 @@ export default function SpcUserManagementPage() {
       const data = (await response.json()) as UsersResponse
       if (!response.ok) throw new Error(data.message || "Failed to load SPC users.")
 
-      const nextGroups = data.roleDefaults || []
       setUsers(data.users || [])
-      setPages(data.pages || [])
-      setRoleDefaults(nextGroups)
-      setSelectedRole((current) =>
-        nextGroups.some((group) => group.role === current)
-          ? current
-          : nextGroups.find((group) => group.role === "BUYER TRADER")?.role || nextGroups[0]?.role || "BUYER TRADER",
-      )
+      setOffices(data.offices?.length ? data.offices : DEFAULT_OFFICES)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load SPC users.")
       setMessageIsError(true)
@@ -145,41 +167,29 @@ export default function SpcUserManagementPage() {
     void loadUsers()
   }, [loadUsers])
 
-  function selectRole(nextRole: SpcRoleId) {
-    setSelectedRole(nextRole)
-    setDraft(createDraft(nextRole))
+  function openAddDialog() {
     setMessage("")
+    if (activeTab === "OFFICE") {
+      setOfficeDraft("")
+      setOfficeDialogOpen(true)
+      return
+    }
+    setUserDraft(createDraft(activeTab, firstOffice))
   }
 
   function editUser(user: ManagedSpcUser) {
-    setSelectedRole(user.role)
-    setDraft(userToDraft(user))
     setMessage("")
+    setUserDraft(userToDraft(user, firstOffice))
   }
 
-  function updateDraft<K extends keyof DraftUser>(key: K, value: DraftUser[K]) {
-    setDraft((current) => ({ ...current, [key]: value }))
-  }
-
-  function updateRolePermission(pageId: string, permission: SpcPagePermission) {
-    if (!selectedGroup || !canEdit) return
-    setRoleDefaults((current) =>
-      current.map((group) =>
-        group.role === selectedGroup.role
-          ? {
-              ...group,
-              permissions: {
-                ...normaliseSpcPagePermissions(group.permissions, "view", pages),
-                [pageId]: permission,
-              },
-            }
-          : group,
-      ),
-    )
+  function updateDraft<K extends keyof UserDraft>(key: K, value: UserDraft[K]) {
+    setUserDraft((current) => (current ? { ...current, [key]: value } : current))
   }
 
   async function saveUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!userDraft || !canEdit) return
+
     setSaving(true)
     setMessage("")
 
@@ -187,13 +197,14 @@ export default function SpcUserManagementPage() {
       const response = await fetch("/api/spc/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save", user: draft }),
+        body: JSON.stringify({ action: "save", user: userDraft }),
       })
       const data = (await response.json()) as { user?: ManagedSpcUser; message?: string }
       if (!response.ok || !data.user) throw new Error(data.message || "Failed to save SPC user.")
+
       await loadUsers()
-      setSelectedRole(data.user.role)
-      setDraft(createDraft(data.user.role))
+      setActiveTab(data.user.role === "ADMIN" || data.user.role === "SUPPLIER TRADER" ? data.user.role : "BUYER TRADER")
+      setUserDraft(null)
       setMessage("User saved.")
       setMessageIsError(false)
     } catch (error) {
@@ -205,7 +216,9 @@ export default function SpcUserManagementPage() {
   }
 
   async function deleteUser(user: ManagedSpcUser) {
-    if (!window.confirm(`Delete ${user.displayName || user.username}?`)) return
+    if (!canEdit) return
+    if (!window.confirm(`Remove ${user.displayName || user.username}?`)) return
+
     setSaving(true)
     setMessage("")
 
@@ -216,116 +229,70 @@ export default function SpcUserManagementPage() {
         body: JSON.stringify({ action: "delete", id: user.id }),
       })
       const data = (await response.json().catch(() => ({}))) as { message?: string }
-      if (!response.ok) throw new Error(data.message || "Failed to delete SPC user.")
+      if (!response.ok) throw new Error(data.message || "Failed to remove SPC user.")
+
       await loadUsers()
-      if (draft.id === user.id) setDraft(createDraft(selectedRole))
-      setMessage("User deleted.")
+      setMessage("User removed.")
       setMessageIsError(false)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete SPC user.")
+      setMessage(error instanceof Error ? error.message : "Failed to remove SPC user.")
       setMessageIsError(true)
     } finally {
       setSaving(false)
     }
   }
 
-  async function saveRoleDefault() {
-    if (!selectedGroup) return
+  async function saveOffice(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const office = cleanOffice(officeDraft)
+    if (!office || !canEdit) return
 
     setSaving(true)
     setMessage("")
+
     try {
       const response = await fetch("/api/spc/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "save-role-default",
-          roleDefault: {
-            role: selectedGroup.role,
-            permissions: selectedPermissions,
-          },
-        }),
+        body: JSON.stringify({ action: "save-office", office }),
       })
-      const data = (await response.json()) as { message?: string }
-      if (!response.ok) throw new Error(data.message || "Failed to save permission group.")
-      await loadUsers()
-      setMessage(`${selectedGroup.role} permissions saved.`)
+      const data = (await response.json()) as { offices?: string[]; message?: string }
+      if (!response.ok || !data.offices) throw new Error(data.message || "Failed to save office.")
+
+      setOffices(data.offices)
+      setOfficeDraft("")
+      setOfficeDialogOpen(false)
+      setMessage("Office saved.")
       setMessageIsError(false)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save permission group.")
+      setMessage(error instanceof Error ? error.message : "Failed to save office.")
       setMessageIsError(true)
     } finally {
       setSaving(false)
     }
   }
 
-  async function createGroup() {
-    const requestedName = newGroupName.trim()
-    if (!requestedName) {
-      setMessage("Group name is required.")
-      setMessageIsError(true)
-      return
-    }
-
-    const nextRole = normaliseSpcRole(requestedName)
-    if (roleDefaults.some((group) => group.role === nextRole)) {
-      setMessage(`${nextRole} already exists.`)
-      setMessageIsError(true)
-      return
-    }
+  async function deleteOffice(office: string) {
+    if (!canEdit) return
+    if (!window.confirm(`Remove ${office}?`)) return
 
     setSaving(true)
     setMessage("")
+
     try {
       const response = await fetch("/api/spc/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "save-role-default",
-          roleDefault: {
-            role: requestedName,
-            permissions: normaliseSpcPagePermissions(null, "view", pages),
-          },
-        }),
+        body: JSON.stringify({ action: "delete-office", office }),
       })
-      const data = (await response.json()) as { roleDefault?: ManagedSpcRoleDefault; message?: string }
-      if (!response.ok || !data.roleDefault) throw new Error(data.message || "Failed to create permission group.")
-      setNewGroupName("")
-      setSelectedRole(data.roleDefault.role)
-      await loadUsers()
-      setMessage(`${data.roleDefault.role} group created.`)
+      const data = (await response.json()) as { offices?: string[]; message?: string }
+      if (!response.ok || !data.offices) throw new Error(data.message || "Failed to remove office.")
+
+      setOffices(data.offices.length ? data.offices : DEFAULT_OFFICES)
+      setMessage("Office removed.")
       setMessageIsError(false)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create permission group.")
-      setMessageIsError(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function deleteGroup() {
-    if (!selectedGroup || selectedGroup.isBuiltIn) return
-    if (!window.confirm(`Delete the ${selectedGroup.role} permission group?`)) return
-
-    setSaving(true)
-    setMessage("")
-    try {
-      const response = await fetch("/api/spc/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "delete-role-default",
-          roleDefault: { role: selectedGroup.role },
-        }),
-      })
-      const data = (await response.json().catch(() => ({}))) as { message?: string }
-      if (!response.ok) throw new Error(data.message || "Failed to delete permission group.")
-      setSelectedRole("BUYER TRADER")
-      await loadUsers()
-      setMessage(`${selectedGroup.role} group deleted.`)
-      setMessageIsError(false)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete permission group.")
+      setMessage(error instanceof Error ? error.message : "Failed to remove office.")
       setMessageIsError(true)
     } finally {
       setSaving(false)
@@ -338,184 +305,215 @@ export default function SpcUserManagementPage() {
 
   return (
     <SpcShell title="SPC User Management">
-      <div className="spc-page-heading">
-        <div>
-          <h1>User Management</h1>
-          <p>{users.length} SPC users · {roleDefaults.length} groups</p>
-        </div>
-      </div>
-
       {message ? (
         <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>
           {message}
         </div>
       ) : null}
 
-      <div className="spc-user-grid">
-        <section className="spc-panel">
-          <div className="spc-group-list">
-            {roleDefaults.map((item) => (
+      <div className="spc-user-compact">
+        <section className="spc-panel spc-user-directory" aria-label="SPC users and offices">
+          <div className="spc-user-tabs" role="tablist" aria-label="SPC user categories">
+            {USER_TABS.map((tab) => (
               <button
-                key={item.role}
+                key={tab.id}
                 type="button"
-                onClick={() => selectRole(item.role)}
-                className={selectedRole === item.role ? "is-active" : ""}
+                className={activeTab === tab.id ? "is-active" : ""}
+                onClick={() => {
+                  setActiveTab(tab.id)
+                  setMessage("")
+                }}
               >
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.isBuiltIn ? "Built-in SPC group" : "Custom SPC group"}</small>
-                </span>
-                <em>{item.memberCount}</em>
+                <span>{tab.label}</span>
+                <em>{tab.id === "OFFICE" ? offices.length : roleCounts[tab.id] || 0}</em>
               </button>
             ))}
-            {canEdit ? (
-              <div className="spc-group-create">
-                <input
-                  value={newGroupName}
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                  placeholder="New group name"
-                />
-                <button type="button" onClick={() => void createGroup()} disabled={saving}>
-                  Add Group
-                </button>
-              </div>
-            ) : null}
           </div>
-        </section>
 
-        <section className="spc-panel">
-          <div className="spc-panel-header">
-            <div>
-              <h2>{selectedGroup?.label || "SPC Users"}</h2>
-            </div>
-            <button type="button" onClick={() => setDraft(createDraft(selectedRole))} disabled={!canEdit}>
-              New User
+          <div className="spc-user-directory-toolbar">
+            <button type="button" onClick={openAddDialog} disabled={!canEdit}>
+              Add
             </button>
           </div>
 
-          <div className="spc-user-list">
-            {selectedRoleUsers.map((user) => (
-              <article key={user.id} className={!user.isActive ? "is-disabled" : ""}>
-                <button type="button" onClick={() => editUser(user)}>
-                  <strong>{user.displayName}</strong>
-                  <span>{user.username}</span>
-                  <small>{user.isActive ? "Active" : "Inactive"} · {displayDate(user.updatedAt)}</small>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void deleteUser(user)}
-                  disabled={saving || !canEdit || (user.username === username && user.username !== "spcadmin")}
-                  aria-label={`Delete ${user.displayName}`}
-                  title={`Delete ${user.displayName}`}
-                >
-                  Delete
-                </button>
-              </article>
-            ))}
-            {!loading && selectedRoleUsers.length === 0 ? (
-              <p className="spc-empty">No users in this group.</p>
+          <div className="spc-compact-list">
+            {activeTab === "OFFICE"
+              ? offices.map((office) => (
+                  <article key={office} className="spc-compact-row">
+                    <span>
+                      <strong>{office}</strong>
+                      <small>{usersByOffice[office] || 0} users</small>
+                    </span>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => void deleteOffice(office)}
+                        disabled={!canEdit || saving || (usersByOffice[office] || 0) > 0}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                ))
+              : activeUsers.map((user) => (
+                  <article key={user.id} className={user.isActive ? "spc-compact-row" : "spc-compact-row is-disabled"}>
+                    <span>
+                      <strong>{user.displayName || user.username}</strong>
+                      <small>{user.username} · {user.office || firstOffice}</small>
+                    </span>
+                    <div>
+                      <button type="button" onClick={() => editUser(user)} disabled={!canEdit}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="is-danger"
+                        onClick={() => void deleteUser(user)}
+                        disabled={saving || !canEdit || user.username === username}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                ))}
+            {!loading && activeTab !== "OFFICE" && activeUsers.length === 0 ? (
+              <p className="spc-empty">No {roleLabel(activeTab).toLowerCase()} users.</p>
             ) : null}
           </div>
         </section>
 
-        <section className="spc-panel">
+        <section className="spc-panel spc-user-overview" aria-label="SPC user overview">
           <div className="spc-panel-header">
-            <h2>{draft.id ? "Edit User" : "New User"}</h2>
+            <h2>Overview</h2>
           </div>
-          <form onSubmit={saveUser} className="spc-user-form">
-            <label>
-              <span>Username</span>
-              <input
-                value={draft.username}
-                onChange={(event) => updateDraft("username", event.target.value)}
-                autoComplete="username"
-                required
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
-              <span>Display Name</span>
-              <input
-                value={draft.displayName}
-                onChange={(event) => updateDraft("displayName", event.target.value)}
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
-              <span>Group</span>
-              <select
-                value={draft.role}
-                onChange={(event) => updateDraft("role", event.target.value)}
-                disabled={!canEdit}
-              >
-                {roleDefaults.map((item) => (
-                  <option key={item.role} value={item.role}>{item.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>{draft.id ? "New Password" : "Password"}</span>
-              <input
-                type="password"
-                value={draft.password}
-                onChange={(event) => updateDraft("password", event.target.value)}
-                autoComplete="new-password"
-                required={!draft.id}
-                disabled={!canEdit}
-              />
-            </label>
-            <label className="spc-checkbox-field">
-              <input
-                type="checkbox"
-                checked={draft.isActive}
-                onChange={(event) => updateDraft("isActive", event.target.checked)}
-                disabled={!canEdit}
-              />
-              <span>Active account</span>
-            </label>
-            <div className="spc-form-actions">
-              <button type="submit" disabled={saving || !canEdit}>
-                {saving ? "Saving..." : "Save User"}
-              </button>
+          <div className="spc-user-overview-grid">
+            <div>
+              <strong>{users.length}</strong>
+              <span>Users</span>
             </div>
-          </form>
-        </section>
-
-        <section className="spc-panel spc-authority-panel">
-          <div className="spc-panel-header">
-            <h2>Authority</h2>
-            <div className="spc-authority-actions">
-              <button type="button" onClick={() => void saveRoleDefault()} disabled={!canEdit || saving || !selectedGroup}>
-                Save Authority
-              </button>
-              {selectedGroup && !selectedGroup.isBuiltIn ? (
-                <button type="button" onClick={() => void deleteGroup()} disabled={!canEdit || saving}>
-                  Delete Group
-                </button>
-              ) : null}
+            <div>
+              <strong>{offices.length}</strong>
+              <span>Offices</span>
             </div>
-          </div>
-          <div className="spc-authority-list">
-            {pages.map((page) => (
-              <label key={page.id}>
-                <span>
-                  <strong>{page.label}</strong>
-                  <small>{page.group.replace("-", " ")}</small>
-                </span>
-                <select
-                  value={selectedPermissions[page.id] || "none"}
-                  onChange={(event) => updateRolePermission(page.id, event.target.value as SpcPagePermission)}
-                  disabled={!canEdit}
-                >
-                  <option value="none">None</option>
-                  <option value="view">View</option>
-                  <option value="edit">Edit</option>
-                </select>
-              </label>
-            ))}
+            <div>
+              <strong>{users.filter((user) => user.mustChangePassword).length}</strong>
+              <span>Password Reset</span>
+            </div>
+            <div>
+              <strong>{users.filter((user) => !user.isActive).length}</strong>
+              <span>Inactive</span>
+            </div>
           </div>
         </section>
       </div>
+
+      {officeDialogOpen ? (
+        <div className="spc-dialog-backdrop" role="presentation">
+          <form className="spc-dialog spc-user-dialog" role="dialog" aria-modal="true" onSubmit={saveOffice}>
+            <div className="spc-dialog-header">
+              <h2>Add Office</h2>
+              <button type="button" onClick={() => setOfficeDialogOpen(false)}>×</button>
+            </div>
+            <label className="spc-dialog-field">
+              <span>Office</span>
+              <input
+                value={officeDraft}
+                onChange={(event) => setOfficeDraft(event.target.value)}
+                autoFocus
+                required
+              />
+            </label>
+            <div className="spc-dialog-actions">
+              <button type="button" onClick={() => setOfficeDialogOpen(false)}>Cancel</button>
+              <button type="submit" className="is-primary" disabled={saving}>
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {userDraft ? (
+        <div className="spc-dialog-backdrop" role="presentation">
+          <form className="spc-dialog spc-user-dialog" role="dialog" aria-modal="true" onSubmit={saveUser}>
+            <div className="spc-dialog-header">
+              <h2>{userDraft.id ? "Edit User" : "Add User"}</h2>
+              <button type="button" onClick={() => setUserDraft(null)}>×</button>
+            </div>
+            <div className="spc-user-dialog-fields">
+              <label>
+                <span>Username</span>
+                <input
+                  value={userDraft.username}
+                  onChange={(event) => updateDraft("username", event.target.value)}
+                  autoComplete="username"
+                  required
+                />
+              </label>
+              <label>
+                <span>Display Name</span>
+                <input
+                  value={userDraft.displayName}
+                  onChange={(event) => updateDraft("displayName", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Role</span>
+                <select
+                  value={userDraft.role}
+                  onChange={(event) =>
+                    updateDraft("role", event.target.value as Exclude<UserTab, "OFFICE">)
+                  }
+                >
+                  {USER_ROLE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Office</span>
+                <select value={userDraft.office} onChange={(event) => updateDraft("office", event.target.value)}>
+                  {offices.map((office) => (
+                    <option key={office} value={office}>{office}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{userDraft.id ? "New Password" : "Password"}</span>
+                <input
+                  type="password"
+                  value={userDraft.password}
+                  onChange={(event) => updateDraft("password", event.target.value)}
+                  autoComplete="new-password"
+                  required={!userDraft.id}
+                />
+              </label>
+              <label className="spc-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={userDraft.mustChangePassword}
+                  onChange={(event) => updateDraft("mustChangePassword", event.target.checked)}
+                />
+                <span>Change password on next login</span>
+              </label>
+              <label className="spc-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={userDraft.isActive}
+                  onChange={(event) => updateDraft("isActive", event.target.checked)}
+                />
+                <span>Active account</span>
+              </label>
+            </div>
+            <div className="spc-dialog-actions">
+              <button type="button" onClick={() => setUserDraft(null)}>Cancel</button>
+              <button type="submit" className="is-primary" disabled={saving}>
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </SpcShell>
   )
 }

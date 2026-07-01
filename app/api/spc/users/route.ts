@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server"
-import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { invalidateSpcUserLookupCache, requireSpcPagePermission } from "@/lib/spcAuth"
 import { createSpcAuditContext } from "@/lib/spcAudit"
 import {
   deleteManagedSpcRoleDefault,
+  deleteManagedSpcOffice,
   deleteManagedSpcUser,
+  listManagedSpcOffices,
   listManagedSpcRoleDefaults,
   listManagedSpcUsers,
+  saveManagedSpcOffice,
   saveManagedSpcUser,
   saveManagedSpcRoleDefault,
   spcUserCanManageUsers,
@@ -19,6 +22,8 @@ type UserActionPayload = {
     username?: string
     displayName?: string
     role?: string
+    office?: string
+    mustChangePassword?: boolean
     password?: string
     isActive?: boolean
   }
@@ -26,6 +31,7 @@ type UserActionPayload = {
     role?: string
     permissions?: Record<string, "none" | "view" | "edit">
   }
+  office?: string
   id?: string
 }
 
@@ -40,7 +46,8 @@ function errorResponse(error: unknown, fallback: string) {
             message.includes("cannot delete") ||
             message.includes("valid permission group") ||
             message.includes("Built-in") ||
-            message.includes("Move all users")
+            message.includes("Move all users") ||
+            message.includes("Move users")
           ? 400
           : 500
   return NextResponse.json({ message }, { status })
@@ -50,9 +57,13 @@ export async function GET() {
   try {
     await requireSpcPagePermission("spc-user-management", "view")
     const roleDefaultState = await listManagedSpcRoleDefaults(SPC_PAGE_DEFINITIONS)
-    const users = await listManagedSpcUsers(roleDefaultState, SPC_PAGE_DEFINITIONS)
+    const [users, offices] = await Promise.all([
+      listManagedSpcUsers(roleDefaultState, SPC_PAGE_DEFINITIONS),
+      listManagedSpcOffices(),
+    ])
     return NextResponse.json({
       users,
+      offices,
       pages: SPC_PAGE_DEFINITIONS,
       roleDefaults: roleDefaultState,
       groupStorage: "shared-store",
@@ -89,6 +100,7 @@ export async function POST(request: Request) {
       }
 
       await deleteManagedSpcUser(payload.id, auditContext)
+      invalidateSpcUserLookupCache(targetUser?.username)
       return NextResponse.json({ success: true })
     }
 
@@ -104,6 +116,8 @@ export async function POST(request: Request) {
           username: payload.user.username,
           displayName: payload.user.displayName,
           role: payload.user.role,
+          office: payload.user.office,
+          mustChangePassword: payload.user.mustChangePassword,
           password: payload.user.password,
           isActive: payload.user.isActive,
         },
@@ -111,8 +125,27 @@ export async function POST(request: Request) {
         SPC_PAGE_DEFINITIONS,
         roleDefaults,
       )
+      invalidateSpcUserLookupCache(user.username)
 
       return NextResponse.json({ success: true, user })
+    }
+
+    if (payload.action === "save-office") {
+      if (!payload.office) {
+        return NextResponse.json({ message: "Office is required." }, { status: 400 })
+      }
+
+      const offices = await saveManagedSpcOffice(payload.office, auditContext)
+      return NextResponse.json({ success: true, offices })
+    }
+
+    if (payload.action === "delete-office") {
+      if (!payload.office) {
+        return NextResponse.json({ message: "Office is required." }, { status: 400 })
+      }
+
+      const offices = await deleteManagedSpcOffice(payload.office, auditContext)
+      return NextResponse.json({ success: true, offices })
     }
 
     if (payload.action === "save-role-default") {
