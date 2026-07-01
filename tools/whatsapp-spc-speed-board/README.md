@@ -30,4 +30,4 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - This is intentionally separate from `tools/whatsapp-speed-board`, so the current personal version can stay unchanged.
 - If the enquiry panel says to log in, open `https://spc.fcuno.com`, log in, then return to WhatsApp Web.
 - The board data is stored locally in Chrome extension storage under `fcuno-wa-spc-board-v1`.
-- The extension uses Chrome's debugger permission only to dispatch the WhatsApp send-button click from the background worker when DOM clicks are ignored.
+- The extension uses Chrome's debugger permission only to dispatch the WhatsApp send action from the background worker when DOM events are ignored.

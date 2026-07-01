@@ -49,6 +49,41 @@ async function nativeClick(tabId, x, y) {
   }
 }
 
+async function withDebugger(tabId, action) {
+  const target = { tabId }
+  let attached = false
+  try {
+    await chromeCall((callback) => chrome.debugger.attach(target, "1.3", callback))
+    attached = true
+    await action(target)
+  } finally {
+    if (attached) {
+      await chromeCall((callback) => chrome.debugger.detach(target, callback)).catch(() => {})
+    }
+  }
+}
+
+async function nativeEnter(tabId) {
+  await withDebugger(tabId, async (target) => {
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+      unmodifiedText: "\r",
+      text: "\r",
+    }, callback))
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    }, callback))
+  })
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -80,6 +115,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           message: error instanceof Error ? error.message : "Native click failed.",
+        })
+      })
+
+    return true
+  }
+
+  if (message.type === "spc-native-enter") {
+    const tabId = _sender.tab && _sender.tab.id
+    if (!tabId) {
+      sendResponse({ ok: false, message: "Missing tab." })
+      return false
+    }
+
+    nativeEnter(tabId)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Native enter failed.",
         })
       })
 

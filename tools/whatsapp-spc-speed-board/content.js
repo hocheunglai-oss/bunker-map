@@ -938,6 +938,31 @@
     return domClickSendButton(button)
   }
 
+  function requestNativeEnter(text = "", fallbackButton = null) {
+    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+      return false
+    }
+    const composer = findComposer()
+    composer?.focus()
+    try {
+      chrome.runtime.sendMessage({ type: "spc-native-enter" }, (response) => {
+        const failed = chrome.runtime.lastError || !response || response.ok !== true
+        window.setTimeout(() => {
+          const nextComposer = findComposer()
+          const stillStuck = Boolean(nextComposer && composerText(nextComposer))
+          if ((failed || stillStuck) && fallbackButton) {
+            clickSendButton(fallbackButton)
+          } else if (failed && !fallbackButton) {
+            pressComposerEnter()
+          }
+        }, failed ? 0 : 260)
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function pressComposerEnter() {
     const composer = findComposer()
     if (!composer) return false
@@ -952,6 +977,7 @@
       return false
     }
     const button = findSendButton()
+    if (requestNativeEnter(text, button)) return true
     if (button) {
       return clickSendButton(button)
     }

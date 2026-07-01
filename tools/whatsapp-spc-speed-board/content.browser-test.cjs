@@ -54,6 +54,9 @@ const html = `<!doctype html>
     <script>
       window.sentMessages = [];
       window.decoyClicks = 0;
+      window.nativeEnterCount = 0;
+      window.nativeClickCount = 0;
+      window.nativeEnterShouldSend = false;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
       window.setChatTitle = (name) => {
         const title = document.getElementById("chatTitle");
@@ -83,10 +86,17 @@ const html = `<!doctype html>
               return;
             }
             if (message && message.type === "spc-native-click") {
+              window.nativeClickCount += 1;
               const target = document.elementFromPoint(Number(message.x), Number(message.y));
               const clickable = target && target.closest("button,[role='button']");
               if (clickable) clickable.click();
               callback({ ok: Boolean(clickable) });
+              return;
+            }
+            if (message && message.type === "spc-native-enter") {
+              window.nativeEnterCount += 1;
+              if (window.nativeEnterShouldSend) document.getElementById("sendButton").click();
+              callback({ ok: true });
               return;
             }
             if (callback) callback({ ok: true });
@@ -129,19 +139,24 @@ async function main() {
       await page.waitForSelector("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
       await page.click("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
-      await page.waitForTimeout(300)
+      await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 3000 })
+      await page.waitForTimeout(100)
 
       const firstResult = await page.evaluate(() => ({
         sentText: document.getElementById("sent").innerText,
         composerText: document.getElementById("composer").innerText,
         sentCount: window.sentMessages.length,
         decoyClicks: window.decoyClicks,
+        nativeEnterCount: window.nativeEnterCount,
+        nativeClickCount: window.nativeClickCount,
       }))
 
       assert.equal(firstResult.sentText, expected)
       assert.equal(firstResult.composerText, "")
       assert.equal(firstResult.sentCount, 1)
       assert.equal(firstResult.decoyClicks, 0)
+      assert.equal(firstResult.nativeEnterCount, 1)
+      assert.equal(firstResult.nativeClickCount, 1)
 
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
       await page.waitForTimeout(300)
