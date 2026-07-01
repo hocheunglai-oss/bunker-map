@@ -3,7 +3,7 @@
   "name": "FCUNO SPC WhatsApp Board",
   "version": "0.1.0",
   "description": "SPC Supplier/Buyer board plus sent enquiry sender for WhatsApp Web.",
-  "permissions": ["storage", "notifications"],
+  "permissions": ["storage", "notifications", "debugger"],
   "background": {
     "service_worker": "background.js"
   },

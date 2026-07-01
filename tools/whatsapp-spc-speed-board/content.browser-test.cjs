@@ -82,6 +82,13 @@ const html = `<!doctype html>
               });
               return;
             }
+            if (message && message.type === "spc-native-click") {
+              const target = document.elementFromPoint(Number(message.x), Number(message.y));
+              const clickable = target && target.closest("button,[role='button']");
+              if (clickable) clickable.click();
+              callback({ ok: Boolean(clickable) });
+              return;
+            }
             if (callback) callback({ ok: true });
           }
         },

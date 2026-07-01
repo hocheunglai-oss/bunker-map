@@ -1,5 +1,54 @@
 const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
 
+function chromeCall(invoke) {
+  return new Promise((resolve, reject) => {
+    invoke((result) => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        reject(new Error(error.message || String(error)))
+        return
+      }
+      resolve(result)
+    })
+  })
+}
+
+async function nativeClick(tabId, x, y) {
+  const target = { tabId }
+  let attached = false
+  try {
+    await chromeCall((callback) => chrome.debugger.attach(target, "1.3", callback))
+    attached = true
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x,
+      y,
+      button: "none",
+      buttons: 0,
+    }, callback))
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    }, callback))
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    }, callback))
+  } finally {
+    if (attached) {
+      await chromeCall((callback) => chrome.debugger.detach(target, callback)).catch(() => {})
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -14,6 +63,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
     }
     return false
+  }
+
+  if (message.type === "spc-native-click") {
+    const tabId = _sender.tab && _sender.tab.id
+    const x = Number(message.x)
+    const y = Number(message.y)
+    if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
+      sendResponse({ ok: false, message: "Missing tab or click coordinates." })
+      return false
+    }
+
+    nativeClick(tabId, x, y)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Native click failed.",
+        })
+      })
+
+    return true
   }
 
   if (message.type !== "load-spc-enquiries") return false

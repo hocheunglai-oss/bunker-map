@@ -291,14 +291,31 @@
   }
 
   function isVisible(element) {
-    if (!element || element.closest(`#${BOARD_ID}`)) return false
-    const rect = element.getBoundingClientRect()
-    return rect.width > 0 && rect.height > 0
+    try {
+      if (!element || element.closest(`#${BOARD_ID}`)) return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    } catch {
+      return false
+    }
   }
 
   function textCandidates(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return []
     const seen = new Set()
-    return Array.from(root.querySelectorAll("span[title], div[title], [dir='auto'], [aria-label]"))
+    let elements = []
+    try {
+      elements = Array.from(root.querySelectorAll("span[title], div[title], [dir='auto'], [aria-label]"))
+    } catch {
+      elements = ["span[title]", "div[title]", "[dir='auto']", "[aria-label]"].flatMap((selector) => {
+        try {
+          return Array.from(root.querySelectorAll(selector))
+        } catch {
+          return []
+        }
+      })
+    }
+    return elements
       .filter(isVisible)
       .map((element) =>
         cleanText(
@@ -333,15 +350,19 @@
   }
 
   function getCurrentChat() {
-    const main = document.querySelector("#main") || document.querySelector("[role='main']")
-    const header = main && main.querySelector("header")
-    if (!main || !header) return null
+    try {
+      const main = document.querySelector("#main") || document.querySelector("[role='main']")
+      const header = main && main.querySelector("header")
+      if (!main || !header) return null
 
-    const candidates = textCandidates(header)
-    const name = candidates.find((text) => phoneDigits(text).length < 7) || candidates[0] || ""
-    const phone = phoneDigits(name).length >= 7 ? phoneDigits(name) : ""
-    if (!name && !phone) return null
-    return { name: cleanText(name || phone), company: "", phone, directUrl: getDirectUrl(phone) }
+      const candidates = textCandidates(header)
+      const name = candidates.find((text) => phoneDigits(text).length < 7) || candidates[0] || ""
+      const phone = phoneDigits(name).length >= 7 ? phoneDigits(name) : ""
+      if (!name && !phone) return null
+      return { name: cleanText(name || phone), company: "", phone, directUrl: getDirectUrl(phone) }
+    } catch {
+      return null
+    }
   }
 
   function addContact(list) {
@@ -876,12 +897,12 @@
     return byLabel[byLabel.length - 1] || null
   }
 
-  function clickSendButton(button) {
+  function domClickSendButton(button, rect = null) {
     if (!button) return false
     button.focus?.()
-    const rect = button.getBoundingClientRect()
-    const clientX = rect.left + rect.width / 2
-    const clientY = rect.top + rect.height / 2
+    const buttonRect = rect || button.getBoundingClientRect()
+    const clientX = buttonRect.left + buttonRect.width / 2
+    const clientY = buttonRect.top + buttonRect.height / 2
     try {
       button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 1, isPrimary: true, button: 0, buttons: 1, clientX, clientY }))
       button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX, clientY }))
@@ -891,6 +912,30 @@
     }
     button.click()
     return true
+  }
+
+  function requestNativeClick(button) {
+    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+      return false
+    }
+    const rect = button.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    try {
+      chrome.runtime.sendMessage({ type: "spc-native-click", x, y }, (response) => {
+        const failed = chrome.runtime.lastError || !response || response.ok !== true
+        if (failed) domClickSendButton(button, rect)
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function clickSendButton(button) {
+    if (!button) return false
+    if (requestNativeClick(button)) return true
+    return domClickSendButton(button)
   }
 
   function pressComposerEnter() {
