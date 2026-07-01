@@ -194,6 +194,11 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   background: #f5f6f6;
 }
 
+.fcuno-wa-spc-row.is-send-target {
+  background: #e4f8ef;
+  box-shadow: inset 3px 0 0 #008069;
+}
+
 .fcuno-wa-spc-row.is-drop-before::before,
 .fcuno-wa-spc-row.is-drop-after::after {
   content: "";

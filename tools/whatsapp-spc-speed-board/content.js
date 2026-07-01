@@ -27,6 +27,7 @@
     loadingEnquiries: false,
     enquiryError: "",
     dragging: null,
+    draggingType: "",
   }
 
   let unreadTimer = 0
@@ -683,26 +684,57 @@
     const composer = findComposer()
     if (!composer) return false
     composer.focus()
-    document.execCommand("selectAll", false)
-    document.execCommand("insertText", false, text)
+    const selection = window.getSelection()
+    if (selection) {
+      const range = document.createRange()
+      range.selectNodeContents(composer)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } else {
+      document.execCommand("selectAll", false)
+    }
+    const inserted = document.execCommand("insertText", false, text)
+    if (!inserted) composer.textContent = text
     composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    const wanted = cleanText(text)
+    const actual = cleanText(composer.textContent)
+    if (wanted && (actual === `${wanted}${wanted}` || actual === `${wanted} ${wanted}`)) {
+      composer.textContent = ""
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+      composer.focus()
+      document.execCommand("insertText", false, text)
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    }
     return true
   }
 
-  function clickSendButton() {
+  function findSendButton() {
     const main = document.querySelector("#main") || document.querySelector("[role='main']")
-    const button =
+    return (
       main?.querySelector("button[aria-label='Send']") ||
       main?.querySelector("span[data-icon='send']")?.closest("button")
-    if (button) {
-      button.click()
-      return true
-    }
+    )
+  }
+
+  function pressComposerEnter() {
     const composer = findComposer()
     if (!composer) return false
     composer.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }))
     composer.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }))
     return true
+  }
+
+  function sendComposerWhenReady(attempt = 0) {
+    const button = findSendButton()
+    if (button) {
+      button.click()
+      return true
+    }
+    if (attempt < 10) {
+      window.setTimeout(() => sendComposerWhenReady(attempt + 1), 80)
+      return false
+    }
+    return pressComposerEnter()
   }
 
   function currentChatMatchesContact(contact) {
@@ -712,7 +744,12 @@
     if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
     const chatName = cleanText(chat.name).toLowerCase()
     const contactName = cleanText(contact.name).toLowerCase()
-    return Boolean(chatName && contactName && chatName === contactName)
+    return Boolean(
+      chatName &&
+        contactName &&
+        (chatName === contactName ||
+          (contactName.length >= 4 && (chatName.includes(contactName) || contactName.includes(chatName)))),
+    )
   }
 
   function clearPendingSend() {
@@ -730,7 +767,7 @@
     const contact = state.contacts.find((item) => item.id === pending.contactId)
     if (contact && currentChatMatchesContact(contact) && insertComposerText(pending.text)) {
       clearPendingSend()
-      window.setTimeout(() => clickSendButton(), 120)
+      window.setTimeout(() => sendComposerWhenReady(), 120)
       return
     }
 
@@ -749,7 +786,7 @@
     if (!contact || !message) return
 
     if (currentChatMatchesContact(contact) && insertComposerText(message)) {
-      window.setTimeout(() => clickSendButton(), 120)
+      window.setTimeout(() => sendComposerWhenReady(), 120)
       return
     }
 
@@ -768,7 +805,7 @@
     const text = selectedEnquiryText()
     if (!text) return
     if (!insertComposerText(text)) return
-    window.setTimeout(() => clickSendButton(), 120)
+    window.setTimeout(() => sendComposerWhenReady(), 120)
   }
 
   function renderContactList(list) {
@@ -892,10 +929,26 @@
   }
 
   function clearDropMarkers(root = document) {
-    root.querySelectorAll(".fcuno-wa-spc-row.is-drop-before, .fcuno-wa-spc-row.is-drop-after").forEach((row) => {
-      row.classList.remove("is-drop-before", "is-drop-after")
+    root.querySelectorAll(".fcuno-wa-spc-row.is-drop-before, .fcuno-wa-spc-row.is-drop-after, .fcuno-wa-spc-row.is-send-target").forEach((row) => {
+      row.classList.remove("is-drop-before", "is-drop-after", "is-send-target")
       delete row.dataset.dropPosition
     })
+  }
+
+  function clearDragState(root = document) {
+    state.dragging = null
+    state.draggingType = ""
+    clearDropMarkers(root)
+  }
+
+  function dragHasType(event, type) {
+    return Array.from(event.dataTransfer?.types || []).includes(type)
+  }
+
+  function prepareDragData(event, effectAllowed) {
+    if (!event.dataTransfer) return
+    event.dataTransfer.clearData()
+    event.dataTransfer.effectAllowed = effectAllowed
   }
 
   function setRowDragImage(event, row) {
@@ -945,10 +998,12 @@
         const row = button.closest(".fcuno-wa-spc-row")
         if (!row) return
         state.dragging = button.dataset.id || ""
-        event.dataTransfer.effectAllowed = "move"
+        state.draggingType = "contact"
+        prepareDragData(event, "move")
         event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
         setRowDragImage(event, row)
       })
+      button.addEventListener("dragend", () => clearDragState(host))
     })
 
     host.querySelectorAll("[data-action='rename-contact']").forEach((button) => {
@@ -974,12 +1029,14 @@
       })
       row.addEventListener("dragstart", (event) => {
         state.dragging = row.dataset.id || ""
-        event.dataTransfer.effectAllowed = "move"
+        state.draggingType = "contact"
+        prepareDragData(event, "move")
         event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
         setRowDragImage(event, row)
       })
       row.addEventListener("drop", (event) => {
         event.preventDefault()
+        event.stopPropagation()
         const position = row.dataset.dropPosition || "before"
         clearDropMarkers(host)
         const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
@@ -994,17 +1051,27 @@
       })
       row.addEventListener("dragover", (event) => {
         event.preventDefault()
+        event.stopPropagation()
+        if (dragHasType(event, "application/x-fcuno-spc-enquiry-id") || state.draggingType === "enquiry") {
+          event.dataTransfer.dropEffect = "copy"
+          clearDropMarkers(host)
+          row.classList.add("is-send-target")
+          return
+        }
+        event.dataTransfer.dropEffect = "move"
         setDropMarker(event, row, host)
       })
       row.addEventListener("dragleave", (event) => {
         if (!row.contains(event.relatedTarget)) clearDropMarkers(host)
       })
+      row.addEventListener("dragend", () => clearDragState(host))
     })
 
     host.querySelectorAll(".fcuno-wa-spc-contact-list").forEach((list) => {
       list.addEventListener("dragover", (event) => event.preventDefault())
       list.addEventListener("drop", (event) => {
         event.preventDefault()
+        event.stopPropagation()
         clearDropMarkers(host)
         const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
         if (enquiryId) return
@@ -1075,11 +1142,14 @@
           event.preventDefault()
           return
         }
-        event.dataTransfer.effectAllowed = "copy"
+        state.dragging = id
+        state.draggingType = "enquiry"
+        prepareDragData(event, "copy")
         event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
         event.dataTransfer.setData("application/x-fcuno-spc-enquiry-text", text)
         setRowDragImage(event, row)
       })
+      row.addEventListener("dragend", () => clearDragState(host))
     })
   }
 
