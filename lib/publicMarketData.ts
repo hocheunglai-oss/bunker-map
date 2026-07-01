@@ -21,9 +21,7 @@ const HOMEPAGE_PORT_COLUMNS = [
   "hsfo_formula",
   "vlsfo_formula",
   "mgo_formula",
-  "recorded_at",
   "updated_at",
-  "date",
 ].join(",")
 
 export type PublicPort = {
