@@ -39,6 +39,7 @@ export async function GET(request: Request) {
       tableNames,
       operations: operations ? [...operations] : undefined,
       actorId: actor && actor !== "all" ? actor : undefined,
+      scope: "spc",
     })
     const presented = await presentAuditLogs(records, SPC_PAGE_DEFINITIONS)
     const logs = presented

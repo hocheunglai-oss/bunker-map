@@ -2276,10 +2276,27 @@ body {
 .spc-login-form::before {
   content: "";
   position: absolute;
-  inset: -2.2cqw -2cqw -3cqw;
+  inset: -2.2cqw -2cqw -5.4cqw;
   z-index: -1;
   background: #ffffff;
   pointer-events: none;
+}
+
+.spc-login-form::after {
+  content: "";
+  position: absolute;
+  right: -3cqw;
+  bottom: -7cqw;
+  left: -3cqw;
+  z-index: 2;
+  height: 7cqw;
+  background: #ffffff;
+  pointer-events: none;
+}
+
+.spc-login-form > * {
+  position: relative;
+  z-index: 1;
 }
 
 .spc-login-field {
@@ -2450,22 +2467,43 @@ body {
   object-fit: contain;
 }
 
-.spc-welcome-panel {
+.spc-welcome-page {
   min-height: calc(100vh - 42px);
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--fc-admin-border);
-  border-radius: 8px;
-  background: #ffffff;
+  padding: 44px 26px;
 }
 
-.spc-welcome-panel h1 {
-  margin: 0;
-  color: var(--spc-navy-dark);
-  font-size: clamp(30px, 4.2vw, 58px);
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-align: center;
+.spc-welcome-content {
+  width: min(1120px, 100%);
+}
+
+.spc-dashboard-swatches {
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  margin-top: 30px;
+}
+
+.spc-holiday-list {
+  max-height: 430px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 980px) {
+  .spc-dashboard-swatches {
+    max-width: 680px;
+    grid-template-columns: 1fr;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .spc-welcome-page {
+    padding: 30px 22px 50px;
+  }
+}
+
+@media (max-width: 640px) {
+  .spc-holiday-list {
+    max-height: none;
+  }
 }
 
 .spc-topbar-brand span {

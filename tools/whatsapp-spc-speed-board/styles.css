@@ -78,7 +78,8 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 .fcuno-wa-spc-icon,
 .fcuno-wa-spc-quick button,
 .fcuno-wa-spc-list-button,
-.fcuno-wa-spc-remove,
+.fcuno-wa-spc-contact-action,
+.fcuno-wa-spc-contact-menu button,
 .fcuno-wa-spc-enquiry-actions button {
   border: 0;
   background: transparent;
@@ -178,6 +179,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -190,6 +192,12 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 
 .fcuno-wa-spc-row:hover {
   background: #f5f6f6;
+}
+
+.fcuno-wa-spc-row.is-drop-target {
+  outline: 2px solid #008069;
+  outline-offset: -2px;
+  background: #e4f8ef;
 }
 
 .fcuno-wa-spc-list-button {
@@ -222,25 +230,62 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-row-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.fcuno-wa-spc-remove {
+.fcuno-wa-spc-contact-action {
   width: 26px;
   height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: 7px;
   color: #667781;
-  font-size: 14px;
+  cursor: grab;
+  font-size: 13px;
   font-weight: 800;
 }
 
-.fcuno-wa-spc-remove:hover {
-  background: #ffe7e7;
+.fcuno-wa-spc-contact-action:hover {
+  background: #e9edef;
+  color: #111b21;
+}
+
+.fcuno-wa-spc-contact-action:active {
+  cursor: grabbing;
+}
+
+.fcuno-wa-spc-contact-menu {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  z-index: 3;
+  min-width: 118px;
+  overflow: hidden;
+  border: 1px solid #d1d7db;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(17, 27, 33, 0.18);
+}
+
+.fcuno-wa-spc-contact-menu button {
+  width: 100%;
+  display: block;
+  padding: 8px 10px;
+  color: #111b21;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.fcuno-wa-spc-contact-menu button:hover {
+  background: #f0f2f5;
+}
+
+.fcuno-wa-spc-contact-menu button:last-child {
   color: #b42318;
 }
 
@@ -278,8 +323,50 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-enquiry-panel {
-  grid-template-rows: 42px 44px minmax(0, 1fr);
+  grid-template-rows: auto 42px 44px minmax(0, 1fr);
   background: #ffffff;
+}
+
+.fcuno-wa-spc-template {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid #d1d7db;
+  background: #fbfcfd;
+  padding: 8px;
+}
+
+.fcuno-wa-spc-template-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #06284a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.fcuno-wa-spc-template-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #008069;
+}
+
+.fcuno-wa-spc-template textarea {
+  width: 100%;
+  height: 66px;
+  resize: vertical;
+  border: 1px solid #d1d7db;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #111b21;
+  font: 700 12px/1.35 Arial, Helvetica, sans-serif;
+  outline: none;
+  padding: 7px 8px;
+}
+
+.fcuno-wa-spc-template textarea:disabled {
+  background: #f0f2f5;
+  color: #667781;
 }
 
 .fcuno-wa-spc-enquiry-head {
@@ -336,6 +423,14 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   cursor: pointer;
   margin-bottom: 8px;
   padding: 8px;
+}
+
+.fcuno-wa-spc-enquiry[draggable="true"] {
+  cursor: grab;
+}
+
+.fcuno-wa-spc-enquiry[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .fcuno-wa-spc-enquiry.is-new {

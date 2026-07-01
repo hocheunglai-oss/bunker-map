@@ -22,6 +22,8 @@ export type AuditLogRecord = {
   undoneByLogId: string | null
 }
 
+export type AuditLogScope = "www" | "spc" | "all"
+
 export type PresentedAuditLogRecord = AuditLogRecord & {
   displayOperation: AuditOperation
   pageId: string
@@ -192,6 +194,28 @@ const NON_CREATION_INSERT_TABLES = new Set([
   "office_calendar_store",
   "admin_role_defaults",
 ])
+
+const SPC_TABLE_NAMES = new Set([
+  "spc_users",
+  "spc_enquiries",
+  "spc_role_defaults",
+])
+
+function isSpcAuditRecord(record: AuditLogRecord) {
+  const actorId = record.actorId?.trim().toLowerCase() || ""
+  const pageId = getContextText(record.requestContext, "pageId", "page_id")?.toLowerCase() || ""
+
+  if (actorId.startsWith("spc:")) return true
+  if (pageId.startsWith("spc-")) return true
+  if (SPC_TABLE_NAMES.has(record.tableName)) return true
+
+  if (record.tableName === "office_calendar_store") {
+    const row = record.afterRow || record.beforeRow || {}
+    return String(row.key || "") === "spc-permission-groups"
+  }
+
+  return false
+}
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -675,9 +699,11 @@ export async function listAuditLogs(options: {
   tableNames?: string[]
   operations?: AuditOperation[]
   actorId?: string | null
+  scope?: AuditLogScope
 }) {
   const supabase = getSupabaseAuditClient()
   const limit = Math.min(Math.max(options.limit || 100, 1), 500)
+  const scope = options.scope || "www"
   let query = supabase
     .from("audit_logs")
     .select(AUDIT_SELECT)
@@ -685,6 +711,14 @@ export async function listAuditLogs(options: {
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
     .limit(limit)
+
+  if (scope === "www") {
+    query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
+  } else if (scope === "spc") {
+    query = query.or(
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_role_defaults)",
+    )
+  }
 
   if (options.tableNames?.length) {
     query = query.in("table_name", options.tableNames)
@@ -703,6 +737,11 @@ export async function listAuditLogs(options: {
   return ((data || []) as unknown as AuditLogRow[])
     .map(mapAuditLog)
     .filter(isUserAuditRecord)
+    .filter((record) => {
+      if (scope === "all") return true
+      const isSpcRecord = isSpcAuditRecord(record)
+      return scope === "spc" ? isSpcRecord : !isSpcRecord
+    })
 }
 
 export async function undoAuditLog(

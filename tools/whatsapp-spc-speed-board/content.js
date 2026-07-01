@@ -3,6 +3,8 @@
   const BOARD_ID = "fcuno-wa-spc-board"
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
+  const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
+  const PENDING_SEND_TIMEOUT_MS = 30000
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
@@ -15,8 +17,12 @@
     enquiries: [],
     selectedEnquiries: {},
     hiddenEnquiryIds: {},
+    templateEnabled: true,
+    templateText: DEFAULT_TEMPLATE_TEXT,
     lastSeenEnquiryAt: "",
     lastNotifiedEnquiryAt: "",
+    pendingSend: null,
+    contactMenuId: "",
     loadingEnquiries: false,
     enquiryError: "",
     dragging: null,
@@ -32,6 +38,13 @@
 
   function cleanText(value) {
     return String(value || "").replace(/\s+/g, " ").trim()
+  }
+
+  function cleanTemplateText(value) {
+    return String(value || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .trim()
   }
 
   function phoneDigits(value) {
@@ -83,8 +96,25 @@
       collapsed: state.collapsed,
       contacts: state.contacts,
       hiddenEnquiryIds: state.hiddenEnquiryIds,
+      templateEnabled: state.templateEnabled,
+      templateText: state.templateText,
       lastSeenEnquiryAt: state.lastSeenEnquiryAt,
       lastNotifiedEnquiryAt: state.lastNotifiedEnquiryAt,
+      pendingSend: state.pendingSend,
+    }
+  }
+
+  function sanitizePendingSend(value) {
+    if (!value || typeof value !== "object") return null
+    const startedAt = Number(value.startedAt || 0)
+    if (!startedAt || Date.now() - startedAt > PENDING_SEND_TIMEOUT_MS) return null
+    const text = cleanTemplateText(value.text)
+    if (!text) return null
+    return {
+      contactId: cleanText(value.contactId),
+      text,
+      startedAt,
+      attempts: Number.isFinite(Number(value.attempts)) ? Number(value.attempts) : 0,
     }
   }
 
@@ -94,6 +124,9 @@
       collapsed: Boolean(source.collapsed),
       lastSeenEnquiryAt: cleanText(source.lastSeenEnquiryAt),
       lastNotifiedEnquiryAt: cleanText(source.lastNotifiedEnquiryAt),
+      templateEnabled: typeof source.templateEnabled === "boolean" ? source.templateEnabled : true,
+      templateText: cleanTemplateText(source.templateText) || DEFAULT_TEMPLATE_TEXT,
+      pendingSend: sanitizePendingSend(source.pendingSend),
       hiddenEnquiryIds:
         source.hiddenEnquiryIds && typeof source.hiddenEnquiryIds === "object"
           ? Object.fromEntries(
@@ -132,8 +165,11 @@
     state.collapsed = saved.collapsed
     state.contacts = saved.contacts
     state.hiddenEnquiryIds = saved.hiddenEnquiryIds
+    state.templateEnabled = saved.templateEnabled
+    state.templateText = saved.templateText
     state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt
     state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt
+    state.pendingSend = saved.pendingSend
     normalizeOrders()
   }
 
@@ -265,8 +301,33 @@
   function removeContact(id) {
     state.contacts = state.contacts.filter((contact) => contact.id !== id)
     delete state.unreadById[id]
+    if (state.contactMenuId === id) state.contactMenuId = ""
     saveState()
     render()
+  }
+
+  function renameContact(id) {
+    const contact = state.contacts.find((item) => item.id === id)
+    if (!contact) return
+    const nextName = window.prompt("Rename saved chat", contact.name)
+    const cleaned = cleanText(nextName)
+    if (!cleaned || cleaned === contact.name) {
+      state.contactMenuId = ""
+      render()
+      return
+    }
+    contact.name = cleaned
+    contact.updatedAt = new Date().toISOString()
+    state.contactMenuId = ""
+    saveState()
+    render()
+  }
+
+  function confirmRemoveContact(id) {
+    const contact = state.contacts.find((item) => item.id === id)
+    if (!contact) return
+    if (!window.confirm(`Remove ${contact.name} from the SPC board?`)) return
+    removeContact(id)
   }
 
   function moveContact(id, targetList, targetId) {
@@ -471,12 +532,30 @@
     }
   }
 
+  function withTemplate(text) {
+    const body = cleanTemplateText(text)
+    if (!body) return ""
+    const template = state.templateEnabled ? cleanTemplateText(state.templateText) : ""
+    return template ? `${template}\n\n${body}` : body
+  }
+
+  function enquiryBodyText(enquiry) {
+    return cleanText(enquiry?.formattedText || enquiry?.notes || enquiry?.title || "")
+  }
+
+  function enquiryTextForDrag(id) {
+    const enquiry = visibleEnquiries().find((item) => item.id === id)
+    if (!enquiry || !isSendableEnquiry(enquiry)) return ""
+    return withTemplate(enquiryBodyText(enquiry))
+  }
+
   function selectedEnquiryText() {
-    return visibleEnquiries()
+    const text = visibleEnquiries()
       .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
-      .map((enquiry) => cleanText(enquiry.formattedText || enquiry.notes || enquiry.title))
+      .map(enquiryBodyText)
       .filter(Boolean)
       .join("\n\n")
+    return withTemplate(text)
   }
 
   function findComposer() {
@@ -514,6 +593,65 @@
     return true
   }
 
+  function currentChatMatchesContact(contact) {
+    const chat = getCurrentChat()
+    if (!chat || !contact) return false
+    const contactPhone = phoneDigits(contact.phone)
+    if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
+    const chatName = cleanText(chat.name).toLowerCase()
+    const contactName = cleanText(contact.name).toLowerCase()
+    return Boolean(chatName && contactName && chatName === contactName)
+  }
+
+  function clearPendingSend() {
+    state.pendingSend = null
+    saveState()
+  }
+
+  function trySendPending() {
+    const pending = sanitizePendingSend(state.pendingSend)
+    if (!pending) {
+      if (state.pendingSend) clearPendingSend()
+      return
+    }
+
+    const contact = state.contacts.find((item) => item.id === pending.contactId)
+    if (contact && currentChatMatchesContact(contact) && insertComposerText(pending.text)) {
+      clearPendingSend()
+      window.setTimeout(() => clickSendButton(), 120)
+      return
+    }
+
+    pending.attempts += 1
+    state.pendingSend = pending
+    if (Date.now() - pending.startedAt > PENDING_SEND_TIMEOUT_MS || pending.attempts > 60) {
+      clearPendingSend()
+      return
+    }
+    saveState()
+    window.setTimeout(trySendPending, 500)
+  }
+
+  function sendTextToContact(contact, text) {
+    const message = cleanTemplateText(text)
+    if (!contact || !message) return
+
+    if (currentChatMatchesContact(contact) && insertComposerText(message)) {
+      window.setTimeout(() => clickSendButton(), 120)
+      return
+    }
+
+    state.pendingSend = {
+      contactId: contact.id,
+      text: message,
+      startedAt: Date.now(),
+      attempts: 0,
+    }
+    saveState()
+    void openContact(contact)
+    window.setTimeout(trySendPending, 650)
+  }
+
   function sendSelectedToChat() {
     const text = selectedEnquiryText()
     if (!text) return
@@ -524,6 +662,7 @@
   function renderContactList(list) {
     const rows = contactsFor(list).map((contact) => {
       const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
+      const menuOpen = state.contactMenuId === contact.id
       return `
         <div class="fcuno-wa-spc-row" draggable="true" data-id="${escapeHtml(contact.id)}" data-list="${list}">
           <button class="fcuno-wa-spc-list-button" type="button" data-action="open-contact" data-id="${escapeHtml(contact.id)}">
@@ -532,7 +671,13 @@
           </button>
           <div class="fcuno-wa-spc-row-actions">
             ${state.unreadById[contact.id] ? `<span class="fcuno-wa-spc-unread">${escapeHtml(state.unreadById[contact.id])}</span>` : ""}
-            <button class="fcuno-wa-spc-remove" type="button" data-action="remove-contact" data-id="${escapeHtml(contact.id)}" title="Remove">×</button>
+            <button class="fcuno-wa-spc-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or edit">☰</button>
+            ${menuOpen ? `
+              <div class="fcuno-wa-spc-contact-menu" role="menu">
+                <button type="button" data-action="rename-contact" data-id="${escapeHtml(contact.id)}">Rename</button>
+                <button type="button" data-action="remove-contact" data-id="${escapeHtml(contact.id)}">Remove</button>
+              </div>
+            ` : ""}
           </div>
         </div>
       `
@@ -543,6 +688,18 @@
         <div class="fcuno-wa-spc-contact-list" data-list="${list}">
           ${rows || `<div class="fcuno-wa-spc-empty">No ${LIST_LABELS[list].toLowerCase()} saved.</div>`}
         </div>
+      </section>
+    `
+  }
+
+  function renderTemplate() {
+    return `
+      <section class="fcuno-wa-spc-template" aria-label="SPC message template">
+        <label class="fcuno-wa-spc-template-toggle">
+          <input type="checkbox" data-action="toggle-template" ${state.templateEnabled ? "checked" : ""} />
+          <span>Use Template</span>
+        </label>
+        <textarea data-action="template-text" aria-label="Template text" ${state.templateEnabled ? "" : "disabled"}>${escapeHtml(state.templateText)}</textarea>
       </section>
     `
   }
@@ -558,7 +715,7 @@
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const heading = enquiry.vesselName || enquiry.vessel_name || enquiry.title || "ENQUIRY"
       return `
-        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""} is-${escapeHtml(status)}" data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
           ${sendable ? `<input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />` : `<span class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</span>`}
           <span>
             <strong>${escapeHtml(heading)}</strong>
@@ -572,6 +729,7 @@
 
     return `
       <section class="fcuno-wa-spc-enquiry-panel">
+        ${renderTemplate()}
         <div class="fcuno-wa-spc-enquiry-head">
           <strong>ENQUIRIES</strong>
           ${count ? `<span class="fcuno-wa-spc-new">${count} new</span>` : ""}
@@ -580,8 +738,8 @@
           <button type="button" data-action="clear-enquiries">Clear All</button>
           <button type="button" class="is-primary" data-action="send-selected">Send Selected</button>
         </div>
-        ${state.enquiryError ? `<div class="fcuno-wa-spc-error">${escapeHtml(state.enquiryError)}</div>` : ""}
         <div class="fcuno-wa-spc-enquiry-list">
+          ${state.enquiryError ? `<div class="fcuno-wa-spc-error">${escapeHtml(state.enquiryError)}</div>` : ""}
           ${rows || `<div class="fcuno-wa-spc-empty">No enquiries loaded.</div>`}
         </div>
       </section>
@@ -639,43 +797,90 @@
     host.querySelectorAll("[data-action='open-contact']").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation()
+        state.contactMenuId = ""
         const contact = state.contacts.find((item) => item.id === button.dataset.id)
         if (contact) void openContact(contact)
+      })
+    })
+
+    host.querySelectorAll("[data-action='contact-menu']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        const id = button.dataset.id || ""
+        state.contactMenuId = state.contactMenuId === id ? "" : id
+        render()
+      })
+    })
+
+    host.querySelectorAll("[data-action='rename-contact']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        renameContact(button.dataset.id || "")
       })
     })
 
     host.querySelectorAll("[data-action='remove-contact']").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation()
-        removeContact(button.dataset.id || "")
+        confirmRemoveContact(button.dataset.id || "")
       })
     })
 
     host.querySelectorAll(".fcuno-wa-spc-row").forEach((row) => {
       row.addEventListener("click", (event) => {
-        if (event.target.closest("[data-action='remove-contact']")) return
+        if (event.target instanceof Element && event.target.closest(".fcuno-wa-spc-row-actions")) return
+        state.contactMenuId = ""
         const contact = state.contacts.find((item) => item.id === row.dataset.id)
         if (contact) void openContact(contact)
       })
       row.addEventListener("dragstart", (event) => {
         state.dragging = row.dataset.id || ""
         event.dataTransfer.effectAllowed = "move"
+        event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
         event.dataTransfer.setData("text/plain", state.dragging)
       })
       row.addEventListener("drop", (event) => {
         event.preventDefault()
-        const id = event.dataTransfer.getData("text/plain") || state.dragging
+        row.classList.remove("is-drop-target")
+        const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
+        if (enquiryId) {
+          const contact = state.contacts.find((item) => item.id === row.dataset.id)
+          const text = enquiryTextForDrag(enquiryId)
+          if (contact && text) sendTextToContact(contact, text)
+          return
+        }
+        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || event.dataTransfer.getData("text/plain") || state.dragging
         moveContact(id, row.dataset.list || "supplier", row.dataset.id || "")
       })
-      row.addEventListener("dragover", (event) => event.preventDefault())
+      row.addEventListener("dragover", (event) => {
+        event.preventDefault()
+        row.classList.add("is-drop-target")
+      })
+      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"))
     })
 
     host.querySelectorAll(".fcuno-wa-spc-contact-list").forEach((list) => {
       list.addEventListener("dragover", (event) => event.preventDefault())
       list.addEventListener("drop", (event) => {
         event.preventDefault()
-        const id = event.dataTransfer.getData("text/plain") || state.dragging
+        const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
+        if (enquiryId) return
+        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || event.dataTransfer.getData("text/plain") || state.dragging
         moveContact(id, list.dataset.list || "supplier", "")
+      })
+    })
+
+    host.querySelectorAll("[data-action='toggle-template']").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        state.templateEnabled = checkbox.checked
+        saveState()
+        render()
+      })
+    })
+    host.querySelectorAll("[data-action='template-text']").forEach((textarea) => {
+      textarea.addEventListener("input", () => {
+        state.templateText = cleanTemplateText(textarea.value) || DEFAULT_TEMPLATE_TEXT
+        saveState()
       })
     })
 
@@ -698,10 +903,24 @@
       })
     })
     host.querySelectorAll("[data-action='toggle-enquiry']").forEach((checkbox) => {
+      checkbox.addEventListener("click", (event) => event.stopPropagation())
       checkbox.addEventListener("change", () => {
         state.selectedEnquiries[checkbox.dataset.id || ""] = checkbox.checked
         const enquiry = state.enquiries.find((item) => item.id === checkbox.dataset.id)
         if (enquiry) markEnquirySeen(enquiry)
+      })
+    })
+    host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
+      row.addEventListener("dragstart", (event) => {
+        const id = row.dataset.id || ""
+        const text = enquiryTextForDrag(id)
+        if (!text) {
+          event.preventDefault()
+          return
+        }
+        event.dataTransfer.effectAllowed = "copy"
+        event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
+        event.dataTransfer.setData("text/plain", text)
       })
     })
   }
@@ -713,6 +932,7 @@
     render()
     loadEnquiries()
     refreshUnreadIndicators()
+    window.setTimeout(trySendPending, 650)
     unreadTimer = window.setInterval(refreshUnreadIndicators, 1800)
     enquiryTimer = window.setInterval(loadEnquiries, 2000)
   }

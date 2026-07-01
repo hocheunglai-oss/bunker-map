@@ -30,7 +30,7 @@ type TechStackResponse = {
 const SERVICES = [
   ["APPLICATION", "NEXT.JS 15 / REACT 18 / TYPESCRIPT", "VERCEL", "FCUNO.COM"],
   ["SOURCE CONTROL", "GIT / GITHUB", "GITHUB", "HOCHEUNGLAI-OSS/BUNKER-MAP"],
-  ["PRIMARY DATABASE", "POSTGRESQL", "SUPABASE", "PROJECT GGLYUPTZNLDAILZHLXWW"],
+  ["PRIMARY DATABASE", "POSTGRESQL", "SUPABASE", "PROJECT GGLYUGBRNYVYFKTGWERT"],
   ["FILE SOURCE", "GOOGLE DRIVE", "GOOGLE WORKSPACE", "WIDER.CUSTOM@GMAIL.COM"],
   ["FILE BACKUP", "GOOGLE CLOUD STORAGE", "GOOGLE CLOUD", "BUNKER-MAP-DRIVE-UPLOADER"],
   ["BACKUP RUNNER", "CLOUD RUN JOB", "GOOGLE CLOUD", "US-CENTRAL1"],
@@ -47,7 +47,7 @@ const SERVICES = [
 const DATABASE_GROUPS = [
   {
     title: "ADMINISTRATION",
-    tables: ["admin_users", "admin_role_defaults", "admin_audit_logs", "spc_users"],
+    tables: ["admin_users", "admin_role_defaults", "audit_logs"],
   },
   {
     title: "CCINFO",
@@ -74,7 +74,11 @@ const DATABASE_GROUPS = [
   },
   {
     title: "OPERATIONS",
-    tables: ["office_calendar_store", "email_templates", "ports", "remarks", "price_history", "spc_enquiries"],
+    tables: ["office_calendar_store", "email_templates", "ports", "remarks", "price_history"],
+  },
+  {
+    title: "SPC",
+    tables: ["spc_users", "spc_enquiries", "office_calendar_store: spc-permission-groups"],
   },
 ] as const
 
