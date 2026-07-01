@@ -5,6 +5,8 @@
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
   const PENDING_SEND_TIMEOUT_MS = 30000
+  const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
+  const SEND_LOCK_TTL_MS = 30000
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
@@ -50,6 +52,37 @@
       .replace(/\r\n?/g, "\n")
       .replace(/[ \t]+\n/g, "\n")
       .trim()
+  }
+
+  function readSendLock() {
+    try {
+      const raw = window.sessionStorage?.getItem(SEND_LOCK_KEY)
+      const parsed = raw ? JSON.parse(raw) : null
+      if (!parsed || typeof parsed !== "object") return null
+      return { key: cleanText(parsed.key), at: Number(parsed.at) || 0 }
+    } catch {
+      return null
+    }
+  }
+
+  function writeSendLock(lock) {
+    try {
+      window.sessionStorage?.setItem(SEND_LOCK_KEY, JSON.stringify(lock))
+    } catch {
+      document.documentElement?.setAttribute("data-fcuno-wa-spc-send-lock", `${lock.key}|${lock.at}`)
+    }
+  }
+
+  function acquireSendLock(scope, text) {
+    const message = cleanTemplateText(text)
+    const key = `${cleanText(scope)}|${message}`
+    if (!message || !key) return false
+    const now = Date.now()
+    const current = readSendLock()
+    if (current?.key === key && now - current.at < SEND_LOCK_TTL_MS) return false
+    writeSendLock({ key, at: now })
+    recentSend = { key, at: now }
+    return true
   }
 
   function phoneDigits(value) {
@@ -685,8 +718,19 @@
   }
 
   function selectedEnquiryText() {
+    const seenIds = new Set()
+    const seenBodies = new Set()
     const text = visibleEnquiries()
-      .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
+      .filter((enquiry) => {
+        if (!state.selectedEnquiries[enquiry.id] || !isSendableEnquiry(enquiry)) return false
+        const body = enquiryBodyText(enquiry)
+        const id = cleanText(enquiry.id)
+        const bodyKey = body.toLowerCase()
+        if ((id && seenIds.has(id)) || (bodyKey && seenBodies.has(bodyKey))) return false
+        if (id) seenIds.add(id)
+        if (bodyKey) seenBodies.add(bodyKey)
+        return true
+      })
       .map(enquiryBodyText)
       .filter(Boolean)
       .join("\n\n")
@@ -706,7 +750,7 @@
     return cleanText(composer?.innerText || composer?.textContent || "")
   }
 
-  function replaceComposerText(composer, text) {
+  function clearComposerText(composer) {
     composer.focus()
     const selection = window.getSelection()
     if (selection) {
@@ -719,21 +763,29 @@
     }
     document.execCommand("delete", false)
     composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+    if (composerText(composer)) {
+      if (typeof composer.replaceChildren === "function") {
+        composer.replaceChildren()
+      }
+      composer.textContent = ""
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }))
+    }
+  }
+
+  function replaceComposerText(composer, text) {
+    clearComposerText(composer)
     const inserted = document.execCommand("insertText", false, text)
-    if (!inserted || composerText(composer) !== cleanText(text)) {
+    if (!inserted) {
       composer.textContent = text
     }
     composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    return composerText(composer) === cleanText(text)
   }
 
   function insertComposerText(text) {
     const composer = findComposer()
     if (!composer) return false
-    replaceComposerText(composer, text)
-    const wanted = cleanText(text)
-    const actual = composerText(composer)
-    if (wanted && actual !== wanted) replaceComposerText(composer, text)
-    return true
+    return replaceComposerText(composer, text)
   }
 
   function findSendButton() {
@@ -755,7 +807,7 @@
   function sendComposerWhenReady(text = "", attempt = 0) {
     const composer = findComposer()
     if (text && composer && composerText(composer) !== cleanText(text)) {
-      replaceComposerText(composer, text)
+      return false
     }
     const button = findSendButton()
     if (button) {
@@ -814,6 +866,7 @@
     const sendKey = `${contact.id}|${message}`
     const now = Date.now()
     if (recentSend.key === sendKey && now - recentSend.at < 1200) return
+    if (!acquireSendLock(`contact:${contact.id}`, message)) return
     recentSend = { key: sendKey, at: now }
     if (state.pendingSend?.contactId === contact.id) clearPendingSend()
 
@@ -836,6 +889,9 @@
   function sendSelectedToChat() {
     const text = selectedEnquiryText()
     if (!text) return
+    const chat = getCurrentChat()
+    const scope = chat ? `chat:${chat.name || chat.phone}` : "chat:current"
+    if (!acquireSendLock(scope, text)) return
     if (!insertComposerText(text)) return
     window.setTimeout(() => sendComposerWhenReady(text), 120)
   }
@@ -1232,6 +1288,8 @@
       insertComposerText,
       moveContact,
       phoneDigits,
+      selectedEnquiryText,
+      acquireSendLock,
       sendTextToContact,
       textMatchesContact,
       withTemplate,
@@ -1239,7 +1297,7 @@
   }
 
   async function start() {
-    if (document.getElementById(BOARD_ID)) return
+    document.getElementById(BOARD_ID)?.remove()
     await loadState()
     saveState()
     render()

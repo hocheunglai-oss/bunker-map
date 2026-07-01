@@ -96,6 +96,22 @@ class FakeElement {
     return child
   }
 
+  replaceChildren(...children) {
+    this.children = children
+    this._text = ""
+    this.children.forEach((child) => {
+      child.parentElement = this
+    })
+  }
+
+  remove() {
+    if (this.id) elementsById.delete(this.id)
+    if (this.parentElement) {
+      this.parentElement.children = this.parentElement.children.filter((child) => child !== this)
+    }
+    this.parentElement = null
+  }
+
   click() {
     this.clicked += 1
     ;(this.listeners.click || []).forEach((handler) => handler({ target: this }))
@@ -110,10 +126,13 @@ class FakeElement {
 let activeElement = null
 let selected = false
 let main = null
+let deleteFails = false
 const elementsById = new Map()
+const sessionStore = new Map()
 
 const document = {
   readyState: "loading",
+  documentElement: new FakeElement({ tag: "html" }),
   body: new FakeElement(),
   addEventListener() {},
   getElementById() {
@@ -136,6 +155,7 @@ const document = {
       return true
     }
     if (command === "delete") {
+      if (deleteFails) return true
       activeElement.textContent = ""
       selected = false
       return true
@@ -163,6 +183,14 @@ const window = {
   },
   location: {
     assign() {},
+  },
+  sessionStorage: {
+    getItem(key) {
+      return sessionStore.get(key) || null
+    },
+    setItem(key, value) {
+      sessionStore.set(key, String(value))
+    },
   },
   setTimeout,
 }
@@ -248,6 +276,12 @@ composer = setComposer(`${enquiry}${enquiry}`)
 assert.equal(api.insertComposerText(enquiry), true)
 assert.equal(api.composerText(composer), enquiry)
 
+deleteFails = true
+composer = setComposer(`${enquiry}${enquiry}${enquiry}${enquiry}`)
+assert.equal(api.insertComposerText(enquiry), true)
+assert.equal(api.composerText(composer), enquiry)
+deleteFails = false
+
 api.state.contacts = [
   { id: "supplier-a", name: "Supplier A", list: "supplier", order: 1000 },
   { id: "supplier-b", name: "Supplier B", list: "supplier", order: 2000 },
@@ -275,5 +309,17 @@ api.sendTextToContact(contact, duplicateMessage)
 await new Promise((resolve) => setTimeout(resolve, 180))
 assert.equal(api.composerText(sendComposer), duplicateMessage)
 assert.equal(sendButton.clicked, 1, "duplicate sends for the same contact/message should be suppressed")
+
+assert.equal(api.acquireSendLock("same-contact", "same message"), true)
+assert.equal(api.acquireSendLock("same-contact", "same message"), false)
+
+api.state.templateEnabled = false
+api.state.enquiries = [
+  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
+  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
+  { id: "enq-2", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
+]
+api.state.selectedEnquiries = { "enq-1": true, "enq-2": true }
+assert.equal(api.selectedEnquiryText(), duplicateMessage)
 
 console.log("SPC WhatsApp content tests passed")
