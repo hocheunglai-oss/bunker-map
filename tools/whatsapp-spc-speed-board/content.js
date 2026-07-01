@@ -31,6 +31,8 @@
 
   let unreadTimer = 0
   let enquiryTimer = 0
+  let templateSaveTimer = 0
+  let lastEnquiryFingerprint = ""
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -182,6 +184,19 @@
     document.body.classList.toggle("fcuno-wa-spc-active", !state.collapsed)
   }
 
+  function saveTemplateState() {
+    const storage = getStorage()
+    if (storage) storage.set({ [STORAGE_KEY]: statePayload() })
+  }
+
+  function scheduleTemplateSave() {
+    if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
+    templateSaveTimer = window.setTimeout(() => {
+      templateSaveTimer = 0
+      saveTemplateState()
+    }, 250)
+  }
+
   function getDirectUrl(phone) {
     const digits = phoneDigits(phone)
     return digits ? `https://web.whatsapp.com/send?phone=${digits}` : ""
@@ -331,9 +346,9 @@
     removeContact(id)
   }
 
-  function moveContact(id, targetList, targetId) {
+  function moveContact(id, targetList, targetId, position = "before") {
     const moving = state.contacts.find((contact) => contact.id === id)
-    if (!moving) return
+    if (!moving || !LISTS.includes(targetList)) return
     const next = {
       supplier: contactsFor("supplier").filter((contact) => contact.id !== id),
       buyer: contactsFor("buyer").filter((contact) => contact.id !== id),
@@ -342,7 +357,8 @@
     moving.updatedAt = new Date().toISOString()
     const target = next[targetList]
     const index = targetId ? target.findIndex((contact) => contact.id === targetId) : target.length
-    target.splice(index < 0 ? target.length : index, 0, moving)
+    const insertAt = index < 0 ? target.length : position === "after" ? index + 1 : index
+    target.splice(insertAt, 0, moving)
     state.contacts = [...next.supplier, ...next.buyer]
     saveState()
     render()
@@ -485,6 +501,18 @@
     render()
   }
 
+  function enquiriesFingerprint(enquiries) {
+    return enquiries
+      .map((enquiry) => {
+        const id = cleanText(enquiry.id)
+        const status = enquiryStatusKey(enquiry)
+        const body = enquiryBodyText(enquiry)
+        const createdAt = enquiryCreatedAt(enquiry)
+        return `${id}|${status}|${createdAt}|${body}`
+      })
+      .join("\n")
+  }
+
   function loadEnquiries() {
     if (state.loadingEnquiries) return
     state.loadingEnquiries = true
@@ -497,7 +525,11 @@
         render()
         return
       }
-      state.enquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
+      const nextEnquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
+      const nextFingerprint = enquiriesFingerprint(nextEnquiries)
+      const changed = nextFingerprint !== lastEnquiryFingerprint
+      state.enquiries = nextEnquiries
+      lastEnquiryFingerprint = nextFingerprint
       Object.keys(state.selectedEnquiries).forEach((id) => {
         const enquiry = state.enquiries.find((item) => item.id === id)
         if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
@@ -505,7 +537,7 @@
         }
       })
       notifyNewEnquiries()
-      render()
+      if (!state.templateEditing || changed) render()
     })
   }
 
@@ -709,7 +741,7 @@
       return
     }
     saveState()
-    window.setTimeout(trySendPending, 500)
+    window.setTimeout(trySendPending, 250)
   }
 
   function sendTextToContact(contact, text) {
@@ -728,8 +760,8 @@
       attempts: 0,
     }
     saveState()
-    void openContact(contact)
-    window.setTimeout(trySendPending, 650)
+    void openContact(contact).then(() => window.setTimeout(trySendPending, 180))
+    window.setTimeout(trySendPending, 320)
   }
 
   function sendSelectedToChat() {
@@ -782,7 +814,7 @@
           </label>
           <button type="button" data-action="edit-template">${state.templateEditing ? "Done" : "Edit"}</button>
         </div>
-        ${state.templateEditing ? `<textarea data-action="template-text" aria-label="Template text" ${state.templateEnabled ? "" : "disabled"}>${escapeHtml(state.templateText)}</textarea>` : ""}
+        ${state.templateEditing ? `<textarea data-action="template-text" aria-label="Template text">${escapeHtml(state.templateText)}</textarea>` : ""}
       </section>
     `
   }
@@ -859,6 +891,27 @@
     bindEvents(host)
   }
 
+  function clearDropMarkers(root = document) {
+    root.querySelectorAll(".fcuno-wa-spc-row.is-drop-before, .fcuno-wa-spc-row.is-drop-after").forEach((row) => {
+      row.classList.remove("is-drop-before", "is-drop-after")
+      delete row.dataset.dropPosition
+    })
+  }
+
+  function setRowDragImage(event, row) {
+    if (event.dataTransfer && typeof event.dataTransfer.setDragImage === "function") {
+      event.dataTransfer.setDragImage(row, 16, 16)
+    }
+  }
+
+  function setDropMarker(event, row, root) {
+    const rect = row.getBoundingClientRect()
+    const position = event.clientY > rect.top + rect.height / 2 ? "after" : "before"
+    clearDropMarkers(root)
+    row.dataset.dropPosition = position
+    row.classList.add(position === "after" ? "is-drop-after" : "is-drop-before")
+  }
+
   function bindEvents(host) {
     host.querySelectorAll("[data-action='toggle']").forEach((button) => {
       button.addEventListener("click", () => {
@@ -888,6 +941,14 @@
         state.contactMenuId = state.contactMenuId === id ? "" : id
         render()
       })
+      button.addEventListener("dragstart", (event) => {
+        const row = button.closest(".fcuno-wa-spc-row")
+        if (!row) return
+        state.dragging = button.dataset.id || ""
+        event.dataTransfer.effectAllowed = "move"
+        event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
+        setRowDragImage(event, row)
+      })
     })
 
     host.querySelectorAll("[data-action='rename-contact']").forEach((button) => {
@@ -915,11 +976,12 @@
         state.dragging = row.dataset.id || ""
         event.dataTransfer.effectAllowed = "move"
         event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
-        event.dataTransfer.setData("text/plain", state.dragging)
+        setRowDragImage(event, row)
       })
       row.addEventListener("drop", (event) => {
         event.preventDefault()
-        row.classList.remove("is-drop-target")
+        const position = row.dataset.dropPosition || "before"
+        clearDropMarkers(host)
         const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
         if (enquiryId) {
           const contact = state.contacts.find((item) => item.id === row.dataset.id)
@@ -927,23 +989,26 @@
           if (contact && text) sendTextToContact(contact, text)
           return
         }
-        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || event.dataTransfer.getData("text/plain") || state.dragging
-        moveContact(id, row.dataset.list || "supplier", row.dataset.id || "")
+        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || state.dragging
+        moveContact(id, row.dataset.list || "supplier", row.dataset.id || "", position)
       })
       row.addEventListener("dragover", (event) => {
         event.preventDefault()
-        row.classList.add("is-drop-target")
+        setDropMarker(event, row, host)
       })
-      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"))
+      row.addEventListener("dragleave", (event) => {
+        if (!row.contains(event.relatedTarget)) clearDropMarkers(host)
+      })
     })
 
     host.querySelectorAll(".fcuno-wa-spc-contact-list").forEach((list) => {
       list.addEventListener("dragover", (event) => event.preventDefault())
       list.addEventListener("drop", (event) => {
         event.preventDefault()
+        clearDropMarkers(host)
         const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
         if (enquiryId) return
-        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || event.dataTransfer.getData("text/plain") || state.dragging
+        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || state.dragging
         moveContact(id, list.dataset.list || "supplier", "")
       })
     })
@@ -957,14 +1022,22 @@
     })
     host.querySelectorAll("[data-action='edit-template']").forEach((button) => {
       button.addEventListener("click", () => {
+        if (state.templateEditing) {
+          state.templateText = cleanTemplateText(state.templateText) || DEFAULT_TEMPLATE_TEXT
+          saveTemplateState()
+        }
         state.templateEditing = !state.templateEditing
         render()
       })
     })
     host.querySelectorAll("[data-action='template-text']").forEach((textarea) => {
       textarea.addEventListener("input", () => {
+        state.templateText = String(textarea.value || "").replace(/\r\n?/g, "\n")
+        scheduleTemplateSave()
+      })
+      textarea.addEventListener("blur", () => {
         state.templateText = cleanTemplateText(textarea.value) || DEFAULT_TEMPLATE_TEXT
-        saveState()
+        saveTemplateState()
       })
     })
 
@@ -1004,7 +1077,8 @@
         }
         event.dataTransfer.effectAllowed = "copy"
         event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
-        event.dataTransfer.setData("text/plain", text)
+        event.dataTransfer.setData("application/x-fcuno-spc-enquiry-text", text)
+        setRowDragImage(event, row)
       })
     })
   }
@@ -1024,6 +1098,7 @@
   window.addEventListener("beforeunload", () => {
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (enquiryTimer) window.clearInterval(enquiryTimer)
+    if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
   })
 
   if (document.readyState === "loading") {

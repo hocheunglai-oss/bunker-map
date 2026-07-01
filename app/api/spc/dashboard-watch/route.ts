@@ -4,6 +4,7 @@ import { requireSpcSession } from "@/lib/spcAuth"
 const HKT_TIME_ZONE = "Asia/Hong_Kong"
 const REQUEST_TIMEOUT_MS = 8000
 const HOLIDAYS_PER_COUNTRY = 2
+const MAX_HOLIDAY_DAYS_AHEAD = 5
 
 const HOLIDAY_COUNTRIES = [
   { code: "IT", label: "Italy" },
@@ -13,6 +14,9 @@ const HOLIDAY_COUNTRIES = [
   { code: "US", label: "USA" },
   { code: "GR", label: "Greece" },
   { code: "SG", label: "Singapore" },
+  { code: "JP", label: "Japan" },
+  { code: "KR", label: "Korea" },
+  { code: "VN", label: "Vietnam" },
 ] as const
 
 type NagerHoliday = {
@@ -84,16 +88,20 @@ async function fetchUpcomingHolidays() {
       ]
 
       return holidays
-        .filter((holiday) => holiday.date >= fromDate)
-        .sort((first, second) => first.date.localeCompare(second.date))
-        .slice(0, HOLIDAYS_PER_COUNTRY)
         .map((holiday) => ({
+          holiday,
+          daysUntil: daysBetweenDateKeys(fromDate, holiday.date),
+        }))
+        .filter(({ daysUntil }) => daysUntil >= 0 && daysUntil <= MAX_HOLIDAY_DAYS_AHEAD)
+        .sort((first, second) => first.holiday.date.localeCompare(second.holiday.date))
+        .slice(0, HOLIDAYS_PER_COUNTRY)
+        .map(({ holiday, daysUntil }) => ({
           countryCode: country.code,
           countryName: country.label,
           date: holiday.date,
           name: holiday.name || holiday.localName || "Public holiday",
           localName: holiday.localName || null,
-          daysUntil: daysBetweenDateKeys(fromDate, holiday.date),
+          daysUntil,
         }))
     }),
   )
@@ -101,8 +109,6 @@ async function fetchUpcomingHolidays() {
   const items = countryResults.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
   )
-
-  if (!items.length) throw new Error("Holiday feed unavailable.")
 
   items.sort((first, second) => {
     if (first.date !== second.date) return first.date.localeCompare(second.date)

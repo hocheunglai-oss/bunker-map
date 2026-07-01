@@ -2273,27 +2273,6 @@ body {
   background: transparent;
 }
 
-.spc-login-form::before {
-  content: "";
-  position: absolute;
-  inset: -2.2cqw -2cqw -5.4cqw;
-  z-index: -1;
-  background: #ffffff;
-  pointer-events: none;
-}
-
-.spc-login-form::after {
-  content: "";
-  position: absolute;
-  right: -3cqw;
-  bottom: -7cqw;
-  left: -3cqw;
-  z-index: 2;
-  height: 7cqw;
-  background: #ffffff;
-  pointer-events: none;
-}
-
 .spc-login-form > * {
   position: relative;
   z-index: 1;
@@ -2477,7 +2456,7 @@ body {
 }
 
 .spc-dashboard-swatches {
-  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  grid-template-columns: minmax(0, 720px);
   margin-top: 30px;
 }
 
@@ -3577,36 +3556,109 @@ body {
   opacity: 0.48;
 }
 
-.spc-user-overview-grid {
+.spc-user-authority {
+  max-height: calc(100vh - 72px);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
-.spc-user-overview-grid div {
-  min-height: 84px;
-  display: grid;
-  align-content: center;
-  gap: 5px;
-  border: 1px solid var(--fc-admin-border-soft);
-  border-radius: 8px;
-  background: var(--fc-admin-panel-soft-bg);
-  padding: 12px;
-}
-
-.spc-user-overview-grid strong {
-  color: var(--fc-admin-heading);
-  font-size: 24px;
-  font-weight: 900;
-}
-
-.spc-user-overview-grid span {
-  color: var(--fc-admin-muted);
+.spc-authority-save {
+  min-height: 30px;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
   font-size: 11px;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  padding: 6px 12px;
+}
+
+.spc-authority-save:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.spc-authority-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.spc-authority-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  padding: 9px 0;
+}
+
+.spc-authority-row:first-child {
+  padding-top: 0;
+}
+
+.spc-authority-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.spc-authority-row strong,
+.spc-authority-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-authority-row strong {
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.spc-authority-row small {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 850;
   text-transform: uppercase;
+}
+
+.spc-authority-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.spc-authority-toggle button {
+  min-height: 28px;
+  min-width: 58px;
+  border: 0;
+  border-left: 1px solid var(--fc-admin-button-border);
+  background: transparent;
+  color: var(--fc-admin-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 5px 9px;
+}
+
+.spc-authority-toggle button:first-child {
+  border-left: 0;
+}
+
+.spc-authority-toggle button.is-active {
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
+.spc-authority-toggle button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .spc-user-dialog {

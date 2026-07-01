@@ -194,10 +194,26 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   background: #f5f6f6;
 }
 
-.fcuno-wa-spc-row.is-drop-target {
-  outline: 2px solid #008069;
-  outline-offset: -2px;
-  background: #e4f8ef;
+.fcuno-wa-spc-row.is-drop-before::before,
+.fcuno-wa-spc-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  left: 6px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: #008069;
+  box-shadow: 0 0 0 2px rgba(0, 128, 105, 0.14);
+  pointer-events: none;
+}
+
+.fcuno-wa-spc-row.is-drop-before::before {
+  top: -2px;
+}
+
+.fcuno-wa-spc-row.is-drop-after::after {
+  bottom: -2px;
 }
 
 .fcuno-wa-spc-list-button {
@@ -382,11 +398,6 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   font: 700 12px/1.35 Arial, Helvetica, sans-serif;
   outline: none;
   padding: 7px 8px;
-}
-
-.fcuno-wa-spc-template textarea:disabled {
-  background: #f0f2f5;
-  color: #667781;
 }
 
 .fcuno-wa-spc-enquiry-actions {

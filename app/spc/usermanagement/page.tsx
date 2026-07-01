@@ -4,7 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
-import { canAccessSpcPage, type SpcPageDefinition, type SpcPagePermissionMap, type SpcRoleId } from "@/lib/spcPages"
+import {
+  canAccessSpcPage,
+  normaliseSpcPagePermissions,
+  type SpcPageDefinition,
+  type SpcPagePermission,
+  type SpcPagePermissionMap,
+  type SpcRoleId,
+} from "@/lib/spcPages"
 
 type ManagedSpcUser = {
   id: string
@@ -106,6 +113,8 @@ export default function SpcUserManagementPage() {
   const { loading: authLoading, authenticated, permissions, username } = useSpcAuth()
   const [users, setUsers] = useState<ManagedSpcUser[]>([])
   const [offices, setOffices] = useState<string[]>(DEFAULT_OFFICES)
+  const [pages, setPages] = useState<SpcPageDefinition[]>([])
+  const [roleDefaults, setRoleDefaults] = useState<ManagedSpcRoleDefault[]>([])
   const [activeTab, setActiveTab] = useState<UserTab>("SUPPLIER TRADER")
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null)
   const [officeDialogOpen, setOfficeDialogOpen] = useState(false)
@@ -135,6 +144,13 @@ export default function SpcUserManagementPage() {
       return map
     }, {})
   }, [users])
+  const selectedRoleDefault = useMemo(() => {
+    if (activeTab === "OFFICE") return null
+    return roleDefaults.find((roleDefault) => roleDefault.role === activeTab) || null
+  }, [activeTab, roleDefaults])
+  const selectedRolePermissions = useMemo(() => {
+    return normaliseSpcPagePermissions(selectedRoleDefault?.permissions, "none", pages)
+  }, [pages, selectedRoleDefault])
 
   const loadUsers = useCallback(async () => {
     if (!authenticated || !canView) return
@@ -147,6 +163,8 @@ export default function SpcUserManagementPage() {
 
       setUsers(data.users || [])
       setOffices(data.offices?.length ? data.offices : DEFAULT_OFFICES)
+      setPages(data.pages || [])
+      setRoleDefaults(data.roleDefaults || [])
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load SPC users.")
       setMessageIsError(true)
@@ -184,6 +202,55 @@ export default function SpcUserManagementPage() {
 
   function updateDraft<K extends keyof UserDraft>(key: K, value: UserDraft[K]) {
     setUserDraft((current) => (current ? { ...current, [key]: value } : current))
+  }
+
+  function updateRolePermission(pageId: string, permission: SpcPagePermission) {
+    if (activeTab === "OFFICE" || !selectedRoleDefault) return
+    setRoleDefaults((current) =>
+      current.map((roleDefault) =>
+        roleDefault.role === activeTab
+          ? {
+              ...roleDefault,
+              permissions: {
+                ...normaliseSpcPagePermissions(roleDefault.permissions, "none", pages),
+                [pageId]: permission,
+              },
+            }
+          : roleDefault,
+      ),
+    )
+  }
+
+  async function saveRoleAuthority() {
+    if (!canEdit || activeTab === "OFFICE" || !selectedRoleDefault) return
+
+    setSaving(true)
+    setMessage("")
+
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-role-default",
+          roleDefault: {
+            role: activeTab,
+            permissions: selectedRolePermissions,
+          },
+        }),
+      })
+      const data = (await response.json()) as { roleDefault?: ManagedSpcRoleDefault; message?: string }
+      if (!response.ok || !data.roleDefault) throw new Error(data.message || "Failed to save authority.")
+
+      await loadUsers()
+      setMessage("Authority saved.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save authority.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function saveUser(event: React.FormEvent<HTMLFormElement>) {
@@ -274,7 +341,15 @@ export default function SpcUserManagementPage() {
 
   async function deleteOffice(office: string) {
     if (!canEdit) return
-    if (!window.confirm(`Remove ${office}?`)) return
+    const affectedUsers = usersByOffice[office] || 0
+    const fallbackOffice =
+      offices.find((item) => item !== office) ||
+      DEFAULT_OFFICES.find((item) => item !== office) ||
+      DEFAULT_OFFICES[0]
+    const warning = affectedUsers
+      ? `Remove ${office}? ${affectedUsers} user${affectedUsers === 1 ? "" : "s"} will be moved to ${fallbackOffice}.`
+      : `Remove ${office}?`
+    if (!window.confirm(warning)) return
 
     setSaving(true)
     setMessage("")
@@ -348,7 +423,7 @@ export default function SpcUserManagementPage() {
                       <button
                         type="button"
                         onClick={() => void deleteOffice(office)}
-                        disabled={!canEdit || saving || (usersByOffice[office] || 0) > 0}
+                        disabled={!canEdit || saving}
                       >
                         Remove
                       </button>
@@ -382,28 +457,47 @@ export default function SpcUserManagementPage() {
           </div>
         </section>
 
-        <section className="spc-panel spc-user-overview" aria-label="SPC user overview">
+        <section className="spc-panel spc-user-authority" aria-label="SPC user authority">
           <div className="spc-panel-header">
-            <h2>Overview</h2>
+            <h2>Authority</h2>
+            <button
+              type="button"
+              className="spc-authority-save"
+              onClick={() => void saveRoleAuthority()}
+              disabled={!canEdit || saving || activeTab === "OFFICE" || !selectedRoleDefault}
+            >
+              Save
+            </button>
           </div>
-          <div className="spc-user-overview-grid">
-            <div>
-              <strong>{users.length}</strong>
-              <span>Users</span>
+          {activeTab === "OFFICE" ? (
+            <p className="spc-empty">Select a user tab to edit page authority.</p>
+          ) : pages.length ? (
+            <div className="spc-authority-list">
+              {pages.map((page) => (
+                <article key={page.id} className="spc-authority-row">
+                  <span>
+                    <strong>{page.label}</strong>
+                    <small>{page.group}</small>
+                  </span>
+                  <div className="spc-authority-toggle" role="group" aria-label={`${page.label} authority`}>
+                    {(["none", "view", "edit"] as SpcPagePermission[]).map((permission) => (
+                      <button
+                        key={permission}
+                        type="button"
+                        className={selectedRolePermissions[page.id] === permission ? "is-active" : ""}
+                        onClick={() => updateRolePermission(page.id, permission)}
+                        disabled={!canEdit || saving}
+                      >
+                        {permission.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
             </div>
-            <div>
-              <strong>{offices.length}</strong>
-              <span>Offices</span>
-            </div>
-            <div>
-              <strong>{users.filter((user) => user.mustChangePassword).length}</strong>
-              <span>Password Reset</span>
-            </div>
-            <div>
-              <strong>{users.filter((user) => !user.isActive).length}</strong>
-              <span>Inactive</span>
-            </div>
-          </div>
+          ) : (
+            <p className="spc-empty">Loading authority settings...</p>
+          )}
         </section>
       </div>
 

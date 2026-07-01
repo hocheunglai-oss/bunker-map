@@ -866,14 +866,39 @@ export async function deleteManagedSpcOffice(officeInput: string, actor?: SpcAct
   try {
     const supabase = getServiceClient(actor)
     const stored = await loadStoredRoleDefaults(supabase)
-    if (stored.userProfiles.some((profile) => profile.office === office)) {
-      throw new Error("Move users out of this office before removing it.")
-    }
-    return await writeOfficeStore(
-      supabase,
-      stored.offices.filter((item) => item !== office),
-      actor,
+    const updatedAt = new Date().toISOString()
+    const nextOffices = normaliseOfficeList(stored.offices.filter((item) => item !== office))
+    const fallbackOffice =
+      nextOffices.find((item) => item !== office) ||
+      SPC_DEFAULT_OFFICES.find((item) => item !== office) ||
+      SPC_DEFAULT_OFFICES[0]
+    const nextProfiles = stored.userProfiles.map((profile) =>
+      profile.office === office
+        ? {
+            ...profile,
+            office: fallbackOffice,
+            updatedAt,
+          }
+        : profile,
     )
+    const afterRow: SpcStoreRow = {
+      key: SPC_PERMISSION_GROUPS_STORE_KEY,
+      payload: buildStorePayload(stored.rows, stored.userRoles, nextProfiles, nextOffices),
+      updated_at: updatedAt,
+    }
+
+    const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
+    if (error) throw error
+
+    await writePermissionGroupAudit(
+      supabase,
+      actor,
+      stored.storeRow ? "UPDATE" : "INSERT",
+      stored.storeRow,
+      afterRow,
+    )
+
+    return nextOffices
   } catch (error) {
     throw friendlySpcUserError(error)
   }

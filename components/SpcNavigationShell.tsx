@@ -80,15 +80,6 @@ function ToolIcon({ page }: { page: SpcPageDefinition }) {
   )
 }
 
-function FolderIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 8.3a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4Z" />
-      <path d="m19.2 13.3.1-1.3-.1-1.3 2-1.5-2-3.4-2.4 1a8 8 0 0 0-2.2-1.3L14.2 3h-4.4l-.4 2.5a8 8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.5-.1 1.3.1 1.3-2 1.5 2 3.4 2.4-1a8 8 0 0 0 2.2 1.3l.4 2.5h4.4l.4-2.5a8 8 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.5Z" />
-    </svg>
-  )
-}
-
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { loading, authenticated, displayName, permissions, pages } = useSpcAuth()
@@ -336,9 +327,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
                     aria-expanded={expanded}
                   >
                     <span className="fc-admin-sidebar-folder-tab-main">
-                      <span className="fc-admin-sidebar-folder-icon">
-                        <FolderIcon />
-                      </span>
                       <span>{folder.label}</span>
                     </span>
                     <span className="fc-admin-sidebar-folder-toggle" aria-hidden="true">

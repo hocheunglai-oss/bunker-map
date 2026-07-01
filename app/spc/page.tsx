@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import { SpcShell } from "@/components/SpcShell"
 
-const HOLIDAY_MARKET_CODES = "IT HK MC FR US GR SG"
+const HOLIDAY_MARKET_CODES = "IT HK MC FR US GR SG JP KR VN"
 
 type SpcHoliday = {
   countryCode: string
@@ -42,75 +42,6 @@ function formatDaysUntil(daysUntil: number) {
   if (daysUntil === 0) return "Today"
   if (daysUntil === 1) return "Tomorrow"
   return `In ${daysUntil} days`
-}
-
-function SpcOilWidget() {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    container.innerHTML = ""
-
-    const timer = window.setTimeout(() => {
-      const widgetHost = document.createElement("div")
-      widgetHost.className = "tradingview-widget-container__widget"
-      widgetHost.style.height = "216px"
-      widgetHost.style.width = "100%"
-
-      const script = document.createElement("script")
-      script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
-      script.type = "text/javascript"
-      script.async = true
-      script.innerHTML = JSON.stringify({
-        colorTheme: "light",
-        dateRange: "1D",
-        showChart: true,
-        locale: "en",
-        width: "100%",
-        height: 216,
-        largeChartUrl: "",
-        isTransparent: true,
-        showSymbolLogo: false,
-        showFloatingTooltip: false,
-        plotLineColorGrowing: "rgba(41, 98, 255, 1)",
-        plotLineColorFalling: "rgba(41, 98, 255, 1)",
-        gridLineColor: "rgba(29, 29, 31, 0.08)",
-        scaleFontColor: "rgba(29, 29, 31, 0.72)",
-        belowLineFillColorGrowing: "rgba(0, 113, 227, 0.12)",
-        belowLineFillColorFalling: "rgba(0, 113, 227, 0.08)",
-        belowLineFillColorGrowingBottom: "rgba(0, 113, 227, 0.01)",
-        belowLineFillColorFallingBottom: "rgba(0, 113, 227, 0.01)",
-        symbolActiveColor: "rgba(0, 113, 227, 0.12)",
-        tabs: [
-          {
-            title: "Energy",
-            symbols: [
-              { s: "TVC:UKOIL", d: "Brent" },
-              { s: "TVC:USOIL", d: "WTI / Nymex" },
-            ],
-          },
-        ],
-      })
-
-      container.appendChild(widgetHost)
-      container.appendChild(script)
-    }, 0)
-
-    return () => {
-      window.clearTimeout(timer)
-      container.innerHTML = ""
-    }
-  }, [])
-
-  return (
-    <div
-      ref={containerRef}
-      className="fc-admin-crude-widget tradingview-widget-container"
-      aria-label="Current crude market overview"
-    />
-  )
 }
 
 export default function SpcLoginPage() {
@@ -334,13 +265,6 @@ export default function SpcLoginPage() {
                 )}
               </section>
 
-              <section className="fc-admin-swatch-card is-crude" aria-label="Current crude market">
-                <div className="fc-admin-swatch-heading">
-                  <span>Crude Watch</span>
-                  <strong>Brent / WTI</strong>
-                </div>
-                <SpcOilWidget />
-              </section>
             </div>
           </div>
         </section>
