@@ -20,10 +20,11 @@ const html = `<!doctype html>
       #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
-      .messages { height: 420px; background: #f6efe5; }
-      .composer-row { display: flex; gap: 8px; padding: 12px; }
-      #composer { flex: 1; min-height: 36px; border: 1px solid #ccc; border-radius: 18px; padding: 10px; white-space: pre-wrap; }
+      .messages { height: 360px; background: #f6efe5; }
+      .composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 12px; }
+      #composer { flex: 1; min-height: 120px; border: 1px solid #ccc; border-radius: 18px; padding: 10px; white-space: pre-wrap; }
       #sendButton { width: 48px; height: 48px; border-radius: 50%; background: #00a884; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+      #decoySend { margin: 24px; padding: 8px 12px; }
       #sent { white-space: pre-wrap; border-top: 1px solid #ddd; padding: 10px; }
     </style>
   </head>
@@ -36,7 +37,9 @@ const html = `<!doctype html>
     </div>
     <div id="main">
       <header><span id="chatTitle" title="Otto Tone">Otto Tone</span></header>
-      <div class="messages"></div>
+      <div class="messages">
+        <button id="decoySend" aria-label="Send" onclick="window.decoyClicks += 1">Old send-like control</button>
+      </div>
       <div class="composer-row">
         <div id="composer" contenteditable="true" role="textbox"></div>
         <div id="sendButton" role="button" onclick="
@@ -50,6 +53,7 @@ const html = `<!doctype html>
     <pre id="sent"></pre>
     <script>
       window.sentMessages = [];
+      window.decoyClicks = 0;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
       window.setChatTitle = (name) => {
         const title = document.getElementById("chatTitle");
@@ -124,11 +128,13 @@ async function main() {
         sentText: document.getElementById("sent").innerText,
         composerText: document.getElementById("composer").innerText,
         sentCount: window.sentMessages.length,
+        decoyClicks: window.decoyClicks,
       }))
 
       assert.equal(firstResult.sentText, expected)
       assert.equal(firstResult.composerText, "")
       assert.equal(firstResult.sentCount, 1)
+      assert.equal(firstResult.decoyClicks, 0)
 
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
       await page.waitForTimeout(300)

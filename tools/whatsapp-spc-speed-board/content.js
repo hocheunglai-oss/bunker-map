@@ -806,27 +806,52 @@
     return replaceComposerText(composer, text)
   }
 
+  function sendButtonLabel(item) {
+    const ownLabel = [
+      item.getAttribute("aria-label"),
+      item.getAttribute("title"),
+      item.getAttribute("data-testid"),
+      item.getAttribute("data-icon"),
+    ].map(cleanText).join(" ")
+    const childLabel = Array.from(item.querySelectorAll("[aria-label], [title], [data-testid], [data-icon]"))
+      .map((child) =>
+        [
+          child.getAttribute("aria-label"),
+          child.getAttribute("title"),
+          child.getAttribute("data-testid"),
+          child.getAttribute("data-icon"),
+        ].map(cleanText).join(" "),
+      )
+      .join(" ")
+    return `${ownLabel} ${childLabel}`.toLowerCase()
+  }
+
+  function isSendButtonLabel(label) {
+    return /\bsend\b|send-filled|wds-ic-send/.test(label)
+  }
+
+  function isBlockedComposerControl(label) {
+    return /\bmicrophone\b|\bvoice\b|\baudio\b|\bcamera\b|\battach\b|\bemoji\b|\bsticker\b|\bgif\b|\bplus\b/.test(label)
+  }
+
+  function sortByBottomRight(items) {
+    return [...items].sort((a, b) => {
+      const aRect = a.getBoundingClientRect()
+      const bRect = b.getBoundingClientRect()
+      return aRect.left - bRect.left || aRect.top - bRect.top
+    })
+  }
+
+  function isNearComposerAction(item, composerRect) {
+    const rect = item.getBoundingClientRect()
+    const verticalOverlap = rect.bottom >= composerRect.top - 12 && rect.top <= composerRect.bottom + 36
+    const rightAligned = rect.left >= composerRect.right - 140 || rect.right >= composerRect.right - 12
+    return verticalOverlap && rightAligned
+  }
+
   function findSendButton() {
     const main = document.querySelector("#main") || document.querySelector("[role='main']")
     if (!main) return null
-
-    const directSelectors = [
-      "button[aria-label*='Send' i]",
-      "[role='button'][aria-label*='Send' i]",
-      "button[title*='Send' i]",
-      "[role='button'][title*='Send' i]",
-      "button[data-testid*='send' i]",
-      "[role='button'][data-testid*='send' i]",
-      "span[data-icon='send']",
-      "span[data-icon*='send' i]",
-      "[data-testid='send']",
-    ]
-
-    for (const selector of directSelectors) {
-      const match = main.querySelector(selector)
-      const button = match?.closest("button,[role='button']") || match
-      if (button && isVisible(button)) return button
-    }
 
     const candidates = Array.from(
       main.querySelectorAll("button,[role='button'],span[data-icon],div[data-testid],button[data-testid]"),
@@ -834,47 +859,34 @@
       .map((item) => item.closest("button,[role='button']") || item)
       .filter((item, index, items) => item && items.indexOf(item) === index && isVisible(item))
 
-    const byLabel = candidates.find((item) => {
-      const ownLabel = [
-        item.getAttribute("aria-label"),
-        item.getAttribute("title"),
-        item.getAttribute("data-testid"),
-        item.getAttribute("data-icon"),
-      ].map(cleanText).join(" ").toLowerCase()
-      const childLabel = Array.from(item.querySelectorAll("[aria-label], [title], [data-testid], [data-icon]"))
-        .map((child) =>
-          [
-            child.getAttribute("aria-label"),
-            child.getAttribute("title"),
-            child.getAttribute("data-testid"),
-            child.getAttribute("data-icon"),
-          ].map(cleanText).join(" "),
-        )
-        .join(" ")
-        .toLowerCase()
-      return /\bsend\b|send-filled|wds-ic-send/.test(`${ownLabel} ${childLabel}`)
-    })
-    if (byLabel) return byLabel
-
     const composer = findComposer()
-    if (!composer) return null
-    const composerRect = composer.getBoundingClientRect()
-    const rightSideButtons = candidates.filter((item) => {
-      const rect = item.getBoundingClientRect()
-      const verticallyAligned = rect.bottom >= composerRect.top - 8 && rect.top <= composerRect.bottom + 8
-      return verticallyAligned && rect.left >= composerRect.right - 12
-    })
-    return rightSideButtons[rightSideButtons.length - 1] || null
+    if (composer) {
+      const composerRect = composer.getBoundingClientRect()
+      const nearComposer = candidates.filter((item) => isNearComposerAction(item, composerRect))
+      const nearSendButtons = sortByBottomRight(nearComposer.filter((item) => isSendButtonLabel(sendButtonLabel(item))))
+      if (nearSendButtons.length) return nearSendButtons[nearSendButtons.length - 1]
+
+      const nearActions = sortByBottomRight(
+        nearComposer.filter((item) => !isBlockedComposerControl(sendButtonLabel(item))),
+      )
+      if (nearActions.length) return nearActions[nearActions.length - 1]
+    }
+
+    const byLabel = sortByBottomRight(candidates.filter((item) => isSendButtonLabel(sendButtonLabel(item))))
+    return byLabel[byLabel.length - 1] || null
   }
 
   function clickSendButton(button) {
     if (!button) return false
     button.focus?.()
+    const rect = button.getBoundingClientRect()
+    const clientX = rect.left + rect.width / 2
+    const clientY = rect.top + rect.height / 2
     try {
-      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse" }))
-      button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }))
-      button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerType: "mouse" }))
-      button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }))
+      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 1, isPrimary: true, button: 0, buttons: 1, clientX, clientY }))
+      button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX, clientY }))
+      button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 1, isPrimary: true, button: 0, buttons: 0, clientX, clientY }))
+      button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, buttons: 0, clientX, clientY }))
     } catch {
     }
     button.click()
@@ -884,8 +896,8 @@
   function pressComposerEnter() {
     const composer = findComposer()
     if (!composer) return false
-    composer.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }))
-    composer.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }))
+    composer.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 }))
+    composer.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 }))
     return true
   }
 
