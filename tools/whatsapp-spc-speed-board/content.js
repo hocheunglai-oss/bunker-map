@@ -55,6 +55,43 @@
       .trim()
   }
 
+  function runtimeUnavailableMessage() {
+    return "Reload WhatsApp Web after updating the SPC extension."
+  }
+
+  function runtimeLastErrorMessage() {
+    try {
+      return chrome.runtime.lastError?.message || ""
+    } catch {
+      return runtimeUnavailableMessage()
+    }
+  }
+
+  function canSendRuntimeMessage() {
+    try {
+      return (
+        typeof chrome !== "undefined" &&
+        chrome.runtime &&
+        Boolean(chrome.runtime.id) &&
+        typeof chrome.runtime.sendMessage === "function"
+      )
+    } catch {
+      return false
+    }
+  }
+
+  function sendRuntimeMessage(message, callback) {
+    if (!canSendRuntimeMessage()) return false
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        callback?.(response, runtimeLastErrorMessage())
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function readSendLock() {
     if (memorySendLock.key) return memorySendLock
     try {
@@ -603,10 +640,10 @@
     state.loadingEnquiries = true
     state.enquiryError = ""
     if (state.enquiries.length === 0) render()
-    chrome.runtime.sendMessage({ type: "load-spc-enquiries" }, (response) => {
+    const sent = sendRuntimeMessage({ type: "load-spc-enquiries" }, (response, runtimeError) => {
       state.loadingEnquiries = false
-      if (chrome.runtime.lastError || !response || !response.ok) {
-        state.enquiryError = response?.message || chrome.runtime.lastError?.message || "Open spc.fcuno.com and log in."
+      if (runtimeError || !response || !response.ok) {
+        state.enquiryError = response?.message || runtimeError || "Open spc.fcuno.com and log in."
         render()
         return
       }
@@ -624,6 +661,11 @@
       notifyNewEnquiries()
       if (!state.templateEditing || changed) render()
     })
+    if (!sent) {
+      state.loadingEnquiries = false
+      state.enquiryError = runtimeUnavailableMessage()
+      render()
+    }
   }
 
   function visibleEnquiries() {
@@ -725,7 +767,7 @@
     state.lastNotifiedEnquiryAt = latest
     saveState()
     if (count > 0) {
-      chrome.runtime.sendMessage({ type: "notify-new-enquiries", count })
+      sendRuntimeMessage({ type: "notify-new-enquiries", count })
     }
   }
 
@@ -915,21 +957,13 @@
   }
 
   function requestNativeClick(button) {
-    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
-      return false
-    }
     const rect = button.getBoundingClientRect()
     const x = rect.left + rect.width / 2
     const y = rect.top + rect.height / 2
-    try {
-      chrome.runtime.sendMessage({ type: "spc-native-click", x, y }, (response) => {
-        const failed = chrome.runtime.lastError || !response || response.ok !== true
-        if (failed) domClickSendButton(button, rect)
-      })
-      return true
-    } catch {
-      return false
-    }
+    return sendRuntimeMessage({ type: "spc-native-click", x, y }, (response, runtimeError) => {
+      const failed = runtimeError || !response || response.ok !== true
+      if (failed) domClickSendButton(button, rect)
+    })
   }
 
   function clickSendButton(button) {
@@ -939,28 +973,20 @@
   }
 
   function requestNativeEnter(text = "", fallbackButton = null) {
-    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
-      return false
-    }
     const composer = findComposer()
     composer?.focus()
-    try {
-      chrome.runtime.sendMessage({ type: "spc-native-enter" }, (response) => {
-        const failed = chrome.runtime.lastError || !response || response.ok !== true
-        window.setTimeout(() => {
-          const nextComposer = findComposer()
-          const stillStuck = Boolean(nextComposer && composerText(nextComposer))
-          if ((failed || stillStuck) && fallbackButton) {
-            clickSendButton(fallbackButton)
-          } else if (failed && !fallbackButton) {
-            pressComposerEnter()
-          }
-        }, failed ? 0 : 260)
-      })
-      return true
-    } catch {
-      return false
-    }
+    return sendRuntimeMessage({ type: "spc-native-enter" }, (response, runtimeError) => {
+      const failed = runtimeError || !response || response.ok !== true
+      window.setTimeout(() => {
+        const nextComposer = findComposer()
+        const stillStuck = Boolean(nextComposer && composerText(nextComposer))
+        if ((failed || stillStuck) && fallbackButton) {
+          clickSendButton(fallbackButton)
+        } else if (failed && !fallbackButton) {
+          pressComposerEnter()
+        }
+      }, failed ? 0 : 260)
+    })
   }
 
   function pressComposerEnter() {
@@ -1446,6 +1472,7 @@
       findSendButton,
       getCurrentChat,
       insertComposerText,
+      loadEnquiries,
       moveContact,
       phoneDigits,
       selectedEnquiryText,

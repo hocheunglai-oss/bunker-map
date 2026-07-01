@@ -69,6 +69,7 @@ const html = `<!doctype html>
       });
       window.chrome = {
         runtime: {
+          id: "fcuno-spc-test-extension",
           lastError: null,
           getURL: (asset) => asset,
           sendMessage: (message, callback) => {
@@ -200,6 +201,26 @@ async function main() {
       assert.equal(renamedResult.sentCount, 1)
       assert.equal(renamedResult.chatTitle, "Otto Tone")
       assert.equal(renamedResult.searchText, "")
+
+      const invalidRuntimeResult = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const originalSendMessage = window.chrome.runtime.sendMessage
+        window.chrome.runtime.sendMessage = () => {
+          throw new Error("Extension context invalidated.")
+        }
+        api.state.loadingEnquiries = false
+        api.state.enquiryError = ""
+        api.loadEnquiries()
+        const result = {
+          loading: api.state.loadingEnquiries,
+          enquiryError: api.state.enquiryError,
+        }
+        window.chrome.runtime.sendMessage = originalSendMessage
+        return result
+      })
+
+      assert.equal(invalidRuntimeResult.loading, false)
+      assert.match(invalidRuntimeResult.enquiryError, /Reload WhatsApp Web/)
     } finally {
       await browser.close()
     }
