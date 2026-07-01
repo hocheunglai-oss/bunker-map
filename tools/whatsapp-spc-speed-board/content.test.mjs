@@ -10,11 +10,18 @@ class FakeElement {
     this.tag = tag
     this.role = role
     this.dataset = {}
+    this.id = attrs.id || ""
+    this.parentElement = null
+    this.clicked = 0
+    this.listeners = {}
     this.classList = {
       add() {},
       remove() {},
       toggle() {},
     }
+    this.children.forEach((child) => {
+      child.parentElement = this
+    })
   }
 
   get textContent() {
@@ -40,6 +47,9 @@ class FakeElement {
 
   querySelector(selector) {
     if (selector === "header") return this.children.find((child) => child.tag === "header") || null
+    if (selector === "button[aria-label='Send']") {
+      return this.children.find((child) => child.tag === "button" && child.attrs["aria-label"] === "Send") || null
+    }
     return this.querySelectorAll(selector)[0] || null
   }
 
@@ -53,7 +63,12 @@ class FakeElement {
     return []
   }
 
-  closest() {
+  closest(selector) {
+    let current = this
+    while (current) {
+      if (selector.startsWith("#") && current.id === selector.slice(1)) return current
+      current = current.parentElement
+    }
     return null
   }
 
@@ -69,7 +84,25 @@ class FakeElement {
     activeElement = this
   }
 
-  dispatchEvent() {
+  addEventListener(type, handler) {
+    this.listeners[type] ||= []
+    this.listeners[type].push(handler)
+  }
+
+  appendChild(child) {
+    child.parentElement = this
+    this.children.push(child)
+    if (child.id) elementsById.set(child.id, child)
+    return child
+  }
+
+  click() {
+    this.clicked += 1
+    ;(this.listeners.click || []).forEach((handler) => handler({ target: this }))
+  }
+
+  dispatchEvent(event) {
+    ;(this.listeners[event?.type] || []).forEach((handler) => handler(event))
     return true
   }
 }
@@ -77,13 +110,14 @@ class FakeElement {
 let activeElement = null
 let selected = false
 let main = null
+const elementsById = new Map()
 
 const document = {
   readyState: "loading",
   body: new FakeElement(),
   addEventListener() {},
   getElementById() {
-    return null
+    return elementsById.get("fcuno-wa-spc-board") || null
   },
   createElement() {
     return new FakeElement()
@@ -134,6 +168,7 @@ const window = {
 }
 
 const context = vm.createContext({
+  Element: FakeElement,
   InputEvent: class InputEvent {},
   KeyboardEvent: class KeyboardEvent {},
   MouseEvent: class MouseEvent {},
@@ -172,6 +207,24 @@ function setComposer(text = "") {
   return composer
 }
 
+function setChatWithComposer(title, text = "") {
+  const header = new FakeElement({
+    tag: "header",
+    children: [new FakeElement({ text: title, attrs: { title } })],
+  })
+  const composer = new FakeElement({
+    text,
+    attrs: { contenteditable: "true" },
+    role: "textbox",
+  })
+  const sendButton = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send" },
+  })
+  main = new FakeElement({ children: [header, composer, sendButton] })
+  return { composer, sendButton }
+}
+
 setHeaderTitles("KOREA", "+60 12-699 4488, You")
 const groupChat = api.getCurrentChat()
 assert.equal(groupChat.name, "KOREA")
@@ -194,5 +247,33 @@ assert.equal(api.composerText(composer), enquiry)
 composer = setComposer(`${enquiry}${enquiry}`)
 assert.equal(api.insertComposerText(enquiry), true)
 assert.equal(api.composerText(composer), enquiry)
+
+api.state.contacts = [
+  { id: "supplier-a", name: "Supplier A", list: "supplier", order: 1000 },
+  { id: "supplier-b", name: "Supplier B", list: "supplier", order: 2000 },
+  { id: "supplier-c", name: "Supplier C", list: "supplier", order: 3000 },
+  { id: "buyer-a", name: "Buyer A", list: "buyer", order: 1000 },
+]
+api.moveContact("supplier-c", "supplier", "supplier-a", "before")
+assert.deepEqual(
+  Array.from(api.contactsFor("supplier").map((contact) => contact.id)),
+  ["supplier-c", "supplier-a", "supplier-b"],
+  "contacts should reorder before a target row",
+)
+api.moveContact("supplier-c", "buyer", "", "before")
+assert.deepEqual(
+  Array.from(api.contactsFor("buyer").map((contact) => contact.id)),
+  ["buyer-a", "supplier-c"],
+  "contacts should move to the end of another list",
+)
+
+const duplicateMessage = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
+const { composer: sendComposer, sendButton } = setChatWithComposer("Supplier B")
+const contact = { id: "supplier-b", name: "Supplier B", phone: "", list: "supplier" }
+api.sendTextToContact(contact, duplicateMessage)
+api.sendTextToContact(contact, duplicateMessage)
+await new Promise((resolve) => setTimeout(resolve, 180))
+assert.equal(api.composerText(sendComposer), duplicateMessage)
+assert.equal(sendButton.clicked, 1, "duplicate sends for the same contact/message should be suppressed")
 
 console.log("SPC WhatsApp content tests passed")

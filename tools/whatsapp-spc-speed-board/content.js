@@ -90,6 +90,16 @@
     })
   }
 
+  function assignOrdersByCurrentListOrder() {
+    LISTS.forEach((list) => {
+      state.contacts
+        .filter((contact) => contact.list === list)
+        .forEach((contact, index) => {
+          contact.order = (index + 1) * 1000
+        })
+    })
+  }
+
   function contactsFor(list) {
     return state.contacts
       .filter((contact) => contact.list === list)
@@ -372,6 +382,7 @@
     const insertAt = index < 0 ? target.length : position === "after" ? index + 1 : index
     target.splice(insertAt, 0, moving)
     state.contacts = [...next.supplier, ...next.buyer]
+    assignOrdersByCurrentListOrder()
     saveState()
     render()
   }
@@ -972,6 +983,40 @@
     event.dataTransfer.effectAllowed = effectAllowed
   }
 
+  function setContactDragData(event, id) {
+    if (!event.dataTransfer || !id) return
+    event.dataTransfer.setData("application/x-fcuno-spc-contact-id", id)
+    event.dataTransfer.setData("text/plain", id)
+  }
+
+  function setEnquiryDragData(event, id) {
+    if (!event.dataTransfer || !id) return
+    event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
+  }
+
+  function contactDragId(event) {
+    if (!event.dataTransfer) return state.dragging || ""
+    return (
+      event.dataTransfer.getData("application/x-fcuno-spc-contact-id") ||
+      event.dataTransfer.getData("text/plain") ||
+      state.dragging ||
+      ""
+    )
+  }
+
+  function isBoardEventTarget(target) {
+    return Boolean(target && typeof target.closest === "function" && target.closest(`#${BOARD_ID}`))
+  }
+
+  function blockExternalEnquiryDrop(event) {
+    if (state.draggingType !== "enquiry") return
+    if (isBoardEventTarget(event.target)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation()
+    if (event.type === "drop") clearDragState()
+  }
+
   function setRowDragImage(event, row) {
     if (event.dataTransfer && typeof event.dataTransfer.setDragImage === "function") {
       event.dataTransfer.setDragImage(row, 16, 16)
@@ -1021,7 +1066,7 @@
         state.dragging = button.dataset.id || ""
         state.draggingType = "contact"
         prepareDragData(event, "move")
-        event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
+        setContactDragData(event, state.dragging)
         setRowDragImage(event, row)
       })
       button.addEventListener("dragend", () => clearDragState(host))
@@ -1052,7 +1097,7 @@
         state.dragging = row.dataset.id || ""
         state.draggingType = "contact"
         prepareDragData(event, "move")
-        event.dataTransfer.setData("application/x-fcuno-spc-contact-id", state.dragging)
+        setContactDragData(event, state.dragging)
         setRowDragImage(event, row)
       })
       row.addEventListener("drop", (event) => {
@@ -1067,7 +1112,7 @@
           if (contact && text) sendTextToContact(contact, text)
           return
         }
-        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || state.dragging
+        const id = contactDragId(event)
         moveContact(id, row.dataset.list || "supplier", row.dataset.id || "", position)
       })
       row.addEventListener("dragover", (event) => {
@@ -1096,7 +1141,7 @@
         clearDropMarkers(host)
         const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
         if (enquiryId) return
-        const id = event.dataTransfer.getData("application/x-fcuno-spc-contact-id") || state.dragging
+        const id = contactDragId(event)
         moveContact(id, list.dataset.list || "supplier", "")
       })
     })
@@ -1166,8 +1211,7 @@
         state.dragging = id
         state.draggingType = "enquiry"
         prepareDragData(event, "copy")
-        event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
-        event.dataTransfer.setData("application/x-fcuno-spc-enquiry-text", text)
+        setEnquiryDragData(event, id)
         setRowDragImage(event, row)
       })
       row.addEventListener("dragend", () => clearDragState(host))
@@ -1181,10 +1225,14 @@
       cleanText,
       composerText,
       contactNameIsPhone,
+      contactsFor,
+      contactDragId,
       currentChatMatchesContact,
       getCurrentChat,
       insertComposerText,
+      moveContact,
       phoneDigits,
+      sendTextToContact,
       textMatchesContact,
       withTemplate,
     }
@@ -1207,6 +1255,9 @@
     if (enquiryTimer) window.clearInterval(enquiryTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
   })
+
+  document.addEventListener("dragover", blockExternalEnquiryDrop, true)
+  document.addEventListener("drop", blockExternalEnquiryDrop, true)
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true })
