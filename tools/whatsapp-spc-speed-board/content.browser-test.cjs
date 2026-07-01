@@ -221,6 +221,29 @@ async function main() {
 
       assert.equal(invalidRuntimeResult.loading, false)
       assert.match(invalidRuntimeResult.enquiryError, /Reload WhatsApp Web/)
+
+      const invalidUnreadResult = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const row = document.getElementById("renamedRow")
+        const originalQuerySelectorAll = row.querySelectorAll
+        row.style.display = "block"
+        row.querySelectorAll = () => {
+          throw new Error("Extension context invalidated.")
+        }
+        api.state.contacts = [{ id: "unread-contact", name: "Otto Tone", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }]
+        api.state.unreadById = { "unread-contact": "1" }
+        api.state.enquiryError = ""
+        api.refreshUnreadIndicators()
+        const result = {
+          unread: api.state.unreadById["unread-contact"] || "",
+          enquiryError: api.state.enquiryError,
+        }
+        row.querySelectorAll = originalQuerySelectorAll
+        return result
+      })
+
+      assert.equal(invalidUnreadResult.unread, "")
+      assert.match(invalidUnreadResult.enquiryError, /Reload WhatsApp Web/)
     } finally {
       await browser.close()
     }

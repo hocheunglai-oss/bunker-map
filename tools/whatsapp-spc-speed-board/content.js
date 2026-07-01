@@ -38,6 +38,7 @@
   let lastEnquiryFingerprint = ""
   let recentSend = { key: "", at: 0 }
   let memorySendLock = { key: "", at: 0 }
+  let extensionContextStopped = false
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -59,6 +60,42 @@
     return "Reload WhatsApp Web after updating the SPC extension."
   }
 
+  function isExtensionContextError(error) {
+    return /extension context invalidated|context invalidated/i.test(String(error?.message || error || ""))
+  }
+
+  function stopExtensionContext() {
+    extensionContextStopped = true
+    if (unreadTimer) window.clearInterval(unreadTimer)
+    if (enquiryTimer) window.clearInterval(enquiryTimer)
+    if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
+    unreadTimer = 0
+    enquiryTimer = 0
+    templateSaveTimer = 0
+  }
+
+  function handleContentError(error) {
+    if (isExtensionContextError(error)) {
+      stopExtensionContext()
+      state.loadingEnquiries = false
+      state.enquiryError = runtimeUnavailableMessage()
+      render()
+      return true
+    }
+    console.error(error)
+    return true
+  }
+
+  function safeRun(callback) {
+    if (extensionContextStopped) return undefined
+    try {
+      return callback()
+    } catch (error) {
+      handleContentError(error)
+      return undefined
+    }
+  }
+
   function runtimeLastErrorMessage() {
     try {
       return chrome.runtime.lastError?.message || ""
@@ -68,6 +105,7 @@
   }
 
   function canSendRuntimeMessage() {
+    if (extensionContextStopped) return false
     try {
       return (
         typeof chrome !== "undefined" &&
@@ -603,15 +641,21 @@
   }
 
   function unreadCount(row) {
-    const label = Array.from(row.querySelectorAll("[aria-label], [title]"))
-      .map((element) => `${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""}`)
-      .map(cleanText)
-      .find((text) => /unread|未讀|未读/i.test(text))
-    const match = label && label.match(/\d+/)
-    return match ? match[0] : label ? "•" : ""
+    try {
+      const label = Array.from(row.querySelectorAll("[aria-label], [title]"))
+        .map((element) => `${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""}`)
+        .map(cleanText)
+        .find((text) => /unread|未讀|未读/i.test(text))
+      const match = label && label.match(/\d+/)
+      return match ? match[0] : label ? "•" : ""
+    } catch (error) {
+      handleContentError(error)
+      return ""
+    }
   }
 
   function refreshUnreadIndicators() {
+    if (extensionContextStopped) return
     const next = {}
     state.contacts.forEach((contact) => {
       const row = findVisibleChatRow(contact)
@@ -1475,6 +1519,7 @@
       loadEnquiries,
       moveContact,
       phoneDigits,
+      refreshUnreadIndicators,
       selectedEnquiryText,
       acquireSendLock,
       sendTextToContact,
@@ -1488,11 +1533,11 @@
     await loadState()
     saveState()
     render()
-    loadEnquiries()
-    refreshUnreadIndicators()
-    window.setTimeout(trySendPending, 650)
-    unreadTimer = window.setInterval(refreshUnreadIndicators, 1800)
-    enquiryTimer = window.setInterval(loadEnquiries, 2000)
+    safeRun(loadEnquiries)
+    safeRun(refreshUnreadIndicators)
+    window.setTimeout(() => safeRun(trySendPending), 650)
+    unreadTimer = window.setInterval(() => safeRun(refreshUnreadIndicators), 1800)
+    enquiryTimer = window.setInterval(() => safeRun(loadEnquiries), 2000)
   }
 
   window.addEventListener("beforeunload", () => {
