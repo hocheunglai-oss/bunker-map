@@ -1,7 +1,13 @@
 import { createClient } from "@supabase/supabase-js"
-import type { AdminPageDefinition } from "@/lib/adminPages"
-
 export type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
+
+type AuditPageDefinition = {
+  id: string
+  label: string
+  group: string
+  path: string
+  matchPrefixes?: string[]
+}
 
 export type AuditLogRecord = {
   id: string
@@ -99,6 +105,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "taiwan-price-history": "TAIWAN PRICE HISTORY",
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-buyer-enquiries": "SPC ENQUIRIES",
+  "spc-chrome-extension": "SPC CHROME EXTENSION",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
   "spc-suppliers": "SPC SUPPLIER DATABASE",
@@ -284,7 +291,7 @@ function getContextText(context: Record<string, unknown>, ...keys: string[]) {
   return null
 }
 
-function pageFromPath(pathname: string, pages: AdminPageDefinition[]) {
+function pageFromPath(pathname: string, pages: AuditPageDefinition[]) {
   return pages.find((page) => {
     if (pathname === page.path) return true
     return (page.matchPrefixes || []).some(
@@ -327,7 +334,7 @@ function inferOfficeCalendarPageId(record: AuditLogRecord) {
   return key === "task-calendar" ? "task-calendar" : "event-calendar"
 }
 
-function withAuditPageLabel(page: AdminPageDefinition) {
+function withAuditPageLabel(page: AuditPageDefinition) {
   return {
     ...page,
     label: AUDIT_PAGE_LABELS[page.id] || page.label,
@@ -336,7 +343,7 @@ function withAuditPageLabel(page: AdminPageDefinition) {
 
 function getAuditPage(
   record: AuditLogRecord,
-  pages: AdminPageDefinition[],
+  pages: AuditPageDefinition[],
   portNames: Map<string, string>
 ) {
   const contextPageId = getContextText(
@@ -377,7 +384,7 @@ function getAuditPage(
       AUDIT_PAGE_LABELS[pageId] ||
       getContextText(record.requestContext, "pageLabel", "page_label") ||
       "OTHER ADMIN ACTIVITY",
-    group: "management" as const,
+    group: "management",
     path: "/admin",
   }
 }
@@ -671,7 +678,7 @@ async function getPortNames(records: AuditLogRecord[]) {
 
 export async function presentAuditLogs(
   records: AuditLogRecord[],
-  pages: AdminPageDefinition[]
+  pages: AuditPageDefinition[]
 ) {
   const portNames = await getPortNames(records)
 

@@ -15,7 +15,7 @@ import {
 type SpcPageGroup = SpcPageDefinition["group"]
 type VisiblePermission = Exclude<SpcPagePermission, "none">
 
-const SPC_GROUP_ORDER: SpcPageGroup[] = ["trading", "contacts", "management"]
+const SPC_GROUP_ORDER: SpcPageGroup[] = ["trading", "records", "market", "management"]
 const SIDEBAR_COLLAPSED_KEY = "spc-sidebar-collapsed"
 const SIDEBAR_GROUPS_KEY = "spc-sidebar-groups"
 
@@ -38,46 +38,6 @@ function readStoredGroups() {
   } catch {
     return defaultExpandedGroups()
   }
-}
-
-function ToolIcon({ page }: { page: SpcPageDefinition }) {
-  if (page.id === "spc-user-management") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4.5 19c.6-3.3 2.1-5 4.5-5s3.9 1.7 4.5 5" />
-        <path d="M16.2 7.2a2.5 2.5 0 0 1 0 4.6M16 14.2c1.8.4 3 1.9 3.5 4.3" />
-      </svg>
-    )
-  }
-  if (page.id === "spc-audit-log") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M7 4.5h10v15H7v-15Z" />
-        <path d="M9.5 8.5h5M9.5 12h5M9.5 15.5h3.5" />
-      </svg>
-    )
-  }
-  if (page.id === "spc-system-health") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 13h4l2-5 4 10 2-5h4" />
-      </svg>
-    )
-  }
-  if (page.id === "spc-tech-stack") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m12 4 8 4-8 4-8-4 8-4Z" />
-        <path d="m4 12 8 4 8-4M4 16l8 4 8-4" />
-      </svg>
-    )
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 4.5h8M9 3.5h6v3H9v-3ZM6 6h12v14H6V6Z" />
-      <path d="M8.8 11h6.4M8.8 14h6.4M8.8 17h4.2" />
-    </svg>
-  )
 }
 
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
@@ -223,9 +183,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
               title={`${page.label} (${permission === "edit" ? "Edit access" : "View access"})`}
             >
               <span className="fc-admin-sidebar-link-main">
-                <span className="fc-admin-sidebar-page-icon">
-                  <ToolIcon page={page} />
-                </span>
                 <span>{page.label}</span>
               </span>
             </Link>
@@ -299,7 +256,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
 
         <div className="fc-admin-sidebar-expanded-content">
           <label className="fc-admin-sidebar-search">
-            <span className="fc-admin-sidebar-search-icon" aria-hidden="true">⌕</span>
             <span className="sr-only">Search SPC tools</span>
             <input
               ref={searchInputRef}

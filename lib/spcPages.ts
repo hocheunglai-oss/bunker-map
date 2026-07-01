@@ -9,7 +9,7 @@ export type SpcRoleId = string
 export type SpcPageDefinition = {
   id: string
   label: string
-  group: "trading" | "contacts" | "management"
+  group: "trading" | "records" | "market" | "management"
   path: string
   matchPrefixes?: string[]
 }
@@ -23,23 +23,30 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/buyer", "/spc/buyer", "/enquiries", "/spc/enquiries"],
   },
   {
+    id: "spc-chrome-extension",
+    label: "CHROME EXTENSION",
+    group: "trading",
+    path: "/spc/chrome",
+    matchPrefixes: ["/chrome", "/spc/chrome"],
+  },
+  {
     id: "spc-fixtures",
     label: "FIXTURES",
-    group: "trading",
+    group: "records",
     path: "/spc/fixtures",
     matchPrefixes: ["/fixtures", "/spc/fixtures"],
   },
   {
     id: "spc-lost-record",
     label: "LOST RECORD",
-    group: "trading",
+    group: "records",
     path: "/spc/lost-record",
     matchPrefixes: ["/lost-record", "/spc/lost-record", "/lost", "/spc/lost"],
   },
   {
     id: "spc-suppliers",
     label: "SUPPLIER DATABASE",
-    group: "contacts",
+    group: "market",
     path: "/spc/suppliers",
     matchPrefixes: ["/suppliers", "/spc/suppliers"],
   },
@@ -75,7 +82,8 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
 
 export const SPC_PAGE_GROUP_LABELS: Record<SpcPageDefinition["group"], string> = {
   trading: "Trading Tools",
-  contacts: "Contact Tools",
+  records: "Trading Records",
+  market: "Market Intelligence",
   management: "Management Tools",
 }
 
@@ -159,7 +167,10 @@ export function getDefaultSpcPermissionsForRole(
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
       permissions[page.id] =
-        page.id === "spc-buyer-enquiries" || page.id === "spc-fixtures" || page.id === "spc-lost-record"
+        page.id === "spc-buyer-enquiries" ||
+        page.id === "spc-chrome-extension" ||
+        page.id === "spc-fixtures" ||
+        page.id === "spc-lost-record"
           ? "view"
           : "none"
       return permissions
@@ -190,6 +201,7 @@ export function getSpcPageByPath(pathname: string) {
 export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | null | undefined) {
   const priority = [
     "spc-buyer-enquiries",
+    "spc-chrome-extension",
     "spc-fixtures",
     "spc-lost-record",
     "spc-suppliers",
