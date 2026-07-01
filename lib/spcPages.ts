@@ -37,6 +37,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/lost-record", "/spc/lost-record", "/lost", "/spc/lost"],
   },
   {
+    id: "spc-suppliers",
+    label: "SUPPLIER DATABASE",
+    group: "contacts",
+    path: "/spc/suppliers",
+    matchPrefixes: ["/suppliers", "/spc/suppliers"],
+  },
+  {
     id: "spc-audit-log",
     label: "AUDIT LOG",
     group: "management",
@@ -185,6 +192,7 @@ export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | nul
     "spc-buyer-enquiries",
     "spc-fixtures",
     "spc-lost-record",
+    "spc-suppliers",
     "spc-user-management",
     "spc-audit-log",
     "spc-system-health",

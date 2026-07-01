@@ -31,6 +31,7 @@ export type PresentedAuditLogRecord = AuditLogRecord & {
   recordLabel: string
   summary: string
   details: string[]
+  undoable: boolean
 }
 
 type AuditLogRow = {
@@ -90,6 +91,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_users: "spc-user-management",
   spc_enquiries: "spc-buyer-enquiries",
   spc_role_defaults: "spc-user-management",
+  spc_suppliers: "spc-suppliers",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -99,6 +101,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
+  "spc-suppliers": "SPC SUPPLIER DATABASE",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",
   "spc-tech-stack": "SPC TECH STACK",
@@ -127,6 +130,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_users: "SPC user",
   spc_enquiries: "SPC enquiry",
   spc_role_defaults: "SPC permission group",
+  spc_suppliers: "SPC supplier",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -172,6 +176,8 @@ const FIELD_LABELS: Record<string, string> = {
   enquiry_number: "enquiry number",
   vessel_name: "vessel name",
   supplier_name: "supplier",
+  bdn_entries: "BDN rows",
+  contact: "contact",
   created_by_username: "created by",
   created_by_display_name: "created by",
   content: "content",
@@ -199,7 +205,10 @@ const SPC_TABLE_NAMES = new Set([
   "spc_users",
   "spc_enquiries",
   "spc_role_defaults",
+  "spc_suppliers",
 ])
+
+const NON_UNDOABLE_TABLES = new Set(["spc_suppliers"])
 
 function isSpcAuditRecord(record: AuditLogRecord) {
   const actorId = record.actorId?.trim().toLowerCase() || ""
@@ -249,6 +258,22 @@ function mapAuditLog(row: AuditLogRow): AuditLogRecord {
     undoneAt: row.undone_at,
     undoneByLogId: row.undone_by_log_id,
   }
+}
+
+export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  return !NON_UNDOABLE_TABLES.has(record.tableName)
+}
+
+export async function getAuditLogRecord(logId: string) {
+  const supabase = getSupabaseAuditClient()
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select(AUDIT_SELECT)
+    .eq("id", logId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data ? mapAuditLog(data as unknown as AuditLogRow) : null
 }
 
 function getContextText(context: Record<string, unknown>, ...keys: string[]) {
@@ -663,6 +688,7 @@ export async function presentAuditLogs(
       recordLabel,
       summary: buildSummary(record, displayOperation, recordLabel),
       details: buildDetails(record, displayOperation, recordLabel),
+      undoable: canUndoAuditLogRecord(record),
     }
   })
 }
@@ -716,7 +742,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_role_defaults)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_role_defaults,spc_suppliers)",
     )
   }
 

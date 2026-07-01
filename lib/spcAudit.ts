@@ -14,6 +14,7 @@ const SPC_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
+  "spc-suppliers": "SPC SUPPLIER DATABASE",
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",

@@ -33,12 +33,14 @@ const SERVICES = [
   ["USER AUTHORITY", "PAGE PERMISSIONS", "SHARED CONFIG STORE", "SPC GROUPS"],
   ["DATABASE", "POSTGRESQL", "SUPABASE", "SPC_USERS / SPC_ENQUIRIES"],
   ["ENQUIRY OUTCOME TRACKING", "ENQUIRIES / FIXTURES / LOST RECORD", "SPC APP", "SPC_ENQUIRIES"],
+  ["SUPPLIER DATABASE", "GOOGLE SHEETS API / SHEET-BACKED EDITS", "GOOGLE WORKSPACE", "SINGAPORE PURCHASE CENTRE DATA"],
   ["WHATSAPP ENQUIRY BOARD", "CHROME EXTENSION / SPC ENQUIRY FEED", "TRADER BROWSER", "TOOLS/WHATSAPP-SPC-SPEED-BOARD"],
 ] as const
 
 const DATABASE_GROUPS = [
   { title: "SPC AUTH", tables: ["spc_users", "office_calendar_store: spc-permission-groups"] },
   { title: "SPC OPERATIONS", tables: ["spc_enquiries"] },
+  { title: "SPC SUPPLIERS", tables: ["Google Sheet: INFO", "Google Sheet: COVERAGE", "Google Sheet: SUPPLIER BDN", "Google Sheet: CONTACTS", "Google Sheet: SUPPLIER BARGES"] },
   { title: "SPC AUDIT", tables: ["audit_logs"] },
 ] as const
 

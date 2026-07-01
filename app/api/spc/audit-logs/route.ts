@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import {
+  canUndoAuditLogRecord,
+  getAuditLogRecord,
   listAuditLogs,
   matchesAuditActor,
   presentAuditLogs,
@@ -14,6 +16,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   "spc-buyer-enquiries": ["spc_enquiries"],
   "spc-fixtures": ["spc_enquiries"],
   "spc-lost-record": ["spc_enquiries"],
+  "spc-suppliers": ["spc_suppliers"],
 }
 
 function rawOperationsForDisplay(operation: string | undefined) {
@@ -95,6 +98,13 @@ export async function POST(request: Request) {
     }
     if (!payload.id) {
       return NextResponse.json({ message: "Missing audit log id." }, { status: 400 })
+    }
+    const target = await getAuditLogRecord(payload.id)
+    if (!target) {
+      return NextResponse.json({ message: "Audit log was not found." }, { status: 404 })
+    }
+    if (!canUndoAuditLogRecord(target)) {
+      return NextResponse.json({ message: "This SPC supplier change must be edited from the supplier database." }, { status: 400 })
     }
 
     const undoLogId = await undoAuditLog(payload.id, session)

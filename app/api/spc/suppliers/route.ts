@@ -1,88 +1,73 @@
 import { NextResponse } from "next/server"
-import { requireSpcPagePermission } from "@/lib/spcAuth"
+import {
+  hasSpcPagePermission,
+  requireSpcPagePermission,
+  requireSpcSession,
+} from "@/lib/spcAuth"
+import { loadSpcSupplierDataset, saveSpcSupplier } from "@/lib/spcSuppliers"
+import type { SpcSupplierSaveInput } from "@/lib/spcSupplierTypes"
 
 export const dynamic = "force-dynamic"
 
-const SUPPLIER_SHEET_CSV =
-  "https://docs.google.com/spreadsheets/d/1SIyBc1hl29gVwCxBQDsz-gK0bfZe36RDDgiDDIFfGTg/export?format=csv&gid=0"
-
-const FALLBACK_SUPPLIERS = [
-  "PETRONAS",
-  "GLOBAL MARINE TRANSPORT",
-  "HYUNDAI",
-  "EASTPAC",
-  "PERTAMINA",
-  "CNC PETROLEUM",
-  "TFG MARINE",
-  "CHEVRON",
-  "SK ENERGY",
-  "SHELL",
-  "MAERSK",
-]
-
-function firstCsvCell(line: string) {
-  const source = line.trim()
-  if (!source) return ""
-  if (!source.startsWith('"')) return source.split(",")[0]?.trim() || ""
-
-  let cell = ""
-  for (let index = 1; index < source.length; index += 1) {
-    const char = source[index]
-    const next = source[index + 1]
-    if (char === '"' && next === '"') {
-      cell += '"'
-      index += 1
-      continue
-    }
-    if (char === '"') break
-    cell += char
-  }
-  return cell.trim()
+function statusForMessage(message: string) {
+  if (message === "Unauthorized") return 401
+  if (message === "Forbidden") return 403
+  return 500
 }
 
-function parseSupplierCsv(csv: string) {
-  const seen = new Set<string>()
-  const suppliers: string[] = []
-
-  csv.split(/\r?\n/).forEach((line) => {
-    const supplier = firstCsvCell(line)
-    const key = supplier.toLowerCase()
-    if (!supplier || seen.has(key)) return
-    seen.add(key)
-    suppliers.push(supplier)
-  })
-
-  return suppliers
+async function requireSupplierView() {
+  const session = await requireSpcSession()
+  if (
+    !hasSpcPagePermission(session, "spc-suppliers", "view") &&
+    !hasSpcPagePermission(session, "spc-fixtures", "view")
+  ) {
+    throw new Error("Forbidden")
+  }
+  return session
 }
 
 export async function GET() {
   try {
-    await requireSpcPagePermission("spc-fixtures", "view")
-    let suppliers = FALLBACK_SUPPLIERS
-
-    try {
-      const response = await fetch(SUPPLIER_SHEET_CSV, { cache: "no-store" })
-      if (response.ok) {
-        const parsed = parseSupplierCsv(await response.text())
-        if (parsed.length > 0) suppliers = parsed
-      }
-    } catch {
-      suppliers = FALLBACK_SUPPLIERS
-    }
-
-    return NextResponse.json(
-      { suppliers },
-      {
-        headers: {
-          "Cache-Control": "private, no-store",
-        },
+    await requireSupplierView()
+    const dataset = await loadSpcSupplierDataset()
+    return NextResponse.json(dataset, {
+      headers: {
+        "Cache-Control": "private, no-store",
       },
-    )
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load suppliers."
-    return NextResponse.json(
-      { message },
-      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    return NextResponse.json({ message }, { status: statusForMessage(message) })
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const session = await requireSpcPagePermission("spc-suppliers", "edit")
+    const payload = (await request.json()) as Partial<SpcSupplierSaveInput>
+    const supplierKey = typeof payload.supplierKey === "string" ? payload.supplierKey : ""
+    if (!supplierKey) {
+      return NextResponse.json({ message: "Missing supplier." }, { status: 400 })
+    }
+
+    const result = await saveSpcSupplier(
+      {
+        supplierKey,
+        info: payload.info,
+        contact: payload.contact,
+        bdnEntries: Array.isArray(payload.bdnEntries) ? payload.bdnEntries : [],
+      },
+      session,
+      request,
     )
+
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "private, no-store",
+      },
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to save supplier."
+    return NextResponse.json({ message }, { status: statusForMessage(message) })
   }
 }

@@ -21,6 +21,7 @@ type AuditLogRecord = {
   details: string[]
   undoOfLogId: string | null
   undoneAt: string | null
+  undoable: boolean
 }
 
 type AuditResponse = {
@@ -89,7 +90,7 @@ export default function SpcAuditLogPage() {
   }, [actor, authenticated, canView, operation, pageId])
 
   async function undoSelected() {
-    if (!selectedLog || !canEdit) return
+    if (!selectedLog || !canEdit || !selectedLog.undoable) return
     if (!window.confirm(`Undo this change?\n\n${selectedLog.summary}`)) return
     setUndoingId(selectedLog.id)
     setMessage("")
@@ -202,7 +203,14 @@ export default function SpcAuditLogPage() {
             <button
               type="button"
               onClick={() => void undoSelected()}
-              disabled={!selectedLog || !canEdit || Boolean(selectedLog.undoOfLogId) || Boolean(selectedLog.undoneAt) || undoingId === selectedLog.id}
+              disabled={
+                !selectedLog ||
+                !canEdit ||
+                !selectedLog.undoable ||
+                Boolean(selectedLog.undoOfLogId) ||
+                Boolean(selectedLog.undoneAt) ||
+                undoingId === selectedLog.id
+              }
             >
               {undoingId === selectedLog?.id ? "Undoing..." : "Undo"}
             </button>
