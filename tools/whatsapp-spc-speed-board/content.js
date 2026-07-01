@@ -190,18 +190,22 @@
       contacts: Array.isArray(source.contacts)
         ? source.contacts
             .filter((contact) => contact && typeof contact === "object")
-            .map((contact, index) => ({
-              id: String(contact.id || uid()),
-              name: cleanText(contact.name) || "Unnamed chat",
-              chatName: cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName),
-              company: cleanText(contact.company),
-              phone: cleanText(contact.phone),
-              directUrl: cleanText(contact.directUrl),
-              list: contact.list === "buyer" ? "buyer" : "supplier",
-              order: Number.isFinite(Number(contact.order)) ? Number(contact.order) : index + 1,
-              createdAt: contact.createdAt || new Date().toISOString(),
-              updatedAt: contact.updatedAt || new Date().toISOString(),
-            }))
+            .map((contact, index) => {
+              const chatName = cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName || contact.name)
+              const phone = cleanText(contact.phone)
+              return {
+                id: String(contact.id || uid()),
+                name: chatName || phone || "Unnamed chat",
+                chatName,
+                company: cleanText(contact.company),
+                phone,
+                directUrl: cleanText(contact.directUrl),
+                list: contact.list === "buyer" ? "buyer" : "supplier",
+                order: Number.isFinite(Number(contact.order)) ? Number(contact.order) : index + 1,
+                createdAt: contact.createdAt || new Date().toISOString(),
+                updatedAt: contact.updatedAt || new Date().toISOString(),
+              }
+            })
         : [],
     }
   }
@@ -267,19 +271,8 @@
   }
 
   function contactLookupNames(contact) {
-    const seen = new Set()
-    return [contactChatName(contact), contact?.name]
-      .map(cleanText)
-      .filter((name) => {
-        const key = name.toLowerCase()
-        if (!name || seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
-  }
-
-  function allowsPartialDisplayMatch(contact) {
-    return !contactChatName(contact) && !phoneDigits(contact?.phone) && cleanText(contact?.name).length >= 3
+    const name = contactChatName(contact) || cleanText(contact?.name)
+    return name ? [name] : []
   }
 
   function canUseDirectUrl(contact) {
@@ -321,9 +314,13 @@
           "search",
           "menu",
           "message",
+          "more options",
           "typing",
           "online",
           "last seen",
+          "video call",
+          "voice call",
+          "audio call",
           "profile details",
           "contact info",
           "group info",
@@ -335,30 +332,12 @@
       })
   }
 
-  function headerTitleCandidates(header) {
-    return Array.from(header.querySelectorAll("span[title], div[title]"))
-      .filter(isVisible)
-      .map((element) => cleanText(element.getAttribute("title") || element.textContent))
-      .filter((text) => {
-        const key = text.toLowerCase()
-        if (!text) return false
-        return ![
-          "profile details",
-          "contact info",
-          "group info",
-          "click to see",
-          "open chat details",
-        ].some((item) => key.includes(item))
-      })
-  }
-
   function getCurrentChat() {
     const main = document.querySelector("#main") || document.querySelector("[role='main']")
     const header = main && main.querySelector("header")
     if (!main || !header) return null
 
-    const titleCandidates = headerTitleCandidates(header)
-    const candidates = titleCandidates.length > 0 ? titleCandidates : textCandidates(header)
+    const candidates = textCandidates(header)
     const name = candidates.find((text) => phoneDigits(text).length < 7) || candidates[0] || ""
     const phone = phoneDigits(name).length >= 7 ? phoneDigits(name) : ""
     if (!name && !phone) return null
@@ -377,8 +356,7 @@
     })
 
     if (duplicate) {
-      const wasUsingWhatsappName = !duplicate.chatName || cleanText(duplicate.name).toLowerCase() === cleanText(duplicate.chatName).toLowerCase()
-      duplicate.name = wasUsingWhatsappName ? keyName : duplicate.name
+      duplicate.name = keyName
       duplicate.chatName = keyName
       duplicate.phone = chat.phone || duplicate.phone
       duplicate.directUrl = chat.directUrl || duplicate.directUrl
@@ -405,24 +383,6 @@
     state.contacts = state.contacts.filter((contact) => contact.id !== id)
     delete state.unreadById[id]
     if (state.contactMenuId === id) state.contactMenuId = ""
-    saveState()
-    render()
-  }
-
-  function renameContact(id) {
-    const contact = state.contacts.find((item) => item.id === id)
-    if (!contact) return
-    const nextName = window.prompt("Rename saved chat", contact.name)
-    const cleaned = cleanText(nextName)
-    if (!cleaned || cleaned === contact.name) {
-      state.contactMenuId = ""
-      render()
-      return
-    }
-    if (!contact.chatName) contact.chatName = contact.name
-    contact.name = cleaned
-    contact.updatedAt = new Date().toISOString()
-    state.contactMenuId = ""
     saveState()
     render()
   }
@@ -463,12 +423,7 @@
     const digits = phoneDigits(contact.phone)
     if (digits && phoneDigits(text).includes(digits)) return true
     const lookupNames = contactLookupNames(contact).map((name) => name.toLowerCase())
-    if (lookupNames.some((name) => text === name)) return true
-    if (allowsPartialDisplayMatch(contact)) {
-      const displayName = cleanText(contact.name).toLowerCase()
-      return Boolean(displayName && (text.includes(displayName) || displayName.includes(text)))
-    }
-    return false
+    return lookupNames.some((name) => text === name)
   }
 
   function clickableRow(element) {
@@ -956,12 +911,7 @@
     const contactPhone = phoneDigits(contact.phone)
     if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
     const chatName = cleanText(chat.name).toLowerCase()
-    if (contactLookupNames(contact).some((name) => chatName && chatName === name.toLowerCase())) return true
-    if (allowsPartialDisplayMatch(contact)) {
-      const displayName = cleanText(contact.name).toLowerCase()
-      return Boolean(chatName && displayName && (chatName.includes(displayName) || displayName.includes(chatName)))
-    }
-    return false
+    return contactLookupNames(contact).some((name) => chatName && chatName === name.toLowerCase())
   }
 
   function clearPendingSend() {
@@ -1041,10 +991,9 @@
           </button>
           <div class="fcuno-wa-spc-row-actions">
             ${state.unreadById[contact.id] ? `<span class="fcuno-wa-spc-unread">${escapeHtml(state.unreadById[contact.id])}</span>` : ""}
-            <button class="fcuno-wa-spc-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or edit">☰</button>
+            <button class="fcuno-wa-spc-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or remove">☰</button>
             ${menuOpen ? `
               <div class="fcuno-wa-spc-contact-menu" role="menu">
-                <button type="button" data-action="rename-contact" data-id="${escapeHtml(contact.id)}">Rename</button>
                 <button type="button" data-action="remove-contact" data-id="${escapeHtml(contact.id)}">Remove</button>
               </div>
             ` : ""}
@@ -1259,13 +1208,6 @@
         setRowDragImage(event, row)
       })
       button.addEventListener("dragend", () => clearDragState(host))
-    })
-
-    host.querySelectorAll("[data-action='rename-contact']").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation()
-        renameContact(button.dataset.id || "")
-      })
     })
 
     host.querySelectorAll("[data-action='remove-contact']").forEach((button) => {

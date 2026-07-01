@@ -293,6 +293,17 @@ function setHeaderTitles(...titles) {
   main = new FakeElement({ children: [header] })
 }
 
+function setHeaderTitleAndSubtitle(title, subtitle) {
+  const header = new FakeElement({
+    tag: "header",
+    children: [
+      new FakeElement({ text: title, tag: "span", attrs: { dir: "auto" } }),
+      new FakeElement({ text: subtitle, tag: "span", attrs: { title: subtitle } }),
+    ],
+  })
+  main = new FakeElement({ children: [header] })
+}
+
 function setComposer(text = "") {
   const composer = new FakeElement({
     text,
@@ -352,22 +363,30 @@ assert.equal(groupChat.directUrl, "")
 assert.equal(api.canUseDirectUrl({ name: "KOREA", phone: "+60126994488" }), false)
 assert.equal(api.canUseDirectUrl({ name: "+85266885575", phone: "+85266885575" }), true)
 
+setHeaderTitleAndSubtitle("Cosulich - Sumitomo (South Korea/Taiwan)", "ATSUSHI, MASATO, SHUGO, You")
+const renamedGroupChat = api.getCurrentChat()
+assert.equal(renamedGroupChat.name, "Cosulich - Sumitomo (South Korea/Taiwan)")
+assert.equal(renamedGroupChat.phone, "")
+
 setHeaderTitles("SUMITOMO KOREA TAIWAN")
 assert.equal(api.currentChatMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }), false)
 assert.equal(api.currentChatMatchesContact({ name: "SUMITOMO KOREA TAIWAN", phone: "" }), true)
 assert.equal(api.textMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }, "SUMITOMO KOREA TAIWAN"), false)
 assert.equal(api.textMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }, "KOREA"), true)
 
-const renamedContact = { name: "OTTO", chatName: "Otto Tone", phone: "" }
-assert.equal(api.contactSearchText(renamedContact), "Otto Tone")
-assert.equal(api.textMatchesContact(renamedContact, "Otto Tone"), true)
-assert.equal(api.textMatchesContact(renamedContact, "OTTO"), true)
+const formerRenamedContact = { name: "OTTO", chatName: "Otto Tone", phone: "" }
+assert.equal(api.contactSearchText(formerRenamedContact), "Otto Tone")
+assert.equal(api.textMatchesContact(formerRenamedContact, "Otto Tone"), true)
+assert.equal(api.textMatchesContact(formerRenamedContact, "OTTO"), false)
 setHeaderTitles("Otto Tone")
-assert.equal(api.currentChatMatchesContact(renamedContact), true)
+assert.equal(api.currentChatMatchesContact(formerRenamedContact), true)
+setHeaderTitles("OTTO")
+assert.equal(api.currentChatMatchesContact(formerRenamedContact), false)
 
-const legacyRenamedContact = { name: "OTTO", phone: "" }
-assert.equal(api.textMatchesContact(legacyRenamedContact, "Otto Tone"), true)
-assert.equal(api.currentChatMatchesContact(legacyRenamedContact), true)
+const aliasOnlyContact = { name: "OTTO", phone: "" }
+assert.equal(api.textMatchesContact(aliasOnlyContact, "Otto Tone"), false)
+setHeaderTitles("Otto Tone")
+assert.equal(api.currentChatMatchesContact(aliasOnlyContact), false)
 
 const enquiry = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 let composer = setComposer(enquiry)

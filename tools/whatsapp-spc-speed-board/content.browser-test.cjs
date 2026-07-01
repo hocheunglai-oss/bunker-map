@@ -58,7 +58,7 @@ const html = `<!doctype html>
       };
       document.getElementById("search").addEventListener("input", (event) => {
         const value = String(event.target.value || "").toLowerCase();
-        document.getElementById("renamedRow").style.display = value === "otto" || value.includes("otto tone") ? "block" : "none";
+        document.getElementById("renamedRow").style.display = value.includes("otto tone") ? "block" : "none";
       });
       window.chrome = {
         runtime: {
@@ -172,36 +172,6 @@ async function main() {
       assert.equal(renamedResult.sentCount, 1)
       assert.equal(renamedResult.chatTitle, "Otto Tone")
       assert.equal(renamedResult.searchText, "")
-
-      await page.evaluate((message) => {
-        const api = window.__FCUNO_WA_SPC_TEST_API__
-        const contact = { id: "legacy-renamed-contact", name: "OTTO", phone: "", list: "buyer", order: 1000 }
-        api.state.contacts = [contact]
-        window.sentMessages = []
-        document.getElementById("sent").textContent = ""
-        document.getElementById("composer").replaceChildren()
-        document.getElementById("search").value = ""
-        document.getElementById("renamedRow").style.display = "none"
-        window.setChatTitle("Other Chat")
-        api.sendTextToContact(contact, message)
-      }, enquiry)
-
-      await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 5000 })
-      await page.waitForTimeout(250)
-
-      const legacyRenamedResult = await page.evaluate(() => ({
-        sentText: document.getElementById("sent").innerText,
-        composerText: document.getElementById("composer").innerText,
-        sentCount: window.sentMessages.length,
-        chatTitle: document.getElementById("chatTitle").getAttribute("title"),
-        searchText: document.getElementById("search").value,
-      }))
-
-      assert.equal(legacyRenamedResult.sentText, enquiry)
-      assert.equal(legacyRenamedResult.composerText, "")
-      assert.equal(legacyRenamedResult.sentCount, 1)
-      assert.equal(legacyRenamedResult.chatTitle, "Otto Tone")
-      assert.equal(legacyRenamedResult.searchText, "")
     } finally {
       await browser.close()
     }
