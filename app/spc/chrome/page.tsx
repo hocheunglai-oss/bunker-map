@@ -6,7 +6,7 @@ import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
-const PAGE_TITLE = "whatsappex"
+const PAGE_TITLE = "WHATSAPP EXTENSION"
 
 type Step = {
   title: string
@@ -40,8 +40,8 @@ const STEPS: readonly Step[] = [
   {
     title: "Open",
     details: [
-      "Refresh WhatsApp Web.",
-      "Ensure both SPC and WhatsApp Web open while using the board.",
+      "Ensure your WhatsApp Web is in English, click refresh.",
+      "Keep both SPC and WhatsApp Web open while using the board.",
     ],
   },
   {
@@ -52,13 +52,6 @@ const STEPS: readonly Step[] = [
     ],
   },
 ]
-
-const CHECKS = [
-  "The extension appears as FCUNO SPC WhatsApp Board in chrome://extensions.",
-  "WhatsApp Web shows the SPC board after the page finishes loading.",
-  "The enquiry panel loads recent SPC enquiries after SPC login.",
-  "If the panel asks you to log in, open SPC again, refresh WhatsApp Web, then retry.",
-] as const
 
 export default function SpcChromeExtensionPage() {
   const router = useRouter()
@@ -84,13 +77,7 @@ export default function SpcChromeExtensionPage() {
 
   return (
     <SpcShell title={PAGE_TITLE}>
-      <div className="spc-page-heading">
-        <div>
-          <h1>{PAGE_TITLE}</h1>
-        </div>
-      </div>
-
-      <section className="spc-panel">
+      <section className="spc-panel spc-chrome-installation-panel">
         <div className="spc-panel-header">
           <h2>INSTALLATION</h2>
         </div>
@@ -114,37 +101,6 @@ export default function SpcChromeExtensionPage() {
             </article>
           ))}
         </div>
-      </section>
-
-      <section className="spc-panel">
-        <div className="spc-panel-header">
-          <h2>Required Addresses</h2>
-        </div>
-        <div className="spc-chrome-addresses">
-          <div>
-            <span>Install page</span>
-            <strong>chrome://extensions</strong>
-          </div>
-          <div>
-            <span>SPC login</span>
-            <strong>https://spc.fcuno.com</strong>
-          </div>
-          <div>
-            <span>Run extension</span>
-            <strong>https://web.whatsapp.com</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="spc-panel">
-        <div className="spc-panel-header">
-          <h2>Verification</h2>
-        </div>
-        <ul className="spc-chrome-checks">
-          {CHECKS.map((check) => (
-            <li key={check}>{check}</li>
-          ))}
-        </ul>
       </section>
     </SpcShell>
   )

@@ -2700,16 +2700,27 @@ body {
   white-space: nowrap;
 }
 
+.spc-chrome-installation-panel {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.spc-chrome-installation-panel .spc-panel-header {
+  min-height: 50px;
+  background: #ffffff;
+}
+
 .spc-guide-list {
   display: grid;
 }
 
 .spc-guide-step {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
   border-top: 1px solid var(--fc-admin-border-soft);
-  padding: 16px;
+  padding: 18px 20px;
 }
 
 .spc-guide-step:first-child {
@@ -2717,81 +2728,42 @@ body {
 }
 
 .spc-guide-step > span {
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cbd9e8;
+  border: 1px solid #b8c9dc;
   border-radius: 999px;
-  background: #eef4fb;
+  background: #f5f8fb;
   color: var(--spc-navy-dark);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .spc-guide-step h3 {
   margin: 0;
   color: var(--fc-admin-heading);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 850;
 }
 
-.spc-guide-step ul,
-.spc-chrome-checks {
+.spc-guide-step ul {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   margin: 10px 0 0;
+  padding-left: 18px;
   color: var(--fc-admin-panel-text);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-.spc-guide-step li,
-.spc-chrome-checks li {
+.spc-guide-step li {
   padding-left: 2px;
 }
 
 .spc-guide-step .spc-chrome-download {
   margin-top: 12px;
-}
-
-.spc-chrome-addresses {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.spc-chrome-addresses > div {
-  min-height: 86px;
-  display: grid;
-  align-content: center;
-  gap: 8px;
-  border-right: 1px solid var(--fc-admin-border-soft);
-  padding: 14px;
-}
-
-.spc-chrome-addresses > div:last-child {
-  border-right: 0;
-}
-
-.spc-chrome-addresses span {
-  color: var(--fc-admin-muted);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.spc-chrome-addresses strong {
-  color: var(--fc-admin-heading);
-  font-size: 16px;
-  font-weight: 800;
-  overflow-wrap: anywhere;
-}
-
-.spc-chrome-checks {
-  margin: 0;
-  padding: 16px 16px 16px 34px;
 }
 
 .spc-enquiry-form,
@@ -4678,7 +4650,6 @@ body {
   .spc-check-grid,
   .spc-tech-database,
   .spc-secret-grid,
-  .spc-chrome-addresses,
   .spc-supplier-facts,
   .spc-supplier-form-grid,
   .spc-supplier-form-grid.is-contacts {
@@ -4686,18 +4657,13 @@ body {
   }
 
   .spc-health-grid > div,
-  .spc-chrome-addresses > div,
   .spc-supplier-facts > div {
     border-right: 0;
     border-bottom: 1px solid var(--fc-admin-border-soft);
   }
 
-  .spc-chrome-addresses > div:last-child {
-    border-bottom: 0;
-  }
-
   .spc-guide-step {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr);
     padding: 14px;
   }
 
