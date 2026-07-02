@@ -43,8 +43,10 @@ const html = `<!doctype html>
       <div class="composer-row">
         <div id="composer" contenteditable="true" role="textbox"></div>
         <div id="sendButton" role="button" onclick="
-          window.sentMessages.push(document.getElementById('composer').innerText || document.getElementById('composer').textContent);
+          if (!window.editorModel) return;
+          window.sentMessages.push(window.editorModel);
           document.getElementById('sent').textContent = window.sentMessages.join('\\n---\\n');
+          window.editorModel = '';
           document.getElementById('composer').replaceChildren();
           document.getElementById('composer').dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
         "><span data-icon="wds-ic-send-filled">send</span></div>
@@ -54,8 +56,10 @@ const html = `<!doctype html>
     <script>
       window.sentMessages = [];
       window.decoyClicks = 0;
+      window.editorModel = "";
       window.nativeEnterCount = 0;
       window.nativeClickCount = 0;
+      window.nativeInsertCount = 0;
       window.nativeEnterShouldSend = false;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
       window.setChatTitle = (name) => {
@@ -92,6 +96,19 @@ const html = `<!doctype html>
               const clickable = target && target.closest("button,[role='button']");
               if (clickable) clickable.click();
               callback({ ok: Boolean(clickable) });
+              return;
+            }
+            if (message && message.type === "spc-native-insert-text") {
+              window.nativeInsertCount += 1;
+              window.editorModel = String(message.text || "");
+              const composer = document.getElementById("composer");
+              composer.replaceChildren();
+              String(message.text || "").split("\\n").forEach((line, index) => {
+                if (index > 0) composer.appendChild(document.createElement("br"));
+                composer.appendChild(document.createTextNode(line));
+              });
+              composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(message.text || "") }));
+              callback({ ok: true });
               return;
             }
             if (message && message.type === "spc-native-enter") {
@@ -148,6 +165,7 @@ async function main() {
         composerText: document.getElementById("composer").innerText,
         sentCount: window.sentMessages.length,
         decoyClicks: window.decoyClicks,
+        nativeInsertCount: window.nativeInsertCount,
         nativeEnterCount: window.nativeEnterCount,
         nativeClickCount: window.nativeClickCount,
       }))
@@ -156,6 +174,7 @@ async function main() {
       assert.equal(firstResult.composerText, "")
       assert.equal(firstResult.sentCount, 1)
       assert.equal(firstResult.decoyClicks, 0)
+      assert.equal(firstResult.nativeInsertCount, 1)
       assert.equal(firstResult.nativeEnterCount, 1)
       assert.equal(firstResult.nativeClickCount, 1)
 
@@ -177,6 +196,7 @@ async function main() {
         const contact = { id: "renamed-contact", name: "OTTO", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }
         api.state.contacts = [contact]
         window.sentMessages = []
+        window.editorModel = ""
         document.getElementById("sent").textContent = ""
         document.getElementById("composer").replaceChildren()
         document.getElementById("search").value = ""

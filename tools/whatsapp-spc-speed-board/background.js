@@ -84,6 +84,14 @@ async function nativeEnter(tabId) {
   })
 }
 
+async function nativeInsertText(tabId, text) {
+  await withDebugger(tabId, async (target) => {
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.insertText", {
+      text: String(text || ""),
+    }, callback))
+  })
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -134,6 +142,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           message: error instanceof Error ? error.message : "Native enter failed.",
+        })
+      })
+
+    return true
+  }
+
+  if (message.type === "spc-native-insert-text") {
+    const tabId = _sender.tab && _sender.tab.id
+    const text = String(message.text || "")
+    if (!tabId || !text) {
+      sendResponse({ ok: false, message: "Missing tab or text." })
+      return false
+    }
+
+    nativeInsertText(tabId, text)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Native text insert failed.",
         })
       })
 

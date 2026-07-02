@@ -913,6 +913,26 @@
     return replaceComposerText(composer, text)
   }
 
+  function prepareComposerTextForSend(text, onReady) {
+    const message = cleanTemplateText(text)
+    const composer = findComposer()
+    if (!composer || !message) return false
+
+    clearComposerText(composer)
+    composer.focus()
+    const sent = sendRuntimeMessage({ type: "spc-native-insert-text", text: message }, (response, runtimeError) => {
+      const nextComposer = findComposer()
+      const nativeReady = !runtimeError && response?.ok === true && nextComposer && composerText(nextComposer) === cleanText(message)
+      if (!nativeReady && !insertComposerText(message)) return
+      window.setTimeout(() => onReady?.(message), nativeReady ? 80 : 120)
+    })
+
+    if (sent) return true
+    if (!insertComposerText(message)) return false
+    window.setTimeout(() => onReady?.(message), 120)
+    return true
+  }
+
   function sendButtonLabel(item) {
     const ownLabel = [
       item.getAttribute("aria-label"),
@@ -1080,9 +1100,8 @@
     }
 
     const contact = state.contacts.find((item) => item.id === pending.contactId)
-    if (contact && currentChatMatchesContact(contact) && insertComposerText(pending.text)) {
+    if (contact && currentChatMatchesContact(contact) && prepareComposerTextForSend(pending.text, sendComposerWhenReady)) {
       clearPendingSend()
-      window.setTimeout(() => sendComposerWhenReady(pending.text), 120)
       return
     }
 
@@ -1106,8 +1125,7 @@
     recentSend = { key: sendKey, at: now }
     if (state.pendingSend?.contactId === contact.id) clearPendingSend()
 
-    if (currentChatMatchesContact(contact) && insertComposerText(message)) {
-      window.setTimeout(() => sendComposerWhenReady(message), 120)
+    if (currentChatMatchesContact(contact) && prepareComposerTextForSend(message, sendComposerWhenReady)) {
       return
     }
 
@@ -1128,8 +1146,7 @@
     const chat = getCurrentChat()
     const scope = chat ? `chat:${chat.name || chat.phone}` : "chat:current"
     if (!acquireSendLock(scope, text)) return
-    if (!insertComposerText(text)) return
-    window.setTimeout(() => sendComposerWhenReady(text), 120)
+    prepareComposerTextForSend(text, sendComposerWhenReady)
   }
 
   function renderContactList(list) {
@@ -1519,6 +1536,7 @@
       loadEnquiries,
       moveContact,
       phoneDigits,
+      prepareComposerTextForSend,
       refreshUnreadIndicators,
       selectedEnquiryText,
       acquireSendLock,
