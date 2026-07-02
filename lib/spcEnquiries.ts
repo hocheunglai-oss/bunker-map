@@ -289,6 +289,7 @@ export async function reofferSpcEnquiry(
   if (!enquiryId) throw new Error("Enquiry id is required.")
   const title = cleanText(input.title)
   if (!title) throw new Error("Enquiry title is required.")
+  if (!session.username) throw new Error("Authenticated username is required.")
 
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
@@ -296,8 +297,7 @@ export async function reofferSpcEnquiry(
   const currentText = formatSpcEnquiry(existing)
   const providedNotes = cleanText(input.notes)
   const now = new Date().toISOString()
-  const nextMeta: SpcEnquiryMeta = {
-    ...readSpcEnquiryMeta(existing.notes),
+  const newMeta: SpcEnquiryMeta = {
     ...readSpcEnquiryMeta(providedNotes),
     outcomeAt: undefined,
     postponedAt: undefined,
@@ -309,7 +309,7 @@ export async function reofferSpcEnquiry(
 
   const { data, error } = await supabase
     .from("spc_enquiries")
-    .update({
+    .insert({
       title,
       vessel_name: cleanText(input.vesselName),
       port: cleanText(input.port),
@@ -317,15 +317,39 @@ export async function reofferSpcEnquiry(
       quantity: cleanText(input.quantity),
       delivery_date: cleanDateInput(input.deliveryDate),
       supplier_name: cleanText(input.supplierName),
-      notes: writeSpcEnquiryNotes(providedNotes || currentText, nextMeta),
+      notes: writeSpcEnquiryNotes(providedNotes || currentText, newMeta),
       status: "sent",
-      updated_at: now,
+      created_by_username: session.username,
+      created_by_display_name: session.displayName || session.username,
     })
-    .eq("id", enquiryId)
     .select("*")
     .single()
 
   if (error) throw error
+
+  const retiredMeta: SpcEnquiryMeta = {
+    ...readSpcEnquiryMeta(existing.notes),
+    outcomeAt: now,
+    postponedAt: undefined,
+    cancelledAt: now,
+    lostReason: undefined,
+    stemSupplierTraderUsername: undefined,
+    stemSupplierTraderDisplayName: undefined,
+  }
+
+  const { error: retireError } = await supabase
+    .from("spc_enquiries")
+    .update({
+      status: "closed",
+      notes: writeSpcEnquiryNotes(currentText, retiredMeta),
+      updated_at: now,
+    })
+    .eq("id", enquiryId)
+
+  if (retireError) {
+    console.error("Failed to retire reoffered SPC enquiry", retireError)
+  }
+
   return mapEnquiry(data as SpcEnquiryRow)
 }
 

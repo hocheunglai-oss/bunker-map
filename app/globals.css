@@ -2854,8 +2854,8 @@ body {
 .spc-enquiries-layout {
   min-height: calc(100vh - 72px);
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) minmax(360px, 460px);
-  gap: 12px;
+  grid-template-columns: minmax(470px, 0.95fr) minmax(330px, 414px);
+  gap: 10px;
   align-items: start;
 }
 
@@ -2870,8 +2870,8 @@ body {
 
 .spc-enquiry-entry-form {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px 12px;
+  gap: 7px;
+  padding: 9px 10px 10px;
 }
 
 .spc-enquiry-entry-form label,
@@ -2889,13 +2889,13 @@ body {
 .spc-enquiry-entry-form input,
 .spc-enquiry-entry-form textarea {
   width: 100%;
-  min-height: 34px;
+  min-height: 31px;
   border: 1px solid var(--fc-input-border);
   border-radius: 7px;
   background: var(--fc-tool-input-bg);
   color: var(--fc-tool-input-text);
   outline: none;
-  padding: 7px 10px;
+  padding: 6px 9px;
   font-size: 13px;
   line-height: 1.35;
 }
@@ -2905,17 +2905,17 @@ body {
 }
 
 .spc-enquiry-raw textarea {
-  min-height: 96px;
+  min-height: 86px;
 }
 
 .spc-enquiry-preview-field textarea {
-  min-height: 58px;
+  min-height: 54px;
 }
 
 .spc-enquiry-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .spc-enquiry-remarks {
@@ -2930,6 +2930,14 @@ body {
   text-decoration: none;
   text-transform: none;
   white-space: nowrap;
+}
+
+.spc-field-label-row {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .spc-enquiry-entry-form label.is-missing,
@@ -3001,53 +3009,42 @@ body {
 }
 
 .spc-postponed-enquiries-panel {
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
   overflow: hidden;
 }
 
 .spc-postponed-enquiries-list {
-  max-height: 220px;
+  max-height: 190px;
   overflow-y: auto;
-  padding: 10px;
+  padding: 8px;
 }
 
 .spc-postponed-enquiry-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 3px 10px;
   border: 1px solid #f4d37b;
   border-radius: 8px;
   background: #fffaf0;
-  padding: 9px 10px;
+  padding: 7px 9px;
 }
 
 .spc-postponed-enquiry-card + .spc-postponed-enquiry-card {
   margin-top: 8px;
 }
 
-.spc-postponed-enquiry-card div {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.spc-postponed-enquiry-card strong {
-  overflow: hidden;
-  color: var(--fc-admin-heading);
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .spc-postponed-enquiry-card span {
+  grid-column: 1;
   color: #8a5a00;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 850;
 }
 
 .spc-postponed-enquiry-card p {
-  grid-column: 1 / -1;
+  grid-column: 1;
   margin: 0;
   color: var(--fc-admin-panel-text);
   font-size: 12px;
@@ -3056,14 +3053,18 @@ body {
 }
 
 .spc-postponed-enquiry-card button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 84px;
+  min-height: 26px;
   border: 1px solid #d49b22;
   border-radius: 999px;
   background: #ffffff;
   color: #8a5a00;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
-  padding: 6px 12px;
+  padding: 5px 10px;
 }
 
 .spc-sent-enquiries-list {
@@ -3076,14 +3077,14 @@ body {
   border: 1px solid var(--fc-admin-border-soft);
   border-radius: 8px;
   background: #ffffff;
-  padding: 10px;
+  padding: 8px;
 }
 
 .spc-sent-enquiry-card + .spc-sent-enquiry-card {
   margin-top: 8px;
 }
 
-.spc-sent-enquiry-topline,
+.spc-sent-enquiry-summary,
 .spc-sent-enquiry-meta,
 .spc-sent-enquiry-actions {
   display: flex;
@@ -3092,47 +3093,44 @@ body {
   gap: 8px;
 }
 
-.spc-sent-enquiry-topline strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fc-admin-heading);
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.spc-sent-enquiry-summary {
+  align-items: flex-start;
 }
 
-.spc-sent-enquiry-card p {
-  margin: 8px 0;
+.spc-sent-enquiry-summary p {
+  min-width: 0;
+  margin: 0;
   color: var(--fc-admin-panel-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
   white-space: pre-wrap;
 }
 
 .spc-sent-enquiry-meta {
+  justify-content: flex-end;
+  margin-top: 5px;
   color: var(--fc-admin-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
 }
 
 .spc-sent-enquiry-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
-  margin-top: 10px;
+  margin-top: 7px;
 }
 
 .spc-sent-enquiry-actions button {
-  min-height: 30px;
+  min-height: 27px;
   border: 1px solid #0f8a63;
   border-radius: 999px;
   background: #e8f7f1;
   color: #006b4f;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
-  padding: 6px 12px;
+  padding: 5px 10px;
 }
 
 .spc-sent-enquiry-actions button.is-lost {
@@ -3253,6 +3251,10 @@ body {
   font-weight: 900;
 }
 
+.spc-dialog-header h2.spc-reoffer-warning-title {
+  color: #b42318;
+}
+
 .spc-dialog-header button,
 .spc-dialog-actions button,
 .spc-fixture-table button {
@@ -3328,8 +3330,8 @@ body {
 
 .spc-reoffer-form {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .spc-reoffer-form label {
@@ -3346,13 +3348,13 @@ body {
 .spc-reoffer-form input,
 .spc-reoffer-form textarea {
   width: 100%;
-  min-height: 34px;
+  min-height: 31px;
   border: 1px solid var(--fc-input-border);
   border-radius: 7px;
   background: var(--fc-tool-input-bg);
   color: var(--fc-tool-input-text);
   outline: none;
-  padding: 7px 10px;
+  padding: 6px 9px;
   font-size: 13px;
   line-height: 1.35;
 }
