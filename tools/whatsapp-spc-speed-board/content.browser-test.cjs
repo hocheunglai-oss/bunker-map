@@ -9,6 +9,12 @@ const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
+const crudeWatch = {
+  price: 73.14,
+  change: -0.28,
+  changePercent: -0.38,
+  points: [73.42, 73.35, 73.38, 73.28, 73.31, 73.12, 73.19, 73.14],
+}
 
 const html = `<!doctype html>
 <html>
@@ -108,6 +114,10 @@ const html = `<!doctype html>
               });
               return;
             }
+            if (message && message.type === "load-crude-watch") {
+              callback({ ok: true, crude: ${JSON.stringify(crudeWatch)} });
+              return;
+            }
             if (message && message.type === "spc-native-click") {
               window.nativeClickCount += 1;
               const target = document.elementFromPoint(Number(message.x), Number(message.y));
@@ -173,6 +183,19 @@ async function main() {
       const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
       await page.waitForSelector("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
+      await page.waitForFunction(() => document.querySelector(".fcuno-wa-spc-crude strong")?.textContent === "73.14")
+
+      const crudeResult = await page.evaluate(() => ({
+        price: document.querySelector(".fcuno-wa-spc-crude strong")?.textContent || "",
+        change: document.querySelector(".fcuno-wa-spc-crude span")?.textContent || "",
+        path: document.querySelector(".fcuno-wa-spc-crude path")?.getAttribute("d") || "",
+      }))
+
+      assert.equal(crudeResult.price, "73.14")
+      assert.equal(crudeResult.change, "-0.28 -0.38%")
+      assert.match(crudeResult.path, /^M/)
+      assert.match(crudeResult.path, /L/)
+
       await page.click("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
       await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 3000 })
