@@ -7,7 +7,7 @@
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
   const SEND_LOCK_TTL_MS = 30000
-  const CRUDE_REFRESH_MS = 60000
+  const CRUDE_REFRESH_MS = 15000
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")

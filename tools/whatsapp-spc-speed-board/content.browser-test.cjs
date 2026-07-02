@@ -176,13 +176,13 @@ async function withServer(callback) {
 async function main() {
   await withServer(async (url) => {
     const browser = await chromium.launch({
-      executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      executablePath: chromium.executablePath(),
       headless: true,
     })
     try {
       const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
-      await page.waitForSelector("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
+      await page.waitForSelector("#fcuno-wa-spc-board [data-action='toggle-enquiry'][data-id='enq-1']")
       await page.waitForFunction(() => document.querySelector(".fcuno-wa-spc-crude strong")?.textContent === "73.14")
 
       const crudeResult = await page.evaluate(() => ({
@@ -196,8 +196,8 @@ async function main() {
       assert.match(crudeResult.path, /^M/)
       assert.match(crudeResult.path, /L/)
 
-      await page.click("#fcuno-wa-spc-board [data-action='toggle-enquiry']")
-      await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
+      await page.check("#fcuno-wa-spc-board [data-action='toggle-enquiry'][data-id='enq-1']", { force: true })
+      await page.click("#fcuno-wa-spc-board [data-action='send-selected']", { force: true })
       await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 3000 })
       await page.waitForTimeout(100)
 
@@ -219,7 +219,7 @@ async function main() {
       assert.equal(firstResult.nativeEnterCount, 1)
       assert.equal(firstResult.nativeClickCount, 1)
 
-      await page.click("#fcuno-wa-spc-board [data-action='send-selected']")
+      await page.click("#fcuno-wa-spc-board [data-action='send-selected']", { force: true })
       await page.waitForTimeout(300)
 
       const secondResult = await page.evaluate(() => ({

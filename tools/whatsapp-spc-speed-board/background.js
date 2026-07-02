@@ -1,6 +1,6 @@
 const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
-const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=1d&interval=5m"
-const CRUDE_CACHE_TTL_MS = 60000
+const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
+const CRUDE_CACHE_TTL_MS = 15000
 
 let crudeCache = { at: 0, payload: null }
 
@@ -97,6 +97,7 @@ async function nativeInsertText(tabId, text) {
 }
 
 function finiteNumber(value) {
+  if (value == null || value === "") return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
