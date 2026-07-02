@@ -5,13 +5,17 @@ import { useEffect, useState } from "react"
 import HomepageShell from "@/components/HomepageShell"
 import type { HomepageMarketData } from "@/lib/publicMarketData"
 
+type HomepageInitialData = HomepageMarketData & {
+  unavailable?: boolean
+}
+
 const Homepage = dynamic(() => import("@/components/Homepage"), {
   ssr: false,
   loading: () => null,
 })
 
 type HomepageClientProps = {
-  initialData: HomepageMarketData
+  initialData: HomepageInitialData
 }
 
 export default function HomepageClient({ initialData }: HomepageClientProps) {

@@ -1,4 +1,8 @@
 const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
+const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=1d&interval=5m"
+const CRUDE_CACHE_TTL_MS = 60000
+
+let crudeCache = { at: 0, payload: null }
 
 function chromeCall(invoke) {
   return new Promise((resolve, reject) => {
@@ -92,6 +96,61 @@ async function nativeInsertText(tabId, text) {
   })
 }
 
+function finiteNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function parseCrudeChart(data) {
+  const result = data?.chart?.result?.[0]
+  if (!result) throw new Error("Crude quote unavailable.")
+
+  const meta = result.meta || {}
+  const closes = Array.isArray(result.indicators?.quote?.[0]?.close)
+    ? result.indicators.quote[0].close.map(finiteNumber).filter((value) => value != null)
+    : []
+  const price =
+    finiteNumber(meta.regularMarketPrice) ||
+    closes.slice().reverse().find((value) => value != null) ||
+    null
+  const previousClose =
+    finiteNumber(meta.chartPreviousClose) ||
+    finiteNumber(meta.previousClose) ||
+    closes.find((value) => value != null) ||
+    null
+
+  if (price == null || previousClose == null) throw new Error("Crude quote unavailable.")
+
+  const change = price - previousClose
+  const changePercent = previousClose ? (change / previousClose) * 100 : 0
+  const points = closes.slice(-48)
+
+  return {
+    symbol: "Brent",
+    price,
+    change,
+    changePercent,
+    points,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+async function fetchCrudeWatch() {
+  const now = Date.now()
+  if (crudeCache.payload && now - crudeCache.at < CRUDE_CACHE_TTL_MS) return crudeCache.payload
+
+  const response = await fetch(BRENT_CHART_URL, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data?.chart?.error?.description || `Crude quote failed: ${response.status}`)
+
+  const payload = parseCrudeChart(data)
+  crudeCache = { at: now, payload }
+  return payload
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -162,6 +221,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           message: error instanceof Error ? error.message : "Native text insert failed.",
+        })
+      })
+
+    return true
+  }
+
+  if (message.type === "load-crude-watch") {
+    fetchCrudeWatch()
+      .then((crude) => sendResponse({ ok: true, crude }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Unable to load crude quote.",
         })
       })
 

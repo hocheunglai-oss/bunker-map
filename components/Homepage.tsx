@@ -20,8 +20,12 @@ type HomepageDataResponse = {
   message?: string
 }
 
+type HomepageInitialData = HomepageMarketData & {
+  unavailable?: boolean
+}
+
 type HomepageProps = {
-  initialData?: HomepageMarketData
+  initialData?: HomepageInitialData
   onReady?: () => void
 }
 
@@ -411,6 +415,8 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       refreshTimer = window.setTimeout(() => {
         void loadHomepageData(false)
       }, 60000)
+    } else if (initialData?.unavailable) {
+      setMarketDataStatus("error")
     } else {
       void loadHomepageData(true)
     }

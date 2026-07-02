@@ -14,6 +14,11 @@ async function getInitialHomepageData() {
     return await getHomepageMarketData()
   } catch (error) {
     console.error("Initial homepage data load failed", error)
-    return { ports: [], fallbacks: {} }
+    const message = error instanceof Error ? error.message : ""
+    return {
+      ports: [],
+      fallbacks: {},
+      unavailable: message.includes("Missing environment variable"),
+    }
   }
 }

@@ -7,6 +7,7 @@
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
   const SEND_LOCK_TTL_MS = 30000
+  const CRUDE_REFRESH_MS = 60000
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
@@ -28,6 +29,8 @@
     contactMenuId: "",
     loadingEnquiries: false,
     enquiryError: "",
+    crude: null,
+    crudeError: "",
     dragging: null,
     draggingType: "",
     draggingEnquiryIds: [],
@@ -35,8 +38,10 @@
 
   let unreadTimer = 0
   let enquiryTimer = 0
+  let crudeTimer = 0
   let templateSaveTimer = 0
   let lastEnquiryFingerprint = ""
+  let lastCrudeFingerprint = ""
   let recentSend = { key: "", at: 0 }
   let memorySendLock = { key: "", at: 0 }
   let extensionContextStopped = false
@@ -69,9 +74,11 @@
     extensionContextStopped = true
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (enquiryTimer) window.clearInterval(enquiryTimer)
+    if (crudeTimer) window.clearInterval(crudeTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
     unreadTimer = 0
     enquiryTimer = 0
+    crudeTimer = 0
     templateSaveTimer = 0
   }
 
@@ -188,6 +195,33 @@
       minute: "2-digit",
       hour12: false,
     })
+  }
+
+  function formatPrice(value) {
+    const number = Number(value)
+    return Number.isFinite(number) ? number.toFixed(2) : "--.--"
+  }
+
+  function formatSigned(value) {
+    const number = Number(value)
+    if (!Number.isFinite(number)) return "--"
+    const sign = number > 0 ? "+" : ""
+    return `${sign}${number.toFixed(2)}`
+  }
+
+  function crudeSparklinePath(points, width = 170, height = 28) {
+    const values = (Array.isArray(points) ? points : []).map(Number).filter(Number.isFinite)
+    if (values.length < 2) return `M0 ${height / 2} L${width} ${height / 2}`
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const range = max - min || 1
+    return values
+      .map((value, index) => {
+        const x = (index / (values.length - 1)) * width
+        const y = height - ((value - min) / range) * (height - 4) - 2
+        return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`
+      })
+      .join(" ")
   }
 
   function getStorage() {
@@ -709,6 +743,35 @@
     if (!sent) {
       state.loadingEnquiries = false
       state.enquiryError = runtimeUnavailableMessage()
+      render()
+    }
+  }
+
+  function loadCrudeWatch() {
+    const sent = sendRuntimeMessage({ type: "load-crude-watch" }, (response, runtimeError) => {
+      if (runtimeError || !response || !response.ok || !response.crude) {
+        state.crudeError = response?.message || runtimeError || ""
+        if (!state.crude) render()
+        return
+      }
+
+      const crude = response.crude
+      const fingerprint = JSON.stringify({
+        price: crude.price,
+        change: crude.change,
+        changePercent: crude.changePercent,
+        points: crude.points,
+      })
+      state.crude = crude
+      state.crudeError = ""
+      if (fingerprint !== lastCrudeFingerprint) {
+        lastCrudeFingerprint = fingerprint
+        render()
+      }
+    })
+
+    if (!sent && !state.crude) {
+      state.crudeError = runtimeUnavailableMessage()
       render()
     }
   }
@@ -1255,6 +1318,30 @@
     `
   }
 
+  function renderCrudeWatch() {
+    const crude = state.crude || {}
+    const change = Number(crude.change)
+    const changeClass = Number.isFinite(change) && change > 0 ? "is-up" : change < 0 ? "is-down" : ""
+    const changeText =
+      Number.isFinite(Number(crude.changePercent))
+        ? `${formatSigned(crude.change)} ${formatSigned(crude.changePercent)}%`
+        : state.crudeError
+          ? "-- --"
+          : "Loading"
+
+    return `
+      <div class="fcuno-wa-spc-crude" aria-label="Live Brent crude">
+        <svg viewBox="0 0 170 28" focusable="false" aria-hidden="true">
+          <path d="${escapeHtml(crudeSparklinePath(crude.points))}" />
+        </svg>
+        <div>
+          <strong>${escapeHtml(formatPrice(crude.price))}</strong>
+          <span class="${escapeHtml(changeClass)}">${escapeHtml(changeText)}</span>
+        </div>
+      </div>
+    `
+  }
+
   function render() {
     let host = document.getElementById(BOARD_ID)
     if (!host) {
@@ -1267,6 +1354,7 @@
       <div class="fcuno-wa-spc-shell${state.collapsed ? " is-collapsed" : ""}">
         <div class="fcuno-wa-spc-head">
           <img class="fcuno-wa-spc-logo" src="${escapeHtml(LOGO_SRC)}" alt="Singapore Purchasing Center" />
+          ${renderCrudeWatch()}
           <button class="fcuno-wa-spc-icon" type="button" data-action="toggle">${state.collapsed ? "‹" : "›"}</button>
         </div>
         <div class="fcuno-wa-spc-main">
@@ -1627,6 +1715,7 @@
       findSendButton,
       getCurrentChat,
       enquiryTextForIds,
+      loadCrudeWatch,
       insertComposerText,
       loadEnquiries,
       moveContact,
@@ -1650,15 +1739,18 @@
     saveState()
     render()
     safeRun(loadEnquiries)
+    safeRun(loadCrudeWatch)
     safeRun(refreshUnreadIndicators)
     window.setTimeout(() => safeRun(trySendPending), 650)
     unreadTimer = window.setInterval(() => safeRun(refreshUnreadIndicators), 1800)
     enquiryTimer = window.setInterval(() => safeRun(loadEnquiries), 2000)
+    crudeTimer = window.setInterval(() => safeRun(loadCrudeWatch), CRUDE_REFRESH_MS)
   }
 
   window.addEventListener("beforeunload", () => {
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (enquiryTimer) window.clearInterval(enquiryTimer)
+    if (crudeTimer) window.clearInterval(crudeTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
   })
 
