@@ -1,3 +1,8 @@
+import {
+  findEnquiryPortInText,
+  normalizeIndexedEnquiryPort,
+} from "@/lib/enquiryPortIndex"
+
 export type EnquiryWorksheetGuess = {
   vesselName: string
   imo: string
@@ -9,6 +14,7 @@ export type EnquiryWorksheetGuess = {
 
 export type EnquiryWorksheetParseOptions = {
   detectBuyer?: boolean
+  portNames?: string[]
 }
 
 type ImoCandidate = {
@@ -28,19 +34,10 @@ const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 const PORT_LABEL_PATTERN =
-  /^\s*(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*port|加油港口|港口)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*port|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
-
-const KNOWN_PORT_PATTERNS: Array<{ pattern: RegExp; value: string }> = [
-  { pattern: /\b(?:singapore|sgp|sin|sg)\b/i, value: "singapore" },
-  { pattern: /\bcolombo\b/i, value: "colombo" },
-  { pattern: /\blaem\s*chabang\b/i, value: "laemchabang" },
-  { pattern: /\b(?:yeosu|yosu)\b/i, value: "yosu" },
-  { pattern: /\bnansha\b/i, value: "nansha" },
-  { pattern: /\bhong\s*kong\b/i, value: "hong kong" },
-]
 
 function normalizeInput(text: string) {
   return text
@@ -226,27 +223,27 @@ function extractHeaderVessel(lines: string[]) {
   return ""
 }
 
-function findKnownPort(value: string) {
-  const normalized = normalizeInput(value)
-  return KNOWN_PORT_PATTERNS.find(({ pattern }) => pattern.test(normalized))?.value || ""
+function findKnownPort(
+  value: string,
+  options: EnquiryWorksheetParseOptions & { includeShortAliases?: boolean } = {},
+) {
+  return findEnquiryPortInText(normalizeInput(value), {
+    portNames: options.portNames,
+    includeShortAliases: options.includeShortAliases,
+  })
 }
 
-function normalizePortAlias(value: string) {
-  const compact = cleanSpaces(value)
-    .toLowerCase()
-    .replace(/\./g, "")
-    .replace(/\s+/g, " ")
-
-  if (!compact) return ""
-  if (/^(?:singapore|sgp|sin|sg)$/.test(compact)) return "singapore"
-  if (/^laem\s*chabang$/.test(compact)) return "laemchabang"
-  if (/^(?:yeosu|yosu)$/.test(compact)) return "yosu"
-
-  return ""
-}
-
-function cleanPortName(value: string) {
+function cleanPortName(
+  value: string,
+  options: EnquiryWorksheetParseOptions & { allowUnknown?: boolean; includeShortAliases?: boolean } = {},
+) {
   let next = normalizeInput(value)
+
+  const indexedInline = findEnquiryPortInText(next, {
+    portNames: options.portNames,
+    includeShortAliases: options.includeShortAliases,
+  })
+  if (indexedInline) return indexedInline
 
   next = next.replace(/^\s*(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*port|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
   next = next.replace(/\([^)]*\)/g, " ")
@@ -256,11 +253,16 @@ function cleanPortName(value: string) {
   next = next.split(/[,，]/)[0] || next
   next = stripOuterNoise(next)
 
-  const alias = normalizePortAlias(next)
-  if (alias) return alias
+  const indexedExact = normalizeIndexedEnquiryPort(next, {
+    portNames: options.portNames,
+    includeShortAliases: options.includeShortAliases,
+  })
+  if (indexedExact) return indexedExact
 
-  const known = findKnownPort(next)
+  const known = findKnownPort(next, options)
   if (known) return known
+
+  if (!options.allowUnknown) return ""
 
   if (!/^[A-Za-z][A-Za-z\s.'-]{1,36}$/.test(next)) return ""
   if (/\b(?:days?|delivery|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|mt|mts|ton)\b/i.test(next)) {
@@ -270,7 +272,7 @@ function cleanPortName(value: string) {
   return next.toLowerCase()
 }
 
-export function extractEnquiryPort(text: string) {
+export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseOptions = {}) {
   const lines = normalizeInput(text)
     .split("\n")
     .map((line) => cleanSpaces(line))
@@ -281,10 +283,18 @@ export function extractEnquiryPort(text: string) {
     const match = line.match(PORT_LABEL_PATTERN)
     if (!match) continue
 
-    const inlinePort = cleanPortName(match[1] || "")
+    const inlinePort = cleanPortName(match[1] || "", {
+      ...options,
+      allowUnknown: true,
+      includeShortAliases: true,
+    })
     if (inlinePort) return inlinePort
 
-    const nextPort = cleanPortName(lines[index + 1] || "")
+    const nextPort = cleanPortName(lines[index + 1] || "", {
+      ...options,
+      allowUnknown: true,
+      includeShortAliases: true,
+    })
     if (nextPort) return nextPort
   }
 
@@ -292,15 +302,21 @@ export function extractEnquiryPort(text: string) {
     if (NON_PORT_CONTEXT_PATTERN.test(line) || /[\w.-]+@[\w.-]+/.test(line)) continue
 
     const atMatch = line.match(/@\s*([A-Za-z][A-Za-z\s.'-]{1,36})\b/)
-    const atPort = cleanPortName(atMatch?.[1] || "")
+    const atPort = cleanPortName(atMatch?.[1] || "", {
+      ...options,
+      includeShortAliases: true,
+    })
     if (atPort) return atPort
 
     const contextualMatch = line.match(/\b(?:at|calling|position(?:ed)?|bunkering\s+at)\s+([A-Za-z][A-Za-z\s.'-]{1,36})\b/i)
-    const contextualPort = cleanPortName(contextualMatch?.[1] || "")
+    const contextualPort = cleanPortName(contextualMatch?.[1] || "", {
+      ...options,
+      includeShortAliases: true,
+    })
     if (contextualPort) return contextualPort
 
     if (/\b(?:bunker|eta|etb|etd|ets|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line)) {
-      const known = findKnownPort(line)
+      const known = findKnownPort(line, { ...options, includeShortAliases: true })
       if (known) return known
     }
   }
@@ -380,7 +396,7 @@ export function parseEnquiryWorksheetGuess(
   return {
     vesselName,
     imo,
-    port: extractEnquiryPort(normalized),
+    port: extractEnquiryPort(normalized, options),
     buyer: detectBuyer ? extractBuyer(normalized) : "",
     confidence,
     warnings,

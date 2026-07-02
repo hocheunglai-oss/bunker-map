@@ -47,6 +47,10 @@ type EnquiryWorksheetCache = {
   worksheet: Worksheet
 }
 
+type EnquiryWorksheetPortsResponse = {
+  ports?: string[]
+}
+
 const workflowLabels: Array<[WorkflowKey, string]> = [
   ["bumain", "BUMAIN"],
   ["nom", "NOM"],
@@ -299,13 +303,14 @@ function hasViscosityCaution(value: string) {
 }
 
 export default function EnquiryWorksheetPage() {
-  const { displayName, username } = useSimpleAdminAuth()
+  const { authenticated, displayName, username } = useSimpleAdminAuth()
   const userNickname = useMemo(() => deriveNickname(displayName, username), [displayName, username])
   const [worksheet, setWorksheet] = useState<Worksheet>(() => blankWorksheet())
   const [enquiryText, setEnquiryText] = useState("")
   const [cleanedEnquiryText, setCleanedEnquiryText] = useState("")
   const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
+  const [portIndex, setPortIndex] = useState<string[]>([])
   const [shortenedDraft, setShortenedDraft] = useState("")
   const [cacheReady, setCacheReady] = useState(false)
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
@@ -315,6 +320,30 @@ export default function EnquiryWorksheetPage() {
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
   }, [])
+
+  useEffect(() => {
+    if (!authenticated) return
+
+    let cancelled = false
+    fetch("/api/admin/enquiryworksheet/ports", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => ({}))) as EnquiryWorksheetPortsResponse
+        if (!response.ok) throw new Error("Unable to load port index.")
+        return Array.isArray(payload.ports)
+          ? payload.ports.filter((port): port is string => typeof port === "string" && Boolean(port.trim()))
+          : []
+      })
+      .then((ports) => {
+        if (!cancelled) setPortIndex(ports)
+      })
+      .catch(() => {
+        if (!cancelled) setPortIndex([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated])
 
   useEffect(() => {
     try {
@@ -407,7 +436,7 @@ export default function EnquiryWorksheetPage() {
     setEnquiryText(value)
     const nextCleaned = cleanEnquiryForReading(value)
     setCleanedEnquiryText(nextCleaned)
-    setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned) : emptyGuess())
+    setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned, { portNames: portIndex }) : emptyGuess())
   }
 
   function getParserSourceText() {
@@ -421,11 +450,30 @@ export default function EnquiryWorksheetPage() {
         guesses.vesselName,
         guesses.imo,
         vlsfoMaxRemarks,
-        { includePort: true, port: guesses.port },
+        { includePort: true, port: guesses.port, portNames: portIndex },
       ),
-    [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, vlsfoMaxRemarks],
+    [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, portIndex, vlsfoMaxRemarks],
   )
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
+
+  useEffect(() => {
+    if (portIndex.length === 0) return
+    const sourceText = getParserSourceText()
+    if (!sourceText.trim()) return
+
+    const parsed = parseEnquiryWorksheetGuess(sourceText, { portNames: portIndex })
+    if (!parsed.port) return
+
+    setGuesses((current) => {
+      if (current.port) return current
+      return {
+        ...current,
+        port: parsed.port,
+        confidence: parsed.confidence,
+        warnings: parsed.warnings,
+      }
+    })
+  }, [portIndex])
 
   useEffect(() => {
     setShortenedDraft(shortenedEnquiry)
@@ -490,7 +538,7 @@ export default function EnquiryWorksheetPage() {
   }
 
   function guessDetails() {
-    const parsed = parseEnquiryWorksheetGuess(getParserSourceText())
+    const parsed = parseEnquiryWorksheetGuess(getParserSourceText(), { portNames: portIndex })
     const nextGuess: EnquiryWorksheetGuess = {
       vesselName: guesses.vesselName || parsed.vesselName,
       imo: guesses.imo || parsed.imo,

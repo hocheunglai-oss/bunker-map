@@ -6,6 +6,7 @@ export type BuildShortenedEnquiryOptions = {
   autoDetectVlsfoRemarks?: boolean
   includePort?: boolean
   port?: string
+  portNames?: string[]
 }
 
 type ProductSegment = {
@@ -356,7 +357,9 @@ export function buildShortenedEnquiry(
 ) {
   const autoDetectVlsfoRemarks = options.autoDetectVlsfoRemarks !== false
   const date = extractDeliveryDate(sourceText)
-  const port = options.includePort ? (options.port?.trim() || extractEnquiryPort(sourceText)) : ""
+  const port = options.includePort
+    ? (options.port?.trim() || extractEnquiryPort(sourceText, { portNames: options.portNames }))
+    : ""
   const portAndDate = [port, date].filter(Boolean).join(" ")
   const products = extractProducts(sourceText, autoDetectVlsfoRemarks)
     .map((product) => formatProductSegment(product, manualVlsfoRemarks))
