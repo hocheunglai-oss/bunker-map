@@ -528,6 +528,7 @@ export default function EnquiryWorksheetPage() {
         type: WHATSAPP_EXTENSION_REQUEST_TYPE,
         requestId,
         text,
+        buyer: (guesses.buyer || worksheet.buyer).trim(),
       },
       window.location.origin,
     )

@@ -58,9 +58,10 @@
     }
   }
 
-  async function enqueueEnquiry(text) {
+  async function enqueueEnquiry(text, buyer) {
     const message = cleanMessage(text)
     if (!message) throw new Error("Shortened enquiry is empty.")
+    const buyerName = cleanText(buyer)
 
     const current = await readState()
     const id = uid()
@@ -83,7 +84,8 @@
           body: message,
           title: message.split("\n").find(Boolean) || "ENQUIRY",
           createdAt: now,
-          createdByDisplayName: "ENQUIRY WORKSHEET",
+          buyer: buyerName,
+          createdByDisplayName: buyerName,
           source: "enquiryworksheet",
         },
         ...enquiries,
@@ -110,7 +112,7 @@
     const payload = event.data && typeof event.data === "object" ? event.data : null
     if (!payload || payload.type !== REQUEST_TYPE) return
 
-    enqueueEnquiry(payload.text)
+    enqueueEnquiry(payload.text, payload.buyer)
       .then((result) => {
         window.postMessage(
           {

@@ -180,15 +180,12 @@
       .replace(/'/g, "&#039;")
   }
 
-  function formatTime(value) {
+  function formatDate(value) {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return ""
-    return date.toLocaleString("en-GB", {
+    return date.toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
     })
   }
 
@@ -269,14 +266,16 @@
     if (!body) return null
     const id = cleanText(value.id) || uid()
     const createdAt = cleanText(value.createdAt || value.created_at) || new Date().toISOString()
+    const storedBuyer = cleanText(value.buyer || value.buyerName || value.buyer_name)
+    const storedSender = cleanText(value.createdByDisplayName || value.created_by_display_name || value.createdByUsername)
+    const buyer = storedBuyer || (storedSender.toUpperCase() === "ENQUIRY WORKSHEET" ? "" : storedSender)
     return {
       id,
       body,
       title: cleanText(value.title) || body.split("\n").find(Boolean) || "ENQUIRY",
       createdAt,
-      createdByDisplayName:
-        cleanText(value.createdByDisplayName || value.created_by_display_name || value.createdByUsername) ||
-        "ENQUIRY WORKSHEET",
+      buyer,
+      createdByDisplayName: buyer,
       source: cleanText(value.source) || "enquiryworksheet",
     }
   }
@@ -816,8 +815,8 @@
       if (id && seenIds.has(id)) return false
       if (id) seenIds.add(id)
       const createdBucket = cleanText(enquiryCreatedAt(enquiry)).slice(0, 16)
-      const sender = cleanText(enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername)
-      const bodyKey = `${enquiryBodyText(enquiry).toLowerCase()}|${sender.toLowerCase()}|${createdBucket}`
+      const buyer = cleanText(enquiry.buyer || enquiry.buyerName || enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername)
+      const bodyKey = `${enquiryBodyText(enquiry).toLowerCase()}|${buyer.toLowerCase()}|${createdBucket}`
       if (bodyKey !== "||" && seenBodies.has(bodyKey)) return false
       if (bodyKey !== "||") seenBodies.add(bodyKey)
       return true
@@ -1297,7 +1296,10 @@
     const rows = visibleEnquiries().map((enquiry) => {
       const createdAt = enquiryCreatedAt(enquiry)
       const isNew = !state.lastSeenEnquiryAt || createdAt > state.lastSeenEnquiryAt
-      const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "ENQUIRY WORKSHEET"
+      const buyer = cleanText(enquiry.buyer || enquiry.buyerName || enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername)
+      const displayBuyer = buyer.toUpperCase() === "ENQUIRY WORKSHEET" ? "" : buyer
+      const dateLabel = formatDate(createdAt)
+      const meta = [displayBuyer, dateLabel].filter(Boolean).join(" · ")
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       return `
@@ -1305,7 +1307,7 @@
           <input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />
           <span>
             <em>${escapeHtml(body || enquiry.title || "ENQUIRY")}</em>
-            <small>${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
+            ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
           </span>
           <button class="fcuno-wa-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
         </div>
