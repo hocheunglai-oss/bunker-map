@@ -69,6 +69,8 @@ const workflowCells: Record<WorkflowKey, Partial<Record<WorkflowAction, { suffix
 }
 
 const ENQUIRY_WORKSHEET_CACHE_KEY = "fc-admin-enquiry-worksheet-draft-v1"
+const WHATSAPP_EXTENSION_REQUEST_TYPE = "fcuno-wa-enquiry-send"
+const WHATSAPP_EXTENSION_RESPONSE_TYPE = "fcuno-wa-enquiry-send-result"
 const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["180cst max", "120cst max"]
 
 function toCaps(value: string) {
@@ -304,8 +306,11 @@ export default function EnquiryWorksheetPage() {
   const [cleanedEnquiryText, setCleanedEnquiryText] = useState("")
   const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
+  const [shortenedDraft, setShortenedDraft] = useState("")
   const [cacheReady, setCacheReady] = useState(false)
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
+  const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle")
+  const [whatsappRequestId, setWhatsappRequestId] = useState("")
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -423,8 +428,26 @@ export default function EnquiryWorksheetPage() {
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
 
   useEffect(() => {
+    setShortenedDraft(shortenedEnquiry)
     setCopyStatus("idle")
+    setWhatsappStatus("idle")
   }, [shortenedEnquiry])
+
+  useEffect(() => {
+    function handleWhatsappResponse(event: MessageEvent) {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const payload = event.data && typeof event.data === "object"
+        ? (event.data as { type?: unknown; ok?: unknown; requestId?: unknown; message?: unknown })
+        : null
+      if (!payload || payload.type !== WHATSAPP_EXTENSION_RESPONSE_TYPE) return
+      if (whatsappRequestId && payload.requestId !== whatsappRequestId) return
+
+      setWhatsappStatus(payload.ok ? "sent" : "failed")
+    }
+
+    window.addEventListener("message", handleWhatsappResponse)
+    return () => window.removeEventListener("message", handleWhatsappResponse)
+  }, [whatsappRequestId])
 
   function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
     setVlsfoMaxRemarks((current) =>
@@ -435,14 +458,35 @@ export default function EnquiryWorksheetPage() {
   }
 
   async function copyShortenedEnquiry() {
-    if (!shortenedEnquiry) return
+    if (!shortenedDraft.trim()) return
 
     try {
-      await navigator.clipboard.writeText(shortenedEnquiry)
+      await navigator.clipboard.writeText(shortenedDraft.trim())
       setCopyStatus("copied")
     } catch {
       setCopyStatus("failed")
     }
+  }
+
+  function sendShortenedToWhatsappBoard() {
+    const text = shortenedDraft.trim()
+    if (!text) return
+
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    setWhatsappRequestId(requestId)
+    setWhatsappStatus("sending")
+    window.postMessage(
+      {
+        type: WHATSAPP_EXTENSION_REQUEST_TYPE,
+        requestId,
+        text,
+      },
+      window.location.origin,
+    )
+
+    window.setTimeout(() => {
+      setWhatsappStatus((current) => (current === "sending" ? "failed" : current))
+    }, 2500)
   }
 
   function guessDetails() {
@@ -481,6 +525,9 @@ export default function EnquiryWorksheetPage() {
     setCleanedEnquiryText("")
     setVlsfoMaxRemarks([])
     setCopyStatus("idle")
+    setWhatsappStatus("idle")
+    setWhatsappRequestId("")
+    setShortenedDraft("")
     setGuesses(emptyGuess())
     setWorksheet(blankWorksheet(userNickname))
   }
@@ -512,19 +559,39 @@ export default function EnquiryWorksheetPage() {
                 type="button"
                 className={styles.copyButton}
                 onClick={copyShortenedEnquiry}
-                disabled={!shortenedEnquiry}
+                disabled={!shortenedDraft.trim()}
                 aria-label="Copy shortened enquiry"
                 title="Copy shortened enquiry"
                 data-admin-button-style="preserve"
               >
                 ⧉
               </button>
+              <button
+                type="button"
+                className={styles.whatsappButton}
+                onClick={sendShortenedToWhatsappBoard}
+                disabled={!shortenedDraft.trim() || whatsappStatus === "sending"}
+                aria-label="Send shortened enquiry to FCUNO WhatsApp Speed Board"
+                title="Send to FCUNO WhatsApp Speed Board"
+                data-admin-button-style="preserve"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3.8 11.2 19.1 4.1c.9-.4 1.8.5 1.4 1.4l-7.1 15.3c-.4.9-1.7.7-1.9-.3l-1.4-6.4-6.4-1.4c-1-.2-1.2-1.5-.3-1.9Z" />
+                  <path d="m10.4 13.7 4.2-4.2" />
+                </svg>
+              </button>
             </div>
-            <div className={styles.shortenedBox}>
-              {shortenedEnquiry || (
-                <span className={styles.shortenedPlaceholder}>No shortened enquiry yet.</span>
-              )}
-            </div>
+            <textarea
+              className={styles.shortenedBox}
+              value={shortenedDraft}
+              onChange={(event) => {
+                setShortenedDraft(event.target.value)
+                setCopyStatus("idle")
+                setWhatsappStatus("idle")
+              }}
+              placeholder="No shortened enquiry yet."
+              aria-label="Editable shortened enquiry"
+            />
             <div className={styles.vlsfoRemarkButtons}>
               {vlsfoRemarkOptions.map((remark) => {
                 const active = vlsfoMaxRemarks.includes(remark)
@@ -544,6 +611,9 @@ export default function EnquiryWorksheetPage() {
             </div>
             {copyStatus === "copied" ? <p className={styles.copyStatus}>Copied.</p> : null}
             {copyStatus === "failed" ? <p className={styles.copyError}>Copy failed.</p> : null}
+            {whatsappStatus === "sending" ? <p className={styles.copyStatus}>Sending to WhatsApp board...</p> : null}
+            {whatsappStatus === "sent" ? <p className={styles.copyStatus}>Sent to FCUNO WhatsApp Speed Board.</p> : null}
+            {whatsappStatus === "failed" ? <p className={styles.copyError}>FCUNO WhatsApp Speed Board did not respond. Reload the extension and try again.</p> : null}
           </section>
 
           <div className={styles.confirmGrid}>

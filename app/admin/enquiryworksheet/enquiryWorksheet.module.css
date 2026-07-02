@@ -363,7 +363,7 @@
 
 .shortenedHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -388,7 +388,32 @@
   line-height: 1;
 }
 
-.copyButton:disabled {
+.whatsappButton {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #1ea75a !important;
+  border-radius: 999px;
+  background: #25d366 !important;
+  color: #ffffff !important;
+  cursor: pointer;
+}
+
+.whatsappButton svg {
+  width: 19px;
+  height: 19px;
+  display: block;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.copyButton:disabled,
+.whatsappButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -401,13 +426,16 @@
   background: #fff;
   color: #171717;
   padding: 12px;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 800;
   line-height: 1.45;
   white-space: pre-wrap;
 }
 
-.shortenedPlaceholder {
+.shortenedBox::placeholder {
   color: var(--fc-admin-muted);
 }
 
