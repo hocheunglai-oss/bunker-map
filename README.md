@@ -44,8 +44,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ## Tech Stack
 
-- Next.js
-- React
+- Next.js 16
+- React 19
 - TypeScript
 - Supabase
 - Leaflet / React Leaflet

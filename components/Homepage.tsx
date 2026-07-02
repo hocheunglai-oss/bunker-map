@@ -10,28 +10,19 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { resolvePortFuelValue } from "@/lib/portPricing"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
+import type { HomepageMarketData, PublicPort } from "@/lib/publicMarketData"
 
-type Port = {
-  id: number
-  name: string
-  type?: string | null
-  lat: number | null
-  lng: number | null
-  hsfo: number | null
-  vlsfo: number | null
-  mgo: number | null
-  hsfo_formula?: string | null
-  vlsfo_formula?: string | null
-  mgo_formula?: string | null
-  recorded_at?: string | null
-  updated_at?: string | null
-  date?: string | null
-}
+type Port = PublicPort
 
 type HomepageDataResponse = {
   ports?: Port[]
   fallbacks?: FallbackMap
   message?: string
+}
+
+type HomepageProps = {
+  initialData?: HomepageMarketData
+  onReady?: () => void
 }
 
 const mapTilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY
@@ -77,6 +68,23 @@ function formatFuelDelta(value: number | null, singaporeValue: number | null) {
   if (delta === 0) return "vs SGP 0"
 
   return `vs SGP ${delta > 0 ? "+" : ""}${delta}`
+}
+
+function normaliseHomepageData(payload: HomepageDataResponse | HomepageMarketData | undefined) {
+  const data = Array.isArray(payload?.ports) ? payload.ports : []
+  const portsByName = new Map(
+    data.map((port: Port) => [port.name.toLowerCase(), port] as const)
+  )
+
+  return {
+    ports: data.map((port: Port) => ({
+      ...port,
+      hsfo: resolvePortFuelValue(port, portsByName, "hsfo"),
+      vlsfo: resolvePortFuelValue(port, portsByName, "vlsfo"),
+      mgo: resolvePortFuelValue(port, portsByName, "mgo"),
+    })),
+    fallbacks: payload?.fallbacks || {},
+  }
 }
 
 function MapController({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
@@ -173,10 +181,35 @@ function ZoomControls() {
 
 function OilWidget() {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const [shouldLoad, setShouldLoad] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let idleId: number | null = null
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null
+
+    const markReady = () => {
+      if (!cancelled) setShouldLoad(true)
+    }
+
+    if ("requestIdleCallback" in window) {
+      idleId = window.requestIdleCallback(markReady, { timeout: 1600 })
+    } else {
+      timeoutId = globalThis.setTimeout(markReady, 900)
+    }
+
+    return () => {
+      cancelled = true
+      if (idleId != null && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId)
+      }
+      if (timeoutId != null) globalThis.clearTimeout(timeoutId)
+    }
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
-    if (!container) return
+    if (!container || !shouldLoad) return
 
     container.innerHTML = ""
 
@@ -226,9 +259,26 @@ function OilWidget() {
     return () => {
       container.innerHTML = ""
     }
-  }, [])
+  }, [shouldLoad])
 
-  return <div ref={containerRef} style={{ width: "100%", minHeight: "300px" }} />
+  return (
+    <div ref={containerRef} style={{ width: "100%", minHeight: "300px" }}>
+      {!shouldLoad && (
+        <div
+          style={{
+            minHeight: "300px",
+            display: "grid",
+            placeItems: "center",
+            color: "rgba(237,247,255,0.72)",
+            fontSize: "13px",
+            fontWeight: 700,
+          }}
+        >
+          Loading market overview...
+        </div>
+      )}
+    </div>
+  )
 }
 
 function IconButton({
@@ -288,22 +338,33 @@ function IconButton({
   )
 }
 
-export default function Homepage() {
+export default function Homepage({ initialData, onReady }: HomepageProps) {
   const isMobile = useIsMobile()
-  const [ports, setPorts] = useState<Port[]>([])
+  const initialMarketData = useMemo(() => normaliseHomepageData(initialData), [initialData])
+  const [ports, setPorts] = useState<Port[]>(() => initialMarketData.ports)
   const [search, setSearch] = useState("")
   const [results, setResults] = useState<Port[]>([])
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const [selectedPortId, setSelectedPortId] = useState<number | null>(null)
   const [reportsOpen, setReportsOpen] = useState(false)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
-  const [fallbacks, setFallbacks] = useState<FallbackMap>({})
-  const [marketDataStatus, setMarketDataStatus] = useState<"loading" | "ready" | "error">("loading")
+  const [fallbacks, setFallbacks] = useState<FallbackMap>(() => initialMarketData.fallbacks)
+  const [marketDataStatus, setMarketDataStatus] = useState<"loading" | "ready" | "error">(
+    () => initialMarketData.ports.length > 0 ? "ready" : "loading"
+  )
 
   const mapRef = useRef<L.Map | null>(null)
   const markerRefs = useRef<Record<number, L.CircleMarker>>({})
   const reportsCloseTimeoutRef = useRef<number | null>(null)
   const router = useRouter()
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      onReady?.()
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [onReady])
 
   function clearReportsCloseTimeout() {
     if (reportsCloseTimeoutRef.current != null) {
@@ -322,10 +383,11 @@ export default function Homepage() {
 
   useEffect(() => {
     let cancelled = false
+    let refreshTimer: number | null = null
 
-    async function loadHomepageData() {
+    async function loadHomepageData(showLoading: boolean) {
       try {
-        setMarketDataStatus("loading")
+        if (showLoading) setMarketDataStatus("loading")
         const response = await fetch("/api/homepage-data")
         const payload = (await response.json()) as HomepageDataResponse
 
@@ -333,21 +395,11 @@ export default function Homepage() {
           throw new Error(payload.message || "Unable to load homepage data.")
         }
 
-        const data = Array.isArray(payload.ports) ? payload.ports : []
-        const portsByName = new Map(
-          data.map((port: Port) => [port.name.toLowerCase(), port] as const)
-        )
-
-        const processed = data.map((port: Port) => ({
-          ...port,
-          hsfo: resolvePortFuelValue(port, portsByName, "hsfo"),
-          vlsfo: resolvePortFuelValue(port, portsByName, "vlsfo"),
-          mgo: resolvePortFuelValue(port, portsByName, "mgo"),
-        }))
+        const processed = normaliseHomepageData(payload)
 
         if (cancelled) return
-        setPorts(processed)
-        setFallbacks(payload.fallbacks || {})
+        setPorts(processed.ports)
+        setFallbacks(processed.fallbacks)
         setMarketDataStatus("ready")
       } catch (error) {
         console.error("Failed to load homepage data", error)
@@ -355,12 +407,19 @@ export default function Homepage() {
       }
     }
 
-    loadHomepageData()
+    if (initialMarketData.ports.length > 0) {
+      refreshTimer = window.setTimeout(() => {
+        void loadHomepageData(false)
+      }, 60000)
+    } else {
+      void loadHomepageData(true)
+    }
 
     return () => {
       cancelled = true
+      if (refreshTimer != null) window.clearTimeout(refreshTimer)
     }
-  }, [])
+  }, [initialMarketData.ports.length])
 
   function fuelFallback(portName: string, fuel: "hsfo" | "vlsfo" | "mgo") {
     return fallbacks[buildFallbackKey(portName, fuel)] || "-"

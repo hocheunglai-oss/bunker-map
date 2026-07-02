@@ -5,7 +5,8 @@ import type { HongKongReportRow } from "@/lib/hongKongReport"
 import type { TaiwanReportRow } from "@/lib/taiwanReport"
 import type { ChinaReportSection } from "@/lib/chinaReport"
 
-export const PUBLIC_MARKET_DATA_REVALIDATE_SECONDS = 30
+export const PUBLIC_MARKET_DATA_REVALIDATE_SECONDS = 120
+export const PUBLIC_MARKET_DATA_STALE_SECONDS = 600
 
 const SUPABASE_TIMEOUT_MS = 8000
 
@@ -252,7 +253,11 @@ export function getPublicReportData<Key extends ReportSnapshotKey>(key: Key) {
 }
 
 export function publicMarketCacheHeaders() {
+  const sharedCacheControl = `public, s-maxage=${PUBLIC_MARKET_DATA_REVALIDATE_SECONDS}, stale-while-revalidate=${PUBLIC_MARKET_DATA_STALE_SECONDS}`
+
   return {
-    "Cache-Control": `public, s-maxage=${PUBLIC_MARKET_DATA_REVALIDATE_SECONDS}, stale-while-revalidate=300`,
+    "Cache-Control": `public, max-age=0, s-maxage=${PUBLIC_MARKET_DATA_REVALIDATE_SECONDS}, stale-while-revalidate=${PUBLIC_MARKET_DATA_STALE_SECONDS}`,
+    "CDN-Cache-Control": sharedCacheControl,
+    "Vercel-CDN-Cache-Control": sharedCacheControl,
   }
 }
