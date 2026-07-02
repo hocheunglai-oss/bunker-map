@@ -137,18 +137,18 @@ function findDates(value: string) {
   const dates: string[] = []
   const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\s*(?:,?\\s*\\d{2,4})?(?:\\s*\\([^)]*\\))?\\s*-\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\s*(?:,?\\s*\\d{2,4})?(?:\\s*\\([^)]*\\))?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[2], match[3], match[4])
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})[./](\d{1,2})\s*(?:-|\/|to)\s*(?:(\d{1,2})[./])?(\d{1,2})\b/gi)) {
+  for (const match of normalized.matchAll(/\b(\d{1,2})[./](\d{1,2})\s*(?:-|~|\/|to)\s*(?:(\d{1,2})[./])?(\d{1,2})\b/gi)) {
     const rangeMonth = match[3] || match[1]
     const range = formatDateRange(match[2], match[1], match[4], rangeMonth)
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*-\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
   }
@@ -158,12 +158,17 @@ function findDates(value: string) {
     if (range) dates.push(range)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*['’]?\\d{2,4})?\\b`, "gi"))) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
   for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b/g)) {
     const date = normalizeDate(match[1], match[2])
     if (date) dates.push(date)
   }
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*[- ]\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi)) {
+  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?(?:\s+of\s+|\s*[- ]\s*)(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi)) {
     const date = normalizeDate(match[1], match[2])
     if (date) dates.push(date)
   }
@@ -220,7 +225,7 @@ export function hasVlsfoMaxCaution(value: string) {
 }
 
 function extractQuantityFromInlineUnit(value: string) {
-  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
+  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
   if (range) {
     return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
   }

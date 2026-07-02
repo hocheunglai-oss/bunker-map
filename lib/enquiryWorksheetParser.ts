@@ -25,7 +25,7 @@ type ImoCandidate = {
 }
 
 const VESSEL_LABEL_PATTERN =
-  /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\b|船名)/i
+  /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|船名)/i
 
 const BUYER_LABEL_PATTERN =
   /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
@@ -34,7 +34,7 @@ const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 const PORT_LABEL_PATTERN =
-  /^\s*(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*port|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:[-•*]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
@@ -108,7 +108,7 @@ function removeVesselLabel(value: string) {
   return value
     .replace(/^\s*船名[^:：]*[:：]\s*/i, "")
     .replace(
-      /^\s*(?:performing\s+vessel|vessel\s*(?:\/\s*imo|\(\s*imo\s*\))?|vsl|ship)\s*[:#\-/]?\s*/i,
+      /^\s*(?:performing\s+vessel|vessel\s*(?:name|\s*\/\s*imo|\(\s*imo\s*\))?|vsl(?:\s+name)?|ship(?:\s+name)?)\s*[:#\-/]?\s*/i,
       "",
     )
 }
@@ -158,11 +158,15 @@ function extractVesselFromImoLine(line: string, imo: string) {
 }
 
 function extractLabelledVessel(lines: string[]) {
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
     if (!VESSEL_LABEL_PATTERN.test(line)) continue
 
     const cleaned = cleanVesselName(line)
     if (isPlausibleVesselName(cleaned)) return cleaned
+
+    const nextLine = cleanVesselName(lines[index + 1] || "")
+    if (isPlausibleVesselName(nextLine)) return nextLine
   }
 
   return ""
@@ -245,7 +249,7 @@ function cleanPortName(
   })
   if (indexedInline) return indexedInline
 
-  next = next.replace(/^\s*(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*port|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
+  next = next.replace(/^\s*(?:[-•*]\s*\.?\s*)?(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
   next = next.replace(/\([^)]*\)/g, " ")
   next = next.replace(/\b(?:bunkers?\s+only|bunker(?:ing)?|call|berth|discharging|loading|unloading)\b.*$/i, "")
   next = next.replace(/\b(?:eta|etb|etd|ets|wp\/agw|iagw)\b.*$/i, "")
@@ -300,6 +304,12 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
 
   for (const line of lines) {
     if (NON_PORT_CONTEXT_PATTERN.test(line) || /[\w.-]+@[\w.-]+/.test(line)) continue
+
+    const standalonePort = normalizeIndexedEnquiryPort(stripOuterNoise(line), {
+      portNames: options.portNames,
+      includeShortAliases: true,
+    })
+    if (standalonePort) return standalonePort
 
     const atMatch = line.match(/@\s*([A-Za-z][A-Za-z\s.'-]{1,36})\b/)
     const atPort = cleanPortName(atMatch?.[1] || "", {
