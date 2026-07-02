@@ -30,6 +30,7 @@
     enquiryError: "",
     dragging: null,
     draggingType: "",
+    draggingEnquiryIds: [],
   }
 
   let unreadTimer = 0
@@ -827,29 +828,39 @@
   }
 
   function enquiryTextForDrag(id) {
-    const enquiry = visibleEnquiries().find((item) => item.id === id)
-    if (!enquiry || !isSendableEnquiry(enquiry)) return ""
-    return withTemplate(enquiryBodyText(enquiry))
+    return enquiryTextForIds(activeDragEnquiryIds(id))
+  }
+
+  function selectedSendableEnquiryIds() {
+    return visibleEnquiries()
+      .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
+      .map((enquiry) => enquiry.id)
+  }
+
+  function activeDragEnquiryIds(draggedId) {
+    const selectedIds = selectedSendableEnquiryIds()
+    if (selectedIds.length >= 2) return selectedIds
+    return draggedId ? [draggedId] : []
+  }
+
+  function enquiryTextForIds(ids) {
+    const idSet = new Set((ids || []).map(cleanText).filter(Boolean))
+    const seenBodies = new Set()
+    const text = visibleEnquiries()
+      .filter((enquiry) => idSet.has(enquiry.id) && isSendableEnquiry(enquiry))
+      .map(enquiryBodyText)
+      .filter((body) => {
+        const key = body.toLowerCase()
+        if (!key || seenBodies.has(key)) return false
+        seenBodies.add(key)
+        return true
+      })
+      .join("\n\n")
+    return withTemplate(text)
   }
 
   function selectedEnquiryText() {
-    const seenIds = new Set()
-    const seenBodies = new Set()
-    const text = visibleEnquiries()
-      .filter((enquiry) => {
-        if (!state.selectedEnquiries[enquiry.id] || !isSendableEnquiry(enquiry)) return false
-        const body = enquiryBodyText(enquiry)
-        const id = cleanText(enquiry.id)
-        const bodyKey = body.toLowerCase()
-        if ((id && seenIds.has(id)) || (bodyKey && seenBodies.has(bodyKey))) return false
-        if (id) seenIds.add(id)
-        if (bodyKey) seenBodies.add(bodyKey)
-        return true
-      })
-      .map(enquiryBodyText)
-      .filter(Boolean)
-      .join("\n\n")
-    return withTemplate(text)
+    return enquiryTextForIds(selectedSendableEnquiryIds())
   }
 
   function findComposer() {
@@ -1140,6 +1151,14 @@
     window.setTimeout(trySendPending, 320)
   }
 
+  function sendSelectedToContact(id) {
+    const contact = state.contacts.find((item) => item.id === id)
+    const text = selectedEnquiryText()
+    state.contactMenuId = ""
+    if (contact && text) sendTextToContact(contact, text)
+    render()
+  }
+
   function sendSelectedToChat() {
     const text = selectedEnquiryText()
     if (!text) return
@@ -1150,6 +1169,7 @@
   }
 
   function renderContactList(list) {
+    const hasSelectedEnquiries = selectedSendableEnquiryIds().length > 0
     const rows = contactsFor(list).map((contact) => {
       const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
       const menuOpen = state.contactMenuId === contact.id
@@ -1164,6 +1184,7 @@
             <button class="fcuno-wa-spc-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or remove">☰</button>
             ${menuOpen ? `
               <div class="fcuno-wa-spc-contact-menu" role="menu">
+                <button type="button" data-action="send-selected-contact" data-id="${escapeHtml(contact.id)}" ${hasSelectedEnquiries ? "" : "disabled"}>Send Selected</button>
                 <button type="button" data-action="remove-contact" data-id="${escapeHtml(contact.id)}">Remove</button>
               </div>
             ` : ""}
@@ -1206,8 +1227,9 @@
       const statusText = enquiryStatusText(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const body = enquiryBodyText(enquiry)
+      const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       return `
-        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
           ${sendable ? `<input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />` : `<span class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</span>`}
           <span>
             <em>${escapeHtml(body || enquiry.title || "ENQUIRY")}</em>
@@ -1278,7 +1300,9 @@
   function clearDragState(root = document) {
     state.dragging = null
     state.draggingType = ""
+    state.draggingEnquiryIds = []
     clearDropMarkers(root)
+    clearEnquiryDragMarkers(root)
   }
 
   function dragHasType(event, type) {
@@ -1297,9 +1321,27 @@
     event.dataTransfer.setData("text/plain", id)
   }
 
-  function setEnquiryDragData(event, id) {
-    if (!event.dataTransfer || !id) return
-    event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", id)
+  function setEnquiryDragData(event, ids) {
+    if (!event.dataTransfer) return
+    const enquiryIds = (Array.isArray(ids) ? ids : [ids]).map(cleanText).filter(Boolean)
+    if (!enquiryIds.length) return
+    event.dataTransfer.setData("application/x-fcuno-spc-enquiry-id", enquiryIds[0])
+    event.dataTransfer.setData("application/x-fcuno-spc-enquiry-ids", JSON.stringify(enquiryIds))
+    event.dataTransfer.setData("text/plain", enquiryTextForIds(enquiryIds))
+  }
+
+  function enquiryDragIds(event) {
+    if (!event.dataTransfer) return state.draggingEnquiryIds || []
+    const rawIds = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-ids")
+    if (rawIds) {
+      try {
+        const ids = JSON.parse(rawIds)
+        if (Array.isArray(ids)) return ids.map(cleanText).filter(Boolean)
+      } catch {
+      }
+    }
+    const id = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id") || state.dragging || ""
+    return id ? [id] : []
   }
 
   function contactDragId(event) {
@@ -1329,6 +1371,47 @@
     if (event.dataTransfer && typeof event.dataTransfer.setDragImage === "function") {
       event.dataTransfer.setDragImage(row, 16, 16)
     }
+  }
+
+  function clearEnquiryDragMarkers(root = document) {
+    root.querySelectorAll(".fcuno-wa-spc-enquiry.is-dragging").forEach((row) => {
+      row.classList.remove("is-dragging")
+    })
+  }
+
+  function markDraggingEnquiries(root, ids) {
+    clearEnquiryDragMarkers(root)
+    const idSet = new Set((ids || []).map(cleanText).filter(Boolean))
+    root.querySelectorAll(".fcuno-wa-spc-enquiry[data-id]").forEach((row) => {
+      if (idSet.has(row.dataset.id || "")) row.classList.add("is-dragging")
+    })
+  }
+
+  function setEnquiryDragImage(event, row, ids) {
+    if (!event.dataTransfer || typeof event.dataTransfer.setDragImage !== "function") return
+    if (!ids || ids.length <= 1) {
+      setRowDragImage(event, row)
+      return
+    }
+    const preview = document.createElement("div")
+    preview.className = "fcuno-wa-spc-drag-preview"
+    const idSet = new Set(ids.map(cleanText).filter(Boolean))
+    visibleEnquiries()
+      .filter((enquiry) => idSet.has(enquiry.id))
+      .slice(0, 3)
+      .forEach((enquiry) => {
+        const line = document.createElement("span")
+        line.textContent = enquiryBodyText(enquiry)
+        preview.appendChild(line)
+      })
+    if (ids.length > 3) {
+      const line = document.createElement("span")
+      line.textContent = `+${ids.length - 3} more`
+      preview.appendChild(line)
+    }
+    document.body.appendChild(preview)
+    event.dataTransfer.setDragImage(preview, 12, 12)
+    window.setTimeout(() => preview.remove(), 0)
   }
 
   function setDropMarker(event, row, root) {
@@ -1387,6 +1470,14 @@
       })
     })
 
+    host.querySelectorAll("[data-action='send-selected-contact']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        if (button.disabled) return
+        sendSelectedToContact(button.dataset.id || "")
+      })
+    })
+
     host.querySelectorAll(".fcuno-wa-spc-row").forEach((row) => {
       row.addEventListener("click", (event) => {
         if (event.target instanceof Element && event.target.closest(".fcuno-wa-spc-row-actions")) return
@@ -1406,10 +1497,10 @@
         event.stopPropagation()
         const position = row.dataset.dropPosition || "before"
         clearDropMarkers(host)
-        const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
-        if (enquiryId) {
+        const enquiryIds = enquiryDragIds(event)
+        if (enquiryIds.length) {
           const contact = state.contacts.find((item) => item.id === row.dataset.id)
-          const text = enquiryTextForDrag(enquiryId)
+          const text = enquiryTextForIds(enquiryIds)
           if (contact && text) sendTextToContact(contact, text)
           return
         }
@@ -1440,8 +1531,7 @@
         event.preventDefault()
         event.stopPropagation()
         clearDropMarkers(host)
-        const enquiryId = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id")
-        if (enquiryId) return
+        if (enquiryDragIds(event).length) return
         const id = contactDragId(event)
         moveContact(id, list.dataset.list || "supplier", "")
       })
@@ -1504,16 +1594,19 @@
     host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
       row.addEventListener("dragstart", (event) => {
         const id = row.dataset.id || ""
-        const text = enquiryTextForDrag(id)
+        const ids = activeDragEnquiryIds(id)
+        const text = enquiryTextForIds(ids)
         if (!text) {
           event.preventDefault()
           return
         }
         state.dragging = id
         state.draggingType = "enquiry"
+        state.draggingEnquiryIds = ids
         prepareDragData(event, "copy")
-        setEnquiryDragData(event, id)
-        setRowDragImage(event, row)
+        setEnquiryDragData(event, ids)
+        markDraggingEnquiries(host, ids)
+        setEnquiryDragImage(event, row, ids)
       })
       row.addEventListener("dragend", () => clearDragState(host))
     })
@@ -1522,6 +1615,7 @@
   if (typeof window !== "undefined" && window.__FCUNO_WA_SPC_ENABLE_TEST_API__) {
     window.__FCUNO_WA_SPC_TEST_API__ = {
       state,
+      activeDragEnquiryIds,
       canUseDirectUrl,
       cleanText,
       composerText,
@@ -1532,14 +1626,18 @@
       currentChatMatchesContact,
       findSendButton,
       getCurrentChat,
+      enquiryTextForIds,
       insertComposerText,
       loadEnquiries,
       moveContact,
       phoneDigits,
       prepareComposerTextForSend,
       refreshUnreadIndicators,
+      render,
       selectedEnquiryText,
+      selectedSendableEnquiryIds,
       acquireSendLock,
+      sendSelectedToContact,
       sendTextToContact,
       textMatchesContact,
       withTemplate,

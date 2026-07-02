@@ -306,6 +306,15 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   background: #f0f2f5;
 }
 
+.fcuno-wa-spc-contact-menu button:disabled {
+  color: #98a2ad;
+  cursor: not-allowed;
+}
+
+.fcuno-wa-spc-contact-menu button:disabled:hover {
+  background: transparent;
+}
+
 .fcuno-wa-spc-contact-menu button:last-child {
   color: #b42318;
 }
@@ -452,6 +461,12 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   cursor: grabbing;
 }
 
+.fcuno-wa-spc-enquiry.is-dragging {
+  border-color: #008069;
+  background: #e4f8ef;
+  box-shadow: inset 3px 0 0 #008069;
+}
+
 .fcuno-wa-spc-enquiry.is-new {
   border-color: #25d366;
   box-shadow: inset 3px 0 0 #25d366;
@@ -557,4 +572,31 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 .fcuno-wa-spc-enquiry-remove:hover {
   background: #ffe7e7;
   color: #b42318;
+}
+
+.fcuno-wa-spc-drag-preview {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  z-index: 2147483001;
+  border: 1px solid #b9e3d5;
+  border-radius: 8px;
+  background: #e4f8ef;
+  color: #006b4f;
+  font: 900 12px/1 Arial, Helvetica, sans-serif;
+  padding: 9px 12px;
+  box-shadow: 0 8px 20px rgba(17, 27, 33, 0.18);
+  pointer-events: none;
+  max-width: 260px;
+}
+
+.fcuno-wa-spc-drag-preview span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcuno-wa-spc-drag-preview span + span {
+  margin-top: 5px;
 }

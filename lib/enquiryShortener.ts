@@ -152,11 +152,15 @@ function isLabelLine(value: string) {
   return /^[A-Za-z][A-Za-z0-9\s/&().,-]{0,48}:/.test(value)
 }
 
-function extractDetectedVlsfoRemarks(value: string): VlsfoMaxRemark[] {
+export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
   const remarks: VlsfoMaxRemark[] = []
   if (/(^|\D)180(?!\d)/.test(value)) remarks.push("180cst max")
   if (/(^|\D)120(?!\d)/.test(value)) remarks.push("120cst max")
   return remarks
+}
+
+export function hasVlsfoMaxCaution(value: string) {
+  return /(^|\D)(?:180|120)(?!\d)/.test(value)
 }
 
 function extractQuantityFromInlineUnit(value: string) {
@@ -218,7 +222,7 @@ function extractProducts(text: string) {
       products.push({
         product,
         quantity,
-        detectedRemarks: product === "vlsfo" ? extractDetectedVlsfoRemarks(block.join(" ")) : [],
+        detectedRemarks: product === "vlsfo" ? detectVlsfoMaxRemarks(block.join(" ")) : [],
       })
     }
 
@@ -232,11 +236,16 @@ function mergeRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
   return Array.from(new Set(remarkGroups.flat()))
 }
 
+export function formatVlsfoMaxRemark(remark: VlsfoMaxRemark) {
+  return remark === "180cst max" ? "180CST MAX" : "120CST MAX"
+}
+
 function formatProductSegment(segment: ProductSegment, manualVlsfoRemarks: VlsfoMaxRemark[]) {
+  if (segment.product === "hsfo") return `HSFO ${segment.quantity}`
   if (segment.product !== "vlsfo") return `${segment.product} ${segment.quantity}`
 
   const remarks = mergeRemarks(segment.detectedRemarks, manualVlsfoRemarks)
-  return [segment.product, ...remarks, segment.quantity].join(" ")
+  return [segment.product, ...remarks.map(formatVlsfoMaxRemark), segment.quantity].join(" ")
 }
 
 export function buildShortenedEnquiry(

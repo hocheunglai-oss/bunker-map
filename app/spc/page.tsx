@@ -288,10 +288,13 @@ export default function SpcLoginPage() {
                 </svg>
               </span>
               <input
+                name="username"
                 value={loginUsername}
                 onChange={(event) => setLoginUsername(event.target.value)}
                 autoComplete="username"
                 aria-label="Username"
+                autoCapitalize="none"
+                spellCheck={false}
                 required
               />
             </span>
@@ -308,11 +311,14 @@ export default function SpcLoginPage() {
                 </svg>
               </span>
               <input
+                name="password"
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
                 aria-label="Password"
+                autoCapitalize="none"
+                spellCheck={false}
                 required
               />
               <button

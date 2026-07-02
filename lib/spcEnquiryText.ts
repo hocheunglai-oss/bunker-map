@@ -1,3 +1,11 @@
+import {
+  buildShortenedEnquiry,
+  detectVlsfoMaxRemarks,
+  formatVlsfoMaxRemark,
+  type VlsfoMaxRemark,
+} from "@/lib/enquiryShortener"
+import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+
 export type ParsedSpcEnquiry = {
   rawText: string
   title: string
@@ -12,6 +20,7 @@ export type ParsedSpcEnquiry = {
 }
 
 export type SpcEnquiryMeta = {
+  imo?: string
   lostReason?: string
   stemSupplierTraderUsername?: string
   stemSupplierTraderDisplayName?: string
@@ -44,6 +53,7 @@ const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
 const FUEL_PATTERN = /\b(vlsfo|lsfo|hsfo|hfo|ifo|mgo|lsmgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)\b/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
+  "imo",
   "lostReason",
   "stemSupplierTraderUsername",
   "stemSupplierTraderDisplayName",
@@ -182,6 +192,18 @@ function vlsfoRemarks(value: string) {
   return remarks
 }
 
+function mergeVlsfoMaxRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
+  return Array.from(new Set(remarkGroups.flat()))
+}
+
+function stripVlsfoMaxRemarks(value: string) {
+  return value
+    .replace(/\b180\s*cst\s*max\b/gi, "")
+    .replace(/\b120\s*cst\s*max\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKey) {
   let text = lowerText(value)
   if (!text) return ""
@@ -210,9 +232,19 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKe
   return text
 }
 
-export function formatSpcFuelSegment(fuel: FuelKey, value: string | null | undefined) {
+export function formatSpcFuelSegment(
+  fuel: FuelKey,
+  value: string | null | undefined,
+  manualVlsfoRemarks: VlsfoMaxRemark[] = [],
+) {
   const cleaned = cleanSpcFuelValue(value, fuel)
-  return cleaned ? `${fuel} ${cleaned}` : ""
+  if (!cleaned) return ""
+  if (fuel === "hsfo") return `HSFO ${cleaned}`
+  if (fuel === "lsmgo") return `lsmgo ${cleaned}`
+
+  const remarks = mergeVlsfoMaxRemarks(detectVlsfoMaxRemarks(cleaned), manualVlsfoRemarks)
+  const quantity = stripVlsfoMaxRemarks(cleaned)
+  return ["vlsfo", ...remarks.map(formatVlsfoMaxRemark), quantity].filter(Boolean).join(" ")
 }
 
 export function buildSpcStandardEnquiry(input: {
@@ -223,13 +255,14 @@ export function buildSpcStandardEnquiry(input: {
   vlsfo?: string | null
   lsmgo?: string | null
   remarks?: string | null
+  vlsfoMaxRemarks?: VlsfoMaxRemark[]
 }) {
   return [
     lowerText(input.vesselName),
     lowerText(input.imo),
     lowerText(input.eta),
     formatSpcFuelSegment("hsfo", input.hsfo),
-    formatSpcFuelSegment("vlsfo", input.vlsfo),
+    formatSpcFuelSegment("vlsfo", input.vlsfo, input.vlsfoMaxRemarks || []),
     formatSpcFuelSegment("lsmgo", input.lsmgo),
     lowerText(input.remarks),
   ].filter(Boolean).join(" / ")
@@ -249,7 +282,7 @@ export function formatSpcEnquiry(input: SpcEnquiryTextInput) {
   return parts.join(" / ")
 }
 
-export function parseSpcEnquiryText(rawValue: string): ParsedSpcEnquiry {
+function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: VlsfoMaxRemark[] = []): ParsedSpcEnquiry {
   const rawText = cleanSpcEnquiryText(rawValue)
   const source = oneLine(rawText)
   const parts = source
@@ -296,6 +329,7 @@ export function parseSpcEnquiryText(rawValue: string): ParsedSpcEnquiry {
     vlsfo,
     lsmgo,
     remarks: remarks.join(" / "),
+    vlsfoMaxRemarks: manualVlsfoRemarks,
   })
   const title = [lowerText(vesselName) || "new enquiry", eta].filter(Boolean).join(" / ")
 
@@ -310,5 +344,66 @@ export function parseSpcEnquiryText(rawValue: string): ParsedSpcEnquiry {
     lsmgo,
     remarks: remarks.join(" / "),
     standardText: standardText || lowerText(source),
+  }
+}
+
+export function parseSpcEnquiryText(
+  rawValue: string,
+  manualVlsfoRemarks: VlsfoMaxRemark[] = [],
+): ParsedSpcEnquiry {
+  const rawText = cleanSpcEnquiryText(rawValue)
+  if (!rawText) {
+    return {
+      rawText: "",
+      title: "",
+      vesselName: "",
+      imo: "",
+      eta: "",
+      hsfo: "",
+      vlsfo: "",
+      lsmgo: "",
+      remarks: "",
+      standardText: "",
+    }
+  }
+
+  const delimited = parseDelimitedSpcEnquiryText(rawText, manualVlsfoRemarks)
+  const guess = parseEnquiryWorksheetGuess(rawText)
+  const vesselName = lowerText(guess.vesselName || delimited.vesselName)
+  const imo = guess.imo || delimited.imo
+  const shortened = buildShortenedEnquiry(
+    rawText,
+    guess.vesselName || delimited.vesselName,
+    imo,
+    manualVlsfoRemarks,
+  )
+  const shortenedParts = shortened ? parseDelimitedSpcEnquiryText(shortened, manualVlsfoRemarks) : null
+  const eta = shortenedParts?.eta || delimited.eta
+  const hsfo = shortenedParts?.hsfo || delimited.hsfo
+  const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
+  const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo
+  const remarks = shortenedParts?.remarks || delimited.remarks
+  const standardText = buildSpcStandardEnquiry({
+    vesselName,
+    imo,
+    eta,
+    hsfo,
+    vlsfo,
+    lsmgo,
+    remarks,
+    vlsfoMaxRemarks: manualVlsfoRemarks,
+  })
+
+  return {
+    rawText,
+    title: [vesselName || "new enquiry", eta].filter(Boolean).join(" / "),
+    vesselName,
+    imo,
+    eta,
+    hsfo,
+    vlsfo,
+    lsmgo,
+    remarks,
+    standardText: standardText || delimited.standardText || lowerText(rawText),
   }
 }

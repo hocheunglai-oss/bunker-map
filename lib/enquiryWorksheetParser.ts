@@ -165,6 +165,22 @@ function extractSlashPrefixVessel(lines: string[]) {
   return ""
 }
 
+function extractHeaderVessel(lines: string[]) {
+  for (const line of lines.slice(0, 4)) {
+    if (/^\s*(?:good\s+day|dear|hi|hello|please|kindly|quote|re\b|subject\b)/i.test(line)) continue
+    const hasLocationMarker = /\s+@\s+/.test(line)
+    const hasShipPrefix = /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)\b/i.test(line)
+    const mostlyCaps = line === line.toUpperCase() && /[A-Z]{2}/.test(line)
+    if (!hasLocationMarker && !hasShipPrefix && !mostlyCaps) continue
+
+    const beforeLocation = line.split(/\s+@\s+/)[0] || line
+    const cleaned = cleanVesselName(beforeLocation)
+    if (isPlausibleVesselName(cleaned)) return cleaned
+  }
+
+  return ""
+}
+
 function cleanBuyerName(value: string) {
   return stripOuterNoise(value)
     .replace(/^(?:is|are)\s+/i, "")
@@ -220,7 +236,8 @@ export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess 
     (imoLine ? extractVesselFromImoLine(imoLine, imo) : "") ||
     extractLabelledVessel(lines) ||
     extractFallbackVessel(lines, imo) ||
-    extractSlashPrefixVessel(lines)
+    extractSlashPrefixVessel(lines) ||
+    extractHeaderVessel(lines)
 
   if (bestImo && !imo) warnings.push("No valid IMO was found.")
   if (!vesselName) warnings.push("Vessel name could not be identified with high confidence.")

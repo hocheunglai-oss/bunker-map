@@ -62,6 +62,8 @@ export type SpcFixtureInput = {
   barging?: string
 }
 
+export type ReofferSpcEnquiryInput = SaveSpcEnquiryInput
+
 type SpcEnquiryRow = {
   id: string
   enquiry_number: string
@@ -267,6 +269,56 @@ export async function updateSpcEnquiryOutcome(
     .update({
       status,
       notes: writeSpcEnquiryNotes(currentText, nextMeta),
+      updated_at: now,
+    })
+    .eq("id", enquiryId)
+    .select("*")
+    .single()
+
+  if (error) throw error
+  return mapEnquiry(data as SpcEnquiryRow)
+}
+
+export async function reofferSpcEnquiry(
+  id: string,
+  input: ReofferSpcEnquiryInput,
+  session: SpcSession,
+  request: Request,
+) {
+  const enquiryId = cleanText(id)
+  if (!enquiryId) throw new Error("Enquiry id is required.")
+  const title = cleanText(input.title)
+  if (!title) throw new Error("Enquiry title is required.")
+
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  const currentText = formatSpcEnquiry(existing)
+  const providedNotes = cleanText(input.notes)
+  const now = new Date().toISOString()
+  const nextMeta: SpcEnquiryMeta = {
+    ...readSpcEnquiryMeta(existing.notes),
+    ...readSpcEnquiryMeta(providedNotes),
+    outcomeAt: undefined,
+    postponedAt: undefined,
+    cancelledAt: undefined,
+    lostReason: undefined,
+    stemSupplierTraderUsername: undefined,
+    stemSupplierTraderDisplayName: undefined,
+  }
+
+  const { data, error } = await supabase
+    .from("spc_enquiries")
+    .update({
+      title,
+      vessel_name: cleanText(input.vesselName),
+      port: cleanText(input.port),
+      product: cleanText(input.product),
+      quantity: cleanText(input.quantity),
+      delivery_date: cleanDateInput(input.deliveryDate),
+      supplier_name: cleanText(input.supplierName),
+      notes: writeSpcEnquiryNotes(providedNotes || currentText, nextMeta),
+      status: "sent",
       updated_at: now,
     })
     .eq("id", enquiryId)

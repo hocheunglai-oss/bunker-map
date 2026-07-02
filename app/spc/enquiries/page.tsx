@@ -9,11 +9,13 @@ import {
   buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
   cleanSpcFuelValue,
+  formatSpcFuelSegment,
   parseSpcEnquiryText,
   writeSpcEnquiryNotes,
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
+import { hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
 
 type SpcEnquiry = {
   id: string
@@ -57,6 +59,13 @@ type OutcomeDraft = {
   supplierTraderUsername: string
 }
 
+type ReofferDraft = DraftEnquiry & {
+  id: string
+  enquiryNumber: string
+}
+
+type DraftFieldKey = "vesselName" | "imo" | "eta" | "fuel"
+
 const LOST_REASONS = [
   "MINIMUM MARGIN",
   "CREDIT OR PAYMENT TERMS",
@@ -67,6 +76,8 @@ const LOST_REASONS = [
   "T&C",
   "UNKNOWN",
 ] as const
+
+const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["120cst max", "180cst max"]
 
 const emptyDraft: DraftEnquiry = {
   rawText: "",
@@ -111,12 +122,15 @@ function enquiryStatusClass(enquiry: SpcEnquiry) {
   return enquiry.status || "sent"
 }
 
-function standardTextForDraft(draft: Pick<DraftEnquiry, "vesselName" | "imo" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">) {
-  return buildSpcStandardEnquiry(draft)
+function standardTextForDraft(
+  draft: Pick<DraftEnquiry, "vesselName" | "imo" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">,
+  vlsfoMaxRemarks: VlsfoMaxRemark[] = [],
+) {
+  return buildSpcStandardEnquiry({ ...draft, vlsfoMaxRemarks })
 }
 
-function normaliseDraft(rawText: string): DraftEnquiry {
-  const parsed = parseSpcEnquiryText(rawText)
+function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
+  const parsed = parseSpcEnquiryText(rawText, vlsfoMaxRemarks)
   return {
     ...parsed,
     standardText: parsed.standardText,
@@ -135,6 +149,53 @@ function isOutcome(status: string) {
   return status === "quoted" || status === "cancelled" || status === "closed"
 }
 
+function sortByLatest(enquiries: SpcEnquiry[]) {
+  return [...enquiries].sort((a, b) => {
+    const first = a.meta?.postponedAt || a.updatedAt || a.createdAt
+    const second = b.meta?.postponedAt || b.updatedAt || b.createdAt
+    return second.localeCompare(first)
+  })
+}
+
+function missingDraftFields(draft: DraftEnquiry): Set<DraftFieldKey> {
+  const missing = new Set<DraftFieldKey>()
+  if (!draft.vesselName.trim()) missing.add("vesselName")
+  if (!draft.imo.trim()) missing.add("imo")
+  if (!draft.eta.trim()) missing.add("eta")
+  if (!draft.hsfo.trim() && !draft.vlsfo.trim() && !draft.lsmgo.trim()) missing.add("fuel")
+  return missing
+}
+
+function productTextForDraft(draft: DraftEnquiry, vlsfoMaxRemarks: VlsfoMaxRemark[]) {
+  return [
+    formatSpcFuelSegment("hsfo", draft.hsfo),
+    formatSpcFuelSegment("vlsfo", draft.vlsfo, vlsfoMaxRemarks),
+    formatSpcFuelSegment("lsmgo", draft.lsmgo),
+  ].filter(Boolean).join(" / ")
+}
+
+function googleImoSearchUrl(draft: DraftEnquiry) {
+  const firstRawLine = draft.rawText
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean) || ""
+  const vessel = draft.vesselName || firstRawLine.split(/\s+@\s+/)[0] || ""
+  const query = [vessel, "vessel IMO"].filter(Boolean).join(" ").trim()
+  return query ? `https://www.google.com/search?q=${encodeURIComponent(query)}` : ""
+}
+
+function draftFromEnquiry(enquiry: SpcEnquiry): ReofferDraft {
+  const parsed = normaliseDraft(enquiry.formattedText || enquiry.title || "")
+  return {
+    ...emptyDraft,
+    ...parsed,
+    id: enquiry.id,
+    enquiryNumber: enquiry.enquiryNumber,
+    vesselName: parsed.vesselName || String(enquiry.vesselName || "").toLowerCase(),
+    standardText: parsed.standardText || enquiry.formattedText || enquiry.title,
+  }
+}
+
 export default function SpcEnquiriesPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
@@ -142,6 +203,10 @@ export default function SpcEnquiriesPage() {
   const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
   const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
   const [outcomeDraft, setOutcomeDraft] = useState<OutcomeDraft | null>(null)
+  const [reofferDraft, setReofferDraft] = useState<ReofferDraft | null>(null)
+  const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
+  const [validationAttempted, setValidationAttempted] = useState(false)
+  const [reofferValidationAttempted, setReofferValidationAttempted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updatingId, setUpdatingId] = useState("")
@@ -151,7 +216,11 @@ export default function SpcEnquiriesPage() {
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
   const activeEnquiries = useMemo(
-    () => enquiries.filter((enquiry) => enquiry.status === "sent"),
+    () => sortByLatest(enquiries.filter((enquiry) => enquiry.status === "sent" && !enquiry.meta?.postponedAt)),
+    [enquiries],
+  )
+  const postponedEnquiries = useMemo(
+    () => sortByLatest(enquiries.filter((enquiry) => enquiry.status === "sent" && enquiry.meta?.postponedAt)),
     [enquiries],
   )
   const outcomeMatchesByVessel = useMemo(() => {
@@ -166,6 +235,14 @@ export default function SpcEnquiriesPage() {
     })
     return matches
   }, [enquiries])
+  const draftMissingFields = useMemo(() => missingDraftFields(draft), [draft])
+  const reofferMissingFields = useMemo(
+    () => (reofferDraft ? missingDraftFields(reofferDraft) : new Set<DraftFieldKey>()),
+    [reofferDraft],
+  )
+  const draftPreviousMatches = useMemo(() => matchesForVesselName(draft.vesselName), [draft.vesselName, outcomeMatchesByVessel])
+  const imoSearchUrl = useMemo(() => googleImoSearchUrl(draft), [draft])
+  const viscosityCautionDetected = hasVlsfoMaxCaution(draft.rawText)
 
   const loadEnquiries = useCallback(async () => {
     if (!canView) return
@@ -213,14 +290,15 @@ export default function SpcEnquiriesPage() {
   }, [loadSupplierTraders])
 
   function updateDraft(key: keyof DraftEnquiry, value: string) {
+    setValidationAttempted(false)
     setDraft((current) => {
       const next = { ...current, [key]: value }
-      if (key === "rawText") return normaliseDraft(value)
+      if (key === "rawText") return normaliseDraft(value, vlsfoMaxRemarks)
       if (key !== "standardText") {
         if (key === "hsfo") next.hsfo = cleanSpcFuelValue(value, "hsfo")
         if (key === "vlsfo") next.vlsfo = cleanSpcFuelValue(value, "vlsfo")
         if (key === "lsmgo") next.lsmgo = cleanSpcFuelValue(value, "lsmgo")
-        next.standardText = standardTextForDraft(next)
+        next.standardText = standardTextForDraft(next, vlsfoMaxRemarks)
         next.title = [next.vesselName || "new enquiry", next.eta]
           .filter(Boolean)
           .join(" / ")
@@ -229,28 +307,66 @@ export default function SpcEnquiriesPage() {
     })
   }
 
+  function updateReofferDraft(key: keyof DraftEnquiry, value: string) {
+    setReofferValidationAttempted(false)
+    setReofferDraft((current) => {
+      if (!current) return current
+      const next = { ...current, [key]: value }
+      if (key === "rawText") return { ...current, ...normaliseDraft(value), id: current.id, enquiryNumber: current.enquiryNumber }
+      if (key !== "standardText") {
+        if (key === "hsfo") next.hsfo = cleanSpcFuelValue(value, "hsfo")
+        if (key === "vlsfo") next.vlsfo = cleanSpcFuelValue(value, "vlsfo")
+        if (key === "lsmgo") next.lsmgo = cleanSpcFuelValue(value, "lsmgo")
+        next.standardText = standardTextForDraft(next)
+        next.title = [next.vesselName || "reoffer", next.eta].filter(Boolean).join(" / ")
+      }
+      return next
+    })
+  }
+
+  function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
+    setValidationAttempted(false)
+    setVlsfoMaxRemarks((current) => {
+      const next = current.includes(remark)
+        ? current.filter((item) => item !== remark)
+        : [...current, remark]
+
+      setDraft((draftCurrent) => ({
+        ...draftCurrent,
+        standardText: standardTextForDraft(draftCurrent, next),
+      }))
+      return next
+    })
+  }
+
+  function clearDraft() {
+    setDraft(emptyDraft)
+    setVlsfoMaxRemarks([])
+    setValidationAttempted(false)
+  }
+
   async function sendEnquiry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canEdit || saving) return
+    setValidationAttempted(true)
     setSaving(true)
     setMessage("")
 
-    const standardText = cleanSpcEnquiryText(draft.standardText || draft.rawText)
-    const hasFuel = Boolean(draft.hsfo || draft.vlsfo || draft.lsmgo)
-    if (!draft.vesselName.trim() || !draft.imo.trim() || !draft.eta.trim() || !hasFuel) {
-      setMessage("VESSEL, IMO, ETA and at least one fuel are required.")
+    if (draftMissingFields.size > 0) {
+      setMessage("Complete the red fields before sending.")
       setMessageIsError(true)
       setSaving(false)
       return
     }
 
+    const standardText = cleanSpcEnquiryText(standardTextForDraft(draft, vlsfoMaxRemarks))
+
     const payload = {
       title: draft.title || draft.vesselName || standardText.slice(0, 80),
       vesselName: draft.vesselName,
-      product: [draft.hsfo && `hsfo ${draft.hsfo}`, draft.vlsfo && `vlsfo ${draft.vlsfo}`, draft.lsmgo && `lsmgo ${draft.lsmgo}`]
-        .filter(Boolean)
-        .join(" / "),
+      product: productTextForDraft(draft, vlsfoMaxRemarks),
       notes: writeSpcEnquiryNotes(standardText, {
+        imo: draft.imo,
         eta: draft.eta,
         hsfo: draft.hsfo,
         vlsfo: draft.vlsfo,
@@ -268,7 +384,7 @@ export default function SpcEnquiriesPage() {
       if (!response.ok || !data.enquiry) {
         throw new Error(data.message || "Failed to send enquiry.")
       }
-      setDraft(emptyDraft)
+      clearDraft()
       setEnquiries((current) => {
         const withoutDuplicate = current.filter((enquiry) => enquiry.id !== data.enquiry!.id)
         return [data.enquiry!, ...withoutDuplicate]
@@ -356,10 +472,72 @@ export default function SpcEnquiriesPage() {
     }
   }
 
-  function matchesFor(enquiry: SpcEnquiry) {
-    const key = normaliseVesselName(enquiry.vesselName || enquiry.title)
+  function openReoffer(enquiry: SpcEnquiry) {
+    setMessage("")
+    setReofferValidationAttempted(false)
+    setReofferDraft(draftFromEnquiry(enquiry))
+  }
+
+  async function confirmReoffer() {
+    if (!canEdit || !reofferDraft || saving) return
+    setReofferValidationAttempted(true)
+    const missing = missingDraftFields(reofferDraft)
+    if (missing.size > 0) {
+      setMessage("Complete the red fields before reoffering.")
+      setMessageIsError(true)
+      return
+    }
+
+    setSaving(true)
+    setUpdatingId(reofferDraft.id)
+    setMessage("")
+    const standardText = cleanSpcEnquiryText(standardTextForDraft(reofferDraft))
+
+    try {
+      const response = await fetch("/api/spc/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: reofferDraft.id,
+          mode: "reoffer",
+          title: reofferDraft.title || reofferDraft.vesselName || standardText.slice(0, 80),
+          vesselName: reofferDraft.vesselName,
+          product: productTextForDraft(reofferDraft, []),
+          notes: writeSpcEnquiryNotes(standardText, {
+            imo: reofferDraft.imo,
+            eta: reofferDraft.eta,
+            hsfo: reofferDraft.hsfo,
+            vlsfo: reofferDraft.vlsfo,
+            lsmgo: reofferDraft.lsmgo,
+          }),
+        }),
+      })
+      const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
+      if (!response.ok || !data.enquiry) throw new Error(data.message || "Failed to reoffer enquiry.")
+
+      setEnquiries((current) =>
+        current.map((enquiry) => (enquiry.id === reofferDraft.id ? data.enquiry! : enquiry)),
+      )
+      setReofferDraft(null)
+      setMessage("Enquiry reoffered.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to reoffer enquiry.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+      setUpdatingId("")
+    }
+  }
+
+  function matchesForVesselName(vesselName: string | null | undefined) {
+    const key = normaliseVesselName(vesselName)
     if (!key) return []
-    return (outcomeMatchesByVessel.get(key) || []).filter((match) => match.id !== enquiry.id)
+    return outcomeMatchesByVessel.get(key) || []
+  }
+
+  function matchesFor(enquiry: SpcEnquiry) {
+    return matchesForVesselName(enquiry.vesselName || enquiry.title).filter((match) => match.id !== enquiry.id)
   }
 
   if (authLoading || !canView) {
@@ -375,72 +553,144 @@ export default function SpcEnquiriesPage() {
       ) : null}
 
       <div className="spc-enquiries-layout">
-        <section className="spc-panel spc-enquiry-entry-panel">
-          <div className="spc-panel-header">
-            <h2>New Enquiry</h2>
-            <button type="button" onClick={() => setDraft(emptyDraft)} disabled={!canEdit || saving}>
-              Clear
-            </button>
-          </div>
-          <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form">
-            <label className="spc-enquiry-raw">
-              <span>Paste Your Enquiry Here</span>
-              <textarea
-                value={draft.rawText}
-                onChange={(event) => updateDraft("rawText", event.target.value)}
-                placeholder=""
-                rows={4}
-                disabled={!canEdit}
-              />
-            </label>
-            <div className="spc-enquiry-fields">
-              <label>
-                <span>Vessel</span>
-                <input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} required />
-              </label>
-              <label>
-                <span>IMO</span>
-                <input value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} required />
-              </label>
-              <label>
-                <span>ETA</span>
-                <input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} required />
-              </label>
-              <label>
-                <span>HSFO</span>
-                <input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} />
-              </label>
-              <label>
-                <span>VLSFO</span>
-                <input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} />
-              </label>
-              <label>
-                <span>LSMGO</span>
-                <input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} />
-              </label>
-              <label className="spc-enquiry-remarks">
-                <span>Remarks</span>
-                <input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} />
-              </label>
-            </div>
-            <label className="spc-enquiry-preview-field">
-              <span>Standard Format Preview</span>
-              <textarea
-                value={draft.standardText}
-                onChange={(event) => updateDraft("standardText", event.target.value)}
-                placeholder="Standard enquiry preview"
-                rows={3}
-                readOnly
-                disabled={!canEdit}
-              />
-            </label>
-            <div className="spc-form-actions">
-              <button type="submit" disabled={saving || !canEdit}>
-                {saving ? "Sending..." : "Send Enquiry"}
+        <div className="spc-enquiry-left-column">
+          <section className="spc-panel spc-enquiry-entry-panel">
+            <div className="spc-panel-header">
+              <h2>New Enquiry</h2>
+              <button type="button" onClick={clearDraft} disabled={!canEdit || saving}>
+                Clear
               </button>
             </div>
-          </form>
-        </section>
+            <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form" noValidate>
+              <label className="spc-enquiry-raw">
+                <span>Paste Your Enquiry Here</span>
+                <textarea
+                  value={draft.rawText}
+                  onChange={(event) => updateDraft("rawText", event.target.value)}
+                  placeholder=""
+                  rows={4}
+                  disabled={!canEdit}
+                />
+              </label>
+              {viscosityCautionDetected ? (
+                <div className="spc-enquiry-warning">
+                  WARNING: 180 / 120 spotted. Confirm whether VLSFO 180CST MAX or 120CST MAX applies.
+                </div>
+              ) : null}
+              <div className="spc-enquiry-fields">
+                <label className={validationAttempted && draftMissingFields.has("vesselName") ? "is-missing" : ""}>
+                  <span>Vessel</span>
+                  <input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} />
+                  {validationAttempted && draftMissingFields.has("vesselName") ? <small>Missing</small> : null}
+                </label>
+                <div className={`spc-field-block${validationAttempted && draftMissingFields.has("imo") ? " is-missing" : ""}`}>
+                  <label htmlFor="spc-enquiry-imo">IMO</label>
+                  <input id="spc-enquiry-imo" value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} inputMode="numeric" maxLength={7} />
+                  {!draft.imo.trim() && imoSearchUrl ? (
+                    <a className="spc-imo-lookup" href={imoSearchUrl} target="_blank" rel="noreferrer">
+                      Google search
+                    </a>
+                  ) : null}
+                  {validationAttempted && draftMissingFields.has("imo") ? <small>Missing</small> : null}
+                </div>
+                <label className={validationAttempted && draftMissingFields.has("eta") ? "is-missing" : ""}>
+                  <span>ETA</span>
+                  <input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} />
+                  {validationAttempted && draftMissingFields.has("eta") ? <small>Missing</small> : null}
+                </label>
+                <label className={validationAttempted && draftMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>HSFO</span>
+                  <input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} />
+                </label>
+                <label className={validationAttempted && draftMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>VLSFO</span>
+                  <input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} />
+                  {validationAttempted && draftMissingFields.has("fuel") ? <small>Add one fuel</small> : null}
+                </label>
+                <label className={validationAttempted && draftMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>LSMGO</span>
+                  <input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} />
+                </label>
+                <label className="spc-enquiry-remarks">
+                  <span>Remarks</span>
+                  <input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} />
+                </label>
+              </div>
+              <div className="spc-vlsfo-remark-row" aria-label="VLSFO max viscosity controls">
+                {vlsfoRemarkOptions.map((remark) => {
+                  const active = vlsfoMaxRemarks.includes(remark)
+                  return (
+                    <button
+                      key={remark}
+                      type="button"
+                      className={active ? "is-active" : ""}
+                      aria-pressed={active}
+                      onClick={() => toggleVlsfoMaxRemark(remark)}
+                      disabled={!canEdit}
+                    >
+                      Add {remark === "120cst max" ? "120CST MAX" : "180CST MAX"}
+                    </button>
+                  )
+                })}
+              </div>
+              {draftPreviousMatches.length > 0 ? (
+                <div className="spc-enquiry-match is-new-panel">
+                  <strong>Previous vessel record</strong>
+                  {draftPreviousMatches.slice(0, 3).map((match) => (
+                    <span key={match.id}>
+                      {statusLabel(match.status)} · {displayTime(match.meta?.outcomeAt || match.updatedAt)} ·{" "}
+                      {match.status === "cancelled"
+                        ? match.meta?.lostReason || "No reason"
+                        : match.meta?.stemSupplierTraderDisplayName || "No supplier trader"}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <label className="spc-enquiry-preview-field">
+                <span>Standard Format Preview</span>
+                <textarea
+                  value={draft.standardText}
+                  onChange={(event) => updateDraft("standardText", event.target.value)}
+                  placeholder="Standard enquiry preview"
+                  rows={2}
+                  readOnly
+                  disabled={!canEdit}
+                />
+              </label>
+              <div className="spc-form-actions">
+                <button type="submit" disabled={saving || !canEdit}>
+                  {saving ? "Sending..." : "Send Enquiry"}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          {postponedEnquiries.length > 0 ? (
+            <section className="spc-panel spc-postponed-enquiries-panel">
+              <div className="spc-panel-header">
+                <h2>Postponed Enquiries</h2>
+              </div>
+              <div className="spc-postponed-enquiries-list">
+                {postponedEnquiries.map((enquiry) => (
+                  <article key={enquiry.id} className="spc-postponed-enquiry-card">
+                    <div>
+                      <strong>{enquiry.vesselName || enquiry.title || enquiry.enquiryNumber}</strong>
+                      <span>Postponed {displayTime(enquiry.meta?.postponedAt || enquiry.updatedAt)}</span>
+                    </div>
+                    <p>{enquiry.formattedText || enquiry.title}</p>
+                    <button
+                      type="button"
+                      onClick={() => openReoffer(enquiry)}
+                      disabled={!canEdit || updatingId === enquiry.id}
+                    >
+                      Reoffer
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
 
         <section className="spc-panel spc-sent-enquiries-panel">
           <div className="spc-panel-header">
@@ -587,6 +837,66 @@ export default function SpcEnquiriesPage() {
                 Confirm
               </button>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {reofferDraft ? (
+        <div className="spc-dialog-backdrop" role="presentation">
+          <section className="spc-dialog spc-reoffer-dialog" role="dialog" aria-modal="true" aria-label="Reoffer enquiry">
+            <div className="spc-dialog-header">
+              <h2>Reoffer {reofferDraft.enquiryNumber}</h2>
+              <button type="button" onClick={() => setReofferDraft(null)}>×</button>
+            </div>
+            <form
+              className="spc-reoffer-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void confirmReoffer()
+              }}
+              noValidate
+            >
+              <div className="spc-enquiry-fields">
+                <label className={reofferValidationAttempted && reofferMissingFields.has("vesselName") ? "is-missing" : ""}>
+                  <span>Vessel</span>
+                  <input value={reofferDraft.vesselName} onChange={(event) => updateReofferDraft("vesselName", event.target.value)} disabled={saving} />
+                  {reofferValidationAttempted && reofferMissingFields.has("vesselName") ? <small>Missing</small> : null}
+                </label>
+                <label className={reofferValidationAttempted && reofferMissingFields.has("imo") ? "is-missing" : ""}>
+                  <span>IMO</span>
+                  <input value={reofferDraft.imo} onChange={(event) => updateReofferDraft("imo", event.target.value)} disabled={saving} inputMode="numeric" maxLength={7} />
+                  {reofferValidationAttempted && reofferMissingFields.has("imo") ? <small>Missing</small> : null}
+                </label>
+                <label className={reofferValidationAttempted && reofferMissingFields.has("eta") ? "is-missing" : ""}>
+                  <span>ETA</span>
+                  <input value={reofferDraft.eta} onChange={(event) => updateReofferDraft("eta", event.target.value)} disabled={saving} />
+                  {reofferValidationAttempted && reofferMissingFields.has("eta") ? <small>Missing</small> : null}
+                </label>
+                <label className={reofferValidationAttempted && reofferMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>HSFO</span>
+                  <input value={reofferDraft.hsfo} onChange={(event) => updateReofferDraft("hsfo", event.target.value)} disabled={saving} />
+                </label>
+                <label className={reofferValidationAttempted && reofferMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>VLSFO</span>
+                  <input value={reofferDraft.vlsfo} onChange={(event) => updateReofferDraft("vlsfo", event.target.value)} disabled={saving} />
+                  {reofferValidationAttempted && reofferMissingFields.has("fuel") ? <small>Add one fuel</small> : null}
+                </label>
+                <label className={reofferValidationAttempted && reofferMissingFields.has("fuel") ? "is-missing" : ""}>
+                  <span>LSMGO</span>
+                  <input value={reofferDraft.lsmgo} onChange={(event) => updateReofferDraft("lsmgo", event.target.value)} disabled={saving} />
+                </label>
+              </div>
+              <label className="spc-enquiry-preview-field">
+                <span>Standard Format Preview</span>
+                <textarea value={reofferDraft.standardText} readOnly rows={3} disabled={saving} />
+              </label>
+              <div className="spc-dialog-actions">
+                <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
+                <button type="submit" className="is-primary" disabled={saving || updatingId === reofferDraft.id}>
+                  {saving ? "Sending..." : "Send Reoffer"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

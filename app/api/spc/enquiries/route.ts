@@ -3,6 +3,7 @@ import { requireSpcPagePermission } from "@/lib/spcAuth"
 import {
   createSpcEnquiry,
   listSpcEnquiries,
+  reofferSpcEnquiry,
   updateSpcEnquiryFixture,
   updateSpcEnquiryOutcome,
   type SpcEnquiryOutcome,
@@ -98,6 +99,27 @@ export async function PATCH(request: Request) {
           lsmgo: typeof fixture.lsmgo === "string" ? fixture.lsmgo : "",
           price: typeof fixture.price === "string" ? fixture.price : "",
           barging: typeof fixture.barging === "string" ? fixture.barging : "",
+        },
+        session,
+        request,
+      )
+      return NextResponse.json({ success: true, enquiry })
+    }
+
+    if (payload.mode === "reoffer") {
+      const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
+      const source = payload as Record<string, unknown>
+      const enquiry = await reofferSpcEnquiry(
+        id,
+        {
+          title: typeof source.title === "string" ? source.title : "",
+          vesselName: typeof source.vesselName === "string" ? source.vesselName : "",
+          port: typeof source.port === "string" ? source.port : "",
+          product: typeof source.product === "string" ? source.product : "",
+          quantity: typeof source.quantity === "string" ? source.quantity : "",
+          deliveryDate: typeof source.deliveryDate === "string" ? source.deliveryDate : "",
+          supplierName: typeof source.supplierName === "string" ? source.supplierName : "",
+          notes: typeof source.notes === "string" ? source.notes : "",
         },
         session,
         request,

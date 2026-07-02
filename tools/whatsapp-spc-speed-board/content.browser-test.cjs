@@ -6,6 +6,8 @@ const { chromium } = require("playwright")
 
 const extensionSource = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
 const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
+const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
+const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
 
 const html = `<!doctype html>
@@ -80,13 +82,29 @@ const html = `<!doctype html>
             if (message && message.type === "load-spc-enquiries") {
               callback({
                 ok: true,
-                enquiries: [{
-                  id: "enq-1",
-                  formattedText: ${JSON.stringify(enquiry)},
-                  createdAt: "2026-07-01T08:00:00Z",
-                  status: "sent",
-                  createdByDisplayName: "OL"
-                }]
+                enquiries: [
+                  {
+                    id: "enq-1",
+                    formattedText: ${JSON.stringify(enquiry)},
+                    createdAt: "2026-07-01T08:00:00Z",
+                    status: "sent",
+                    createdByDisplayName: "OL"
+                  },
+                  {
+                    id: "enq-2",
+                    formattedText: ${JSON.stringify(enquiry2)},
+                    createdAt: "2026-07-01T08:05:00Z",
+                    status: "sent",
+                    createdByDisplayName: "OL"
+                  },
+                  {
+                    id: "enq-3",
+                    formattedText: ${JSON.stringify(enquiry3)},
+                    createdAt: "2026-07-01T08:10:00Z",
+                    status: "sent",
+                    createdByDisplayName: "OL"
+                  }
+                ]
               });
               return;
             }
@@ -190,6 +208,52 @@ async function main() {
       assert.equal(secondResult.sentText, expected)
       assert.equal(secondResult.composerText, "")
       assert.equal(secondResult.sentCount, 1)
+
+      const dragRuleResult = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.selectedEnquiries = {}
+        const noneSelected = api.activeDragEnquiryIds("enq-2")
+        api.state.selectedEnquiries = { "enq-1": true }
+        const oneSelected = api.activeDragEnquiryIds("enq-2")
+        api.state.selectedEnquiries = { "enq-1": true, "enq-3": true }
+        const manySelected = api.activeDragEnquiryIds("enq-2")
+        const manyText = api.enquiryTextForIds(manySelected)
+        return { noneSelected, oneSelected, manySelected, manyText }
+      })
+
+      assert.deepEqual(dragRuleResult.noneSelected, ["enq-2"])
+      assert.deepEqual(dragRuleResult.oneSelected, ["enq-2"])
+      assert.deepEqual(dragRuleResult.manySelected, ["enq-1", "enq-3"])
+      assert.equal(
+        dragRuleResult.manyText,
+        `Good day, please quote for the following enquiries.\n\n${enquiry}\n\n${enquiry3}`,
+      )
+
+      const contactMenuResult = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const contact = { id: "menu-contact", name: "Menu Contact", chatName: "Menu Contact", phone: "", list: "supplier", order: 1000 }
+        api.state.contacts = [contact]
+        api.state.selectedEnquiries = {}
+        api.state.contactMenuId = "menu-contact"
+        api.render()
+        const disabledButtons = Array.from(document.querySelectorAll(".fcuno-wa-spc-contact-menu button")).map((button) => ({
+          text: button.textContent.trim(),
+          disabled: button.disabled,
+        }))
+        api.state.selectedEnquiries = { "enq-1": true }
+        api.state.contactMenuId = "menu-contact"
+        api.render()
+        const activeButtons = Array.from(document.querySelectorAll(".fcuno-wa-spc-contact-menu button")).map((button) => ({
+          text: button.textContent.trim(),
+          disabled: button.disabled,
+        }))
+        return { disabledButtons, activeButtons }
+      })
+
+      assert.deepEqual(contactMenuResult.disabledButtons.map((button) => button.text), ["Send Selected", "Remove"])
+      assert.equal(contactMenuResult.disabledButtons[0].disabled, true)
+      assert.deepEqual(contactMenuResult.activeButtons.map((button) => button.text), ["Send Selected", "Remove"])
+      assert.equal(contactMenuResult.activeButtons[0].disabled, false)
 
       await page.evaluate((message) => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
