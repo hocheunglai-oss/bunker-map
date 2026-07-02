@@ -1,9 +1,14 @@
 export type EnquiryWorksheetGuess = {
   vesselName: string
   imo: string
+  port: string
   buyer: string
   confidence: "high" | "medium" | "low"
   warnings: string[]
+}
+
+export type EnquiryWorksheetParseOptions = {
+  detectBuyer?: boolean
 }
 
 type ImoCandidate = {
@@ -14,13 +19,28 @@ type ImoCandidate = {
 }
 
 const VESSEL_LABEL_PATTERN =
-  /\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\b/i
+  /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel|vsl|ship)\b|船名)/i
 
 const BUYER_LABEL_PATTERN =
-  /^\s*(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
+
+const PORT_LABEL_PATTERN =
+  /^\s*(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*port|加油港口|港口)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+
+const NON_PORT_CONTEXT_PATTERN =
+  /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
+
+const KNOWN_PORT_PATTERNS: Array<{ pattern: RegExp; value: string }> = [
+  { pattern: /\b(?:singapore|sgp|sin|sg)\b/i, value: "singapore" },
+  { pattern: /\bcolombo\b/i, value: "colombo" },
+  { pattern: /\blaem\s*chabang\b/i, value: "laemchabang" },
+  { pattern: /\b(?:yeosu|yosu)\b/i, value: "yosu" },
+  { pattern: /\bnansha\b/i, value: "nansha" },
+  { pattern: /\bhong\s*kong\b/i, value: "hong kong" },
+]
 
 function normalizeInput(text: string) {
   return text
@@ -28,6 +48,9 @@ function normalizeInput(text: string) {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/[–—]/g, "-")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[：]/g, ":")
     .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
     .replace(/\u00ad/g, "")
     .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
@@ -85,15 +108,18 @@ function findBestImo(lines: string[]) {
 }
 
 function removeVesselLabel(value: string) {
-  return value.replace(
-    /^\s*(?:performing\s+vessel|vessel\s*(?:\/\s*imo|\(\s*imo\s*\))?|vsl|ship)\s*[:#\-/]?\s*/i,
-    ""
-  )
+  return value
+    .replace(/^\s*船名[^:：]*[:：]\s*/i, "")
+    .replace(
+      /^\s*(?:performing\s+vessel|vessel\s*(?:\/\s*imo|\(\s*imo\s*\))?|vsl|ship)\s*[:#\-/]?\s*/i,
+      "",
+    )
 }
 
 function cleanVesselName(value: string) {
   let next = normalizeInput(value)
 
+  next = next.replace(/^\s*\[[^\]]+\]\s*[^:]{1,40}:\s*/i, "")
   next = next.replace(/^\s*\d+\s*[\).:-]\s*/, "")
   next = removeVesselLabel(next)
   next = next.replace(/\bIMO(?:\s*NO\.?|\s*NUMBER)?\b[\s:#.-]*\d{0,7}.*$/i, "")
@@ -114,7 +140,8 @@ function isPlausibleVesselName(value: string) {
     return false
   }
   if (/\b\d{1,2}\s*(?:[./-]\s*\d{1,2}|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/i.test(value)) return false
-  if (/\b(?:LSMGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)\b/i.test(value)) return false
+  const compact = value.replace(/\s+/g, "")
+  if (/(?:LSMGO|LEMGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)/i.test(compact)) return false
   return true
 }
 
@@ -123,6 +150,10 @@ function extractVesselFromImoLine(line: string, imo: string) {
   if (imoIndex < 0) return ""
 
   const beforeImo = line.slice(0, imoIndex)
+  const quotedName = Array.from(beforeImo.matchAll(/["']([^"']{2,60})["']/g)).at(-1)?.[1] || ""
+  const cleanedQuotedName = cleanVesselName(quotedName)
+  if (isPlausibleVesselName(cleanedQuotedName)) return cleanedQuotedName
+
   const cleaned = cleanVesselName(beforeImo)
   if (isPlausibleVesselName(cleaned)) return cleaned
 
@@ -165,6 +196,20 @@ function extractSlashPrefixVessel(lines: string[]) {
   return ""
 }
 
+function extractLeadingVesselBeforeTradingDetails(lines: string[]) {
+  for (const line of lines.slice(0, 6)) {
+    if (/^\s*(?:account|agent|buyer|date|eta|port|position|product|quantity)\b/i.test(line)) continue
+
+    const match = line.match(
+      /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)?\.?\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s+(?:@|at\s+|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)))\b/i,
+    )
+    const cleaned = cleanVesselName(match?.[1] || "")
+    if (isPlausibleVesselName(cleaned)) return cleaned
+  }
+
+  return ""
+}
+
 function extractHeaderVessel(lines: string[]) {
   for (const line of lines.slice(0, 4)) {
     if (/^\s*(?:good\s+day|dear|hi|hello|please|kindly|quote|re\b|subject\b)/i.test(line)) continue
@@ -181,6 +226,88 @@ function extractHeaderVessel(lines: string[]) {
   return ""
 }
 
+function findKnownPort(value: string) {
+  const normalized = normalizeInput(value)
+  return KNOWN_PORT_PATTERNS.find(({ pattern }) => pattern.test(normalized))?.value || ""
+}
+
+function normalizePortAlias(value: string) {
+  const compact = cleanSpaces(value)
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\s+/g, " ")
+
+  if (!compact) return ""
+  if (/^(?:singapore|sgp|sin|sg)$/.test(compact)) return "singapore"
+  if (/^laem\s*chabang$/.test(compact)) return "laemchabang"
+  if (/^(?:yeosu|yosu)$/.test(compact)) return "yosu"
+
+  return ""
+}
+
+function cleanPortName(value: string) {
+  let next = normalizeInput(value)
+
+  next = next.replace(/^\s*(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*port|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
+  next = next.replace(/\([^)]*\)/g, " ")
+  next = next.replace(/\b(?:bunkers?\s+only|bunker(?:ing)?|call|berth|discharging|loading|unloading)\b.*$/i, "")
+  next = next.replace(/\b(?:eta|etb|etd|ets|wp\/agw|iagw)\b.*$/i, "")
+  next = next.split(/\s+:\s+/)[0] || next
+  next = next.split(/[,，]/)[0] || next
+  next = stripOuterNoise(next)
+
+  const alias = normalizePortAlias(next)
+  if (alias) return alias
+
+  const known = findKnownPort(next)
+  if (known) return known
+
+  if (!/^[A-Za-z][A-Za-z\s.'-]{1,36}$/.test(next)) return ""
+  if (/\b(?:days?|delivery|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|mt|mts|ton)\b/i.test(next)) {
+    return ""
+  }
+
+  return next.toLowerCase()
+}
+
+export function extractEnquiryPort(text: string) {
+  const lines = normalizeInput(text)
+    .split("\n")
+    .map((line) => cleanSpaces(line))
+    .filter(Boolean)
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const match = line.match(PORT_LABEL_PATTERN)
+    if (!match) continue
+
+    const inlinePort = cleanPortName(match[1] || "")
+    if (inlinePort) return inlinePort
+
+    const nextPort = cleanPortName(lines[index + 1] || "")
+    if (nextPort) return nextPort
+  }
+
+  for (const line of lines) {
+    if (NON_PORT_CONTEXT_PATTERN.test(line) || /[\w.-]+@[\w.-]+/.test(line)) continue
+
+    const atMatch = line.match(/@\s*([A-Za-z][A-Za-z\s.'-]{1,36})\b/)
+    const atPort = cleanPortName(atMatch?.[1] || "")
+    if (atPort) return atPort
+
+    const contextualMatch = line.match(/\b(?:at|calling|position(?:ed)?|bunkering\s+at)\s+([A-Za-z][A-Za-z\s.'-]{1,36})\b/i)
+    const contextualPort = cleanPortName(contextualMatch?.[1] || "")
+    if (contextualPort) return contextualPort
+
+    if (/\b(?:bunker|eta|etb|etd|ets|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line)) {
+      const known = findKnownPort(line)
+      if (known) return known
+    }
+  }
+
+  return ""
+}
+
 function cleanBuyerName(value: string) {
   return stripOuterNoise(value)
     .replace(/^(?:is|are)\s+/i, "")
@@ -192,6 +319,7 @@ function isPlausibleBuyerName(value: string) {
   if (!value) return false
   if (value.length < 2 || value.length > 100) return false
   if (!/[A-Z]/.test(value)) return false
+  if (/^(?:BUYER|CLIENT|ACCOUNT|ACCT|A\/C)$/i.test(value)) return false
   if (NON_BUYER_LABEL_PATTERN.test(value)) return false
   return true
 }
@@ -216,7 +344,11 @@ function extractBuyer(text: string) {
   return ""
 }
 
-export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess {
+export function parseEnquiryWorksheetGuess(
+  text: string,
+  options: EnquiryWorksheetParseOptions = {},
+): EnquiryWorksheetGuess {
+  const detectBuyer = options.detectBuyer !== false
   const normalized = normalizeInput(text)
   const lines = normalized
     .split("\n")
@@ -237,6 +369,7 @@ export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess 
     extractLabelledVessel(lines) ||
     extractFallbackVessel(lines, imo) ||
     extractSlashPrefixVessel(lines) ||
+    extractLeadingVesselBeforeTradingDetails(lines) ||
     extractHeaderVessel(lines)
 
   if (bestImo && !imo) warnings.push("No valid IMO was found.")
@@ -247,7 +380,8 @@ export function parseEnquiryWorksheetGuess(text: string): EnquiryWorksheetGuess 
   return {
     vesselName,
     imo,
-    buyer: extractBuyer(normalized),
+    port: extractEnquiryPort(normalized),
+    buyer: detectBuyer ? extractBuyer(normalized) : "",
     confidence,
     warnings,
   }

@@ -1,4 +1,12 @@
+import { extractEnquiryPort } from "@/lib/enquiryWorksheetParser"
+
 export type VlsfoMaxRemark = "180cst max" | "120cst max"
+
+export type BuildShortenedEnquiryOptions = {
+  autoDetectVlsfoRemarks?: boolean
+  includePort?: boolean
+  port?: string
+}
 
 type ProductSegment = {
   product: "hsfo" | "vlsfo" | "lsmgo"
@@ -60,6 +68,9 @@ function normalizeInput(text: string) {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/[–—]/g, "-")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[：]/g, ":")
     .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
     .replace(/\u00ad/g, "")
     .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
@@ -72,6 +83,9 @@ function cleanSpaces(value: string) {
 function normalizeQuantityNumber(value: string) {
   const normalized = value.replace(/,/g, "")
   if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
+  if (/^\d+$/.test(normalized) && Number(normalized) >= 1000) {
+    return Number(normalized).toLocaleString("en-US")
+  }
   return normalized
 }
 
@@ -88,24 +102,59 @@ function isUsableQuantityNumber(value: string) {
 
 function normalizeDate(day: string, month: string) {
   const normalizedMonth = MONTHS[month.toLowerCase()]
+  const normalizedDay = Number(day)
+  if (!normalizedMonth || normalizedDay < 1 || normalizedDay > 31) return ""
+  if (/^\d+$/.test(month) && (Number(month) < 1 || Number(month) > 12)) return ""
+  return `${normalizedDay} ${normalizedMonth}`
+}
+
+function validDateParts(day: string, month: string) {
+  const normalizedMonth = MONTHS[month.toLowerCase()]
+  const normalizedDay = Number(day)
   if (!normalizedMonth) return ""
-  return `${Number(day)} ${normalizedMonth}`
+  if (normalizedDay < 1 || normalizedDay > 31) return ""
+  if (/^\d+$/.test(month) && (Number(month) < 1 || Number(month) > 12)) return ""
+  return normalizedMonth
+}
+
+function formatDateRange(firstDay: string, firstMonth: string, secondDay: string, secondMonth: string) {
+  const normalizedFirstMonth = validDateParts(firstDay, firstMonth)
+  const normalizedSecondMonth = validDateParts(secondDay, secondMonth)
+  if (!normalizedFirstMonth || !normalizedSecondMonth) return ""
+
+  const first = Number(firstDay)
+  const second = Number(secondDay)
+  if (normalizedFirstMonth === normalizedSecondMonth) {
+    return `${first} - ${second} ${normalizedFirstMonth}`
+  }
+
+  return `${first} ${normalizedFirstMonth} - ${second} ${normalizedSecondMonth}`
 }
 
 function findDates(value: string) {
-  const normalized = normalizeInput(value)
+  const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
   const dates: string[] = []
+  const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*-\s*(\d{1,2})(?:st|nd|rd|th)?\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi)) {
-    const firstDate = normalizeDate(match[1], match[3])
-    const secondDate = normalizeDate(match[2], match[3])
-    if (firstDate && secondDate) dates.push(`${firstDate} - ${secondDate}`)
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\s*(?:,?\\s*\\d{2,4})?(?:\\s*\\([^)]*\\))?\\s*-\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[2], match[3], match[4])
+    if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})\s*\/\s*(\d{1,2})[./-](\d{1,2}|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[./-]\d{2,4})?\b/gi)) {
-    const firstDate = normalizeDate(match[1], match[3])
-    const secondDate = normalizeDate(match[2], match[3])
-    if (firstDate && secondDate) dates.push(`${firstDate} - ${secondDate}`)
+  for (const match of normalized.matchAll(/\b(\d{1,2})[./](\d{1,2})\s*(?:-|\/|to)\s*(?:(\d{1,2})[./])?(\d{1,2})\b/gi)) {
+    const rangeMonth = match[3] || match[1]
+    const range = formatDateRange(match[2], match[1], match[4], rangeMonth)
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*-\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})\\s*\\/\\s*(\\d{1,2})[./-](\\d{1,2}|${monthNamePattern})(?:[./-]\\d{2,4})?\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
   }
 
   for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b/g)) {
@@ -136,9 +185,10 @@ function extractDeliveryDate(text: string) {
 }
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
-  if (/\b(?:lsmgo|mgo|mdo|dma|dmb)\b/i.test(value)) return "lsmgo"
-  if (/\b(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b/i.test(value)) return "hsfo"
-  if (/\b(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\b/i.test(value)) {
+  const compact = value.toLowerCase().replace(/\s+/g, "")
+  if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
+  if (/(?:hsfo|hfo|ifo|3[,.]?5)/i.test(compact)) return "hsfo"
+  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst)/i.test(compact)) {
     return "vlsfo"
   }
   return ""
@@ -153,9 +203,14 @@ function isLabelLine(value: string) {
 }
 
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
+  const normalized = normalizeInput(value)
   const remarks: VlsfoMaxRemark[] = []
-  if (/(^|\D)180(?!\d)/.test(value)) remarks.push("180cst max")
-  if (/(^|\D)120(?!\d)/.test(value)) remarks.push("120cst max")
+  if (/(?:rmg\s*)?180\s*cst\b/i.test(normalized) || /\brmg\s*180\b/i.test(normalized)) {
+    remarks.push("180cst max")
+  }
+  if (/(?:rmg\s*)?120\s*cst\b/i.test(normalized) || /\brmg\s*120\b/i.test(normalized)) {
+    remarks.push("120cst max")
+  }
   return remarks
 }
 
@@ -164,12 +219,12 @@ export function hasVlsfoMaxCaution(value: string) {
 }
 
 function extractQuantityFromInlineUnit(value: string) {
-  const range = value.match(/\b(\d+(?:[,.]\d{3})?|\d+)\s*(?:-|to)\s*(\d+(?:[,.]\d{3})?|\d+)\s*(?:m\s*t|mt|mts|tons?)\b/i)
+  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
   if (range) {
     return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
   }
 
-  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*t|mt|mts|tons?)\b/gi))
+  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/gi))
     .map((match) => match[1])
     .filter(isUsableQuantityNumber)
 
@@ -181,7 +236,7 @@ function extractQuantityFromBlock(lines: string[]) {
   const inlineQuantity = extractQuantityFromInlineUnit(lines.join(" "))
   if (inlineQuantity) return inlineQuantity
 
-  const unitIndex = lines.findIndex((line) => /^(?:m\s*t|mt|mts|tons?)$/i.test(line))
+  const unitIndex = lines.findIndex((line) => /^(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)$/i.test(line))
   const scanLines = unitIndex >= 0 ? lines.slice(1, unitIndex) : lines.slice(1)
   const numericLine = scanLines
     .map((line) => line.match(/^\d+(?:[,.]\d+)?$/)?.[0] || "")
@@ -190,7 +245,42 @@ function extractQuantityFromBlock(lines: string[]) {
   return numericLine ? `${normalizeQuantityNumber(numericLine)}mts` : ""
 }
 
-function extractProducts(text: string) {
+function productMatches(line: string) {
+  return Array.from(
+    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst)/gi),
+  )
+    .map((match) => ({
+      index: match.index ?? -1,
+      value: match[0],
+      product: classifyProduct(match[0]),
+    }))
+    .filter((match): match is { index: number; value: string; product: ProductSegment["product"] } =>
+      match.index >= 0 && Boolean(match.product),
+    )
+}
+
+function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: boolean) {
+  const matches = productMatches(line)
+  if (matches.length < 2) return []
+
+  return matches.flatMap((match, index) => {
+    const nextMatch = matches[index + 1]
+    const segmentText = line.slice(match.index, nextMatch?.index ?? line.length)
+    const quantity = extractQuantityFromInlineUnit(segmentText)
+    if (!quantity) return []
+
+    return [{
+      product: match.product,
+      quantity,
+      detectedRemarks:
+        autoDetectVlsfoRemarks && match.product === "vlsfo"
+          ? detectVlsfoMaxRemarks(segmentText)
+          : [],
+    }]
+  })
+}
+
+function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
   const lines = normalizeInput(text)
     .split("\n")
     .map(cleanSpaces)
@@ -200,6 +290,12 @@ function extractProducts(text: string) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
+    const inlineSegments = extractInlineProductSegments(line, autoDetectVlsfoRemarks)
+    if (inlineSegments.length > 0) {
+      products.push(...inlineSegments)
+      continue
+    }
+
     const product = classifyProduct(line)
     if (!product) continue
 
@@ -214,7 +310,7 @@ function extractProducts(text: string) {
       block.push(nextLine)
       endIndex = offset
 
-      if (/^(?:m\s*t|mt|mts|tons?)$/i.test(nextLine) || /\b(?:m\s*t|mt|mts|tons?)\b/i.test(nextLine)) break
+      if (/^(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)$/i.test(nextLine) || /\b(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i.test(nextLine)) break
     }
 
     const quantity = extractQuantityFromBlock(block)
@@ -222,7 +318,10 @@ function extractProducts(text: string) {
       products.push({
         product,
         quantity,
-        detectedRemarks: product === "vlsfo" ? detectVlsfoMaxRemarks(block.join(" ")) : [],
+        detectedRemarks:
+          autoDetectVlsfoRemarks && product === "vlsfo"
+            ? detectVlsfoMaxRemarks(block.join(" "))
+            : [],
       })
     }
 
@@ -253,12 +352,16 @@ export function buildShortenedEnquiry(
   vesselName: string,
   imo: string,
   manualVlsfoRemarks: VlsfoMaxRemark[] = [],
+  options: BuildShortenedEnquiryOptions = {},
 ) {
+  const autoDetectVlsfoRemarks = options.autoDetectVlsfoRemarks !== false
   const date = extractDeliveryDate(sourceText)
-  const products = extractProducts(sourceText)
+  const port = options.includePort ? (options.port?.trim() || extractEnquiryPort(sourceText)) : ""
+  const portAndDate = [port, date].filter(Boolean).join(" ")
+  const products = extractProducts(sourceText, autoDetectVlsfoRemarks)
     .map((product) => formatProductSegment(product, manualVlsfoRemarks))
 
-  return [vesselName.toLowerCase(), imo, date, ...products]
+  return [vesselName.toLowerCase(), imo, portAndDate || date, ...products]
     .filter(Boolean)
     .join(" / ")
 }

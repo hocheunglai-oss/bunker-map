@@ -14,7 +14,7 @@ import {
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
-import { detectVlsfoMaxRemarks, hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
+import { hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
 
 type SpcEnquiry = {
   id: string
@@ -138,10 +138,6 @@ function standardTextForDraft(
   return buildSpcStandardEnquiry({ ...draft, vlsfoMaxRemarks })
 }
 
-function uniqueVlsfoMaxRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
-  return Array.from(new Set(remarkGroups.flat()))
-}
-
 function cleanFuelEntry(value: string | null | undefined) {
   return String(value || "")
     .replace(/\b(?:120|180)\s*cst\s*max\b/gi, "")
@@ -154,12 +150,6 @@ function cleanFuelEntry(value: string | null | undefined) {
 
 function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
   const parsed = parseSpcEnquiryText(rawText, vlsfoMaxRemarks)
-  const detectedRemarks = uniqueVlsfoMaxRemarks(
-    vlsfoMaxRemarks,
-    detectVlsfoMaxRemarks(rawText),
-    detectVlsfoMaxRemarks(parsed.vlsfo),
-    detectVlsfoMaxRemarks(parsed.standardText),
-  )
   const draft = {
     ...parsed,
     hsfo: cleanFuelEntry(parsed.hsfo),
@@ -168,7 +158,7 @@ function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = [])
   }
   return {
     ...draft,
-    standardText: standardTextForDraft(draft, detectedRemarks),
+    standardText: standardTextForDraft(draft, vlsfoMaxRemarks),
   }
 }
 
@@ -357,9 +347,8 @@ export default function SpcEnquiriesPage() {
     if (key === "hsfo" || key === "vlsfo" || key === "lsmgo") dismissDraftMissingField("fuel")
 
     if (key === "rawText") {
-      const detectedRemarks = uniqueVlsfoMaxRemarks(detectVlsfoMaxRemarks(value))
-      setVlsfoMaxRemarks(detectedRemarks)
-      setDraft(normaliseDraft(value, detectedRemarks))
+      setVlsfoMaxRemarks([])
+      setDraft(normaliseDraft(value, []))
       return
     }
 
@@ -386,7 +375,7 @@ export default function SpcEnquiriesPage() {
 
     if (key === "rawText") {
       setReofferDraft((current) =>
-        current ? { ...current, ...normaliseDraft(value), id: current.id, enquiryNumber: current.enquiryNumber } : current,
+        current ? { ...current, ...normaliseDraft(value, []), id: current.id, enquiryNumber: current.enquiryNumber } : current,
       )
       return
     }
@@ -398,8 +387,7 @@ export default function SpcEnquiriesPage() {
         [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? cleanFuelEntry(value) : value,
       }
       if (key !== "standardText") {
-        const retainedRemarks = detectVlsfoMaxRemarks(current.standardText || current.rawText)
-        next.standardText = standardTextForDraft(next, retainedRemarks)
+        next.standardText = standardTextForDraft(next, [])
         next.title = [next.vesselName || "reoffer", next.eta].filter(Boolean).join(" / ")
       }
       return next
@@ -440,7 +428,7 @@ export default function SpcEnquiriesPage() {
     }
 
     const standardText = cleanSpcEnquiryText(draft.standardText || standardTextForDraft(draft, vlsfoMaxRemarks))
-    const finalVlsfoMaxRemarks = uniqueVlsfoMaxRemarks(vlsfoMaxRemarks, detectVlsfoMaxRemarks(standardText))
+    const finalVlsfoMaxRemarks = vlsfoMaxRemarks
 
     const payload = {
       title: draft.title || draft.vesselName || standardText.slice(0, 80),
@@ -561,7 +549,7 @@ export default function SpcEnquiriesPage() {
     setSaving(true)
     setUpdatingId(reofferDraft.id)
     const standardText = cleanSpcEnquiryText(reofferDraft.standardText || standardTextForDraft(reofferDraft))
-    const finalVlsfoMaxRemarks = detectVlsfoMaxRemarks(standardText)
+    const finalVlsfoMaxRemarks: VlsfoMaxRemark[] = []
 
     try {
       const response = await fetch("/api/spc/enquiries", {

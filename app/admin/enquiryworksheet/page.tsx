@@ -220,6 +220,7 @@ function restoreGuess(value: unknown): EnquiryWorksheetGuess | null {
   return {
     vesselName: readString(value, "vesselName"),
     imo: readString(value, "imo"),
+    port: readString(value, "port"),
     buyer: readString(value, "buyer"),
     confidence:
       confidence === "high" || confidence === "medium" || confidence === "low"
@@ -279,6 +280,7 @@ function emptyGuess(): EnquiryWorksheetGuess {
   return {
     vesselName: "",
     imo: "",
+    port: "",
     buyer: "",
     confidence: "low",
     warnings: [],
@@ -414,8 +416,9 @@ export default function EnquiryWorksheetPage() {
         guesses.vesselName,
         guesses.imo,
         vlsfoMaxRemarks,
+        { includePort: true, port: guesses.port },
       ),
-    [cleanedEnquiryText, enquiryText, guesses.imo, guesses.vesselName, vlsfoMaxRemarks],
+    [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, vlsfoMaxRemarks],
   )
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
 
@@ -447,6 +450,7 @@ export default function EnquiryWorksheetPage() {
     const nextGuess: EnquiryWorksheetGuess = {
       vesselName: guesses.vesselName || parsed.vesselName,
       imo: guesses.imo || parsed.imo,
+      port: guesses.port || parsed.port,
       buyer: guesses.buyer || parsed.buyer,
       confidence: parsed.confidence,
       warnings: parsed.warnings,
@@ -565,6 +569,15 @@ export default function EnquiryWorksheetPage() {
                 }
                 inputMode="numeric"
                 maxLength={7}
+              />
+            </label>
+            <label>
+              <span>PORT</span>
+              <input
+                value={guesses.port}
+                onChange={(event) =>
+                  setGuesses((current) => ({ ...current, port: event.target.value.toLowerCase() }))
+                }
               />
             </label>
             <label>

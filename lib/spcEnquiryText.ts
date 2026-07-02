@@ -51,7 +51,7 @@ export type SpcEnquiryTextInput = {
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
-const FUEL_PATTERN = /\b(vlsfo|lsfo|hsfo|hfo|ifo|mgo|lsmgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)\b/i
+const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|mgo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "imo",
   "lostReason",
@@ -72,6 +72,9 @@ const META_KEYS: Array<keyof SpcEnquiryMeta> = [
 export function cleanSpcEnquiryText(value: string | null | undefined) {
   return String(value || "")
     .replace(/\r/g, "\n")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[：]/g, ":")
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean)
@@ -159,27 +162,31 @@ function looksLikeFuel(value: string) {
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
 function classifyFuel(value: string): FuelKey | "" {
-  if (/\b(?:lsmgo|mgo|mdo|dma|dmb)\b/i.test(value)) return "lsmgo"
-  if (/\b(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst)\b/i.test(value)) {
+  const compact = value.toLowerCase().replace(/\s+/g, "")
+  if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
+  if (/(?:hsfo|hfo|ifo|3[,.]?5|s3[,.]?5)/i.test(compact)) return "hsfo"
+  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst)/i.test(compact)) {
     return "vlsfo"
   }
-  if (/\b(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b/i.test(value)) return "hsfo"
   return ""
 }
 
 function normalizeQuantityNumber(value: string) {
   const normalized = value.replace(/,/g, "")
   if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
+  if (/^\d+$/.test(normalized) && Number(normalized) >= 1000) {
+    return Number(normalized).toLocaleString("en-US")
+  }
   return normalized
 }
 
 function extractQuantity(value: string) {
-  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*t|mt|mts|tons?)\b/i)
+  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
   if (range) {
     return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
   }
 
-  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*t|mt|mts|tons?)\b/gi))
+  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/gi))
     .map((match) => match[1])
   const quantity = matches.at(-1)
   return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
@@ -216,8 +223,8 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKe
     .trim()
 
   if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b\s*[:/-]?\s*/i, "")
-  if (fuel === "vlsfo") text = text.replace(/^\s*(?:vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\b\s*[:/-]?\s*/i, "")
-  if (fuel === "lsmgo") text = text.replace(/^\s*(?:lsmgo|mgo|mdo|dma|dmb)\b\s*[:/-]?\s*/i, "")
+  if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\s*[:/-]?\s*/i, "")
+  if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\b\s*[:/-]?\s*/i, "")
 
   const plainNumber = text.match(/^(\d+(?:[,.]\d+)?)$/)
   if (plainNumber) return `${normalizeQuantityNumber(plainNumber[1])}mts`
@@ -368,7 +375,7 @@ export function parseSpcEnquiryText(
   }
 
   const delimited = parseDelimitedSpcEnquiryText(rawText, manualVlsfoRemarks)
-  const guess = parseEnquiryWorksheetGuess(rawText)
+  const guess = parseEnquiryWorksheetGuess(rawText, { detectBuyer: false })
   const vesselName = lowerText(guess.vesselName || delimited.vesselName)
   const imo = guess.imo || delimited.imo
   const shortened = buildShortenedEnquiry(
@@ -376,13 +383,14 @@ export function parseSpcEnquiryText(
     guess.vesselName || delimited.vesselName,
     imo,
     manualVlsfoRemarks,
+    { autoDetectVlsfoRemarks: false, includePort: false },
   )
   const shortenedParts = shortened ? parseDelimitedSpcEnquiryText(shortened, manualVlsfoRemarks) : null
   const eta = shortenedParts?.eta || delimited.eta
   const hsfo = shortenedParts?.hsfo || delimited.hsfo
   const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
   const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo
-  const remarks = shortenedParts?.remarks || delimited.remarks
+  const remarks = ""
   const standardText = buildSpcStandardEnquiry({
     vesselName,
     imo,
