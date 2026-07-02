@@ -2752,6 +2752,10 @@ body {
   padding-left: 2px;
 }
 
+.spc-guide-step .spc-chrome-download {
+  margin-top: 12px;
+}
+
 .spc-chrome-addresses {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

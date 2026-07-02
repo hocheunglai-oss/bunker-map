@@ -6,48 +6,52 @@ import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
-const STEPS = [
+const PAGE_TITLE = "whatsappex"
+
+type Step = {
+  title: string
+  details: readonly string[]
+  action?: {
+    href: string
+    label: string
+  }
+}
+
+const STEPS: readonly Step[] = [
   {
-    title: "Download the extension",
+    title: "Download",
     details: [
-      "Click Download extension ZIP.",
-      "Save the ZIP to a normal folder such as Downloads.",
-      "Extract the ZIP before loading it into Chrome.",
+      "Download extension.",
+      "Extract the ZIP and save to a folder such as Documents.",
     ],
+    action: {
+      href: "/api/spc/chrome-extension/download",
+      label: "WHATSAPP EXTENSION",
+    },
   },
   {
-    title: "Open Chrome extensions",
+    title: "Install",
     details: [
-      "Open Chrome in the profile used for SPC and WhatsApp Web.",
-      "Go to chrome://extensions.",
+      "Open Google Chrome and paste chrome://extensions to the browser.",
       "Switch on Developer mode at the top right.",
+      "Click Load unpacked and select the extracted fcuno-spc-whatsapp-board folder (Select the folder and press the select button, do not open it).",
     ],
   },
   {
-    title: "Install the unpacked folder",
+    title: "Open",
     details: [
-      "Click Load unpacked.",
-      "Select the extracted fcuno-spc-whatsapp-board folder.",
-      "If Chrome says the manifest is missing, select the folder that directly contains manifest.json.",
+      "Refresh WhatsApp Web.",
+      "Ensure both SPC and WhatsApp Web open while using the board.",
     ],
   },
   {
-    title: "Sign in and run",
+    title: "Update",
     details: [
-      "Open https://spc.fcuno.com and sign in with your SPC account.",
-      "Open https://web.whatsapp.com in the same Chrome profile.",
-      "Keep both SPC and WhatsApp Web open while using the board.",
+      "When there is an update, go to chrome://extensions.",
+      "Click reload and then refresh WhatsApp Web.",
     ],
   },
-  {
-    title: "Update later",
-    details: [
-      "Download the latest ZIP from this page.",
-      "Extract it over the old folder or into a new folder.",
-      "Return to chrome://extensions and click Reload on FCUNO SPC WhatsApp Board.",
-    ],
-  },
-] as const
+]
 
 const CHECKS = [
   "The extension appears as FCUNO SPC WhatsApp Board in chrome://extensions.",
@@ -66,7 +70,7 @@ export default function SpcChromeExtensionPage() {
   )
 
   useEffect(() => {
-    document.title = "SPC Chrome Extension"
+    document.title = PAGE_TITLE
   }, [])
 
   useEffect(() => {
@@ -79,25 +83,21 @@ export default function SpcChromeExtensionPage() {
   }
 
   return (
-    <SpcShell title="SPC Chrome Extension">
+    <SpcShell title={PAGE_TITLE}>
       <div className="spc-page-heading">
         <div>
-          <h1>Chrome Extension</h1>
-          <p>Download, install, and run the FCUNO SPC WhatsApp Board.</p>
+          <h1>{PAGE_TITLE}</h1>
         </div>
-        <a className="spc-page-action spc-chrome-download" href="/api/spc/chrome-extension/download">
-          Download extension ZIP
-        </a>
       </div>
 
       <section className="spc-panel">
         <div className="spc-panel-header">
-          <h2>Installation Steps</h2>
+          <h2>INSTALLATION</h2>
         </div>
         <div className="spc-guide-list">
           {STEPS.map((step, index) => (
             <article className="spc-guide-step" key={step.title}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
+              <span>{String(index + 1)}</span>
               <div>
                 <h3>{step.title}</h3>
                 <ul>
@@ -105,6 +105,11 @@ export default function SpcChromeExtensionPage() {
                     <li key={detail}>{detail}</li>
                   ))}
                 </ul>
+                {step.action ? (
+                  <a className="spc-page-action spc-chrome-download" href={step.action.href}>
+                    {step.action.label}
+                  </a>
+                ) : null}
               </div>
             </article>
           ))}

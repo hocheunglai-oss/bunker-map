@@ -24,7 +24,7 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   },
   {
     id: "spc-chrome-extension",
-    label: "CHROME EXTENSION",
+    label: "WHATSAPPEX",
     group: "trading",
     path: "/spc/chrome",
     matchPrefixes: ["/chrome", "/spc/chrome"],
