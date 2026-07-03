@@ -44,7 +44,7 @@ function normalizeInput(text: string) {
     .replace(/\r\n?/g, "\n")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, "-")
+    .replace(/[–—‐‑‒–—―−﹘﹣－]/g, "-")
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[：]/g, ":")

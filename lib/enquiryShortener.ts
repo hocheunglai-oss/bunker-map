@@ -68,7 +68,7 @@ function normalizeInput(text: string) {
     .replace(/\r\n?/g, "\n")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, "-")
+    .replace(/[–—‐‑‒–—―−﹘﹣－]/g, "-")
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[：]/g, ":")
@@ -148,6 +148,11 @@ function findDates(value: string) {
     if (range) dates.push(range)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})\\s*(?:-|~|to)\\s*(\\d{1,2})[./-](\\d{1,2}|${monthNamePattern})(?:[./-]\\d{2,4})?\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
@@ -202,6 +207,10 @@ function classifyProduct(value: string): ProductSegment["product"] | "" {
 
 function containsProduct(value: string) {
   return Boolean(classifyProduct(value))
+}
+
+function isSulphurSpecLine(value: string) {
+  return /\bsulphur|sulfur\b/i.test(value) || /^\s*:\s*(?:min|max)\s*\d/i.test(value)
 }
 
 function isLabelLine(value: string) {
@@ -310,8 +319,8 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
 
     for (let offset = index + 1; offset < Math.min(lines.length, index + 6); offset += 1) {
       const nextLine = lines[offset]
-      if (containsProduct(nextLine)) break
-      if (isLabelLine(nextLine) && !/^(?:product|qty|quantity)\b/i.test(nextLine)) break
+      if (containsProduct(nextLine) && !isSulphurSpecLine(nextLine)) break
+      if (isLabelLine(nextLine) && !isSulphurSpecLine(nextLine) && !/^(?:product|qty|quantity)\b/i.test(nextLine)) break
 
       block.push(nextLine)
       endIndex = offset
