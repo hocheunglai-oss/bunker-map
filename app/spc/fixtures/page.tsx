@@ -93,22 +93,22 @@ const emptyDraft: FixtureDraft = {
 }
 
 const fixtureColumnWidths = [
-  68, // date
-  122, // supplier trader office
+  74, // date
+  130, // supplier trader office
   100, // supplier trader PIC
-  92, // customer trader office
-  96, // customer trader PIC
-  72, // account
-  62, // commission
-  100, // earliest ETA
-  145, // vessel
-  60, // HSFO
-  60, // VLSFO
-  60, // LSMGO
-  120, // supplier
-  60, // price
-  60, // barging
-  78, // action
+  112, // customer trader office
+  100, // customer trader PIC
+  80, // account
+  74, // commission
+  110, // earliest ETA
+  160, // vessel
+  66, // HSFO
+  66, // VLSFO
+  66, // LSMGO
+  140, // supplier
+  78, // price
+  78, // barging
+  72, // action
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
@@ -354,11 +354,12 @@ export default function SpcFixturesPage() {
     fixture: SpcFixture,
     draft: FixtureDraft,
     key: keyof FixtureDraft,
-    options?: { list?: string },
+    options?: { list?: string; className?: string },
   ) {
     return (
       <input
         list={options?.list}
+        className={options?.className}
         value={draft[key]}
         onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
         disabled={!canEdit}
@@ -373,7 +374,7 @@ export default function SpcFixturesPage() {
       const supplierTrader = userFromChoice(users, draft.supplierTrader)
       const buyerTrader = userFromChoice(users, draft.buyerTrader)
       const supplierContent = editing ? (
-        sheetInput(fixture, draft, "supplierName", { list: "spc-fixture-suppliers" })
+        sheetInput(fixture, draft, "supplierName", { list: "spc-fixture-suppliers", className: "is-sheet-pill" })
       ) : draft.supplierName ? (
         <a className="spc-fixture-supplier-link" href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">
           {draft.supplierName}
@@ -389,10 +390,10 @@ export default function SpcFixturesPage() {
         >
           <td>{displayDate(draft.fixtureDate)}</td>
           <td>{blank(supplierTrader?.office)}</td>
-          <td>{editing ? sheetInput(fixture, draft, "supplierTrader", { list: "spc-fixture-users" }) : traderPic(draft.supplierTrader)}</td>
+          <td>{editing ? sheetInput(fixture, draft, "supplierTrader", { list: "spc-fixture-users", className: "is-sheet-pill" }) : traderPic(draft.supplierTrader)}</td>
           <td>{blank(buyerTrader?.office)}</td>
-          <td>{editing ? sheetInput(fixture, draft, "buyerTrader", { list: "spc-fixture-users" }) : traderPic(draft.buyerTrader)}</td>
-          <td>{staticOrInput(fixture, draft, "account", editing)}</td>
+          <td>{editing ? sheetInput(fixture, draft, "buyerTrader", { list: "spc-fixture-users", className: "is-sheet-pill" }) : traderPic(draft.buyerTrader)}</td>
+          <td>{staticOrInput(fixture, draft, "account", editing, { className: "is-sheet-pill" })}</td>
           <td>{staticOrInput(fixture, draft, "commission", editing)}</td>
           <td>{staticOrInput(fixture, draft, "earliestEta", editing)}</td>
           <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
