@@ -119,6 +119,10 @@ function cleanDate(value: unknown) {
   return /^\d{4}-\d{2}-\d{2}$/.test(cleaned) ? cleaned : null
 }
 
+function sameUsername(left: string | null | undefined, right: string | null | undefined) {
+  return cleanString(left).toLowerCase() === cleanString(right).toLowerCase()
+}
+
 function hongKongDate(value: string | Date = new Date()) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10)
@@ -365,6 +369,11 @@ export async function updateSpcFixture(
   const context = createSpcAuditContext(session, request, "spc-fixtures")
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadFixtureRow(supabase, fixtureId)
+
+  if (existing.fixture_status === "pending" && !sameUsername(session.username, existing.supplier_trader_username)) {
+    throw new Error("Only the assigned supplier trader can edit this new stem.")
+  }
+
   const users = await listActiveSpcUserOptions()
   const supplierTrader = resolveUserChoice(users, input.supplierTrader)
   const buyerTrader = resolveUserChoice(users, input.buyerTrader)
@@ -372,31 +381,48 @@ export async function updateSpcFixture(
   if (!supplierTrader) throw new Error("Select a valid supplier trader.")
   if (!buyerTrader) throw new Error("Select a valid buyer trader.")
 
+  const fixtureDate = cleanDate(input.fixtureDate) || existing.fixture_date || hongKongDate()
+  const account = optionalString(input.account)
+  const earliestEta = optionalString(input.earliestEta)
+  const vesselName = optionalString(input.vesselName)
+  const hsfo = optionalString(input.hsfo)
+  const vlsfo = optionalString(input.vlsfo)
+  const lsmgo = optionalString(input.lsmgo)
   const supplierName = displaySupplierName(input.supplierName)
   const price = optionalString(input.price)
+
   if (action === "complete") {
-    if (!supplierName) throw new Error("Supplier is required before completing.")
-    if (!price) throw new Error("Buying price is required before completing.")
+    const missing: string[] = []
+    if (!fixtureDate) missing.push("DATE")
+    if (!supplierTrader.username) missing.push("SUPPLIER TRADER")
+    if (!buyerTrader.username) missing.push("CUSTOMER TRADER")
+    if (!account) missing.push("ACCT")
+    if (!earliestEta) missing.push("ETA")
+    if (!vesselName) missing.push("VESSEL")
+    if (!hsfo && !vlsfo && !lsmgo) missing.push("GRADE")
+    if (!supplierName) missing.push("SUPPLIER")
+    if (!price) missing.push("PRICE")
+    if (missing.length > 0) throw new Error(`Complete ${missing.join(", ")} before completing.`)
   }
 
   const now = new Date().toISOString()
   const completed = action === "complete"
   const payload = {
     fixture_status: completed ? "completed" : existing.fixture_status,
-    fixture_date: cleanDate(input.fixtureDate) || existing.fixture_date || hongKongDate(),
+    fixture_date: fixtureDate,
     supplier_trader_user_id: supplierTrader.id,
     supplier_trader_username: supplierTrader.username,
     supplier_trader_display_name: supplierTrader.displayName,
     buyer_trader_user_id: buyerTrader.id,
     buyer_trader_username: buyerTrader.username,
     buyer_trader_display_name: buyerTrader.displayName,
-    account: optionalString(input.account),
+    account,
     commission: optionalString(input.commission),
-    earliest_eta: optionalString(input.earliestEta),
-    vessel_name: optionalString(input.vesselName),
-    hsfo: optionalString(input.hsfo),
-    vlsfo: optionalString(input.vlsfo),
-    lsmgo: optionalString(input.lsmgo),
+    earliest_eta: earliestEta,
+    vessel_name: vesselName,
+    hsfo,
+    vlsfo,
+    lsmgo,
     supplier_name: supplierName || null,
     supplier_key: supplierName ? supplierKey(supplierName) : null,
     price,

@@ -3412,27 +3412,7 @@ body {
 
 body:has(.spc-fixture-ledger-panel) .spc-main {
   width: min(1760px, 100%);
-  padding: 10px 18px 18px;
-}
-
-body:has(.spc-fixture-ledger-panel) .spc-page-heading {
-  min-height: 40px;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-body:has(.spc-fixture-ledger-panel) .spc-page-heading h1 {
-  font-size: 24px;
-}
-
-body:has(.spc-fixture-ledger-panel) .spc-page-heading p {
-  margin-top: 2px;
-  font-size: 12px;
-}
-
-body:has(.spc-fixture-ledger-panel) .spc-page-action {
-  min-height: 30px;
-  padding: 5px 12px;
+  padding: 6px 18px 18px;
 }
 
 .spc-fixture-ledger-panel .spc-table-wrap {
@@ -3440,13 +3420,14 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
 }
 
 .spc-table.spc-fixture-table {
-  width: 1506px;
-  min-width: 1506px;
+  width: 1432px;
+  min-width: 1432px;
   border: 1px solid #dadce0;
   table-layout: fixed;
   border-collapse: collapse;
   background: #ffffff;
   font-family: Roboto, Arial, sans-serif;
+  text-transform: uppercase;
 }
 
 .spc-table.spc-fixture-table th,
@@ -3524,6 +3505,7 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
   font-weight: 650;
   text-align: center;
   text-overflow: ellipsis;
+  text-transform: uppercase;
 }
 
 .spc-table.spc-fixture-table input.is-sheet-pill {
@@ -3565,6 +3547,23 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
   text-align: left;
 }
 
+.spc-table.spc-fixture-table .spc-fixture-status-row td {
+  height: 32px;
+  border-color: #a8d7b4;
+  background: #eefaf1 !important;
+  color: #086b2b;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-status-row.is-error td {
+  border-color: #f0aab3;
+  background: #fff1f2 !important;
+  color: #b00020;
+}
+
 .spc-fixture-supplier-link {
   color: var(--fc-admin-panel-text);
   text-decoration: none;
@@ -3579,9 +3578,13 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
   position: sticky;
   right: 0;
   z-index: 2;
-  background: #fffaf0;
+  background: #ffffff;
   box-shadow: -1px 0 0 #dadce0;
   text-align: center;
+}
+
+.spc-table.spc-fixture-table tr.is-pending .spc-fixture-action-cell {
+  background: #fffaf0;
 }
 
 .spc-fixture-row-actions {
@@ -3599,12 +3602,6 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
   font-size: 9px;
   line-height: 14px;
   padding: 0 5px;
-}
-
-.spc-table.spc-fixture-table button.is-primary {
-  border-color: #0f8a63;
-  background: #e8f7f1;
-  color: #006b4f;
 }
 
 .spc-table-wrap {

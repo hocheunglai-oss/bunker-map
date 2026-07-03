@@ -48,6 +48,8 @@ type SupplierRecord = {
   name: string
 }
 
+type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
+
 type FixtureDraft = {
   fixtureDate: string
   supplierTrader: string
@@ -99,8 +101,7 @@ const fixtureColumnWidths = [
   112, // customer trader office
   100, // customer trader PIC
   80, // account
-  74, // commission
-  110, // earliest ETA
+  110, // ETA
   160, // vessel
   66, // HSFO
   66, // VLSFO
@@ -112,6 +113,14 @@ const fixtureColumnWidths = [
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
+
+const fuelColumns: Array<{ key: FuelKey; label: string }> = [
+  { key: "hsfo", label: "HSFO" },
+  { key: "vlsfo", label: "VLSFO" },
+  { key: "lsmgo", label: "LSMGO" },
+]
+
+const defaultOfficeOptions = ["ITALY", "HONG KONG", "SINGAPORE", "MONACO", "FRANCE", "USA", "KOREA", "JAPAN", "VIETNAM"]
 
 function cleanText(value: string | null | undefined) {
   return String(value || "").trim()
@@ -131,10 +140,6 @@ function compactPersonName(value: string | null | undefined) {
   if (!cleaned) return ""
   const withoutDomain = cleaned.includes("@") ? cleaned.split("@")[0] : cleaned
   return withoutDomain.split(/\s+/)[0] || withoutDomain
-}
-
-function traderDraftValue(displayName: string | null | undefined, username: string | null | undefined) {
-  return compactPersonName(traderValue(displayName, username))
 }
 
 function userFromChoice(users: SpcUserOption[], value: string) {
@@ -177,7 +182,8 @@ function displayDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
-  }).format(date)
+    year: "numeric",
+  }).format(date).toUpperCase()
 }
 
 function blank(value: string | null | undefined) {
@@ -187,8 +193,8 @@ function blank(value: string | null | undefined) {
 function draftFromFixture(fixture: SpcFixture): FixtureDraft {
   return {
     fixtureDate: dateInput(fixture.fixtureDate),
-    supplierTrader: traderDraftValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
-    buyerTrader: traderDraftValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
+    supplierTrader: traderValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
+    buyerTrader: traderValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
     account: cleanText(fixture.account),
     commission: cleanText(fixture.commission),
     earliestEta: cleanText(fixture.earliestEta),
@@ -204,7 +210,7 @@ function draftFromFixture(fixture: SpcFixture): FixtureDraft {
 
 export default function SpcFixturesPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
+  const { loading: authLoading, authenticated, username, permissions } = useSpcAuth()
   const [fixtures, setFixtures] = useState<SpcFixture[]>([])
   const [users, setUsers] = useState<SpcUserOption[]>([])
   const [supplierRecords, setSupplierRecords] = useState<SupplierRecord[]>([])
@@ -246,6 +252,24 @@ export default function SpcFixturesPage() {
       .sort((a, b) => a.localeCompare(b))
   }, [drafts, fixtures, supplierRecords])
 
+  const officeOptions = useMemo(() => {
+    const values = [
+      ...defaultOfficeOptions,
+      ...users.map((user) => user.office),
+      ...fixtures.map((fixture) => fixture.account || ""),
+      ...Object.values(drafts).map((draft) => draft.account),
+    ]
+    const seen = new Set<string>()
+    return values
+      .map((value) => value.trim().toUpperCase())
+      .filter((value) => {
+        if (!value || seen.has(value)) return false
+        seen.add(value)
+        return true
+      })
+      .sort((a, b) => a.localeCompare(b))
+  }, [drafts, fixtures, users])
+
   const loadData = useCallback(async () => {
     if (!canView) return
     setLoading(true)
@@ -281,7 +305,7 @@ export default function SpcFixturesPage() {
   }, [canView])
 
   useEffect(() => {
-    document.title = "SPC Fixtures"
+    document.title = "SPC FIXTURES"
   }, [])
 
   useEffect(() => {
@@ -303,8 +327,57 @@ export default function SpcFixturesPage() {
     }))
   }
 
+  function sameUsername(left: string | null | undefined, right: string | null | undefined) {
+    return cleanText(left).toLowerCase() === cleanText(right).toLowerCase()
+  }
+
+  function canEditFixture(fixture: SpcFixture, mode: "pending" | "completed") {
+    if (!canEdit) return false
+    if (fixture.fixtureStatus === "pending") {
+      return sameUsername(username, fixture.supplierTraderUsername)
+    }
+    return mode === "completed"
+  }
+
+  function fuelRows(draft: FixtureDraft): Array<{ key: FuelKey | null; label: string }> {
+    const rows = fuelColumns
+      .filter(({ key }) => cleanText(draft[key]))
+      .map(({ key, label }) => ({ key, label }))
+    return rows.length ? rows : [{ key: null, label: "" }]
+  }
+
+  function missingCompleteFields(draft: FixtureDraft) {
+    const required: Array<[string, boolean]> = [
+      ["DATE", Boolean(cleanText(draft.fixtureDate))],
+      ["SUPPLIER TRADER", Boolean(cleanText(draft.supplierTrader))],
+      ["PIC", Boolean(cleanText(draft.supplierTrader))],
+      ["CUSTOMER TRADER", Boolean(cleanText(draft.buyerTrader))],
+      ["ACCT", Boolean(cleanText(draft.account))],
+      ["ETA", Boolean(cleanText(draft.earliestEta))],
+      ["VESSEL", Boolean(cleanText(draft.vesselName))],
+      ["GRADE", fuelColumns.some(({ key }) => Boolean(cleanText(draft[key])))],
+      ["SUPPLIER", Boolean(cleanText(draft.supplierName))],
+      ["PRICE", Boolean(cleanText(draft.price))],
+    ]
+    return required.filter(([, ok]) => !ok).map(([label]) => label)
+  }
+
   async function submitFixture(fixture: SpcFixture, action: "save" | "complete") {
     if (!canEdit) return
+    if (fixture.fixtureStatus === "pending" && !sameUsername(username, fixture.supplierTraderUsername)) {
+      setMessage("ONLY THE ASSIGNED SUPPLIER TRADER CAN EDIT THIS NEW STEM.")
+      setMessageIsError(true)
+      return
+    }
+    const draft = drafts[fixture.id] || draftFromFixture(fixture)
+    if (action === "complete") {
+      const missing = missingCompleteFields(draft)
+      if (missing.length > 0) {
+        setMessage(`COMPLETE ${missing.join(", ")} BEFORE COMPLETING.`)
+        setMessageIsError(true)
+        return
+      }
+    }
     setSavingId(`${fixture.id}:${action}`)
     setMessage("")
     try {
@@ -314,7 +387,7 @@ export default function SpcFixturesPage() {
         body: JSON.stringify({
           id: fixture.id,
           action,
-          fixture: drafts[fixture.id] || draftFromFixture(fixture),
+          fixture: draft,
         }),
       })
       const data = (await response.json()) as { fixture?: SpcFixture; message?: string }
@@ -322,10 +395,10 @@ export default function SpcFixturesPage() {
       setFixtures((current) => current.map((row) => (row.id === fixture.id ? data.fixture! : row)))
       setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(data.fixture!) }))
       setEditingId("")
-      setMessage(action === "complete" ? "Fixture completed." : "Fixture saved.")
+      setMessage(action === "complete" ? "FIXTURE COMPLETED." : "FIXTURE SAVED.")
       setMessageIsError(false)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save fixture.")
+      setMessage((error instanceof Error ? error.message : "Failed to save fixture.").toUpperCase())
       setMessageIsError(true)
     } finally {
       setSavingId("")
@@ -371,10 +444,11 @@ export default function SpcFixturesPage() {
     fixture: SpcFixture,
     draft: FixtureDraft,
     key: keyof FixtureDraft,
-    options?: { list?: string; className?: string },
+    options?: { type?: string; list?: string; className?: string },
   ) {
     return (
       <input
+        type={options?.type || "text"}
         list={options?.list}
         className={options?.className}
         value={draft[key]}
@@ -385,38 +459,43 @@ export default function SpcFixturesPage() {
   }
 
   function renderFixtureRows(rows: SpcFixture[], mode: "pending" | "completed") {
-    return rows.map((fixture) => {
+    return rows.flatMap((fixture) => {
       const draft = drafts[fixture.id] || draftFromFixture(fixture)
-      const editing = canEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
+      const rowCanEdit = canEditFixture(fixture, mode)
+      const editing = rowCanEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
       const supplierTrader = userFromChoice(users, draft.supplierTrader)
       const buyerTrader = userFromChoice(users, draft.buyerTrader)
+      const missing = missingCompleteFields(draft)
       const supplierContent = editing ? (
-        sheetInput(fixture, draft, "supplierName", { list: "spc-fixture-suppliers", className: "is-sheet-pill" })
+        sheetInput(fixture, draft, "supplierName", { type: "search", list: "spc-fixture-suppliers", className: "is-sheet-pill" })
       ) : draft.supplierName ? (
         <a className="spc-fixture-supplier-link" href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">
           {draft.supplierName}
         </a>
       ) : "-"
-      return (
+      return fuelRows(draft).map((fuelRow) => (
         <tr
-          key={fixture.id}
+          key={`${fixture.id}-${fuelRow.key || "fuel"}`}
           className={fixture.fixtureStatus === "pending" ? "is-pending" : ""}
           onDoubleClick={() => {
-            if (canEdit && mode === "completed") setEditingId(fixture.id)
+            if (rowCanEdit && mode === "completed") setEditingId(fixture.id)
           }}
         >
           <td>{displayDate(draft.fixtureDate)}</td>
           <td>{blank(supplierTrader?.office)}</td>
-          <td>{editing ? sheetInput(fixture, draft, "supplierTrader", { list: "spc-fixture-users", className: "is-sheet-pill" }) : traderPic(draft.supplierTrader)}</td>
+          <td>{traderPic(draft.supplierTrader)}</td>
           <td>{blank(buyerTrader?.office)}</td>
-          <td>{editing ? sheetInput(fixture, draft, "buyerTrader", { list: "spc-fixture-users", className: "is-sheet-pill" }) : traderPic(draft.buyerTrader)}</td>
-          <td>{staticOrInput(fixture, draft, "account", editing, { className: "is-sheet-pill" })}</td>
-          <td>{staticOrInput(fixture, draft, "commission", editing)}</td>
+          <td>{traderPic(draft.buyerTrader)}</td>
+          <td>{staticOrInput(fixture, draft, "account", editing, { list: "spc-fixture-offices", className: "is-sheet-pill" })}</td>
           <td>{staticOrInput(fixture, draft, "earliestEta", editing)}</td>
           <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
-          <td>{staticOrInput(fixture, draft, "hsfo", editing)}</td>
-          <td>{staticOrInput(fixture, draft, "vlsfo", editing)}</td>
-          <td>{staticOrInput(fixture, draft, "lsmgo", editing)}</td>
+          {fuelColumns.map(({ key }) => (
+            <td key={key}>
+              {fuelRow.key === key || (!fuelRow.key && editing)
+                ? staticOrInput(fixture, draft, key, editing)
+                : ""}
+            </td>
+          ))}
           <td>{supplierContent}</td>
           <td>{staticOrInput(fixture, draft, "price", editing)}</td>
           <td>{staticOrInput(fixture, draft, "barging", editing)}</td>
@@ -426,11 +505,11 @@ export default function SpcFixturesPage() {
                 {fixture.fixtureStatus === "pending" ? (
                   <button
                     type="button"
-                    className="is-primary"
                     onClick={() => void submitFixture(fixture, "complete")}
-                    disabled={!canEdit || savingId === `${fixture.id}:complete`}
+                    disabled={missing.length > 0 || savingId === `${fixture.id}:complete`}
+                    title={missing.length > 0 ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
                   >
-                    {savingId === `${fixture.id}:complete` ? "Completing" : "Complete"}
+                    {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
                   </button>
                 ) : null}
                 {fixture.fixtureStatus === "completed" ? (
@@ -440,13 +519,13 @@ export default function SpcFixturesPage() {
                       onClick={() => void submitFixture(fixture, "save")}
                       disabled={!canEdit || savingId === `${fixture.id}:save`}
                     >
-                      {savingId === `${fixture.id}:save` ? "Saving" : "Save"}
+                      {savingId === `${fixture.id}:save` ? "SAVING" : "SAVE"}
                     </button>
                     <button type="button" onClick={() => {
                       setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(fixture) }))
                       setEditingId("")
                     }}>
-                      Cancel
+                      CANCEL
                     </button>
                   </>
                 ) : null}
@@ -456,38 +535,31 @@ export default function SpcFixturesPage() {
                     onClick={() => void submitFixture(fixture, "save")}
                     disabled={!canEdit || savingId === `${fixture.id}:save`}
                   >
-                    Save
+                    SAVE
                   </button>
                 ) : null}
               </div>
             ) : null}
           </td>
         </tr>
-      )
+      ))
     })
   }
 
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
-    return <div className="spc-loading">Loading...</div>
+    return <div className="spc-loading">LOADING...</div>
   }
 
   return (
-    <SpcShell title="SPC Fixtures">
-      <div className="spc-page-heading">
-        <div>
-          <h1>Fixtures</h1>
-          <p>{pendingFixtures.length} new stems · {completedFixtures.length} completed fixtures</p>
-        </div>
-        <button type="button" className="spc-page-action" onClick={() => void loadData()} disabled={loading}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
-      {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
-
+    <SpcShell title="SPC FIXTURES">
       <datalist id="spc-fixture-users">
         {users.map((user) => (
           <option key={user.id} value={userOptionValue(user)} />
+        ))}
+      </datalist>
+      <datalist id="spc-fixture-offices">
+        {officeOptions.map((office) => (
+          <option key={office} value={office} />
         ))}
       </datalist>
       <datalist id="spc-fixture-suppliers">
@@ -512,15 +584,14 @@ export default function SpcFixturesPage() {
                 <th>CUSTOMER TRADER</th>
                 <th>PIC</th>
                 <th>ACCT</th>
-                <th>$0.25/mt</th>
-                <th>EARLIEST ETA</th>
+                <th>ETA</th>
                 <th>VESSEL</th>
                 <th>HSFO</th>
                 <th>VLSFO</th>
                 <th>LSMGO</th>
                 <th>SUPPLIER</th>
-                <th>Price</th>
-                <th>Barging</th>
+                <th>PRICE</th>
+                <th>BARGING</th>
                 <th></th>
               </tr>
             </thead>
@@ -531,6 +602,11 @@ export default function SpcFixturesPage() {
               {renderFixtureRows(pendingFixtures, "pending")}
               {!loading && pendingFixtures.length === 0 ? (
                 <tr className="spc-fixture-empty-row"><td colSpan={fixtureColumnSpan}>No new stems.</td></tr>
+              ) : null}
+              {message ? (
+                <tr className={messageIsError ? "spc-fixture-status-row is-error" : "spc-fixture-status-row"}>
+                  <td colSpan={fixtureColumnSpan}>{message}</td>
+                </tr>
               ) : null}
               <tr className="spc-fixture-section-row">
                 <td colSpan={fixtureColumnSpan}>FIXTURE TABLE</td>
