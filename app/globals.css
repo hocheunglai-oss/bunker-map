@@ -3476,6 +3476,13 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
   white-space: normal;
 }
 
+.spc-table.spc-fixture-table th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  box-shadow: -1px 0 0 #dadce0;
+}
+
 .spc-table.spc-fixture-table td {
   background: #ffffff;
   font-weight: 500;
@@ -3569,6 +3576,11 @@ body:has(.spc-fixture-ledger-panel) .spc-page-action {
 }
 
 .spc-table.spc-fixture-table .spc-fixture-action-cell {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fffaf0;
+  box-shadow: -1px 0 0 #dadce0;
   text-align: center;
 }
 
