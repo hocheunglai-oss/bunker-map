@@ -12,6 +12,7 @@ import {
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const STORAGE_KEY = "bunker-map-task-calendar-tasks-v2"
+const DELETED_TASK_IDS_STORAGE_KEY = "bunker-map-task-calendar-deleted-task-ids"
 const SHARED_STORE_KEY = "task-calendar"
 const people = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const scheduleTypes: TaskScheduleType[] = ["Weekly", "Monthly", "Yearly"]
@@ -159,6 +160,11 @@ function normalizeTasks(value: unknown) {
   return tasks.length ? tasks : taskCalendarTasks
 }
 
+function normalizeStringList(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.map((item) => String(item || "").trim()).filter(Boolean)))
+}
+
 function taskHasSelectedPeople(task: TaskCalendarTask, selectedPeople: string[]) {
   if (!selectedPeople.length) return false
   return selectedPeople.some((person) => task.notify.includes(person) || task.cc.includes(person))
@@ -166,7 +172,11 @@ function taskHasSelectedPeople(task: TaskCalendarTask, selectedPeople: string[])
 
 export default function TaskCalendarPage() {
   const { loading, authenticated } = useSimpleAdminAuth()
-  const [tasks, setTasks] = useState<TaskCalendarTask[]>(taskCalendarTasks)
+  const [tasks, setTasks] = useState<TaskCalendarTask[]>([])
+  const [deletedTaskIds, setDeletedTaskIds] = useState<string[]>([])
+  const [calendarLoaded, setCalendarLoaded] = useState(false)
+  const [calendarLoadError, setCalendarLoadError] = useState("")
+  const [saveStatus, setSaveStatus] = useState("Loading shared task calendar")
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [draftTask, setDraftTask] = useState<TaskCalendarTask>(buildBlankTask)
@@ -182,27 +192,42 @@ export default function TaskCalendarPage() {
 
     async function loadTasks() {
       let fallbackTasks = taskCalendarTasks
+      let fallbackDeletedTaskIds: string[] = []
 
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
+        const storedDeletedTaskIds = window.localStorage.getItem(DELETED_TASK_IDS_STORAGE_KEY)
         if (stored) fallbackTasks = normalizeTasks(JSON.parse(stored))
+        if (storedDeletedTaskIds) fallbackDeletedTaskIds = normalizeStringList(JSON.parse(storedDeletedTaskIds))
       } catch {
         fallbackTasks = taskCalendarTasks
       }
 
       try {
         const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        if (!response.ok) throw new Error("Could not load shared task calendar data.")
         const data = await response.json()
         if (response.ok && Array.isArray(data?.payload?.tasks)) {
           fallbackTasks = normalizeTasks(data.payload.tasks)
         }
-      } catch {
-        // Local storage remains the fallback when the shared store is unavailable.
+        if (Array.isArray(data?.payload?.deletedTaskIds)) {
+          fallbackDeletedTaskIds = normalizeStringList(data.payload.deletedTaskIds)
+        }
+      } catch (error) {
+        if (cancelled) return
+        setCalendarLoadError(error instanceof Error ? error.message : "Could not load shared task calendar data.")
+        setSaveStatus("Shared task calendar unavailable")
+        setCalendarLoaded(true)
+        return
       }
 
       if (cancelled) return
       setTasks(fallbackTasks)
+      setDeletedTaskIds(fallbackDeletedTaskIds)
+      setCalendarLoadError("")
+      setSaveStatus("Shared task calendar loaded")
       loadedRef.current = true
+      setCalendarLoaded(true)
     }
 
     loadTasks()
@@ -218,21 +243,37 @@ export default function TaskCalendarPage() {
   }, [tasks])
 
   useEffect(() => {
+    if (!loadedRef.current) return
+    window.localStorage.setItem(DELETED_TASK_IDS_STORAGE_KEY, JSON.stringify(deletedTaskIds))
+  }, [deletedTaskIds])
+
+  useEffect(() => {
     if (!authenticated || !loadedRef.current) return
     if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
 
     remoteSaveTimerRef.current = setTimeout(() => {
+      setSaveStatus("Saving shared task calendar")
       void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks }),
+        body: JSON.stringify({ tasks, deletedTaskIds }),
       })
+        .then(async (response) => {
+          if (!response.ok) {
+            const payload = await response.json().catch(() => null)
+            throw new Error(payload?.message || "Shared task calendar save failed")
+          }
+          setSaveStatus("Shared task calendar saved")
+        })
+        .catch((error) => {
+          setSaveStatus(error instanceof Error ? error.message : "Shared task calendar save failed")
+        })
     }, 700)
 
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
     }
-  }, [authenticated, tasks])
+  }, [authenticated, deletedTaskIds, tasks])
 
   useEffect(() => {
     return () => {
@@ -267,6 +308,11 @@ export default function TaskCalendarPage() {
 
   function deleteDraftTask() {
     setTasks((current) => current.filter((task) => task.id !== draftTask.id))
+    setDeletedTaskIds((current) => {
+      const nextDeletedIds = current.includes(draftTask.id) ? current : [...current, draftTask.id]
+      window.localStorage.setItem(DELETED_TASK_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
+      return nextDeletedIds
+    })
     setModalOpen(false)
   }
 
@@ -306,6 +352,37 @@ export default function TaskCalendarPage() {
     )
   }
 
+  if (!calendarLoaded) {
+    return (
+      <div style={pageStyle}>
+        <div style={shellStyle}>
+          <div style={panelStyle}>
+            <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>
+              Loading task calendar...
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (calendarLoadError) {
+    return (
+      <div style={pageStyle}>
+        <div style={shellStyle}>
+          <div style={panelStyle}>
+            <p style={{ margin: "0 0 8px", color: "var(--fc-admin-danger-text)", fontSize: "14px", fontWeight: 900 }}>
+              Shared task calendar unavailable
+            </p>
+            <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+              {calendarLoadError} Refresh the page before making task calendar changes.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
@@ -324,6 +401,25 @@ export default function TaskCalendarPage() {
               Add New Task
             </button>
           </div>
+          <span
+            style={{
+              border: "1px solid var(--fc-admin-border-soft)",
+              borderRadius: "999px",
+              background: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                ? "var(--fc-admin-danger-bg)"
+                : "var(--fc-admin-panel-bg)",
+              color: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                ? "var(--fc-admin-danger-text)"
+                : "var(--fc-admin-muted)",
+              fontSize: "11px",
+              fontWeight: 800,
+              lineHeight: 1,
+              padding: "8px 10px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {saveStatus}
+          </span>
         </header>
 
         <div style={panelStyle}>

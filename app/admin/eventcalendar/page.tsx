@@ -529,6 +529,8 @@ export default function EventCalendarPage() {
   const [calendarLoadError, setCalendarLoadError] = useState("")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
+  const [recoveryStatus, setRecoveryStatus] = useState("")
+  const [recoveringEvents, setRecoveringEvents] = useState(false)
   const loadedRef = useRef(false)
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1137,6 +1139,39 @@ export default function EventCalendarPage() {
     }
   }
 
+  async function recoverMissingEvents() {
+    if (recoveringEvents) return
+    if (!window.confirm("Restore missing future events found in audit history?")) return
+
+    setToolsMenuOpen(false)
+    setRecoveringEvents(true)
+    setRecoveryStatus("Inspecting audit history")
+
+    try {
+      const response = await fetch("/api/event-calendar/recover-missing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      const payload = await response.json()
+      if (!response.ok || !Array.isArray(payload.restoredEvents)) {
+        throw new Error(payload?.message || "Could not recover missing events.")
+      }
+
+      const restoredEvents = normalizeStoredEvents(payload.restoredEvents)
+      setEvents((current) => mergeImportedEvents(current, restoredEvents))
+      setRecoveryStatus(
+        payload.restoredCount
+          ? `Recovered ${payload.restoredCount} missing events`
+          : "No missing future events found"
+      )
+    } catch (error) {
+      setRecoveryStatus(error instanceof Error ? error.message : "Could not recover missing events.")
+    } finally {
+      setRecoveringEvents(false)
+    }
+  }
+
   function deleteDraftEvent() {
     if (eventModalMode !== "edit") return
     if (!window.confirm("Are you sure you want to delete this event?")) return
@@ -1384,9 +1419,28 @@ export default function EventCalendarPage() {
                   >
                     Add HK Holidays
                   </button>
+                  <button
+                    type="button"
+                    onClick={recoverMissingEvents}
+                    disabled={recoveringEvents}
+                    style={{
+                      ...menuItemButtonStyle,
+                      whiteSpace: "normal",
+                      marginTop: "3px",
+                      opacity: recoveringEvents ? 0.58 : 1,
+                      cursor: recoveringEvents ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Recover Missing Events
+                  </button>
                   {holidayImportStatus && (
                     <div style={{ marginTop: "5px", padding: "7px 9px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 700 }}>
                       {holidayImportStatus}
+                    </div>
+                  )}
+                  {recoveryStatus && (
+                    <div style={{ marginTop: "5px", padding: "7px 9px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 700 }}>
+                      {recoveryStatus}
                     </div>
                   )}
                 </div>

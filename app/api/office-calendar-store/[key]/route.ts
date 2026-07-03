@@ -59,38 +59,55 @@ function eventId(value: unknown) {
   return typeof id === "string" ? id.trim() : ""
 }
 
+function mergeCollectionById(
+  currentPayload: Record<string, unknown>,
+  incomingPayload: Record<string, unknown>,
+  collectionKey: string,
+  deletedKey: string,
+) {
+  const deletedIds = new Set([
+    ...normalizeStringList(currentPayload[deletedKey]),
+    ...normalizeStringList(incomingPayload[deletedKey]),
+  ])
+  const recordsById = new Map<string, unknown>()
+
+  for (const record of Array.isArray(currentPayload[collectionKey]) ? currentPayload[collectionKey] : []) {
+    const id = eventId(record)
+    if (!id || deletedIds.has(id)) continue
+    recordsById.set(id, record)
+  }
+
+  for (const record of Array.isArray(incomingPayload[collectionKey]) ? incomingPayload[collectionKey] : []) {
+    const id = eventId(record)
+    if (!id || deletedIds.has(id)) continue
+    recordsById.set(id, record)
+  }
+
+  return {
+    ...currentPayload,
+    ...incomingPayload,
+    [collectionKey]: Array.from(recordsById.values()),
+    [deletedKey]: Array.from(deletedIds),
+  }
+}
+
 function mergeEventCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
   const current = asRecord(currentPayload)
   const incoming = asRecord(incomingPayload)
-  const deletedEventIds = new Set([
-    ...normalizeStringList(current.deletedEventIds),
-    ...normalizeStringList(incoming.deletedEventIds),
-  ])
   const deletedRequiredSeedIds = new Set([
     ...normalizeStringList(current.deletedRequiredSeedIds),
     ...normalizeStringList(incoming.deletedRequiredSeedIds),
   ])
-  const eventsById = new Map<string, unknown>()
-
-  for (const event of Array.isArray(current.events) ? current.events : []) {
-    const id = eventId(event)
-    if (!id || deletedEventIds.has(id)) continue
-    eventsById.set(id, event)
-  }
-
-  for (const event of Array.isArray(incoming.events) ? incoming.events : []) {
-    const id = eventId(event)
-    if (!id || deletedEventIds.has(id)) continue
-    eventsById.set(id, event)
-  }
+  const merged = mergeCollectionById(current, incoming, "events", "deletedEventIds")
 
   return {
-    ...current,
-    ...incoming,
-    events: Array.from(eventsById.values()),
-    deletedEventIds: Array.from(deletedEventIds),
+    ...merged,
     deletedRequiredSeedIds: Array.from(deletedRequiredSeedIds),
   }
+}
+
+function mergeTaskCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
+  return mergeCollectionById(asRecord(currentPayload), asRecord(incomingPayload), "tasks", "deletedTaskIds")
 }
 
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
@@ -147,7 +164,7 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
       : getSupabaseClient()
     let nextPayload = payload
 
-    if (storeKey === "event-calendar") {
+    if (storeKey === "event-calendar" || storeKey === "task-calendar") {
       const { data: currentRow, error: currentError } = await supabase
         .from("office_calendar_store")
         .select("payload")
@@ -155,7 +172,9 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
         .maybeSingle()
 
       if (currentError) throw currentError
-      nextPayload = mergeEventCalendarPayload(currentRow?.payload || null, payload)
+      nextPayload = storeKey === "event-calendar"
+        ? mergeEventCalendarPayload(currentRow?.payload || null, payload)
+        : mergeTaskCalendarPayload(currentRow?.payload || null, payload)
     }
 
     const { error } = await supabase.from("office_calendar_store").upsert({
