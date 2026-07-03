@@ -92,6 +92,27 @@ const emptyDraft: FixtureDraft = {
   barging: "",
 }
 
+const fixtureColumnWidths = [
+  86, // date
+  126, // supplier trader office
+  78, // supplier trader PIC
+  130, // customer trader office
+  78, // customer trader PIC
+  76, // account
+  80, // commission
+  116, // earliest ETA
+  164, // vessel
+  78, // HSFO
+  78, // VLSFO
+  78, // LSMGO
+  204, // supplier
+  92, // price
+  92, // barging
+  98, // action
+] as const
+
+const fixtureColumnSpan = fixtureColumnWidths.length
+
 function cleanText(value: string | null | undefined) {
   return String(value || "").trim()
 }
@@ -461,6 +482,11 @@ export default function SpcFixturesPage() {
       <section className="spc-panel spc-fixture-ledger-panel">
         <div className="spc-table-wrap">
           <table className="spc-table spc-fixture-table">
+            <colgroup>
+              {fixtureColumnWidths.map((width, index) => (
+                <col key={`${width}-${index}`} style={{ width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 <th>DATE</th>
@@ -483,18 +509,18 @@ export default function SpcFixturesPage() {
             </thead>
             <tbody>
               <tr className="spc-fixture-section-row">
-                <td colSpan={16}>NEW STEMS</td>
+                <td colSpan={fixtureColumnSpan}>NEW STEMS</td>
               </tr>
               {renderFixtureRows(pendingFixtures, "pending")}
               {!loading && pendingFixtures.length === 0 ? (
-                <tr className="spc-fixture-empty-row"><td colSpan={16}>No new stems.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={fixtureColumnSpan}>No new stems.</td></tr>
               ) : null}
               <tr className="spc-fixture-section-row">
-                <td colSpan={16}>FIXTURE TABLE</td>
+                <td colSpan={fixtureColumnSpan}>FIXTURE TABLE</td>
               </tr>
               {renderFixtureRows(completedFixtures, "completed")}
               {!loading && completedFixtures.length === 0 ? (
-                <tr className="spc-fixture-empty-row"><td colSpan={16}>No completed fixtures.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={fixtureColumnSpan}>No completed fixtures.</td></tr>
               ) : null}
             </tbody>
           </table>
