@@ -134,6 +134,13 @@ function userChoiceLabel(user: Pick<SpcUserOption, "username" | "displayName">) 
   return `${user.displayName || user.username} | ${user.username}`
 }
 
+function compactPersonName(value: string | null | undefined) {
+  const cleaned = cleanString(value).split("|")[0].trim()
+  if (!cleaned) return ""
+  const withoutDomain = cleaned.includes("@") ? cleaned.split("@")[0] : cleaned
+  return withoutDomain.split(/\s+/)[0] || withoutDomain
+}
+
 function findUserByUsername(users: SpcUserOption[], username: string | null | undefined) {
   const target = cleanString(username).toLowerCase()
   if (!target) return null
@@ -146,12 +153,18 @@ function resolveUserChoice(users: SpcUserOption[], input: unknown) {
   const lowerValue = value.toLowerCase()
   const pipeUsername = value.includes("|") ? cleanString(value.split("|").pop()).toLowerCase() : ""
 
-  return users.find((user) => {
+  const exactMatch = users.find((user) => {
     const username = user.username.toLowerCase()
     const displayName = (user.displayName || user.username).toLowerCase()
     const label = userChoiceLabel(user).toLowerCase()
     return lowerValue === username || lowerValue === displayName || lowerValue === label || pipeUsername === username
-  }) || null
+  })
+  if (exactMatch) return exactMatch
+
+  const firstNameMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === lowerValue)
+  if (firstNameMatches.length === 1) return firstNameMatches[0]
+
+  return null
 }
 
 function extractInitialFuel(text: string, aliases: string[]) {

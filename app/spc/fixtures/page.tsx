@@ -126,23 +126,40 @@ function traderValue(displayName: string | null | undefined, username: string | 
   return cleanText(displayName) || cleanUsername
 }
 
+function compactPersonName(value: string | null | undefined) {
+  const cleaned = cleanText(value).split("|")[0].trim()
+  if (!cleaned) return ""
+  const withoutDomain = cleaned.includes("@") ? cleaned.split("@")[0] : cleaned
+  return withoutDomain.split(/\s+/)[0] || withoutDomain
+}
+
+function traderDraftValue(displayName: string | null | undefined, username: string | null | undefined) {
+  return compactPersonName(traderValue(displayName, username))
+}
+
 function userFromChoice(users: SpcUserOption[], value: string) {
   const cleaned = cleanText(value)
   if (!cleaned) return null
   const lower = cleaned.toLowerCase()
   const username = cleaned.includes("|") ? cleanText(cleaned.split("|").pop()).toLowerCase() : lower
-  return users.find((user) => {
+  const exactMatch = users.find((user) => {
     const userName = user.username.toLowerCase()
     const displayName = user.displayName.toLowerCase()
     const label = userOptionValue(user).toLowerCase()
     return userName === username || userName === lower || displayName === lower || label === lower
-  }) || null
+  })
+  if (exactMatch) return exactMatch
+
+  const firstNameMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === lower)
+  if (firstNameMatches.length === 1) return firstNameMatches[0]
+
+  return null
 }
 
 function traderPic(value: string) {
   const cleaned = cleanText(value)
   if (!cleaned) return "-"
-  return cleanText(cleaned.split("|")[0]) || cleaned
+  return compactPersonName(cleaned) || cleaned
 }
 
 function dateInput(value: string | null | undefined) {
@@ -170,8 +187,8 @@ function blank(value: string | null | undefined) {
 function draftFromFixture(fixture: SpcFixture): FixtureDraft {
   return {
     fixtureDate: dateInput(fixture.fixtureDate),
-    supplierTrader: traderValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
-    buyerTrader: traderValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
+    supplierTrader: traderDraftValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
+    buyerTrader: traderDraftValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
     account: cleanText(fixture.account),
     commission: cleanText(fixture.commission),
     earliestEta: cleanText(fixture.earliestEta),
