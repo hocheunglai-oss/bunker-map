@@ -28,7 +28,7 @@ const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: bo
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
   { label: "Inchon", aliases: ["Inchon", "Incheon"] },
   { label: "Singapore", aliases: ["Singapore", "SGP", "SIN", "SG"], short: true },
-  { label: "Hong Kong", aliases: ["Hong Kong"] },
+  { label: "Hong Kong", aliases: ["Hong Kong", "Hongkong", "HK", "HKG"], short: true },
   { label: "Laemchabang", aliases: ["Laemchabang", "Laem Chabang"] },
   { label: "Ho Chi Minh", aliases: ["Ho Chi Minh", "Ho Chi Minh City", "Hochiminh City"] },
   { label: "Koh Sichang", aliases: ["Koh Sichang", "Kohsichang"] },

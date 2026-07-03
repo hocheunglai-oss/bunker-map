@@ -151,6 +151,12 @@ function extractVesselFromImoLine(line: string, imo: string) {
   const cleanedQuotedName = cleanVesselName(quotedName)
   if (isPlausibleVesselName(cleanedQuotedName)) return cleanedQuotedName
 
+  const forPhrase = line.match(
+    /\bfor\s+(?:the\s+)?(?:(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt|vessel|vsl|ship)\.?\s+)?([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s*(?:\(|\/)?\s*imo\b|\s+at\b|\s+eta\b|$)/i,
+  )
+  const cleanedForPhrase = cleanVesselName(forPhrase?.[1] || "")
+  if (isPlausibleVesselName(cleanedForPhrase)) return cleanedForPhrase
+
   const cleaned = cleanVesselName(beforeImo)
   if (isPlausibleVesselName(cleaned)) return cleaned
 
