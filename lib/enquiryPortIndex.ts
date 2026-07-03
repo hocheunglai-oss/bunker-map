@@ -16,10 +16,16 @@ export type EnquiryPortIndexOptions = {
 }
 
 const supplementalPorts = [
+  "Caofeidian",
   "Colombo",
+  "Hakata",
   "Hong Kong",
   "Laemchabang",
+  "Nagasaki",
+  "Pyeongtaek",
+  "Shimonoseki",
   "Singapore",
+  "Yokohama",
 ]
 
 const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: boolean }> = [
@@ -28,7 +34,7 @@ const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: bo
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
   { label: "Inchon", aliases: ["Inchon", "Incheon"] },
   { label: "Singapore", aliases: ["Singapore", "SGP", "SIN", "SG"], short: true },
-  { label: "Hong Kong", aliases: ["Hong Kong", "Hongkong", "HK", "HKG"], short: true },
+  { label: "Hong Kong", aliases: ["Hong Kong", "Hongkong", "HK", "HKG", "香港"], short: true },
   { label: "Laemchabang", aliases: ["Laemchabang", "Laem Chabang"] },
   { label: "Ho Chi Minh", aliases: ["Ho Chi Minh", "Ho Chi Minh City", "Hochiminh City"] },
   { label: "Koh Sichang", aliases: ["Koh Sichang", "Kohsichang"] },
@@ -75,7 +81,7 @@ export function normalizePortKey(value: string) {
     .replace(/\bpt\b/g, "port")
     .replace(/\./g, "")
     .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 }

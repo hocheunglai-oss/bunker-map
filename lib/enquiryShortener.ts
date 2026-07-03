@@ -15,6 +15,8 @@ type ProductSegment = {
   detectedRemarks: VlsfoMaxRemark[]
 }
 
+const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|[吨噸])`
+
 const MONTHS: Record<string, string> = {
   "1": "jan",
   "01": "jan",
@@ -132,10 +134,48 @@ function formatDateRange(firstDay: string, firstMonth: string, secondDay: string
   return `${first} ${normalizedFirstMonth} - ${second} ${normalizedSecondMonth}`
 }
 
+function currentMonthKey() {
+  return String(new Date().getMonth() + 1)
+}
+
+function normalizeCurrentMonthDate(day: string) {
+  return normalizeDate(day, currentMonthKey())
+}
+
+function formatCurrentMonthDateRange(firstDay: string, secondDay: string) {
+  return formatDateRange(firstDay, currentMonthKey(), secondDay, currentMonthKey())
+}
+
+function isContactOrAddressLine(value: string) {
+  return /^(?:add|address|voice|voice\/fax|fax|mobile|phone|tel|e-?mail)\b/i.test(value) ||
+    /[\w.-]+@[\w.-]+/.test(value) ||
+    /\+\d{1,3}[-\d\s]{5,}/.test(value)
+}
+
 function findDates(value: string) {
   const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
   const dates: string[] = []
   const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+
+  for (const match of normalized.matchAll(/(?:^|\n)\s*[A-Za-z][A-Za-z .'-]{1,36}\s+(\d{1,2})[./](\d{1,2})(?=$|[^\d])/gm)) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})\s*(?:-|~|to|至|到)\s*(\d{1,2})\s*[日号]/gi)) {
+    const range = formatCurrentMonthDateRange(match[1], match[2])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})\s*[日号]/g)) {
+    const date = normalizeCurrentMonthDate(match[1])
+    if (date) dates.push(date)
+  }
 
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\s*(?:,?\\s*\\d{2,4})?(?:\\s*\\([^)]*\\))?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[2], match[3], match[4])
@@ -168,13 +208,23 @@ function findDates(value: string) {
     if (date) dates.push(date)
   }
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b/g)) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const date = normalizeDate(match[1], match[2])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b(?!\s*[日号])/g)) {
     const date = normalizeDate(match[1], match[2])
     if (date) dates.push(date)
   }
 
   for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?(?:\s+of\s+|\s*[- ]\s*)(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi)) {
     const date = normalizeDate(match[1], match[2])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi)) {
+    const date = normalizeCurrentMonthDate(match[1])
     if (date) dates.push(date)
   }
 
@@ -187,10 +237,11 @@ function extractDeliveryDate(text: string) {
     .map(cleanSpaces)
     .filter(Boolean)
 
-  const labelledLines = lines.filter((line) =>
+  const candidateLines = lines.filter((line) => !isContactOrAddressLine(line))
+  const labelledLines = candidateLines.filter((line) =>
     /^\s*(?:delivery|window|date|eta|etb|etd|ets)\b/i.test(line),
   )
-  const dates = findDates(labelledLines.join(" ") || lines.join(" "))
+  const dates = findDates(labelledLines.join(" ") || candidateLines.join("\n"))
 
   return dates[0] || ""
 }
@@ -199,7 +250,7 @@ function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
   if (/(?:hsfo|hfo|ifo|3[,.]?5)/i.test(compact)) return "hsfo"
-  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst)/i.test(compact)) {
+  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact)) {
     return "vlsfo"
   }
   return ""
@@ -234,12 +285,12 @@ export function hasVlsfoMaxCaution(value: string) {
 }
 
 function extractQuantityFromInlineUnit(value: string) {
-  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
+  const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
     return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
   }
 
-  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/gi))
+  const matches = Array.from(value.matchAll(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "gi")))
     .map((match) => match[1])
     .filter(isUsableQuantityNumber)
 
@@ -251,7 +302,7 @@ function extractQuantityFromBlock(lines: string[]) {
   const inlineQuantity = extractQuantityFromInlineUnit(lines.join(" "))
   if (inlineQuantity) return inlineQuantity
 
-  const unitIndex = lines.findIndex((line) => /^(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)$/i.test(line))
+  const unitIndex = lines.findIndex((line) => new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(line))
   const scanLines = unitIndex >= 0 ? lines.slice(1, unitIndex) : lines.slice(1)
   const numericLine = scanLines
     .map((line) => line.match(/^\d+(?:[,.]\d+)?$/)?.[0] || "")
@@ -262,7 +313,7 @@ function extractQuantityFromBlock(lines: string[]) {
 
 function productMatches(line: string) {
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|l\s*s\s*(?:120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,
@@ -325,7 +376,7 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
       block.push(nextLine)
       endIndex = offset
 
-      if (/^(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)$/i.test(nextLine) || /\b(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i.test(nextLine)) break
+      if (new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(nextLine) || new RegExp(String.raw`${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(nextLine)) break
     }
 
     const quantity = extractQuantityFromBlock(block)

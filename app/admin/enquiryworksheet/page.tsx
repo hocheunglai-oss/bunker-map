@@ -238,15 +238,6 @@ function restoreGuess(value: unknown): EnquiryWorksheetGuess | null {
   }
 }
 
-function restoreVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
-  if (!Array.isArray(value)) return []
-
-  return value.filter(
-    (remark): remark is VlsfoMaxRemark =>
-      remark === "180cst max" || remark === "120cst max",
-  )
-}
-
 function restoreCache(value: unknown): EnquiryWorksheetCache | null {
   if (!isRecord(value)) return null
 
@@ -259,7 +250,7 @@ function restoreCache(value: unknown): EnquiryWorksheetCache | null {
   return {
     enquiryText,
     cleanedEnquiryText: sourceText,
-    vlsfoMaxRemarks: restoreVlsfoMaxRemarks(value.vlsfoMaxRemarks),
+    vlsfoMaxRemarks: [],
     guesses,
     worksheet,
   }
@@ -377,7 +368,6 @@ export default function EnquiryWorksheetPage() {
         JSON.stringify({
           enquiryText,
           cleanedEnquiryText,
-          vlsfoMaxRemarks,
           guesses,
           worksheet,
         }),
@@ -385,7 +375,7 @@ export default function EnquiryWorksheetPage() {
     } catch {
       // If browser storage is blocked/full, keep the worksheet usable without persistence.
     }
-  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, vlsfoMaxRemarks, worksheet])
+  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, worksheet])
 
   useEffect(() => {
     if (!userNickname) return
@@ -434,6 +424,7 @@ export default function EnquiryWorksheetPage() {
 
   function handleEnquiryTextChange(value: string) {
     setEnquiryText(value)
+    setVlsfoMaxRemarks([])
     const nextCleaned = cleanEnquiryForReading(value)
     setCleanedEnquiryText(nextCleaned)
     setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned, { portNames: portIndex }) : emptyGuess())
@@ -450,7 +441,7 @@ export default function EnquiryWorksheetPage() {
         guesses.vesselName,
         guesses.imo,
         vlsfoMaxRemarks,
-        { includePort: true, port: guesses.port, portNames: portIndex },
+        { autoDetectVlsfoRemarks: false, includePort: true, port: guesses.port, portNames: portIndex },
       ),
     [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, portIndex, vlsfoMaxRemarks],
   )

@@ -203,6 +203,18 @@ function extractSlashPrefixVessel(lines: string[]) {
   return ""
 }
 
+function extractColonProductVessel(lines: string[]) {
+  for (const line of lines.slice(0, 6)) {
+    const match = line.match(
+      /^\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)\s*:\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\b/i,
+    )
+    const cleaned = cleanVesselName(match?.[1] || "")
+    if (isPlausibleVesselName(cleaned)) return cleaned
+  }
+
+  return ""
+}
+
 function extractLeadingVesselBeforeTradingDetails(lines: string[]) {
   for (const line of lines.slice(0, 6)) {
     if (/^\s*(?:account|agent|buyer|date|eta|port|position|product|quantity)\b/i.test(line)) continue
@@ -331,7 +343,7 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     })
     if (contextualPort) return contextualPort
 
-    if (/\b(?:bunker|eta|etb|etd|ets|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line)) {
+    if (/\b(?:bunker|eta|etb|etd|ets|vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /\b\d{1,2}(?:[./-]\d{1,2}|st|nd|rd|th)\b/i.test(line) || /\b\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /[月日号월일]|到达|抵达/.test(line)) {
       const known = findKnownPort(line, { ...options, includeShortAliases: true })
       if (known) return known
     }
@@ -400,6 +412,7 @@ export function parseEnquiryWorksheetGuess(
     (imoLine ? extractVesselFromImoLine(imoLine, imo) : "") ||
     extractLabelledVessel(lines) ||
     extractFallbackVessel(lines, imo) ||
+    extractColonProductVessel(lines) ||
     extractSlashPrefixVessel(lines) ||
     extractLeadingVesselBeforeTradingDetails(lines) ||
     extractHeaderVessel(lines)
