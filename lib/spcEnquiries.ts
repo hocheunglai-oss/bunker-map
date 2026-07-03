@@ -6,6 +6,7 @@ import {
   writeSpcEnquiryNotes,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
+import { ensurePendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
 
 export type SpcEnquiry = {
   id: string
@@ -276,6 +277,9 @@ export async function updateSpcEnquiryOutcome(
     .single()
 
   if (error) throw error
+  if (outcome === "stem") {
+    await ensurePendingSpcFixtureForEnquiry(data as SpcEnquiryRow, session, request)
+  }
   return mapEnquiry(data as SpcEnquiryRow)
 }
 

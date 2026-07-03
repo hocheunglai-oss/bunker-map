@@ -79,7 +79,7 @@ const DATABASE_GROUPS = [
   },
   {
     title: "SPC",
-    tables: ["spc_users", "spc_enquiries", "office_calendar_store: spc-permission-groups"],
+    tables: ["spc_users", "spc_enquiries", "spc_fixtures", "office_calendar_store: spc-permission-groups"],
   },
 ] as const
 

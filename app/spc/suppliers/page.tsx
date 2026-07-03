@@ -101,6 +101,7 @@ export default function SpcSuppliersPage() {
   const [selectedKey, setSelectedKey] = useState("")
   const [activeTab, setActiveTab] = useState<SupplierTab>("overview")
   const [query, setQuery] = useState("")
+  const [supplierQuery, setSupplierQuery] = useState("")
   const [draft, setDraft] = useState<SupplierDraft | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -136,11 +137,21 @@ export default function SpcSuppliersPage() {
       const data = (await response.json()) as SupplierResponse
       if (!response.ok) throw new Error(data.message || "Failed to load supplier database.")
       setDataset(data)
+      const requestedSupplier = data.records.find((record) => {
+        const target = supplierQuery.toLowerCase()
+        return target && (
+          record.key.toLowerCase() === target ||
+          record.name.toLowerCase().includes(target) ||
+          record.searchText.includes(target)
+        )
+      })
       setSelectedKey((current) =>
-        current && data.records.some((record) => record.key === current)
+        requestedSupplier?.key ||
+        (current && data.records.some((record) => record.key === current)
           ? current
-          : data.records[0]?.key || "",
+          : data.records[0]?.key || ""),
       )
+      if (supplierQuery) setQuery((current) => current || supplierQuery)
       setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load supplier database.")
@@ -148,10 +159,14 @@ export default function SpcSuppliersPage() {
     } finally {
       setLoading(false)
     }
-  }, [canView])
+  }, [canView, supplierQuery])
 
   useEffect(() => {
     document.title = "SPC Supplier Database"
+  }, [])
+
+  useEffect(() => {
+    setSupplierQuery(new URLSearchParams(window.location.search).get("supplier")?.trim() || "")
   }, [])
 
   useEffect(() => {

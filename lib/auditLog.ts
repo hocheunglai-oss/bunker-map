@@ -96,6 +96,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   admin_role_defaults: "user-management",
   spc_users: "spc-user-management",
   spc_enquiries: "spc-buyer-enquiries",
+  spc_fixtures: "spc-fixtures",
   spc_role_defaults: "spc-user-management",
   spc_suppliers: "spc-suppliers",
 }
@@ -136,6 +137,7 @@ const ENTITY_NAMES: Record<string, string> = {
   admin_role_defaults: "role defaults",
   spc_users: "SPC user",
   spc_enquiries: "SPC enquiry",
+  spc_fixtures: "SPC fixture",
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
 }
@@ -187,6 +189,16 @@ const FIELD_LABELS: Record<string, string> = {
   contact: "contact",
   created_by_username: "created by",
   created_by_display_name: "created by",
+  fixture_status: "fixture status",
+  fixture_date: "fixture date",
+  supplier_trader_username: "supplier trader",
+  supplier_trader_display_name: "supplier trader",
+  buyer_trader_username: "buyer trader",
+  buyer_trader_display_name: "buyer trader",
+  supplier_key: "supplier key",
+  earliest_eta: "earliest ETA",
+  price: "price",
+  barging: "barging",
   content: "content",
   body: "content",
 }
@@ -211,6 +223,7 @@ const NON_CREATION_INSERT_TABLES = new Set([
 const SPC_TABLE_NAMES = new Set([
   "spc_users",
   "spc_enquiries",
+  "spc_fixtures",
   "spc_role_defaults",
   "spc_suppliers",
 ])
@@ -749,7 +762,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_role_defaults,spc_suppliers)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers)",
     )
   }
 

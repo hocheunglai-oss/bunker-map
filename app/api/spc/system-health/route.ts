@@ -44,9 +44,10 @@ export async function GET() {
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
       process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     )
-    const [users, enquiries] = await Promise.all([
+    const [users, enquiries, fixtures] = await Promise.all([
       countRows(supabase, "spc_users"),
       countRows(supabase, "spc_enquiries"),
+      countRows(supabase, "spc_fixtures"),
     ])
     const checks = [
       {
@@ -64,6 +65,14 @@ export async function GET() {
         message: "SPC enquiry table reachable",
         checkedAt,
         details: { enquiries },
+      },
+      {
+        id: "spc-fixtures",
+        label: "SPC FIXTURES",
+        status: "ok" as const,
+        message: "SPC fixture table reachable",
+        checkedAt,
+        details: { fixtures },
       },
       {
         id: "spc-domain",

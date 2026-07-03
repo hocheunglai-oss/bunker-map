@@ -445,7 +445,8 @@ begin
     'admin_users',
     'admin_role_defaults',
     'spc_users',
-    'spc_enquiries'
+    'spc_enquiries',
+    'spc_fixtures'
   ]
   loop
     table_reg := to_regclass('public.' || table_name);

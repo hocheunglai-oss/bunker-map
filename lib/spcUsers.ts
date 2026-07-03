@@ -104,6 +104,14 @@ export type ManagedSpcUser = {
   updatedAt: string
 }
 
+export type SpcUserOption = {
+  id: string
+  username: string
+  displayName: string
+  role: SpcRoleId
+  office: string
+}
+
 export type ManagedSpcRoleDefault = {
   role: SpcRoleId
   label: string
@@ -805,6 +813,27 @@ export async function listSupplierTraderOptions(
       displayName: user.displayName || user.username,
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
+}
+
+export async function listActiveSpcUserOptions(
+  roleDefaults?: ManagedSpcRoleDefault[],
+  pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
+): Promise<SpcUserOption[]> {
+  const users = await listManagedSpcUsers(roleDefaults, pages)
+  return users
+    .filter((user) => user.isActive)
+    .map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      role: user.role,
+      office: user.office,
+    }))
+    .sort((a, b) => {
+      const roleOrder = a.role.localeCompare(b.role)
+      if (roleOrder !== 0) return roleOrder
+      return a.displayName.localeCompare(b.displayName)
+    })
 }
 
 export async function listManagedSpcOffices() {

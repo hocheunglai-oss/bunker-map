@@ -5,45 +5,118 @@ import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
-import type { SpcEnquiryMeta } from "@/lib/spcEnquiryText"
 
-type SpcEnquiry = {
+type SpcFixtureStatus = "pending" | "completed" | "cancelled"
+
+type SpcFixture = {
   id: string
-  title: string
+  enquiryId: string
+  enquiryNumber: string
+  enquiryTitle: string
+  fixtureStatus: SpcFixtureStatus
+  fixtureDate: string | null
+  supplierTraderUsername: string
+  supplierTraderDisplayName: string
+  buyerTraderUsername: string
+  buyerTraderDisplayName: string
+  account: string | null
+  commission: string | null
+  earliestEta: string | null
   vesselName: string | null
-  product: string | null
-  deliveryDate: string | null
+  hsfo: string | null
+  vlsfo: string | null
+  lsmgo: string | null
   supplierName: string | null
-  formattedText: string
-  createdByDisplayName: string
+  supplierKey: string | null
+  price: string | null
+  barging: string | null
+  completedAt: string | null
   createdAt: string
   updatedAt: string
-  meta: SpcEnquiryMeta
+}
+
+type SpcUserOption = {
+  id: string
+  username: string
+  displayName: string
+  role: string
+  office: string
+}
+
+type SupplierRecord = {
+  key: string
+  name: string
 }
 
 type FixtureDraft = {
-  supplier: string
-  eta: string
+  fixtureDate: string
+  supplierTrader: string
+  buyerTrader: string
+  account: string
+  commission: string
+  earliestEta: string
+  vesselName: string
   hsfo: string
   vlsfo: string
   lsmgo: string
+  supplierName: string
   price: string
   barging: string
 }
 
-const emptyFixture: FixtureDraft = {
-  supplier: "",
-  eta: "",
+type FixturesResponse = {
+  fixtures?: SpcFixture[]
+  users?: SpcUserOption[]
+  message?: string
+}
+
+type SuppliersResponse = {
+  records?: SupplierRecord[]
+  suppliers?: string[]
+  message?: string
+}
+
+const emptyDraft: FixtureDraft = {
+  fixtureDate: "",
+  supplierTrader: "",
+  buyerTrader: "",
+  account: "",
+  commission: "",
+  earliestEta: "",
+  vesselName: "",
   hsfo: "",
   vlsfo: "",
   lsmgo: "",
+  supplierName: "",
   price: "",
   barging: "",
 }
 
+function cleanText(value: string | null | undefined) {
+  return String(value || "").trim()
+}
+
+function userOptionValue(user: Pick<SpcUserOption, "username" | "displayName">) {
+  return `${user.displayName || user.username} | ${user.username}`
+}
+
+function traderValue(displayName: string | null | undefined, username: string | null | undefined) {
+  const cleanUsername = cleanText(username)
+  if (!cleanUsername) return cleanText(displayName)
+  return `${cleanText(displayName) || cleanUsername} | ${cleanUsername}`
+}
+
+function dateInput(value: string | null | undefined) {
+  const cleanValue = cleanText(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanValue)) return cleanValue
+  const date = new Date(cleanValue)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
 function displayDate(value: string | null | undefined) {
   if (!value) return "-"
-  const date = new Date(value)
+  const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
@@ -52,31 +125,36 @@ function displayDate(value: string | null | undefined) {
   }).format(date)
 }
 
-function extractFuel(text: string, aliases: string[]) {
-  const pattern = new RegExp(`\\b(${aliases.join("|")})\\b\\s*([^/\\n]+)`, "i")
-  const match = text.match(pattern)
-  return match ? match[2].trim() : ""
+function blank(value: string | null | undefined) {
+  return cleanText(value) || "-"
 }
 
-function draftFromEnquiry(enquiry: SpcEnquiry): FixtureDraft {
-  const text = `${enquiry.product || ""} / ${enquiry.formattedText || ""}`
+function draftFromFixture(fixture: SpcFixture): FixtureDraft {
   return {
-    supplier: enquiry.meta?.fixtureSupplier || enquiry.supplierName || "",
-    eta: enquiry.meta?.eta || enquiry.deliveryDate || "",
-    hsfo: enquiry.meta?.hsfo || extractFuel(text, ["hsfo", "ifo"]),
-    vlsfo: enquiry.meta?.vlsfo || extractFuel(text, ["vlsfo", "lsfo"]),
-    lsmgo: enquiry.meta?.lsmgo || extractFuel(text, ["lsmgo", "mgo"]),
-    price: enquiry.meta?.price || "",
-    barging: enquiry.meta?.barging || "",
+    fixtureDate: dateInput(fixture.fixtureDate),
+    supplierTrader: traderValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
+    buyerTrader: traderValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
+    account: cleanText(fixture.account),
+    commission: cleanText(fixture.commission),
+    earliestEta: cleanText(fixture.earliestEta),
+    vesselName: cleanText(fixture.vesselName),
+    hsfo: cleanText(fixture.hsfo),
+    vlsfo: cleanText(fixture.vlsfo),
+    lsmgo: cleanText(fixture.lsmgo),
+    supplierName: cleanText(fixture.supplierName),
+    price: cleanText(fixture.price),
+    barging: cleanText(fixture.barging),
   }
 }
 
 export default function SpcFixturesPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
-  const [suppliers, setSuppliers] = useState<string[]>([])
+  const [fixtures, setFixtures] = useState<SpcFixture[]>([])
+  const [users, setUsers] = useState<SpcUserOption[]>([])
+  const [supplierRecords, setSupplierRecords] = useState<SupplierRecord[]>([])
   const [drafts, setDrafts] = useState<Record<string, FixtureDraft>>({})
+  const [editingId, setEditingId] = useState("")
   const [loading, setLoading] = useState(false)
   const [savingId, setSavingId] = useState("")
   const [message, setMessage] = useState("")
@@ -86,44 +164,59 @@ export default function SpcFixturesPage() {
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-fixtures", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-fixtures")
 
+  const pendingFixtures = useMemo(
+    () => fixtures.filter((fixture) => fixture.fixtureStatus === "pending"),
+    [fixtures],
+  )
+  const completedFixtures = useMemo(
+    () => fixtures.filter((fixture) => fixture.fixtureStatus === "completed"),
+    [fixtures],
+  )
+
   const supplierOptions = useMemo(() => {
+    const values = [
+      ...supplierRecords.map((record) => record.name),
+      ...fixtures.map((fixture) => fixture.supplierName || ""),
+      ...Object.values(drafts).map((draft) => draft.supplierName),
+    ]
     const seen = new Set<string>()
-    const values = [...suppliers]
-    Object.values(drafts).forEach((draft) => {
-      if (draft.supplier) values.push(draft.supplier)
-    })
-    return values.filter((supplier) => {
-      const key = supplier.toLowerCase()
-      if (!supplier || seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  }, [drafts, suppliers])
+    return values
+      .map((value) => value.trim())
+      .filter((value) => {
+        const key = value.toLowerCase()
+        if (!key || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .sort((a, b) => a.localeCompare(b))
+  }, [drafts, fixtures, supplierRecords])
 
   const loadData = useCallback(async () => {
     if (!canView) return
     setLoading(true)
     setMessage("")
     try {
-      const [enquiryResponse, supplierResponse] = await Promise.all([
-        fetch("/api/spc/enquiries?status=quoted&limit=250", { cache: "no-store" }),
+      const [fixtureResponse, supplierResponse] = await Promise.all([
+        fetch("/api/spc/fixtures?limit=500", { cache: "no-store" }),
         fetch("/api/spc/suppliers", { cache: "no-store" }),
       ])
-      const enquiryData = (await enquiryResponse.json()) as { enquiries?: SpcEnquiry[]; message?: string }
-      const supplierData = (await supplierResponse.json()) as { suppliers?: string[]; message?: string }
-      if (!enquiryResponse.ok) throw new Error(enquiryData.message || "Failed to load fixtures.")
+      const fixtureData = (await fixtureResponse.json()) as FixturesResponse
+      const supplierData = (await supplierResponse.json()) as SuppliersResponse
+      if (!fixtureResponse.ok) throw new Error(fixtureData.message || "Failed to load fixtures.")
       if (!supplierResponse.ok) throw new Error(supplierData.message || "Failed to load suppliers.")
 
-      const rows = enquiryData.enquiries || []
-      setEnquiries(rows)
-      setSuppliers(supplierData.suppliers || [])
+      const rows = fixtureData.fixtures || []
+      setFixtures(rows)
+      setUsers(fixtureData.users || [])
+      setSupplierRecords(supplierData.records || (supplierData.suppliers || []).map((name) => ({ key: name, name })))
       setDrafts((current) => {
         const next: Record<string, FixtureDraft> = {}
-        rows.forEach((enquiry) => {
-          next[enquiry.id] = current[enquiry.id] || draftFromEnquiry(enquiry)
+        rows.forEach((fixture) => {
+          next[fixture.id] = current[fixture.id] || draftFromFixture(fixture)
         })
         return next
       })
+      setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load fixtures.")
       setMessageIsError(true)
@@ -149,31 +242,32 @@ export default function SpcFixturesPage() {
     setDrafts((current) => ({
       ...current,
       [id]: {
-        ...(current[id] || emptyFixture),
+        ...(current[id] || emptyDraft),
         [key]: value,
       },
     }))
   }
 
-  async function saveFixture(enquiry: SpcEnquiry) {
+  async function submitFixture(fixture: SpcFixture, action: "save" | "complete") {
     if (!canEdit) return
-    setSavingId(enquiry.id)
+    setSavingId(`${fixture.id}:${action}`)
     setMessage("")
     try {
-      const response = await fetch("/api/spc/enquiries", {
+      const response = await fetch("/api/spc/fixtures", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: enquiry.id,
-          mode: "fixture",
-          fixture: drafts[enquiry.id] || emptyFixture,
+          id: fixture.id,
+          action,
+          fixture: drafts[fixture.id] || draftFromFixture(fixture),
         }),
       })
-      const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
-      if (!response.ok || !data.enquiry) throw new Error(data.message || "Failed to save fixture.")
-      setEnquiries((current) => current.map((row) => (row.id === enquiry.id ? data.enquiry! : row)))
-      setDrafts((current) => ({ ...current, [enquiry.id]: draftFromEnquiry(data.enquiry!) }))
-      setMessage("Fixture saved.")
+      const data = (await response.json()) as { fixture?: SpcFixture; message?: string }
+      if (!response.ok || !data.fixture) throw new Error(data.message || "Failed to save fixture.")
+      setFixtures((current) => current.map((row) => (row.id === fixture.id ? data.fixture! : row)))
+      setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(data.fixture!) }))
+      setEditingId("")
+      setMessage(action === "complete" ? "Fixture completed." : "Fixture saved.")
       setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save fixture.")
@@ -181,6 +275,109 @@ export default function SpcFixturesPage() {
     } finally {
       setSavingId("")
     }
+  }
+
+  function supplierHref(fixture: SpcFixture, draft: FixtureDraft) {
+    const query = draft.supplierName || fixture.supplierKey || fixture.supplierName || ""
+    return `/spc/suppliers?supplier=${encodeURIComponent(query)}`
+  }
+
+  function inputCell(
+    fixture: SpcFixture,
+    draft: FixtureDraft,
+    key: keyof FixtureDraft,
+    options?: { type?: string; list?: string; className?: string },
+  ) {
+    return (
+      <input
+        type={options?.type || "text"}
+        list={options?.list}
+        className={options?.className}
+        value={draft[key]}
+        onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
+        disabled={!canEdit}
+      />
+    )
+  }
+
+  function staticOrInput(
+    fixture: SpcFixture,
+    draft: FixtureDraft,
+    key: keyof FixtureDraft,
+    editing: boolean,
+    options?: { type?: string; list?: string; className?: string },
+  ) {
+    if (editing) return inputCell(fixture, draft, key, options)
+    if (key === "fixtureDate") return displayDate(draft.fixtureDate)
+    return blank(draft[key])
+  }
+
+  function renderFixtureRows(rows: SpcFixture[], mode: "pending" | "completed") {
+    return rows.map((fixture) => {
+      const draft = drafts[fixture.id] || draftFromFixture(fixture)
+      const editing = canEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
+      return (
+        <tr
+          key={fixture.id}
+          className={fixture.fixtureStatus === "pending" ? "is-pending" : ""}
+          onDoubleClick={() => {
+            if (canEdit && mode === "completed") setEditingId(fixture.id)
+          }}
+        >
+          <td>{staticOrInput(fixture, draft, "fixtureDate", editing, { type: "date" })}</td>
+          <td>{staticOrInput(fixture, draft, "supplierTrader", editing, { list: "spc-fixture-users" })}</td>
+          <td>{staticOrInput(fixture, draft, "buyerTrader", editing, { list: "spc-fixture-users" })}</td>
+          <td>{staticOrInput(fixture, draft, "account", editing)}</td>
+          <td>{staticOrInput(fixture, draft, "commission", editing)}</td>
+          <td>{staticOrInput(fixture, draft, "earliestEta", editing)}</td>
+          <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
+          <td>{staticOrInput(fixture, draft, "hsfo", editing)}</td>
+          <td>{staticOrInput(fixture, draft, "vlsfo", editing)}</td>
+          <td>{staticOrInput(fixture, draft, "lsmgo", editing)}</td>
+          <td>
+            <div className="spc-fixture-supplier-cell">
+              {staticOrInput(fixture, draft, "supplierName", editing, { list: "spc-fixture-suppliers" })}
+              {draft.supplierName ? (
+                <a href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">Open</a>
+              ) : null}
+            </div>
+          </td>
+          <td>{staticOrInput(fixture, draft, "price", editing)}</td>
+          <td>{staticOrInput(fixture, draft, "barging", editing)}</td>
+          <td>
+            {editing ? (
+              <div className="spc-fixture-row-actions">
+                {fixture.fixtureStatus === "pending" ? (
+                  <button
+                    type="button"
+                    className="is-primary"
+                    onClick={() => void submitFixture(fixture, "complete")}
+                    disabled={!canEdit || savingId === `${fixture.id}:complete`}
+                  >
+                    {savingId === `${fixture.id}:complete` ? "Completing" : "Complete"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void submitFixture(fixture, "save")}
+                  disabled={!canEdit || savingId === `${fixture.id}:save`}
+                >
+                  {savingId === `${fixture.id}:save` ? "Saving" : "Save"}
+                </button>
+                {fixture.fixtureStatus === "completed" ? (
+                  <button type="button" onClick={() => {
+                    setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(fixture) }))
+                    setEditingId("")
+                  }}>
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </td>
+        </tr>
+      )
+    })
   }
 
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
@@ -192,7 +389,7 @@ export default function SpcFixturesPage() {
       <div className="spc-page-heading">
         <div>
           <h1>Fixtures</h1>
-          <p>{enquiries.length} stemmed enquiries</p>
+          <p>{pendingFixtures.length} new stems · {completedFixtures.length} completed fixtures</p>
         </div>
         <button type="button" className="spc-page-action" onClick={() => void loadData()} disabled={loading}>
           {loading ? "Refreshing..." : "Refresh"}
@@ -201,58 +398,93 @@ export default function SpcFixturesPage() {
 
       {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
 
-      <section className="spc-panel">
+      <datalist id="spc-fixture-users">
+        {users.map((user) => (
+          <option key={user.id} value={userOptionValue(user)} />
+        ))}
+      </datalist>
+      <datalist id="spc-fixture-suppliers">
+        {supplierOptions.map((supplier) => (
+          <option key={supplier} value={supplier} />
+        ))}
+      </datalist>
+
+      <section className="spc-panel spc-fixture-ledger-panel">
+        <div className="spc-panel-header">
+          <h2>New Stems</h2>
+          <span>{pendingFixtures.length}</span>
+        </div>
         <div className="spc-table-wrap">
           <table className="spc-table spc-fixture-table">
             <thead>
+              <tr className="spc-fixture-group-row">
+                <th colSpan={5}>Trader Parties</th>
+                <th colSpan={5}>Vessel / Fuel</th>
+                <th>Supplier</th>
+                <th colSpan={3}>Commercial</th>
+              </tr>
               <tr>
                 <th>DATE</th>
-                <th>SUPPLIER</th>
                 <th>SUPPLIER TRADER</th>
                 <th>BUYER TRADER</th>
-                <th>VESSEL NAME</th>
-                <th>ETA</th>
+                <th>ACCT</th>
+                <th>$/MT</th>
+                <th>EARLIEST ETA</th>
+                <th>VESSEL</th>
                 <th>HSFO</th>
                 <th>VLSFO</th>
                 <th>LSMGO</th>
+                <th>SUPPLIER</th>
                 <th>PRICE</th>
                 <th>BARGING</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {enquiries.map((enquiry) => {
-                const draft = drafts[enquiry.id] || emptyFixture
-                return (
-                  <tr key={enquiry.id}>
-                    <td>{displayDate(enquiry.createdAt)}</td>
-                    <td>
-                      <select value={draft.supplier} onChange={(event) => updateDraft(enquiry.id, "supplier", event.target.value)} disabled={!canEdit}>
-                        <option value="">Select supplier</option>
-                        {supplierOptions.map((supplier) => (
-                          <option key={supplier} value={supplier}>{supplier}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{enquiry.meta?.stemSupplierTraderDisplayName || "-"}</td>
-                    <td>{enquiry.createdByDisplayName || "-"}</td>
-                    <td><strong>{enquiry.vesselName || enquiry.title || "-"}</strong></td>
-                    <td><input value={draft.eta} onChange={(event) => updateDraft(enquiry.id, "eta", event.target.value)} disabled={!canEdit} /></td>
-                    <td><input value={draft.hsfo} onChange={(event) => updateDraft(enquiry.id, "hsfo", event.target.value)} disabled={!canEdit} /></td>
-                    <td><input value={draft.vlsfo} onChange={(event) => updateDraft(enquiry.id, "vlsfo", event.target.value)} disabled={!canEdit} /></td>
-                    <td><input value={draft.lsmgo} onChange={(event) => updateDraft(enquiry.id, "lsmgo", event.target.value)} disabled={!canEdit} /></td>
-                    <td><input value={draft.price} onChange={(event) => updateDraft(enquiry.id, "price", event.target.value)} disabled={!canEdit} /></td>
-                    <td><input value={draft.barging} onChange={(event) => updateDraft(enquiry.id, "barging", event.target.value)} disabled={!canEdit} /></td>
-                    <td>
-                      <button type="button" onClick={() => void saveFixture(enquiry)} disabled={!canEdit || savingId === enquiry.id}>
-                        {savingId === enquiry.id ? "Saving" : "Save"}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {!loading && enquiries.length === 0 ? (
-                <tr><td colSpan={12}>No fixtures yet.</td></tr>
+              {renderFixtureRows(pendingFixtures, "pending")}
+              {!loading && pendingFixtures.length === 0 ? (
+                <tr><td colSpan={14}>No new stems.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="spc-panel spc-fixture-ledger-panel">
+        <div className="spc-panel-header">
+          <h2>Fixture Table</h2>
+          <span>{completedFixtures.length}</span>
+        </div>
+        <div className="spc-table-wrap">
+          <table className="spc-table spc-fixture-table">
+            <thead>
+              <tr className="spc-fixture-group-row">
+                <th colSpan={5}>Trader Parties</th>
+                <th colSpan={5}>Vessel / Fuel</th>
+                <th>Supplier</th>
+                <th colSpan={3}>Commercial</th>
+              </tr>
+              <tr>
+                <th>DATE</th>
+                <th>SUPPLIER TRADER</th>
+                <th>BUYER TRADER</th>
+                <th>ACCT</th>
+                <th>$/MT</th>
+                <th>EARLIEST ETA</th>
+                <th>VESSEL</th>
+                <th>HSFO</th>
+                <th>VLSFO</th>
+                <th>LSMGO</th>
+                <th>SUPPLIER</th>
+                <th>PRICE</th>
+                <th>BARGING</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {renderFixtureRows(completedFixtures, "completed")}
+              {!loading && completedFixtures.length === 0 ? (
+                <tr><td colSpan={14}>No completed fixtures.</td></tr>
               ) : null}
             </tbody>
           </table>
