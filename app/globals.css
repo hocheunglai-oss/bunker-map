@@ -3414,8 +3414,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-fixture-table {
-  width: 1654px;
-  min-width: 1654px;
+  width: 1684px;
+  min-width: 1684px;
   table-layout: fixed;
   border-collapse: collapse;
   font-family: Arial, Roboto, sans-serif;

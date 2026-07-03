@@ -93,22 +93,22 @@ const emptyDraft: FixtureDraft = {
 }
 
 const fixtureColumnWidths = [
-  86, // date
-  126, // supplier trader office
-  78, // supplier trader PIC
-  130, // customer trader office
-  78, // customer trader PIC
-  76, // account
-  80, // commission
-  116, // earliest ETA
-  164, // vessel
+  76, // date
+  122, // supplier trader office
+  110, // supplier trader PIC
+  118, // customer trader office
+  108, // customer trader PIC
+  72, // account
+  76, // commission
+  112, // earliest ETA
+  170, // vessel
   78, // HSFO
   78, // VLSFO
   78, // LSMGO
-  204, // supplier
-  92, // price
-  92, // barging
-  98, // action
+  210, // supplier
+  90, // price
+  90, // barging
+  96, // action
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
@@ -160,7 +160,6 @@ function displayDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
-    year: "numeric",
   }).format(date)
 }
 
