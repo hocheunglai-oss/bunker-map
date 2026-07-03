@@ -114,8 +114,8 @@ function parseCrudeChart(data) {
     closes.slice().reverse().find((value) => value != null) ||
     null
   const previousClose =
-    finiteNumber(meta.chartPreviousClose) ||
     finiteNumber(meta.previousClose) ||
+    finiteNumber(meta.chartPreviousClose) ||
     closes.find((value) => value != null) ||
     null
 
