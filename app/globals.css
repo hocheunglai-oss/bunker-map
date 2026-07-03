@@ -688,7 +688,7 @@ body {
 }
 
 .fc-admin-scope .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-reopen {
-  display: inline-flex !important;
+  display: none !important;
 }
 
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-top {
