@@ -246,6 +246,34 @@ function extractDeliveryDate(text: string) {
   return dates[0] || ""
 }
 
+function extractDeliverySchedule(
+  text: string,
+  options: Pick<BuildShortenedEnquiryOptions, "includePort" | "portNames"> = {},
+) {
+  const lines = normalizeInput(text)
+    .split("\n")
+    .map(cleanSpaces)
+    .filter(Boolean)
+    .filter((line) => !isContactOrAddressLine(line))
+
+  const entries: string[] = []
+  for (const line of lines) {
+    const date = findDates(line)[0] || ""
+    if (!date) continue
+
+    if (options.includePort) {
+      const port = extractEnquiryPort(line, { portNames: options.portNames })
+      if (!port) continue
+      entries.push(`${port} ${date}`)
+      continue
+    }
+
+    entries.push(date)
+  }
+
+  return Array.from(new Set(entries)).join(", ")
+}
+
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
@@ -425,7 +453,8 @@ export function buildShortenedEnquiry(
   const port = options.includePort
     ? (options.port?.trim() || extractEnquiryPort(sourceText, { portNames: options.portNames }))
     : ""
-  const portAndDate = [port, date].filter(Boolean).join(" ")
+  const schedule = extractDeliverySchedule(sourceText, options)
+  const portAndDate = schedule || [port, date].filter(Boolean).join(" ")
   const products = extractProducts(sourceText, autoDetectVlsfoRemarks)
     .map((product) => formatProductSegment(product, manualVlsfoRemarks))
 
