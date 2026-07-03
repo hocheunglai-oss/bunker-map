@@ -50,6 +50,7 @@ type ManagedEvent = OfficeCalendarEvent & {
 const STORAGE_KEY = "bunker-map-office-calendar-events"
 const PEOPLE_STORAGE_KEY = "bunker-map-office-calendar-people"
 const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipients"
+const DELETED_EVENT_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-event-ids"
 const DELETED_REQUIRED_SEED_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-required-seed-ids"
 const SHARED_STORE_KEY = "event-calendar"
 const CALENDAR_ID = "fcb.bunker@gmail.com"
@@ -500,6 +501,7 @@ export default function EventCalendarPage() {
   const [people, setPeople] = useState(defaultPeople)
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
+  const [deletedEventIds, setDeletedEventIds] = useState<string[]>([])
   const [deletedRequiredSeedIds, setDeletedRequiredSeedIds] = useState<string[]>([])
   const [calendarLoaded, setCalendarLoaded] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("upcoming")
@@ -523,6 +525,8 @@ export default function EventCalendarPage() {
   const [syncStatus, setSyncStatus] = useState("Sync ready")
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([])
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState("Calendar ready")
+  const [saveStatus, setSaveStatus] = useState("Loading shared calendar")
+  const [calendarLoadError, setCalendarLoadError] = useState("")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
   const loadedRef = useRef(false)
@@ -538,16 +542,18 @@ export default function EventCalendarPage() {
       let fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
       let fallbackPeople = defaultPeople
       let fallbackEmailRecipients = ""
+      let fallbackDeletedEventIds: string[] = []
       let fallbackDeletedRequiredSeedIds: string[] = []
-
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
         const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
         const storedEmailRecipients = window.localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY)
+        const storedDeletedEventIds = window.localStorage.getItem(DELETED_EVENT_IDS_STORAGE_KEY)
         const storedDeletedRequiredSeedIds = window.localStorage.getItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY)
         if (stored) fallbackEvents = normalizeStoredEvents(JSON.parse(stored))
         if (storedPeople) fallbackPeople = normalizePeople(JSON.parse(storedPeople))
         if (storedEmailRecipients) fallbackEmailRecipients = storedEmailRecipients
+        if (storedDeletedEventIds) fallbackDeletedEventIds = normalizeStringList(JSON.parse(storedDeletedEventIds))
         if (storedDeletedRequiredSeedIds) fallbackDeletedRequiredSeedIds = normalizeStringList(JSON.parse(storedDeletedRequiredSeedIds))
       } catch {
         fallbackEvents = normalizeStoredEvents(officeCalendarSeedEvents)
@@ -556,6 +562,7 @@ export default function EventCalendarPage() {
 
       try {
         const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        if (!response.ok) throw new Error("Could not load shared calendar data.")
         const data = await response.json()
         const payload = data?.payload
 
@@ -563,21 +570,31 @@ export default function EventCalendarPage() {
           if (Array.isArray(payload.events)) fallbackEvents = normalizeStoredEvents(payload.events)
           if (Array.isArray(payload.people)) fallbackPeople = normalizePeople(payload.people)
           if (typeof payload.emailRecipientsText === "string") fallbackEmailRecipients = payload.emailRecipientsText
+          if (Array.isArray(payload.deletedEventIds)) {
+            fallbackDeletedEventIds = normalizeStringList(payload.deletedEventIds)
+          }
           if (Array.isArray(payload.deletedRequiredSeedIds)) {
             fallbackDeletedRequiredSeedIds = normalizeStringList(payload.deletedRequiredSeedIds)
           }
         }
-      } catch {
-        // Local storage remains the fallback when the shared store is unavailable.
+      } catch (error) {
+        if (cancelled) return
+        setCalendarLoadError(error instanceof Error ? error.message : "Could not load shared calendar data.")
+        setSaveStatus("Shared calendar unavailable")
+        setCalendarLoaded(true)
+        return
       }
 
-      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, fallbackDeletedRequiredSeedIds)
+      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, [...fallbackDeletedRequiredSeedIds, ...fallbackDeletedEventIds])
 
       if (cancelled) return
       setEvents(fallbackEvents)
       setPeople(fallbackPeople)
       setEmailRecipientsText(fallbackEmailRecipients)
+      setDeletedEventIds(fallbackDeletedEventIds)
       setDeletedRequiredSeedIds(fallbackDeletedRequiredSeedIds)
+      setCalendarLoadError("")
+      setSaveStatus("Shared calendar loaded")
       loadedRef.current = true
       setCalendarLoaded(true)
     }
@@ -606,6 +623,11 @@ export default function EventCalendarPage() {
 
   useEffect(() => {
     if (!loadedRef.current) return
+    window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(deletedEventIds))
+  }, [deletedEventIds])
+
+  useEffect(() => {
+    if (!loadedRef.current) return
     window.localStorage.setItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(deletedRequiredSeedIds))
   }, [deletedRequiredSeedIds])
 
@@ -614,17 +636,28 @@ export default function EventCalendarPage() {
     if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
 
     remoteSaveTimerRef.current = setTimeout(() => {
+      setSaveStatus("Saving shared calendar")
       void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ events, people, emailRecipientsText, deletedRequiredSeedIds }),
+        body: JSON.stringify({ events, people, emailRecipientsText, deletedEventIds, deletedRequiredSeedIds }),
       })
+        .then(async (response) => {
+          if (!response.ok) {
+            const payload = await response.json().catch(() => null)
+            throw new Error(payload?.message || "Shared calendar save failed")
+          }
+          setSaveStatus("Shared calendar saved")
+        })
+        .catch((error) => {
+          setSaveStatus(error instanceof Error ? error.message : "Shared calendar save failed")
+        })
     }, 700)
 
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
     }
-  }, [authenticated, deletedRequiredSeedIds, emailRecipientsText, events, people])
+  }, [authenticated, deletedEventIds, deletedRequiredSeedIds, emailRecipientsText, events, people])
 
   useEffect(() => {
     if (!authenticated || !loadedRef.current) return
@@ -1113,6 +1146,11 @@ export default function EventCalendarPage() {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEvents))
       return nextEvents
     })
+    setDeletedEventIds((current) => {
+      const nextDeletedIds = current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
+      window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
+      return nextDeletedIds
+    })
     if (requiredSeedEventIds.includes(draftEvent.id)) {
       setDeletedRequiredSeedIds((current) => {
         const nextDeletedIds = current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
@@ -1144,6 +1182,23 @@ export default function EventCalendarPage() {
           <div style={panelStyle}>
             <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 800 }}>
               Loading calendar...
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (calendarLoadError) {
+    return (
+      <div style={pageStyle}>
+        <div style={shellStyle}>
+          <div style={panelStyle}>
+            <p style={{ margin: "0 0 8px", color: "var(--fc-admin-danger-text)", fontSize: "14px", fontWeight: 900 }}>
+              Shared calendar unavailable
+            </p>
+            <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
+              {calendarLoadError} Refresh the page before making calendar changes.
             </p>
           </div>
         </div>
@@ -1230,6 +1285,25 @@ export default function EventCalendarPage() {
               marginLeft: "auto",
             }}
           >
+            <span
+              style={{
+                border: "1px solid var(--fc-admin-border-soft)",
+                borderRadius: "999px",
+                background: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                  ? "var(--fc-admin-danger-bg)"
+                  : "var(--fc-admin-panel-bg)",
+                color: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                  ? "var(--fc-admin-danger-text)"
+                  : "var(--fc-admin-muted)",
+                fontSize: "11px",
+                fontWeight: 800,
+                lineHeight: 1,
+                padding: "8px 10px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {saveStatus}
+            </span>
             <div
               style={{ position: "relative" }}
               onMouseEnter={cancelToolsMenuClose}

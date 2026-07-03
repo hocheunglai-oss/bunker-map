@@ -44,6 +44,55 @@ function getPageId(storeKey: string) {
   return "enquiry-worksheet"
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function normalizeStringList(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.map((item) => String(item || "").trim()).filter(Boolean)))
+}
+
+function eventId(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return ""
+  const id = (value as { id?: unknown }).id
+  return typeof id === "string" ? id.trim() : ""
+}
+
+function mergeEventCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
+  const current = asRecord(currentPayload)
+  const incoming = asRecord(incomingPayload)
+  const deletedEventIds = new Set([
+    ...normalizeStringList(current.deletedEventIds),
+    ...normalizeStringList(incoming.deletedEventIds),
+  ])
+  const deletedRequiredSeedIds = new Set([
+    ...normalizeStringList(current.deletedRequiredSeedIds),
+    ...normalizeStringList(incoming.deletedRequiredSeedIds),
+  ])
+  const eventsById = new Map<string, unknown>()
+
+  for (const event of Array.isArray(current.events) ? current.events : []) {
+    const id = eventId(event)
+    if (!id || deletedEventIds.has(id)) continue
+    eventsById.set(id, event)
+  }
+
+  for (const event of Array.isArray(incoming.events) ? incoming.events : []) {
+    const id = eventId(event)
+    if (!id || deletedEventIds.has(id)) continue
+    eventsById.set(id, event)
+  }
+
+  return {
+    ...current,
+    ...incoming,
+    events: Array.from(eventsById.values()),
+    deletedEventIds: Array.from(deletedEventIds),
+    deletedRequiredSeedIds: Array.from(deletedRequiredSeedIds),
+  }
+}
+
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   const session = await getAccessSession(request)
   if (session === false) {
@@ -96,14 +145,27 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
           { useServiceRole: true }
         )
       : getSupabaseClient()
+    let nextPayload = payload
+
+    if (storeKey === "event-calendar") {
+      const { data: currentRow, error: currentError } = await supabase
+        .from("office_calendar_store")
+        .select("payload")
+        .eq("key", storeKey)
+        .maybeSingle()
+
+      if (currentError) throw currentError
+      nextPayload = mergeEventCalendarPayload(currentRow?.payload || null, payload)
+    }
+
     const { error } = await supabase.from("office_calendar_store").upsert({
       key: storeKey,
-      payload,
+      payload: nextPayload,
       updated_at: new Date().toISOString(),
     })
 
     if (error) throw error
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, payload: nextPayload })
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not save shared calendar data." },
