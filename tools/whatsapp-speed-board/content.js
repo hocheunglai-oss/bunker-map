@@ -8,6 +8,7 @@
   const SEND_LOCK_KEY = "fcuno-wa-send-lock-v1"
   const SEND_LOCK_TTL_MS = 30000
   const CRUDE_REFRESH_MS = 15000
+  const CONTACT_MENU_AUTO_HIDE_MS = 1800
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("fc-uno-sidebar-logo.png")
@@ -38,6 +39,7 @@
   let unreadTimer = 0
   let crudeTimer = 0
   let templateSaveTimer = 0
+  let contactMenuHideTimer = 0
   let lastEnquiryFingerprint = ""
   let lastCrudeFingerprint = ""
   let recentSend = { key: "", at: 0 }
@@ -73,9 +75,11 @@
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (crudeTimer) window.clearInterval(crudeTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
+    if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
     unreadTimer = 0
     crudeTimer = 0
     templateSaveTimer = 0
+    contactMenuHideTimer = 0
   }
 
   function handleContentError(error) {
@@ -1242,6 +1246,29 @@
     prepareComposerTextForSend(text, sendComposerWhenReady)
   }
 
+  function cancelContactMenuAutoHide() {
+    if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
+    contactMenuHideTimer = 0
+  }
+
+  function closeContactMenu(id = "") {
+    cancelContactMenuAutoHide()
+    if (!state.contactMenuId || (id && state.contactMenuId !== id)) return
+    state.contactMenuId = ""
+    render()
+  }
+
+  function scheduleContactMenuAutoHide(id) {
+    cancelContactMenuAutoHide()
+    if (!id || state.contactMenuId !== id) return
+    contactMenuHideTimer = window.setTimeout(() => {
+      contactMenuHideTimer = 0
+      if (state.contactMenuId !== id) return
+      state.contactMenuId = ""
+      render()
+    }, CONTACT_MENU_AUTO_HIDE_MS)
+  }
+
   function renderContactList(list) {
     const hasSelectedEnquiries = selectedSendableEnquiryIds().length > 0
     const rows = contactsFor(list).map((contact) => {
@@ -1537,6 +1564,7 @@
     host.querySelectorAll("[data-action='open-contact']").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation()
+        cancelContactMenuAutoHide()
         state.contactMenuId = ""
         const contact = state.contacts.find((item) => item.id === button.dataset.id)
         if (contact) void openContact(contact)
@@ -1547,6 +1575,7 @@
       button.addEventListener("click", (event) => {
         event.stopPropagation()
         const id = button.dataset.id || ""
+        cancelContactMenuAutoHide()
         state.contactMenuId = state.contactMenuId === id ? "" : id
         render()
       })
@@ -1565,6 +1594,7 @@
     host.querySelectorAll("[data-action='remove-contact']").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation()
+        cancelContactMenuAutoHide()
         confirmRemoveContact(button.dataset.id || "")
       })
     })
@@ -1573,13 +1603,27 @@
       button.addEventListener("click", (event) => {
         event.stopPropagation()
         if (button.disabled) return
+        cancelContactMenuAutoHide()
         sendSelectedToContact(button.dataset.id || "")
+      })
+    })
+
+    host.querySelectorAll(".fcuno-wa-row-actions").forEach((zone) => {
+      const row = zone.closest(".fcuno-wa-row")
+      const id = row?.dataset.id || ""
+      zone.addEventListener("mouseenter", cancelContactMenuAutoHide)
+      zone.addEventListener("mouseleave", () => scheduleContactMenuAutoHide(id))
+      zone.addEventListener("focusin", cancelContactMenuAutoHide)
+      zone.addEventListener("focusout", (event) => {
+        if (event.relatedTarget instanceof Element && zone.contains(event.relatedTarget)) return
+        scheduleContactMenuAutoHide(id)
       })
     })
 
     host.querySelectorAll(".fcuno-wa-row").forEach((row) => {
       row.addEventListener("click", (event) => {
         if (event.target instanceof Element && event.target.closest(".fcuno-wa-row-actions")) return
+        cancelContactMenuAutoHide()
         state.contactMenuId = ""
         const contact = state.contacts.find((item) => item.id === row.dataset.id)
         if (contact) void openContact(contact)
@@ -1760,10 +1804,19 @@
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (crudeTimer) window.clearInterval(crudeTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
+    if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
   })
 
   document.addEventListener("dragover", blockExternalEnquiryDrop, true)
   document.addEventListener("drop", blockExternalEnquiryDrop, true)
+  document.addEventListener("click", (event) => {
+    if (!state.contactMenuId) return
+    if (event.target instanceof Element && event.target.closest(`#${BOARD_ID} .fcuno-wa-row-actions`)) return
+    closeContactMenu()
+  })
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeContactMenu()
+  })
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true })

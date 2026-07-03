@@ -278,6 +278,18 @@ async function main() {
       assert.deepEqual(contactMenuResult.activeButtons.map((button) => button.text), ["Send Selected", "Remove"])
       assert.equal(contactMenuResult.activeButtons[0].disabled, false)
 
+      await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.contacts = [{ id: "menu-contact", name: "Menu Contact", chatName: "Menu Contact", phone: "", list: "supplier", order: 1000 }]
+        api.state.contactMenuId = "menu-contact"
+        api.render()
+      })
+      await page.locator(".fcuno-wa-spc-row-actions").first().hover()
+      await page.mouse.move(24, 24)
+      await page.waitForTimeout(1000)
+      assert.equal(await page.locator(".fcuno-wa-spc-contact-menu").count(), 1)
+      await page.waitForFunction(() => !document.querySelector(".fcuno-wa-spc-contact-menu"), undefined, { timeout: 3000 })
+
       await page.evaluate((message) => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
         const contact = { id: "renamed-contact", name: "OTTO", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }

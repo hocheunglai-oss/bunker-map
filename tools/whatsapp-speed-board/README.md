@@ -23,7 +23,7 @@ Local Chrome extension for the trading-hour WhatsApp workflow.
 ## Trading Use
 
 - Open a WhatsApp chat, then click `Add as Supplier` or `Add as Buyer`.
-- Drag contacts to reorder. Use the handle menu to send selected enquiries or remove a saved contact.
+- Drag contacts to reorder. Use the handle menu to send selected enquiries or remove a saved contact; the menu hides shortly after you move away from it.
 - Click a contact to jump to the WhatsApp chat. Phone-number chats open directly with WhatsApp Web's `send?phone=` URL.
 - Name-only chats use WhatsApp Web's left chat search as a fallback; the extension does not use in-chat search.
 - Visible WhatsApp unread counts are mirrored as green badges on saved rows.
