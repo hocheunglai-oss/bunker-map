@@ -16,7 +16,11 @@ function errorResponse(error: unknown, fallback: string) {
       ? 401
       : message === "Forbidden"
         ? 403
-        : message.includes("required") || message.startsWith("Select a valid")
+        : message.startsWith("Only the assigned")
+          ? 403
+          : message.includes("required") ||
+              message.startsWith("Select a valid") ||
+              message.startsWith("Complete ")
           ? 400
           : 500
   return NextResponse.json({ message }, { status })
