@@ -97,13 +97,31 @@ function cleanText(value: string | null | undefined) {
 }
 
 function userOptionValue(user: Pick<SpcUserOption, "username" | "displayName">) {
-  return `${user.displayName || user.username} | ${user.username}`
+  return user.displayName || user.username
 }
 
 function traderValue(displayName: string | null | undefined, username: string | null | undefined) {
   const cleanUsername = cleanText(username)
-  if (!cleanUsername) return cleanText(displayName)
-  return `${cleanText(displayName) || cleanUsername} | ${cleanUsername}`
+  return cleanText(displayName) || cleanUsername
+}
+
+function userFromChoice(users: SpcUserOption[], value: string) {
+  const cleaned = cleanText(value)
+  if (!cleaned) return null
+  const lower = cleaned.toLowerCase()
+  const username = cleaned.includes("|") ? cleanText(cleaned.split("|").pop()).toLowerCase() : lower
+  return users.find((user) => {
+    const userName = user.username.toLowerCase()
+    const displayName = user.displayName.toLowerCase()
+    const label = userOptionValue(user).toLowerCase()
+    return userName === username || userName === lower || displayName === lower || label === lower
+  }) || null
+}
+
+function traderPic(value: string) {
+  const cleaned = cleanText(value)
+  if (!cleaned) return "-"
+  return cleanText(cleaned.split("|")[0]) || cleaned
 }
 
 function dateInput(value: string | null | undefined) {
@@ -312,10 +330,35 @@ export default function SpcFixturesPage() {
     return blank(draft[key])
   }
 
+  function sheetInput(
+    fixture: SpcFixture,
+    draft: FixtureDraft,
+    key: keyof FixtureDraft,
+    options?: { list?: string },
+  ) {
+    return (
+      <input
+        list={options?.list}
+        value={draft[key]}
+        onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
+        disabled={!canEdit}
+      />
+    )
+  }
+
   function renderFixtureRows(rows: SpcFixture[], mode: "pending" | "completed") {
     return rows.map((fixture) => {
       const draft = drafts[fixture.id] || draftFromFixture(fixture)
       const editing = canEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
+      const supplierTrader = userFromChoice(users, draft.supplierTrader)
+      const buyerTrader = userFromChoice(users, draft.buyerTrader)
+      const supplierContent = editing ? (
+        sheetInput(fixture, draft, "supplierName", { list: "spc-fixture-suppliers" })
+      ) : draft.supplierName ? (
+        <a className="spc-fixture-supplier-link" href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">
+          {draft.supplierName}
+        </a>
+      ) : "-"
       return (
         <tr
           key={fixture.id}
@@ -324,9 +367,11 @@ export default function SpcFixturesPage() {
             if (canEdit && mode === "completed") setEditingId(fixture.id)
           }}
         >
-          <td>{staticOrInput(fixture, draft, "fixtureDate", editing, { type: "date" })}</td>
-          <td>{staticOrInput(fixture, draft, "supplierTrader", editing, { list: "spc-fixture-users" })}</td>
-          <td>{staticOrInput(fixture, draft, "buyerTrader", editing, { list: "spc-fixture-users" })}</td>
+          <td>{displayDate(draft.fixtureDate)}</td>
+          <td>{blank(supplierTrader?.office)}</td>
+          <td>{editing ? sheetInput(fixture, draft, "supplierTrader", { list: "spc-fixture-users" }) : traderPic(draft.supplierTrader)}</td>
+          <td>{blank(buyerTrader?.office)}</td>
+          <td>{editing ? sheetInput(fixture, draft, "buyerTrader", { list: "spc-fixture-users" }) : traderPic(draft.buyerTrader)}</td>
           <td>{staticOrInput(fixture, draft, "account", editing)}</td>
           <td>{staticOrInput(fixture, draft, "commission", editing)}</td>
           <td>{staticOrInput(fixture, draft, "earliestEta", editing)}</td>
@@ -334,17 +379,10 @@ export default function SpcFixturesPage() {
           <td>{staticOrInput(fixture, draft, "hsfo", editing)}</td>
           <td>{staticOrInput(fixture, draft, "vlsfo", editing)}</td>
           <td>{staticOrInput(fixture, draft, "lsmgo", editing)}</td>
-          <td>
-            <div className="spc-fixture-supplier-cell">
-              {staticOrInput(fixture, draft, "supplierName", editing, { list: "spc-fixture-suppliers" })}
-              {draft.supplierName ? (
-                <a href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">Open</a>
-              ) : null}
-            </div>
-          </td>
+          <td>{supplierContent}</td>
           <td>{staticOrInput(fixture, draft, "price", editing)}</td>
           <td>{staticOrInput(fixture, draft, "barging", editing)}</td>
-          <td>
+          <td className="spc-fixture-action-cell">
             {editing ? (
               <div className="spc-fixture-row-actions">
                 {fixture.fixtureStatus === "pending" ? (
@@ -357,19 +395,30 @@ export default function SpcFixturesPage() {
                     {savingId === `${fixture.id}:complete` ? "Completing" : "Complete"}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => void submitFixture(fixture, "save")}
-                  disabled={!canEdit || savingId === `${fixture.id}:save`}
-                >
-                  {savingId === `${fixture.id}:save` ? "Saving" : "Save"}
-                </button>
                 {fixture.fixtureStatus === "completed" ? (
-                  <button type="button" onClick={() => {
-                    setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(fixture) }))
-                    setEditingId("")
-                  }}>
-                    Cancel
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void submitFixture(fixture, "save")}
+                      disabled={!canEdit || savingId === `${fixture.id}:save`}
+                    >
+                      {savingId === `${fixture.id}:save` ? "Saving" : "Save"}
+                    </button>
+                    <button type="button" onClick={() => {
+                      setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(fixture) }))
+                      setEditingId("")
+                    }}>
+                      Cancel
+                    </button>
+                  </>
+                ) : null}
+                {fixture.fixtureStatus !== "pending" && fixture.fixtureStatus !== "completed" ? (
+                  <button
+                    type="button"
+                    onClick={() => void submitFixture(fixture, "save")}
+                    disabled={!canEdit || savingId === `${fixture.id}:save`}
+                  >
+                    Save
                   </button>
                 ) : null}
               </div>
@@ -410,81 +459,42 @@ export default function SpcFixturesPage() {
       </datalist>
 
       <section className="spc-panel spc-fixture-ledger-panel">
-        <div className="spc-panel-header">
-          <h2>New Stems</h2>
-          <span>{pendingFixtures.length}</span>
-        </div>
         <div className="spc-table-wrap">
           <table className="spc-table spc-fixture-table">
             <thead>
-              <tr className="spc-fixture-group-row">
-                <th colSpan={5}>Trader Parties</th>
-                <th colSpan={5}>Vessel / Fuel</th>
-                <th>Supplier</th>
-                <th colSpan={3}>Commercial</th>
-              </tr>
               <tr>
                 <th>DATE</th>
                 <th>SUPPLIER TRADER</th>
-                <th>BUYER TRADER</th>
+                <th>PIC</th>
+                <th>CUSTOMER TRADER</th>
+                <th>PIC</th>
                 <th>ACCT</th>
-                <th>$/MT</th>
+                <th>$0.25/mt</th>
                 <th>EARLIEST ETA</th>
                 <th>VESSEL</th>
                 <th>HSFO</th>
                 <th>VLSFO</th>
                 <th>LSMGO</th>
                 <th>SUPPLIER</th>
-                <th>PRICE</th>
-                <th>BARGING</th>
+                <th>Price</th>
+                <th>Barging</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
+              <tr className="spc-fixture-section-row">
+                <td colSpan={16}>NEW STEMS</td>
+              </tr>
               {renderFixtureRows(pendingFixtures, "pending")}
               {!loading && pendingFixtures.length === 0 ? (
-                <tr><td colSpan={14}>No new stems.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={16}>No new stems.</td></tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="spc-panel spc-fixture-ledger-panel">
-        <div className="spc-panel-header">
-          <h2>Fixture Table</h2>
-          <span>{completedFixtures.length}</span>
-        </div>
-        <div className="spc-table-wrap">
-          <table className="spc-table spc-fixture-table">
-            <thead>
-              <tr className="spc-fixture-group-row">
-                <th colSpan={5}>Trader Parties</th>
-                <th colSpan={5}>Vessel / Fuel</th>
-                <th>Supplier</th>
-                <th colSpan={3}>Commercial</th>
+              <tr className="spc-fixture-section-row">
+                <td colSpan={16}>FIXTURE TABLE</td>
               </tr>
-              <tr>
-                <th>DATE</th>
-                <th>SUPPLIER TRADER</th>
-                <th>BUYER TRADER</th>
-                <th>ACCT</th>
-                <th>$/MT</th>
-                <th>EARLIEST ETA</th>
-                <th>VESSEL</th>
-                <th>HSFO</th>
-                <th>VLSFO</th>
-                <th>LSMGO</th>
-                <th>SUPPLIER</th>
-                <th>PRICE</th>
-                <th>BARGING</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
               {renderFixtureRows(completedFixtures, "completed")}
               {!loading && completedFixtures.length === 0 ? (
-                <tr><td colSpan={14}>No completed fixtures.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={16}>No completed fixtures.</td></tr>
               ) : null}
             </tbody>
           </table>
