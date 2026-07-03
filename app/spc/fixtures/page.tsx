@@ -93,22 +93,22 @@ const emptyDraft: FixtureDraft = {
 }
 
 const fixtureColumnWidths = [
-  76, // date
-  122, // supplier trader office
-  110, // supplier trader PIC
-  118, // customer trader office
-  108, // customer trader PIC
-  72, // account
-  76, // commission
-  112, // earliest ETA
-  170, // vessel
-  78, // HSFO
-  78, // VLSFO
-  78, // LSMGO
-  210, // supplier
-  90, // price
-  90, // barging
-  96, // action
+  68, // date
+  104, // supplier trader office
+  82, // supplier trader PIC
+  92, // customer trader office
+  80, // customer trader PIC
+  64, // account
+  66, // commission
+  100, // earliest ETA
+  145, // vessel
+  64, // HSFO
+  64, // VLSFO
+  64, // LSMGO
+  132, // supplier
+  68, // price
+  68, // barging
+  82, // action
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
