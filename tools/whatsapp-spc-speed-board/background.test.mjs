@@ -30,8 +30,9 @@ const crude = context.parseCrudeChart({
     result: [
       {
         meta: {
-          regularMarketPrice: 70.75,
-          chartPreviousClose: 71.57,
+          regularMarketPrice: 72.27,
+          previousClose: 71.8,
+          chartPreviousClose: 73.15,
         },
         indicators: {
           quote: [
@@ -46,9 +47,9 @@ const crude = context.parseCrudeChart({
 })
 
 assert.equal(listeners.length, 1)
-assert.equal(crude.price, 70.75)
-assert.equal(crude.change.toFixed(2), "-0.82")
-assert.equal(crude.changePercent.toFixed(2), "-1.15")
+assert.equal(crude.price, 72.27)
+assert.equal(crude.change.toFixed(2), "0.47")
+assert.equal(crude.changePercent.toFixed(2), "0.65")
 assert.deepEqual(crude.points, [73.28, 73.29, 73.19, 70.84, 70.75])
 assert.equal(crude.points.includes(0), false)
 
