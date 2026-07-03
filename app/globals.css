@@ -3420,8 +3420,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table {
-  width: 1432px;
-  min-width: 1432px;
+  width: 1398px;
+  min-width: 1398px;
   border: 1px solid #dadce0;
   table-layout: fixed;
   border-collapse: collapse;
