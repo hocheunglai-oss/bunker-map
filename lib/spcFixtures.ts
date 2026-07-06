@@ -395,7 +395,7 @@ export async function updateSpcFixture(
     const missing: string[] = []
     if (!fixtureDate) missing.push("DATE")
     if (!supplierTrader.username) missing.push("SUPPLIER TRADER")
-    if (!buyerTrader.username) missing.push("CUSTOMER TRADER")
+    if (!buyerTrader.username) missing.push("BUYER TRADER")
     if (!account) missing.push("ACCT")
     if (!earliestEta) missing.push("ETA")
     if (!vesselName) missing.push("VESSEL")
@@ -449,4 +449,29 @@ export async function updateSpcFixture(
   }
 
   return loadMappedFixture(supabase, fixtureId)
+}
+
+export async function deleteSpcFixture(
+  id: string,
+  session: SpcSession,
+  request: Request,
+) {
+  const fixtureId = cleanString(id)
+  if (!fixtureId) throw new Error("Fixture id is required.")
+
+  const context = createSpcAuditContext(session, request, "spc-fixtures")
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const existing = await loadFixtureRow(supabase, fixtureId)
+
+  if (existing.fixture_status === "pending" && !sameUsername(session.username, existing.supplier_trader_username)) {
+    throw new Error("Only the assigned supplier trader can edit this new stem.")
+  }
+
+  const { error } = await supabase
+    .from("spc_fixtures")
+    .delete()
+    .eq("id", fixtureId)
+
+  if (error) throw error
+  return fixtureId
 }

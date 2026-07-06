@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import {
+  deleteSpcFixture,
   listSpcFixtures,
   updateSpcFixture,
   type SpcFixtureInput,
@@ -75,7 +76,11 @@ export async function PATCH(request: Request) {
     }
     const id = typeof payload.id === "string" ? payload.id.trim() : ""
     if (!id) throw new Error("Fixture id is required.")
-    const action = payload.action === "complete" ? "complete" : "save"
+    const action = payload.action === "complete" ? "complete" : payload.action === "delete" ? "delete" : "save"
+    if (action === "delete") {
+      const deletedId = await deleteSpcFixture(id, session, request)
+      return NextResponse.json({ success: true, id: deletedId })
+    }
     const source =
       payload.fixture && typeof payload.fixture === "object"
         ? (payload.fixture as Record<string, unknown>)

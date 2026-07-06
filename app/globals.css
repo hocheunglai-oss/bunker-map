@@ -3507,8 +3507,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table {
-  width: 1398px;
-  min-width: 1398px;
+  width: 1368px;
+  min-width: 1368px;
   border: 1px solid #dadce0;
   table-layout: fixed;
   border-collapse: collapse;
@@ -3627,6 +3627,35 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   text-align: left;
 }
 
+.spc-fixture-section-content {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.spc-fixture-section-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-section-filters select {
+  width: auto;
+  min-width: 78px;
+  min-height: 18px;
+  height: 18px;
+  border: 1px solid #c7cdd6;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #202124;
+  padding: 0 18px 0 5px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .spc-table.spc-fixture-table .spc-fixture-empty-row td {
   height: 22px;
   color: #202124;
@@ -3677,18 +3706,31 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-fixture-row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
 }
 
 .spc-table.spc-fixture-table button {
-  min-height: 18px;
+  min-height: 20px;
   border-radius: 3px;
   background: #f6f8fb;
   color: #344054;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 14px;
-  padding: 0 5px;
+  padding: 0 7px;
+}
+
+.spc-table.spc-fixture-table button.spc-fixture-edit-button,
+.spc-table.spc-fixture-table button.spc-fixture-save-button {
+  border-color: #1a73e8;
+  background: #1a73e8;
+  color: #ffffff;
+}
+
+.spc-table.spc-fixture-table button.spc-fixture-delete-button {
+  border-color: #d92d20;
+  background: #fff5f5;
+  color: #b42318;
 }
 
 .spc-table-wrap {
