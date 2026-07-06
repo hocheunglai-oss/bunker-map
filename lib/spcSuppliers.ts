@@ -51,6 +51,14 @@ type MutableSupplierRecord = Omit<SpcSupplierRecord, "aliases" | "searchText"> &
   aliases: Set<string>
 }
 
+type ManualSupplierRow = {
+  key: string
+  name: string
+  aliases: string[] | null
+  notes: string | null
+  updated_at: string | null
+}
+
 function requireEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing environment variable: ${name}`)
@@ -467,13 +475,98 @@ function buildDataset(workbook: WorkbookRows, source: SpcSupplierDataset["source
   return finaliseDataset(records, source)
 }
 
+function emptyManualSupplierRecord(key: string, name: string, aliases: string[], updatedAt: string): SpcSupplierRecord {
+  return {
+    key,
+    name,
+    aliases,
+    info: emptyInfo(),
+    contact: emptyContact(),
+    bdnEntries: [],
+    barges: [],
+    coverage: [],
+    searchText: [name, ...aliases].filter(Boolean).join(" ").toLowerCase(),
+    updatedAt,
+  }
+}
+
+async function readManualSupplierRows() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!serviceRoleKey || !supabaseUrl) return []
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
+  const { data, error } = await supabase
+    .from("spc_suppliers")
+    .select("key,name,aliases,notes,updated_at")
+    .order("name", { ascending: true })
+
+  if (error) {
+    if (error.code === "42P01" || /spc_suppliers/i.test(error.message)) return []
+    throw error
+  }
+  return (data || []) as ManualSupplierRow[]
+}
+
+function mergeManualSupplierRows(dataset: SpcSupplierDataset, manualRows: ManualSupplierRow[]) {
+  if (manualRows.length === 0) return dataset
+
+  const recordMap = new Map<string, SpcSupplierRecord>(
+    dataset.records.map((record) => [record.key, { ...record, aliases: [...record.aliases] }]),
+  )
+
+  manualRows.forEach((row) => {
+    const name = displaySupplierName(row.name)
+    const key = supplierKey(row.key || name)
+    if (!key || !name) return
+    const aliases = Array.from(
+      new Set([name, ...(row.aliases || []).map(displaySupplierName)].filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b))
+    const updatedAt = row.updated_at || dataset.generatedAt
+    const existing = recordMap.get(key)
+    if (!existing) {
+      recordMap.set(key, emptyManualSupplierRecord(key, name, aliases, updatedAt))
+      return
+    }
+
+    const nextAliases = Array.from(new Set([...existing.aliases, ...aliases])).sort((a, b) =>
+      a.localeCompare(b),
+    )
+    recordMap.set(key, {
+      ...existing,
+      aliases: nextAliases,
+      searchText: [
+        existing.searchText,
+        name,
+        ...nextAliases,
+        row.notes,
+      ].filter(Boolean).join(" ").toLowerCase(),
+      updatedAt: updatedAt > existing.updatedAt ? updatedAt : existing.updatedAt,
+    })
+  })
+
+  const records = Array.from(recordMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+  const supplierNames = records.flatMap((record) => [record.name, ...record.aliases])
+  return {
+    ...dataset,
+    records,
+    suppliers: Array.from(new Set(supplierNames.filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    counts: {
+      ...dataset.counts,
+      suppliers: records.length,
+    },
+  }
+}
+
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
+  let dataset: SpcSupplierDataset
   try {
-    return buildDataset(await readGoogleSheetWorkbook(), "google-sheets")
+    dataset = buildDataset(await readGoogleSheetWorkbook(), "google-sheets")
   } catch (error) {
     console.warn("spc supplier google sheets read failed, falling back to public csv", error)
-    return buildDataset(await readPublicCsvWorkbook(), "public-csv")
+    dataset = buildDataset(await readPublicCsvWorkbook(), "public-csv")
   }
+  return mergeManualSupplierRows(dataset, await readManualSupplierRows())
 }
 
 function supplierAuditSnapshot(record: SpcSupplierRecord | null) {

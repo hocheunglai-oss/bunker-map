@@ -305,6 +305,10 @@ function compactPersonName(value: string | null | undefined) {
   return withoutDomain.split(/\s+/)[0] || withoutDomain
 }
 
+function traderCodeName(value: string | null | undefined) {
+  return cleanString(value).split("-")[0]?.trim() || ""
+}
+
 function findUserByUsername(users: SpcUserOption[], username: string | null | undefined) {
   const target = cleanString(username).toLowerCase()
   if (!target) return null
@@ -315,6 +319,7 @@ function resolveUserChoice(users: SpcUserOption[], input: unknown) {
   const value = cleanString(input)
   if (!value) return null
   const lowerValue = value.toLowerCase()
+  const codeName = traderCodeName(value).toLowerCase()
   const pipeUsername = value.includes("|") ? cleanString(value.split("|").pop()).toLowerCase() : ""
 
   const exactMatch = users.find((user) => {
@@ -327,6 +332,10 @@ function resolveUserChoice(users: SpcUserOption[], input: unknown) {
 
   const firstNameMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === lowerValue)
   if (firstNameMatches.length === 1) return firstNameMatches[0]
+  if (codeName && codeName !== lowerValue) {
+    const codeMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === codeName)
+    if (codeMatches.length === 1) return codeMatches[0]
+  }
 
   return null
 }

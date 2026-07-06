@@ -46,6 +46,7 @@ type SpcUserOption = {
 type SupplierRecord = {
   key: string
   name: string
+  aliases?: string[]
 }
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
@@ -343,6 +344,10 @@ function compactPersonName(value: string | null | undefined) {
   return withoutDomain.split(/\s+/)[0] || withoutDomain
 }
 
+function traderCodeName(value: string | null | undefined) {
+  return cleanText(value).split("-")[0]?.trim() || ""
+}
+
 function officeCode(value: string | null | undefined) {
   const office = cleanText(value).toUpperCase()
   if (!office) return ""
@@ -376,6 +381,7 @@ function userFromChoice(users: SpcUserOption[], value: string) {
   const cleaned = cleanText(value)
   if (!cleaned) return null
   const lower = cleaned.toLowerCase()
+  const codeName = traderCodeName(cleaned).toLowerCase()
   const username = cleaned.includes("|") ? cleanText(cleaned.split("|").pop()).toLowerCase() : lower
   const exactMatch = users.find((user) => {
     const userName = user.username.toLowerCase()
@@ -387,6 +393,10 @@ function userFromChoice(users: SpcUserOption[], value: string) {
 
   const firstNameMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === lower)
   if (firstNameMatches.length === 1) return firstNameMatches[0]
+  if (codeName && codeName !== lower) {
+    const codeMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === codeName)
+    if (codeMatches.length === 1) return codeMatches[0]
+  }
 
   return null
 }
@@ -493,7 +503,7 @@ export default function SpcFixturesPage() {
       return [value || ""]
     }
     const values = [
-      ...supplierRecords.map((record) => record.name),
+      ...supplierRecords.flatMap((record) => [record.name, ...(record.aliases || [])]),
       ...fixtures.flatMap((fixture) => supplierValues(fixture.supplierName)),
     ]
     const seen = new Set<string>()
