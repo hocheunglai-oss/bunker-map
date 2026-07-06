@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   buildShortenedEnquiry,
   type VlsfoMaxRemark,
@@ -49,6 +49,10 @@ type EnquiryWorksheetCache = {
 
 type EnquiryWorksheetPortsResponse = {
   ports?: string[]
+}
+
+type ParserReportsResponse = {
+  reports?: unknown[]
 }
 
 type ParserReportDraft = {
@@ -319,10 +323,31 @@ export default function EnquiryWorksheetPage() {
     note: "",
   })
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
+  const [parserReportCount, setParserReportCount] = useState(0)
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
   }, [])
+
+  const loadParserReportCount = useCallback(async () => {
+    if (!authenticated) {
+      setParserReportCount(0)
+      return
+    }
+
+    try {
+      const response = await fetch("/api/parser-reports?source=enquiryworksheet", { cache: "no-store" })
+      const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
+      if (!response.ok) throw new Error("Unable to load parser reports.")
+      setParserReportCount(Array.isArray(payload.reports) ? payload.reports.length : 0)
+    } catch {
+      setParserReportCount(0)
+    }
+  }, [authenticated])
+
+  useEffect(() => {
+    void loadParserReportCount()
+  }, [loadParserReportCount])
 
   useEffect(() => {
     if (!authenticated) return
@@ -584,6 +609,7 @@ export default function EnquiryWorksheetPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
+      await loadParserReportCount()
       setParserReportStatus("saved")
       window.setTimeout(() => {
         setParserReportDraft((current) => ({ ...current, open: false }))
@@ -680,7 +706,7 @@ export default function EnquiryWorksheetPage() {
                 title="Report incorrect parser output"
                 data-admin-button-style="preserve"
               >
-                Report
+                Report ({parserReportCount})
               </button>
               <button
                 type="button"

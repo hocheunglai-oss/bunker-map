@@ -45,6 +45,10 @@ type EnquiriesResponse = {
   message?: string
 }
 
+type ParserReportsResponse = {
+  reports?: unknown[]
+}
+
 type EnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
 
 type DraftEnquiry = ParsedSpcEnquiry & {
@@ -259,6 +263,7 @@ export default function SpcEnquiriesPage() {
   const [updatingId, setUpdatingId] = useState("")
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
+  const [parserReportCount, setParserReportCount] = useState(0)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
@@ -326,6 +331,23 @@ export default function SpcEnquiriesPage() {
     }
   }, [canEdit])
 
+  const loadParserReportCount = useCallback(async () => {
+    if (!canView) {
+      setParserReportCount(0)
+      return
+    }
+
+    try {
+      const response = await fetch("/api/parser-reports?source=spc", { cache: "no-store" })
+      const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
+      if (!response.ok) throw new Error("Unable to load parser reports.")
+      setParserReportCount(Array.isArray(payload.reports) ? payload.reports.length : 0)
+    } catch (error) {
+      reportEnquiryError(error, "Failed to load parser report count.")
+      setParserReportCount(0)
+    }
+  }, [canView])
+
   useEffect(() => {
     document.title = "SPC Enquiries"
   }, [])
@@ -341,6 +363,10 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     void loadSupplierTraders()
   }, [loadSupplierTraders])
+
+  useEffect(() => {
+    void loadParserReportCount()
+  }, [loadParserReportCount])
 
   function dismissDraftMissingField(field: DraftFieldKey) {
     setDismissedDraftMissingFields((current) => new Set(current).add(field))
@@ -477,6 +503,7 @@ export default function SpcEnquiriesPage() {
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to save report.")
 
+      await loadParserReportCount()
       setParserReportStatus("saved")
       window.setTimeout(() => {
         setParserReportDialog(null)
@@ -773,7 +800,7 @@ export default function SpcEnquiriesPage() {
                     onClick={openDraftParserReport}
                     disabled={!canEdit || !draft.rawText.trim()}
                   >
-                    Report
+                    Report ({parserReportCount})
                   </button>
                 </span>
                 <textarea
@@ -1001,7 +1028,7 @@ export default function SpcEnquiriesPage() {
                     onClick={openReofferParserReport}
                     disabled={saving || !reofferDraft.standardText.trim()}
                   >
-                    Report
+                    Report ({parserReportCount})
                   </button>
                 </span>
                 <textarea value={reofferDraft.standardText} onChange={(event) => updateReofferDraft("standardText", event.target.value)} rows={3} disabled={saving} />
