@@ -312,6 +312,15 @@ export function hasVlsfoMaxCaution(value: string) {
   return /(^|\D)(?:180|120)(?!\d)/.test(value)
 }
 
+export function detectAttentionTerms(value: string) {
+  const normalized = normalizeInput(value)
+  const terms: string[] = []
+  if (/\br\s*\.?\s*m\s*\.?\s*k\s*s?\b/i.test(normalized)) terms.push("RMK")
+  if (/\bc\s*\.?\s*b\s*\.?\s*m\b/i.test(normalized)) terms.push("CBM")
+  if (/\bk\s*\.?\s*l\b/i.test(normalized)) terms.push("KL")
+  return terms
+}
+
 function extractQuantityFromInlineUnit(value: string) {
   const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {

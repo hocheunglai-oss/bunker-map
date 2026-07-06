@@ -14,7 +14,12 @@ import {
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
-import { detectVlsfoMaxRemarks, hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
+import {
+  detectAttentionTerms,
+  detectVlsfoMaxRemarks,
+  hasVlsfoMaxCaution,
+  type VlsfoMaxRemark,
+} from "@/lib/enquiryShortener"
 
 type SpcEnquiry = {
   id: string
@@ -295,6 +300,8 @@ export default function SpcEnquiriesPage() {
   const draftPreviousMatches = useMemo(() => matchesForVesselName(draft.vesselName), [draft.vesselName, outcomeMatchesByVessel])
   const imoSearchUrl = useMemo(() => googleImoSearchUrl(draft), [draft])
   const viscosityCautionDetected = hasVlsfoMaxCaution(draft.rawText)
+  const attentionTerms = detectAttentionTerms(draft.rawText)
+  const reofferAttentionTerms = detectAttentionTerms(reofferDraft?.rawText || reofferDraft?.standardText || "")
 
   function shouldShowDraftMissing(field: DraftFieldKey) {
     return validationAttempted && draftMissingFields.has(field) && !dismissedDraftMissingFields.has(field)
@@ -757,6 +764,11 @@ export default function SpcEnquiriesPage() {
                   WARNING: 180 / 120 spotted. Confirm whether VLSFO 180CST MAX or 120CST MAX applies.
                 </div>
               ) : null}
+              {attentionTerms.length > 0 ? (
+                <div className="spc-enquiry-warning">
+                  WARNING: {attentionTerms.join(" / ")} spotted. Check remarks and quantity unit before sending.
+                </div>
+              ) : null}
               <div className="spc-enquiry-fields">
                 <label className={shouldShowDraftMissing("vesselName") ? "is-missing" : ""}>
                   <span>Vessel</span>
@@ -1024,6 +1036,11 @@ export default function SpcEnquiriesPage() {
               }}
               noValidate
             >
+              {reofferAttentionTerms.length > 0 ? (
+                <div className="spc-enquiry-warning">
+                  WARNING: {reofferAttentionTerms.join(" / ")} spotted. Check remarks and quantity unit before sending.
+                </div>
+              ) : null}
               <div className="spc-enquiry-fields">
                 <label className={shouldShowReofferMissing("vesselName") ? "is-missing" : ""}>
                   <span>Vessel</span>

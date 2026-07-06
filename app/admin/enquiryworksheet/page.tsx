@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   buildShortenedEnquiry,
+  detectAttentionTerms,
   detectVlsfoMaxRemarks,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
@@ -485,6 +486,7 @@ export default function EnquiryWorksheetPage() {
     [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, portIndex, vlsfoMaxRemarks],
   )
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
+  const attentionTerms = detectAttentionTerms(`${enquiryText}\n${cleanedEnquiryText}`)
 
   useEffect(() => {
     if (portIndex.length === 0) return
@@ -723,6 +725,11 @@ export default function EnquiryWorksheetPage() {
           {viscosityCautionDetected ? (
             <div className={styles.cautionAlert}>
               CAUTION: 180 / 120 detected. Check whether VLSFO 180cst max or 120cst max applies.
+            </div>
+          ) : null}
+          {attentionTerms.length > 0 ? (
+            <div className={styles.cautionAlert}>
+              WARNING: {attentionTerms.join(" / ")} spotted. Check remarks and quantity unit before sending.
             </div>
           ) : null}
 
