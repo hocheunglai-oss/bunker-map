@@ -14,7 +14,7 @@ import {
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
-import { hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
+import { detectVlsfoMaxRemarks, hasVlsfoMaxCaution, type VlsfoMaxRemark } from "@/lib/enquiryShortener"
 
 type SpcEnquiry = {
   id: string
@@ -474,6 +474,35 @@ export default function SpcEnquiriesPage() {
     setParserReportStatus("idle")
   }
 
+  function applyCorrectedParserReport(dialog: ParserReportDialog, correctedOutput: string) {
+    const correctedVlsfoMaxRemarks = dialog.context === "reoffer" ? [] : detectVlsfoMaxRemarks(correctedOutput)
+    const correctedDraft = normaliseDraft(correctedOutput, correctedVlsfoMaxRemarks)
+
+    if (dialog.context === "reoffer") {
+      setReofferDraft((current) =>
+        current
+          ? {
+              ...current,
+              ...correctedDraft,
+              id: current.id,
+              enquiryNumber: current.enquiryNumber,
+              rawText: current.rawText,
+              standardText: correctedOutput,
+            }
+          : current,
+      )
+      return
+    }
+
+    setVlsfoMaxRemarks(correctedVlsfoMaxRemarks)
+    setDraft((current) => ({
+      ...current,
+      ...correctedDraft,
+      rawText: current.rawText,
+      standardText: correctedOutput,
+    }))
+  }
+
   async function submitParserReport() {
     if (!parserReportDialog || parserReportStatus === "saving") return
     const rawText = parserReportDialog.rawText.trim()
@@ -503,11 +532,7 @@ export default function SpcEnquiriesPage() {
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to save report.")
 
-      if (parserReportDialog.context === "reoffer") {
-        setReofferDraft((current) => current ? { ...current, standardText: correctedOutput } : current)
-      } else {
-        setDraft((current) => ({ ...current, standardText: correctedOutput }))
-      }
+      applyCorrectedParserReport(parserReportDialog, correctedOutput)
       await loadParserReportCount()
       setParserReportStatus("saved")
       window.setTimeout(() => {

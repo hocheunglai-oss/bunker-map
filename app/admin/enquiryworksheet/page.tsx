@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   buildShortenedEnquiry,
+  detectVlsfoMaxRemarks,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import {
@@ -324,6 +325,7 @@ export default function EnquiryWorksheetPage() {
   })
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const [parserReportCount, setParserReportCount] = useState(0)
+  const preservedShortenedDraftRef = useRef("")
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -504,10 +506,48 @@ export default function EnquiryWorksheetPage() {
   }, [portIndex])
 
   useEffect(() => {
-    setShortenedDraft(shortenedEnquiry)
+    const preservedShortenedDraft = preservedShortenedDraftRef.current
+    if (preservedShortenedDraft) {
+      preservedShortenedDraftRef.current = ""
+      setShortenedDraft(preservedShortenedDraft)
+    } else {
+      setShortenedDraft(shortenedEnquiry)
+    }
     setCopyStatus("idle")
     setWhatsappStatus("idle")
   }, [shortenedEnquiry])
+
+  function applyCorrectedShortenedEnquiry(correctedOutput: string) {
+    const correctedGuess = parseEnquiryWorksheetGuess(correctedOutput, { portNames: portIndex })
+    const hasCorrectedFields = Boolean(
+      correctedGuess.vesselName ||
+      correctedGuess.imo ||
+      correctedGuess.port ||
+      correctedGuess.buyer,
+    )
+    const nextVesselName = correctedGuess.vesselName ? toCaps(correctedGuess.vesselName) : ""
+    const nextBuyer = correctedGuess.buyer ? toCaps(correctedGuess.buyer) : ""
+    const nextImo = correctedGuess.imo.replace(/\D/g, "").slice(0, 7)
+
+    preservedShortenedDraftRef.current = correctedOutput
+    setShortenedDraft(correctedOutput)
+    setVlsfoMaxRemarks(detectVlsfoMaxRemarks(correctedOutput))
+    setGuesses((current) => ({
+      ...current,
+      vesselName: nextVesselName || current.vesselName,
+      imo: nextImo || current.imo,
+      port: correctedGuess.port || current.port,
+      buyer: nextBuyer || current.buyer,
+      confidence: hasCorrectedFields ? correctedGuess.confidence : current.confidence,
+      warnings: hasCorrectedFields ? correctedGuess.warnings : current.warnings,
+    }))
+    setWorksheet((current) => ({
+      ...current,
+      vesselName: nextVesselName || current.vesselName,
+      imo: nextImo || current.imo,
+      buyer: nextBuyer || current.buyer,
+    }))
+  }
 
   useEffect(() => {
     function handleWhatsappResponse(event: MessageEvent) {
@@ -609,7 +649,7 @@ export default function EnquiryWorksheetPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
-      setShortenedDraft(correctedOutput)
+      applyCorrectedShortenedEnquiry(correctedOutput)
       setCopyStatus("idle")
       setWhatsappStatus("idle")
       await loadParserReportCount()
