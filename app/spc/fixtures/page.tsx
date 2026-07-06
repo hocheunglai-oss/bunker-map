@@ -95,18 +95,18 @@ const emptyDraft: FixtureDraft = {
 }
 
 const fixtureColumnWidths = [
-  116, // date
-  98, // supplier trader
-  98, // buyer trader
-  102, // account
-  128, // ETA
-  200, // vessel
-  54, // HSFO
-  54, // VLSFO
-  54, // LSMGO
-  116, // supplier
-  66, // price
-  66, // barging
+  126, // date
+  96, // supplier trader
+  96, // buyer trader
+  104, // account
+  184, // ETA
+  220, // vessel
+  108, // HSFO
+  108, // VLSFO
+  108, // LSMGO
+  130, // supplier
+  74, // price
+  74, // barging
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
@@ -163,8 +163,24 @@ function formatIntegerString(value: string | null | undefined) {
   return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
+function formatQuantityString(value: string | null | undefined) {
+  const text = cleanText(value).replace(/[–—]/g, "-")
+  if (!text.includes("-")) return formatIntegerString(text)
+  const [leftRaw, ...rightRawParts] = text.split("-")
+  const left = formatIntegerString(leftRaw)
+  const rightRaw = rightRawParts.join("")
+  const right = formatIntegerString(rightRaw)
+  if (left && !right && text.trim().endsWith("-")) return `${left}-`
+  if (left && right) return `${left}-${right}`
+  return left || right
+}
+
 function numericDisplay(value: string | null | undefined) {
   return formatIntegerString(value) || "-"
+}
+
+function quantityDisplay(value: string | null | undefined) {
+  return formatQuantityString(value) || "-"
 }
 
 function parseGradeValues(value: string | null | undefined) {
@@ -407,9 +423,9 @@ function draftFromFixture(fixture: SpcFixture): FixtureDraft {
     commission: cleanText(fixture.commission),
     earliestEta: normalizeEta(fixture.earliestEta) || cleanText(fixture.earliestEta),
     vesselName: cleanText(fixture.vesselName),
-    hsfo: formatIntegerString(fixture.hsfo),
-    vlsfo: formatIntegerString(fixture.vlsfo),
-    lsmgo: formatIntegerString(fixture.lsmgo),
+    hsfo: formatQuantityString(fixture.hsfo),
+    vlsfo: formatQuantityString(fixture.vlsfo),
+    lsmgo: formatQuantityString(fixture.lsmgo),
     supplierName: cleanText(fixture.supplierName),
     price: parseGradeValues(fixture.price).encoded
       ? serializeGradeValues(parseGradeValues(fixture.price).map)
@@ -578,7 +594,7 @@ export default function SpcFixturesPage() {
       ...current,
       [id]: {
         ...(current[id] || emptyDraft),
-        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? formatIntegerString(value) : value,
+        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? formatQuantityString(value) : value,
       },
     }))
   }
@@ -624,7 +640,7 @@ export default function SpcFixturesPage() {
 
   function activeFuelKeys(draft: FixtureDraft) {
     return fuelColumns
-      .filter(({ key }) => Boolean(formatIntegerString(draft[key])))
+      .filter(({ key }) => Boolean(formatQuantityString(draft[key])))
       .map(({ key }) => key)
   }
 
@@ -649,9 +665,9 @@ export default function SpcFixturesPage() {
       ...draft,
       account,
       earliestEta: eta,
-      hsfo: formatIntegerString(draft.hsfo),
-      vlsfo: formatIntegerString(draft.vlsfo),
-      lsmgo: formatIntegerString(draft.lsmgo),
+      hsfo: formatQuantityString(draft.hsfo),
+      vlsfo: formatQuantityString(draft.vlsfo),
+      lsmgo: formatQuantityString(draft.lsmgo),
     }
     const activeKeys = activeFuelKeys(normalized)
     normalized.supplierName = normalizedGradeField(draft.supplierName, activeKeys, false)
@@ -850,10 +866,10 @@ export default function SpcFixturesPage() {
   }
 
   function numericCell(fixture: SpcFixture, draft: FixtureDraft, key: "hsfo" | "vlsfo" | "lsmgo", editing: boolean) {
-    if (!editing) return numericDisplay(draft[key])
+    if (!editing) return quantityDisplay(draft[key])
     return (
       <input
-        inputMode="numeric"
+        inputMode="text"
         value={draft[key]}
         onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
         disabled={!canEdit}

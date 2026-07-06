@@ -136,6 +136,18 @@ function formatIntegerString(value: unknown) {
   return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
+function formatQuantityString(value: unknown) {
+  const text = cleanString(value).replace(/[–—]/g, "-")
+  if (!text.includes("-")) return formatIntegerString(text)
+  const [leftRaw, ...rightRawParts] = text.split("-")
+  const left = formatIntegerString(leftRaw)
+  const rightRaw = rightRawParts.join("")
+  const right = formatIntegerString(rightRaw)
+  if (left && !right && text.trim().endsWith("-")) return left
+  if (left && right) return `${left}-${right}`
+  return left || right
+}
+
 function parseGradeValues(value: unknown) {
   const text = cleanString(value)
   const map: Partial<Record<FuelKey, string>> = {}
@@ -533,9 +545,9 @@ export async function updateSpcFixture(
   const account = normalizeAccount(input.account, users)
   const earliestEta = normalizeEta(input.earliestEta)
   const vesselName = optionalString(input.vesselName)
-  const hsfo = optionalString(formatIntegerString(input.hsfo))
-  const vlsfo = optionalString(formatIntegerString(input.vlsfo))
-  const lsmgo = optionalString(formatIntegerString(input.lsmgo))
+  const hsfo = optionalString(formatQuantityString(input.hsfo))
+  const vlsfo = optionalString(formatQuantityString(input.vlsfo))
+  const lsmgo = optionalString(formatQuantityString(input.lsmgo))
   const activeFuelKeys = fuelColumns
     .filter(({ key }) => (key === "hsfo" ? hsfo : key === "vlsfo" ? vlsfo : lsmgo))
     .map(({ key }) => key)

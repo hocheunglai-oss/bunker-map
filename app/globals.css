@@ -3493,6 +3493,7 @@ body {
 .spc-fixture-ledger-panel {
   width: fit-content;
   max-width: 100%;
+  padding-right: 132px;
   border-color: #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
@@ -3513,8 +3514,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table {
-  width: 1152px;
-  min-width: 1152px;
+  width: 1428px;
+  min-width: 1428px;
   border: 1px solid #e5e7eb;
   table-layout: fixed;
   border-collapse: collapse;
@@ -3649,7 +3650,7 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 
 .spc-fixture-supplier-menu {
   position: absolute;
-  bottom: calc(100% + 5px);
+  top: calc(100% + 5px);
   left: 3px;
   z-index: 40;
   width: max(230px, calc(100% + 88px));
@@ -3691,10 +3692,10 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 
 .spc-fixture-eta-editor {
   display: grid;
-  grid-template-columns: 28px 34px 28px 34px;
+  grid-template-columns: 34px 44px 34px 44px;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
 }
 
 .spc-table.spc-fixture-table .spc-fixture-eta-editor select {
@@ -3702,8 +3703,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   min-height: 18px;
   border-radius: 5px;
   background: #eef0f3;
-  padding: 0 1px;
-  font-size: 8px;
+  padding: 0 2px;
+  font-size: 9px;
 }
 
 .spc-table.spc-fixture-table .spc-fixture-section-row td {
@@ -3788,7 +3789,7 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-fixture-inline-actions {
   position: absolute;
   top: 50%;
-  right: 4px;
+  right: -124px;
   z-index: 25;
   display: flex;
   align-items: center;
