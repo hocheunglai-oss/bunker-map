@@ -83,6 +83,11 @@ function cleanSpaces(value: string) {
   return value.replace(/\s+/g, " ").trim()
 }
 
+function formatShortenedPort(value: string) {
+  const normalized = cleanSpaces(value).toLowerCase()
+  return normalized === "hong kong" || normalized === "hongkong" || normalized === "hkg" ? "hk" : normalized
+}
+
 function normalizeQuantityNumber(value: string) {
   const normalized = value.replace(/,/g, "")
   if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
@@ -264,7 +269,7 @@ function extractDeliverySchedule(
     if (options.includePort) {
       const port = extractEnquiryPort(line, { portNames: options.portNames })
       if (!port) continue
-      entries.push(`${port} ${date}`)
+      entries.push(`${formatShortenedPort(port)} ${date}`)
       continue
     }
 
@@ -460,7 +465,7 @@ export function buildShortenedEnquiry(
   const autoDetectVlsfoRemarks = options.autoDetectVlsfoRemarks !== false
   const date = extractDeliveryDate(sourceText)
   const port = options.includePort
-    ? (options.port?.trim() || extractEnquiryPort(sourceText, { portNames: options.portNames }))
+    ? formatShortenedPort(options.port?.trim() || extractEnquiryPort(sourceText, { portNames: options.portNames }))
     : ""
   const schedule = extractDeliverySchedule(sourceText, options)
   const portAndDate = schedule || [port, date].filter(Boolean).join(" ")
