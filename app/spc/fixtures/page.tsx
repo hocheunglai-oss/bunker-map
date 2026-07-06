@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
@@ -446,6 +446,7 @@ export default function SpcFixturesPage() {
   const [supplierRecords, setSupplierRecords] = useState<SupplierRecord[]>([])
   const [drafts, setDrafts] = useState<Record<string, FixtureDraft>>({})
   const [editingId, setEditingId] = useState("")
+  const [actionPositions, setActionPositions] = useState<Record<string, number>>({})
   const [supplierMenuKey, setSupplierMenuKey] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
   const [fixtureMonthFilter, setFixtureMonthFilter] = useState(initialPeriod.month)
@@ -577,6 +578,7 @@ export default function SpcFixturesPage() {
       const target = event.target
       if (!(target instanceof Node)) return
       if (fixtureTableRef.current?.contains(target)) return
+      if (target instanceof Element && target.closest(".spc-fixture-floating-actions")) return
       const fixtureId = editingId.split(":")[0] || editingId
       const fixture = fixtures.find((row) => row.id === fixtureId)
       if (fixture) {
@@ -588,6 +590,62 @@ export default function SpcFixturesPage() {
     document.addEventListener("pointerdown", closeCompletedEdit)
     return () => document.removeEventListener("pointerdown", closeCompletedEdit)
   }, [editingId, fixtures])
+
+  const floatingActionRows = useMemo(() => {
+    const rows: Array<{
+      key: string
+      fixture: SpcFixture
+      missing: string[]
+      type: "complete" | "edit"
+    }> = []
+    pendingFixtures.forEach((fixture) => {
+      if (!canEditFixture(fixture, "pending")) return
+      const draft = drafts[fixture.id] || draftFromFixture(fixture)
+      const missing = prepareDraftForSubmit(draft, true).errors
+      fuelRows(draft).forEach((fuelRow) => {
+        rows.push({
+          key: `${fixture.id}:${fuelRow.key || "all"}`,
+          fixture,
+          missing,
+          type: "complete",
+        })
+      })
+    })
+    if (editingId) {
+      const fixtureId = editingId.split(":")[0] || editingId
+      const fixture = filteredCompletedFixtures.find((row) => row.id === fixtureId)
+      if (fixture && canEditFixture(fixture, "completed")) {
+        rows.push({
+          key: editingId,
+          fixture,
+          missing: [],
+          type: "edit",
+        })
+      }
+    }
+    return rows
+  }, [drafts, editingId, filteredCompletedFixtures, pendingFixtures, username, canEdit, officeOptions])
+
+  useLayoutEffect(() => {
+    function measureActions() {
+      const next: Record<string, number> = {}
+      floatingActionRows.forEach((row) => {
+        const escapedKey = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(row.key) : row.key.replace(/"/g, '\\"')
+        const node = document.querySelector(`[data-fixture-action-key="${escapedKey}"]`)
+        if (!(node instanceof HTMLElement)) return
+        const rect = node.getBoundingClientRect()
+        next[row.key] = rect.top + rect.height / 2
+      })
+      setActionPositions(next)
+    }
+    measureActions()
+    window.addEventListener("resize", measureActions)
+    window.addEventListener("scroll", measureActions, true)
+    return () => {
+      window.removeEventListener("resize", measureActions)
+      window.removeEventListener("scroll", measureActions, true)
+    }
+  }, [floatingActionRows])
 
   function updateDraft(id: string, key: keyof FixtureDraft, value: string) {
     setDrafts((current) => ({
@@ -968,43 +1026,11 @@ export default function SpcFixturesPage() {
       return gradeRows.map((fuelRow) => {
         const rowKey = `${fixture.id}:${fuelRow.key || "all"}`
         const editing = rowCanEdit && (fixture.fixtureStatus === "pending" || editingId === rowKey)
-        const rowActions = editing ? (
-          <div className="spc-fixture-inline-actions">
-            {fixture.fixtureStatus === "pending" ? (
-              <button
-                type="button"
-                onClick={() => void submitFixture(fixture, "complete")}
-                disabled={missing.length > 0 || savingId === `${fixture.id}:complete`}
-                title={missing.length > 0 ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
-              >
-                {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="spc-fixture-save-button"
-                  onClick={() => void submitFixture(fixture, "save")}
-                  disabled={!canEdit || savingId === `${fixture.id}:save`}
-                >
-                  {savingId === `${fixture.id}:save` ? "UPDATING" : "UPDATE"}
-                </button>
-                <button
-                  type="button"
-                  className="spc-fixture-delete-button"
-                  onClick={() => void deleteFixture(fixture)}
-                  disabled={!canEdit || savingId === `${fixture.id}:delete`}
-                >
-                  {savingId === `${fixture.id}:delete` ? "DELETING" : "DELETE"}
-                </button>
-              </>
-            )}
-          </div>
-        ) : null
         return (
           <tr
             key={rowKey}
             className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
+            data-fixture-action-key={editing ? rowKey : undefined}
             onDoubleClick={() => {
               if (rowCanEdit && mode === "completed") {
                 setSupplierMenuKey("")
@@ -1027,10 +1053,7 @@ export default function SpcFixturesPage() {
             ))}
             <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
             <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
-            <td className={editing ? "spc-fixture-inline-action-host" : undefined}>
-              {gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}
-              {rowActions}
-            </td>
+            <td>{gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}</td>
           </tr>
         )
       })
@@ -1117,6 +1140,43 @@ export default function SpcFixturesPage() {
           </table>
         </div>
       </section>
+      {floatingActionRows.map((row) => (
+        <div
+          key={row.key}
+          className="spc-fixture-floating-actions"
+          style={{ top: actionPositions[row.key] ?? -1000 }}
+        >
+          {row.type === "complete" ? (
+            <button
+              type="button"
+              onClick={() => void submitFixture(row.fixture, "complete")}
+              disabled={row.missing.length > 0 || savingId === `${row.fixture.id}:complete`}
+              title={row.missing.length > 0 ? `MISSING: ${row.missing.join(", ")}` : "COMPLETE"}
+            >
+              {savingId === `${row.fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="spc-fixture-save-button"
+                onClick={() => void submitFixture(row.fixture, "save")}
+                disabled={!canEdit || savingId === `${row.fixture.id}:save`}
+              >
+                {savingId === `${row.fixture.id}:save` ? "UPDATING" : "UPDATE"}
+              </button>
+              <button
+                type="button"
+                className="spc-fixture-delete-button"
+                onClick={() => void deleteFixture(row.fixture)}
+                disabled={!canEdit || savingId === `${row.fixture.id}:delete`}
+              >
+                {savingId === `${row.fixture.id}:delete` ? "DELETING" : "DELETE"}
+              </button>
+            </>
+          )}
+        </div>
+      ))}
     </SpcShell>
   )
 }

@@ -3493,7 +3493,6 @@ body {
 .spc-fixture-ledger-panel {
   width: fit-content;
   max-width: 100%;
-  padding-right: 132px;
   border-color: #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
@@ -3781,24 +3780,20 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   text-decoration: underline;
 }
 
-.spc-table.spc-fixture-table .spc-fixture-inline-action-host {
-  position: relative;
-  overflow: visible;
-}
-
-.spc-fixture-inline-actions {
-  position: absolute;
-  top: 50%;
-  right: -124px;
-  z-index: 25;
+.spc-fixture-floating-actions {
+  position: fixed;
+  right: 18px;
+  z-index: 80;
   display: flex;
   align-items: center;
   gap: 5px;
   transform: translateY(-50%);
   white-space: nowrap;
+  pointer-events: auto;
 }
 
-.spc-table.spc-fixture-table button {
+.spc-table.spc-fixture-table button,
+.spc-fixture-floating-actions button {
   min-height: 22px;
   min-width: 52px;
   border-radius: 999px;
@@ -3810,13 +3805,15 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-save-button {
+.spc-table.spc-fixture-table button.spc-fixture-save-button,
+.spc-fixture-floating-actions button.spc-fixture-save-button {
   border-color: #0071e3;
   background: #0071e3;
   color: #ffffff;
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-delete-button {
+.spc-table.spc-fixture-table button.spc-fixture-delete-button,
+.spc-fixture-floating-actions button.spc-fixture-delete-button {
   border-color: #d92d20;
   background: #fff5f5;
   color: #b42318;
