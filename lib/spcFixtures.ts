@@ -57,6 +57,8 @@ export type SpcFixtureInput = {
   barging?: string
 }
 
+type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
+
 type SpcFixtureEnquiryRow = {
   id: string
   enquiry_number: string
@@ -117,6 +119,152 @@ function optionalString(value: unknown) {
 function cleanDate(value: unknown) {
   const cleaned = cleanString(value)
   return /^\d{4}-\d{2}-\d{2}$/.test(cleaned) ? cleaned : null
+}
+
+const defaultOfficeOptions = ["ITALY", "HONG KONG", "SINGAPORE", "MONACO", "FRANCE", "USA", "KOREA", "JAPAN", "VIETNAM"]
+const fuelColumns: Array<{ key: FuelKey; label: string }> = [
+  { key: "hsfo", label: "HSFO" },
+  { key: "vlsfo", label: "VLSFO" },
+  { key: "lsmgo", label: "LSMGO" },
+]
+const monthLabels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+function formatIntegerString(value: unknown) {
+  const digits = cleanString(value).replace(/[^\d]/g, "")
+  if (!digits) return ""
+  const normalized = digits.replace(/^0+(?=\d)/, "")
+  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+}
+
+function parseGradeValues(value: unknown) {
+  const text = cleanString(value)
+  const map: Partial<Record<FuelKey, string>> = {}
+  if (!text) return { encoded: false, map }
+  const parts = text.split("/").map((part) => part.trim()).filter(Boolean)
+  let encoded = parts.length > 0
+  parts.forEach((part) => {
+    const match = part.match(/^(HSFO|VLSFO|LSMGO)\s*[:=]\s*(.+)$/i)
+    if (!match) {
+      encoded = false
+      return
+    }
+    const key = fuelColumns.find((column) => column.label === match[1].toUpperCase())?.key
+    if (key) map[key] = cleanString(match[2])
+  })
+  return { encoded, map: encoded ? map : {} }
+}
+
+function serializeGradeValues(map: Partial<Record<FuelKey, string>>) {
+  return fuelColumns
+    .map(({ key, label }) => {
+      const value = cleanString(map[key])
+      return value ? `${label}: ${value}` : ""
+    })
+    .filter(Boolean)
+    .join(" / ")
+}
+
+function gradeValue(value: unknown, key: FuelKey, fallbackPlain = true) {
+  const text = cleanString(value)
+  const parsed = parseGradeValues(text)
+  if (parsed.encoded) return cleanString(parsed.map[key])
+  return fallbackPlain ? text : ""
+}
+
+function normalizeGradeField(value: unknown, keys: FuelKey[], options?: { numeric?: boolean; supplier?: boolean }) {
+  const parsed = parseGradeValues(value)
+  if (parsed.encoded) {
+    const nextMap: Partial<Record<FuelKey, string>> = {}
+    keys.forEach((key) => {
+      const raw = parsed.map[key]
+      const nextValue = options?.numeric
+        ? formatIntegerString(raw)
+        : options?.supplier
+          ? displaySupplierName(raw)
+          : cleanString(raw)
+      if (nextValue) nextMap[key] = nextValue
+    })
+    return serializeGradeValues(nextMap) || null
+  }
+  const plain = options?.numeric
+    ? formatIntegerString(value)
+    : options?.supplier
+      ? displaySupplierName(value)
+      : cleanString(value)
+  return plain || null
+}
+
+function monthCode(value: unknown) {
+  const token = cleanString(value).toUpperCase().slice(0, 3)
+  return monthLabels.includes(token) ? token : ""
+}
+
+function validDay(value: unknown) {
+  const day = Number(cleanString(value))
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? String(day) : ""
+}
+
+function normalizeEta(value: unknown) {
+  const text = cleanString(value)
+    .toUpperCase()
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+  if (!text) return null
+
+  const single = text.match(/^(\d{1,2})\s*([A-Z]{3,})$/)
+  if (single) {
+    const day = validDay(single[1])
+    const month = monthCode(single[2])
+    return day && month ? `${day} ${month}` : null
+  }
+
+  const sameMonth = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*([A-Z]{3,})$/)
+  if (sameMonth) {
+    const startDay = validDay(sameMonth[1])
+    const endDay = validDay(sameMonth[2])
+    const month = monthCode(sameMonth[3])
+    return startDay && endDay && month ? `${startDay} - ${endDay} ${month}` : null
+  }
+
+  const crossMonth = text.match(/^(\d{1,2})\s*([A-Z]{3,})\s*-\s*(\d{1,2})\s*([A-Z]{3,})$/)
+  if (crossMonth) {
+    const startDay = validDay(crossMonth[1])
+    const startMonth = monthCode(crossMonth[2])
+    const endDay = validDay(crossMonth[3])
+    const endMonth = monthCode(crossMonth[4])
+    return startDay && startMonth && endDay && endMonth ? `${startDay} ${startMonth} - ${endDay} ${endMonth}` : null
+  }
+
+  return null
+}
+
+function editDistance(left: string, right: string) {
+  const rows = Array.from({ length: left.length + 1 }, (_, index) => [index])
+  for (let column = 1; column <= right.length; column += 1) rows[0][column] = column
+  for (let row = 1; row <= left.length; row += 1) {
+    for (let column = 1; column <= right.length; column += 1) {
+      rows[row][column] = Math.min(
+        rows[row - 1][column] + 1,
+        rows[row][column - 1] + 1,
+        rows[row - 1][column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1),
+      )
+    }
+  }
+  return rows[left.length][right.length]
+}
+
+function normalizeAccount(value: unknown, users: SpcUserOption[]) {
+  const cleaned = cleanString(value).toUpperCase()
+  if (!cleaned) return null
+  const options = Array.from(new Set([...defaultOfficeOptions, ...users.map((user) => user.office.toUpperCase())].filter(Boolean)))
+  const exact = options.find((option) => option === cleaned)
+  if (exact) return exact
+  const singular = cleaned.endsWith("S") ? options.find((option) => option === cleaned.slice(0, -1)) : null
+  if (singular) return singular
+  const prefix = options.find((option) => cleaned.startsWith(option))
+  if (prefix) return prefix
+  const closeMatches = options.filter((option) => editDistance(cleaned, option) <= 2)
+  return closeMatches.length === 1 ? closeMatches[0] : null
 }
 
 function sameUsername(left: string | null | undefined, right: string | null | undefined) {
@@ -382,14 +530,21 @@ export async function updateSpcFixture(
   if (!buyerTrader) throw new Error("Select a valid buyer trader.")
 
   const fixtureDate = cleanDate(input.fixtureDate) || existing.fixture_date || hongKongDate()
-  const account = optionalString(input.account)
-  const earliestEta = optionalString(input.earliestEta)
+  const account = normalizeAccount(input.account, users)
+  const earliestEta = normalizeEta(input.earliestEta)
   const vesselName = optionalString(input.vesselName)
-  const hsfo = optionalString(input.hsfo)
-  const vlsfo = optionalString(input.vlsfo)
-  const lsmgo = optionalString(input.lsmgo)
-  const supplierName = displaySupplierName(input.supplierName)
-  const price = optionalString(input.price)
+  const hsfo = optionalString(formatIntegerString(input.hsfo))
+  const vlsfo = optionalString(formatIntegerString(input.vlsfo))
+  const lsmgo = optionalString(formatIntegerString(input.lsmgo))
+  const activeFuelKeys = fuelColumns
+    .filter(({ key }) => (key === "hsfo" ? hsfo : key === "vlsfo" ? vlsfo : lsmgo))
+    .map(({ key }) => key)
+  const supplierName = normalizeGradeField(input.supplierName, activeFuelKeys, { supplier: true })
+  const price = normalizeGradeField(input.price, activeFuelKeys, { numeric: true })
+  const barging = normalizeGradeField(input.barging, activeFuelKeys, { numeric: true })
+
+  if (cleanString(input.account) && !account) throw new Error("Select a valid ACCT.")
+  if (cleanString(input.earliestEta) && !earliestEta) throw new Error("Select a valid ETA.")
 
   if (action === "complete") {
     const missing: string[] = []
@@ -399,14 +554,17 @@ export async function updateSpcFixture(
     if (!account) missing.push("ACCT")
     if (!earliestEta) missing.push("ETA")
     if (!vesselName) missing.push("VESSEL")
-    if (!hsfo && !vlsfo && !lsmgo) missing.push("GRADE")
-    if (!supplierName) missing.push("SUPPLIER")
-    if (!price) missing.push("PRICE")
+    if (activeFuelKeys.length === 0) missing.push("GRADE")
+    activeFuelKeys.forEach((key) => {
+      if (!gradeValue(supplierName, key)) missing.push(`SUPPLIER ${key.toUpperCase()}`)
+      if (!formatIntegerString(gradeValue(price, key))) missing.push(`PRICE ${key.toUpperCase()}`)
+    })
     if (missing.length > 0) throw new Error(`Complete ${missing.join(", ")} before completing.`)
   }
 
   const now = new Date().toISOString()
   const completed = action === "complete"
+  const primarySupplier = activeFuelKeys.map((key) => gradeValue(supplierName, key)).find(Boolean) || cleanString(supplierName)
   const payload = {
     fixture_status: completed ? "completed" : existing.fixture_status,
     fixture_date: fixtureDate,
@@ -424,9 +582,9 @@ export async function updateSpcFixture(
     vlsfo,
     lsmgo,
     supplier_name: supplierName || null,
-    supplier_key: supplierName ? supplierKey(supplierName) : null,
+    supplier_key: primarySupplier ? supplierKey(primarySupplier) : null,
     price,
-    barging: optionalString(input.barging),
+    barging,
     completed_at: completed ? existing.completed_at || now : existing.completed_at,
     completed_by_username: completed ? session.username : existing.completed_by_username,
     completed_by_display_name: completed ? session.displayName || session.username : existing.completed_by_display_name,
@@ -440,10 +598,10 @@ export async function updateSpcFixture(
 
   if (error) throw error
 
-  if (supplierName) {
+  if (primarySupplier) {
     const { error: enquiryError } = await supabase
       .from("spc_enquiries")
-      .update({ supplier_name: supplierName, updated_at: now })
+      .update({ supplier_name: primarySupplier, updated_at: now })
       .eq("id", existing.enquiry_id)
     if (enquiryError) throw enquiryError
   }

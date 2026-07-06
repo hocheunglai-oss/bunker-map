@@ -99,15 +99,15 @@ const fixtureColumnWidths = [
   116, // supplier trader
   116, // buyer trader
   128, // account
-  108, // ETA
-  152, // vessel
+  164, // ETA
+  132, // vessel
   66, // HSFO
   66, // VLSFO
   66, // LSMGO
-  150, // supplier
+  138, // supplier
   78, // price
   78, // barging
-  148, // action
+  124, // action
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
@@ -117,6 +117,12 @@ const fuelColumns: Array<{ key: FuelKey; label: string }> = [
   { key: "vlsfo", label: "VLSFO" },
   { key: "lsmgo", label: "LSMGO" },
 ]
+
+const fuelLabels: Record<FuelKey, string> = {
+  hsfo: "HSFO",
+  vlsfo: "VLSFO",
+  lsmgo: "LSMGO",
+}
 
 const defaultOfficeOptions = ["ITALY", "HONG KONG", "SINGAPORE", "MONACO", "FRANCE", "USA", "KOREA", "JAPAN", "VIETNAM"]
 
@@ -149,6 +155,144 @@ function hongKongYearMonth() {
 
 function cleanText(value: string | null | undefined) {
   return String(value || "").trim()
+}
+
+function formatIntegerString(value: string | null | undefined) {
+  const digits = cleanText(value).replace(/[^\d]/g, "")
+  if (!digits) return ""
+  const normalized = digits.replace(/^0+(?=\d)/, "")
+  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+}
+
+function numericDisplay(value: string | null | undefined) {
+  return formatIntegerString(value) || "-"
+}
+
+function parseGradeValues(value: string | null | undefined) {
+  const text = cleanText(value)
+  const map: Partial<Record<FuelKey, string>> = {}
+  if (!text) return { encoded: false, map }
+  const parts = text.split("/").map((part) => part.trim()).filter(Boolean)
+  let encoded = parts.length > 0
+  parts.forEach((part) => {
+    const match = part.match(/^(HSFO|VLSFO|LSMGO)\s*[:=]\s*(.+)$/i)
+    if (!match) {
+      encoded = false
+      return
+    }
+    const label = match[1].toUpperCase()
+    const key = fuelColumns.find((column) => column.label === label)?.key
+    if (key) map[key] = cleanText(match[2])
+  })
+  return { encoded, map: encoded ? map : {} }
+}
+
+function serializeGradeValues(map: Partial<Record<FuelKey, string>>) {
+  return fuelColumns
+    .map(({ key, label }) => {
+      const value = cleanText(map[key])
+      return value ? `${label}: ${value}` : ""
+    })
+    .filter(Boolean)
+    .join(" / ")
+}
+
+function gradeValue(value: string | null | undefined, key: FuelKey | null, fallbackPlain = true) {
+  const text = cleanText(value)
+  if (!key) return text
+  const parsed = parseGradeValues(text)
+  if (parsed.encoded) return cleanText(parsed.map[key])
+  return fallbackPlain ? text : ""
+}
+
+function gradeNumberDisplay(value: string | null | undefined, key: FuelKey | null) {
+  return numericDisplay(gradeValue(value, key))
+}
+
+function officeMatch(value: string | null | undefined, options: string[]) {
+  const cleaned = cleanText(value).toUpperCase()
+  if (!cleaned) return ""
+  const uniqueOptions = Array.from(new Set(options.map((option) => option.trim().toUpperCase()).filter(Boolean)))
+  const exact = uniqueOptions.find((option) => option === cleaned)
+  if (exact) return exact
+  const withoutTrailingS = cleaned.endsWith("S") ? cleaned.slice(0, -1) : cleaned
+  const singular = uniqueOptions.find((option) => option === withoutTrailingS)
+  if (singular) return singular
+  const prefix = uniqueOptions.find((option) => cleaned.startsWith(option))
+  return prefix || ""
+}
+
+function monthCode(value: string | null | undefined) {
+  const token = cleanText(value).toUpperCase().slice(0, 3)
+  return monthOptions.find((month) => month.label === token)?.label || ""
+}
+
+function validDay(value: string | null | undefined) {
+  const day = Number(cleanText(value))
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? String(day) : ""
+}
+
+function normalizeEta(value: string | null | undefined) {
+  const text = cleanText(value)
+    .toUpperCase()
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+  if (!text) return ""
+
+  const single = text.match(/^(\d{1,2})\s*([A-Z]{3,})$/)
+  if (single) {
+    const day = validDay(single[1])
+    const month = monthCode(single[2])
+    return day && month ? `${day} ${month}` : ""
+  }
+
+  const sameMonth = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*([A-Z]{3,})$/)
+  if (sameMonth) {
+    const startDay = validDay(sameMonth[1])
+    const endDay = validDay(sameMonth[2])
+    const month = monthCode(sameMonth[3])
+    return startDay && endDay && month ? `${startDay} - ${endDay} ${month}` : ""
+  }
+
+  const crossMonth = text.match(/^(\d{1,2})\s*([A-Z]{3,})\s*-\s*(\d{1,2})\s*([A-Z]{3,})$/)
+  if (crossMonth) {
+    const startDay = validDay(crossMonth[1])
+    const startMonth = monthCode(crossMonth[2])
+    const endDay = validDay(crossMonth[3])
+    const endMonth = monthCode(crossMonth[4])
+    return startDay && startMonth && endDay && endMonth ? `${startDay} ${startMonth} - ${endDay} ${endMonth}` : ""
+  }
+
+  return ""
+}
+
+function parseEtaParts(value: string | null | undefined) {
+  const eta = normalizeEta(value)
+  const crossMonth = eta.match(/^(\d{1,2})\s+([A-Z]{3})\s+-\s+(\d{1,2})\s+([A-Z]{3})$/)
+  if (crossMonth) {
+    return { startDay: crossMonth[1], startMonth: crossMonth[2], endDay: crossMonth[3], endMonth: crossMonth[4] }
+  }
+  const sameMonth = eta.match(/^(\d{1,2})\s+-\s+(\d{1,2})\s+([A-Z]{3})$/)
+  if (sameMonth) {
+    return { startDay: sameMonth[1], startMonth: sameMonth[3], endDay: sameMonth[2], endMonth: sameMonth[3] }
+  }
+  const single = eta.match(/^(\d{1,2})\s+([A-Z]{3})$/)
+  if (single) {
+    return { startDay: single[1], startMonth: single[2], endDay: "", endMonth: single[2] }
+  }
+  const currentMonth = monthOptions[new Date().getMonth()]?.label || "JAN"
+  return { startDay: "", startMonth: currentMonth, endDay: "", endMonth: currentMonth }
+}
+
+function etaFromParts(parts: { startDay: string; startMonth: string; endDay: string; endMonth: string }) {
+  const startDay = validDay(parts.startDay)
+  const startMonth = monthCode(parts.startMonth)
+  const endDay = validDay(parts.endDay)
+  const endMonth = monthCode(parts.endMonth) || startMonth
+  if (!startDay || !startMonth) return ""
+  if (!endDay) return `${startDay} ${startMonth}`
+  if (endMonth && endMonth !== startMonth) return `${startDay} ${startMonth} - ${endDay} ${endMonth}`
+  return `${startDay} - ${endDay} ${startMonth}`
 }
 
 function userOptionValue(user: Pick<SpcUserOption, "username" | "displayName">) {
@@ -245,14 +389,18 @@ function draftFromFixture(fixture: SpcFixture): FixtureDraft {
     buyerTrader: traderValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
     account: cleanText(fixture.account),
     commission: cleanText(fixture.commission),
-    earliestEta: cleanText(fixture.earliestEta),
+    earliestEta: normalizeEta(fixture.earliestEta) || cleanText(fixture.earliestEta),
     vesselName: cleanText(fixture.vesselName),
-    hsfo: cleanText(fixture.hsfo),
-    vlsfo: cleanText(fixture.vlsfo),
-    lsmgo: cleanText(fixture.lsmgo),
+    hsfo: formatIntegerString(fixture.hsfo),
+    vlsfo: formatIntegerString(fixture.vlsfo),
+    lsmgo: formatIntegerString(fixture.lsmgo),
     supplierName: cleanText(fixture.supplierName),
-    price: cleanText(fixture.price),
-    barging: cleanText(fixture.barging),
+    price: parseGradeValues(fixture.price).encoded
+      ? serializeGradeValues(parseGradeValues(fixture.price).map)
+      : formatIntegerString(fixture.price),
+    barging: parseGradeValues(fixture.barging).encoded
+      ? serializeGradeValues(parseGradeValues(fixture.barging).map)
+      : formatIntegerString(fixture.barging),
   }
 }
 
@@ -305,10 +453,15 @@ export default function SpcFixturesPage() {
   )
 
   const supplierOptions = useMemo(() => {
+    const supplierValues = (value: string | null | undefined) => {
+      const parsed = parseGradeValues(value)
+      if (parsed.encoded) return fuelColumns.map(({ key }) => parsed.map[key] || "")
+      return [value || ""]
+    }
     const values = [
       ...supplierRecords.map((record) => record.name),
-      ...fixtures.map((fixture) => fixture.supplierName || ""),
-      ...Object.values(drafts).map((draft) => draft.supplierName),
+      ...fixtures.flatMap((fixture) => supplierValues(fixture.supplierName)),
+      ...Object.values(drafts).flatMap((draft) => supplierValues(draft.supplierName)),
     ]
     const seen = new Set<string>()
     return values
@@ -326,8 +479,6 @@ export default function SpcFixturesPage() {
     const values = [
       ...defaultOfficeOptions,
       ...users.map((user) => user.office),
-      ...fixtures.map((fixture) => fixture.account || ""),
-      ...Object.values(drafts).map((draft) => draft.account),
     ]
     const seen = new Set<string>()
     return values
@@ -338,7 +489,7 @@ export default function SpcFixturesPage() {
         return true
       })
       .sort((a, b) => a.localeCompare(b))
-  }, [drafts, fixtures, users])
+  }, [users])
 
   const loadData = useCallback(async () => {
     if (!canView) return
@@ -410,9 +561,29 @@ export default function SpcFixturesPage() {
       ...current,
       [id]: {
         ...(current[id] || emptyDraft),
-        [key]: value,
+        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? formatIntegerString(value) : value,
       },
     }))
+  }
+
+  function updateGradeDraft(id: string, key: "supplierName" | "price" | "barging", fuelKey: FuelKey | null, value: string) {
+    if (!fuelKey) {
+      updateDraft(id, key, key === "supplierName" ? value : formatIntegerString(value))
+      return
+    }
+    setDrafts((current) => {
+      const draft = current[id] || emptyDraft
+      const parsed = parseGradeValues(draft[key])
+      const nextMap = parsed.encoded ? { ...parsed.map } : {}
+      nextMap[fuelKey] = key === "supplierName" ? value : formatIntegerString(value)
+      return {
+        ...current,
+        [id]: {
+          ...draft,
+          [key]: serializeGradeValues(nextMap),
+        },
+      }
+    })
   }
 
   function sameUsername(left: string | null | undefined, right: string | null | undefined) {
@@ -434,19 +605,61 @@ export default function SpcFixturesPage() {
     return rows.length ? rows : [{ key: null, label: "" }]
   }
 
-  function missingCompleteFields(draft: FixtureDraft) {
-    const required: Array<[string, boolean]> = [
-      ["DATE", Boolean(cleanText(draft.fixtureDate))],
-      ["SUPPLIER TRADER", Boolean(cleanText(draft.supplierTrader))],
-      ["BUYER TRADER", Boolean(cleanText(draft.buyerTrader))],
-      ["ACCT", Boolean(cleanText(draft.account))],
-      ["ETA", Boolean(cleanText(draft.earliestEta))],
-      ["VESSEL", Boolean(cleanText(draft.vesselName))],
-      ["GRADE", fuelColumns.some(({ key }) => Boolean(cleanText(draft[key])))],
-      ["SUPPLIER", Boolean(cleanText(draft.supplierName))],
-      ["PRICE", Boolean(cleanText(draft.price))],
-    ]
-    return required.filter(([, ok]) => !ok).map(([label]) => label)
+  function activeFuelKeys(draft: FixtureDraft) {
+    return fuelColumns
+      .filter(({ key }) => Boolean(formatIntegerString(draft[key])))
+      .map(({ key }) => key)
+  }
+
+  function normalizedGradeField(value: string, keys: FuelKey[], numeric = false) {
+    const parsed = parseGradeValues(value)
+    if (parsed.encoded) {
+      const nextMap: Partial<Record<FuelKey, string>> = {}
+      keys.forEach((key) => {
+        const nextValue = numeric ? formatIntegerString(parsed.map[key]) : cleanText(parsed.map[key])
+        if (nextValue) nextMap[key] = nextValue
+      })
+      return serializeGradeValues(nextMap)
+    }
+    return numeric ? formatIntegerString(value) : cleanText(value)
+  }
+
+  function prepareDraftForSubmit(draft: FixtureDraft, requireComplete: boolean) {
+    const errors: string[] = []
+    const account = officeMatch(draft.account, officeOptions)
+    const eta = normalizeEta(draft.earliestEta)
+    const normalized: FixtureDraft = {
+      ...draft,
+      account,
+      earliestEta: eta,
+      hsfo: formatIntegerString(draft.hsfo),
+      vlsfo: formatIntegerString(draft.vlsfo),
+      lsmgo: formatIntegerString(draft.lsmgo),
+    }
+    const activeKeys = activeFuelKeys(normalized)
+    normalized.supplierName = normalizedGradeField(draft.supplierName, activeKeys, false)
+    normalized.price = normalizedGradeField(draft.price, activeKeys, true)
+    normalized.barging = normalizedGradeField(draft.barging, activeKeys, true)
+
+    if (cleanText(draft.account) && !account) errors.push("SELECT A VALID ACCT")
+    if (cleanText(draft.earliestEta) && !eta) errors.push("SELECT A VALID ETA")
+    if (requireComplete) {
+      const required: Array<[string, boolean]> = [
+        ["DATE", Boolean(cleanText(normalized.fixtureDate))],
+        ["SUPPLIER TRADER", Boolean(cleanText(normalized.supplierTrader))],
+        ["BUYER TRADER", Boolean(cleanText(normalized.buyerTrader))],
+        ["ACCT", Boolean(account)],
+        ["ETA", Boolean(eta)],
+        ["VESSEL", Boolean(cleanText(normalized.vesselName))],
+        ["GRADE", activeKeys.length > 0],
+      ]
+      errors.push(...required.filter(([, ok]) => !ok).map(([label]) => label))
+      activeKeys.forEach((key) => {
+        if (!gradeValue(normalized.supplierName, key)) errors.push(`SUPPLIER ${fuelLabels[key]}`)
+        if (!formatIntegerString(gradeValue(normalized.price, key))) errors.push(`PRICE ${fuelLabels[key]}`)
+      })
+    }
+    return { draft: normalized, errors }
   }
 
   async function submitFixture(fixture: SpcFixture, action: "save" | "complete") {
@@ -457,13 +670,11 @@ export default function SpcFixturesPage() {
       return
     }
     const draft = drafts[fixture.id] || draftFromFixture(fixture)
-    if (action === "complete") {
-      const missing = missingCompleteFields(draft)
-      if (missing.length > 0) {
-        setMessage(`COMPLETE ${missing.join(", ")} BEFORE COMPLETING.`)
-        setMessageIsError(true)
-        return
-      }
+    const prepared = prepareDraftForSubmit(draft, action === "complete")
+    if (prepared.errors.length > 0) {
+      setMessage(`${action === "complete" ? "COMPLETE" : "FIX"} ${prepared.errors.join(", ")} BEFORE SAVING.`)
+      setMessageIsError(true)
+      return
     }
     setSavingId(`${fixture.id}:${action}`)
     setMessage("")
@@ -474,7 +685,7 @@ export default function SpcFixturesPage() {
         body: JSON.stringify({
           id: fixture.id,
           action,
-          fixture: draft,
+          fixture: prepared.draft,
         }),
       })
       const data = (await response.json()) as { fixture?: SpcFixture; message?: string }
@@ -525,11 +736,6 @@ export default function SpcFixturesPage() {
     }
   }
 
-  function supplierHref(fixture: SpcFixture, draft: FixtureDraft) {
-    const query = draft.supplierName || fixture.supplierKey || fixture.supplierName || ""
-    return `/spc/suppliers?supplier=${encodeURIComponent(query)}`
-  }
-
   function inputCell(
     fixture: SpcFixture,
     draft: FixtureDraft,
@@ -560,22 +766,121 @@ export default function SpcFixturesPage() {
     return blank(draft[key])
   }
 
-  function sheetInput(
-    fixture: SpcFixture,
-    draft: FixtureDraft,
-    key: keyof FixtureDraft,
-    options?: { type?: string; list?: string; className?: string },
-  ) {
+  function accountSelect(fixture: SpcFixture, draft: FixtureDraft, editing: boolean) {
+    if (!editing) return blank(officeMatch(draft.account, officeOptions) || draft.account)
+    const value = officeMatch(draft.account, officeOptions)
+    return (
+      <select
+        className="is-sheet-pill"
+        value={value}
+        onChange={(event) => updateDraft(fixture.id, "account", event.target.value)}
+        disabled={!canEdit}
+      >
+        <option value="">ACCT</option>
+        {officeOptions.map((office) => (
+          <option key={office} value={office}>{office}</option>
+        ))}
+      </select>
+    )
+  }
+
+  function etaEditor(fixture: SpcFixture, draft: FixtureDraft, editing: boolean) {
+    if (!editing) return blank(normalizeEta(draft.earliestEta) || draft.earliestEta)
+    const parts = parseEtaParts(draft.earliestEta)
+    const dayOptions = Array.from({ length: 31 }, (_, index) => String(index + 1))
+    const updateEta = (next: typeof parts) => updateDraft(fixture.id, "earliestEta", etaFromParts(next))
+    return (
+      <div className="spc-fixture-eta-editor">
+        <select
+          aria-label="ETA start day"
+          value={parts.startDay}
+          onChange={(event) => updateEta({ ...parts, startDay: event.target.value })}
+          disabled={!canEdit}
+        >
+          <option value="">DD</option>
+          {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
+        </select>
+        <select
+          aria-label="ETA start month"
+          value={parts.startMonth}
+          onChange={(event) => updateEta({ ...parts, startMonth: event.target.value, endMonth: parts.endDay ? event.target.value : parts.endMonth })}
+          disabled={!canEdit}
+        >
+          {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
+        </select>
+        <select
+          aria-label="ETA end day"
+          value={parts.endDay}
+          onChange={(event) => updateEta({ ...parts, endDay: event.target.value })}
+          disabled={!canEdit}
+        >
+          <option value="">-</option>
+          {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
+        </select>
+        <select
+          aria-label="ETA end month"
+          value={parts.endMonth}
+          onChange={(event) => updateEta({ ...parts, endMonth: event.target.value })}
+          disabled={!canEdit || !parts.endDay}
+        >
+          {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
+        </select>
+      </div>
+    )
+  }
+
+  function numericCell(fixture: SpcFixture, draft: FixtureDraft, key: "hsfo" | "vlsfo" | "lsmgo", editing: boolean) {
+    if (!editing) return numericDisplay(draft[key])
     return (
       <input
-        type={options?.type || "text"}
-        list={options?.list}
-        className={options?.className}
+        inputMode="numeric"
         value={draft[key]}
         onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
         disabled={!canEdit}
       />
     )
+  }
+
+  function gradeSupplierCell(fixture: SpcFixture, draft: FixtureDraft, key: FuelKey | null, editing: boolean) {
+    const value = gradeValue(draft.supplierName, key)
+    if (editing) {
+      return (
+        <input
+          type="search"
+          list="spc-fixture-suppliers"
+          className="is-sheet-pill"
+          value={value}
+          onChange={(event) => updateGradeDraft(fixture.id, "supplierName", key, event.target.value)}
+          disabled={!canEdit}
+        />
+      )
+    }
+    return value ? (
+      <a className="spc-fixture-supplier-link" href={`/spc/suppliers?supplier=${encodeURIComponent(value)}`} target="_blank" rel="noreferrer">
+        {value}
+      </a>
+    ) : "-"
+  }
+
+  function gradeNumberCell(
+    fixture: SpcFixture,
+    draft: FixtureDraft,
+    field: "price" | "barging",
+    key: FuelKey | null,
+    editing: boolean,
+  ) {
+    const value = gradeValue(draft[field], key)
+    if (editing) {
+      return (
+        <input
+          inputMode="numeric"
+          value={formatIntegerString(value)}
+          onChange={(event) => updateGradeDraft(fixture.id, field, key, event.target.value)}
+          disabled={!canEdit}
+        />
+      )
+    }
+    return gradeNumberDisplay(draft[field], key)
   }
 
   function renderFixtureRows(rows: SpcFixture[], mode: "pending" | "completed") {
@@ -585,15 +890,8 @@ export default function SpcFixturesPage() {
       const editing = rowCanEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
       const supplierTrader = userFromChoice(users, draft.supplierTrader)
       const buyerTrader = userFromChoice(users, draft.buyerTrader)
-      const missing = missingCompleteFields(draft)
+      const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)
-      const supplierContent = editing ? (
-        sheetInput(fixture, draft, "supplierName", { type: "search", list: "spc-fixture-suppliers", className: "is-sheet-pill" })
-      ) : draft.supplierName ? (
-        <a className="spc-fixture-supplier-link" href={supplierHref(fixture, draft)} target="_blank" rel="noreferrer">
-          {draft.supplierName}
-        </a>
-      ) : "-"
       return gradeRows.map((fuelRow, fuelIndex) => (
         <tr
           key={`${fixture.id}-${fuelRow.key || "fuel"}`}
@@ -605,19 +903,19 @@ export default function SpcFixturesPage() {
           <td>{displayDate(draft.fixtureDate)}</td>
           <td>{traderCode(supplierTrader, draft.supplierTrader)}</td>
           <td>{traderCode(buyerTrader, draft.buyerTrader)}</td>
-          <td>{staticOrInput(fixture, draft, "account", editing, { list: "spc-fixture-offices", className: "is-sheet-pill" })}</td>
-          <td>{staticOrInput(fixture, draft, "earliestEta", editing)}</td>
+          <td>{accountSelect(fixture, draft, editing)}</td>
+          <td>{etaEditor(fixture, draft, editing)}</td>
           <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
           {fuelColumns.map(({ key }) => (
             <td key={key}>
               {fuelRow.key === key || (!fuelRow.key && editing)
-                ? staticOrInput(fixture, draft, key, editing)
+                ? numericCell(fixture, draft, key, editing)
                 : ""}
             </td>
           ))}
-          <td>{supplierContent}</td>
-          <td>{staticOrInput(fixture, draft, "price", editing)}</td>
-          <td>{staticOrInput(fixture, draft, "barging", editing)}</td>
+          <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
+          <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
+          <td>{gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}</td>
           {fuelIndex === 0 ? (
             <td className="spc-fixture-action-cell" rowSpan={gradeRows.length}>
               <div className="spc-fixture-row-actions">
@@ -674,16 +972,6 @@ export default function SpcFixturesPage() {
 
   return (
     <SpcShell title="SPC FIXTURES">
-      <datalist id="spc-fixture-users">
-        {users.map((user) => (
-          <option key={user.id} value={userOptionValue(user)} />
-        ))}
-      </datalist>
-      <datalist id="spc-fixture-offices">
-        {officeOptions.map((office) => (
-          <option key={office} value={office} />
-        ))}
-      </datalist>
       <datalist id="spc-fixture-suppliers">
         {supplierOptions.map((supplier) => (
           <option key={supplier} value={supplier} />
