@@ -220,7 +220,7 @@ function extractLeadingVesselBeforeTradingDetails(lines: string[]) {
     if (/^\s*(?:account|agent|buyer|date|eta|port|position|product|quantity)\b/i.test(line)) continue
 
     const match = line.match(
-      /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)?\.?\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s+(?:@|at\s+|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)))\b/i,
+      /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)?\.?\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s*(?:[,，]\s*)?(?:@|at\s+|eta\b|etb\b|etd\b|ets\b|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)))\b/i,
     )
     const cleaned = cleanVesselName(match?.[1] || "")
     if (isPlausibleVesselName(cleaned)) return cleaned

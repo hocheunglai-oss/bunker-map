@@ -282,9 +282,11 @@ function extractDeliverySchedule(
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:hsfo|hfo|ifo|3[,.]?5)/i.test(compact)) return "hsfo"
   if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact)) {
     return "vlsfo"
+  }
+  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?=$|[^0-9])/i.test(value)) {
+    return "hsfo"
   }
   return ""
 }
