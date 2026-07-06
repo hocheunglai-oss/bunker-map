@@ -2896,17 +2896,19 @@ body {
 }
 
 .spc-preview-label-row button {
+  min-width: 88px;
   min-height: 28px;
   border: 1px solid var(--fc-admin-button-border);
   border-radius: 999px;
   background: var(--fc-admin-button-bg);
   color: var(--fc-admin-button-text);
   cursor: pointer;
-  padding: 5px 10px;
+  padding: 5px 12px;
   font-size: 11px;
   font-weight: 850;
   text-transform: none;
   letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .spc-preview-label-row button:disabled {

@@ -363,7 +363,7 @@
 
 .shortenedHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 74px 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 88px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -373,6 +373,13 @@
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.05em;
+}
+
+.shortenedTitle {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  line-height: 1.15;
 }
 
 .copyButton {
@@ -389,8 +396,11 @@
 }
 
 .reportButton {
-  min-width: 74px;
+  min-width: 88px;
   height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--fc-admin-button-border) !important;
   border-radius: 999px;
   background: var(--fc-admin-button-bg) !important;
@@ -398,6 +408,8 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 850;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .whatsappButton {

@@ -609,6 +609,9 @@ export default function EnquiryWorksheetPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
+      setShortenedDraft(correctedOutput)
+      setCopyStatus("idle")
+      setWhatsappStatus("idle")
       await loadParserReportCount()
       setParserReportStatus("saved")
       window.setTimeout(() => {
@@ -685,7 +688,10 @@ export default function EnquiryWorksheetPage() {
 
           <section className={styles.shortenedPanel} aria-label="Shortened enquiry">
             <div className={styles.shortenedHeader}>
-              <span>SHORTENED ENQUIRY (USE WITH CAUTION)</span>
+              <span className={styles.shortenedTitle}>
+                <span>SHORTENED ENQUIRY</span>
+                <span>(USE WITH CAUTION)</span>
+              </span>
               <button
                 type="button"
                 className={styles.copyButton}

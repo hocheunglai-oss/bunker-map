@@ -503,6 +503,11 @@ export default function SpcEnquiriesPage() {
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to save report.")
 
+      if (parserReportDialog.context === "reoffer") {
+        setReofferDraft((current) => current ? { ...current, standardText: correctedOutput } : current)
+      } else {
+        setDraft((current) => ({ ...current, standardText: correctedOutput }))
+      }
       await loadParserReportCount()
       setParserReportStatus("saved")
       window.setTimeout(() => {
