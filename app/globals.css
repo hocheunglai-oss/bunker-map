@@ -3649,7 +3649,7 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 
 .spc-fixture-supplier-menu {
   position: absolute;
-  top: calc(100% + 5px);
+  bottom: calc(100% + 5px);
   left: 3px;
   z-index: 40;
   width: max(230px, calc(100% + 88px));
