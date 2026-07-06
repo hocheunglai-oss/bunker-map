@@ -219,7 +219,24 @@ function officeMatch(value: string | null | undefined, options: string[]) {
   const singular = uniqueOptions.find((option) => option === withoutTrailingS)
   if (singular) return singular
   const prefix = uniqueOptions.find((option) => cleaned.startsWith(option))
-  return prefix || ""
+  if (prefix) return prefix
+  const closeMatches = uniqueOptions.filter((option) => editDistance(cleaned, option) <= 2)
+  return closeMatches.length === 1 ? closeMatches[0] : ""
+}
+
+function editDistance(left: string, right: string) {
+  const rows = Array.from({ length: left.length + 1 }, (_, index) => [index])
+  for (let column = 1; column <= right.length; column += 1) rows[0][column] = column
+  for (let row = 1; row <= left.length; row += 1) {
+    for (let column = 1; column <= right.length; column += 1) {
+      rows[row][column] = Math.min(
+        rows[row - 1][column] + 1,
+        rows[row][column - 1] + 1,
+        rows[row - 1][column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1),
+      )
+    }
+  }
+  return rows[left.length][right.length]
 }
 
 function monthCode(value: string | null | undefined) {
