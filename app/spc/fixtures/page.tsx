@@ -561,9 +561,10 @@ export default function SpcFixturesPage() {
       const target = event.target
       if (!(target instanceof Node)) return
       if (fixtureTableRef.current?.contains(target)) return
-      const fixture = fixtures.find((row) => row.id === editingId)
+      const fixtureId = editingId.split(":")[0] || editingId
+      const fixture = fixtures.find((row) => row.id === fixtureId)
       if (fixture) {
-        setDrafts((current) => ({ ...current, [editingId]: draftFromFixture(fixture) }))
+        setDrafts((current) => ({ ...current, [fixtureId]: draftFromFixture(fixture) }))
       }
       setEditingId("")
     }
@@ -944,83 +945,79 @@ export default function SpcFixturesPage() {
     return rows.flatMap((fixture) => {
       const draft = drafts[fixture.id] || draftFromFixture(fixture)
       const rowCanEdit = canEditFixture(fixture, mode)
-      const editing = rowCanEdit && (fixture.fixtureStatus === "pending" || editingId === fixture.id)
       const supplierTrader = userFromChoice(users, draft.supplierTrader)
       const buyerTrader = userFromChoice(users, draft.buyerTrader)
       const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)
-      const fixtureRows = gradeRows.map((fuelRow) => (
-        <tr
-          key={`${fixture.id}-${fuelRow.key || "fuel"}`}
-          className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
-          onDoubleClick={() => {
-            if (rowCanEdit && mode === "completed") {
-              setSupplierMenuKey("")
-              setEditingId(fixture.id)
-            }
-          }}
-        >
-          <td>{displayDate(draft.fixtureDate)}</td>
-          <td>{traderCode(supplierTrader, draft.supplierTrader)}</td>
-          <td>{traderCode(buyerTrader, draft.buyerTrader)}</td>
-          <td>{accountSelect(fixture, draft, editing)}</td>
-          <td>{etaEditor(fixture, draft, editing)}</td>
-          <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
-          {fuelColumns.map(({ key }) => (
-            <td key={key}>
-              {fuelRow.key === key || (!fuelRow.key && editing)
-                ? numericCell(fixture, draft, key, editing)
-                : ""}
-            </td>
-          ))}
-          <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
-          <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
-          <td>{gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}</td>
-        </tr>
-      ))
-      if (editing) {
-        fixtureRows.push(
+      return gradeRows.map((fuelRow) => {
+        const rowKey = `${fixture.id}:${fuelRow.key || "all"}`
+        const editing = rowCanEdit && (fixture.fixtureStatus === "pending" || editingId === rowKey)
+        const rowActions = editing ? (
+          <div className="spc-fixture-inline-actions">
+            {fixture.fixtureStatus === "pending" ? (
+              <button
+                type="button"
+                onClick={() => void submitFixture(fixture, "complete")}
+                disabled={missing.length > 0 || savingId === `${fixture.id}:complete`}
+                title={missing.length > 0 ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
+              >
+                {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="spc-fixture-save-button"
+                  onClick={() => void submitFixture(fixture, "save")}
+                  disabled={!canEdit || savingId === `${fixture.id}:save`}
+                >
+                  {savingId === `${fixture.id}:save` ? "UPDATING" : "UPDATE"}
+                </button>
+                <button
+                  type="button"
+                  className="spc-fixture-delete-button"
+                  onClick={() => void deleteFixture(fixture)}
+                  disabled={!canEdit || savingId === `${fixture.id}:delete`}
+                >
+                  {savingId === `${fixture.id}:delete` ? "DELETING" : "DELETE"}
+                </button>
+              </>
+            )}
+          </div>
+        ) : null
+        return (
           <tr
-            key={`${fixture.id}-actions`}
-            className={`spc-fixture-action-row${fixture.fixtureStatus === "pending" ? " is-pending" : ""}`}
+            key={rowKey}
+            className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
+            onDoubleClick={() => {
+              if (rowCanEdit && mode === "completed") {
+                setSupplierMenuKey("")
+                setEditingId(rowKey)
+              }
+            }}
           >
-            <td colSpan={fixtureColumnSpan}>
-              <div className="spc-fixture-row-actions">
-                {fixture.fixtureStatus === "pending" ? (
-                  <button
-                    type="button"
-                    onClick={() => void submitFixture(fixture, "complete")}
-                    disabled={missing.length > 0 || savingId === `${fixture.id}:complete`}
-                    title={missing.length > 0 ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
-                  >
-                    {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="spc-fixture-save-button"
-                      onClick={() => void submitFixture(fixture, "save")}
-                      disabled={!canEdit || savingId === `${fixture.id}:save`}
-                    >
-                      {savingId === `${fixture.id}:save` ? "UPDATING" : "UPDATE"}
-                    </button>
-                    <button
-                      type="button"
-                      className="spc-fixture-delete-button"
-                      onClick={() => void deleteFixture(fixture)}
-                      disabled={!canEdit || savingId === `${fixture.id}:delete`}
-                    >
-                      {savingId === `${fixture.id}:delete` ? "DELETING" : "DELETE"}
-                    </button>
-                  </>
-                )}
-              </div>
+            <td>{displayDate(draft.fixtureDate)}</td>
+            <td>{traderCode(supplierTrader, draft.supplierTrader)}</td>
+            <td>{traderCode(buyerTrader, draft.buyerTrader)}</td>
+            <td>{accountSelect(fixture, draft, editing)}</td>
+            <td>{etaEditor(fixture, draft, editing)}</td>
+            <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
+            {fuelColumns.map(({ key }) => (
+              <td key={key}>
+                {fuelRow.key === key || (!fuelRow.key && editing)
+                  ? numericCell(fixture, draft, key, editing)
+                  : ""}
+              </td>
+            ))}
+            <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
+            <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
+            <td className={editing ? "spc-fixture-inline-action-host" : undefined}>
+              {gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}
+              {rowActions}
             </td>
-          </tr>,
+          </tr>
         )
-      }
-      return fixtureRows
+      })
     })
   }
 

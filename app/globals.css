@@ -3567,17 +3567,17 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table tr.is-pending td {
-  background: #fff1a8;
+  background: #fff6c7;
   font-weight: 650;
 }
 
-.spc-table.spc-fixture-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-status-row):not(.spc-fixture-empty-row):not(.spc-fixture-action-row):hover td {
+.spc-table.spc-fixture-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-status-row):not(.spc-fixture-empty-row):hover td {
   background: #e8f1ff;
   box-shadow: inset 0 1px 0 rgba(0, 113, 227, 0.16), inset 0 -1px 0 rgba(0, 113, 227, 0.16);
 }
 
-.spc-table.spc-fixture-table tbody tr.is-pending:not(.spc-fixture-action-row):hover td {
-  background: #ffe27a;
+.spc-table.spc-fixture-table tbody tr.is-pending:hover td {
+  background: #ffedaa;
 }
 
 .spc-table.spc-fixture-table tr.is-editing td {
@@ -3585,7 +3585,7 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table tr.is-pending.is-editing td {
-  background: #ffea8a;
+  background: #fff0b8;
 }
 
 .spc-table.spc-fixture-table input,
@@ -3780,33 +3780,33 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   text-decoration: underline;
 }
 
-.spc-table.spc-fixture-table .spc-fixture-action-row td {
-  height: 30px;
-  background: #f8fafc;
-  padding: 0 10px;
-  text-align: right;
+.spc-table.spc-fixture-table .spc-fixture-inline-action-host {
+  position: relative;
+  overflow: visible;
 }
 
-.spc-table.spc-fixture-table .spc-fixture-action-row.is-pending td {
-  background: #ffe27a;
-}
-
-.spc-fixture-row-actions {
+.spc-fixture-inline-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 25;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 5px;
+  transform: translateY(-50%);
+  white-space: nowrap;
 }
 
 .spc-table.spc-fixture-table button {
   min-height: 22px;
-  min-width: 48px;
+  min-width: 52px;
   border-radius: 999px;
   background: #f6f8fb;
   color: #344054;
   font-size: 10px;
   line-height: 14px;
   padding: 0 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
 .spc-table.spc-fixture-table button.spc-fixture-save-button {
