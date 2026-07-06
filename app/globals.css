@@ -3507,9 +3507,11 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-fixture-ledger-panel .spc-table-wrap {
   width: fit-content;
   max-width: 100%;
-  overflow: visible;
+  max-height: calc(100vh - 88px);
+  overflow: auto;
   background: #ffffff;
   border-radius: 10px;
+  position: relative;
 }
 
 .spc-table.spc-fixture-table {
@@ -3541,7 +3543,7 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-table.spc-fixture-table th {
   position: sticky;
   top: 0;
-  z-index: 6;
+  z-index: 14;
   height: 28px;
   background: #f5f5f7;
   color: #1d1d1f;
@@ -3585,6 +3587,39 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table tr.is-pending.is-editing td {
+  background: #fff0b8;
+}
+
+.spc-table.spc-fixture-table th.spc-fixture-actions-head,
+.spc-table.spc-fixture-table td.spc-fixture-actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 10;
+  overflow: visible;
+  padding: 0 6px;
+  background-clip: padding-box;
+  box-shadow: -1px 0 0 #e5e7eb;
+}
+
+.spc-table.spc-fixture-table th.spc-fixture-actions-head {
+  z-index: 18;
+}
+
+.spc-table.spc-fixture-table td.spc-fixture-actions-cell {
+  background: #ffffff;
+}
+
+.spc-table.spc-fixture-table tr.is-pending td.spc-fixture-actions-cell {
+  background: #fff6c7;
+}
+
+.spc-table.spc-fixture-table tr.is-editing td.spc-fixture-actions-cell,
+.spc-table.spc-fixture-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-status-row):not(.spc-fixture-empty-row):hover td.spc-fixture-actions-cell {
+  background: #e8f1ff;
+}
+
+.spc-table.spc-fixture-table tbody tr.is-pending:hover td.spc-fixture-actions-cell,
+.spc-table.spc-fixture-table tr.is-pending.is-editing td.spc-fixture-actions-cell {
   background: #fff0b8;
 }
 
@@ -3780,40 +3815,38 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   text-decoration: underline;
 }
 
-.spc-fixture-floating-actions {
-  position: fixed;
-  right: 18px;
-  z-index: 80;
+.spc-fixture-row-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
-  transform: translateY(-50%);
+  justify-content: center;
+  gap: 4px;
   white-space: nowrap;
-  pointer-events: auto;
 }
 
-.spc-table.spc-fixture-table button,
-.spc-fixture-floating-actions button {
+.spc-table.spc-fixture-table button {
   min-height: 22px;
-  min-width: 52px;
+  min-width: 50px;
   border-radius: 999px;
   background: #f6f8fb;
   color: #344054;
   font-size: 10px;
   line-height: 14px;
-  padding: 0 8px;
+  padding: 0 6px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-save-button,
-.spc-fixture-floating-actions button.spc-fixture-save-button {
+.spc-table.spc-fixture-table button.spc-fixture-complete-button {
+  min-width: 76px;
+}
+
+.spc-table.spc-fixture-table button.spc-fixture-save-button {
+  min-width: 56px;
   border-color: #0071e3;
   background: #0071e3;
   color: #ffffff;
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-delete-button,
-.spc-fixture-floating-actions button.spc-fixture-delete-button {
+.spc-table.spc-fixture-table button.spc-fixture-delete-button {
   border-color: #d92d20;
   background: #fff5f5;
   color: #b42318;
