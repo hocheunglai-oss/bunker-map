@@ -32,6 +32,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   "user-management": ["admin_users", "admin_role_defaults"],
   "event-calendar": ["office_calendar_store"],
   "task-calendar": ["office_calendar_store"],
+  "enquiry-worksheet": ["office_calendar_store"],
   pricesetter: ["ports", "price_history", "remarks"],
   "hongkong-price-history": ["ports", "price_history", "remarks"],
   "taiwan-price-history": ["ports", "price_history", "remarks"],

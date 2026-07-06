@@ -344,6 +344,11 @@ function inferOfficeCalendarPageId(record: AuditLogRecord) {
   const row = record.afterRow || record.beforeRow || {}
   const key = typeof row.key === "string" ? row.key : ""
   if (key === "spc-permission-groups") return "spc-user-management"
+  if (key === "parser-reports") {
+    return record.actorId?.trim().toLowerCase().startsWith("spc:")
+      ? "spc-buyer-enquiries"
+      : "enquiry-worksheet"
+  }
   return key === "task-calendar" ? "task-calendar" : "event-calendar"
 }
 
@@ -470,6 +475,17 @@ function formatValue(field: string, value: unknown) {
 
 function getRecordLabel(record: AuditLogRecord, portNames: Map<string, string>) {
   const row = record.afterRow || record.beforeRow || {}
+  if (record.tableName === "office_calendar_store") {
+    const labels: Record<string, string> = {
+      "event-calendar": "event calendar",
+      "task-calendar": "task calendar",
+      "spc-permission-groups": "SPC permission groups",
+      "parser-reports": "parser reports",
+    }
+    const key = typeof row.key === "string" ? row.key : ""
+    return labels[key] || "shared store"
+  }
+
   if (record.tableName === "remarks") {
     const labels: Record<number, string> = {
       1: "Taiwan remarks",
@@ -734,7 +750,7 @@ export function isUserAuditRecord(record: AuditLogRecord) {
 
   if (record.tableName === "office_calendar_store") {
     const row = record.afterRow || record.beforeRow || {}
-    return ["event-calendar", "task-calendar", "spc-permission-groups"].includes(String(row.key || ""))
+    return ["event-calendar", "task-calendar", "spc-permission-groups", "parser-reports"].includes(String(row.key || ""))
   }
 
   return true

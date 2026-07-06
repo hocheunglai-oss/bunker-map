@@ -2888,6 +2888,32 @@ body {
   min-height: 54px;
 }
 
+.spc-preview-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spc-preview-label-row button {
+  min-height: 28px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.spc-preview-label-row button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .spc-enquiry-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3302,6 +3328,65 @@ body {
 
 .spc-reoffer-dialog {
   width: min(720px, 100%);
+}
+
+.spc-parser-report-dialog {
+  width: min(680px, 100%);
+}
+
+.spc-parser-report-body {
+  display: grid;
+  gap: 10px;
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+  padding: 14px;
+}
+
+.spc-parser-report-body label {
+  display: grid;
+  gap: 6px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.spc-parser-report-body textarea,
+.spc-parser-report-body input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 8px 9px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.spc-parser-report-body textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.spc-parser-report-body textarea[readonly] {
+  color: var(--fc-admin-muted);
+}
+
+.spc-parser-report-status,
+.spc-parser-report-error {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.spc-parser-report-status {
+  color: var(--fc-admin-success-bg);
+}
+
+.spc-parser-report-error {
+  color: var(--fc-admin-danger-bg);
 }
 
 .spc-reoffer-form {

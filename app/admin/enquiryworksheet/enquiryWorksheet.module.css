@@ -363,7 +363,7 @@
 
 .shortenedHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 74px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -386,6 +386,18 @@
   font-size: 18px;
   font-weight: 900;
   line-height: 1;
+}
+
+.reportButton {
+  min-width: 74px;
+  height: 36px;
+  border: 1px solid var(--fc-admin-button-border) !important;
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .whatsappButton {
@@ -413,6 +425,7 @@
 }
 
 .copyButton:disabled,
+.reportButton:disabled,
 .whatsappButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -481,6 +494,125 @@
 
 .copyError {
   color: var(--fc-admin-danger-bg);
+}
+
+.reportBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.3);
+  padding: 18px;
+}
+
+.reportDialog {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 10px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.reportHeader {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 12px 14px;
+}
+
+.reportHeader h2 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.reportHeader button,
+.reportActions button {
+  border: 1px solid var(--fc-admin-button-border) !important;
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.reportHeader button {
+  width: 30px;
+  height: 30px;
+}
+
+.reportBody {
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.reportBody label {
+  display: grid;
+  gap: 6px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.reportBody textarea,
+.reportBody input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 8px 9px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.reportBody textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.reportBody textarea[readonly] {
+  color: var(--fc-admin-muted);
+}
+
+.reportActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  padding: 12px 14px;
+}
+
+.reportActions button {
+  min-height: 32px;
+  padding: 7px 12px;
+}
+
+.reportActions button:last-child {
+  border-color: var(--fc-admin-primary-button-bg) !important;
+  background: var(--fc-admin-primary-button-bg) !important;
+  color: var(--fc-admin-primary-button-text) !important;
+}
+
+.reportActions button:disabled,
+.reportHeader button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .confirmGrid {

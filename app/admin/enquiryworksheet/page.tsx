@@ -51,6 +51,12 @@ type EnquiryWorksheetPortsResponse = {
   ports?: string[]
 }
 
+type ParserReportDraft = {
+  open: boolean
+  correctedOutput: string
+  note: string
+}
+
 const workflowLabels: Array<[WorkflowKey, string]> = [
   ["bumain", "BUMAIN"],
   ["nom", "NOM"],
@@ -307,6 +313,12 @@ export default function EnquiryWorksheetPage() {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
   const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle")
   const [whatsappRequestId, setWhatsappRequestId] = useState("")
+  const [parserReportDraft, setParserReportDraft] = useState<ParserReportDraft>({
+    open: false,
+    correctedOutput: "",
+    note: "",
+  })
+  const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -529,6 +541,59 @@ export default function EnquiryWorksheetPage() {
     }, 2500)
   }
 
+  function openParserReport() {
+    setParserReportDraft({
+      open: true,
+      correctedOutput: (shortenedDraft || shortenedEnquiry).trim(),
+      note: "",
+    })
+    setParserReportStatus("idle")
+  }
+
+  async function submitParserReport() {
+    const rawText = enquiryText.trim()
+    const parserOutput = shortenedEnquiry.trim()
+    const correctedOutput = parserReportDraft.correctedOutput.trim()
+    if (!rawText || !correctedOutput || parserReportStatus === "saving") return
+
+    setParserReportStatus("saving")
+    try {
+      const response = await fetch("/api/parser-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "enquiryworksheet",
+          context: "shortened-enquiry",
+          rawText,
+          cleanedText: cleanedEnquiryText,
+          parserOutput,
+          correctedOutput,
+          note: parserReportDraft.note,
+          pageUrl: window.location.href,
+          metadata: {
+            guesses,
+            worksheet: {
+              vesselName: worksheet.vesselName,
+              imo: worksheet.imo,
+              buyer: worksheet.buyer,
+            },
+            manualVlsfoMaxRemarks: vlsfoMaxRemarks,
+          },
+        }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!response.ok) throw new Error(payload.message || "Failed to save report.")
+
+      setParserReportStatus("saved")
+      window.setTimeout(() => {
+        setParserReportDraft((current) => ({ ...current, open: false }))
+        setParserReportStatus("idle")
+      }, 900)
+    } catch {
+      setParserReportStatus("failed")
+    }
+  }
+
   function guessDetails() {
     const parsed = parseEnquiryWorksheetGuess(getParserSourceText(), { portNames: portIndex })
     const nextGuess: EnquiryWorksheetGuess = {
@@ -605,6 +670,17 @@ export default function EnquiryWorksheetPage() {
                 data-admin-button-style="preserve"
               >
                 ⧉
+              </button>
+              <button
+                type="button"
+                className={styles.reportButton}
+                onClick={openParserReport}
+                disabled={!enquiryText.trim()}
+                aria-label="Report incorrect parser output"
+                title="Report incorrect parser output"
+                data-admin-button-style="preserve"
+              >
+                Report
               </button>
               <button
                 type="button"
@@ -841,6 +917,80 @@ export default function EnquiryWorksheetPage() {
           </div>
         </section>
       </div>
+
+      {parserReportDraft.open ? (
+        <div className={styles.reportBackdrop} role="dialog" aria-modal="true" aria-labelledby="parser-report-title">
+          <div className={styles.reportDialog}>
+            <div className={styles.reportHeader}>
+              <h2 id="parser-report-title">Report Parser Output</h2>
+              <button
+                type="button"
+                onClick={() => setParserReportDraft((current) => ({ ...current, open: false }))}
+                disabled={parserReportStatus === "saving"}
+                aria-label="Close report dialog"
+                data-admin-button-style="preserve"
+              >
+                ×
+              </button>
+            </div>
+            <div className={styles.reportBody}>
+              <label>
+                <span>RAW ENQUIRY</span>
+                <textarea value={enquiryText} readOnly />
+              </label>
+              <label>
+                <span>PARSER OUTPUT</span>
+                <textarea value={shortenedEnquiry} readOnly />
+              </label>
+              <label>
+                <span>CORRECT VERSION</span>
+                <textarea
+                  value={parserReportDraft.correctedOutput}
+                  onChange={(event) =>
+                    setParserReportDraft((current) => ({
+                      ...current,
+                      correctedOutput: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>NOTE</span>
+                <input
+                  value={parserReportDraft.note}
+                  onChange={(event) =>
+                    setParserReportDraft((current) => ({
+                      ...current,
+                      note: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+              {parserReportStatus === "saved" ? <p className={styles.copyStatus}>Report saved.</p> : null}
+              {parserReportStatus === "failed" ? <p className={styles.copyError}>Report failed. Please try again.</p> : null}
+            </div>
+            <div className={styles.reportActions}>
+              <button
+                type="button"
+                onClick={() => setParserReportDraft((current) => ({ ...current, open: false }))}
+                disabled={parserReportStatus === "saving"}
+                data-admin-button-style="preserve"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitParserReport}
+                disabled={!parserReportDraft.correctedOutput.trim() || parserReportStatus === "saving"}
+                data-admin-button-style="preserve"
+              >
+                {parserReportStatus === "saving" ? "Saving..." : "Submit Report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   )
 }

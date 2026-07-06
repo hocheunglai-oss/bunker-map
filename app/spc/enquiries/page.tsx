@@ -63,6 +63,14 @@ type ReofferDraft = DraftEnquiry & {
   enquiryNumber: string
 }
 
+type ParserReportDialog = {
+  context: "new-enquiry" | "reoffer"
+  rawText: string
+  parserOutput: string
+  correctedOutput: string
+  note: string
+}
+
 type DraftFieldKey = "vesselName" | "imo" | "eta" | "fuel"
 
 const LOST_REASONS = [
@@ -249,6 +257,8 @@ export default function SpcEnquiriesPage() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updatingId, setUpdatingId] = useState("")
+  const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
+  const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
@@ -413,6 +423,69 @@ export default function SpcEnquiriesPage() {
     setVlsfoMaxRemarks([])
     setValidationAttempted(false)
     setDismissedDraftMissingFields(new Set())
+  }
+
+  function openDraftParserReport() {
+    setParserReportDialog({
+      context: "new-enquiry",
+      rawText: draft.rawText,
+      parserOutput: standardTextForDraft(draft, vlsfoMaxRemarks),
+      correctedOutput: draft.standardText || standardTextForDraft(draft, vlsfoMaxRemarks),
+      note: "",
+    })
+    setParserReportStatus("idle")
+  }
+
+  function openReofferParserReport() {
+    if (!reofferDraft) return
+    setParserReportDialog({
+      context: "reoffer",
+      rawText: reofferDraft.rawText || reofferDraft.standardText,
+      parserOutput: standardTextForDraft(reofferDraft, []),
+      correctedOutput: reofferDraft.standardText || standardTextForDraft(reofferDraft, []),
+      note: "",
+    })
+    setParserReportStatus("idle")
+  }
+
+  async function submitParserReport() {
+    if (!parserReportDialog || parserReportStatus === "saving") return
+    const rawText = parserReportDialog.rawText.trim()
+    const parserOutput = parserReportDialog.parserOutput.trim()
+    const correctedOutput = parserReportDialog.correctedOutput.trim()
+    if (!rawText || !correctedOutput) return
+
+    setParserReportStatus("saving")
+    try {
+      const response = await fetch("/api/parser-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "spc",
+          context: parserReportDialog.context,
+          rawText,
+          parserOutput,
+          correctedOutput,
+          note: parserReportDialog.note,
+          pageUrl: window.location.href,
+          metadata: {
+            draft: parserReportDialog.context === "reoffer" ? reofferDraft : draft,
+            manualVlsfoMaxRemarks: parserReportDialog.context === "reoffer" ? [] : vlsfoMaxRemarks,
+          },
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to save report.")
+
+      setParserReportStatus("saved")
+      window.setTimeout(() => {
+        setParserReportDialog(null)
+        setParserReportStatus("idle")
+      }, 900)
+    } catch (error) {
+      reportEnquiryError(error, "Failed to save parser report.")
+      setParserReportStatus("failed")
+    }
   }
 
   async function sendEnquiry(event: React.FormEvent<HTMLFormElement>) {
@@ -693,7 +766,16 @@ export default function SpcEnquiriesPage() {
                 </div>
               ) : null}
               <label className="spc-enquiry-preview-field">
-                <span>Standard Format Preview</span>
+                <span className="spc-preview-label-row">
+                  <span>Standard Format Preview</span>
+                  <button
+                    type="button"
+                    onClick={openDraftParserReport}
+                    disabled={!canEdit || !draft.rawText.trim()}
+                  >
+                    Report
+                  </button>
+                </span>
                 <textarea
                   value={draft.standardText}
                   onChange={(event) => updateDraft("standardText", event.target.value)}
@@ -912,7 +994,16 @@ export default function SpcEnquiriesPage() {
                 </label>
               </div>
               <label className="spc-enquiry-preview-field">
-                <span>Standard Format Preview</span>
+                <span className="spc-preview-label-row">
+                  <span>Standard Format Preview</span>
+                  <button
+                    type="button"
+                    onClick={openReofferParserReport}
+                    disabled={saving || !reofferDraft.standardText.trim()}
+                  >
+                    Report
+                  </button>
+                </span>
                 <textarea value={reofferDraft.standardText} onChange={(event) => updateReofferDraft("standardText", event.target.value)} rows={3} disabled={saving} />
               </label>
               <div className="spc-dialog-actions">
@@ -923,6 +1014,60 @@ export default function SpcEnquiriesPage() {
               </div>
             </form>
           </section>
+        </div>
+      ) : null}
+
+      {parserReportDialog ? (
+        <div className="spc-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="spc-parser-report-title">
+          <div className="spc-dialog spc-parser-report-dialog">
+            <div className="spc-dialog-header">
+              <h2 id="spc-parser-report-title">Report Parser Output</h2>
+              <button type="button" onClick={() => setParserReportDialog(null)} disabled={parserReportStatus === "saving"} aria-label="Close report dialog">
+                ×
+              </button>
+            </div>
+            <div className="spc-parser-report-body">
+              <label>
+                <span>Raw Enquiry</span>
+                <textarea value={parserReportDialog.rawText} readOnly />
+              </label>
+              <label>
+                <span>Parser Output</span>
+                <textarea value={parserReportDialog.parserOutput} readOnly />
+              </label>
+              <label>
+                <span>Correct Version</span>
+                <textarea
+                  value={parserReportDialog.correctedOutput}
+                  onChange={(event) =>
+                    setParserReportDialog((current) =>
+                      current ? { ...current, correctedOutput: event.target.value } : current,
+                    )
+                  }
+                />
+              </label>
+              <label>
+                <span>Note</span>
+                <input
+                  value={parserReportDialog.note}
+                  onChange={(event) =>
+                    setParserReportDialog((current) =>
+                      current ? { ...current, note: event.target.value } : current,
+                    )
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+              {parserReportStatus === "saved" ? <p className="spc-parser-report-status">Report saved.</p> : null}
+              {parserReportStatus === "failed" ? <p className="spc-parser-report-error">Report failed. Please try again.</p> : null}
+            </div>
+            <div className="spc-dialog-actions">
+              <button type="button" onClick={() => setParserReportDialog(null)} disabled={parserReportStatus === "saving"}>Cancel</button>
+              <button type="button" className="is-primary" onClick={submitParserReport} disabled={!parserReportDialog.correctedOutput.trim() || parserReportStatus === "saving"}>
+                {parserReportStatus === "saving" ? "Saving..." : "Submit Report"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </SpcShell>
