@@ -98,9 +98,9 @@ const fixtureColumnWidths = [
   96, // date
   116, // supplier trader
   116, // buyer trader
-  96, // account
+  112, // account
   108, // ETA
-  180, // vessel
+  164, // vessel
   66, // HSFO
   66, // VLSFO
   66, // LSMGO
