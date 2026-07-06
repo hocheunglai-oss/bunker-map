@@ -3491,6 +3491,8 @@ body {
 }
 
 .spc-fixture-ledger-panel {
+  width: fit-content;
+  max-width: 100%;
   border-color: #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
@@ -3503,13 +3505,16 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-fixture-ledger-panel .spc-table-wrap {
+  width: fit-content;
+  max-width: 100%;
+  overflow: visible;
   background: #ffffff;
   border-radius: 10px;
 }
 
 .spc-table.spc-fixture-table {
-  width: 1176px;
-  min-width: 1176px;
+  width: 1152px;
+  min-width: 1152px;
   border: 1px solid #e5e7eb;
   table-layout: fixed;
   border-collapse: collapse;
@@ -3534,6 +3539,9 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   height: 28px;
   background: #f5f5f7;
   color: #1d1d1f;
@@ -3543,13 +3551,6 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   overflow: hidden;
   text-overflow: clip;
   white-space: normal;
-}
-
-.spc-table.spc-fixture-table th:last-child {
-  position: sticky;
-  right: 0;
-  z-index: 3;
-  box-shadow: -1px 0 0 #e5e7eb;
 }
 
 .spc-table.spc-fixture-table td {
@@ -3566,16 +3567,25 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table tr.is-pending td {
-  background: #fffdf7;
+  background: #fff1a8;
   font-weight: 650;
 }
 
-.spc-table.spc-fixture-table tr:hover td {
-  background: #f8fafc;
+.spc-table.spc-fixture-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-status-row):not(.spc-fixture-empty-row):not(.spc-fixture-action-row):hover td {
+  background: #e8f1ff;
+  box-shadow: inset 0 1px 0 rgba(0, 113, 227, 0.16), inset 0 -1px 0 rgba(0, 113, 227, 0.16);
 }
 
-.spc-table.spc-fixture-table tr.is-pending:hover td {
-  background: #fff8e8;
+.spc-table.spc-fixture-table tbody tr.is-pending:not(.spc-fixture-action-row):hover td {
+  background: #ffe27a;
+}
+
+.spc-table.spc-fixture-table tr.is-editing td {
+  background: #e8f1ff;
+}
+
+.spc-table.spc-fixture-table tr.is-pending.is-editing td {
+  background: #ffea8a;
 }
 
 .spc-table.spc-fixture-table input,
@@ -3621,6 +3631,62 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-table.spc-fixture-table select.is-sheet-pill:hover,
 .spc-table.spc-fixture-table select.is-sheet-pill:focus {
   box-shadow: inset 0 0 0 1px #0071e3;
+}
+
+.spc-table.spc-fixture-table td:has(.spc-fixture-supplier-picker) {
+  position: relative;
+  overflow: visible;
+}
+
+.spc-fixture-supplier-picker {
+  position: relative;
+  z-index: 7;
+}
+
+.spc-table.spc-fixture-table input.spc-fixture-supplier-input {
+  text-align: left;
+}
+
+.spc-fixture-supplier-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 3px;
+  z-index: 40;
+  width: max(230px, calc(100% + 88px));
+  max-height: 198px;
+  overflow-y: auto;
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+  padding: 5px;
+  text-align: left;
+}
+
+.spc-fixture-supplier-option,
+.spc-fixture-supplier-empty {
+  border-radius: 6px;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+  padding: 5px 8px;
+  text-align: left;
+  white-space: normal;
+}
+
+.spc-fixture-supplier-option {
+  cursor: pointer;
+}
+
+.spc-fixture-supplier-option:hover,
+.spc-fixture-supplier-option[aria-selected="true"] {
+  background: #e8f1ff;
+  color: #0057b8;
+}
+
+.spc-fixture-supplier-empty {
+  color: #6b7280;
 }
 
 .spc-fixture-eta-editor {
@@ -3714,23 +3780,21 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   text-decoration: underline;
 }
 
-.spc-table.spc-fixture-table .spc-fixture-action-cell {
-  position: sticky;
-  right: 0;
-  z-index: 2;
-  background: #ffffff;
-  box-shadow: -1px 0 0 #e5e7eb;
-  text-align: center;
+.spc-table.spc-fixture-table .spc-fixture-action-row td {
+  height: 30px;
+  background: #f8fafc;
+  padding: 0 10px;
+  text-align: right;
 }
 
-.spc-table.spc-fixture-table tr.is-pending .spc-fixture-action-cell {
-  background: #fffaf0;
+.spc-table.spc-fixture-table .spc-fixture-action-row.is-pending td {
+  background: #ffe27a;
 }
 
 .spc-fixture-row-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 5px;
 }
 
@@ -3745,7 +3809,6 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   padding: 0 8px;
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-edit-button,
 .spc-table.spc-fixture-table button.spc-fixture-save-button {
   border-color: #0071e3;
   background: #0071e3;

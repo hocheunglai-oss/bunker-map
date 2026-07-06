@@ -95,19 +95,18 @@ const emptyDraft: FixtureDraft = {
 }
 
 const fixtureColumnWidths = [
-  92, // date
-  104, // supplier trader
-  104, // buyer trader
-  112, // account
-  140, // ETA
-  140, // vessel
+  116, // date
+  98, // supplier trader
+  98, // buyer trader
+  102, // account
+  128, // ETA
+  200, // vessel
   54, // HSFO
   54, // VLSFO
   54, // LSMGO
-  120, // supplier
-  64, // price
+  116, // supplier
+  66, // price
   66, // barging
-  72, // action
 ] as const
 
 const fixtureColumnSpan = fixtureColumnWidths.length
@@ -431,6 +430,7 @@ export default function SpcFixturesPage() {
   const [supplierRecords, setSupplierRecords] = useState<SupplierRecord[]>([])
   const [drafts, setDrafts] = useState<Record<string, FixtureDraft>>({})
   const [editingId, setEditingId] = useState("")
+  const [supplierMenuKey, setSupplierMenuKey] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
   const [fixtureMonthFilter, setFixtureMonthFilter] = useState(initialPeriod.month)
   const [loading, setLoading] = useState(false)
@@ -693,6 +693,9 @@ export default function SpcFixturesPage() {
       setMessageIsError(true)
       return
     }
+    const fixtureLabel = cleanText(prepared.draft.vesselName || fixture.vesselName || fixture.enquiryTitle || fixture.enquiryNumber).toUpperCase()
+    const confirmMessage = action === "complete" ? `COMPLETE FIXTURE ${fixtureLabel}?` : `UPDATE FIXTURE ${fixtureLabel}?`
+    if (!window.confirm(confirmMessage)) return
     setSavingId(`${fixture.id}:${action}`)
     setMessage("")
     try {
@@ -861,15 +864,53 @@ export default function SpcFixturesPage() {
   function gradeSupplierCell(fixture: SpcFixture, draft: FixtureDraft, key: FuelKey | null, editing: boolean) {
     const value = gradeValue(draft.supplierName, key)
     if (editing) {
+      const pickerKey = `${fixture.id}:${key || "all"}`
+      const query = value.toLowerCase()
+      const matches = supplierOptions
+        .filter((supplier) => !query || supplier.toLowerCase().includes(query))
+        .slice(0, 8)
       return (
-        <input
-          type="search"
-          list="spc-fixture-suppliers"
-          className="is-sheet-pill"
-          value={value}
-          onChange={(event) => updateGradeDraft(fixture.id, "supplierName", key, event.target.value)}
-          disabled={!canEdit}
-        />
+        <div className="spc-fixture-supplier-picker">
+          <input
+            type="text"
+            autoComplete="off"
+            className="is-sheet-pill spc-fixture-supplier-input"
+            value={value}
+            onFocus={() => setSupplierMenuKey(pickerKey)}
+            onChange={(event) => {
+              updateGradeDraft(fixture.id, "supplierName", key, event.target.value)
+              setSupplierMenuKey(pickerKey)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSupplierMenuKey("")
+            }}
+            onBlur={() => window.setTimeout(() => setSupplierMenuKey((current) => (current === pickerKey ? "" : current)), 120)}
+            disabled={!canEdit}
+          />
+          {supplierMenuKey === pickerKey ? (
+            <div className="spc-fixture-supplier-menu" role="listbox">
+              {matches.length > 0 ? (
+                matches.map((supplier) => (
+                  <div
+                    key={supplier}
+                    className="spc-fixture-supplier-option"
+                    role="option"
+                    aria-selected={supplier.toLowerCase() === value.toLowerCase()}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      updateGradeDraft(fixture.id, "supplierName", key, supplier)
+                      setSupplierMenuKey("")
+                    }}
+                  >
+                    {supplier}
+                  </div>
+                ))
+              ) : (
+                <div className="spc-fixture-supplier-empty">NO MATCHES</div>
+              )}
+            </div>
+          ) : null}
+        </div>
       )
     }
     return value ? (
@@ -909,12 +950,15 @@ export default function SpcFixturesPage() {
       const buyerTrader = userFromChoice(users, draft.buyerTrader)
       const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)
-      return gradeRows.map((fuelRow, fuelIndex) => (
+      const fixtureRows = gradeRows.map((fuelRow) => (
         <tr
           key={`${fixture.id}-${fuelRow.key || "fuel"}`}
-          className={fixture.fixtureStatus === "pending" ? "is-pending" : ""}
+          className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
           onDoubleClick={() => {
-            if (rowCanEdit && mode === "completed") setEditingId(fixture.id)
+            if (rowCanEdit && mode === "completed") {
+              setSupplierMenuKey("")
+              setEditingId(fixture.id)
+            }
           }}
         >
           <td>{displayDate(draft.fixtureDate)}</td>
@@ -933,10 +977,17 @@ export default function SpcFixturesPage() {
           <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
           <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
           <td>{gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}</td>
-          {fuelIndex === 0 ? (
-            <td className="spc-fixture-action-cell" rowSpan={gradeRows.length}>
+        </tr>
+      ))
+      if (editing) {
+        fixtureRows.push(
+          <tr
+            key={`${fixture.id}-actions`}
+            className={`spc-fixture-action-row${fixture.fixtureStatus === "pending" ? " is-pending" : ""}`}
+          >
+            <td colSpan={fixtureColumnSpan}>
               <div className="spc-fixture-row-actions">
-                {editing && fixture.fixtureStatus === "pending" ? (
+                {fixture.fixtureStatus === "pending" ? (
                   <button
                     type="button"
                     onClick={() => void submitFixture(fixture, "complete")}
@@ -945,17 +996,7 @@ export default function SpcFixturesPage() {
                   >
                     {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
                   </button>
-                ) : null}
-                {!editing && fixture.fixtureStatus === "completed" && rowCanEdit ? (
-                  <button
-                    type="button"
-                    className="spc-fixture-edit-button"
-                    onClick={() => setEditingId(fixture.id)}
-                  >
-                    EDIT
-                  </button>
-                ) : null}
-                {editing && fixture.fixtureStatus === "completed" ? (
+                ) : (
                   <>
                     <button
                       type="button"
@@ -963,7 +1004,7 @@ export default function SpcFixturesPage() {
                       onClick={() => void submitFixture(fixture, "save")}
                       disabled={!canEdit || savingId === `${fixture.id}:save`}
                     >
-                      {savingId === `${fixture.id}:save` ? "SAVING" : "SAVE"}
+                      {savingId === `${fixture.id}:save` ? "UPDATING" : "UPDATE"}
                     </button>
                     <button
                       type="button"
@@ -974,12 +1015,13 @@ export default function SpcFixturesPage() {
                       {savingId === `${fixture.id}:delete` ? "DELETING" : "DELETE"}
                     </button>
                   </>
-                ) : null}
+                )}
               </div>
             </td>
-          ) : null}
-        </tr>
-      ))
+          </tr>,
+        )
+      }
+      return fixtureRows
     })
   }
 
@@ -989,12 +1031,6 @@ export default function SpcFixturesPage() {
 
   return (
     <SpcShell title="SPC FIXTURES">
-      <datalist id="spc-fixture-suppliers">
-        {supplierOptions.map((supplier) => (
-          <option key={supplier} value={supplier} />
-        ))}
-      </datalist>
-
       <section className="spc-panel spc-fixture-ledger-panel">
         <div className="spc-table-wrap" ref={fixtureTableRef}>
           <table className="spc-table spc-fixture-table">
@@ -1017,7 +1053,6 @@ export default function SpcFixturesPage() {
                 <th>SUPPLIER</th>
                 <th>PRICE</th>
                 <th>BARGING</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
