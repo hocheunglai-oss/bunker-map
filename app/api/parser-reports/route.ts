@@ -10,6 +10,12 @@ import {
   createSpcAuditContext,
   createSpcAuditedSupabaseClient,
 } from "@/lib/spcAudit"
+import {
+  buildShortenedEnquiry,
+  type VlsfoMaxRemark,
+} from "@/lib/enquiryShortener"
+import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import { parseSpcEnquiryText } from "@/lib/spcEnquiryText"
 
 const STORE_KEY = "parser-reports"
 const MAX_REPORTS = 500
@@ -112,6 +118,54 @@ function cleanStoredPayload(value: unknown): ParserReportsPayload {
   }
 }
 
+function manualVlsfoMaxRemarksFrom(metadata: Record<string, unknown>): VlsfoMaxRemark[] {
+  const value = metadata.manualVlsfoMaxRemarks
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is VlsfoMaxRemark => item === "180cst max" || item === "120cst max")
+}
+
+function normalizeComparableOutput(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\bhong\s+kong\b/g, "hk")
+    .replace(/\bhkg\b/g, "hk")
+    .replace(/香港/g, "hk")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function currentParserOutputFor(report: ParserReportRecord) {
+  const manualVlsfoMaxRemarks = manualVlsfoMaxRemarksFrom(report.metadata)
+
+  if (report.source === "spc") {
+    return parseSpcEnquiryText(report.rawText, manualVlsfoMaxRemarks).standardText
+  }
+
+  const sourceText = report.cleanedText || report.rawText
+  const guess = parseEnquiryWorksheetGuess(sourceText)
+  return buildShortenedEnquiry(
+    sourceText,
+    guess.vesselName,
+    guess.imo,
+    manualVlsfoMaxRemarks,
+    {
+      autoDetectVlsfoRemarks: false,
+      includePort: true,
+      port: guess.port,
+    },
+  )
+}
+
+function isResolvedReport(report: ParserReportRecord) {
+  try {
+    const currentOutput = currentParserOutputFor(report)
+    if (!currentOutput.trim()) return false
+    return normalizeComparableOutput(currentOutput) === normalizeComparableOutput(report.correctedOutput)
+  } catch {
+    return false
+  }
+}
+
 async function getSessionAndClient(
   source: ParserReportSource,
   request: Request,
@@ -163,9 +217,14 @@ export async function GET(request: Request) {
     if (error) throw error
 
     const payload = cleanStoredPayload(currentRow?.payload || null)
+    const sourceReports = payload.reports.filter((report) => report.source === source)
+    const unresolvedReports = sourceReports.filter((report) => !isResolvedReport(report))
+
     return NextResponse.json({
       source,
-      reports: payload.reports.filter((report) => report.source === source),
+      reports: unresolvedReports,
+      totalReports: sourceReports.length,
+      resolvedReports: sourceReports.length - unresolvedReports.length,
       updatedAt: currentRow?.updated_at || null,
     })
   } catch (error) {

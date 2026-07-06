@@ -289,6 +289,18 @@ function classifyProduct(value: string): ProductSegment["product"] | "" {
   return ""
 }
 
+function detectDirectVlsfoGrade(value: string): VlsfoMaxRemark[] {
+  const compact = value.toLowerCase().replace(/[^a-z0-9]+/g, "")
+  const remarks: VlsfoMaxRemark[] = []
+  if (/(?:^|[^0-9])(?:ls|rmg)?180cs+t/.test(compact) || /rmg180/.test(compact)) {
+    remarks.push("180cst max")
+  }
+  if (/(?:^|[^0-9])(?:ls|rmg)?120cs+t/.test(compact) || /rmg120/.test(compact)) {
+    remarks.push("120cst max")
+  }
+  return remarks
+}
+
 function containsProduct(value: string) {
   return Boolean(classifyProduct(value))
 }
@@ -381,8 +393,11 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
       product: match.product,
       quantity,
       detectedRemarks:
-        autoDetectVlsfoRemarks && match.product === "vlsfo"
-          ? detectVlsfoMaxRemarks(segmentText)
+        match.product === "vlsfo"
+          ? mergeRemarks(
+              detectDirectVlsfoGrade(match.value),
+              autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(segmentText) : [],
+            )
           : [],
     }]
   })
@@ -427,8 +442,11 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
         product,
         quantity,
         detectedRemarks:
-          autoDetectVlsfoRemarks && product === "vlsfo"
-            ? detectVlsfoMaxRemarks(block.join(" "))
+          product === "vlsfo"
+            ? mergeRemarks(
+                detectDirectVlsfoGrade(line),
+                autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(block.join(" ")) : [],
+              )
             : [],
       })
     }
