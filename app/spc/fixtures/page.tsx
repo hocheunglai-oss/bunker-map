@@ -478,7 +478,6 @@ export default function SpcFixturesPage() {
     const values = [
       ...supplierRecords.map((record) => record.name),
       ...fixtures.flatMap((fixture) => supplierValues(fixture.supplierName)),
-      ...Object.values(drafts).flatMap((draft) => supplierValues(draft.supplierName)),
     ]
     const seen = new Set<string>()
     return values
@@ -490,7 +489,7 @@ export default function SpcFixturesPage() {
         return true
       })
       .sort((a, b) => a.localeCompare(b))
-  }, [drafts, fixtures, supplierRecords])
+  }, [fixtures, supplierRecords])
 
   const officeOptions = useMemo(() => {
     const values = [
