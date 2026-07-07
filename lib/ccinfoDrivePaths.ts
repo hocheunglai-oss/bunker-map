@@ -11,8 +11,6 @@ type SupabaseLike = {
   from: (table: string) => any
 }
 
-const UNASSIGNED_COUNTRY_FOLDER = "_Unassigned Country"
-
 export function cleanDriveSegment(value: string | null | undefined, fallback = "Untitled") {
   const cleaned = String(value || "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -53,16 +51,12 @@ export function buildCcinfoDriveFolderSegments(context: CcinfoDriveContext) {
   if (entryKind === "country") {
     baseSegments = ["Countries", cleanDriveSegment(countryName || entryName)]
   } else if (entryKind === "company") {
-    baseSegments = [
-      "Companies",
-      cleanDriveSegment(countryName, UNASSIGNED_COUNTRY_FOLDER),
-      cleanDriveSegment(companyName || entryName),
-    ]
+    baseSegments = ["Companies", cleanDriveSegment(companyName || entryName)]
   } else if (entryKind === "port") {
     if (countryName) {
       baseSegments = ["Countries", cleanDriveSegment(countryName), "Ports", cleanDriveSegment(portName || entryName)]
     } else {
-      baseSegments = ["Ports", UNASSIGNED_COUNTRY_FOLDER, cleanDriveSegment(portName || entryName)]
+      baseSegments = ["Ports", cleanDriveSegment(portName || entryName)]
     }
   } else {
     baseSegments = ["Other Entries", cleanDriveSegment(entryKind || "entry"), entryName]
