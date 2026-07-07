@@ -34,7 +34,12 @@ function messageFromError(error: unknown) {
 
 function hasCronAccess(request: Request) {
   const secret = process.env.CRON_SECRET
-  return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`)
+  const cleanupToken = process.env.CCINFO_CLEANUP_TOKEN
+  const authorization = request.headers.get("authorization")
+  return Boolean(
+    (secret && authorization === `Bearer ${secret}`) ||
+      (cleanupToken && authorization === `Bearer ${cleanupToken}`),
+  )
 }
 
 async function requireCleanupAccess(request: Request) {
