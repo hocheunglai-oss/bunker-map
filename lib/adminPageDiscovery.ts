@@ -48,6 +48,13 @@ async function findAdminPageRoutes(
 }
 
 async function discoverAdminPages(): Promise<AdminPageDefinition[]> {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ENABLE_ADMIN_PAGE_FS_DISCOVERY !== "true"
+  ) {
+    return ADMIN_PAGE_DEFINITIONS
+  }
+
   const adminRoots = [
     path.join(process.cwd(), "app", "admin"),
     path.join(process.cwd(), ".next", "server", "app", "admin"),

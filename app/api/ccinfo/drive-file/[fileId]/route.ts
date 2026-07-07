@@ -115,6 +115,34 @@ function contentDisposition(disposition: string, fileName: string) {
   return `${disposition}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
 }
 
+function parseByteRange(rangeHeader: string | null, totalSize: number | null) {
+  if (!rangeHeader || !totalSize || totalSize < 1) return null
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim())
+  if (!match) return null
+
+  const [, startText, endText] = match
+  if (!startText && !endText) return null
+
+  let start: number
+  let end: number
+
+  if (!startText) {
+    const suffixLength = Number(endText)
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null
+    start = Math.max(totalSize - suffixLength, 0)
+    end = totalSize - 1
+  } else {
+    start = Number(startText)
+    end = endText ? Number(endText) : totalSize - 1
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null
+    if (start < 0 || end < start || start >= totalSize) return null
+    end = Math.min(end, totalSize - 1)
+  }
+
+  return { start, end }
+}
+
 async function findCcinfoFile(supabase: ReturnType<typeof createAdminAuditedSupabaseClient>, fileId: string) {
   const entryResult = await supabase
     .from("cc_entry_files")
@@ -169,6 +197,9 @@ export async function GET(
     const fileName = exportInfo ? withExtension(baseName, exportInfo.extension) : baseName
     const dispositionParam = new URL(request.url).searchParams.get("disposition")
     const disposition = dispositionParam === "attachment" ? "attachment" : "inline"
+    const metadataSize = Number(metadata.data.size)
+    const totalSize = Number.isSafeInteger(metadataSize) ? metadataSize : null
+    const byteRange = exportInfo ? null : parseByteRange(request.headers.get("range"), totalSize)
 
     const media = exportInfo
       ? await drive.files.export(
@@ -177,19 +208,30 @@ export async function GET(
         )
       : await drive.files.get(
           { fileId, alt: "media", supportsAllDrives: true },
-          { responseType: "stream" },
+          {
+            responseType: "stream",
+            headers: byteRange ? { Range: `bytes=${byteRange.start}-${byteRange.end}` } : undefined,
+          },
         )
+    const byteRangeApplied = Boolean(byteRange && media.status === 206)
 
     const headers = new Headers()
     headers.set("Content-Type", exportInfo?.mimeType || String(media.headers["content-type"] || metadata.data.mimeType || getMimeType(fileName)))
     headers.set("Content-Disposition", contentDisposition(disposition, fileName))
     headers.set("Cache-Control", "private, max-age=3600")
     headers.set("X-Content-Type-Options", "nosniff")
-    const contentLength = media.headers["content-length"] || metadata.data.size
-    if (contentLength) headers.set("Content-Length", String(contentLength))
+    if (!exportInfo && totalSize) headers.set("Accept-Ranges", "bytes")
+    if (byteRangeApplied && byteRange) {
+      headers.set("Content-Range", `bytes ${byteRange.start}-${byteRange.end}/${totalSize}`)
+      headers.set("Content-Length", String(byteRange.end - byteRange.start + 1))
+    }
+    if (!byteRangeApplied) {
+      const contentLength = media.headers["content-length"] || metadata.data.size
+      if (contentLength) headers.set("Content-Length", String(contentLength))
+    }
 
     return new Response(Readable.toWeb(media.data as Readable) as BodyInit, {
-      status: 200,
+      status: byteRangeApplied ? 206 : 200,
       headers,
     })
   } catch (error) {

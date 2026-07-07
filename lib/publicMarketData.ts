@@ -252,6 +252,25 @@ export function getPublicReportData<Key extends ReportSnapshotKey>(key: Key) {
   return getCachedReportData(key) as Promise<PublicReportPayloadByKey[Key]>
 }
 
+export function getEmptyPublicReportData<Key extends ReportSnapshotKey>(
+  key: Key,
+): PublicReportPayloadByKey[Key] {
+  if (key === "taiwan") {
+    return {
+      key,
+      snapshot: null,
+      fallbacks: {},
+      specialNotice: "",
+    } as PublicReportPayloadByKey[Key]
+  }
+
+  return {
+    key,
+    snapshot: null,
+    fallbacks: {},
+  } as PublicReportPayloadByKey[Key]
+}
+
 export function publicMarketCacheHeaders() {
   const sharedCacheControl = `public, s-maxage=${PUBLIC_MARKET_DATA_REVALIDATE_SECONDS}, stale-while-revalidate=${PUBLIC_MARKET_DATA_STALE_SECONDS}`
 
