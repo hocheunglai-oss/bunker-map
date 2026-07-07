@@ -3,6 +3,7 @@ import { google } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
+  cleanDriveSegment,
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
 } from "@/lib/ccinfoDrivePaths"
@@ -37,6 +38,14 @@ type EntryFile = {
   file_name: string | null
   drive_file_id: string | null
   original_path: string | null
+}
+
+type ManualUploadFile = {
+  id: string
+  name: string
+  parentId: string
+  path: string
+  segments: string[]
 }
 
 function requireEnv(name: string) {
@@ -257,16 +266,18 @@ async function collectManualUploads(drive: any, rootFolderId: string) {
       folderSample: [] as string[],
       id: null as string | null,
       fileParentById: new Map<string, string>(),
+      fileEntries: [] as ManualUploadFile[],
     }
   }
 
-  const queue = [{ id: manualFolder.id, path: "Manual Uploads" }]
+  const queue = [{ id: manualFolder.id, path: "Manual Uploads", segments: ["Manual Uploads"] }]
   let folders = 0
   let files = 0
   const sample: string[] = []
   const fileSample: string[] = []
   const folderSample: string[] = []
   const fileParentById = new Map<string, string>()
+  const fileEntries: ManualUploadFile[] = []
   while (queue.length > 0) {
     const current = queue.shift()!
     const folderId = current.id
@@ -274,19 +285,27 @@ async function collectManualUploads(drive: any, rootFolderId: string) {
     for (const child of children) {
       const isFolder = child.mimeType === "application/vnd.google-apps.folder"
       const childPath = `${current.path}/${child.name}`
+      const childSegments = [...current.segments, child.name]
       if (isFolder) {
         folders += 1
-        queue.push({ id: child.id, path: childPath })
+        queue.push({ id: child.id, path: childPath, segments: childSegments })
         if (folderSample.length < 100) folderSample.push(childPath)
       } else {
         files += 1
         fileParentById.set(child.id, folderId)
+        fileEntries.push({
+          id: child.id,
+          name: child.name,
+          parentId: folderId,
+          path: childPath,
+          segments: childSegments,
+        })
         if (fileSample.length < 100) fileSample.push(childPath)
       }
       if (sample.length < 50) sample.push(child.name)
     }
   }
-  return { exists: true, id: manualFolder.id, folders, files, sample, fileSample, folderSample, fileParentById }
+  return { exists: true, id: manualFolder.id, folders, files, sample, fileSample, folderSample, fileParentById, fileEntries }
 }
 
 async function summarizeManualUploads(drive: any, rootFolderId: string) {
@@ -300,6 +319,14 @@ async function summarizeManualUploads(drive: any, rootFolderId: string) {
     fileSample: manualUploads.fileSample,
     folderSample: manualUploads.folderSample,
   }
+}
+
+async function ensureFolderPath(drive: any, rootFolderId: string, segments: string[]) {
+  let parentId = rootFolderId
+  for (const segment of segments) {
+    parentId = await ensureFolder(drive, parentId, cleanDriveSegment(segment))
+  }
+  return parentId
 }
 
 function summarizePlan(plan: Awaited<ReturnType<typeof buildPlan>>) {
@@ -454,6 +481,62 @@ export async function POST(request: Request) {
 
     if (action === "manual-uploads-summary") {
       return NextResponse.json({ action, manualUploads: await summarizeManualUploads(plan.drive, plan.rootFolderId) })
+    }
+
+    if (action === "move-untracked-manual-uploads") {
+      const manualUploads = await collectManualUploads(plan.drive, plan.rootFolderId)
+      const moved = []
+      const skipped = []
+      const targetFolderCache = new Map<string, string>()
+      for (const file of manualUploads.fileEntries) {
+        if (moved.length >= limit) break
+
+        const relativeSegments = file.segments.slice(1)
+        const category = normalizeName(relativeSegments[0])
+        const ownerName = relativeSegments[1]
+        if (!ownerName || relativeSegments.length < 3) {
+          skipped.push({ path: file.path, reason: "Missing category or owner folder." })
+          continue
+        }
+
+        let rootContainer: string | null = null
+        if (category === "COUNTRY") rootContainer = "Countries"
+        if (category === "COMPANY") rootContainer = "Companies"
+        if (category === "PORT") rootContainer = "Ports"
+        if (!rootContainer) {
+          skipped.push({ path: file.path, reason: `Unsupported Manual Uploads category: ${relativeSegments[0] || "(blank)"}` })
+          continue
+        }
+
+        const folderSegments = [rootContainer, ownerName, ...relativeSegments.slice(2, -1)]
+        const cacheKey = folderSegments.join("\u0000")
+        let targetFolderId = targetFolderCache.get(cacheKey)
+        if (!targetFolderId) {
+          targetFolderId = await ensureFolderPath(plan.drive, plan.rootFolderId, folderSegments)
+          targetFolderCache.set(cacheKey, targetFolderId)
+        }
+
+        await plan.drive.files.update({
+          fileId: file.id,
+          addParents: targetFolderId,
+          removeParents: file.parentId,
+          fields: "id,parents",
+          supportsAllDrives: true,
+        })
+        moved.push({ from: file.path, to: [...folderSegments, file.name].join("/") })
+      }
+
+      return NextResponse.json({
+        action,
+        moved: moved.length,
+        skipped: skipped.slice(0, 50),
+        movedSample: moved.slice(0, 50),
+        manualUploadsBefore: {
+          exists: manualUploads.exists,
+          files: manualUploads.files,
+          folders: manualUploads.folders,
+        },
+      })
     }
 
     if (action === "delete-empty-manual-uploads") {
