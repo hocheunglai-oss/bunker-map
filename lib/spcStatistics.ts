@@ -1,5 +1,6 @@
 import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
+import { normaliseSpcRole } from "@/lib/spcPages"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
@@ -81,7 +82,7 @@ export type SpcStatisticsPayload = {
   workload: SpcWorkloadRow[]
   buyerOfficeHitRate: SpcHitRateRow[]
   buyerTraderHitRate: SpcHitRateRow[]
-  supplierFixtureCount: SpcChartPoint[]
+  supplierTraderFixtureCount: SpcChartPoint[]
 }
 
 const fuelColumns: Array<{ key: FuelKey; label: string }> = [
@@ -91,6 +92,7 @@ const fuelColumns: Array<{ key: FuelKey; label: string }> = [
 ]
 
 const monthLabels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+const tableStatisticsStartAt = new Date("2026-07-07T12:00:00+08:00")
 const officeSuffixes: Record<string, string> = {
   GR: "GREECE",
   HK: "HONG KONG",
@@ -145,15 +147,23 @@ function yearEndDate(year: number) {
   return `${year}-12-31`
 }
 
-function daysInYearToDate(year: number) {
+function daysSinceTableStart(year: number) {
   const currentYear = hongKongYear()
-  const start = new Date(`${year}-01-01T00:00:00+08:00`)
+  const start = year === tableStatisticsStartAt.getFullYear()
+    ? tableStatisticsStartAt
+    : new Date(`${year}-01-01T00:00:00+08:00`)
   const today = hongKongDateParts()
   const end = year === currentYear
-    ? new Date(`${today.year}-${today.month}-${today.day}T00:00:00+08:00`)
-    : new Date(`${year}-12-31T00:00:00+08:00`)
+    ? new Date(`${today.year}-${today.month}-${today.day}T23:59:59+08:00`)
+    : new Date(`${year}-12-31T23:59:59+08:00`)
+  if (end.getTime() < start.getTime()) return 1
   const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
   return Math.max(days, 1)
+}
+
+function isTableRecord(value: string | null | undefined) {
+  const time = new Date(cleanText(value)).getTime()
+  return Number.isFinite(time) && time >= tableStatisticsStartAt.getTime()
 }
 
 function parseSelectedYear(value: number | string | null | undefined) {
@@ -377,17 +387,25 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   const selectedFixtures = fixtures.filter((fixture) => fixtureYear(fixture) === selectedYear)
   const nativeFixtures = selectedFixtures.filter((fixture) => !isImportedEnquiry(fixture.enquiry?.enquiry_number))
   const nativeEnquiries = enquiries.filter((enquiry) => !isImportedEnquiry(enquiry.enquiry_number))
+  const tableFixtures = nativeFixtures.filter((fixture) => isTableRecord(fixture.created_at))
+  const tableEnquiries = nativeEnquiries.filter((enquiry) => isTableRecord(enquiry.created_at))
   const currentMonthly = Array.from({ length: 12 }, () => 0)
   const lastMonthly = Array.from({ length: 12 }, () => 0)
   const volumeBySupplier = new Map<string, number>()
   const fixturesBySupplier = new Map<string, number>()
   const volumeByOffice = new Map<string, number>()
   const fixturesByOffice = new Map<string, number>()
-  const nativeSupplierFixtureCount = new Map<string, number>()
+  const supplierTraderFixtureCount = new Map<string, number>()
   const officeEnquiries = new Map<string, number>()
   const officeFixtures = new Map<string, number>()
   const traderEnquiries = new Map<string, number>()
   const traderFixtures = new Map<string, number>()
+
+  users
+    .filter((user) => normaliseSpcRole(user.role) === "SUPPLIER TRADER")
+    .forEach((user) => {
+      supplierTraderFixtureCount.set(traderLabel(usersByUsername, user.username, user.displayName), 0)
+    })
 
   fixtures.forEach((fixture) => {
     const year = fixtureYear(fixture)
@@ -409,15 +427,16 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     })
   })
 
-  nativeFixtures.forEach((fixture) => {
+  tableFixtures.forEach((fixture) => {
     const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     const trader = traderLabel(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name)
+    const supplierTrader = traderLabel(usersByUsername, fixture.supplier_trader_username, fixture.supplier_trader_display_name)
     addMetric(officeFixtures, office)
     addMetric(traderFixtures, trader)
-    fuelLines(fixture).forEach((line) => addMetric(nativeSupplierFixtureCount, line.supplier))
+    addMetric(supplierTraderFixtureCount, supplierTrader)
   })
 
-  nativeEnquiries.forEach((enquiry) => {
+  tableEnquiries.forEach((enquiry) => {
     const office = officeFor(usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
     const trader = traderLabel(usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
     addMetric(officeEnquiries, office)
@@ -439,8 +458,8 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     sourceCounts: {
       graphFixtures: selectedFixtures.length,
       importedFixtures: selectedFixtures.filter((fixture) => isImportedEnquiry(fixture.enquiry?.enquiry_number)).length,
-      nativeFixtures: nativeFixtures.length,
-      nativeEnquiries: nativeEnquiries.length,
+      nativeFixtures: tableFixtures.length,
+      nativeEnquiries: tableEnquiries.length,
     },
     monthlyVolume: monthLabels.map((month, index) => ({
       month,
@@ -452,13 +471,13 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     volumeByOffice: pointsFromMap(volumeByOffice),
     fixturesByOffice: pointsFromMap(fixturesByOffice),
     workload: [{
-      period: String(selectedYear),
-      enquiries: nativeEnquiries.length,
-      days: daysInYearToDate(selectedYear),
-      averagePerDay: Math.round((nativeEnquiries.length / daysInYearToDate(selectedYear)) * 100) / 100,
+      period: selectedYear === tableStatisticsStartAt.getFullYear() ? "FROM 07 JUL 2026" : String(selectedYear),
+      enquiries: tableEnquiries.length,
+      days: daysSinceTableStart(selectedYear),
+      averagePerDay: Math.round((tableEnquiries.length / daysSinceTableStart(selectedYear)) * 100) / 100,
     }],
     buyerOfficeHitRate: hitRateRows(officeEnquiries, officeFixtures),
     buyerTraderHitRate: hitRateRows(traderEnquiries, traderFixtures),
-    supplierFixtureCount: pointsFromMap(nativeSupplierFixtureCount),
+    supplierTraderFixtureCount: pointsFromMap(supplierTraderFixtureCount),
   }
 }

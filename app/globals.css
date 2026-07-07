@@ -3897,28 +3897,9 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-stat-toolbar {
   display: flex;
-  min-height: 48px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-}
-
-.spc-stat-toolbar h1 {
-  margin: 0;
-  color: #1d1d1f;
-  font-size: 18px;
-  font-weight: 850;
-  letter-spacing: 0;
-}
-
-.spc-stat-toolbar span {
-  display: block;
-  margin-top: 2px;
-  color: #6b7280;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
+  justify-content: flex-end;
+  padding: 0;
 }
 
 .spc-stat-controls {
@@ -4026,13 +4007,38 @@ body:has(.spc-statistics-page) .spc-main {
   border-bottom: 1px solid #d1d5db;
 }
 
-.spc-stat-month-bars i {
-  min-height: 2px;
+.spc-stat-month-bar {
+  height: 100%;
+  min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.spc-stat-month-value {
+  width: 100%;
+  min-height: 11px;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-stat-month-bars i {
+  width: 100%;
+  min-height: 2px;
+  flex: none;
   border-radius: 4px 4px 0 0;
 }
 
-.spc-stat-month span {
+.spc-stat-month-label {
   color: #6b7280;
   font-size: 10px;
   font-weight: 850;

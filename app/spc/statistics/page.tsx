@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
@@ -27,18 +27,6 @@ function formatNumber(value: number) {
 
 function formatPercent(value: number) {
   return `${formatNumber(value)}%`
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date).toUpperCase()
 }
 
 function maxPointValue(points: SpcChartPoint[]) {
@@ -87,30 +75,36 @@ function MonthlyVolumeChart({
     <section className="spc-panel spc-stat-card spc-stat-monthly-panel">
       <div className="spc-panel-header">
         <h2>GRAPH 1 · MONTHLY VOLUME</h2>
-        <span>{selectedYear} / {lastYear}</span>
+        <span>{lastYear} / {selectedYear}</span>
       </div>
       <div className="spc-stat-monthly-chart">
         {points.map((point) => (
           <div className="spc-stat-month" key={point.month}>
             <div className="spc-stat-month-bars">
-              <i
-                className="is-current"
-                title={`${selectedYear} ${point.month}: ${formatNumber(point.currentYearVolume)}`}
-                style={{ height: `${Math.max(2, (point.currentYearVolume / maxValue) * 100)}%` }}
-              />
-              <i
-                className="is-last"
-                title={`${lastYear} ${point.month}: ${formatNumber(point.lastYearVolume)}`}
-                style={{ height: `${Math.max(2, (point.lastYearVolume / maxValue) * 100)}%` }}
-              />
+              <div className="spc-stat-month-bar">
+                <span className="spc-stat-month-value">{formatNumber(point.lastYearVolume)}</span>
+                <i
+                  className="is-last"
+                  title={`${lastYear} ${point.month}: ${formatNumber(point.lastYearVolume)}`}
+                  style={{ height: `${Math.max(2, (point.lastYearVolume / maxValue) * 88)}%` }}
+                />
+              </div>
+              <div className="spc-stat-month-bar">
+                <span className="spc-stat-month-value">{formatNumber(point.currentYearVolume)}</span>
+                <i
+                  className="is-current"
+                  title={`${selectedYear} ${point.month}: ${formatNumber(point.currentYearVolume)}`}
+                  style={{ height: `${Math.max(2, (point.currentYearVolume / maxValue) * 88)}%` }}
+                />
+              </div>
             </div>
-            <span>{point.month}</span>
+            <span className="spc-stat-month-label">{point.month}</span>
           </div>
         ))}
       </div>
       <div className="spc-stat-legend">
-        <span><i className="is-current" />{selectedYear}</span>
         <span><i className="is-last" />{lastYear}</span>
+        <span><i className="is-current" />{selectedYear}</span>
       </div>
     </section>
   )
@@ -164,13 +158,13 @@ function HitRateTable({ title, rows }: { title: string; rows: SpcHitRateRow[] })
   )
 }
 
-function SupplierCountTable({ rows }: { rows: SpcChartPoint[] }) {
+function SupplierTraderCountTable({ rows }: { rows: SpcChartPoint[] }) {
   return (
     <section className="spc-panel spc-stat-table-panel">
-      <div className="spc-panel-header"><h2>TABLE 4 · FIXTURES BY SUPPLIER</h2></div>
+      <div className="spc-panel-header"><h2>TABLE 4 · FIXTURES BY SUPPLIER TRADER</h2></div>
       <div className="spc-table-wrap">
         <table className="spc-table spc-stat-table">
-          <thead><tr><th>SUPPLIER</th><th>FIXTURES</th></tr></thead>
+          <thead><tr><th>SUPPLIER TRADER</th><th>FIXTURES</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.label}>
@@ -189,17 +183,13 @@ function SupplierCountTable({ rows }: { rows: SpcChartPoint[] }) {
 export default function SpcStatisticsPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [year, setYear] = useState(hongKongYear)
+  const [year] = useState(hongKongYear)
   const [statistics, setStatistics] = useState<SpcStatisticsPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-statistics", "view")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-statistics")
-  const yearOptions = useMemo(() => {
-    const options = new Set([year, year - 1, ...(statistics?.yearOptions || [])])
-    return Array.from(options).sort((a, b) => b - a)
-  }, [statistics, year])
 
   const loadData = useCallback(async () => {
     if (!canView) return
@@ -237,40 +227,15 @@ export default function SpcStatisticsPage() {
   return (
     <SpcShell title="SPC STATISTICS">
       <div className="spc-statistics-page">
-        <section className="spc-panel spc-stat-toolbar-panel">
-          <div className="spc-stat-toolbar">
-            <div>
-              <h1>STATISTICS</h1>
-              <span>{formatDate(statistics?.generatedAt)}</span>
-            </div>
-            <div className="spc-stat-controls">
-              <select value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Statistics year">
-                {yearOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
-                {loading ? "REFRESHING..." : "REFRESH"}
-              </button>
-            </div>
+        <div className="spc-stat-toolbar">
+          <div className="spc-stat-controls">
+            <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+              {loading ? "REFRESHING..." : "REFRESH"}
+            </button>
           </div>
-        </section>
+        </div>
 
         {message ? <div className="spc-alert is-error">{message}</div> : null}
-
-        <section className="spc-stat-summary-grid" aria-label="Statistics source counts">
-          {[
-            ["GRAPH FIXTURES", statistics?.sourceCounts.graphFixtures || 0],
-            ["IMPORTED FIXTURES", statistics?.sourceCounts.importedFixtures || 0],
-            ["TABLE ENQUIRIES", statistics?.sourceCounts.nativeEnquiries || 0],
-            ["TABLE FIXTURES", statistics?.sourceCounts.nativeFixtures || 0],
-          ].map(([label, value]) => (
-            <article className="spc-panel" key={label}>
-              <span>{label}</span>
-              <strong>{formatNumber(Number(value))}</strong>
-            </article>
-          ))}
-        </section>
 
         <MonthlyVolumeChart
           points={statistics?.monthlyVolume || []}
@@ -289,7 +254,7 @@ export default function SpcStatisticsPage() {
           <WorkloadTable rows={statistics?.workload || []} />
           <HitRateTable title="TABLE 2 · BUYER OFFICE HIT RATE" rows={statistics?.buyerOfficeHitRate || []} />
           <HitRateTable title="TABLE 3 · BUYER TRADER HIT RATE" rows={statistics?.buyerTraderHitRate || []} />
-          <SupplierCountTable rows={statistics?.supplierFixtureCount || []} />
+          <SupplierTraderCountTable rows={statistics?.supplierTraderFixtureCount || []} />
         </div>
       </div>
     </SpcShell>
