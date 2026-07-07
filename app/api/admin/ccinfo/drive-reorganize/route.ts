@@ -245,14 +245,24 @@ async function fetchEntryFiles(supabase: ReturnType<typeof getSupabaseClient>) {
   return rows
 }
 
-async function summarizeManualUploads(drive: any, rootFolderId: string) {
+async function collectManualUploads(drive: any, rootFolderId: string) {
   const manualFolder = await findChildFolderByName(drive, rootFolderId, "Manual Uploads")
-  if (!manualFolder?.id) return { exists: false, folders: 0, files: 0, sample: [] as string[] }
+  if (!manualFolder?.id) {
+    return {
+      exists: false,
+      folders: 0,
+      files: 0,
+      sample: [] as string[],
+      id: null as string | null,
+      fileParentById: new Map<string, string>(),
+    }
+  }
 
   const queue = [manualFolder.id]
   let folders = 0
   let files = 0
   const sample: string[] = []
+  const fileParentById = new Map<string, string>()
   while (queue.length > 0) {
     const folderId = queue.shift()!
     const children = await listChildren(drive, folderId)
@@ -263,11 +273,23 @@ async function summarizeManualUploads(drive: any, rootFolderId: string) {
         queue.push(child.id)
       } else {
         files += 1
+        fileParentById.set(child.id, folderId)
       }
       if (sample.length < 50) sample.push(child.name)
     }
   }
-  return { exists: true, id: manualFolder.id, folders, files, sample }
+  return { exists: true, id: manualFolder.id, folders, files, sample, fileParentById }
+}
+
+async function summarizeManualUploads(drive: any, rootFolderId: string) {
+  const manualUploads = await collectManualUploads(drive, rootFolderId)
+  return {
+    exists: manualUploads.exists,
+    id: manualUploads.id,
+    folders: manualUploads.folders,
+    files: manualUploads.files,
+    sample: manualUploads.sample,
+  }
 }
 
 function summarizePlan(plan: Awaited<ReturnType<typeof buildPlan>>) {
@@ -359,38 +381,47 @@ export async function POST(request: Request) {
     if (action === "move-entry-files") {
       const supabase = getSupabaseClient()
       const rows = await fetchEntryFiles(supabase)
+      const manualUploads = await collectManualUploads(plan.drive, plan.rootFolderId)
+      const rowsStillInManualUploads = rows.filter((row) =>
+        Boolean(row.drive_file_id && manualUploads.fileParentById.has(row.drive_file_id)),
+      )
       const moved = []
-      let alreadyInPlace = 0
-      for (const row of rows) {
+      const targetFolderCache = new Map<string, string>()
+      for (const row of rowsStillInManualUploads) {
         if (moved.length >= limit) break
         if (!row.drive_file_id) continue
 
-        const context = await loadCcinfoDriveContext(
-          supabase,
-          row.entry_kind,
-          row.entry_id,
-          row.original_path?.split("/")?.[1] || row.entry_kind,
-          row.folder_path || "",
-        )
-        const targetFolderId = await ensureCcinfoDriveFolderPath(plan.drive, plan.rootFolderId, context, ensureFolder)
-        const current = await plan.drive.files.get({
-          fileId: row.drive_file_id,
-          fields: "parents",
-          supportsAllDrives: true,
-        })
-        const parents = current.data.parents || []
-        if (parents.length === 1 && parents[0] === targetFolderId) {
-          alreadyInPlace += 1
-          continue
+        const targetCacheKey = `${row.entry_kind}:${row.entry_id}:${row.folder_path || ""}`
+        let targetFolderId = targetFolderCache.get(targetCacheKey)
+        let context: Awaited<ReturnType<typeof loadCcinfoDriveContext>> | null = null
+        if (!targetFolderId) {
+          context = await loadCcinfoDriveContext(
+            supabase,
+            row.entry_kind,
+            row.entry_id,
+            row.original_path?.split("/")?.[1] || row.entry_kind,
+            row.folder_path || "",
+          )
+          targetFolderId = await ensureCcinfoDriveFolderPath(plan.drive, plan.rootFolderId, context, ensureFolder)
+          targetFolderCache.set(targetCacheKey, targetFolderId)
         }
 
         await plan.drive.files.update({
           fileId: row.drive_file_id,
-          addParents: parents.includes(targetFolderId) ? undefined : targetFolderId,
-          removeParents: parents.filter((parentId: string) => parentId !== targetFolderId).join(",") || undefined,
+          addParents: targetFolderId,
+          removeParents: manualUploads.fileParentById.get(row.drive_file_id),
           fields: "id,parents",
           supportsAllDrives: true,
         })
+        if (!context) {
+          context = await loadCcinfoDriveContext(
+            supabase,
+            row.entry_kind,
+            row.entry_id,
+            row.original_path?.split("/")?.[1] || row.entry_kind,
+            row.folder_path || "",
+          )
+        }
         moved.push({
           id: row.id,
           entry_kind: row.entry_kind,
@@ -402,7 +433,13 @@ export async function POST(request: Request) {
               : context.entryKind,
         })
       }
-      return NextResponse.json({ action, moved: moved.length, alreadyInPlace, movedSample: moved.slice(0, 20) })
+      return NextResponse.json({
+        action,
+        moved: moved.length,
+        remainingInManualUploads: Math.max(rowsStillInManualUploads.length - moved.length, 0),
+        manualUploadsFilesBefore: manualUploads.files,
+        movedSample: moved.slice(0, 20),
+      })
     }
 
     if (action === "manual-uploads-summary") {
@@ -412,6 +449,7 @@ export async function POST(request: Request) {
     if (action === "delete-empty-manual-uploads") {
       const manualUploads = await summarizeManualUploads(plan.drive, plan.rootFolderId)
       if (!manualUploads.exists) return NextResponse.json({ action, deleted: false, reason: "Manual Uploads does not exist." })
+      if (!manualUploads.id) return NextResponse.json({ action, deleted: false, reason: "Manual Uploads folder id was not available." }, { status: 409 })
       if (manualUploads.files > 0) {
         return NextResponse.json({ action, deleted: false, reason: "Manual Uploads still contains files.", manualUploads }, { status: 409 })
       }
