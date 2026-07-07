@@ -19,6 +19,16 @@ type SpcEnquiry = {
   meta: SpcEnquiryMeta
 }
 
+const lostRecordColumnWidths = [
+  126, // date
+  120, // buyer trader
+  260, // vessel
+  184, // ETA
+  170, // lost reason
+] as const
+
+const lostRecordTableWidth = lostRecordColumnWidths.reduce((total, width) => total + width, 0)
+
 function displayDate(value: string | null | undefined) {
   if (!value) return "-"
   const date = new Date(value)
@@ -27,7 +37,7 @@ function displayDate(value: string | null | undefined) {
     day: "2-digit",
     month: "short",
     year: "numeric",
-  }).format(date)
+  }).format(date).toUpperCase()
 }
 
 export default function SpcLostRecordPage() {
@@ -57,7 +67,7 @@ export default function SpcLostRecordPage() {
   }, [canView])
 
   useEffect(() => {
-    document.title = "SPC Lost Record"
+    document.title = "SPC LOST RECORD"
   }, [])
 
   useEffect(() => {
@@ -70,26 +80,24 @@ export default function SpcLostRecordPage() {
   }, [loadData])
 
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
-    return <div className="spc-loading">Loading...</div>
+    return <div className="spc-loading">LOADING...</div>
   }
 
   return (
-    <SpcShell title="SPC Lost Record">
-      <div className="spc-page-heading">
-        <div>
-          <h1>Lost Record</h1>
-          <p>{enquiries.length} lost enquiries</p>
+    <SpcShell title="SPC LOST RECORD">
+      <section className="spc-panel spc-fixture-ledger-panel spc-lost-record-ledger-panel">
+        <div className="spc-fixture-ledger-toolbar">
+          <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+            {loading ? "REFRESHING..." : "REFRESH"}
+          </button>
         </div>
-        <button type="button" className="spc-page-action" onClick={() => void loadData()} disabled={loading}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
-      {message ? <div className="spc-alert is-error">{message}</div> : null}
-
-      <section className="spc-panel">
         <div className="spc-table-wrap">
-          <table className="spc-table">
+          <table className="spc-table spc-fixture-table spc-lost-record-table" style={{ width: lostRecordTableWidth, minWidth: lostRecordTableWidth }}>
+            <colgroup>
+              {lostRecordColumnWidths.map((width, index) => (
+                <col key={`${width}-${index}`} style={{ width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 <th>DATE</th>
@@ -100,6 +108,14 @@ export default function SpcLostRecordPage() {
               </tr>
             </thead>
             <tbody>
+              <tr className="spc-fixture-section-row">
+                <td colSpan={5}>LOST RECORD</td>
+              </tr>
+              {message ? (
+                <tr className="spc-fixture-status-row is-error">
+                  <td colSpan={5}>{message.toUpperCase()}</td>
+                </tr>
+              ) : null}
               {enquiries.map((enquiry) => (
                 <tr key={enquiry.id}>
                   <td>{displayDate(enquiry.meta?.outcomeAt || enquiry.updatedAt || enquiry.createdAt)}</td>
@@ -110,7 +126,7 @@ export default function SpcLostRecordPage() {
                 </tr>
               ))}
               {!loading && enquiries.length === 0 ? (
-                <tr><td colSpan={5}>No lost enquiries yet.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={5}>No lost enquiries yet.</td></tr>
               ) : null}
             </tbody>
           </table>

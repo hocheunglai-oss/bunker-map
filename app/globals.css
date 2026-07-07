@@ -3323,7 +3323,8 @@ body {
 }
 
 .spc-dialog-actions button:disabled,
-.spc-fixture-table button:disabled {
+.spc-fixture-table button:disabled,
+.spc-fixture-external-actions button:disabled {
   cursor: default;
   opacity: 0.55;
 }
@@ -3499,6 +3500,41 @@ body {
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
+.spc-fixture-ledger-toolbar {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+  padding: 5px 8px;
+}
+
+.spc-fixture-refresh-button {
+  min-height: 26px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #1d1d1f;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 14px;
+  padding: 0 12px;
+  text-transform: uppercase;
+}
+
+.spc-fixture-refresh-button:hover {
+  border-color: #0071e3;
+  color: #0057b8;
+}
+
+.spc-fixture-refresh-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 body:has(.spc-fixture-ledger-panel) .spc-main {
   width: min(1760px, 100%);
   padding: 6px 18px 18px;
@@ -3507,16 +3543,19 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-fixture-ledger-panel .spc-table-wrap {
   width: fit-content;
   max-width: 100%;
-  max-height: calc(100vh - 88px);
+  max-height: calc(100vh - 126px);
   overflow: auto;
   background: #ffffff;
-  border-radius: 10px;
+  position: relative;
+}
+
+.spc-fixture-ledger-canvas {
   position: relative;
 }
 
 .spc-table.spc-fixture-table {
-  width: 1428px;
-  min-width: 1428px;
+  width: auto;
+  min-width: 0;
   border: 1px solid #e5e7eb;
   table-layout: fixed;
   border-collapse: collapse;
@@ -3587,39 +3626,6 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-table.spc-fixture-table tr.is-pending.is-editing td {
-  background: #fff0b8;
-}
-
-.spc-table.spc-fixture-table th.spc-fixture-actions-head,
-.spc-table.spc-fixture-table td.spc-fixture-actions-cell {
-  position: sticky;
-  right: 0;
-  z-index: 10;
-  overflow: visible;
-  padding: 0 6px;
-  background-clip: padding-box;
-  box-shadow: -1px 0 0 #e5e7eb;
-}
-
-.spc-table.spc-fixture-table th.spc-fixture-actions-head {
-  z-index: 18;
-}
-
-.spc-table.spc-fixture-table td.spc-fixture-actions-cell {
-  background: #ffffff;
-}
-
-.spc-table.spc-fixture-table tr.is-pending td.spc-fixture-actions-cell {
-  background: #fff6c7;
-}
-
-.spc-table.spc-fixture-table tr.is-editing td.spc-fixture-actions-cell,
-.spc-table.spc-fixture-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-status-row):not(.spc-fixture-empty-row):hover td.spc-fixture-actions-cell {
-  background: #e8f1ff;
-}
-
-.spc-table.spc-fixture-table tbody tr.is-pending:hover td.spc-fixture-actions-cell,
-.spc-table.spc-fixture-table tr.is-pending.is-editing td.spc-fixture-actions-cell {
   background: #fff0b8;
 }
 
@@ -3823,7 +3829,18 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   white-space: nowrap;
 }
 
-.spc-table.spc-fixture-table button {
+.spc-fixture-external-actions {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+
+.spc-table.spc-fixture-table button,
+.spc-fixture-external-actions button {
   min-height: 22px;
   min-width: 50px;
   border-radius: 999px;
@@ -3835,18 +3852,21 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-complete-button {
+.spc-table.spc-fixture-table button.spc-fixture-complete-button,
+.spc-fixture-external-actions button.spc-fixture-complete-button {
   min-width: 76px;
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-save-button {
+.spc-table.spc-fixture-table button.spc-fixture-save-button,
+.spc-fixture-external-actions button.spc-fixture-save-button {
   min-width: 56px;
   border-color: #0071e3;
   background: #0071e3;
   color: #ffffff;
 }
 
-.spc-table.spc-fixture-table button.spc-fixture-delete-button {
+.spc-table.spc-fixture-table button.spc-fixture-delete-button,
+.spc-fixture-external-actions button.spc-fixture-delete-button {
   border-color: #d92d20;
   background: #fff5f5;
   color: #b42318;

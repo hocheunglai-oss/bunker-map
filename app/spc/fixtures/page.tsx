@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
@@ -110,9 +110,11 @@ const fixtureColumnWidths = [
   74, // barging
 ] as const
 
-const fixtureActionColumnWidth = 118
-const fixtureColumnSpan = fixtureColumnWidths.length + 1
-const fixtureTableWidth = fixtureColumnWidths.reduce((total, width) => total + width, fixtureActionColumnWidth)
+const fixtureColumnSpan = fixtureColumnWidths.length
+const fixtureTableWidth = fixtureColumnWidths.reduce((total, width) => total + width, 0)
+const fixtureActionRailGap = 8
+const fixtureActionRailWidth = 118
+const fixtureLedgerCanvasWidth = fixtureTableWidth + fixtureActionRailGap + fixtureActionRailWidth
 
 const fuelColumns: Array<{ key: FuelKey; label: string }> = [
   { key: "hsfo", label: "HSFO" },
@@ -452,12 +454,14 @@ export default function SpcFixturesPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, username, permissions } = useSpcAuth()
   const fixtureTableRef = useRef<HTMLDivElement | null>(null)
+  const fixtureCanvasRef = useRef<HTMLDivElement | null>(null)
   const initialPeriod = useMemo(() => hongKongYearMonth(), [])
   const [fixtures, setFixtures] = useState<SpcFixture[]>([])
   const [users, setUsers] = useState<SpcUserOption[]>([])
   const [supplierRecords, setSupplierRecords] = useState<SupplierRecord[]>([])
   const [drafts, setDrafts] = useState<Record<string, FixtureDraft>>({})
   const [editingId, setEditingId] = useState("")
+  const [actionPositions, setActionPositions] = useState<Record<string, number>>({})
   const [supplierMenuKey, setSupplierMenuKey] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
   const [fixtureMonthFilter, setFixtureMonthFilter] = useState(initialPeriod.month)
@@ -581,6 +585,67 @@ export default function SpcFixturesPage() {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  const floatingActionRows = useMemo(() => {
+    const rows: Array<{
+      key: string
+      fixture: SpcFixture
+      editing: boolean
+      missing: string[]
+    }> = []
+    pendingFixtures.forEach((fixture) => {
+      if (!canEditFixture(fixture, "pending")) return
+      const draft = drafts[fixture.id] || draftFromFixture(fixture)
+      const missing = prepareDraftForSubmit(draft, true).errors
+      fuelRows(draft).forEach((fuelRow) => {
+        rows.push({
+          key: `${fixture.id}:${fuelRow.key || "all"}`,
+          fixture,
+          editing: true,
+          missing,
+        })
+      })
+    })
+    if (editingId) {
+      const fixtureId = editingId.split(":")[0] || editingId
+      const fixture = filteredCompletedFixtures.find((row) => row.id === fixtureId)
+      if (fixture && canEditFixture(fixture, "completed")) {
+        rows.push({
+          key: editingId,
+          fixture,
+          editing: true,
+          missing: [],
+        })
+      }
+    }
+    return rows
+  }, [drafts, editingId, filteredCompletedFixtures, pendingFixtures, username, canEdit, officeOptions])
+
+  useLayoutEffect(() => {
+    function measureActions() {
+      const canvas = fixtureCanvasRef.current
+      if (!canvas) return
+      const canvasRect = canvas.getBoundingClientRect()
+      const next: Record<string, number> = {}
+      floatingActionRows.forEach((row) => {
+        const escapedKey = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(row.key) : row.key.replace(/"/g, '\\"')
+        const node = canvas.querySelector(`[data-fixture-action-key="${escapedKey}"]`)
+        if (!(node instanceof HTMLElement)) return
+        const rect = node.getBoundingClientRect()
+        next[row.key] = rect.top - canvasRect.top + rect.height / 2
+      })
+      setActionPositions(next)
+    }
+    measureActions()
+    const animationFrame = window.requestAnimationFrame(measureActions)
+    window.addEventListener("resize", measureActions)
+    window.addEventListener("scroll", measureActions, true)
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      window.removeEventListener("resize", measureActions)
+      window.removeEventListener("scroll", measureActions, true)
+    }
+  }, [floatingActionRows])
 
   useEffect(() => {
     if (!editingId) return
@@ -969,8 +1034,7 @@ export default function SpcFixturesPage() {
     return gradeNumberDisplay(draft[field], key)
   }
 
-  function rowActionCell(fixture: SpcFixture, editing: boolean, rowCanEdit: boolean, missing: string[]) {
-    if (!rowCanEdit) return null
+  function rowActionButtons(fixture: SpcFixture, editing: boolean, missing: string[]) {
     if (fixture.fixtureStatus === "pending") {
       return (
         <button
@@ -1022,6 +1086,7 @@ export default function SpcFixturesPage() {
           <tr
             key={rowKey}
             className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
+            data-fixture-action-key={rowCanEdit && (fixture.fixtureStatus === "pending" || editing) ? rowKey : undefined}
             onDoubleClick={() => {
               if (rowCanEdit && mode === "completed") {
                 setSupplierMenuKey("")
@@ -1045,7 +1110,6 @@ export default function SpcFixturesPage() {
             <td>{gradeSupplierCell(fixture, draft, fuelRow.key, editing)}</td>
             <td>{gradeNumberCell(fixture, draft, "price", fuelRow.key, editing)}</td>
             <td>{gradeNumberCell(fixture, draft, "barging", fuelRow.key, editing)}</td>
-            <td className="spc-fixture-actions-cell">{rowActionCell(fixture, editing, rowCanEdit, missing)}</td>
           </tr>
         )
       })
@@ -1059,13 +1123,22 @@ export default function SpcFixturesPage() {
   return (
     <SpcShell title="SPC FIXTURES">
       <section className="spc-panel spc-fixture-ledger-panel">
+        <div className="spc-fixture-ledger-toolbar">
+          <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+            {loading ? "REFRESHING..." : "REFRESH"}
+          </button>
+        </div>
         <div className="spc-table-wrap" ref={fixtureTableRef}>
+          <div
+            className="spc-fixture-ledger-canvas"
+            ref={fixtureCanvasRef}
+            style={{ width: fixtureLedgerCanvasWidth, minWidth: fixtureLedgerCanvasWidth }}
+          >
           <table className="spc-table spc-fixture-table" style={{ width: fixtureTableWidth, minWidth: fixtureTableWidth }}>
             <colgroup>
               {fixtureColumnWidths.map((width, index) => (
                 <col key={`${width}-${index}`} style={{ width }} />
               ))}
-              <col style={{ width: fixtureActionColumnWidth }} />
             </colgroup>
             <thead>
               <tr>
@@ -1081,7 +1154,6 @@ export default function SpcFixturesPage() {
                 <th>SUPPLIER</th>
                 <th>PRICE</th>
                 <th>BARGING</th>
-                <th className="spc-fixture-actions-head" aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
@@ -1132,6 +1204,21 @@ export default function SpcFixturesPage() {
               ) : null}
             </tbody>
           </table>
+          {floatingActionRows.map((row) => (
+            <div
+              key={row.key}
+              className="spc-fixture-external-actions"
+              data-fixture-action-panel={row.key}
+              style={{
+                top: actionPositions[row.key] ?? -1000,
+                left: fixtureTableWidth + fixtureActionRailGap,
+                width: fixtureActionRailWidth,
+              }}
+            >
+              {rowActionButtons(row.fixture, row.editing, row.missing)}
+            </div>
+          ))}
+          </div>
         </div>
       </section>
     </SpcShell>
