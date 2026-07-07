@@ -9,6 +9,11 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import {
+  buildCcinfoLogicalOriginalPath,
+  ensureCcinfoDriveFolderPath,
+  loadCcinfoDriveContext,
+} from "@/lib/ccinfoDrivePaths"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -162,17 +167,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
-    const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
-    const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
-    let targetFolderId = entryFolderId
-
-    if (folderPath) {
-      const segments = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean)
-      for (const segment of segments) {
-        targetFolderId = await ensureFolder(drive, targetFolderId, segment)
-      }
-    }
+    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+    const targetFolderId = await ensureCcinfoDriveFolderPath(drive, rootFolderId, driveContext, ensureFolder)
 
     tempPath = path.join(os.tmpdir(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
     const bytes = Buffer.from(await uploadFile.arrayBuffer())
@@ -209,7 +205,7 @@ export async function POST(request: Request) {
           drive_file_id: fileId,
           drive_url: url,
           deleted_at: null,
-          original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${uploadFile.name}`,
+          original_path: buildCcinfoLogicalOriginalPath(entryKind, driveContext.entryName, folderPath, uploadFile.name),
         },
         {
           onConflict: "entry_kind,entry_id,original_path",

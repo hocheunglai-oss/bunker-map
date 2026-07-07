@@ -8,6 +8,11 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import {
+  buildCcinfoLogicalOriginalPath,
+  ensureCcinfoDriveFolderPath,
+  loadCcinfoDriveContext,
+} from "@/lib/ccinfoDrivePaths"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -98,18 +103,6 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
   return created.data.id
 }
 
-async function ensureEntryFolderPath(drive: any, rootFolderId: string, entryKind: string, entryName: string, folderPath: string) {
-  const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
-  const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
-  const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
-  let targetFolderId = entryFolderId
-  const segments = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean)
-  for (const segment of segments) {
-    targetFolderId = await ensureFolder(drive, targetFolderId, segment)
-  }
-  return targetFolderId
-}
-
 function messageFromError(error: unknown) {
   const message =
     error instanceof Error
@@ -164,7 +157,11 @@ function getReceivedByteCount(rangeHeader: string | null, fallback: number) {
 
 export async function POST(request: Request) {
   try {
-    await requireAdminPagePermission("ccinfo", "view")
+    const session = await requireAdminPagePermission("ccinfo", "view")
+    const supabase = createAdminAuditedSupabaseClient(
+      createAdminAuditContext(session, request, "ccinfo"),
+      { useServiceRole: true },
+    )
     const body = await request.json()
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
@@ -186,7 +183,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, entryKind, entryName, folderPath)
+    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+    const targetFolderId = await ensureCcinfoDriveFolderPath(drive, rootFolderId, driveContext, ensureFolder)
     const accessTokenResponse = await auth.getAccessToken()
     const accessToken = typeof accessTokenResponse === "string" ? accessTokenResponse : accessTokenResponse?.token
     if (!accessToken) throw new Error("Unable to authorize Google Drive upload session.")
@@ -322,6 +320,7 @@ export async function PATCH(request: Request) {
       fields: "id,name,webViewLink,webContentLink",
       supportsAllDrives: true,
     })
+    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
     const sharingWarning = await makeDriveFilePublic(drive, driveFileId)
     const url = driveFile.data.webViewLink || driveFile.data.webContentLink || `https://drive.google.com/file/d/${driveFileId}/view`
 
@@ -337,7 +336,7 @@ export async function PATCH(request: Request) {
           drive_file_id: driveFileId,
           drive_url: url,
           deleted_at: null,
-          original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${fileName}`,
+          original_path: buildCcinfoLogicalOriginalPath(entryKind, driveContext.entryName, folderPath, fileName),
         },
         {
           onConflict: "entry_kind,entry_id,original_path",

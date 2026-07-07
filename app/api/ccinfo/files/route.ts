@@ -7,6 +7,10 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import {
+  ensureCcinfoDriveFolderPath,
+  loadCcinfoDriveContext,
+} from "@/lib/ccinfoDrivePaths"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -62,16 +66,17 @@ async function ensureFolder(drive: any, parentId: string, name: string) {
   return created.data.id
 }
 
-async function ensureEntryFolderPath(drive: any, rootFolderId: string, entryKind: string, entryName: string, folderPath: string) {
-  const uploadsFolderId = await ensureFolder(drive, rootFolderId, "Manual Uploads")
-  const kindFolderId = await ensureFolder(drive, uploadsFolderId, entryKind)
-  const entryFolderId = await ensureFolder(drive, kindFolderId, entryName)
-  let targetFolderId = entryFolderId
-  const segments = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean)
-  for (const segment of segments) {
-    targetFolderId = await ensureFolder(drive, targetFolderId, segment)
-  }
-  return targetFolderId
+async function ensureEntryFolderPath(
+  drive: any,
+  rootFolderId: string,
+  supabase: ReturnType<typeof createAdminAuditedSupabaseClient>,
+  entryKind: string,
+  entryId: string,
+  entryName: string,
+  folderPath: string,
+) {
+  const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+  return ensureCcinfoDriveFolderPath(drive, rootFolderId, driveContext, ensureFolder)
 }
 
 function messageFromError(error: unknown) {
@@ -605,7 +610,7 @@ export async function PATCH(request: Request) {
     const { drive, rootFolderId } = await getDriveClient()
     if (!rootFolderId) throw new Error("Google Drive folder is not configured. Add GOOGLE_DRIVE_COMPANY_FOLDER_ID in Vercel.")
 
-    const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, entryKind, entryName, folderPath)
+    const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, supabase, entryKind, entryId, entryName, folderPath)
     const current = await drive.files.get({
       fileId: fileRow.drive_file_id,
       fields: "parents",
