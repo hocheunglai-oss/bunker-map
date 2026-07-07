@@ -3974,7 +3974,8 @@ body:has(.spc-statistics-page) .spc-main {
   letter-spacing: 0;
 }
 
-.spc-stat-card .spc-panel-header span {
+.spc-stat-card .spc-panel-header span,
+.spc-stat-table-panel .spc-panel-header span {
   color: #6b7280;
   font-size: 10px;
   font-weight: 850;

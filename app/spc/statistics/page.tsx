@@ -110,10 +110,10 @@ function MonthlyVolumeChart({
   )
 }
 
-function WorkloadTable({ rows }: { rows: SpcWorkloadRow[] }) {
+function WorkloadTable({ rows, windowLabel }: { rows: SpcWorkloadRow[]; windowLabel: string }) {
   return (
     <section className="spc-panel spc-stat-table-panel">
-      <div className="spc-panel-header"><h2>TABLE 1 · SPC WORKLOAD</h2></div>
+      <div className="spc-panel-header"><h2>TABLE 1 · SPC WORKLOAD</h2><span>{windowLabel}</span></div>
       <div className="spc-table-wrap">
         <table className="spc-table spc-stat-table">
           <thead><tr><th>PERIOD</th><th>ENQUIRIES</th><th>DAYS</th><th>AVG / DAY</th></tr></thead>
@@ -134,10 +134,10 @@ function WorkloadTable({ rows }: { rows: SpcWorkloadRow[] }) {
   )
 }
 
-function HitRateTable({ title, rows }: { title: string; rows: SpcHitRateRow[] }) {
+function HitRateTable({ title, rows, windowLabel }: { title: string; rows: SpcHitRateRow[]; windowLabel: string }) {
   return (
     <section className="spc-panel spc-stat-table-panel">
-      <div className="spc-panel-header"><h2>{title}</h2></div>
+      <div className="spc-panel-header"><h2>{title}</h2><span>{windowLabel}</span></div>
       <div className="spc-table-wrap">
         <table className="spc-table spc-stat-table">
           <thead><tr><th>NAME</th><th>ENQUIRIES</th><th>FIXTURES</th><th>HIT RATE</th></tr></thead>
@@ -158,10 +158,10 @@ function HitRateTable({ title, rows }: { title: string; rows: SpcHitRateRow[] })
   )
 }
 
-function SupplierTraderCountTable({ rows }: { rows: SpcChartPoint[] }) {
+function SupplierTraderCountTable({ rows, windowLabel }: { rows: SpcChartPoint[]; windowLabel: string }) {
   return (
     <section className="spc-panel spc-stat-table-panel">
-      <div className="spc-panel-header"><h2>TABLE 4 · FIXTURES BY SUPPLIER TRADER</h2></div>
+      <div className="spc-panel-header"><h2>TABLE 4 · FIXTURES BY SUPPLIER TRADER</h2><span>{windowLabel}</span></div>
       <div className="spc-table-wrap">
         <table className="spc-table spc-stat-table">
           <thead><tr><th>SUPPLIER TRADER</th><th>FIXTURES</th></tr></thead>
@@ -224,6 +224,8 @@ export default function SpcStatisticsPage() {
     return <div className="spc-loading">LOADING...</div>
   }
 
+  const windowLabel = statistics?.windowLabel || "LAST 90 DAYS"
+
   return (
     <SpcShell title="SPC STATISTICS">
       <div className="spc-statistics-page">
@@ -244,17 +246,17 @@ export default function SpcStatisticsPage() {
         />
 
         <div className="spc-stat-chart-grid">
-          <HorizontalBarChart title="GRAPH 2 · VOLUME BY SUPPLIER" points={statistics?.volumeBySupplier || []} valueLabel="MTS" />
-          <HorizontalBarChart title="GRAPH 3 · FIXTURES BY SUPPLIER" points={statistics?.fixturesBySupplier || []} valueLabel="COUNT" />
-          <HorizontalBarChart title="GRAPH 4 · VOLUME BY OFFICE" points={statistics?.volumeByOffice || []} valueLabel="MTS" />
-          <HorizontalBarChart title="GRAPH 5 · FIXTURES BY OFFICE" points={statistics?.fixturesByOffice || []} valueLabel="COUNT" />
+          <HorizontalBarChart title="GRAPH 2 · VOLUME BY SUPPLIER" points={statistics?.volumeBySupplier || []} valueLabel={`${windowLabel} · MTS`} />
+          <HorizontalBarChart title="GRAPH 3 · FIXTURES BY SUPPLIER" points={statistics?.fixturesBySupplier || []} valueLabel={`${windowLabel} · COUNT`} />
+          <HorizontalBarChart title="GRAPH 4 · VOLUME BY OFFICE" points={statistics?.volumeByOffice || []} valueLabel={`${windowLabel} · MTS`} />
+          <HorizontalBarChart title="GRAPH 5 · FIXTURES BY OFFICE" points={statistics?.fixturesByOffice || []} valueLabel={`${windowLabel} · COUNT`} />
         </div>
 
         <div className="spc-stat-table-grid">
-          <WorkloadTable rows={statistics?.workload || []} />
-          <HitRateTable title="TABLE 2 · BUYER OFFICE HIT RATE" rows={statistics?.buyerOfficeHitRate || []} />
-          <HitRateTable title="TABLE 3 · BUYER TRADER HIT RATE" rows={statistics?.buyerTraderHitRate || []} />
-          <SupplierTraderCountTable rows={statistics?.supplierTraderFixtureCount || []} />
+          <WorkloadTable rows={statistics?.workload || []} windowLabel={windowLabel} />
+          <HitRateTable title="TABLE 2 · BUYER OFFICE HIT RATE" rows={statistics?.buyerOfficeHitRate || []} windowLabel={windowLabel} />
+          <HitRateTable title="TABLE 3 · BUYER TRADER HIT RATE" rows={statistics?.buyerTraderHitRate || []} windowLabel={windowLabel} />
+          <SupplierTraderCountTable rows={statistics?.supplierTraderFixtureCount || []} windowLabel={windowLabel} />
         </div>
       </div>
     </SpcShell>

@@ -67,6 +67,9 @@ export type SpcStatisticsPayload = {
   generatedAt: string
   selectedYear: number
   lastYear: number
+  windowLabel: string
+  windowStartDate: string
+  windowEndDate: string
   yearOptions: number[]
   sourceCounts: {
     graphFixtures: number
@@ -92,7 +95,8 @@ const fuelColumns: Array<{ key: FuelKey; label: string }> = [
 ]
 
 const monthLabels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-const tableStatisticsStartAt = new Date("2026-07-07T12:00:00+08:00")
+const statisticsWindowDays = 90
+const millisecondsPerDay = 86400000
 const officeSuffixes: Record<string, string> = {
   GR: "GREECE",
   HK: "HONG KONG",
@@ -124,10 +128,6 @@ function hongKongYear() {
   return Number(value) || new Date().getFullYear()
 }
 
-function hkYearStartUtc(year: number) {
-  return new Date(`${year}-01-01T00:00:00+08:00`).toISOString()
-}
-
 function hongKongDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Hong_Kong",
@@ -143,27 +143,42 @@ function hongKongDateParts(date = new Date()) {
   }
 }
 
+function hongKongDateString(date = new Date()) {
+  const parts = hongKongDateParts(date)
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 function yearEndDate(year: number) {
   return `${year}-12-31`
 }
 
-function daysSinceTableStart(year: number) {
-  const currentYear = hongKongYear()
-  const start = year === tableStatisticsStartAt.getFullYear()
-    ? tableStatisticsStartAt
-    : new Date(`${year}-01-01T00:00:00+08:00`)
-  const today = hongKongDateParts()
-  const end = year === currentYear
-    ? new Date(`${today.year}-${today.month}-${today.day}T23:59:59+08:00`)
-    : new Date(`${year}-12-31T23:59:59+08:00`)
-  if (end.getTime() < start.getTime()) return 1
-  const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
-  return Math.max(days, 1)
+function last90DayWindow() {
+  const endDate = hongKongDateString()
+  const end = new Date(`${endDate}T23:59:59+08:00`)
+  const start = new Date(end.getTime() - (statisticsWindowDays - 1) * millisecondsPerDay)
+  const startDate = hongKongDateString(start)
+  const startIso = new Date(`${startDate}T00:00:00+08:00`).toISOString()
+  const endIso = end.toISOString()
+  return {
+    label: "LAST 90 DAYS",
+    startDate,
+    endDate,
+    startIso,
+    endIso,
+    startTime: new Date(startIso).getTime(),
+    endTime: new Date(endIso).getTime(),
+    days: statisticsWindowDays,
+  }
 }
 
-function isTableRecord(value: string | null | undefined) {
+function isFixtureDateInWindow(value: string | null | undefined, startDate: string, endDate: string) {
+  const date = cleanText(value).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= startDate && date <= endDate
+}
+
+function isCreatedInWindow(value: string | null | undefined, startTime: number, endTime: number) {
   const time = new Date(cleanText(value)).getTime()
-  return Number.isFinite(time) && time >= tableStatisticsStartAt.getTime()
+  return Number.isFinite(time) && time >= startTime && time <= endTime
 }
 
 function parseSelectedYear(value: number | string | null | undefined) {
@@ -359,13 +374,14 @@ async function loadFixtures(
 
 async function loadEnquiries(
   supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
-  year: number,
+  startIso: string,
+  endIso: string,
 ) {
   const { data, error } = await supabase
     .from("spc_enquiries")
     .select("id,enquiry_number,title,created_by_username,created_by_display_name,created_at")
-    .gte("created_at", hkYearStartUtc(year))
-    .lt("created_at", hkYearStartUtc(year + 1))
+    .gte("created_at", startIso)
+    .lte("created_at", endIso)
     .order("created_at", { ascending: true })
     .range(0, 4999)
 
@@ -376,19 +392,31 @@ async function loadEnquiries(
 export async function loadSpcStatistics(session: SpcSession, yearInput?: number | string | null): Promise<SpcStatisticsPayload> {
   const selectedYear = parseSelectedYear(yearInput)
   const lastYear = selectedYear - 1
+  const statisticsWindow = last90DayWindow()
+  const windowStartYear = Number(statisticsWindow.startDate.slice(0, 4))
+  const windowEndYear = Number(statisticsWindow.endDate.slice(0, 4))
+  const firstFixtureYear = Math.min(lastYear, windowStartYear)
+  const lastFixtureYear = Math.max(selectedYear, windowEndYear)
   const context = createSpcAuditContext(session, undefined, "spc-statistics")
   const supabase = createSpcAuditedSupabaseClient(context)
   const [fixtures, enquiries, users] = await Promise.all([
-    loadFixtures(supabase, lastYear, selectedYear),
-    loadEnquiries(supabase, selectedYear),
+    loadFixtures(supabase, firstFixtureYear, lastFixtureYear),
+    loadEnquiries(supabase, statisticsWindow.startIso, statisticsWindow.endIso),
     listActiveSpcUserOptions(),
   ])
   const usersByUsername = userMap(users)
   const selectedFixtures = fixtures.filter((fixture) => fixtureYear(fixture) === selectedYear)
-  const nativeFixtures = selectedFixtures.filter((fixture) => !isImportedEnquiry(fixture.enquiry?.enquiry_number))
   const nativeEnquiries = enquiries.filter((enquiry) => !isImportedEnquiry(enquiry.enquiry_number))
-  const tableFixtures = nativeFixtures.filter((fixture) => isTableRecord(fixture.created_at))
-  const tableEnquiries = nativeEnquiries.filter((enquiry) => isTableRecord(enquiry.created_at))
+  const graphWindowFixtures = fixtures.filter((fixture) => (
+    isFixtureDateInWindow(fixture.fixture_date, statisticsWindow.startDate, statisticsWindow.endDate)
+  ))
+  const tableFixtures = fixtures.filter((fixture) => (
+    !isImportedEnquiry(fixture.enquiry?.enquiry_number)
+    && isCreatedInWindow(fixture.created_at, statisticsWindow.startTime, statisticsWindow.endTime)
+  ))
+  const tableEnquiries = nativeEnquiries.filter((enquiry) => (
+    isCreatedInWindow(enquiry.created_at, statisticsWindow.startTime, statisticsWindow.endTime)
+  ))
   const currentMonthly = Array.from({ length: 12 }, () => 0)
   const lastMonthly = Array.from({ length: 12 }, () => 0)
   const volumeBySupplier = new Map<string, number>()
@@ -417,7 +445,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     if (year === lastYear) lastMonthly[monthIndex] += totalVolume
   })
 
-  selectedFixtures.forEach((fixture) => {
+  graphWindowFixtures.forEach((fixture) => {
     const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     fuelLines(fixture).forEach((line) => {
       addMetric(volumeBySupplier, line.supplier, line.volume)
@@ -454,10 +482,13 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     generatedAt: new Date().toISOString(),
     selectedYear,
     lastYear,
+    windowLabel: statisticsWindow.label,
+    windowStartDate: statisticsWindow.startDate,
+    windowEndDate: statisticsWindow.endDate,
     yearOptions,
     sourceCounts: {
-      graphFixtures: selectedFixtures.length,
-      importedFixtures: selectedFixtures.filter((fixture) => isImportedEnquiry(fixture.enquiry?.enquiry_number)).length,
+      graphFixtures: graphWindowFixtures.length,
+      importedFixtures: graphWindowFixtures.filter((fixture) => isImportedEnquiry(fixture.enquiry?.enquiry_number)).length,
       nativeFixtures: tableFixtures.length,
       nativeEnquiries: tableEnquiries.length,
     },
@@ -471,10 +502,10 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     volumeByOffice: pointsFromMap(volumeByOffice),
     fixturesByOffice: pointsFromMap(fixturesByOffice),
     workload: [{
-      period: selectedYear === tableStatisticsStartAt.getFullYear() ? "FROM 07 JUL 2026" : String(selectedYear),
+      period: statisticsWindow.label,
       enquiries: tableEnquiries.length,
-      days: daysSinceTableStart(selectedYear),
-      averagePerDay: Math.round((tableEnquiries.length / daysSinceTableStart(selectedYear)) * 100) / 100,
+      days: statisticsWindow.days,
+      averagePerDay: Math.round((tableEnquiries.length / statisticsWindow.days) * 100) / 100,
     }],
     buyerOfficeHitRate: hitRateRows(officeEnquiries, officeFixtures),
     buyerTraderHitRate: hitRateRows(traderEnquiries, traderFixtures),
