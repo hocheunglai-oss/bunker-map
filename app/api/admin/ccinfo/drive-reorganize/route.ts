@@ -2,6 +2,10 @@ import { createClient } from "@supabase/supabase-js"
 import { google } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import {
+  ensureCcinfoDriveFolderPath,
+  loadCcinfoDriveContext,
+} from "@/lib/ccinfoDrivePaths"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -23,6 +27,16 @@ type DriveFolder = {
   id: string
   name: string
   parents?: string[]
+}
+
+type EntryFile = {
+  id: string
+  entry_kind: string
+  entry_id: string
+  folder_path: string | null
+  file_name: string | null
+  drive_file_id: string | null
+  original_path: string | null
 }
 
 function requireEnv(name: string) {
@@ -127,6 +141,24 @@ async function listChildFolders(drive: any, parentId: string) {
   return folders.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+async function listChildren(drive: any, parentId: string) {
+  const children: { id: string; name: string; mimeType: string }[] = []
+  let pageToken: string | undefined
+  do {
+    const response = await drive.files.list({
+      q: `trashed = false and '${parentId}' in parents`,
+      fields: "nextPageToken,files(id,name,mimeType)",
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    })
+    children.push(...((response.data.files || []) as { id: string; name: string; mimeType: string }[]))
+    pageToken = response.data.nextPageToken || undefined
+  } while (pageToken)
+  return children.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 async function findChildFolderByName(drive: any, parentId: string, name: string) {
   const escapedName = name.replace(/'/g, "\\'")
   const response = await drive.files.list({
@@ -195,6 +227,47 @@ async function buildPlan() {
     containerFolders,
     unknownFolders,
   }
+}
+
+async function fetchEntryFiles(supabase: ReturnType<typeof getSupabaseClient>) {
+  const rows: EntryFile[] = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase
+      .from("cc_entry_files")
+      .select("id,entry_kind,entry_id,folder_path,file_name,drive_file_id,original_path")
+      .is("deleted_at", null)
+      .not("drive_file_id", "is", null)
+      .range(offset, offset + 999)
+    if (error) throw error
+    rows.push(...((data || []) as EntryFile[]))
+    if (!data || data.length < 1000) break
+  }
+  return rows
+}
+
+async function summarizeManualUploads(drive: any, rootFolderId: string) {
+  const manualFolder = await findChildFolderByName(drive, rootFolderId, "Manual Uploads")
+  if (!manualFolder?.id) return { exists: false, folders: 0, files: 0, sample: [] as string[] }
+
+  const queue = [manualFolder.id]
+  let folders = 0
+  let files = 0
+  const sample: string[] = []
+  while (queue.length > 0) {
+    const folderId = queue.shift()!
+    const children = await listChildren(drive, folderId)
+    for (const child of children) {
+      const isFolder = child.mimeType === "application/vnd.google-apps.folder"
+      if (isFolder) {
+        folders += 1
+        queue.push(child.id)
+      } else {
+        files += 1
+      }
+      if (sample.length < 50) sample.push(child.name)
+    }
+  }
+  return { exists: true, id: manualFolder.id, folders, files, sample }
 }
 
 function summarizePlan(plan: Awaited<ReturnType<typeof buildPlan>>) {
@@ -281,6 +354,69 @@ export async function POST(request: Request) {
         moved.push({ id: folder.id, from: folder.name, to: `Companies/${folder.name}` })
       }
       return NextResponse.json({ action, moved: moved.length, skipped, movedSample: moved.slice(0, 20), plan: summarizePlan(await buildPlan()) })
+    }
+
+    if (action === "move-entry-files") {
+      const supabase = getSupabaseClient()
+      const rows = await fetchEntryFiles(supabase)
+      const moved = []
+      let alreadyInPlace = 0
+      for (const row of rows) {
+        if (moved.length >= limit) break
+        if (!row.drive_file_id) continue
+
+        const context = await loadCcinfoDriveContext(
+          supabase,
+          row.entry_kind,
+          row.entry_id,
+          row.original_path?.split("/")?.[1] || row.entry_kind,
+          row.folder_path || "",
+        )
+        const targetFolderId = await ensureCcinfoDriveFolderPath(plan.drive, plan.rootFolderId, context, ensureFolder)
+        const current = await plan.drive.files.get({
+          fileId: row.drive_file_id,
+          fields: "parents",
+          supportsAllDrives: true,
+        })
+        const parents = current.data.parents || []
+        if (parents.length === 1 && parents[0] === targetFolderId) {
+          alreadyInPlace += 1
+          continue
+        }
+
+        await plan.drive.files.update({
+          fileId: row.drive_file_id,
+          addParents: parents.includes(targetFolderId) ? undefined : targetFolderId,
+          removeParents: parents.filter((parentId: string) => parentId !== targetFolderId).join(",") || undefined,
+          fields: "id,parents",
+          supportsAllDrives: true,
+        })
+        moved.push({
+          id: row.id,
+          entry_kind: row.entry_kind,
+          file_name: row.file_name,
+          to: context.entryKind === "country"
+            ? `Countries/${context.countryName || context.entryName}`
+            : context.entryKind === "company"
+              ? `Companies/${context.companyName || context.entryName}`
+              : context.entryKind,
+        })
+      }
+      return NextResponse.json({ action, moved: moved.length, alreadyInPlace, movedSample: moved.slice(0, 20) })
+    }
+
+    if (action === "manual-uploads-summary") {
+      return NextResponse.json({ action, manualUploads: await summarizeManualUploads(plan.drive, plan.rootFolderId) })
+    }
+
+    if (action === "delete-empty-manual-uploads") {
+      const manualUploads = await summarizeManualUploads(plan.drive, plan.rootFolderId)
+      if (!manualUploads.exists) return NextResponse.json({ action, deleted: false, reason: "Manual Uploads does not exist." })
+      if (manualUploads.files > 0) {
+        return NextResponse.json({ action, deleted: false, reason: "Manual Uploads still contains files.", manualUploads }, { status: 409 })
+      }
+      await plan.drive.files.delete({ fileId: manualUploads.id, supportsAllDrives: true })
+      return NextResponse.json({ action, deleted: true, manualUploads })
     }
 
     return NextResponse.json({ message: "Unknown action." }, { status: 400 })
