@@ -38,6 +38,12 @@ type SpcStatisticsFixtureRow = {
   } | null
 }
 
+type SpcStatisticsAuditRow = {
+  actor_id: string | null
+  request_context: Record<string, unknown> | null
+  after_row: Record<string, unknown> | null
+}
+
 export type SpcChartPoint = {
   label: string
   value: number
@@ -118,6 +124,15 @@ function upperText(value: unknown) {
 
 function isImportedEnquiry(enquiryNumber: string | null | undefined) {
   return upperText(enquiryNumber).startsWith("SPCIMP-")
+}
+
+function isSpcBuyerEnquiryAudit(row: SpcStatisticsAuditRow) {
+  return cleanText(row.actor_id).toLowerCase().startsWith("spc:")
+    && cleanText(row.request_context?.pageId) === "spc-buyer-enquiries"
+}
+
+function auditEnquiryNumber(row: SpcStatisticsAuditRow) {
+  return cleanText(row.after_row?.enquiry_number)
 }
 
 function hongKongYear() {
@@ -389,6 +404,39 @@ async function loadEnquiries(
   return (data || []) as unknown as SpcStatisticsEnquiryRow[]
 }
 
+async function loadSpcBuyerEnquiryNumbers(
+  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
+) {
+  const enquiryNumbers = new Set<string>()
+  const pageSize = 1000
+  let from = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("actor_id,request_context,after_row")
+      .eq("table_schema", "public")
+      .eq("table_name", "spc_enquiries")
+      .eq("operation", "INSERT")
+      .order("occurred_at", { ascending: false })
+      .range(from, from + pageSize - 1)
+
+    if (error) throw error
+
+    const rows = (data || []) as unknown as SpcStatisticsAuditRow[]
+    rows
+      .filter(isSpcBuyerEnquiryAudit)
+      .map(auditEnquiryNumber)
+      .filter(Boolean)
+      .forEach((enquiryNumber) => enquiryNumbers.add(enquiryNumber))
+
+    if (rows.length < pageSize) break
+    from += pageSize
+  }
+
+  return enquiryNumbers
+}
+
 export async function loadSpcStatistics(session: SpcSession, yearInput?: number | string | null): Promise<SpcStatisticsPayload> {
   const selectedYear = parseSelectedYear(yearInput)
   const lastYear = selectedYear - 1
@@ -399,19 +447,24 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   const lastFixtureYear = Math.max(selectedYear, windowEndYear)
   const context = createSpcAuditContext(session, undefined, "spc-statistics")
   const supabase = createSpcAuditedSupabaseClient(context)
-  const [fixtures, enquiries, users] = await Promise.all([
+  const [fixtures, enquiries, users, spcBuyerEnquiryNumbers] = await Promise.all([
     loadFixtures(supabase, firstFixtureYear, lastFixtureYear),
     loadEnquiries(supabase, statisticsWindow.startIso, statisticsWindow.endIso),
     listActiveSpcUserOptions(),
+    loadSpcBuyerEnquiryNumbers(supabase),
   ])
   const usersByUsername = userMap(users)
   const selectedFixtures = fixtures.filter((fixture) => fixtureYear(fixture) === selectedYear)
-  const nativeEnquiries = enquiries.filter((enquiry) => !isImportedEnquiry(enquiry.enquiry_number))
+  const nativeEnquiries = enquiries.filter((enquiry) => (
+    !isImportedEnquiry(enquiry.enquiry_number)
+    && spcBuyerEnquiryNumbers.has(cleanText(enquiry.enquiry_number))
+  ))
   const graphWindowFixtures = fixtures.filter((fixture) => (
     isFixtureDateInWindow(fixture.fixture_date, statisticsWindow.startDate, statisticsWindow.endDate)
   ))
   const tableFixtures = fixtures.filter((fixture) => (
     !isImportedEnquiry(fixture.enquiry?.enquiry_number)
+    && spcBuyerEnquiryNumbers.has(cleanText(fixture.enquiry?.enquiry_number))
     && isCreatedInWindow(fixture.created_at, statisticsWindow.startTime, statisticsWindow.endTime)
   ))
   const tableEnquiries = nativeEnquiries.filter((enquiry) => (
