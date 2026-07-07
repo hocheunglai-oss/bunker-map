@@ -253,32 +253,40 @@ async function collectManualUploads(drive: any, rootFolderId: string) {
       folders: 0,
       files: 0,
       sample: [] as string[],
+      fileSample: [] as string[],
+      folderSample: [] as string[],
       id: null as string | null,
       fileParentById: new Map<string, string>(),
     }
   }
 
-  const queue = [manualFolder.id]
+  const queue = [{ id: manualFolder.id, path: "Manual Uploads" }]
   let folders = 0
   let files = 0
   const sample: string[] = []
+  const fileSample: string[] = []
+  const folderSample: string[] = []
   const fileParentById = new Map<string, string>()
   while (queue.length > 0) {
-    const folderId = queue.shift()!
+    const current = queue.shift()!
+    const folderId = current.id
     const children = await listChildren(drive, folderId)
     for (const child of children) {
       const isFolder = child.mimeType === "application/vnd.google-apps.folder"
+      const childPath = `${current.path}/${child.name}`
       if (isFolder) {
         folders += 1
-        queue.push(child.id)
+        queue.push({ id: child.id, path: childPath })
+        if (folderSample.length < 100) folderSample.push(childPath)
       } else {
         files += 1
         fileParentById.set(child.id, folderId)
+        if (fileSample.length < 100) fileSample.push(childPath)
       }
       if (sample.length < 50) sample.push(child.name)
     }
   }
-  return { exists: true, id: manualFolder.id, folders, files, sample, fileParentById }
+  return { exists: true, id: manualFolder.id, folders, files, sample, fileSample, folderSample, fileParentById }
 }
 
 async function summarizeManualUploads(drive: any, rootFolderId: string) {
@@ -289,6 +297,8 @@ async function summarizeManualUploads(drive: any, rootFolderId: string) {
     folders: manualUploads.folders,
     files: manualUploads.files,
     sample: manualUploads.sample,
+    fileSample: manualUploads.fileSample,
+    folderSample: manualUploads.folderSample,
   }
 }
 
