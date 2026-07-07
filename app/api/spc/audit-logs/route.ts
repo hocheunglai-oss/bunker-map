@@ -16,6 +16,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   "spc-buyer-enquiries": ["spc_enquiries", "office_calendar_store"],
   "spc-fixtures": ["spc_enquiries", "spc_fixtures"],
   "spc-lost-record": ["spc_enquiries"],
+  "spc-statistics": ["spc_enquiries", "spc_fixtures"],
   "spc-suppliers": ["spc_suppliers"],
 }
 

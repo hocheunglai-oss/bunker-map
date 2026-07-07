@@ -109,6 +109,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
+  "spc-statistics": "SPC STATISTICS",
   "spc-suppliers": "SPC SUPPLIER DATABASE",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",

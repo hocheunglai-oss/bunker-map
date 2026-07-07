@@ -44,6 +44,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/lost-record", "/spc/lost-record", "/lost", "/spc/lost"],
   },
   {
+    id: "spc-statistics",
+    label: "STATISTICS",
+    group: "records",
+    path: "/spc/statistics",
+    matchPrefixes: ["/statistics", "/spc/statistics"],
+  },
+  {
     id: "spc-suppliers",
     label: "SUPPLIER DATABASE",
     group: "market",
@@ -170,7 +177,8 @@ export function getDefaultSpcPermissionsForRole(
         page.id === "spc-buyer-enquiries" ||
         page.id === "spc-chrome-extension" ||
         page.id === "spc-fixtures" ||
-        page.id === "spc-lost-record"
+        page.id === "spc-lost-record" ||
+        page.id === "spc-statistics"
           ? "view"
           : "none"
       return permissions
@@ -204,6 +212,7 @@ export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | nul
     "spc-chrome-extension",
     "spc-fixtures",
     "spc-lost-record",
+    "spc-statistics",
     "spc-suppliers",
     "spc-user-management",
     "spc-audit-log",
