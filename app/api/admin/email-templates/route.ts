@@ -3,6 +3,7 @@ import {
   deleteEmailTemplate,
   EmailTemplate,
   loadTemplateLibrary,
+  repairEmailTemplateFormatting,
   saveEmailTemplate,
   saveTemplateLibrary,
 } from "@/lib/emailTemplates"
@@ -93,6 +94,14 @@ export async function POST(request: Request) {
 
       await deleteEmailTemplate(id, auditContext)
       return NextResponse.json({ id, lastUpdatedAt: now })
+    }
+
+    if (action === "repair-formatting") {
+      const result = await repairEmailTemplateFormatting(auditContext)
+      return NextResponse.json({
+        ...result,
+        lastUpdatedAt: new Date().toISOString(),
+      })
     }
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })

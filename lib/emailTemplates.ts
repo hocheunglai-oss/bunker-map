@@ -4,6 +4,10 @@ import {
   createAdminAuditedSupabaseClient,
   type AdminAuditContext,
 } from "@/lib/adminAudit"
+import {
+  findTemplateFormattingIssues,
+  sanitizeEmailTemplate,
+} from "@/lib/emailTemplateSanitizer"
 
 const LEGACY_STORE_KEY = "email-templates"
 
@@ -36,6 +40,18 @@ export type EmailTemplateIndexItem = Pick<
   EmailTemplate,
   "id" | "title" | "subject" | "folder" | "to" | "cc" | "bcc" | "isActive" | "updatedAt"
 >
+
+export type EmailTemplateFormattingRepairResult = {
+  scanned: number
+  changed: number
+  issueCounts: Record<string, number>
+  changedTemplates: Array<{
+    id: string
+    folder: string
+    subject: string
+    issues: string[]
+  }>
+}
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -91,12 +107,25 @@ export function extractPlaceholders(...values: string[]) {
 }
 
 function normaliseTemplate(template: EmailTemplate): EmailTemplate {
+  const sanitized = sanitizeEmailTemplate(template) as EmailTemplate
+
   return {
-    ...template,
-    placeholders: extractPlaceholders(template.subject || "", template.bodyHtml || "", template.bodyText || ""),
-    slug: template.slug || slugify(`${template.folder}-${template.title}`) || template.id,
-    isActive: template.isActive !== false,
+    ...sanitized,
+    placeholders: extractPlaceholders(sanitized.subject || "", sanitized.bodyHtml || "", sanitized.bodyText || ""),
+    slug: sanitized.slug || slugify(`${sanitized.folder}-${sanitized.title}`) || sanitized.id,
+    isActive: sanitized.isActive !== false,
   }
+}
+
+function templateNeedsFormattingRepair(before: EmailTemplate, after: EmailTemplate) {
+  return (
+    before.subject !== after.subject ||
+    before.to !== after.to ||
+    before.cc !== after.cc ||
+    before.bcc !== after.bcc ||
+    before.bodyHtml !== after.bodyHtml ||
+    before.bodyText !== after.bodyText
+  )
 }
 
 function ensureUniqueSlugs(templates: EmailTemplate[]) {
@@ -150,8 +179,8 @@ function templateToRow(template: EmailTemplate) {
   }
 }
 
-function rowToTemplate(row: any): EmailTemplate {
-  return normaliseTemplate({
+function rowToTemplateRaw(row: any): EmailTemplate {
+  return {
     id: row.id,
     title: row.title || "",
     subject: row.subject || "",
@@ -168,7 +197,11 @@ function rowToTemplate(row: any): EmailTemplate {
     isActive: row.is_active !== false,
     placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
     updatedAt: row.updated_at || new Date().toISOString(),
-  })
+  }
+}
+
+function rowToTemplate(row: any): EmailTemplate {
+  return normaliseTemplate(rowToTemplateRaw(row))
 }
 
 function rowToTemplateIndexItem(row: any): EmailTemplateIndexItem {
@@ -406,5 +439,114 @@ export async function deleteEmailTemplate(
       return
     }
     throw error
+  }
+}
+
+export async function repairEmailTemplateFormatting(
+  auditContext?: AdminAuditContext
+): Promise<EmailTemplateFormattingRepairResult> {
+  const supabase = getSupabaseClient(auditContext)
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("*")
+    .order("folder", { ascending: true })
+    .order("title", { ascending: true })
+
+  if (error) {
+    const message = String(error.message || "")
+    if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+      const library = await loadLegacyLibrary(supabase)
+      return repairLegacyEmailTemplateFormatting(supabase, library)
+    }
+    throw error
+  }
+
+  const rawTemplates = Array.isArray(data) ? data.map(rowToTemplateRaw) : []
+  const issueCounts: Record<string, number> = {}
+  const changedTemplates: EmailTemplateFormattingRepairResult["changedTemplates"] = []
+
+  const templates = rawTemplates.map((template) => {
+    const issues = findTemplateFormattingIssues(template)
+    for (const issue of issues) issueCounts[issue] = (issueCounts[issue] || 0) + 1
+
+    const repaired = normaliseTemplate({
+      ...template,
+      updatedAt: template.updatedAt || new Date().toISOString(),
+    })
+
+    if (!templateNeedsFormattingRepair(template, repaired)) return template
+
+    changedTemplates.push({
+      id: template.id,
+      folder: template.folder,
+      subject: template.subject,
+      issues,
+    })
+
+    return {
+      ...repaired,
+      updatedAt: new Date().toISOString(),
+    }
+  })
+
+  if (changedTemplates.length > 0) {
+    await saveTemplateLibrary(
+      {
+        templates,
+        lastUpdatedAt: new Date().toISOString(),
+        lastImportedAt: templates.reduce<string | null>(
+          (latest, template) => (!latest || template.updatedAt > latest ? template.updatedAt : latest),
+          null
+        ),
+      },
+      auditContext
+    )
+  }
+
+  return {
+    scanned: rawTemplates.length,
+    changed: changedTemplates.length,
+    issueCounts,
+    changedTemplates,
+  }
+}
+
+async function repairLegacyEmailTemplateFormatting(
+  supabase: any,
+  library: EmailTemplateLibrary
+): Promise<EmailTemplateFormattingRepairResult> {
+  const issueCounts: Record<string, number> = {}
+  const changedTemplates: EmailTemplateFormattingRepairResult["changedTemplates"] = []
+
+  const templates = library.templates.map((template) => {
+    const issues = findTemplateFormattingIssues(template)
+    for (const issue of issues) issueCounts[issue] = (issueCounts[issue] || 0) + 1
+    const repaired = normaliseTemplate(template)
+    if (!templateNeedsFormattingRepair(template, repaired)) return template
+    changedTemplates.push({
+      id: template.id,
+      folder: template.folder,
+      subject: template.subject,
+      issues,
+    })
+    return {
+      ...repaired,
+      updatedAt: new Date().toISOString(),
+    }
+  })
+
+  if (changedTemplates.length > 0) {
+    await saveLegacyLibrary(supabase, {
+      ...library,
+      templates,
+      lastUpdatedAt: new Date().toISOString(),
+    })
+  }
+
+  return {
+    scanned: library.templates.length,
+    changed: changedTemplates.length,
+    issueCounts,
+    changedTemplates,
   }
 }
