@@ -8,9 +8,10 @@ import {
   deleteSpcSupplier,
   loadSpcSupplierDataset,
   saveSpcSupplierBarges,
+  saveSpcSupplierContacts,
   saveSpcSupplier,
 } from "@/lib/spcSuppliers"
-import type { SaveSpcSupplierBargesInput, SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
+import type { SaveSpcSupplierBargesInput, SaveSpcSupplierContactsInput, SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
 
 export const dynamic = "force-dynamic"
 
@@ -56,6 +57,7 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as {
       action?: unknown
       barges?: unknown
+      contacts?: unknown
       key?: unknown
       supplier?: unknown
     }
@@ -77,6 +79,20 @@ export async function PATCH(request: Request) {
           : null
       if (!barges) throw new Error("Barge fleet details are required.")
       const dataset = await saveSpcSupplierBarges(barges, context)
+      return NextResponse.json(dataset, {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      })
+    }
+
+    if (payload.action === "save-contacts") {
+      const contacts =
+        payload.contacts && typeof payload.contacts === "object"
+          ? (payload.contacts as SaveSpcSupplierContactsInput)
+          : null
+      if (!contacts) throw new Error("Contact details are required.")
+      const dataset = await saveSpcSupplierContacts(contacts, context)
       return NextResponse.json(dataset, {
         headers: {
           "Cache-Control": "private, no-store",

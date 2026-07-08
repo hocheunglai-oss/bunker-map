@@ -7,8 +7,10 @@ import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import type {
   SaveSpcSupplierBargesInput,
+  SaveSpcSupplierContactsInput,
   SaveSpcSupplierInput,
   SpcSupplierBarge,
+  SpcSupplierContact,
   SpcSupplierDataset,
   SpcSupplierFixture,
   SpcSupplierInfoInput,
@@ -32,6 +34,7 @@ type SupplierDraft = {
 }
 
 type BargeDraft = Omit<SpcSupplierBarge, "source">
+type ContactDraft = Omit<SpcSupplierContact, "source">
 
 const gradeOptions = [
   { value: "HSFO", className: "is-hsfo" },
@@ -114,6 +117,27 @@ function bargePayload(supplierKey: string, drafts: BargeDraft[]): SaveSpcSupplie
       imo: draft.imo.trim(),
       grade: draft.grade.trim(),
       capacity: draft.capacity.trim(),
+    })),
+  }
+}
+
+function contactDraftsFromRecord(record: SpcSupplierRecord): ContactDraft[] {
+  return record.contacts.map((contact, index) => ({
+    id: contact.id || `${record.key}-CONTACT-${index + 1}`,
+    role: contact.role,
+    name: contact.name,
+    mobile: contact.mobile,
+  }))
+}
+
+function contactPayload(supplierKey: string, drafts: ContactDraft[]): SaveSpcSupplierContactsInput {
+  return {
+    supplierKey,
+    contacts: drafts.map((draft) => ({
+      id: draft.id,
+      role: draft.role,
+      name: draft.name.trim(),
+      mobile: draft.mobile.trim(),
     })),
   }
 }
@@ -458,6 +482,117 @@ function BargeFleetDialog({
   )
 }
 
+function ContactDialog({
+  supplier,
+  drafts,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  supplier: SpcSupplierRecord
+  drafts: ContactDraft[]
+  saving: boolean
+  onChange: (drafts: ContactDraft[]) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const updateDraft = (index: number, field: keyof ContactDraft, value: string) => {
+    onChange(drafts.map((draft, draftIndex) =>
+      draftIndex === index ? { ...draft, [field]: value } : draft,
+    ))
+  }
+  const addDraft = (role: ContactDraft["role"]) => {
+    onChange([
+      ...drafts,
+      {
+        id: `${supplier.key}-CONTACT-${Date.now()}`,
+        role,
+        name: "",
+        mobile: "",
+      },
+    ])
+  }
+  const removeDraft = (index: number) => {
+    onChange(drafts.filter((_, draftIndex) => draftIndex !== index))
+  }
+
+  return (
+    <div className="spc-supplier-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="spc-supplier-modal is-wide" role="dialog" aria-modal="true" aria-label={`${supplier.name} contacts`} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="spc-supplier-modal-header">
+          <div>
+            <h2>{supplier.name}</h2>
+            <p>CONTACT</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Close</button>
+        </div>
+        <div className="spc-supplier-barge-panel">
+          <div className="spc-table-wrap">
+            <table className="spc-table spc-supplier-popup-table spc-supplier-contact-table">
+              <thead>
+                <tr>
+                  <th>ROLE</th>
+                  <th>CONTACT</th>
+                  <th>MOBILE</th>
+                  <th>REMOVE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {drafts.map((draft, index) => (
+                  <tr key={draft.id || index}>
+                    <td>
+                      <select
+                        value={draft.role}
+                        onChange={(event) => updateDraft(index, "role", event.target.value)}
+                        disabled={saving}
+                      >
+                        <option value="sales">SALES</option>
+                        <option value="ops">OPS</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        value={draft.name}
+                        onChange={(event) => updateDraft(index, "name", event.target.value)}
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={draft.mobile}
+                        inputMode="tel"
+                        onChange={(event) => updateDraft(index, "mobile", event.target.value)}
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button is-danger" onClick={() => removeDraft(index)} disabled={saving}>
+                        REMOVE
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {drafts.length === 0 ? (
+                  <tr><td colSpan={4}>NO CONTACT RECORDS.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="spc-supplier-edit-actions is-contact-actions">
+          <button type="button" onClick={() => addDraft("sales")} disabled={saving}>ADD SALES</button>
+          <button type="button" onClick={() => addDraft("ops")} disabled={saving}>ADD OPS</button>
+          <button type="button" onClick={onClose} disabled={saving}>CANCEL</button>
+          <button type="button" className="is-primary" onClick={onSave} disabled={saving}>
+            {saving ? "SAVING" : "SAVE"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function LegacyFixtureList({ fixtures }: { fixtures: SpcSupplierLegacyFixture[] }) {
   if (fixtures.length === 0) return null
   const visible = fixtures.slice(0, 12)
@@ -491,6 +626,8 @@ export default function SpcSuppliersPage() {
   const [fixtureKey, setFixtureKey] = useState("")
   const [bargeKey, setBargeKey] = useState("")
   const [bargeDrafts, setBargeDrafts] = useState<BargeDraft[]>([])
+  const [contactKey, setContactKey] = useState("")
+  const [contactDrafts, setContactDrafts] = useState<ContactDraft[]>([])
   const [editingDraft, setEditingDraft] = useState<SupplierDraft | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -525,6 +662,7 @@ export default function SpcSuppliersPage() {
   const moreInfoSupplier = records.find((record) => record.key === moreInfoKey) || null
   const fixtureSupplier = records.find((record) => record.key === fixtureKey) || null
   const bargeSupplier = records.find((record) => record.key === bargeKey) || null
+  const contactSupplier = records.find((record) => record.key === contactKey) || null
 
   function openEditor(record?: SpcSupplierRecord) {
     if (!canEdit) return
@@ -535,6 +673,12 @@ export default function SpcSuppliersPage() {
   function openBargeEditor(record: SpcSupplierRecord) {
     setBargeKey(record.key)
     setBargeDrafts(bargeDraftsFromRecord(record))
+    setMessage("")
+  }
+
+  function openContactEditor(record: SpcSupplierRecord) {
+    setContactKey(record.key)
+    setContactDrafts(contactDraftsFromRecord(record))
     setMessage("")
   }
 
@@ -642,6 +786,34 @@ export default function SpcSuppliersPage() {
       setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save barge fleet.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveContactDrafts() {
+    if (!contactSupplier) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-contacts",
+          contacts: contactPayload(contactSupplier.key, contactDrafts),
+        }),
+      })
+      const data = (await response.json()) as SupplierResponse
+      if (!response.ok) throw new Error(data.message || "Failed to save contacts.")
+      setDataset(data)
+      setContactKey("")
+      setContactDrafts([])
+      setMessage("Contacts saved.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save contacts.")
       setMessageIsError(true)
     } finally {
       setSaving(false)
@@ -767,6 +939,14 @@ export default function SpcSuppliersPage() {
                         >
                           BARGE FLEET ({record.barges.length})
                         </button>
+                        <button
+                          type="button"
+                          className={`spc-supplier-mini-button is-contact${record.contacts.length > 0 ? " has-contacts" : ""}`}
+                          onClick={() => openContactEditor(record)}
+                          title={`${record.contacts.length} CONTACT${record.contacts.length === 1 ? "" : "S"}`}
+                        >
+                          CONTACT
+                        </button>
                         <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
                           EDIT
                         </button>
@@ -797,6 +977,19 @@ export default function SpcSuppliersPage() {
               setBargeDrafts([])
             }}
             onSave={() => void saveBargeDrafts()}
+          />
+        ) : null}
+        {contactSupplier ? (
+          <ContactDialog
+            supplier={contactSupplier}
+            drafts={contactDrafts}
+            saving={saving}
+            onChange={setContactDrafts}
+            onClose={() => {
+              setContactKey("")
+              setContactDrafts([])
+            }}
+            onSave={() => void saveContactDrafts()}
           />
         ) : null}
         {editingDraft ? (

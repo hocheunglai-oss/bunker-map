@@ -40,6 +40,14 @@ export type SpcSupplierBarge = {
   source: "sheet" | "override"
 }
 
+export type SpcSupplierContact = {
+  id: string
+  role: "sales" | "ops"
+  name: string
+  mobile: string
+  source: "sheet" | "override"
+}
+
 export type SpcSupplierRecord = {
   key: string
   name: string
@@ -47,6 +55,7 @@ export type SpcSupplierRecord = {
   info: SpcSupplierInfo
   fixtures: SpcSupplierFixture[]
   barges: SpcSupplierBarge[]
+  contacts: SpcSupplierContact[]
   searchText: string
   updatedAt: string
 }
@@ -63,6 +72,7 @@ export type SpcSupplierDataset = {
     fixtureRows: number
     legacyFixtureRows: number
     bargeRows: number
+    contactRows: number
   }
 }
 
@@ -80,5 +90,15 @@ export type SaveSpcSupplierBargesInput = {
     imo: string
     grade: string
     capacity: string
+  }>
+}
+
+export type SaveSpcSupplierContactsInput = {
+  supplierKey: string
+  contacts: Array<{
+    id?: string
+    role: "sales" | "ops"
+    name: string
+    mobile: string
   }>
 }

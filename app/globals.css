@@ -5146,7 +5146,7 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-table.spc-supplier-ledger-table {
-  min-width: 1360px;
+  min-width: 1430px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -5210,7 +5210,7 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-ledger-table th:nth-child(6),
 .spc-table.spc-supplier-ledger-table td:nth-child(6) {
-  width: 389px;
+  width: 459px;
   padding-left: 5px;
   padding-right: 5px;
   text-align: center;
@@ -5312,13 +5312,21 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-supplier-mini-button.is-barge {
-  min-width: 118px;
+  min-width: 112px;
   border-color: #d1d5db;
   background: #f3f4f6;
   color: #4b5563;
 }
 
-.spc-supplier-mini-button.is-barge.has-barges {
+.spc-supplier-mini-button.is-contact {
+  min-width: 74px;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.spc-supplier-mini-button.is-barge.has-barges,
+.spc-supplier-mini-button.is-contact.has-contacts {
   border-color: #93c5fd;
   background: #eff6ff;
   color: #0758c7;
@@ -5448,7 +5456,9 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-table.spc-supplier-barge-table input,
-.spc-table.spc-supplier-barge-table select {
+.spc-table.spc-supplier-barge-table select,
+.spc-table.spc-supplier-contact-table input,
+.spc-table.spc-supplier-contact-table select {
   width: 100%;
   height: 30px;
   border: 1px solid var(--fc-input-border);
@@ -5483,6 +5493,31 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-barge-table th:nth-child(5),
 .spc-table.spc-supplier-barge-table td:nth-child(5) {
+  width: 110px;
+  text-align: center;
+}
+
+.spc-table.spc-supplier-contact-table {
+  min-width: 760px;
+}
+
+.spc-table.spc-supplier-contact-table th:nth-child(1),
+.spc-table.spc-supplier-contact-table td:nth-child(1) {
+  width: 120px;
+}
+
+.spc-table.spc-supplier-contact-table th:nth-child(2),
+.spc-table.spc-supplier-contact-table td:nth-child(2) {
+  width: 280px;
+}
+
+.spc-table.spc-supplier-contact-table th:nth-child(3),
+.spc-table.spc-supplier-contact-table td:nth-child(3) {
+  width: 220px;
+}
+
+.spc-table.spc-supplier-contact-table th:nth-child(4),
+.spc-table.spc-supplier-contact-table td:nth-child(4) {
   width: 110px;
   text-align: center;
 }
@@ -5551,6 +5586,10 @@ body:has(.spc-statistics-page) .spc-main {
   border-top: 1px solid var(--fc-admin-border-soft);
   background: #f8fafc;
   padding: 12px 14px;
+}
+
+.spc-supplier-edit-actions.is-contact-actions {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
 .spc-supplier-edit-actions button.is-primary {

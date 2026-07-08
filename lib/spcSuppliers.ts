@@ -9,12 +9,14 @@ import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import type {
   SpcSupplierDataset,
   SpcSupplierBarge,
+  SpcSupplierContact,
   SpcSupplierFixture,
   SpcSupplierInfo,
   SpcSupplierInfoInput,
   SpcSupplierLegacyFixture,
   SpcSupplierRecord,
   SaveSpcSupplierBargesInput,
+  SaveSpcSupplierContactsInput,
   SaveSpcSupplierInput,
 } from "@/lib/spcSupplierTypes"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
@@ -25,6 +27,8 @@ const SHEET_NAME = "Sheet1"
 const BARGE_SPREADSHEET_ID = "19KHke2iBFDZzteh8hb0G7B7T-TUMa7wrjB27X2RnFA4"
 const BARGE_SHEET_GID = "67085585"
 const BARGE_SHEET_NAME = "SUPPLIER BARGES"
+const CONTACTS_SHEET_GID = "927102689"
+const CONTACTS_SHEET_NAME = "CONTACTS"
 const SUPPLIER_OVERRIDE_STORE_KEY = "spc-supplier-overrides"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
@@ -67,6 +71,7 @@ type SupplierOverrideRecord = {
 }
 
 type StoredSupplierBarge = Omit<SpcSupplierBarge, "source">
+type StoredSupplierContact = Omit<SpcSupplierContact, "source">
 
 type SupplierBargeOverrideRecord = {
   supplierKey: string
@@ -74,15 +79,23 @@ type SupplierBargeOverrideRecord = {
   updatedAt: string
 }
 
+type SupplierContactOverrideRecord = {
+  supplierKey: string
+  contacts: StoredSupplierContact[]
+  updatedAt: string
+}
+
 type SupplierOverrideStore = {
   records: SupplierOverrideRecord[]
   barges: SupplierBargeOverrideRecord[]
+  contacts: SupplierContactOverrideRecord[]
 }
 
 type MutableSupplierRecord = Omit<SpcSupplierRecord, "aliases" | "fixtures" | "searchText"> & {
   aliases: Set<string>
   fixtures: SpcSupplierFixture[]
   barges: SpcSupplierBarge[]
+  contacts: SpcSupplierContact[]
 }
 
 const fuelColumns: Array<{ key: FuelKey; label: string }> = [
@@ -184,6 +197,7 @@ function stripStruckHtml(value: string) {
   return decodeHtmlEntities(
     value
       .replace(/<s\b[^>]*>[\s\S]*?<\/s>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<[^>]+>/g, " "),
   )
 }
@@ -312,6 +326,263 @@ async function readSupplierBargeSheet() {
   return parseBargeWorkbookSheet(sheet)
 }
 
+function lineText(value: unknown) {
+  return cleanText(value)
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+}
+
+function workbookContactCellText(sheet: XLSX.WorkSheet, row: number, column: number) {
+  const cellValue = sheet[XLSX.utils.encode_cell({ r: row, c: column })] as XLSX.CellObject | undefined
+  if (!cellValue) return ""
+  const html = typeof cellValue.h === "string" ? cellValue.h : ""
+  if (/<s\b/i.test(html)) return lineText(stripStruckHtml(html))
+  if (cellValue.t === "n" && typeof cellValue.v === "number") return String(cellValue.v).replace(/\.0$/, "")
+  return lineText(cellValue.v ?? cellValue.w)
+}
+
+function splitContactPeople(value: unknown) {
+  return lineText(value)
+    .split(/\n|\/+/)
+    .map((item) => compactText(item))
+    .filter(Boolean)
+}
+
+function splitContactMobiles(value: unknown) {
+  return lineText(value)
+    .split(/\n+/)
+    .map((item) => compactText(item))
+    .filter(Boolean)
+}
+
+function contactLabel(value: string) {
+  return compactText(value.match(/\(([^)]+)\)/)?.[1] || "")
+}
+
+function stripMobileLabel(value: string) {
+  return compactText(value.replace(/\s*\([^)]*\)\s*$/g, ""))
+}
+
+function contactNameMatchesLabel(name: string, label: string) {
+  const cleanName = compactText(name).toUpperCase()
+  const cleanLabel = compactText(label).toUpperCase()
+  return Boolean(cleanLabel && (cleanName.includes(cleanLabel) || cleanLabel.includes(cleanName.replace(/^(MR|MS|MRS|MISS)\s+/i, ""))))
+}
+
+function contactId(
+  supplierKeyValue: string,
+  source: Partial<StoredSupplierContact>,
+  index: number,
+) {
+  const existing = compactText(source.id)
+  if (existing) return existing
+  const namePart = supplierKey(source.name || source.mobile || `CONTACT ${index + 1}`) || `CONTACT${index + 1}`
+  return `${supplierKeyValue}-CONTACT-${index + 1}-${namePart}`.slice(0, 96)
+}
+
+function cleanStoredContact(
+  supplierKeyValue: string,
+  source: Partial<StoredSupplierContact>,
+  index: number,
+): StoredSupplierContact | null {
+  const role = source.role === "ops" ? "ops" : "sales"
+  const name = compactText(source.name)
+  const mobile = compactText(source.mobile)
+  if (!name && !mobile) return null
+  return {
+    id: contactId(supplierKeyValue, source, index),
+    role,
+    name,
+    mobile,
+  }
+}
+
+function contactRowsFromGroup(
+  supplierKeyValue: string,
+  role: "sales" | "ops",
+  namesText: string,
+  mobilesText: string,
+  baseIndex: number,
+) {
+  const names = splitContactPeople(namesText)
+  const mobiles = splitContactMobiles(mobilesText)
+  const rows: StoredSupplierContact[] = []
+
+  if (supplierKeyValue === supplierKey("BP MARINE") && role === "sales") {
+    mobiles.forEach((mobile, index) => {
+      const label = contactLabel(mobile)
+      if (!label) return
+      const name = names.find((candidate) => contactNameMatchesLabel(candidate, label))
+      if (!name) return
+      const clean = cleanStoredContact(supplierKeyValue, {
+        role,
+        name,
+        mobile: stripMobileLabel(mobile),
+      }, baseIndex + index)
+      if (clean) rows.push(clean)
+    })
+    return rows
+  }
+
+  if (names.length === 0 && mobiles.length === 0) return rows
+
+  if (names.length === mobiles.length && names.length > 0) {
+    names.forEach((name, index) => {
+      const clean = cleanStoredContact(supplierKeyValue, {
+        role,
+        name,
+        mobile: stripMobileLabel(mobiles[index] || ""),
+      }, baseIndex + index)
+      if (clean) rows.push(clean)
+    })
+    return rows
+  }
+
+  const labelledMobiles = mobiles.filter((mobile) => contactLabel(mobile))
+  if (labelledMobiles.length > 0) {
+    labelledMobiles.forEach((mobile, index) => {
+      const label = contactLabel(mobile)
+      const name = names.find((candidate) => contactNameMatchesLabel(candidate, label)) || label
+      const clean = cleanStoredContact(supplierKeyValue, {
+        role,
+        name,
+        mobile: stripMobileLabel(mobile),
+      }, baseIndex + index)
+      if (clean) rows.push(clean)
+    })
+    if (rows.length > 0) return rows
+  }
+
+  if (names.length === 1 && mobiles.length > 1) {
+    mobiles.forEach((mobile, index) => {
+      const clean = cleanStoredContact(supplierKeyValue, {
+        role,
+        name: names[0],
+        mobile,
+      }, baseIndex + index)
+      if (clean) rows.push(clean)
+    })
+    return rows
+  }
+
+  names.forEach((name, index) => {
+    const clean = cleanStoredContact(supplierKeyValue, {
+      role,
+      name,
+      mobile: stripMobileLabel(mobiles[index] || ""),
+    }, baseIndex + index)
+    if (clean) rows.push(clean)
+  })
+
+  if (rows.length === 0) {
+    mobiles.forEach((mobile, index) => {
+      const clean = cleanStoredContact(supplierKeyValue, {
+        role,
+        name: "",
+        mobile: stripMobileLabel(mobile),
+      }, baseIndex + index)
+      if (clean) rows.push(clean)
+    })
+  }
+
+  return rows
+}
+
+function parseContactsWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
+  supplierName: string
+  supplierKey: string
+  contact: StoredSupplierContact
+}> {
+  const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null
+  if (!range) return []
+
+  let headerRow = -1
+  let supplierColumn = -1
+  let salesColumn = -1
+  let salesMobileColumn = -1
+  let opsColumn = -1
+  let opsMobileColumn = -1
+
+  for (let row = range.s.r; row <= Math.min(range.e.r, range.s.r + 20); row += 1) {
+    const headers = Array.from({ length: range.e.c - range.s.c + 1 }, (_, offset) =>
+      workbookContactCellText(sheet, row, range.s.c + offset).toUpperCase().replace(/[^A-Z0-9]/g, ""),
+    )
+    const supplierIndex = headers.findIndex((header) => header === "SUPPLIER")
+    const salesIndex = headers.findIndex((header) => header === "SALES")
+    const opsIndex = headers.findIndex((header) => header === "OPS")
+    const mobileIndexes = headers
+      .map((header, index) => ({ header, index }))
+      .filter((item) => item.header === "MOBILE")
+      .map((item) => item.index)
+    if (supplierIndex >= 0 && salesIndex >= 0 && opsIndex >= 0 && mobileIndexes.length >= 2) {
+      headerRow = row
+      supplierColumn = range.s.c + supplierIndex
+      salesColumn = range.s.c + salesIndex
+      salesMobileColumn = range.s.c + mobileIndexes[0]
+      opsColumn = range.s.c + opsIndex
+      opsMobileColumn = range.s.c + mobileIndexes[1]
+      break
+    }
+  }
+
+  if (headerRow < 0) return []
+
+  const rows: Array<{
+    supplierName: string
+    supplierKey: string
+    contact: StoredSupplierContact
+  }> = []
+
+  for (let row = headerRow + 1; row <= range.e.r; row += 1) {
+    const supplierText = workbookContactCellText(sheet, row, supplierColumn)
+    const key = supplierKey(supplierText)
+    if (!key) continue
+
+    const supplierName = displaySupplierName(supplierText)
+    const contacts = [
+      ...contactRowsFromGroup(
+        key,
+        "sales",
+        workbookContactCellText(sheet, row, salesColumn),
+        workbookContactCellText(sheet, row, salesMobileColumn),
+        (row - headerRow - 1) * 10,
+      ),
+      ...contactRowsFromGroup(
+        key,
+        "ops",
+        workbookContactCellText(sheet, row, opsColumn),
+        workbookContactCellText(sheet, row, opsMobileColumn),
+        (row - headerRow - 1) * 10 + 5,
+      ),
+    ]
+
+    contacts.forEach((contact) => {
+      rows.push({ supplierName, supplierKey: key, contact })
+    })
+  }
+
+  return rows
+}
+
+async function readSupplierContactsSheet() {
+  const url = `https://docs.google.com/spreadsheets/d/${BARGE_SPREADSHEET_ID}/export?format=xlsx&gid=${CONTACTS_SHEET_GID}`
+  const response = await fetch(url, { cache: "no-store" })
+  if (!response.ok) throw new Error("Could not read supplier contacts from Google Sheets.")
+  const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), {
+    cellHTML: true,
+    cellStyles: true,
+    type: "buffer",
+  })
+  const sheetName = workbook.SheetNames.find((name) => name.toUpperCase() === CONTACTS_SHEET_NAME) ||
+    workbook.SheetNames.find((name) => name.toUpperCase().includes("CONTACT")) ||
+    workbook.SheetNames[0]
+  const sheet = sheetName ? workbook.Sheets[sheetName] : null
+  if (!sheet) return []
+  return parseContactsWorkbookSheet(sheet)
+}
+
 function emptyInfo(row: SheetRow | undefined, rowNumber: number): SpcSupplierInfo {
   return {
     paymentTerms: cell(row, 1),
@@ -367,6 +638,7 @@ function buildSupplierRecords(rows: SheetRows) {
       info: emptyInfo(row, index + 2),
       fixtures: [],
       barges: [],
+      contacts: [],
       updatedAt: new Date().toISOString(),
     })
   })
@@ -374,9 +646,10 @@ function buildSupplierRecords(rows: SheetRows) {
 }
 
 function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
-  if (!payload || typeof payload !== "object") return { records: [], barges: [] }
+  if (!payload || typeof payload !== "object") return { records: [], barges: [], contacts: [] }
   const records = (payload as { records?: unknown }).records
   const barges = (payload as { barges?: unknown }).barges
+  const contacts = (payload as { contacts?: unknown }).contacts
 
   return {
     records: Array.isArray(records) ? records.flatMap((record) => {
@@ -409,6 +682,22 @@ function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date(0).toISOString(),
       }]
     }) : [],
+    contacts: Array.isArray(contacts) ? contacts.flatMap((record) => {
+      if (!record || typeof record !== "object") return []
+      const source = record as Record<string, unknown>
+      const key = supplierKey(source.supplierKey || source.key)
+      if (!key) return []
+      const sourceContacts = Array.isArray(source.contacts) ? source.contacts : []
+      return [{
+        supplierKey: key,
+        contacts: sourceContacts.flatMap((contact, index) => {
+          if (!contact || typeof contact !== "object") return []
+          const clean = cleanStoredContact(key, contact as Partial<StoredSupplierContact>, index)
+          return clean ? [clean] : []
+        }),
+        updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date(0).toISOString(),
+      }]
+    }) : [],
   }
 }
 
@@ -429,7 +718,7 @@ async function loadSupplierOverrideStore(supabase: ReturnType<typeof getServiceC
 async function loadSupplierOverrides() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (!serviceRoleKey || !supabaseUrl || serviceRoleKey === "\"\"") return { records: [], barges: [] }
+  if (!serviceRoleKey || !supabaseUrl || serviceRoleKey === "\"\"") return { records: [], barges: [], contacts: [] }
   const supabase = createClient(supabaseUrl, serviceRoleKey)
   const { store } = await loadSupplierOverrideStore(supabase)
   return store
@@ -463,6 +752,7 @@ function applySupplierOverrides(records: Map<string, MutableSupplierRecord>, sto
       info,
       fixtures: [],
       barges: [],
+      contacts: [],
       updatedAt: override.updatedAt,
     })
   })
@@ -715,6 +1005,41 @@ function attachBarges(
   })
 }
 
+function attachContacts(
+  records: Map<string, MutableSupplierRecord>,
+  contactRows: Awaited<ReturnType<typeof readSupplierContactsSheet>>,
+  store: SupplierOverrideStore,
+) {
+  contactRows.forEach((row) => {
+    const record = records.get(row.supplierKey)
+    if (!record) return
+    record.aliases.add(row.supplierName)
+    record.contacts.push({
+      ...row.contact,
+      source: "sheet",
+    })
+  })
+
+  store.contacts.forEach((override) => {
+    const record = records.get(override.supplierKey)
+    if (!record) return
+    record.contacts = override.contacts.map((contact) => ({
+      ...contact,
+      source: "override",
+    }))
+    record.updatedAt = override.updatedAt
+  })
+
+  const roleRank: Record<SpcSupplierContact["role"], number> = { sales: 0, ops: 1 }
+  records.forEach((record) => {
+    record.contacts.sort((a, b) =>
+      roleRank[a.role] - roleRank[b.role] ||
+      a.name.localeCompare(b.name) ||
+      a.mobile.localeCompare(b.mobile),
+    )
+  })
+}
+
 function recordSearchText(record: MutableSupplierRecord) {
   return [
     record.name,
@@ -731,6 +1056,11 @@ function recordSearchText(record: MutableSupplierRecord) {
       barge.grade,
       barge.capacity,
     ].join(" ")),
+    ...record.contacts.map((contact) => [
+      contact.role,
+      contact.name,
+      contact.mobile,
+    ].join(" ")),
     ...record.fixtures.map(fixtureSearchText),
   ].filter(Boolean).join(" ").toLowerCase()
 }
@@ -743,6 +1073,7 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
       aliases: Array.from(record.aliases).sort((a, b) => a.localeCompare(b)),
       fixtures: record.fixtures,
       barges: record.barges,
+      contacts: record.contacts,
       searchText: recordSearchText(record),
       updatedAt: generatedAt,
     }))
@@ -760,22 +1091,25 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
       fixtureRows: finalRecords.reduce((total, record) => total + record.fixtures.length, 0),
       legacyFixtureRows: legacyFixtures.length,
       bargeRows: finalRecords.reduce((total, record) => total + record.barges.length, 0),
+      contactRows: finalRecords.reduce((total, record) => total + record.contacts.length, 0),
     },
   }
 }
 
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
-  const [rows, fixtureRows, activeUsers, overrides, bargeRows] = await Promise.all([
+  const [rows, fixtureRows, activeUsers, overrides, bargeRows, contactRows] = await Promise.all([
     readSupplierSheet(),
     loadCompletedFixtures(),
     loadActiveSpcUsers(),
     loadSupplierOverrides(),
     readSupplierBargeSheet(),
+    readSupplierContactsSheet(),
   ])
   const records = buildSupplierRecords(rows)
   applySupplierOverrides(records, overrides)
   const legacyFixtures = attachFixtures(records, fixtureRows, activeUsers)
   attachBarges(records, bargeRows, overrides)
+  attachContacts(records, contactRows, overrides)
   return finaliseDataset(records, legacyFixtures)
 }
 
@@ -810,9 +1144,14 @@ export async function saveSpcSupplier(input: SaveSpcSupplierInput, context: SpcA
       ? { ...entry, supplierKey: key, updatedAt }
       : entry,
   )
+  const nextContacts = store.contacts.map((entry) =>
+    originalKey && originalKey !== key && entry.supplierKey === originalKey
+      ? { ...entry, supplierKey: key, updatedAt }
+      : entry,
+  )
 
   await writeSupplierOverrideStore(
-    { records: nextRecords, barges: nextBarges },
+    { records: nextRecords, barges: nextBarges, contacts: nextContacts },
     context,
     storeRow,
     storeRow ? "UPDATE" : "INSERT",
@@ -841,7 +1180,11 @@ export async function deleteSpcSupplier(keyInput: string, context: SpcAuditConte
   })
 
   await writeSupplierOverrideStore(
-    { records: nextRecords, barges: store.barges.filter((entry) => entry.supplierKey !== key) },
+    {
+      records: nextRecords,
+      barges: store.barges.filter((entry) => entry.supplierKey !== key),
+      contacts: store.contacts.filter((entry) => entry.supplierKey !== key),
+    },
     context,
     storeRow,
     storeRow ? "UPDATE" : "INSERT",
@@ -870,7 +1213,36 @@ export async function saveSpcSupplierBarges(input: SaveSpcSupplierBargesInput, c
   })
 
   await writeSupplierOverrideStore(
-    { records: store.records, barges: nextBarges },
+    { records: store.records, barges: nextBarges, contacts: store.contacts },
+    context,
+    storeRow,
+    storeRow ? "UPDATE" : "INSERT",
+  )
+  return loadSpcSupplierDataset()
+}
+
+export async function saveSpcSupplierContacts(input: SaveSpcSupplierContactsInput, context: SpcAuditContext) {
+  const key = supplierKey(input.supplierKey)
+  if (!key) throw new Error("Supplier key is required.")
+
+  const supabase = getServiceClient()
+  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
+  const updatedAt = new Date().toISOString()
+  const cleanedContacts = (Array.isArray(input.contacts) ? input.contacts : [])
+    .flatMap((contact, index) => {
+      const clean = cleanStoredContact(key, contact, index)
+      return clean ? [clean] : []
+    })
+
+  const nextContacts = store.contacts.filter((entry) => entry.supplierKey !== key)
+  nextContacts.push({
+    supplierKey: key,
+    contacts: cleanedContacts,
+    updatedAt,
+  })
+
+  await writeSupplierOverrideStore(
+    { records: store.records, barges: store.barges, contacts: nextContacts },
     context,
     storeRow,
     storeRow ? "UPDATE" : "INSERT",
