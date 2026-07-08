@@ -485,7 +485,7 @@ export default function SpcSuppliersPage() {
   const [dataset, setDataset] = useState<SpcSupplierDataset | null>(null)
   const [query, setQuery] = useState("")
   const [traderFilter, setTraderFilter] = useState("ALL")
-  const [traderSort, setTraderSort] = useState<"none" | "asc" | "desc">("none")
+  const [gradeFilter, setGradeFilter] = useState("ALL")
   const [requestedSupplier, setRequestedSupplier] = useState("")
   const [moreInfoKey, setMoreInfoKey] = useState("")
   const [fixtureKey, setFixtureKey] = useState("")
@@ -511,18 +511,16 @@ export default function SpcSuppliersPage() {
   const filteredRecords = useMemo(() => {
     const filtered = records.filter((record) => {
       if (searchValue && !record.searchText.includes(searchValue)) return false
-      if (traderFilter !== "ALL" && record.info.supplierTrader.trim() !== traderFilter) return false
+      if (traderFilter !== "ALL" && traderFilter !== "SORT" && record.info.supplierTrader.trim() !== traderFilter) return false
+      if (gradeFilter !== "ALL" && !gradeTokens(record.info.availableGrade).includes(gradeFilter)) return false
       return true
     })
-    if (traderSort === "none") return filtered
-    return [...filtered].sort((a, b) => {
-      const direction = traderSort === "asc" ? 1 : -1
-      return (
-        direction * a.info.supplierTrader.localeCompare(b.info.supplierTrader) ||
-        a.name.localeCompare(b.name)
-      )
-    })
-  }, [records, searchValue, traderFilter, traderSort])
+    if (traderFilter !== "SORT") return filtered
+    return [...filtered].sort((a, b) =>
+      a.info.supplierTrader.localeCompare(b.info.supplierTrader) ||
+      a.name.localeCompare(b.name),
+    )
+  }, [records, searchValue, traderFilter, gradeFilter])
 
   const moreInfoSupplier = records.find((record) => record.key === moreInfoKey) || null
   const fixtureSupplier = records.find((record) => record.key === fixtureKey) || null
@@ -538,10 +536,6 @@ export default function SpcSuppliersPage() {
     setBargeKey(record.key)
     setBargeDrafts(bargeDraftsFromRecord(record))
     setMessage("")
-  }
-
-  function toggleTraderSort() {
-    setTraderSort((current) => current === "none" ? "asc" : current === "asc" ? "desc" : "none")
   }
 
   const loadData = useCallback(async () => {
@@ -671,6 +665,12 @@ export default function SpcSuppliersPage() {
     void loadData()
   }, [loadData])
 
+  useEffect(() => {
+    if (traderFilter !== "ALL" && traderFilter !== "SORT" && !traderOptions.includes(traderFilter)) {
+      setTraderFilter("ALL")
+    }
+  }, [traderFilter, traderOptions])
+
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
@@ -714,20 +714,28 @@ export default function SpcSuppliersPage() {
                   <th>PAYMENT TERMS</th>
                   <th>QUALITY CLAIM BAR</th>
                   <th>
-                    <div className="spc-supplier-trader-heading">
-                      <span>SUPPLIER TRADER</span>
+                    <label className="spc-supplier-header-menu">
+                      <span className="sr-only">Filter or sort supplier trader</span>
                       <select value={traderFilter} onChange={(event) => setTraderFilter(event.target.value)}>
                         <option value="ALL">ALL TRADERS</option>
+                        <option value="SORT">SORT BY NAME OF TRADER</option>
                         {traderOptions.map((trader) => (
                           <option key={trader} value={trader}>{trader}</option>
                         ))}
                       </select>
-                      <button type="button" onClick={toggleTraderSort}>
-                        SORT BY TRADER{traderSort === "asc" ? " ↑" : traderSort === "desc" ? " ↓" : ""}
-                      </button>
-                    </div>
+                    </label>
                   </th>
-                  <th>AVAILABLE GRADE</th>
+                  <th>
+                    <label className="spc-supplier-header-menu">
+                      <span className="sr-only">Filter by available grade</span>
+                      <select value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)}>
+                        <option value="ALL">ALL GRADES</option>
+                        {gradeOptions.map((grade) => (
+                          <option key={grade.value} value={grade.value}>{grade.value}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </th>
                   <th>INFORMATION</th>
                 </tr>
               </thead>
@@ -746,7 +754,7 @@ export default function SpcSuppliersPage() {
                     <td>
                       <div className="spc-supplier-info-actions">
                         <button type="button" className="spc-supplier-mini-button is-more" onClick={() => setMoreInfoKey(record.key)}>
-                          MORE
+                          BDN
                         </button>
                         <button type="button" className="spc-supplier-mini-button is-fixtures" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
                           FIXTURES
