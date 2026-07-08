@@ -25,6 +25,7 @@ const supplementalPorts = [
   "Pyeongtaek",
   "Shimonoseki",
   "Singapore",
+  "Taichung",
   "Yokohama",
 ]
 

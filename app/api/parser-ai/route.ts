@@ -284,6 +284,29 @@ function injectImoIntoSlashOutput(output: string, imo: string, vesselName: strin
   return [firstPart, imo, ...parts.slice(1)].filter(Boolean).join(" / ")
 }
 
+function stripImoFromSlashOutput(output: string, imo: string) {
+  if (!output || !imo) return output
+  return output
+    .split("/")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== imo)
+    .join(" / ")
+}
+
+function textContainsImo(imo: string, ...values: string[]) {
+  if (!imo) return false
+  return values.some((value) => new RegExp(`(^|\\D)${imo}(?=$|\\D)`).test(value))
+}
+
+function compactLookupText(value: string) {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, "")
+}
+
+function sourceSupportsImo(source: ParserAiSourceLink, vesselName: string, imo: string) {
+  const sourceText = `${source.title} ${source.url}`
+  return sourceText.includes(imo) && compactLookupText(sourceText).includes(compactLookupText(vesselName))
+}
+
 function getHongKongDateKey() {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Hong_Kong",
@@ -487,11 +510,13 @@ async function lookupImoWithWebSearch(apiKey: string, model: string, vesselName:
     if (!outputText) return null
 
     const draft = normalizeImoLookupDraft(JSON.parse(outputText))
+    const sources = extractWebSourceLinks(lookupPayload)
     if (!draft.imo || draft.confidence < 0.6) return null
+    if (!sources.some((source) => sourceSupportsImo(source, cleanedVessel, draft.imo))) return null
     return {
       imo: draft.imo,
       warning: draft.warning || "IMO found by web search; please double check.",
-      sources: extractWebSourceLinks(lookupPayload),
+      sources,
     }
   } catch {
     return null
@@ -600,6 +625,14 @@ export async function POST(request: Request) {
       normalizeDraft(parsed),
     )
 
+    if (draft.imo && !textContainsImo(draft.imo, rawText, cleanedText, parserOutput, currentOutput)) {
+      draft = {
+        ...draft,
+        imo: "",
+        correctedOutput: stripImoFromSlashOutput(draft.correctedOutput, draft.imo),
+      }
+    }
+
     let imoSources: ParserAiSourceLink[] = []
     if (!draft.imo && draft.vesselName) {
       const imoLookup = await lookupImoWithWebSearch(apiKey, model, draft.vesselName)
@@ -614,6 +647,13 @@ export async function POST(request: Request) {
             imoLookup.warning,
           ]),
         }
+      }
+    }
+
+    if (draft.imo && !textContainsImo(draft.imo, draft.correctedOutput)) {
+      draft = {
+        ...draft,
+        correctedOutput: correctedOutputWithImo(source, rawText, cleanedText, draft, draft.imo),
       }
     }
 

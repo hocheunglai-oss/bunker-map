@@ -8,7 +8,7 @@ import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
 import { parseSpcEnquiryText } from "@/lib/spcEnquiryText"
 
 const STORE_KEY = "parser-reports"
-const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T03:40:00.000Z")
+const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T06:15:00.000Z")
 
 export const dynamic = "force-dynamic"
 

@@ -21,7 +21,7 @@ const STORE_KEY = "parser-reports"
 const MAX_REPORTS = 500
 const MAX_TEXT_LENGTH = 20_000
 const MAX_NOTE_LENGTH = 2_000
-const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T03:40:00.000Z")
+const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T06:15:00.000Z")
 
 type ParserReportSource = "enquiryworksheet" | "spc"
 

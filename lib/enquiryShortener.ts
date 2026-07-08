@@ -162,6 +162,16 @@ function findDates(value: string) {
   const dates: string[] = []
   const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
+  for (const match of normalized.matchAll(/(?:\d{4}\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?\s*(?:-|~|to|至|到)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*[日号]/gi)) {
+    const range = formatDateRange(match[2], match[1], match[4], match[3] || match[1])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(/(?:\d{4}\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/g)) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
   for (const match of normalized.matchAll(/(?:^|\n)\s*[A-Za-z][A-Za-z .'-]{1,36}\s+(\d{1,2})[./](\d{1,2})(?=$|[^\d])/gm)) {
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)

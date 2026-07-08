@@ -647,12 +647,10 @@ export default function EnquiryWorksheetPage() {
           parserOutput: deterministicOutput,
           currentOutput: shortenedDraft,
           fields: {
-            guesses,
-            worksheet: {
-              vesselName: worksheet.vesselName,
-              imo: worksheet.imo,
-              buyer: worksheet.buyer,
-            },
+            vesselName: guesses.vesselName,
+            imo: guesses.imo,
+            port: guesses.port,
+            buyer: guesses.buyer,
           },
           manualVlsfoMaxRemarks: vlsfoMaxRemarks,
         }),
