@@ -385,6 +385,9 @@
 .copyButton {
   min-width: 58px;
   height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--fc-admin-button-border) !important;
   border-radius: 999px;
   background: var(--fc-admin-button-bg) !important;

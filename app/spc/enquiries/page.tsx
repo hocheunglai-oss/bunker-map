@@ -79,8 +79,15 @@ type ParserReportDialog = {
   context: "new-enquiry" | "reoffer"
   rawText: string
   parserOutput: string
+  aiOutput?: string
+  aiSources?: ParserAiSourceLink[]
   correctedOutput: string
   note: string
+}
+
+type ParserAiSourceLink = {
+  title: string
+  url: string
 }
 
 type DraftFieldKey = "vesselName" | "imo" | "eta" | "fuel"
@@ -103,17 +110,20 @@ type ParserAiResponse = {
   vlsfoMaxRemarks?: VlsfoMaxRemark[]
   confidence?: number
   warnings?: string[]
+  imoSources?: ParserAiSourceLink[]
   message?: string
 }
 
 type ParserAiSuggestion = {
   context: ParserReportDialog["context"]
   model: string
+  parserOutput: string
   correctedOutput: string
   fields: ParserAiFields
   vlsfoMaxRemarks: VlsfoMaxRemark[]
   confidence: number
   warnings: string[]
+  imoSources: ParserAiSourceLink[]
   appliedAt: string
 }
 
@@ -552,10 +562,16 @@ export default function SpcEnquiriesPage() {
   }
 
   function openDraftParserReport() {
+    const aiOutput = parserAiSuggestion?.context === "new-enquiry" ? parserAiSuggestion.correctedOutput : ""
+    const parserOutput = parserAiSuggestion?.context === "new-enquiry"
+      ? parserAiSuggestion.parserOutput
+      : standardTextForDraft(draft, vlsfoMaxRemarks)
     setParserReportDialog({
       context: "new-enquiry",
       rawText: draft.rawText,
-      parserOutput: standardTextForDraft(draft, vlsfoMaxRemarks),
+      parserOutput,
+      aiOutput,
+      aiSources: parserAiSuggestion?.context === "new-enquiry" ? parserAiSuggestion.imoSources : [],
       correctedOutput: draft.standardText || standardTextForDraft(draft, vlsfoMaxRemarks),
       note: "",
     })
@@ -564,10 +580,16 @@ export default function SpcEnquiriesPage() {
 
   function openReofferParserReport() {
     if (!reofferDraft) return
+    const aiOutput = parserAiSuggestion?.context === "reoffer" ? parserAiSuggestion.correctedOutput : ""
+    const parserOutput = parserAiSuggestion?.context === "reoffer"
+      ? parserAiSuggestion.parserOutput
+      : standardTextForDraft(reofferDraft, [])
     setParserReportDialog({
       context: "reoffer",
       rawText: reofferDraft.rawText || reofferDraft.standardText,
-      parserOutput: standardTextForDraft(reofferDraft, []),
+      parserOutput,
+      aiOutput,
+      aiSources: parserAiSuggestion?.context === "reoffer" ? parserAiSuggestion.imoSources : [],
       correctedOutput: reofferDraft.standardText || standardTextForDraft(reofferDraft, []),
       note: "",
     })
@@ -610,6 +632,7 @@ export default function SpcEnquiriesPage() {
     if (!rawText) return
 
     const manualVlsfoMaxRemarks = context === "reoffer" ? [] : vlsfoMaxRemarks
+    const deterministicOutput = standardTextForDraft(targetDraft, manualVlsfoMaxRemarks)
     setParserAiStatus("loading")
     setParserAiTarget(context)
     setParserAiMessage("")
@@ -622,7 +645,7 @@ export default function SpcEnquiriesPage() {
           source: "spc",
           context,
           rawText,
-          parserOutput: standardTextForDraft(targetDraft, manualVlsfoMaxRemarks),
+          parserOutput: deterministicOutput,
           currentOutput: targetDraft.standardText,
           fields: {
             vesselName: targetDraft.vesselName,
@@ -665,11 +688,13 @@ export default function SpcEnquiriesPage() {
       setParserAiSuggestion({
         context,
         model: payload.model || "gpt-5.4-mini",
+        parserOutput: deterministicOutput,
         correctedOutput: next.draft.standardText,
         fields: payload.fields || {},
         vlsfoMaxRemarks: next.vlsfoMaxRemarks,
         confidence: typeof payload.confidence === "number" ? payload.confidence : 0,
         warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        imoSources: Array.isArray(payload.imoSources) ? payload.imoSources.filter((source) => source?.url) : [],
         appliedAt: new Date().toISOString(),
       })
       setParserAiStatus("applied")
@@ -706,6 +731,8 @@ export default function SpcEnquiriesPage() {
             draft: parserReportDialog.context === "reoffer" ? reofferDraft : draft,
             manualVlsfoMaxRemarks: parserReportDialog.context === "reoffer" ? [] : vlsfoMaxRemarks,
             aiSuggestion: parserAiSuggestion?.context === parserReportDialog.context ? parserAiSuggestion : null,
+            aiFixOutput: parserReportDialog.aiOutput || "",
+            aiSources: parserReportDialog.aiSources || [],
           },
         }),
       })
@@ -1044,6 +1071,14 @@ export default function SpcEnquiriesPage() {
                   AI warning: {parserAiSuggestion.warnings.join(" / ")}
                 </p>
               ) : null}
+              {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.imoSources.length > 0 ? (
+                <p className="spc-parser-report-status">
+                  IMO source:{" "}
+                  <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">
+                    {parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}
+                  </a>
+                </p>
+              ) : null}
               <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               <div className="spc-form-actions">
                 <button type="submit" disabled={saving || !canEdit}>
@@ -1290,6 +1325,14 @@ export default function SpcEnquiriesPage() {
                   AI warning: {parserAiSuggestion.warnings.join(" / ")}
                 </p>
               ) : null}
+              {parserAiSuggestion?.context === "reoffer" && parserAiSuggestion.imoSources.length > 0 ? (
+                <p className="spc-parser-report-status">
+                  IMO source:{" "}
+                  <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">
+                    {parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}
+                  </a>
+                </p>
+              ) : null}
               <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               <div className="spc-dialog-actions">
                 <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
@@ -1320,6 +1363,20 @@ export default function SpcEnquiriesPage() {
                 <span>Parser Output</span>
                 <textarea value={parserReportDialog.parserOutput} readOnly />
               </label>
+              {parserReportDialog.aiOutput ? (
+                <label>
+                  <span>AI Fix</span>
+                  <textarea value={parserReportDialog.aiOutput} readOnly />
+                </label>
+              ) : null}
+              {parserReportDialog.aiSources?.length ? (
+                <p className="spc-parser-report-status">
+                  IMO source:{" "}
+                  <a href={parserReportDialog.aiSources[0].url} target="_blank" rel="noreferrer">
+                    {parserReportDialog.aiSources[0].title || parserReportDialog.aiSources[0].url}
+                  </a>
+                </p>
+              ) : null}
               <label>
                 <span>Correct Version</span>
                 <textarea

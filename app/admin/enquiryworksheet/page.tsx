@@ -62,8 +62,16 @@ type ParserReportsResponse = {
 
 type ParserReportDraft = {
   open: boolean
+  parserOutput: string
+  aiOutput: string
+  aiSources: ParserAiSourceLink[]
   correctedOutput: string
   note: string
+}
+
+type ParserAiSourceLink = {
+  title: string
+  url: string
 }
 
 type ParserAiFields = {
@@ -81,16 +89,19 @@ type ParserAiResponse = {
   vlsfoMaxRemarks?: VlsfoMaxRemark[]
   confidence?: number
   warnings?: string[]
+  imoSources?: ParserAiSourceLink[]
   message?: string
 }
 
 type ParserAiSuggestion = {
   model: string
+  parserOutput: string
   correctedOutput: string
   fields: ParserAiFields
   vlsfoMaxRemarks: VlsfoMaxRemark[]
   confidence: number
   warnings: string[]
+  imoSources: ParserAiSourceLink[]
   appliedAt: string
 }
 
@@ -362,6 +373,9 @@ export default function EnquiryWorksheetPage() {
   const [whatsappRequestId, setWhatsappRequestId] = useState("")
   const [parserReportDraft, setParserReportDraft] = useState<ParserReportDraft>({
     open: false,
+    parserOutput: "",
+    aiOutput: "",
+    aiSources: [],
     correctedOutput: "",
     note: "",
   })
@@ -618,6 +632,7 @@ export default function EnquiryWorksheetPage() {
     const sourceText = getParserSourceText().trim()
     if ((!rawText && !sourceText) || parserAiStatus === "loading") return
 
+    const deterministicOutput = shortenedEnquiry.trim()
     setParserAiStatus("loading")
     setParserAiMessage("")
     try {
@@ -629,7 +644,7 @@ export default function EnquiryWorksheetPage() {
           context: "shortened-enquiry",
           rawText,
           cleanedText: cleanedEnquiryText,
-          parserOutput: shortenedEnquiry,
+          parserOutput: deterministicOutput,
           currentOutput: shortenedDraft,
           fields: {
             guesses,
@@ -649,11 +664,13 @@ export default function EnquiryWorksheetPage() {
 
       const suggestion: ParserAiSuggestion = {
         model: payload.model || "gpt-5.4-mini",
+        parserOutput: deterministicOutput,
         correctedOutput: payload.correctedOutput,
         fields: payload.fields || {},
         vlsfoMaxRemarks: Array.isArray(payload.vlsfoMaxRemarks) ? payload.vlsfoMaxRemarks : [],
         confidence: typeof payload.confidence === "number" ? payload.confidence : 0,
         warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        imoSources: Array.isArray(payload.imoSources) ? payload.imoSources.filter((source) => source?.url) : [],
         appliedAt: new Date().toISOString(),
       }
 
@@ -728,8 +745,13 @@ export default function EnquiryWorksheetPage() {
   }
 
   function openParserReport() {
+    const aiOutput = parserAiSuggestion?.correctedOutput.trim() || ""
+    const parserOutput = parserAiSuggestion?.parserOutput.trim() || shortenedEnquiry.trim()
     setParserReportDraft({
       open: true,
+      parserOutput,
+      aiOutput,
+      aiSources: parserAiSuggestion?.imoSources || [],
       correctedOutput: (shortenedDraft || shortenedEnquiry).trim(),
       note: "",
     })
@@ -738,7 +760,7 @@ export default function EnquiryWorksheetPage() {
 
   async function submitParserReport() {
     const rawText = enquiryText.trim()
-    const parserOutput = shortenedEnquiry.trim()
+    const parserOutput = parserReportDraft.parserOutput.trim() || shortenedEnquiry.trim()
     const correctedOutput = parserReportDraft.correctedOutput.trim()
     if (!rawText || !correctedOutput || parserReportStatus === "saving") return
 
@@ -765,6 +787,8 @@ export default function EnquiryWorksheetPage() {
             },
             manualVlsfoMaxRemarks: vlsfoMaxRemarks,
             aiSuggestion: parserAiSuggestion,
+            aiFixOutput: parserReportDraft.aiOutput,
+            aiSources: parserReportDraft.aiSources,
           },
         }),
       })
@@ -950,10 +974,17 @@ export default function EnquiryWorksheetPage() {
                 AI warning: {parserAiSuggestion.warnings.join(" / ")}
               </p>
             ) : null}
+            {parserAiSuggestion?.imoSources.length ? (
+              <p className={styles.copyStatus}>
+                IMO source:{" "}
+                <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">
+                  {parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}
+                </a>
+              </p>
+            ) : null}
             {whatsappStatus === "sending" ? <p className={styles.copyStatus}>Sending to WhatsApp board...</p> : null}
             {whatsappStatus === "sent" ? <p className={styles.copyStatus}>Sent to FCUNO WhatsApp Speed Board.</p> : null}
             {whatsappStatus === "failed" ? <p className={styles.copyError}>FCUNO WhatsApp Speed Board did not respond. Reload the extension and try again.</p> : null}
-            <p className={styles.reportedCount}>REPORTED ({parserReportCount})</p>
           </section>
 
           <div className={styles.confirmGrid}>
@@ -1044,6 +1075,7 @@ export default function EnquiryWorksheetPage() {
               ))}
             </ul>
           ) : null}
+          <p className={styles.reportedCount}>REPORTED ({parserReportCount})</p>
         </aside>
 
         <section className={styles.sheet} aria-label="Enquiry worksheet">
@@ -1171,8 +1203,22 @@ export default function EnquiryWorksheetPage() {
               </label>
               <label>
                 <span>PARSER OUTPUT</span>
-                <textarea value={shortenedEnquiry} readOnly />
+                <textarea value={parserReportDraft.parserOutput} readOnly />
               </label>
+              {parserReportDraft.aiOutput ? (
+                <label>
+                  <span>AI FIX</span>
+                  <textarea value={parserReportDraft.aiOutput} readOnly />
+                </label>
+              ) : null}
+              {parserReportDraft.aiSources.length ? (
+                <p className={styles.copyStatus}>
+                  IMO source:{" "}
+                  <a href={parserReportDraft.aiSources[0].url} target="_blank" rel="noreferrer">
+                    {parserReportDraft.aiSources[0].title || parserReportDraft.aiSources[0].url}
+                  </a>
+                </p>
+              ) : null}
               <label>
                 <span>CORRECT VERSION</span>
                 <textarea

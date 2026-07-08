@@ -47,6 +47,17 @@ type ParserAiDraft = {
   warnings: string[]
 }
 
+type ParserImoLookupDraft = {
+  imo: string
+  confidence: number
+  warning: string
+}
+
+type ParserAiSourceLink = {
+  title: string
+  url: string
+}
+
 class HttpError extends Error {
   status: number
 
@@ -94,6 +105,17 @@ const PARSER_AI_SCHEMA = {
   ],
 } as const
 
+const PARSER_IMO_LOOKUP_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    imo: { type: "string" },
+    confidence: { type: "number" },
+    warning: { type: "string" },
+  },
+  required: ["imo", "confidence", "warning"],
+} as const
+
 function asString(value: unknown, maxLength = MAX_TEXT_LENGTH) {
   return String(typeof value === "string" ? value : "")
     .replace(/\r\n?/g, "\n")
@@ -129,6 +151,10 @@ function cleanWarnings(value: unknown) {
   return Array.isArray(value) ? value.map(cleanText).filter(Boolean).slice(0, 8) : []
 }
 
+function uniqueWarnings(warnings: string[]) {
+  return Array.from(new Set(warnings.map(cleanText).filter(Boolean))).slice(0, 8)
+}
+
 function cleanVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
   if (!Array.isArray(value)) return []
   return Array.from(
@@ -158,6 +184,49 @@ function extractOutputText(payload: unknown): string {
     }
   }
   return chunks.join("\n").trim()
+}
+
+function addSourceLink(links: ParserAiSourceLink[], value: unknown) {
+  if (!value || typeof value !== "object") return
+  const record = value as Record<string, unknown>
+  const nested = record.url_citation && typeof record.url_citation === "object"
+    ? record.url_citation as Record<string, unknown>
+    : record
+  const url = cleanText(nested.url)
+  if (!url || links.some((link) => link.url === url)) return
+  links.push({
+    title: cleanText(nested.title) || url,
+    url,
+  })
+}
+
+function extractWebSourceLinks(payload: unknown): ParserAiSourceLink[] {
+  if (!payload || typeof payload !== "object") return []
+  const output = Array.isArray((payload as Record<string, unknown>).output)
+    ? (payload as Record<string, unknown>).output as unknown[]
+    : []
+  const links: ParserAiSourceLink[] = []
+
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue
+    const record = item as Record<string, unknown>
+    const content = Array.isArray(record.content) ? record.content : []
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue
+      const annotations = Array.isArray((part as Record<string, unknown>).annotations)
+        ? (part as Record<string, unknown>).annotations as unknown[]
+        : []
+      annotations.forEach((annotation) => addSourceLink(links, annotation))
+    }
+
+    const action = record.action && typeof record.action === "object"
+      ? record.action as Record<string, unknown>
+      : {}
+    const sources = Array.isArray(action.sources) ? action.sources : []
+    sources.forEach((source) => addSourceLink(links, source))
+  }
+
+  return links.slice(0, 3)
 }
 
 function getAiErrorMessage(payload: unknown, fallback: string) {
@@ -190,6 +259,29 @@ function normalizeDraft(value: unknown): ParserAiDraft {
     confidence: cleanConfidence(source.confidence),
     warnings: cleanWarnings(source.warnings),
   }
+}
+
+function normalizeImoLookupDraft(value: unknown): ParserImoLookupDraft {
+  const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  return {
+    imo: cleanImo(source.imo),
+    confidence: cleanConfidence(source.confidence),
+    warning: cleanText(source.warning),
+  }
+}
+
+function injectImoIntoSlashOutput(output: string, imo: string, vesselName: string) {
+  const cleanOutput = cleanText(output)
+  if (!cleanOutput || !imo || /\b\d{7}\b/.test(cleanOutput)) return output
+
+  const parts = cleanOutput
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const firstPart = parts[0] || cleanText(vesselName).toLowerCase()
+  if (!firstPart) return output
+
+  return [firstPart, imo, ...parts.slice(1)].filter(Boolean).join(" / ")
 }
 
 function getHongKongDateKey() {
@@ -313,6 +405,99 @@ function normalizeOutputForSource(
   }
 }
 
+function correctedOutputWithImo(
+  source: ParserAiSource,
+  rawText: string,
+  cleanedText: string,
+  draft: ParserAiDraft,
+  imo: string,
+) {
+  const nextDraft = { ...draft, imo }
+  if (source === "spc") {
+    return cleanSpcEnquiryText(
+      buildSpcStandardEnquiry({
+        vesselName: nextDraft.vesselName,
+        imo,
+        eta: nextDraft.eta,
+        hsfo: nextDraft.hsfo,
+        vlsfo: nextDraft.vlsfo,
+        lsmgo: nextDraft.lsmgo,
+        remarks: nextDraft.remarks,
+        vlsfoMaxRemarks: nextDraft.vlsfoMaxRemarks,
+      }) || injectImoIntoSlashOutput(nextDraft.correctedOutput, imo, nextDraft.vesselName),
+    )
+  }
+
+  if (nextDraft.correctedOutput) {
+    return injectImoIntoSlashOutput(nextDraft.correctedOutput, imo, nextDraft.vesselName)
+  }
+
+  const sourceText = cleanedText || rawText
+  return buildShortenedEnquiry(
+    sourceText,
+    nextDraft.vesselName,
+    imo,
+    nextDraft.vlsfoMaxRemarks,
+    {
+      autoDetectVlsfoRemarks: false,
+      includePort: true,
+      port: nextDraft.port,
+    },
+  )
+}
+
+async function lookupImoWithWebSearch(apiKey: string, model: string, vesselName: string) {
+  const cleanedVessel = cleanText(vesselName)
+  if (!cleanedVessel) return null
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_IMO_LOOKUP_MODEL || model,
+        store: false,
+        instructions: [
+          "Find the vessel IMO number from public web results.",
+          "Use web search. Return an IMO only when one unique valid 7-digit IMO clearly matches the vessel name.",
+          "If multiple vessels, multiple IMO candidates, no match, or weak evidence, return an empty IMO.",
+          "If returning an IMO, set warning to exactly: IMO found by web search; please double check.",
+        ].join("\n"),
+        tools: [{ type: "web_search", search_context_size: "low" }],
+        tool_choice: "required",
+        include: ["web_search_call.action.sources"],
+        input: `Vessel name: ${cleanedVessel}\nSearch query: "${cleanedVessel}" vessel IMO`,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "vessel_imo_lookup",
+            strict: true,
+            schema: PARSER_IMO_LOOKUP_SCHEMA,
+          },
+        },
+      }),
+    })
+
+    const lookupPayload = await response.json().catch(() => ({}))
+    if (!response.ok) return null
+    const outputText = extractOutputText(lookupPayload)
+    if (!outputText) return null
+
+    const draft = normalizeImoLookupDraft(JSON.parse(outputText))
+    if (!draft.imo || draft.confidence < 0.6) return null
+    return {
+      imo: draft.imo,
+      warning: draft.warning || "IMO found by web search; please double check.",
+      sources: extractWebSourceLinks(lookupPayload),
+    }
+  } catch {
+    return null
+  }
+}
+
 async function requireAccess(source: ParserAiSource) {
   if (source === "spc") {
     await requireSpcPagePermission("spc-buyer-enquiries", "edit")
@@ -408,12 +593,29 @@ export async function POST(request: Request) {
       throw new Error("OpenAI returned an unreadable parser correction.")
     }
 
-    const draft = normalizeOutputForSource(
+    let draft = normalizeOutputForSource(
       source,
       rawText,
       cleanedText,
       normalizeDraft(parsed),
     )
+
+    let imoSources: ParserAiSourceLink[] = []
+    if (!draft.imo && draft.vesselName) {
+      const imoLookup = await lookupImoWithWebSearch(apiKey, model, draft.vesselName)
+      if (imoLookup?.imo) {
+        imoSources = imoLookup.sources
+        draft = {
+          ...draft,
+          imo: imoLookup.imo,
+          correctedOutput: correctedOutputWithImo(source, rawText, cleanedText, draft, imoLookup.imo),
+          warnings: uniqueWarnings([
+            ...draft.warnings,
+            imoLookup.warning,
+          ]),
+        }
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -434,6 +636,7 @@ export async function POST(request: Request) {
       vlsfoMaxRemarks: draft.vlsfoMaxRemarks,
       confidence: draft.confidence,
       warnings: draft.warnings,
+      imoSources,
     })
   } catch (error) {
     return errorResponse(error)
