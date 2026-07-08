@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import {
   deleteEmailTemplate,
   EmailTemplate,
+  loadEmailTemplate,
+  loadTemplateIndex,
   loadTemplateLibrary,
   repairEmailTemplateFormatting,
   saveEmailTemplate,
@@ -17,9 +19,53 @@ type SavePayload = {
   templates?: EmailTemplate[]
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireAdminPagePermission("email-templates", "view")
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get("id")
+    const mode = searchParams.get("mode") || searchParams.get("view")
+
+    if (id) {
+      const template = await loadEmailTemplate(id)
+      if (!template) {
+        return NextResponse.json({ message: "Template not found." }, { status: 404 })
+      }
+
+      return NextResponse.json(
+        { template },
+        {
+          headers: {
+            "Cache-Control": "private, no-store",
+          },
+        }
+      )
+    }
+
+    if (mode === "index" || mode === "compact") {
+      const library = await loadTemplateIndex()
+      return NextResponse.json(
+        library,
+        {
+          headers: {
+            "Cache-Control": "private, no-store",
+          },
+        }
+      )
+    }
+
+    if (mode === "recipients") {
+      const recipients = await loadSharedAddressBookRecipients()
+      return NextResponse.json(
+        recipients,
+        {
+          headers: {
+            "Cache-Control": "private, no-store",
+          },
+        }
+      )
+    }
+
     const [library, recipients] = await Promise.all([
       loadTemplateLibrary(),
       loadSharedAddressBookRecipients(),

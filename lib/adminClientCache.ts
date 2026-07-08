@@ -6,6 +6,8 @@ type AdminClientCacheEntry = {
 
 export const OUTLOOK_ADDRESS_BOOK_CACHE_KEY = "outlook-address-book-bootstrap"
 export const OUTLOOK_TEMPLATES_CACHE_KEY = "outlook-templates-bootstrap"
+export const OUTLOOK_TEMPLATES_INDEX_CACHE_KEY = "outlook-templates-index-v1"
+export const OUTLOOK_TEMPLATES_RECIPIENTS_CACHE_KEY = "outlook-templates-recipients-v1"
 
 const adminClientCache = new Map<string, AdminClientCacheEntry>()
 

@@ -205,14 +205,21 @@ function rowToTemplate(row: any): EmailTemplate {
 }
 
 function rowToTemplateIndexItem(row: any): EmailTemplateIndexItem {
-  return {
-    id: row.id,
-    title: row.title || "",
+  const sanitized = sanitizeEmailTemplate({
     subject: row.subject || "",
-    folder: row.folder || "",
     to: row.to_recipients || "",
     cc: row.cc_recipients || "",
     bcc: row.bcc_recipients || "",
+  })
+
+  return {
+    id: row.id,
+    title: row.title || "",
+    subject: sanitized.subject || "",
+    folder: row.folder || "",
+    to: sanitized.to || "",
+    cc: sanitized.cc || "",
+    bcc: sanitized.bcc || "",
     isActive: row.is_active !== false,
     updatedAt: row.updated_at || new Date().toISOString(),
   }

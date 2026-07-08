@@ -6,7 +6,8 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
-  OUTLOOK_TEMPLATES_CACHE_KEY,
+  OUTLOOK_TEMPLATES_INDEX_CACHE_KEY,
+  OUTLOOK_TEMPLATES_RECIPIENTS_CACHE_KEY,
   readAdminClientCache,
 } from "@/lib/adminClientCache"
 
@@ -26,12 +27,23 @@ type EmailTemplate = {
   slug: string
   isActive: boolean
   updatedAt: string
+  bodyLoaded?: boolean
+  bodyLoading?: boolean
+  bodyError?: string
 }
 
-type TemplateLibraryResponse = {
-  templates: EmailTemplate[]
+type TemplateIndexItem = Pick<
+  EmailTemplate,
+  "id" | "title" | "subject" | "folder" | "to" | "cc" | "bcc" | "isActive" | "updatedAt"
+>
+
+type TemplateIndexResponse = {
+  templates: TemplateIndexItem[]
   lastImportedAt: string | null
   lastUpdatedAt: string | null
+}
+
+type RecipientsResponse = {
   contacts: AddressContact[]
   groups: AddressGroup[]
 }
@@ -340,6 +352,40 @@ function createBlankTemplate(folder: string): EmailTemplate {
     slug: id,
     isActive: true,
     updatedAt: now,
+    bodyLoaded: true,
+    bodyLoading: false,
+  }
+}
+
+function templateFromIndexItem(template: TemplateIndexItem): EmailTemplate {
+  return {
+    id: template.id,
+    title: template.title || "",
+    subject: template.subject || "",
+    folder: template.folder || "Unfiled",
+    sourcePath: "",
+    from: "",
+    to: template.to || "",
+    cc: template.cc || "",
+    bcc: template.bcc || "",
+    bodyHtml: "",
+    bodyText: "",
+    tags: getFolderParts(template.folder || "Unfiled"),
+    slug: template.id,
+    isActive: template.isActive !== false,
+    updatedAt: template.updatedAt || new Date().toISOString(),
+    bodyLoaded: false,
+    bodyLoading: false,
+  }
+}
+
+function templateFromDetail(template: EmailTemplate): EmailTemplate {
+  return {
+    ...template,
+    tags: Array.isArray(template.tags) ? template.tags : getFolderParts(template.folder || "Unfiled"),
+    bodyLoaded: true,
+    bodyLoading: false,
+    bodyError: undefined,
   }
 }
 
@@ -347,9 +393,9 @@ export default function EmailTemplatesAdminPage() {
   const isMobile = useIsMobile()
   const { loading, authenticated } = useSimpleAdminAuth()
   const [initialLibrary] = useState(() =>
-    readAdminClientCache<TemplateLibraryResponse>(OUTLOOK_TEMPLATES_CACHE_KEY),
+    readAdminClientCache<TemplateIndexResponse>(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY),
   )
-  const initialTemplates = initialLibrary?.templates || []
+  const initialTemplates = (initialLibrary?.templates || []).map(templateFromIndexItem)
   const initialTree = buildFolderTree(initialTemplates)
   const initialFolder = initialTree.index["Outgoing / Bunker"]
     ? "Outgoing / Bunker"
@@ -358,6 +404,7 @@ export default function EmailTemplatesAdminPage() {
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyVersionRef = useRef(0)
   const pendingTemplateRef = useRef<EmailTemplate | null>(null)
+  const detailPromisesRef = useRef<Map<string, Promise<EmailTemplate>>>(new Map())
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates)
   const [selectedFolder, setSelectedFolder] = useState(initialFolder)
   const [selectedId, setSelectedId] = useState(
@@ -376,8 +423,10 @@ export default function EmailTemplatesAdminPage() {
   const [folderNameDraft, setFolderNameDraft] = useState("")
   const [draggedTemplateId, setDraggedTemplateId] = useState("")
   const [dropTargetFolder, setDropTargetFolder] = useState("")
-  const [contacts, setContacts] = useState<AddressContact[]>(initialLibrary?.contacts || [])
-  const [groups, setGroups] = useState<AddressGroup[]>(initialLibrary?.groups || [])
+  const [contacts, setContacts] = useState<AddressContact[]>([])
+  const [groups, setGroups] = useState<AddressGroup[]>([])
+  const [recipientsLoading, setRecipientsLoading] = useState(false)
+  const [recipientsLoaded, setRecipientsLoaded] = useState(false)
   const [recipientPickerField, setRecipientPickerField] = useState<RecipientField | null>(null)
   const [recipientSearch, setRecipientSearch] = useState("")
   const [search, setSearch] = useState("")
@@ -439,11 +488,11 @@ export default function EmailTemplatesAdminPage() {
 
     async function loadTemplates() {
       try {
-        const data = await fetchAdminClientJson<TemplateLibraryResponse>(
-          OUTLOOK_TEMPLATES_CACHE_KEY,
-          "/api/admin/email-templates",
+        const data = await fetchAdminClientJson<TemplateIndexResponse>(
+          OUTLOOK_TEMPLATES_INDEX_CACHE_KEY,
+          "/api/admin/email-templates?mode=index",
         )
-        const loadedTemplates = data.templates || []
+        const loadedTemplates = (data.templates || []).map(templateFromIndexItem)
         const built = buildFolderTree(loadedTemplates)
         const preferredFolder = built.index["Outgoing / Bunker"]
           ? "Outgoing / Bunker"
@@ -458,8 +507,6 @@ export default function EmailTemplatesAdminPage() {
             ""
         )
         setLastUpdatedAt(data.lastUpdatedAt)
-        setContacts(data.contacts || [])
-        setGroups(data.groups || [])
         setSaveState("saved")
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Failed to load templates.")
@@ -470,9 +517,22 @@ export default function EmailTemplatesAdminPage() {
   }, [authenticated])
 
   useEffect(() => {
+    if (!authenticated || !selectedId) return
+    const template = templates.find((item) => item.id === selectedId)
+    if (!template || template.bodyLoaded || template.bodyLoading) return
+    void loadTemplateDetail(selectedId).catch((error) => {
+      setMessage(error instanceof Error ? error.message : "Failed to load template.")
+    })
+  }, [authenticated, selectedId, templates])
+
+  useEffect(() => {
     if (!editorRef.current || !selectedTemplate) return
+    if (!selectedTemplate.bodyLoaded) {
+      editorRef.current.innerHTML = ""
+      return
+    }
     editorRef.current.innerHTML = selectedTemplate.bodyHtml || "<p></p>"
-  }, [selectedId])
+  }, [selectedId, selectedTemplate?.bodyLoaded, selectedTemplate?.bodyHtml])
 
   useEffect(() => {
     if (!authenticated) return
@@ -493,15 +553,121 @@ export default function EmailTemplatesAdminPage() {
   }
 
   function markDirty(template: EmailTemplate) {
-    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
+    clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
     dirtyVersionRef.current += 1
     pendingTemplateRef.current = template
     setSaveState("dirty")
     setSaveRevision((current) => current + 1)
   }
 
+  async function loadTemplateDetail(templateId: string) {
+    if (!templateId) throw new Error("Missing template id.")
+
+    const currentTemplate = templates.find((template) => template.id === templateId)
+    if (currentTemplate?.bodyLoaded) return currentTemplate
+
+    const existingPromise = detailPromisesRef.current.get(templateId)
+    if (existingPromise) return existingPromise
+
+    setTemplates((current) =>
+      current.map((template) =>
+        template.id === templateId
+          ? { ...template, bodyLoading: true, bodyError: undefined }
+          : template
+      )
+    )
+
+    const promise = fetch(`/api/admin/email-templates?id=${encodeURIComponent(templateId)}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as SaveTemplateResponse
+        if (!response.ok || !data.template) {
+          throw new Error(data.message || "Failed to load template.")
+        }
+        const loadedTemplate = templateFromDetail(data.template)
+        setTemplates((current) =>
+          current.map((template) =>
+            template.id === templateId
+              ? {
+                  ...loadedTemplate,
+                  ...template,
+                  bodyHtml: loadedTemplate.bodyHtml,
+                  bodyText: loadedTemplate.bodyText,
+                  sourcePath: loadedTemplate.sourcePath,
+                  from: loadedTemplate.from,
+                  slug: loadedTemplate.slug,
+                  tags: template.tags?.length ? template.tags : loadedTemplate.tags,
+                  bodyLoaded: true,
+                  bodyLoading: false,
+                  bodyError: undefined,
+                }
+              : template
+          )
+        )
+        return loadedTemplate
+      })
+      .catch((error) => {
+        setTemplates((current) =>
+          current.map((template) =>
+            template.id === templateId
+              ? {
+                  ...template,
+                  bodyLoading: false,
+                  bodyError: error instanceof Error ? error.message : "Failed to load template.",
+                }
+              : template
+          )
+        )
+        throw error
+      })
+      .finally(() => {
+        detailPromisesRef.current.delete(templateId)
+      })
+
+    detailPromisesRef.current.set(templateId, promise)
+    return promise
+  }
+
+  async function hydrateTemplateForSave(template: EmailTemplate) {
+    if (template.bodyLoaded) return template
+    const detail = await loadTemplateDetail(template.id)
+    return {
+      ...detail,
+      ...template,
+      bodyHtml: detail.bodyHtml,
+      bodyText: detail.bodyText,
+      sourcePath: detail.sourcePath,
+      from: detail.from,
+      slug: detail.slug,
+      tags: template.tags?.length ? template.tags : detail.tags,
+      bodyLoaded: true,
+      bodyLoading: false,
+      bodyError: undefined,
+    }
+  }
+
+  async function loadRecipients() {
+    if (recipientsLoaded || recipientsLoading) return
+    setRecipientsLoading(true)
+    try {
+      const data = await fetchAdminClientJson<RecipientsResponse>(
+        OUTLOOK_TEMPLATES_RECIPIENTS_CACHE_KEY,
+        "/api/admin/email-templates?mode=recipients",
+      )
+      setContacts(data.contacts || [])
+      setGroups(data.groups || [])
+      setRecipientsLoaded(true)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to load contacts and groups.")
+    } finally {
+      setRecipientsLoading(false)
+    }
+  }
+
   function updateSelectedTemplate(partial: Partial<EmailTemplate>) {
     if (!selectedTemplate) return
+    if (!selectedTemplate.bodyLoaded) return
     const updatedAt = new Date().toISOString()
     const nextTemplate: EmailTemplate = {
       ...selectedTemplate,
@@ -537,16 +703,17 @@ export default function EmailTemplatesAdminPage() {
     setMessage("")
 
     try {
+      const templateToSave = await hydrateTemplateForSave(template)
       const response = await fetch("/api/admin/email-templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save-template", template }),
+        body: JSON.stringify({ action: "save-template", template: templateToSave }),
       })
 
       const data = (await response.json()) as SaveTemplateResponse
       if (!response.ok) throw new Error(data.message || "Save failed.")
 
-      const savedTemplate = data.template || template
+      const savedTemplate = templateFromDetail(data.template || templateToSave)
       if (dirtyVersionRef.current !== version) {
         setSaveState("dirty")
         setSaveRevision((current) => current + 1)
@@ -567,13 +734,14 @@ export default function EmailTemplatesAdminPage() {
 
   async function saveTemplates(templatesToSave: EmailTemplate[]) {
     if (templatesToSave.length === 0) return
-    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
+    clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
     setSaveState("saving")
     setMessage("")
 
     try {
+      const hydratedTemplates = await Promise.all(templatesToSave.map(hydrateTemplateForSave))
       const savedTemplates = await Promise.all(
-        templatesToSave.map(async (template) => {
+        hydratedTemplates.map(async (template) => {
           const response = await fetch("/api/admin/email-templates", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -581,7 +749,7 @@ export default function EmailTemplatesAdminPage() {
           })
           const data = (await response.json()) as SaveTemplateResponse
           if (!response.ok) throw new Error(data.message || "Save failed.")
-          return data.template || template
+          return templateFromDetail(data.template || template)
         })
       )
       const savedById = new Map(savedTemplates.map((template) => [template.id, template]))
@@ -601,7 +769,7 @@ export default function EmailTemplatesAdminPage() {
   }
 
   async function deleteTemplate(templateId: string) {
-    clearAdminClientCache(OUTLOOK_TEMPLATES_CACHE_KEY)
+    clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
     pendingTemplateRef.current = null
     dirtyVersionRef.current += 1
@@ -732,7 +900,7 @@ export default function EmailTemplatesAdminPage() {
     affected.forEach((template) => void deleteTemplate(template.id))
   }
 
-  function moveTemplateToFolder(templateId: string, folderPath: string) {
+  async function moveTemplateToFolder(templateId: string, folderPath: string) {
     const template = templates.find((item) => item.id === templateId)
     const targetFolder = folderPath || "Custom"
     if (!template || template.folder === targetFolder) return
@@ -747,7 +915,13 @@ export default function EmailTemplatesAdminPage() {
     setSelectedFolder(targetFolder)
     setSelectedId(templateId)
     setExpandedFolders((current) => expandFolderPath(targetFolder, current))
-    markDirty(movedTemplate)
+    try {
+      const templateToSave = await hydrateTemplateForSave(movedTemplate)
+      markDirty(templateToSave)
+    } catch (error) {
+      setSaveState("failed")
+      setMessage(error instanceof Error ? error.message : "Failed to move template.")
+    }
   }
 
   function handleDeleteTemplate() {
@@ -773,6 +947,7 @@ export default function EmailTemplatesAdminPage() {
   function openRecipientPicker(field: RecipientField) {
     setRecipientPickerField(field)
     setRecipientSearch("")
+    void loadRecipients()
   }
 
   function closeRecipientPicker() {
@@ -816,7 +991,7 @@ export default function EmailTemplatesAdminPage() {
           }}
           onDrop={(event) => {
             event.preventDefault()
-            if (draggedTemplateId) moveTemplateToFolder(draggedTemplateId, node.path)
+            if (draggedTemplateId) void moveTemplateToFolder(draggedTemplateId, node.path)
             setDraggedTemplateId("")
             setDropTargetFolder("")
           }}
@@ -1026,9 +1201,17 @@ export default function EmailTemplatesAdminPage() {
                 type="button"
                 onClick={handleManualSave}
                 style={primaryButtonStyle}
-                disabled={!selectedTemplate || saveState === "saving"}
+                disabled={!selectedTemplate || !selectedTemplate.bodyLoaded || saveState === "saving"}
               >
-                {saveState === "saving" ? "Saving" : saveState === "dirty" ? "Save Now" : saveState === "failed" ? "Retry Save" : "Saved"}
+                {selectedTemplate && !selectedTemplate.bodyLoaded
+                  ? "Loading"
+                  : saveState === "saving"
+                    ? "Saving"
+                    : saveState === "dirty"
+                      ? "Save Now"
+                      : saveState === "failed"
+                        ? "Retry Save"
+                        : "Saved"}
               </button>
               <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate}>
                 Delete
@@ -1036,7 +1219,7 @@ export default function EmailTemplatesAdminPage() {
             </div>
           </div>
 
-          {selectedTemplate ? (
+          {selectedTemplate ? selectedTemplate.bodyLoaded ? (
             <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
               {message ? <div style={{ color: "var(--fc-error)", fontSize: "13px" }}>{message}</div> : null}
 
@@ -1152,6 +1335,25 @@ export default function EmailTemplatesAdminPage() {
                   outline: "none",
                 }}
               />
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: "12px", padding: "24px", color: "var(--fc-muted)" }}>
+              {message ? <div style={{ color: "var(--fc-error)", fontSize: "13px" }}>{message}</div> : null}
+              <div style={{ color: "var(--fc-admin-heading)", fontSize: "16px", fontWeight: 900 }}>
+                {selectedTemplate.title || "Untitled template"}
+              </div>
+              <div style={{ fontSize: "13px", lineHeight: 1.5 }}>
+                {selectedTemplate.bodyError || "Loading template body..."}
+              </div>
+              {selectedTemplate.bodyError ? (
+                <button
+                  type="button"
+                  style={primaryButtonStyle}
+                  onClick={() => void loadTemplateDetail(selectedTemplate.id)}
+                >
+                  Retry
+                </button>
+              ) : null}
             </div>
           ) : (
             <div style={{ padding: "24px", color: "var(--fc-muted)" }}>Select or create a template.</div>
@@ -1290,7 +1492,9 @@ export default function EmailTemplatesAdminPage() {
               </div>
             </div>
             <div style={{ overflow: "auto", padding: "8px", display: "grid", gap: "5px" }}>
-              {recipientOptions.length ? recipientOptions.map((option) => (
+              {recipientsLoading ? (
+                <div style={{ padding: "18px", color: "var(--fc-muted)", fontSize: "13px" }}>Loading contacts and groups...</div>
+              ) : recipientOptions.length ? recipientOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
