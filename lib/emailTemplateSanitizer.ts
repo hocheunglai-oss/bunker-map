@@ -172,7 +172,7 @@ function prepareRawContent(value: string) {
 
 function extractCells(rowHtml: string) {
   return Array.from(rowHtml.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi))
-    .map((match) => stripTagsToText(match[1] || "").replace(/[ \t]+/g, " ").trim())
+    .map((match) => stripTagsToText(match[1] || "").replace(/\s+/g, " ").trim())
 }
 
 function tableHtmlToText(tableHtml: string) {
