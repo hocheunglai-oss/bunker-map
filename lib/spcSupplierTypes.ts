@@ -31,12 +31,22 @@ export type SpcSupplierLegacyFixture = SpcSupplierFixture & {
   legacySupplier: string
 }
 
+export type SpcSupplierBarge = {
+  id: string
+  bargeName: string
+  imo: string
+  grade: string
+  capacity: string
+  source: "sheet" | "override"
+}
+
 export type SpcSupplierRecord = {
   key: string
   name: string
   aliases: string[]
   info: SpcSupplierInfo
   fixtures: SpcSupplierFixture[]
+  barges: SpcSupplierBarge[]
   searchText: string
   updatedAt: string
 }
@@ -52,6 +62,7 @@ export type SpcSupplierDataset = {
     suppliers: number
     fixtureRows: number
     legacyFixtureRows: number
+    bargeRows: number
   }
 }
 
@@ -59,4 +70,15 @@ export type SaveSpcSupplierInput = {
   key?: string
   name: string
   info: SpcSupplierInfoInput
+}
+
+export type SaveSpcSupplierBargesInput = {
+  supplierKey: string
+  barges: Array<{
+    id?: string
+    bargeName: string
+    imo: string
+    grade: string
+    capacity: string
+  }>
 }

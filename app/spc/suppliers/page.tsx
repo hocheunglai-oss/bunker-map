@@ -6,7 +6,9 @@ import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import type {
+  SaveSpcSupplierBargesInput,
   SaveSpcSupplierInput,
+  SpcSupplierBarge,
   SpcSupplierDataset,
   SpcSupplierFixture,
   SpcSupplierInfoInput,
@@ -29,11 +31,15 @@ type SupplierDraft = {
   goBdn: string
 }
 
+type BargeDraft = Omit<SpcSupplierBarge, "source">
+
 const gradeOptions = [
   { value: "HSFO", className: "is-hsfo" },
   { value: "VLSFO", className: "is-vlsfo" },
   { value: "LSMGO", className: "is-lsmgo" },
 ]
+
+const bargeGradeOptions = gradeOptions.map((option) => option.value)
 
 function blank(value: string | null | undefined) {
   return value?.trim() || "-"
@@ -86,6 +92,29 @@ function draftInfo(draft: SupplierDraft): SpcSupplierInfoInput {
     availableGrade: draft.availableGrade.join(", "),
     foBdn: draft.foBdn.trim(),
     goBdn: draft.goBdn.trim(),
+  }
+}
+
+function bargeDraftsFromRecord(record: SpcSupplierRecord): BargeDraft[] {
+  return record.barges.map((barge, index) => ({
+    id: barge.id || `${record.key}-BARGE-${index + 1}`,
+    bargeName: barge.bargeName,
+    imo: barge.imo,
+    grade: barge.grade,
+    capacity: barge.capacity,
+  }))
+}
+
+function bargePayload(supplierKey: string, drafts: BargeDraft[]): SaveSpcSupplierBargesInput {
+  return {
+    supplierKey,
+    barges: drafts.map((draft) => ({
+      id: draft.id,
+      bargeName: draft.bargeName.trim(),
+      imo: draft.imo.trim(),
+      grade: draft.grade.trim(),
+      capacity: draft.capacity.trim(),
+    })),
   }
 }
 
@@ -307,6 +336,128 @@ function FixtureDialog({
   )
 }
 
+function BargeFleetDialog({
+  supplier,
+  drafts,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  supplier: SpcSupplierRecord
+  drafts: BargeDraft[]
+  saving: boolean
+  onChange: (drafts: BargeDraft[]) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const updateDraft = (index: number, field: keyof BargeDraft, value: string) => {
+    onChange(drafts.map((draft, draftIndex) =>
+      draftIndex === index ? { ...draft, [field]: value } : draft,
+    ))
+  }
+  const addDraft = () => {
+    onChange([
+      ...drafts,
+      {
+        id: `${supplier.key}-BARGE-${Date.now()}`,
+        bargeName: "",
+        imo: "",
+        grade: "",
+        capacity: "",
+      },
+    ])
+  }
+  const removeDraft = (index: number) => {
+    onChange(drafts.filter((_, draftIndex) => draftIndex !== index))
+  }
+
+  return (
+    <div className="spc-supplier-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="spc-supplier-modal is-wide" role="dialog" aria-modal="true" aria-label={`${supplier.name} barge fleet`} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="spc-supplier-modal-header">
+          <div>
+            <h2>{supplier.name}</h2>
+            <p>BARGE FLEET · {drafts.length}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Close</button>
+        </div>
+        <div className="spc-supplier-barge-panel">
+          <div className="spc-table-wrap">
+            <table className="spc-table spc-supplier-popup-table spc-supplier-barge-table">
+              <thead>
+                <tr>
+                  <th>BARGE NAME</th>
+                  <th>IMO</th>
+                  <th>GRADE</th>
+                  <th>CAPACITY</th>
+                  <th>REMOVE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {drafts.map((draft, index) => (
+                  <tr key={draft.id || index}>
+                    <td>
+                      <input
+                        value={draft.bargeName}
+                        onChange={(event) => updateDraft(index, "bargeName", event.target.value)}
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={draft.imo}
+                        inputMode="numeric"
+                        onChange={(event) => updateDraft(index, "imo", event.target.value)}
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={draft.grade}
+                        onChange={(event) => updateDraft(index, "grade", event.target.value)}
+                        disabled={saving}
+                      >
+                        <option value="">-</option>
+                        {bargeGradeOptions.map((grade) => (
+                          <option key={grade} value={grade}>{grade}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        value={draft.capacity}
+                        placeholder="MTS / CBM"
+                        onChange={(event) => updateDraft(index, "capacity", event.target.value)}
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button is-danger" onClick={() => removeDraft(index)} disabled={saving}>
+                        REMOVE
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {drafts.length === 0 ? (
+                  <tr><td colSpan={5}>NO BARGE RECORDS.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="spc-supplier-edit-actions">
+          <button type="button" onClick={addDraft} disabled={saving}>ADD BARGE</button>
+          <button type="button" onClick={onClose} disabled={saving}>CANCEL</button>
+          <button type="button" className="is-primary" onClick={onSave} disabled={saving}>
+            {saving ? "SAVING" : "SAVE"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function LegacyFixtureList({ fixtures }: { fixtures: SpcSupplierLegacyFixture[] }) {
   if (fixtures.length === 0) return null
   const visible = fixtures.slice(0, 12)
@@ -338,6 +489,8 @@ export default function SpcSuppliersPage() {
   const [requestedSupplier, setRequestedSupplier] = useState("")
   const [moreInfoKey, setMoreInfoKey] = useState("")
   const [fixtureKey, setFixtureKey] = useState("")
+  const [bargeKey, setBargeKey] = useState("")
+  const [bargeDrafts, setBargeDrafts] = useState<BargeDraft[]>([])
   const [editingDraft, setEditingDraft] = useState<SupplierDraft | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -373,10 +526,17 @@ export default function SpcSuppliersPage() {
 
   const moreInfoSupplier = records.find((record) => record.key === moreInfoKey) || null
   const fixtureSupplier = records.find((record) => record.key === fixtureKey) || null
+  const bargeSupplier = records.find((record) => record.key === bargeKey) || null
 
   function openEditor(record?: SpcSupplierRecord) {
     if (!canEdit) return
     setEditingDraft(draftFromRecord(record))
+    setMessage("")
+  }
+
+  function openBargeEditor(record: SpcSupplierRecord) {
+    setBargeKey(record.key)
+    setBargeDrafts(bargeDraftsFromRecord(record))
     setMessage("")
   }
 
@@ -466,6 +626,34 @@ export default function SpcSuppliersPage() {
     }
   }
 
+  async function saveBargeDrafts() {
+    if (!bargeSupplier) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-barges",
+          barges: bargePayload(bargeSupplier.key, bargeDrafts),
+        }),
+      })
+      const data = (await response.json()) as SupplierResponse
+      if (!response.ok) throw new Error(data.message || "Failed to save barge fleet.")
+      setDataset(data)
+      setBargeKey("")
+      setBargeDrafts([])
+      setMessage("Barge fleet saved.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save barge fleet.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   useEffect(() => {
     document.title = "SPC Supplier Database"
   }, [])
@@ -510,15 +698,6 @@ export default function SpcSuppliersPage() {
               placeholder="SEARCH"
             />
           </label>
-          <label>
-            <span className="sr-only">Filter by supplier trader</span>
-            <select value={traderFilter} onChange={(event) => setTraderFilter(event.target.value)}>
-              <option value="ALL">ALL TRADERS</option>
-              {traderOptions.map((trader) => (
-                <option key={trader} value={trader}>{trader}</option>
-              ))}
-            </select>
-          </label>
           <button type="button" onClick={() => void loadData()} disabled={loading}>
             {loading ? "REFRESHING" : "REFRESH"}
           </button>
@@ -537,15 +716,19 @@ export default function SpcSuppliersPage() {
                   <th>
                     <div className="spc-supplier-trader-heading">
                       <span>SUPPLIER TRADER</span>
+                      <select value={traderFilter} onChange={(event) => setTraderFilter(event.target.value)}>
+                        <option value="ALL">ALL TRADERS</option>
+                        {traderOptions.map((trader) => (
+                          <option key={trader} value={trader}>{trader}</option>
+                        ))}
+                      </select>
                       <button type="button" onClick={toggleTraderSort}>
                         SORT BY TRADER{traderSort === "asc" ? " ↑" : traderSort === "desc" ? " ↓" : ""}
                       </button>
                     </div>
                   </th>
                   <th>AVAILABLE GRADE</th>
-                  <th>MORE</th>
-                  <th>FIXTURES</th>
-                  <th>EDIT</th>
+                  <th>INFORMATION</th>
                 </tr>
               </thead>
               <tbody>
@@ -561,24 +744,30 @@ export default function SpcSuppliersPage() {
                     <td>{blank(record.info.supplierTrader)}</td>
                     <td><GradeCells value={record.info.availableGrade} /></td>
                     <td>
-                      <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
-                        MORE
-                      </button>
-                    </td>
-                    <td>
-                      <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
-                        FIXTURES
-                      </button>
-                    </td>
-                    <td>
-                      <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
-                        EDIT
-                      </button>
+                      <div className="spc-supplier-info-actions">
+                        <button type="button" className="spc-supplier-mini-button is-more" onClick={() => setMoreInfoKey(record.key)}>
+                          MORE
+                        </button>
+                        <button type="button" className="spc-supplier-mini-button is-fixtures" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
+                          FIXTURES
+                        </button>
+                        <button
+                          type="button"
+                          className={`spc-supplier-mini-button is-barge${record.barges.length > 0 ? " has-barges" : ""}`}
+                          onClick={() => openBargeEditor(record)}
+                          title={`${record.barges.length} BARGE${record.barges.length === 1 ? "" : "S"}`}
+                        >
+                          BARGE FLEET ({record.barges.length})
+                        </button>
+                        <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
+                          EDIT
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
                 {!loading && filteredRecords.length === 0 ? (
-                  <tr><td colSpan={8}>NO SUPPLIERS FOUND.</td></tr>
+                  <tr><td colSpan={6}>NO SUPPLIERS FOUND.</td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -589,6 +778,19 @@ export default function SpcSuppliersPage() {
 
         {moreInfoSupplier ? <MoreInfoDialog supplier={moreInfoSupplier} onClose={() => setMoreInfoKey("")} /> : null}
         {fixtureSupplier ? <FixtureDialog supplier={fixtureSupplier} onClose={() => setFixtureKey("")} /> : null}
+        {bargeSupplier ? (
+          <BargeFleetDialog
+            supplier={bargeSupplier}
+            drafts={bargeDrafts}
+            saving={saving}
+            onChange={setBargeDrafts}
+            onClose={() => {
+              setBargeKey("")
+              setBargeDrafts([])
+            }}
+            onSave={() => void saveBargeDrafts()}
+          />
+        ) : null}
         {editingDraft ? (
           <SupplierEditDialog
             draft={editingDraft}

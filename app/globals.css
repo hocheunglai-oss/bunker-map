@@ -5146,7 +5146,7 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-table.spc-supplier-ledger-table {
-  min-width: 1260px;
+  min-width: 1360px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -5186,35 +5186,31 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-ledger-table th:nth-child(1),
 .spc-table.spc-supplier-ledger-table td:nth-child(1) {
-  width: 230px;
+  width: 207px;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(2),
 .spc-table.spc-supplier-ledger-table td:nth-child(2),
 .spc-table.spc-supplier-ledger-table th:nth-child(3),
 .spc-table.spc-supplier-ledger-table td:nth-child(3) {
-  width: 116px;
+  width: 112px;
   text-align: center;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(4),
 .spc-table.spc-supplier-ledger-table td:nth-child(4) {
-  width: 210px;
+  width: 300px;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(5),
 .spc-table.spc-supplier-ledger-table td:nth-child(5) {
-  width: 300px;
+  width: 240px;
   text-align: center;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(6),
-.spc-table.spc-supplier-ledger-table td:nth-child(6),
-.spc-table.spc-supplier-ledger-table th:nth-child(7),
-.spc-table.spc-supplier-ledger-table td:nth-child(7),
-.spc-table.spc-supplier-ledger-table th:nth-child(8),
-.spc-table.spc-supplier-ledger-table td:nth-child(8) {
-  width: 82px;
+.spc-table.spc-supplier-ledger-table td:nth-child(6) {
+  width: 389px;
   padding-left: 5px;
   padding-right: 5px;
   text-align: center;
@@ -5227,7 +5223,20 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-supplier-trader-heading {
   display: grid;
-  gap: 3px;
+  gap: 5px;
+}
+
+.spc-supplier-trader-heading select {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 999px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  font-size: 11px;
+  font-weight: 850;
+  outline: none;
+  padding: 0 10px;
 }
 
 .spc-supplier-trader-heading button {
@@ -5246,21 +5255,21 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-supplier-grade-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(68px, 1fr));
-  gap: 5px;
+  grid-template-columns: repeat(3, minmax(50px, 1fr));
+  gap: 4px;
 }
 
 .spc-supplier-grade-grid span,
 .spc-supplier-grade-editor label span {
-  min-height: 22px;
+  min-height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
   line-height: 1;
-  padding: 5px 8px;
+  padding: 4px 6px;
   text-align: center;
 }
 
@@ -5294,17 +5303,53 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-supplier-mini-button {
   min-width: 0;
-  width: 68px;
+  width: auto;
   padding: 6px 7px;
   background: #f8fafc;
   font-size: 10px;
+  white-space: nowrap;
+}
+
+.spc-supplier-info-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.spc-supplier-mini-button.is-more {
+  min-width: 54px;
+}
+
+.spc-supplier-mini-button.is-fixtures {
+  min-width: 74px;
+}
+
+.spc-supplier-mini-button.is-barge {
+  min-width: 118px;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.spc-supplier-mini-button.is-barge.has-barges {
+  border-color: #0071e3;
+  background: #0071e3;
+  color: #fff;
 }
 
 .spc-supplier-mini-button.is-edit {
-  width: 54px;
+  min-width: 54px;
   border-color: #93c5fd;
   background: #eff6ff;
   color: #0758c7;
+}
+
+.spc-supplier-mini-button.is-danger {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
 }
 
 .spc-supplier-mini-button:hover,
@@ -5406,6 +5451,55 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-popup-table td {
   white-space: normal;
+}
+
+.spc-supplier-barge-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+.spc-table.spc-supplier-barge-table {
+  min-width: 840px;
+}
+
+.spc-table.spc-supplier-barge-table input,
+.spc-table.spc-supplier-barge-table select {
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 6px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+  padding: 5px 7px;
+}
+
+.spc-table.spc-supplier-barge-table th:nth-child(1),
+.spc-table.spc-supplier-barge-table td:nth-child(1) {
+  width: 290px;
+}
+
+.spc-table.spc-supplier-barge-table th:nth-child(2),
+.spc-table.spc-supplier-barge-table td:nth-child(2) {
+  width: 120px;
+}
+
+.spc-table.spc-supplier-barge-table th:nth-child(3),
+.spc-table.spc-supplier-barge-table td:nth-child(3) {
+  width: 130px;
+}
+
+.spc-table.spc-supplier-barge-table th:nth-child(4),
+.spc-table.spc-supplier-barge-table td:nth-child(4) {
+  width: 160px;
+}
+
+.spc-table.spc-supplier-barge-table th:nth-child(5),
+.spc-table.spc-supplier-barge-table td:nth-child(5) {
+  width: 110px;
+  text-align: center;
 }
 
 .spc-supplier-edit-form {

@@ -7,9 +7,10 @@ import {
 import {
   deleteSpcSupplier,
   loadSpcSupplierDataset,
+  saveSpcSupplierBarges,
   saveSpcSupplier,
 } from "@/lib/spcSuppliers"
-import type { SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
+import type { SaveSpcSupplierBargesInput, SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
 
 export const dynamic = "force-dynamic"
 
@@ -54,6 +55,7 @@ export async function PATCH(request: Request) {
     }
     const payload = (await request.json()) as {
       action?: unknown
+      barges?: unknown
       key?: unknown
       supplier?: unknown
     }
@@ -61,6 +63,20 @@ export async function PATCH(request: Request) {
     if (payload.action === "delete") {
       const key = typeof payload.key === "string" ? payload.key : ""
       const dataset = await deleteSpcSupplier(key, context)
+      return NextResponse.json(dataset, {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      })
+    }
+
+    if (payload.action === "save-barges") {
+      const barges =
+        payload.barges && typeof payload.barges === "object"
+          ? (payload.barges as SaveSpcSupplierBargesInput)
+          : null
+      if (!barges) throw new Error("Barge fleet details are required.")
+      const dataset = await saveSpcSupplierBarges(barges, context)
       return NextResponse.json(dataset, {
         headers: {
           "Cache-Control": "private, no-store",
