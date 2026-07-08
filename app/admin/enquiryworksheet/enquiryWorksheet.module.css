@@ -363,7 +363,7 @@
 
 .shortenedHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 88px 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 48px 88px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -393,6 +393,23 @@
   font-size: 18px;
   font-weight: 900;
   line-height: 1;
+}
+
+.aiButton {
+  min-width: 48px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2459d6 !important;
+  border-radius: 999px;
+  background: #edf4ff !important;
+  color: #1746a2 !important;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0 11px;
+  white-space: nowrap;
 }
 
 .reportButton {
@@ -437,6 +454,7 @@
 }
 
 .copyButton:disabled,
+.aiButton:disabled,
 .reportButton:disabled,
 .whatsappButton:disabled {
   opacity: 0.45;

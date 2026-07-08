@@ -52,6 +52,9 @@ type EnquiriesResponse = {
 
 type ParserReportsResponse = {
   reports?: unknown[]
+  unresolvedReports?: number
+  totalReports?: number
+  resolvedReports?: number
 }
 
 type EnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
@@ -81,6 +84,38 @@ type ParserReportDialog = {
 }
 
 type DraftFieldKey = "vesselName" | "imo" | "eta" | "fuel"
+
+type ParserAiFields = {
+  vesselName?: string
+  imo?: string
+  eta?: string
+  hsfo?: string
+  vlsfo?: string
+  lsmgo?: string
+  remarks?: string
+}
+
+type ParserAiResponse = {
+  success?: boolean
+  model?: string
+  correctedOutput?: string
+  fields?: ParserAiFields
+  vlsfoMaxRemarks?: VlsfoMaxRemark[]
+  confidence?: number
+  warnings?: string[]
+  message?: string
+}
+
+type ParserAiSuggestion = {
+  context: ParserReportDialog["context"]
+  model: string
+  correctedOutput: string
+  fields: ParserAiFields
+  vlsfoMaxRemarks: VlsfoMaxRemark[]
+  confidence: number
+  warnings: string[]
+  appliedAt: string
+}
 
 const LOST_REASONS = [
   "MINIMUM MARGIN",
@@ -179,6 +214,42 @@ function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = [])
   }
 }
 
+function cleanAiVlsfoMaxRemarks(value: ParserAiResponse["vlsfoMaxRemarks"]) {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value.filter((item): item is VlsfoMaxRemark =>
+        item === "180cst max" || item === "120cst max",
+      ),
+    ),
+  )
+}
+
+function draftFromAiResponse(
+  rawText: string,
+  payload: ParserAiResponse,
+  fallbackVlsfoMaxRemarks: VlsfoMaxRemark[],
+) {
+  const nextVlsfoMaxRemarks = cleanAiVlsfoMaxRemarks(payload.vlsfoMaxRemarks)
+  const vlsfoRemarks = nextVlsfoMaxRemarks.length > 0 ? nextVlsfoMaxRemarks : fallbackVlsfoMaxRemarks
+  const fields = payload.fields || {}
+  const parsed = normaliseDraft(payload.correctedOutput || "", vlsfoRemarks)
+  const draft: DraftEnquiry = {
+    ...parsed,
+    rawText,
+    vesselName: fields.vesselName || parsed.vesselName,
+    imo: fields.imo || parsed.imo,
+    eta: fields.eta || parsed.eta,
+    hsfo: cleanFuelEntry(fields.hsfo || parsed.hsfo),
+    vlsfo: cleanFuelEntry(fields.vlsfo || parsed.vlsfo),
+    lsmgo: cleanFuelEntry(fields.lsmgo || parsed.lsmgo),
+    remarks: fields.remarks || parsed.remarks,
+  }
+  draft.standardText = standardTextForDraft(draft, vlsfoRemarks)
+  draft.title = [draft.vesselName || "new enquiry", draft.eta].filter(Boolean).join(" / ")
+  return { draft, vlsfoMaxRemarks: vlsfoRemarks }
+}
+
 function normaliseVesselName(value: string | null | undefined) {
   return String(value || "")
     .toUpperCase()
@@ -269,6 +340,10 @@ export default function SpcEnquiriesPage() {
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const [parserReportCount, setParserReportCount] = useState(0)
+  const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
+  const [parserAiTarget, setParserAiTarget] = useState<ParserReportDialog["context"] | "">("")
+  const [parserAiMessage, setParserAiMessage] = useState("")
+  const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
@@ -348,7 +423,13 @@ export default function SpcEnquiriesPage() {
       const response = await fetch("/api/parser-reports?source=spc", { cache: "no-store" })
       const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
       if (!response.ok) throw new Error("Unable to load parser reports.")
-      setParserReportCount(Array.isArray(payload.reports) ? payload.reports.length : 0)
+      setParserReportCount(
+        typeof payload.unresolvedReports === "number"
+          ? payload.unresolvedReports
+          : Array.isArray(payload.reports)
+            ? payload.reports.length
+            : 0,
+      )
     } catch (error) {
       reportEnquiryError(error, "Failed to load parser report count.")
       setParserReportCount(0)
@@ -391,6 +472,10 @@ export default function SpcEnquiriesPage() {
 
     if (key === "rawText") {
       setVlsfoMaxRemarks([])
+      setParserAiStatus("idle")
+      setParserAiTarget("")
+      setParserAiMessage("")
+      setParserAiSuggestion(null)
       setDraft(normaliseDraft(value, []))
       return
     }
@@ -417,6 +502,10 @@ export default function SpcEnquiriesPage() {
     if (key === "hsfo" || key === "vlsfo" || key === "lsmgo") dismissReofferMissingField("fuel")
 
     if (key === "rawText") {
+      setParserAiStatus("idle")
+      setParserAiTarget("")
+      setParserAiMessage("")
+      setParserAiSuggestion(null)
       setReofferDraft((current) =>
         current ? { ...current, ...normaliseDraft(value, []), id: current.id, enquiryNumber: current.enquiryNumber } : current,
       )
@@ -456,6 +545,10 @@ export default function SpcEnquiriesPage() {
     setVlsfoMaxRemarks([])
     setValidationAttempted(false)
     setDismissedDraftMissingFields(new Set())
+    setParserAiStatus("idle")
+    setParserAiTarget("")
+    setParserAiMessage("")
+    setParserAiSuggestion(null)
   }
 
   function openDraftParserReport() {
@@ -510,6 +603,85 @@ export default function SpcEnquiriesPage() {
     }))
   }
 
+  async function runParserAi(context: ParserReportDialog["context"]) {
+    const targetDraft = context === "reoffer" ? reofferDraft : draft
+    if (!targetDraft || parserAiStatus === "loading") return
+    const rawText = (targetDraft.rawText || targetDraft.standardText).trim()
+    if (!rawText) return
+
+    const manualVlsfoMaxRemarks = context === "reoffer" ? [] : vlsfoMaxRemarks
+    setParserAiStatus("loading")
+    setParserAiTarget(context)
+    setParserAiMessage("")
+
+    try {
+      const response = await fetch("/api/parser-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "spc",
+          context,
+          rawText,
+          parserOutput: standardTextForDraft(targetDraft, manualVlsfoMaxRemarks),
+          currentOutput: targetDraft.standardText,
+          fields: {
+            vesselName: targetDraft.vesselName,
+            imo: targetDraft.imo,
+            eta: targetDraft.eta,
+            hsfo: targetDraft.hsfo,
+            vlsfo: targetDraft.vlsfo,
+            lsmgo: targetDraft.lsmgo,
+            remarks: targetDraft.remarks,
+          },
+          manualVlsfoMaxRemarks,
+        }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as ParserAiResponse
+      if (!response.ok || !payload.correctedOutput) {
+        throw new Error(payload.message || "AI parser failed.")
+      }
+
+      const next = draftFromAiResponse(rawText, payload, manualVlsfoMaxRemarks)
+      if (context === "reoffer") {
+        setReofferDraft((current) =>
+          current
+            ? {
+                ...next.draft,
+                id: current.id,
+                enquiryNumber: current.enquiryNumber,
+                rawText: current.rawText || rawText,
+              }
+            : current,
+        )
+      } else {
+        setVlsfoMaxRemarks(next.vlsfoMaxRemarks)
+        setDraft((current) => ({
+          ...current,
+          ...next.draft,
+          rawText: current.rawText || rawText,
+        }))
+      }
+
+      setParserAiSuggestion({
+        context,
+        model: payload.model || "gpt-5.4-mini",
+        correctedOutput: next.draft.standardText,
+        fields: payload.fields || {},
+        vlsfoMaxRemarks: next.vlsfoMaxRemarks,
+        confidence: typeof payload.confidence === "number" ? payload.confidence : 0,
+        warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        appliedAt: new Date().toISOString(),
+      })
+      setParserAiStatus("applied")
+      setParserAiMessage("AI correction applied. Double check before sending.")
+      setDismissedDraftMissingFields(new Set())
+      setDismissedReofferMissingFields(new Set())
+    } catch (error) {
+      setParserAiStatus("failed")
+      setParserAiMessage(error instanceof Error ? error.message : "AI parser failed.")
+    }
+  }
+
   async function submitParserReport() {
     if (!parserReportDialog || parserReportStatus === "saving") return
     const rawText = parserReportDialog.rawText.trim()
@@ -533,6 +705,7 @@ export default function SpcEnquiriesPage() {
           metadata: {
             draft: parserReportDialog.context === "reoffer" ? reofferDraft : draft,
             manualVlsfoMaxRemarks: parserReportDialog.context === "reoffer" ? [] : vlsfoMaxRemarks,
+            aiSuggestion: parserAiSuggestion?.context === parserReportDialog.context ? parserAiSuggestion : null,
           },
         }),
       })
@@ -839,6 +1012,14 @@ export default function SpcEnquiriesPage() {
                   <span>Standard Format Preview</span>
                   <button
                     type="button"
+                    className="spc-ai-parser-button"
+                    onClick={() => void runParserAi("new-enquiry")}
+                    disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}
+                  >
+                    {parserAiStatus === "loading" && parserAiTarget === "new-enquiry" ? "AI..." : "AI"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={openDraftParserReport}
                     disabled={!canEdit || !draft.rawText.trim()}
                   >
@@ -853,6 +1034,16 @@ export default function SpcEnquiriesPage() {
                   disabled={!canEdit}
                 />
               </label>
+              {parserAiMessage && parserAiTarget === "new-enquiry" ? (
+                <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>
+                  {parserAiMessage}
+                </p>
+              ) : null}
+              {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.warnings.length > 0 ? (
+                <p className="spc-parser-report-error">
+                  AI warning: {parserAiSuggestion.warnings.join(" / ")}
+                </p>
+              ) : null}
               <div className="spc-form-actions">
                 <button type="submit" disabled={saving || !canEdit}>
                   {saving ? "Sending..." : "Send Enquiry"}
@@ -1072,6 +1263,14 @@ export default function SpcEnquiriesPage() {
                   <span>Standard Format Preview</span>
                   <button
                     type="button"
+                    className="spc-ai-parser-button"
+                    onClick={() => void runParserAi("reoffer")}
+                    disabled={saving || !reofferDraft.standardText.trim() || parserAiStatus === "loading"}
+                  >
+                    {parserAiStatus === "loading" && parserAiTarget === "reoffer" ? "AI..." : "AI"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={openReofferParserReport}
                     disabled={saving || !reofferDraft.standardText.trim()}
                   >
@@ -1080,6 +1279,16 @@ export default function SpcEnquiriesPage() {
                 </span>
                 <textarea value={reofferDraft.standardText} onChange={(event) => updateReofferDraft("standardText", event.target.value)} rows={3} disabled={saving} />
               </label>
+              {parserAiMessage && parserAiTarget === "reoffer" ? (
+                <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>
+                  {parserAiMessage}
+                </p>
+              ) : null}
+              {parserAiSuggestion?.context === "reoffer" && parserAiSuggestion.warnings.length > 0 ? (
+                <p className="spc-parser-report-error">
+                  AI warning: {parserAiSuggestion.warnings.join(" / ")}
+                </p>
+              ) : null}
               <div className="spc-dialog-actions">
                 <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
                 <button type="submit" className="is-primary" disabled={saving || updatingId === reofferDraft.id}>

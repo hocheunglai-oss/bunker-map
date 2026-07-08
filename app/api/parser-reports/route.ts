@@ -223,6 +223,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       source,
       reports: unresolvedReports,
+      unresolvedReports: unresolvedReports.length,
       totalReports: sourceReports.length,
       resolvedReports: sourceReports.length - unresolvedReports.length,
       updatedAt: currentRow?.updated_at || null,

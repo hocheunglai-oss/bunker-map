@@ -2891,8 +2891,12 @@ body {
 .spc-preview-label-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
+}
+
+.spc-preview-label-row > span:first-child {
+  margin-right: auto;
 }
 
 .spc-preview-label-row button {
@@ -2909,6 +2913,14 @@ body {
   text-transform: none;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+.spc-preview-label-row button.spc-ai-parser-button {
+  min-width: 48px;
+  border-color: #2459d6;
+  background: #edf4ff;
+  color: #1746a2;
+  font-weight: 900;
 }
 
 .spc-preview-label-row button:disabled {

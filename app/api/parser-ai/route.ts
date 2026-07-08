@@ -1,0 +1,439 @@
+import { NextResponse } from "next/server"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
+import {
+  buildShortenedEnquiry,
+  detectVlsfoMaxRemarks,
+  type VlsfoMaxRemark,
+} from "@/lib/enquiryShortener"
+import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import {
+  buildSpcStandardEnquiry,
+  cleanSpcEnquiryText,
+  parseSpcEnquiryText,
+} from "@/lib/spcEnquiryText"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
+
+export const maxDuration = 60
+
+const MAX_TEXT_LENGTH = 20_000
+const MODEL = "gpt-5.4-mini"
+
+type ParserAiSource = "enquiryworksheet" | "spc"
+
+type ParserAiPayload = {
+  source?: unknown
+  context?: unknown
+  rawText?: unknown
+  cleanedText?: unknown
+  parserOutput?: unknown
+  currentOutput?: unknown
+  fields?: unknown
+  manualVlsfoMaxRemarks?: unknown
+}
+
+type ParserAiDraft = {
+  correctedOutput: string
+  vesselName: string
+  imo: string
+  port: string
+  buyer: string
+  eta: string
+  hsfo: string
+  vlsfo: string
+  lsmgo: string
+  remarks: string
+  vlsfoMaxRemarks: VlsfoMaxRemark[]
+  confidence: number
+  warnings: string[]
+}
+
+class HttpError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+const PARSER_AI_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    correctedOutput: { type: "string" },
+    vesselName: { type: "string" },
+    imo: { type: "string" },
+    port: { type: "string" },
+    buyer: { type: "string" },
+    eta: { type: "string" },
+    hsfo: { type: "string" },
+    vlsfo: { type: "string" },
+    lsmgo: { type: "string" },
+    remarks: { type: "string" },
+    vlsfoMaxRemarks: {
+      type: "array",
+      items: { type: "string", enum: ["180cst max", "120cst max"] },
+    },
+    confidence: { type: "number" },
+    warnings: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "correctedOutput",
+    "vesselName",
+    "imo",
+    "port",
+    "buyer",
+    "eta",
+    "hsfo",
+    "vlsfo",
+    "lsmgo",
+    "remarks",
+    "vlsfoMaxRemarks",
+    "confidence",
+    "warnings",
+  ],
+} as const
+
+function asString(value: unknown, maxLength = MAX_TEXT_LENGTH) {
+  return String(typeof value === "string" ? value : "")
+    .replace(/\r\n?/g, "\n")
+    .trim()
+    .slice(0, maxLength)
+}
+
+function sourceFrom(value: unknown): ParserAiSource | null {
+  return value === "enquiryworksheet" || value === "spc" ? value : null
+}
+
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+}
+
+function cleanMultiline(value: unknown) {
+  return typeof value === "string"
+    ? value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").trim()
+    : ""
+}
+
+function cleanImo(value: unknown) {
+  return cleanText(value).replace(/\D/g, "").slice(0, 7)
+}
+
+function cleanConfidence(value: unknown) {
+  const confidence = typeof value === "number" && Number.isFinite(value) ? value : 0.5
+  return Math.min(1, Math.max(0, confidence))
+}
+
+function cleanWarnings(value: unknown) {
+  return Array.isArray(value) ? value.map(cleanText).filter(Boolean).slice(0, 8) : []
+}
+
+function cleanVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value.filter((item): item is VlsfoMaxRemark =>
+        item === "180cst max" || item === "120cst max",
+      ),
+    ),
+  )
+}
+
+function extractOutputText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return ""
+  const source = payload as Record<string, unknown>
+  if (typeof source.output_text === "string") return source.output_text
+
+  const output = Array.isArray(source.output) ? source.output : []
+  const chunks: string[] = []
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue
+    const content = (item as Record<string, unknown>).content
+    if (!Array.isArray(content)) continue
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue
+      const text = (part as Record<string, unknown>).text
+      if (typeof text === "string") chunks.push(text)
+    }
+  }
+  return chunks.join("\n").trim()
+}
+
+function getAiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback
+  const error = (payload as Record<string, unknown>).error
+  if (error && typeof error === "object") {
+    const message = cleanText((error as Record<string, unknown>).message)
+    if (message) return message
+  }
+  return fallback
+}
+
+function normalizeDraft(value: unknown): ParserAiDraft {
+  const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const vlsfoMaxRemarks = cleanVlsfoMaxRemarks(source.vlsfoMaxRemarks)
+  const correctedOutput = cleanMultiline(source.correctedOutput)
+
+  return {
+    correctedOutput,
+    vesselName: cleanText(source.vesselName),
+    imo: cleanImo(source.imo),
+    port: cleanText(source.port).toLowerCase(),
+    buyer: cleanText(source.buyer).toUpperCase(),
+    eta: cleanText(source.eta).toLowerCase(),
+    hsfo: cleanText(source.hsfo),
+    vlsfo: cleanText(source.vlsfo),
+    lsmgo: cleanText(source.lsmgo),
+    remarks: cleanText(source.remarks).toLowerCase(),
+    vlsfoMaxRemarks,
+    confidence: cleanConfidence(source.confidence),
+    warnings: cleanWarnings(source.warnings),
+  }
+}
+
+function getHongKongDateKey() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date())
+
+  const year = parts.find((part) => part.type === "year")?.value || "2026"
+  const month = parts.find((part) => part.type === "month")?.value || "01"
+  const day = parts.find((part) => part.type === "day")?.value || "01"
+  return `${year}-${month}-${day}`
+}
+
+function buildInstructions(source: ParserAiSource) {
+  const today = getHongKongDateKey()
+  const sourceRule = source === "spc"
+    ? "SPC output must not include port. Singapore is assumed. Leave buyer empty. Leave remarks empty unless the user explicitly wrote a non-product instruction that must be retained."
+    : "Enquiryworksheet output must include port when known, including Singapore. Return buyer only in the buyer field, not inside correctedOutput."
+
+  return [
+    "You correct bunker enquiry parser output for FCUNO/SPC users.",
+    `Today is ${today} in Asia/Hong_Kong. Resolve missing months only when the input makes that unavoidable.`,
+    sourceRule,
+    "Return one corrected slash-separated enquiry line in correctedOutput.",
+    "Do not invent vessel name, IMO, port, buyer, date, product, or quantity. Use empty strings and warnings when unclear.",
+    "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
+    "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
+    "Prefer these port spellings: busan, yosu, port klang, inchon.",
+    "Normalize quantities to mts, e.g. 100mt -> 100mts and 735-770mt -> 735-770mts.",
+    "Classify VLSFO/LSFO/0.5/RMG180/RMG380/120CST/180CST as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
+    "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
+    "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO as lsmgo.",
+    "Only include 180CST MAX or 120CST MAX when the input explicitly says 180cst, 120cst, rmg180, rmg120, ls180cst, or ls120cst. If only 180 or 120 appears as a quantity/date, add a warning instead.",
+    "If RMK, CBM, or KL appears, add a warning.",
+    "Return vlsfoMaxRemarks as lower-case enum values only.",
+  ].join("\n")
+}
+
+function buildFallbackOutput(
+  source: ParserAiSource,
+  rawText: string,
+  cleanedText: string,
+  draft: ParserAiDraft,
+) {
+  const sourceText = cleanedText || rawText
+  const vlsfoMaxRemarks = draft.vlsfoMaxRemarks.length
+    ? draft.vlsfoMaxRemarks
+    : detectVlsfoMaxRemarks(draft.correctedOutput)
+
+  if (source === "spc") {
+    const standard = buildSpcStandardEnquiry({
+      vesselName: draft.vesselName,
+      imo: draft.imo,
+      eta: draft.eta,
+      hsfo: draft.hsfo,
+      vlsfo: draft.vlsfo,
+      lsmgo: draft.lsmgo,
+      remarks: draft.remarks,
+      vlsfoMaxRemarks,
+    })
+    return cleanSpcEnquiryText(standard || draft.correctedOutput)
+  }
+
+  if (draft.correctedOutput) return draft.correctedOutput
+
+  return buildShortenedEnquiry(
+    sourceText,
+    draft.vesselName,
+    draft.imo,
+    vlsfoMaxRemarks,
+    {
+      autoDetectVlsfoRemarks: false,
+      includePort: true,
+      port: draft.port,
+    },
+  )
+}
+
+function normalizeOutputForSource(
+  source: ParserAiSource,
+  rawText: string,
+  cleanedText: string,
+  draft: ParserAiDraft,
+) {
+  const correctedOutput = buildFallbackOutput(source, rawText, cleanedText, draft)
+  const vlsfoMaxRemarks = draft.vlsfoMaxRemarks.length
+    ? draft.vlsfoMaxRemarks
+    : detectVlsfoMaxRemarks(correctedOutput)
+
+  if (source === "spc") {
+    const parsed = parseSpcEnquiryText(correctedOutput, vlsfoMaxRemarks)
+    return {
+      ...draft,
+      correctedOutput: parsed.standardText || correctedOutput,
+      vesselName: draft.vesselName || parsed.vesselName,
+      imo: draft.imo || parsed.imo,
+      eta: draft.eta || parsed.eta,
+      hsfo: draft.hsfo || parsed.hsfo,
+      vlsfo: draft.vlsfo || parsed.vlsfo,
+      lsmgo: draft.lsmgo || parsed.lsmgo,
+      remarks: draft.remarks || parsed.remarks,
+      port: "",
+      buyer: "",
+      vlsfoMaxRemarks,
+    }
+  }
+
+  const guess = parseEnquiryWorksheetGuess(correctedOutput)
+  return {
+    ...draft,
+    correctedOutput,
+    vesselName: draft.vesselName || guess.vesselName,
+    imo: draft.imo || guess.imo,
+    port: draft.port || guess.port,
+    buyer: draft.buyer || guess.buyer,
+    vlsfoMaxRemarks,
+  }
+}
+
+async function requireAccess(source: ParserAiSource) {
+  if (source === "spc") {
+    await requireSpcPagePermission("spc-buyer-enquiries", "edit")
+    return
+  }
+
+  await requireAdminPagePermission("enquiry-worksheet", "edit")
+}
+
+function errorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : "AI parser request failed."
+  const status =
+    error instanceof HttpError
+      ? error.status
+      : message === "Unauthorized"
+        ? 401
+        : message === "Forbidden"
+          ? 403
+          : 500
+
+  return NextResponse.json({ message }, { status })
+}
+
+export async function POST(request: Request) {
+  try {
+    const payload = (await request.json()) as ParserAiPayload
+    const source = sourceFrom(payload.source)
+    if (!source) {
+      return NextResponse.json({ message: "Parser source is required." }, { status: 400 })
+    }
+
+    await requireAccess(source)
+
+    const rawText = asString(payload.rawText)
+    const cleanedText = asString(payload.cleanedText)
+    const parserOutput = asString(payload.parserOutput, 5_000)
+    const currentOutput = asString(payload.currentOutput, 5_000)
+    if (!rawText && !cleanedText) {
+      return NextResponse.json({ message: "Raw enquiry is required." }, { status: 400 })
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      throw new HttpError("OPENAI_API_KEY is not configured.", 503)
+    }
+
+    const model = process.env.OPENAI_PARSER_MODEL || MODEL
+    const input = [
+      `Source: ${source}`,
+      `Context: ${cleanText(payload.context) || "parser-correction"}`,
+      `Manual VLSFO max remarks: ${JSON.stringify(cleanVlsfoMaxRemarks(payload.manualVlsfoMaxRemarks))}`,
+      `Current fields JSON: ${JSON.stringify(payload.fields || {})}`,
+      `Current deterministic parser output:\n${parserOutput || "(empty)"}`,
+      `Current user-edited output:\n${currentOutput || "(empty)"}`,
+      `Raw enquiry:\n${rawText || cleanedText}`,
+      cleanedText && cleanedText !== rawText ? `Cleaned enquiry:\n${cleanedText}` : "",
+    ].filter(Boolean).join("\n\n")
+
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        instructions: buildInstructions(source),
+        input,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "bunker_parser_correction",
+            strict: true,
+            schema: PARSER_AI_SCHEMA,
+          },
+        },
+      }),
+    })
+
+    const aiPayload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new HttpError(getAiErrorMessage(aiPayload, "OpenAI request failed."), response.status)
+    }
+
+    const outputText = extractOutputText(aiPayload)
+    if (!outputText) throw new Error("OpenAI returned no parser correction.")
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(outputText)
+    } catch {
+      throw new Error("OpenAI returned an unreadable parser correction.")
+    }
+
+    const draft = normalizeOutputForSource(
+      source,
+      rawText,
+      cleanedText,
+      normalizeDraft(parsed),
+    )
+
+    return NextResponse.json({
+      success: true,
+      source,
+      model,
+      correctedOutput: draft.correctedOutput,
+      fields: {
+        vesselName: draft.vesselName,
+        imo: draft.imo,
+        port: draft.port,
+        buyer: draft.buyer,
+        eta: draft.eta,
+        hsfo: draft.hsfo,
+        vlsfo: draft.vlsfo,
+        lsmgo: draft.lsmgo,
+        remarks: draft.remarks,
+      },
+      vlsfoMaxRemarks: draft.vlsfoMaxRemarks,
+      confidence: draft.confidence,
+      warnings: draft.warnings,
+    })
+  } catch (error) {
+    return errorResponse(error)
+  }
+}

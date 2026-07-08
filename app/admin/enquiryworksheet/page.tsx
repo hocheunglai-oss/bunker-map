@@ -55,12 +55,43 @@ type EnquiryWorksheetPortsResponse = {
 
 type ParserReportsResponse = {
   reports?: unknown[]
+  unresolvedReports?: number
+  totalReports?: number
+  resolvedReports?: number
 }
 
 type ParserReportDraft = {
   open: boolean
   correctedOutput: string
   note: string
+}
+
+type ParserAiFields = {
+  vesselName?: string
+  imo?: string
+  port?: string
+  buyer?: string
+}
+
+type ParserAiResponse = {
+  success?: boolean
+  model?: string
+  correctedOutput?: string
+  fields?: ParserAiFields
+  vlsfoMaxRemarks?: VlsfoMaxRemark[]
+  confidence?: number
+  warnings?: string[]
+  message?: string
+}
+
+type ParserAiSuggestion = {
+  model: string
+  correctedOutput: string
+  fields: ParserAiFields
+  vlsfoMaxRemarks: VlsfoMaxRemark[]
+  confidence: number
+  warnings: string[]
+  appliedAt: string
 }
 
 const workflowLabels: Array<[WorkflowKey, string]> = [
@@ -326,6 +357,9 @@ export default function EnquiryWorksheetPage() {
   })
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const [parserReportCount, setParserReportCount] = useState(0)
+  const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
+  const [parserAiMessage, setParserAiMessage] = useState("")
+  const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
   const preservedShortenedDraftRef = useRef("")
 
   useEffect(() => {
@@ -342,7 +376,13 @@ export default function EnquiryWorksheetPage() {
       const response = await fetch("/api/parser-reports?source=enquiryworksheet", { cache: "no-store" })
       const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
       if (!response.ok) throw new Error("Unable to load parser reports.")
-      setParserReportCount(Array.isArray(payload.reports) ? payload.reports.length : 0)
+      setParserReportCount(
+        typeof payload.unresolvedReports === "number"
+          ? payload.unresolvedReports
+          : Array.isArray(payload.reports)
+            ? payload.reports.length
+            : 0,
+      )
     } catch {
       setParserReportCount(0)
     }
@@ -465,6 +505,9 @@ export default function EnquiryWorksheetPage() {
   function handleEnquiryTextChange(value: string) {
     setEnquiryText(value)
     setVlsfoMaxRemarks([])
+    setParserAiStatus("idle")
+    setParserAiMessage("")
+    setParserAiSuggestion(null)
     const nextCleaned = cleanEnquiryForReading(value)
     setCleanedEnquiryText(nextCleaned)
     setGuesses(nextCleaned.trim() ? parseEnquiryWorksheetGuess(nextCleaned, { portNames: portIndex }) : emptyGuess())
@@ -519,17 +562,22 @@ export default function EnquiryWorksheetPage() {
     setWhatsappStatus("idle")
   }, [shortenedEnquiry])
 
-  function applyCorrectedShortenedEnquiry(correctedOutput: string) {
+  function applyCorrectedShortenedEnquiry(correctedOutput: string, fields: ParserAiFields = {}) {
     const correctedGuess = parseEnquiryWorksheetGuess(correctedOutput, { portNames: portIndex })
     const hasCorrectedFields = Boolean(
       correctedGuess.vesselName ||
       correctedGuess.imo ||
       correctedGuess.port ||
-      correctedGuess.buyer,
+      correctedGuess.buyer ||
+      fields.vesselName ||
+      fields.imo ||
+      fields.port ||
+      fields.buyer,
     )
-    const nextVesselName = correctedGuess.vesselName ? toCaps(correctedGuess.vesselName) : ""
-    const nextBuyer = correctedGuess.buyer ? toCaps(correctedGuess.buyer) : ""
-    const nextImo = correctedGuess.imo.replace(/\D/g, "").slice(0, 7)
+    const nextVesselName = fields.vesselName ? toCaps(fields.vesselName) : correctedGuess.vesselName ? toCaps(correctedGuess.vesselName) : ""
+    const nextBuyer = fields.buyer ? toCaps(fields.buyer) : correctedGuess.buyer ? toCaps(correctedGuess.buyer) : ""
+    const nextImo = (fields.imo || correctedGuess.imo).replace(/\D/g, "").slice(0, 7)
+    const nextPort = fields.port ? fields.port.toLowerCase() : correctedGuess.port
 
     preservedShortenedDraftRef.current = correctedOutput
     setShortenedDraft(correctedOutput)
@@ -538,7 +586,7 @@ export default function EnquiryWorksheetPage() {
       ...current,
       vesselName: nextVesselName || current.vesselName,
       imo: nextImo || current.imo,
-      port: correctedGuess.port || current.port,
+      port: nextPort || current.port,
       buyer: nextBuyer || current.buyer,
       confidence: hasCorrectedFields ? correctedGuess.confidence : current.confidence,
       warnings: hasCorrectedFields ? correctedGuess.warnings : current.warnings,
@@ -549,6 +597,63 @@ export default function EnquiryWorksheetPage() {
       imo: nextImo || current.imo,
       buyer: nextBuyer || current.buyer,
     }))
+  }
+
+  async function runParserAi() {
+    const rawText = enquiryText.trim()
+    const sourceText = getParserSourceText().trim()
+    if ((!rawText && !sourceText) || parserAiStatus === "loading") return
+
+    setParserAiStatus("loading")
+    setParserAiMessage("")
+    try {
+      const response = await fetch("/api/parser-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "enquiryworksheet",
+          context: "shortened-enquiry",
+          rawText,
+          cleanedText: cleanedEnquiryText,
+          parserOutput: shortenedEnquiry,
+          currentOutput: shortenedDraft,
+          fields: {
+            guesses,
+            worksheet: {
+              vesselName: worksheet.vesselName,
+              imo: worksheet.imo,
+              buyer: worksheet.buyer,
+            },
+          },
+          manualVlsfoMaxRemarks: vlsfoMaxRemarks,
+        }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as ParserAiResponse
+      if (!response.ok || !payload.correctedOutput) {
+        throw new Error(payload.message || "AI parser failed.")
+      }
+
+      const suggestion: ParserAiSuggestion = {
+        model: payload.model || "gpt-5.4-mini",
+        correctedOutput: payload.correctedOutput,
+        fields: payload.fields || {},
+        vlsfoMaxRemarks: Array.isArray(payload.vlsfoMaxRemarks) ? payload.vlsfoMaxRemarks : [],
+        confidence: typeof payload.confidence === "number" ? payload.confidence : 0,
+        warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        appliedAt: new Date().toISOString(),
+      }
+
+      applyCorrectedShortenedEnquiry(payload.correctedOutput, payload.fields || {})
+      if (suggestion.vlsfoMaxRemarks.length > 0) setVlsfoMaxRemarks(suggestion.vlsfoMaxRemarks)
+      setParserAiSuggestion(suggestion)
+      setParserAiStatus("applied")
+      setParserAiMessage("AI correction applied. Double check before sending.")
+      setCopyStatus("idle")
+      setWhatsappStatus("idle")
+    } catch (error) {
+      setParserAiStatus("failed")
+      setParserAiMessage(error instanceof Error ? error.message : "AI parser failed.")
+    }
   }
 
   useEffect(() => {
@@ -645,6 +750,7 @@ export default function EnquiryWorksheetPage() {
               buyer: worksheet.buyer,
             },
             manualVlsfoMaxRemarks: vlsfoMaxRemarks,
+            aiSuggestion: parserAiSuggestion,
           },
         }),
       })
@@ -704,6 +810,9 @@ export default function EnquiryWorksheetPage() {
     setWhatsappStatus("idle")
     setWhatsappRequestId("")
     setShortenedDraft("")
+    setParserAiStatus("idle")
+    setParserAiMessage("")
+    setParserAiSuggestion(null)
     setGuesses(emptyGuess())
     setWorksheet(blankWorksheet(userNickname))
   }
@@ -749,6 +858,17 @@ export default function EnquiryWorksheetPage() {
                 data-admin-button-style="preserve"
               >
                 ⧉
+              </button>
+              <button
+                type="button"
+                className={styles.aiButton}
+                onClick={runParserAi}
+                disabled={!enquiryText.trim() || parserAiStatus === "loading"}
+                aria-label="Ask AI to correct shortened enquiry"
+                title="Ask AI to correct shortened enquiry"
+                data-admin-button-style="preserve"
+              >
+                {parserAiStatus === "loading" ? "AI..." : "AI"}
               </button>
               <button
                 type="button"
@@ -806,6 +926,16 @@ export default function EnquiryWorksheetPage() {
             </div>
             {copyStatus === "copied" ? <p className={styles.copyStatus}>Copied.</p> : null}
             {copyStatus === "failed" ? <p className={styles.copyError}>Copy failed.</p> : null}
+            {parserAiMessage ? (
+              <p className={parserAiStatus === "failed" ? styles.copyError : styles.copyStatus}>
+                {parserAiMessage}
+              </p>
+            ) : null}
+            {parserAiSuggestion?.warnings.length ? (
+              <p className={styles.copyError}>
+                AI warning: {parserAiSuggestion.warnings.join(" / ")}
+              </p>
+            ) : null}
             {whatsappStatus === "sending" ? <p className={styles.copyStatus}>Sending to WhatsApp board...</p> : null}
             {whatsappStatus === "sent" ? <p className={styles.copyStatus}>Sent to FCUNO WhatsApp Speed Board.</p> : null}
             {whatsappStatus === "failed" ? <p className={styles.copyError}>FCUNO WhatsApp Speed Board did not respond. Reload the extension and try again.</p> : null}
