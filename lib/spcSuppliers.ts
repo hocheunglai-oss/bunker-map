@@ -3,6 +3,7 @@ import {
   displaySupplierName,
   supplierKey,
 } from "@/lib/spcSupplierKeys"
+import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import type {
   SpcSupplierDataset,
   SpcSupplierFixture,
@@ -10,6 +11,7 @@ import type {
   SpcSupplierLegacyFixture,
   SpcSupplierRecord,
 } from "@/lib/spcSupplierTypes"
+import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 const SPREADSHEET_ID = "1lr_WkDeuadBggAWki25qCLcTN76eI_K2lQFh1ZEIX7I"
 const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit`
@@ -30,7 +32,9 @@ type FixtureRow = {
   supplier_name: string | null
   price: string | null
   barging: string | null
+  supplier_trader_username: string | null
   supplier_trader_display_name: string | null
+  buyer_trader_username: string | null
   buyer_trader_display_name: string | null
   created_at: string
   enquiry?: {
@@ -220,7 +224,9 @@ async function loadCompletedFixtures() {
       supplier_name,
       price,
       barging,
+      supplier_trader_username,
       supplier_trader_display_name,
+      buyer_trader_username,
       buyer_trader_display_name,
       created_at,
       enquiry:spc_enquiries!spc_fixtures_enquiry_id_fkey(enquiry_number)
@@ -231,6 +237,13 @@ async function loadCompletedFixtures() {
 
   if (error) throw error
   return (data || []) as unknown as FixtureRow[]
+}
+
+async function loadActiveSpcUsers() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!serviceRoleKey || !supabaseUrl || serviceRoleKey === "\"\"") return []
+  return listActiveSpcUserOptions()
 }
 
 function fixtureSearchText(fixture: SpcSupplierFixture) {
@@ -249,8 +262,13 @@ function fixtureSearchText(fixture: SpcSupplierFixture) {
   ].filter(Boolean).join(" ").toLowerCase()
 }
 
-function attachFixtures(records: Map<string, MutableSupplierRecord>, fixtureRows: FixtureRow[]) {
+function attachFixtures(
+  records: Map<string, MutableSupplierRecord>,
+  fixtureRows: FixtureRow[],
+  activeUsers: SpcUserOption[],
+) {
   const legacyFixtures: SpcSupplierLegacyFixture[] = []
+  const activeTraders = createActiveSpcTraderResolver(activeUsers)
 
   fixtureRows.forEach((row) => {
     fixtureFuelLines(row).forEach((line) => {
@@ -268,8 +286,8 @@ function attachFixtures(records: Map<string, MutableSupplierRecord>, fixtureRows
         recordedSupplier: rawSupplier,
         price: line.price || null,
         barging: line.barging || null,
-        buyerTrader: compactText(row.buyer_trader_display_name),
-        supplierTrader: compactText(row.supplier_trader_display_name),
+        buyerTrader: activeTraders.displayNameOrRetired(row.buyer_trader_username, row.buyer_trader_display_name),
+        supplierTrader: activeTraders.displayNameOrRetired(row.supplier_trader_username, row.supplier_trader_display_name),
         enquiryNumber: compactText(row.enquiry?.enquiry_number),
         fixtureStatus: row.fixture_status,
       }
@@ -350,11 +368,12 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
 }
 
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
-  const [rows, fixtureRows] = await Promise.all([
+  const [rows, fixtureRows, activeUsers] = await Promise.all([
     readSupplierSheet(),
     loadCompletedFixtures(),
+    loadActiveSpcUsers(),
   ])
   const records = buildSupplierRecords(rows)
-  const legacyFixtures = attachFixtures(records, fixtureRows)
+  const legacyFixtures = attachFixtures(records, fixtureRows, activeUsers)
   return finaliseDataset(records, legacyFixtures)
 }

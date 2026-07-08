@@ -1,4 +1,5 @@
 import type { SpcSession } from "@/lib/spcAuth"
+import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { normaliseSpcRole } from "@/lib/spcPages"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
@@ -301,13 +302,15 @@ function officeFor(
 }
 
 function traderLabel(
+  activeTraders: ReturnType<typeof createActiveSpcTraderResolver>,
   usersByUsername: Map<string, SpcUserOption>,
   username: string | null | undefined,
   displayName: string | null | undefined,
 ) {
-  const user = usersByUsername.get(cleanText(username).toLowerCase())
-  const display = upperText(user?.displayName || displayName || username)
-  const office = officeFor(usersByUsername, username, displayName)
+  const user = activeTraders.resolveUser(username, displayName)
+  if (!user) return "RETIRED"
+  const display = upperText(user.displayName || displayName || username)
+  const office = officeFor(usersByUsername, user.username, user.displayName)
   const firstName = display.split(/\s+/)[0] || display
   const suffix = office === "HONG KONG" ? "HK" : office === "SINGAPORE" ? "SG" : office === "ITALY" ? "IT" : office === "MONACO" ? "MC" : office === "GREECE" ? "GR" : office === "UNITED ARAB EMIRATES" || office === "UAE" ? "AE" : office
   return suffix && firstName ? `${firstName}-${suffix}` : firstName || "UNKNOWN"
@@ -455,6 +458,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
     loadSpcBuyerEnquiryNumbers(supabase),
   ])
   const usersByUsername = userMap(users)
+  const activeTraders = createActiveSpcTraderResolver(users)
   const selectedFixtures = fixtures.filter((fixture) => fixtureYear(fixture) === selectedYear)
   const nativeEnquiries = enquiries.filter((enquiry) => (
     !isImportedEnquiry(enquiry.enquiry_number)
@@ -486,7 +490,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   users
     .filter((user) => normaliseSpcRole(user.role) === "SUPPLIER TRADER")
     .forEach((user) => {
-      supplierTraderFixtureCount.set(traderLabel(usersByUsername, user.username, user.displayName), 0)
+      supplierTraderFixtureCount.set(traderLabel(activeTraders, usersByUsername, user.username, user.displayName), 0)
     })
 
   fixtures.forEach((fixture) => {
@@ -511,8 +515,8 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
 
   tableFixtures.forEach((fixture) => {
     const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
-    const trader = traderLabel(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name)
-    const supplierTrader = traderLabel(usersByUsername, fixture.supplier_trader_username, fixture.supplier_trader_display_name)
+    const trader = traderLabel(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name)
+    const supplierTrader = traderLabel(activeTraders, usersByUsername, fixture.supplier_trader_username, fixture.supplier_trader_display_name)
     addMetric(officeFixtures, office)
     addMetric(traderFixtures, trader)
     addMetric(supplierTraderFixtureCount, supplierTrader)
@@ -520,7 +524,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
 
   tableEnquiries.forEach((enquiry) => {
     const office = officeFor(usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
-    const trader = traderLabel(usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
+    const trader = traderLabel(activeTraders, usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
     addMetric(officeEnquiries, office)
     addMetric(traderEnquiries, trader)
   })

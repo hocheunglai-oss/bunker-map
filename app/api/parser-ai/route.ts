@@ -5,7 +5,7 @@ import {
   detectVlsfoMaxRemarks,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
-import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
 import {
   buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
@@ -116,7 +116,8 @@ function cleanMultiline(value: unknown) {
 }
 
 function cleanImo(value: unknown) {
-  return cleanText(value).replace(/\D/g, "").slice(0, 7)
+  const imo = cleanText(value).replace(/\D/g, "").slice(0, 7)
+  return isValidImo(imo) ? imo : ""
 }
 
 function cleanConfidence(value: unknown) {
@@ -216,7 +217,8 @@ function buildInstructions(source: ParserAiSource) {
     `Today is ${today} in Asia/Hong_Kong. Resolve missing months only when the input makes that unavoidable.`,
     sourceRule,
     "Return one corrected slash-separated enquiry line in correctedOutput.",
-    "Do not invent vessel name, IMO, port, buyer, date, product, or quantity. Use empty strings and warnings when unclear.",
+    "Do not invent vessel name, port, buyer, date, product, or quantity. Use empty strings and warnings when unclear.",
+    "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",

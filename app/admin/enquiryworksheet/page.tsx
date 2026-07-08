@@ -332,6 +332,16 @@ function getWorksheetHeader(worksheet: Worksheet) {
   return worksheet.vesselName || worksheet.imo
 }
 
+function googleImoSearchUrl(vesselName: string, sourceText: string) {
+  const firstLine = sourceText
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean) || ""
+  const vessel = vesselName.trim() || firstLine.split(/\s+@\s+|\s+eta\b|[,，]/i)[0]?.trim() || ""
+  const query = [vessel, "vessel IMO"].filter(Boolean).join(" ").trim()
+  return query ? `https://www.google.com/search?q=${encodeURIComponent(query)}` : ""
+}
+
 function hasViscosityCaution(value: string) {
   return /(^|\D)(?:180|120)(?!\d)/.test(value)
 }
@@ -530,6 +540,10 @@ export default function EnquiryWorksheetPage() {
   )
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
   const attentionTerms = detectAttentionTerms(`${enquiryText}\n${cleanedEnquiryText}`)
+  const imoSearchUrl = useMemo(
+    () => googleImoSearchUrl(guesses.vesselName || worksheet.vesselName, getParserSourceText()),
+    [cleanedEnquiryText, enquiryText, guesses.vesselName, worksheet.vesselName],
+  )
 
   useEffect(() => {
     if (portIndex.length === 0) return
@@ -857,7 +871,7 @@ export default function EnquiryWorksheetPage() {
                 title="Copy shortened enquiry"
                 data-admin-button-style="preserve"
               >
-                ⧉
+                COPY
               </button>
               <button
                 type="button"
@@ -868,7 +882,7 @@ export default function EnquiryWorksheetPage() {
                 title="Ask AI to correct shortened enquiry"
                 data-admin-button-style="preserve"
               >
-                {parserAiStatus === "loading" ? "AI..." : "AI"}
+                {parserAiStatus === "loading" ? "AI FIX..." : "AI FIX"}
               </button>
               <button
                 type="button"
@@ -879,7 +893,7 @@ export default function EnquiryWorksheetPage() {
                 title="Report incorrect parser output"
                 data-admin-button-style="preserve"
               >
-                Report ({parserReportCount})
+                REPORT
               </button>
               <button
                 type="button"
@@ -939,6 +953,7 @@ export default function EnquiryWorksheetPage() {
             {whatsappStatus === "sending" ? <p className={styles.copyStatus}>Sending to WhatsApp board...</p> : null}
             {whatsappStatus === "sent" ? <p className={styles.copyStatus}>Sent to FCUNO WhatsApp Speed Board.</p> : null}
             {whatsappStatus === "failed" ? <p className={styles.copyError}>FCUNO WhatsApp Speed Board did not respond. Reload the extension and try again.</p> : null}
+            <p className={styles.reportedCount}>REPORTED ({parserReportCount})</p>
           </section>
 
           <div className={styles.confirmGrid}>
@@ -953,7 +968,14 @@ export default function EnquiryWorksheetPage() {
               />
             </label>
             <label>
-              <span>IMO</span>
+              <span className={styles.fieldLabelRow}>
+                <span>IMO</span>
+                {!guesses.imo.trim() && imoSearchUrl ? (
+                  <a className={styles.imoLookup} href={imoSearchUrl} target="_blank" rel="noreferrer">
+                    Google search
+                  </a>
+                ) : null}
+              </span>
               <input
                 value={guesses.imo}
                 onChange={(event) =>

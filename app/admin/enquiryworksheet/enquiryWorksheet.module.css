@@ -363,7 +363,7 @@
 
 .shortenedHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 48px 88px 36px;
+  grid-template-columns: minmax(0, 1fr) 58px 78px 72px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -383,28 +383,30 @@
 }
 
 .copyButton {
-  width: 36px;
+  min-width: 58px;
   height: 36px;
-  border: 1px solid var(--fc-admin-primary-button-bg) !important;
+  border: 1px solid var(--fc-admin-button-border) !important;
   border-radius: 999px;
-  background: var(--fc-admin-primary-button-bg) !important;
-  color: var(--fc-admin-primary-button-text) !important;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 900;
+  padding: 0 12px;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .aiButton {
-  min-width: 48px;
+  min-width: 78px;
   height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #2459d6 !important;
+  border: 1px solid var(--fc-admin-button-border) !important;
   border-radius: 999px;
-  background: #edf4ff !important;
-  color: #1746a2 !important;
+  background: var(--fc-admin-button-bg) !important;
+  color: var(--fc-admin-button-text) !important;
   cursor: pointer;
   font-size: 12px;
   font-weight: 900;
@@ -413,7 +415,7 @@
 }
 
 .reportButton {
-  min-width: 88px;
+  min-width: 72px;
   height: 36px;
   display: inline-flex;
   align-items: center;
@@ -524,6 +526,14 @@
 
 .copyError {
   color: var(--fc-admin-danger-bg);
+}
+
+.reportedCount {
+  margin: 1px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
 }
 
 .reportBackdrop {
@@ -654,6 +664,24 @@
 .confirmGrid label {
   display: grid;
   gap: 5px;
+}
+
+.fieldLabelRow {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imoLookup {
+  color: #0071e3;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-decoration: none;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .confirmGrid input {

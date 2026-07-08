@@ -21,6 +21,7 @@ const STORE_KEY = "parser-reports"
 const MAX_REPORTS = 500
 const MAX_TEXT_LENGTH = 20_000
 const MAX_NOTE_LENGTH = 2_000
+const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T03:40:00.000Z")
 
 type ParserReportSource = "enquiryworksheet" | "spc"
 
@@ -166,6 +167,11 @@ function isResolvedReport(report: ParserReportRecord) {
   }
 }
 
+function isReviewedReport(report: ParserReportRecord) {
+  const timestamp = Date.parse(report.lastReportedAt || report.createdAt || "")
+  return Number.isFinite(timestamp) && timestamp <= REVIEWED_REPORT_CUTOFF_MS
+}
+
 async function getSessionAndClient(
   source: ParserReportSource,
   request: Request,
@@ -218,7 +224,8 @@ export async function GET(request: Request) {
 
     const payload = cleanStoredPayload(currentRow?.payload || null)
     const sourceReports = payload.reports.filter((report) => report.source === source)
-    const unresolvedReports = sourceReports.filter((report) => !isResolvedReport(report))
+    const reviewedReports = sourceReports.filter(isReviewedReport)
+    const unresolvedReports = sourceReports.filter((report) => !isReviewedReport(report) && !isResolvedReport(report))
 
     return NextResponse.json({
       source,
@@ -226,6 +233,7 @@ export async function GET(request: Request) {
       unresolvedReports: unresolvedReports.length,
       totalReports: sourceReports.length,
       resolvedReports: sourceReports.length - unresolvedReports.length,
+      reviewedReports: reviewedReports.length,
       updatedAt: currentRow?.updated_at || null,
     })
   } catch (error) {
