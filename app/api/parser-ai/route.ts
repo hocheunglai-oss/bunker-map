@@ -5,7 +5,11 @@ import {
   detectVlsfoMaxRemarks,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
-import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import {
+  extractEnquiryPort,
+  isValidImo,
+  parseEnquiryWorksheetGuess,
+} from "@/lib/enquiryWorksheetParser"
 import {
   buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
@@ -293,6 +297,88 @@ function stripImoFromSlashOutput(output: string, imo: string) {
     .join(" / ")
 }
 
+const MONTH_PATTERN =
+  "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+
+const DATE_ONLY_PATTERNS = [
+  new RegExp(`^\\d{1,2}(?:\\s*(?:-|to|/)\\s*\\d{1,2})?\\s*${MONTH_PATTERN}\\b(?:\\s*,?\\s*\\d{2,4})?$`, "i"),
+  new RegExp(`^${MONTH_PATTERN}\\s*\\d{1,2}(?:\\s*(?:-|to|/)\\s*\\d{1,2})?(?:\\s*,?\\s*\\d{2,4})?$`, "i"),
+]
+
+const DATE_EXPRESSION_PATTERN = new RegExp(
+  `(?:\\d{1,2}\\s*(?:-|to|/)\\s*\\d{1,2}\\s*${MONTH_PATTERN}\\b|\\d{1,2}\\s*${MONTH_PATTERN}\\b|${MONTH_PATTERN}\\s*\\d{1,2})`,
+  "i",
+)
+
+const NON_DATE_ONLY_TOKEN_PATTERN =
+  /\b(?:vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|mdo|dma|dmb|cst|mt|mts|kl|cbm|rmk|remarks?|account|buyer|imo)\b/i
+
+function displayPortForShortenedOutput(value: string) {
+  const normalized = cleanText(value).toLowerCase()
+  return normalized === "hong kong" || normalized === "hongkong" || normalized === "hkg" || normalized === "香港"
+    ? "hk"
+    : normalized
+}
+
+function isDateOnlySegment(value: string) {
+  const normalized = cleanText(value).toLowerCase()
+  if (!normalized || NON_DATE_ONLY_TOKEN_PATTERN.test(normalized)) return false
+  return DATE_ONLY_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function getPortOnlySegment(value: string) {
+  const normalized = cleanText(value).toLowerCase()
+  if (!normalized || /\d/.test(normalized)) return ""
+
+  const beforeComma = normalized.split(/[,，]/)[0] || normalized
+  const withoutCountry = beforeComma
+    .replace(/\s+(?:china|taiwan|korea|south korea|malaysia|japan|indonesia|thailand|vietnam|viet nam|uae|united arab emirates|india|singapore)$/i, "")
+    .trim()
+  const port =
+    extractEnquiryPort(normalized) ||
+    extractEnquiryPort(beforeComma) ||
+    extractEnquiryPort(withoutCountry)
+  if (!port) return ""
+
+  const displayPort = displayPortForShortenedOutput(port)
+  if (displayPortForShortenedOutput(normalized) === displayPort) return displayPort
+  if (displayPortForShortenedOutput(withoutCountry) === displayPort) return displayPort
+
+  return displayPortForShortenedOutput(beforeComma) === displayPort ? displayPort : ""
+}
+
+function normalizeHongKongScheduleSegment(value: string) {
+  const normalized = cleanText(value)
+  if (!normalized || extractEnquiryPort(normalized) !== "hong kong") return normalized
+  if (!DATE_EXPRESSION_PATTERN.test(normalized)) return normalized
+
+  return normalized.replace(/^(?:(?:hong\s*kong|hongkong|hkg|hk)\b\s*|香港\s*)/i, "hk ")
+}
+
+function normalizeEnquiryWorksheetAiOutput(output: string) {
+  const parts = cleanText(output)
+    .split("/")
+    .map((part) => cleanText(part))
+    .filter(Boolean)
+
+  const normalized: string[] = []
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    const next = parts[index + 1] || ""
+    const port = getPortOnlySegment(part)
+
+    if (port && isDateOnlySegment(next)) {
+      normalized.push(`${port} ${next.toLowerCase()}`)
+      index += 1
+      continue
+    }
+
+    normalized.push(normalizeHongKongScheduleSegment(part))
+  }
+
+  return normalized.join(" / ")
+}
+
 function textContainsImo(imo: string, ...values: string[]) {
   if (!imo) return false
   return values.some((value) => new RegExp(`(^|\\D)${imo}(?=$|\\D)`).test(value))
@@ -325,7 +411,7 @@ function buildInstructions(source: ParserAiSource) {
   const today = getHongKongDateKey()
   const sourceRule = source === "spc"
     ? "SPC output must not include port. Singapore is assumed. Leave buyer empty. Leave remarks empty unless the user explicitly wrote a non-product instruction that must be retained."
-    : "Enquiryworksheet output must include port when known, including Singapore. Return buyer only in the buyer field, not inside correctedOutput."
+    : "Enquiryworksheet output must include port when known, including Singapore. Combine port and date into one slash segment, e.g. vessel / imo / taichung 10 - 14 jul / vlsfo 80mts, never vessel / imo / taichung / 10 - 14 jul / vlsfo 80mts. Return buyer only in the buyer field, not inside correctedOutput."
 
   return [
     "You correct bunker enquiry parser output for FCUNO/SPC users.",
@@ -416,10 +502,11 @@ function normalizeOutputForSource(
     }
   }
 
-  const guess = parseEnquiryWorksheetGuess(correctedOutput)
+  const worksheetOutput = normalizeEnquiryWorksheetAiOutput(correctedOutput)
+  const guess = parseEnquiryWorksheetGuess(worksheetOutput)
   return {
     ...draft,
-    correctedOutput,
+    correctedOutput: worksheetOutput,
     vesselName: draft.vesselName || guess.vesselName,
     imo: draft.imo || guess.imo,
     port: draft.port || guess.port,
@@ -452,20 +539,24 @@ function correctedOutputWithImo(
   }
 
   if (nextDraft.correctedOutput) {
-    return injectImoIntoSlashOutput(nextDraft.correctedOutput, imo, nextDraft.vesselName)
+    return normalizeEnquiryWorksheetAiOutput(
+      injectImoIntoSlashOutput(nextDraft.correctedOutput, imo, nextDraft.vesselName),
+    )
   }
 
   const sourceText = cleanedText || rawText
-  return buildShortenedEnquiry(
-    sourceText,
-    nextDraft.vesselName,
-    imo,
-    nextDraft.vlsfoMaxRemarks,
-    {
-      autoDetectVlsfoRemarks: false,
-      includePort: true,
-      port: nextDraft.port,
-    },
+  return normalizeEnquiryWorksheetAiOutput(
+    buildShortenedEnquiry(
+      sourceText,
+      nextDraft.vesselName,
+      imo,
+      nextDraft.vlsfoMaxRemarks,
+      {
+        autoDetectVlsfoRemarks: false,
+        includePort: true,
+        port: nextDraft.port,
+      },
+    ),
   )
 }
 
