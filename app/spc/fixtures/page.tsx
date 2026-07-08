@@ -364,6 +364,8 @@ function officeCode(value: string | null | undefined) {
     GREECE: "GR",
     FRANCE: "FR",
     USA: "US",
+    UAE: "AE",
+    "UNITED ARAB EMIRATES": "AE",
     KOREA: "KR",
     JAPAN: "JP",
     VIETNAM: "VN",

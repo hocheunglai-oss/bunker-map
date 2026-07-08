@@ -1,51 +1,32 @@
 export type SpcSupplierInfo = {
-  payment: string
-  qualityClaim: string
-  hsfo: string
-  vlsfo: string
-  lsmgo: string
+  paymentTerms: string
+  qualityClaimBar: string
+  supplierTrader: string
+  availableGrade: string
+  foBdn: string
+  goBdn: string
   rowNumber: number | null
 }
 
-export type SpcSupplierContact = {
-  sales: string
-  salesMobile: string
-  ops: string
-  opsMobile: string
-  rowNumber: number | null
-}
-
-export type SpcSupplierBdnEntry = {
+export type SpcSupplierFixture = {
   id: string
-  rowNumber: number
-  supplier: string
-  sellingEntity: string
-  terms: string
-  bdnFuelOil: string
-  bdnGasOil: string
-  pop: string
-}
-
-export type SpcSupplierBarge = {
-  id: string
-  rowNumber: number
-  supplier: string
+  fixtureDate: string | null
+  vesselName: string | null
   grade: string
-  bargeName: string
-  imoNumber: string
-  loadMt: string
-  status: string
+  quantity: string
+  supplierName: string
+  recordedSupplier: string
+  price: string | null
+  barging: string | null
+  buyerTrader: string
+  supplierTrader: string
+  enquiryNumber: string
+  fixtureStatus: string
+  renamed: boolean
 }
 
-export type SpcSupplierCoverage = {
-  id: string
-  rowNumber: number
-  trader: string
-  supplier: string
-  hsfo: string
-  vlsfo: string
-  lsmgo: string
-  sourceHeader: string
+export type SpcSupplierLegacyFixture = SpcSupplierFixture & {
+  legacySupplier: string
 }
 
 export type SpcSupplierRecord = {
@@ -53,10 +34,7 @@ export type SpcSupplierRecord = {
   name: string
   aliases: string[]
   info: SpcSupplierInfo
-  contact: SpcSupplierContact
-  bdnEntries: SpcSupplierBdnEntry[]
-  barges: SpcSupplierBarge[]
-  coverage: SpcSupplierCoverage[]
+  fixtures: SpcSupplierFixture[]
   searchText: string
   updatedAt: string
 }
@@ -64,20 +42,13 @@ export type SpcSupplierRecord = {
 export type SpcSupplierDataset = {
   suppliers: string[]
   records: SpcSupplierRecord[]
+  legacyFixtures: SpcSupplierLegacyFixture[]
   generatedAt: string
   spreadsheetUrl: string
-  source: "google-sheets" | "public-csv"
+  source: "public-csv"
   counts: {
     suppliers: number
-    activeBarges: number
-    coverageRows: number
-    bdnRows: number
+    fixtureRows: number
+    legacyFixtureRows: number
   }
-}
-
-export type SpcSupplierSaveInput = {
-  supplierKey: string
-  info?: Partial<Omit<SpcSupplierInfo, "rowNumber">>
-  contact?: Partial<Omit<SpcSupplierContact, "rowNumber">>
-  bdnEntries?: Array<Partial<Omit<SpcSupplierBdnEntry, "id" | "supplier">> & { rowNumber: number }>
 }

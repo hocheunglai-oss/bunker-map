@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server"
 import {
   hasSpcPagePermission,
-  requireSpcPagePermission,
   requireSpcSession,
 } from "@/lib/spcAuth"
-import { loadSpcSupplierDataset, saveSpcSupplier } from "@/lib/spcSuppliers"
-import type { SpcSupplierSaveInput } from "@/lib/spcSupplierTypes"
+import { loadSpcSupplierDataset } from "@/lib/spcSuppliers"
 
 export const dynamic = "force-dynamic"
 
@@ -42,32 +40,9 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  try {
-    const session = await requireSpcPagePermission("spc-suppliers", "edit")
-    const payload = (await request.json()) as Partial<SpcSupplierSaveInput>
-    const supplierKey = typeof payload.supplierKey === "string" ? payload.supplierKey : ""
-    if (!supplierKey) {
-      return NextResponse.json({ message: "Missing supplier." }, { status: 400 })
-    }
-
-    const result = await saveSpcSupplier(
-      {
-        supplierKey,
-        info: payload.info,
-        contact: payload.contact,
-        bdnEntries: Array.isArray(payload.bdnEntries) ? payload.bdnEntries : [],
-      },
-      session,
-      request,
-    )
-
-    return NextResponse.json(result, {
-      headers: {
-        "Cache-Control": "private, no-store",
-      },
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to save supplier."
-    return NextResponse.json({ message }, { status: statusForMessage(message) })
-  }
+  void request
+  return NextResponse.json(
+    { message: "Supplier database is imported from the supplier sheet." },
+    { status: 405 },
+  )
 }

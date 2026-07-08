@@ -111,6 +111,7 @@ const officeSuffixes: Record<string, string> = {
   SG: "SINGAPORE",
   US: "USA",
   USA: "USA",
+  UAE: "UNITED ARAB EMIRATES",
   VN: "VIETNAM",
 }
 
@@ -308,7 +309,7 @@ function traderLabel(
   const display = upperText(user?.displayName || displayName || username)
   const office = officeFor(usersByUsername, username, displayName)
   const firstName = display.split(/\s+/)[0] || display
-  const suffix = office === "HONG KONG" ? "HK" : office === "SINGAPORE" ? "SG" : office === "ITALY" ? "IT" : office === "MONACO" ? "MC" : office === "GREECE" ? "GR" : office
+  const suffix = office === "HONG KONG" ? "HK" : office === "SINGAPORE" ? "SG" : office === "ITALY" ? "IT" : office === "MONACO" ? "MC" : office === "GREECE" ? "GR" : office === "UNITED ARAB EMIRATES" || office === "UAE" ? "AE" : office
   return suffix && firstName ? `${firstName}-${suffix}` : firstName || "UNKNOWN"
 }
 

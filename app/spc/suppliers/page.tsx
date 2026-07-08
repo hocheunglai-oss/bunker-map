@@ -6,127 +6,188 @@ import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import type {
-  SpcSupplierBdnEntry,
   SpcSupplierDataset,
+  SpcSupplierFixture,
+  SpcSupplierLegacyFixture,
   SpcSupplierRecord,
 } from "@/lib/spcSupplierTypes"
-
-type SupplierTab = "overview" | "contacts" | "bdn" | "barges" | "coverage"
-
-type SupplierDraft = {
-  info: {
-    payment: string
-    qualityClaim: string
-    hsfo: string
-    vlsfo: string
-    lsmgo: string
-  }
-  contact: {
-    sales: string
-    salesMobile: string
-    ops: string
-    opsMobile: string
-  }
-  bdnEntries: Array<{
-    rowNumber: number
-    sellingEntity: string
-    terms: string
-    bdnFuelOil: string
-    bdnGasOil: string
-    pop: string
-  }>
-}
 
 type SupplierResponse = SpcSupplierDataset & {
   message?: string
 }
 
-type SaveResponse = {
-  dataset?: SpcSupplierDataset
-  record?: SpcSupplierRecord
-  saved?: boolean
-  message?: string
-}
-
-const SUPPLIER_TABS: Array<{ id: SupplierTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "contacts", label: "Contacts" },
-  { id: "bdn", label: "BDN" },
-  { id: "barges", label: "Barges" },
-  { id: "coverage", label: "Coverage" },
-]
-
 function blank(value: string | null | undefined) {
   return value?.trim() || "-"
 }
 
-function activeBargeCount(record: SpcSupplierRecord) {
-  return record.barges.filter((barge) => barge.status.trim().toLowerCase() === "active").length
+function formatDate(value: string | null | undefined) {
+  const text = value?.slice(0, 10) || ""
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return blank(value)
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+  return `${match[3]} ${months[Number(match[2]) - 1] || match[2]} ${match[1]}`
 }
 
-function supplierDraft(record: SpcSupplierRecord): SupplierDraft {
-  return {
-    info: {
-      payment: record.info.payment,
-      qualityClaim: record.info.qualityClaim,
-      hsfo: record.info.hsfo,
-      vlsfo: record.info.vlsfo,
-      lsmgo: record.info.lsmgo,
-    },
-    contact: {
-      sales: record.contact.sales,
-      salesMobile: record.contact.salesMobile,
-      ops: record.contact.ops,
-      opsMobile: record.contact.opsMobile,
-    },
-    bdnEntries: record.bdnEntries.map((entry) => ({
-      rowNumber: entry.rowNumber,
-      sellingEntity: entry.sellingEntity,
-      terms: entry.terms,
-      bdnFuelOil: entry.bdnFuelOil,
-      bdnGasOil: entry.bdnGasOil,
-      pop: entry.pop,
-    })),
-  }
+function gradeTokens(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean)
 }
 
-function sameDraft(a: SupplierDraft | null, b: SupplierDraft | null) {
-  return JSON.stringify(a) === JSON.stringify(b)
+function fixtureSummary(fixtures: SpcSupplierFixture[]) {
+  if (fixtures.length === 0) return "0"
+  const latest = fixtures[0]?.fixtureDate ? formatDate(fixtures[0].fixtureDate) : ""
+  return latest ? `${fixtures.length} · ${latest}` : String(fixtures.length)
+}
+
+function SupplierWarning({ label }: { label: string }) {
+  return (
+    <span className="spc-supplier-warning" title={label} aria-label={label}>
+      !
+    </span>
+  )
+}
+
+function MoreInfoDialog({
+  supplier,
+  onClose,
+}: {
+  supplier: SpcSupplierRecord
+  onClose: () => void
+}) {
+  return (
+    <div className="spc-supplier-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="spc-supplier-modal" role="dialog" aria-modal="true" aria-label={`${supplier.name} more info`} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="spc-supplier-modal-header">
+          <div>
+            <h2>{supplier.name}</h2>
+            <p>MORE INFO</p>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+        <table className="spc-table spc-supplier-popup-table">
+          <tbody>
+            <tr>
+              <th>FO BDN</th>
+              <td>{blank(supplier.info.foBdn)}</td>
+            </tr>
+            <tr>
+              <th>GO BDN</th>
+              <td>{blank(supplier.info.goBdn)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  )
+}
+
+function FixtureDialog({
+  supplier,
+  onClose,
+}: {
+  supplier: SpcSupplierRecord
+  onClose: () => void
+}) {
+  return (
+    <div className="spc-supplier-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="spc-supplier-modal is-wide" role="dialog" aria-modal="true" aria-label={`${supplier.name} fixtures`} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="spc-supplier-modal-header">
+          <div>
+            <h2>{supplier.name}</h2>
+            <p>PREVIOUS FIXTURES</p>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="spc-table-wrap">
+          <table className="spc-table spc-supplier-popup-table">
+            <thead>
+              <tr>
+                <th>DATE</th>
+                <th>VESSEL</th>
+                <th>GRADE</th>
+                <th>QTY</th>
+                <th>SUPPLIER</th>
+                <th>PRICE</th>
+                <th>BARGING</th>
+                <th>BUYER TRADER</th>
+                <th>SUPPLIER TRADER</th>
+              </tr>
+            </thead>
+            <tbody>
+              {supplier.fixtures.map((fixture) => (
+                <tr key={fixture.id}>
+                  <td>{formatDate(fixture.fixtureDate)}</td>
+                  <td><strong>{blank(fixture.vesselName)}</strong></td>
+                  <td>{blank(fixture.grade)}</td>
+                  <td>{blank(fixture.quantity)}</td>
+                  <td>
+                    {fixture.supplierName}
+                    {fixture.renamed ? <span className="spc-supplier-was">was {fixture.recordedSupplier}</span> : null}
+                  </td>
+                  <td>{blank(fixture.price)}</td>
+                  <td>{blank(fixture.barging)}</td>
+                  <td>{blank(fixture.buyerTrader)}</td>
+                  <td>{blank(fixture.supplierTrader)}</td>
+                </tr>
+              ))}
+              {supplier.fixtures.length === 0 ? (
+                <tr><td colSpan={9}>NO PREVIOUS FIXTURES.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function LegacyFixtureList({ fixtures }: { fixtures: SpcSupplierLegacyFixture[] }) {
+  if (fixtures.length === 0) return null
+  const visible = fixtures.slice(0, 12)
+  return (
+    <section className="spc-supplier-legacy">
+      <div className="spc-supplier-legacy-title">
+        <SupplierWarning label="CLOSED DOWN OR RENAMED" />
+        <span>FIXTURE SUPPLIER NAMES NOT IN CURRENT LIST</span>
+      </div>
+      <div className="spc-supplier-legacy-grid">
+        {visible.map((fixture) => (
+          <div key={fixture.id} className="spc-supplier-legacy-item">
+            <strong>{fixture.legacySupplier}</strong>
+            <span>{formatDate(fixture.fixtureDate)} · {blank(fixture.vesselName)} · {blank(fixture.grade)} {blank(fixture.quantity)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 export default function SpcSuppliersPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const [dataset, setDataset] = useState<SpcSupplierDataset | null>(null)
-  const [selectedKey, setSelectedKey] = useState("")
-  const [activeTab, setActiveTab] = useState<SupplierTab>("overview")
   const [query, setQuery] = useState("")
-  const [supplierQuery, setSupplierQuery] = useState("")
-  const [draft, setDraft] = useState<SupplierDraft | null>(null)
+  const [requestedSupplier, setRequestedSupplier] = useState("")
+  const [moreInfoKey, setMoreInfoKey] = useState("")
+  const [fixtureKey, setFixtureKey] = useState("")
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [messageIsError, setMessageIsError] = useState(false)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "view")
-  const canEdit = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-suppliers")
-
   const records = dataset?.records || []
-  const selectedSupplier = useMemo(
-    () => records.find((record) => record.key === selectedKey) || records[0] || null,
-    [records, selectedKey],
-  )
-  const savedDraft = useMemo(
-    () => (selectedSupplier ? supplierDraft(selectedSupplier) : null),
-    [selectedSupplier],
-  )
-  const dirty = Boolean(selectedSupplier && draft && !sameDraft(draft, savedDraft))
-  const normalizedQuery = query.trim().toLowerCase()
+  const searchValue = query.trim().toLowerCase()
+
   const filteredRecords = useMemo(() => {
-    if (!normalizedQuery) return records
-    return records.filter((record) => record.searchText.includes(normalizedQuery))
-  }, [normalizedQuery, records])
+    if (!searchValue) return records
+    return records.filter((record) => record.searchText.includes(searchValue))
+  }, [records, searchValue])
+
+  const moreInfoSupplier = records.find((record) => record.key === moreInfoKey) || null
+  const fixtureSupplier = records.find((record) => record.key === fixtureKey) || null
 
   const loadData = useCallback(async () => {
     if (!canView) return
@@ -137,21 +198,16 @@ export default function SpcSuppliersPage() {
       const data = (await response.json()) as SupplierResponse
       if (!response.ok) throw new Error(data.message || "Failed to load supplier database.")
       setDataset(data)
-      const requestedSupplier = data.records.find((record) => {
-        const target = supplierQuery.toLowerCase()
-        return target && (
+      if (requestedSupplier) {
+        const target = requestedSupplier.toLowerCase()
+        const match = data.records.find((record) =>
           record.key.toLowerCase() === target ||
           record.name.toLowerCase().includes(target) ||
-          record.searchText.includes(target)
+          record.searchText.includes(target),
         )
-      })
-      setSelectedKey((current) =>
-        requestedSupplier?.key ||
-        (current && data.records.some((record) => record.key === current)
-          ? current
-          : data.records[0]?.key || ""),
-      )
-      if (supplierQuery) setQuery((current) => current || supplierQuery)
+        if (match) setFixtureKey(match.key)
+        setQuery((current) => current || requestedSupplier)
+      }
       setMessageIsError(false)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load supplier database.")
@@ -159,14 +215,14 @@ export default function SpcSuppliersPage() {
     } finally {
       setLoading(false)
     }
-  }, [canView, supplierQuery])
+  }, [canView, requestedSupplier])
 
   useEffect(() => {
     document.title = "SPC Supplier Database"
   }, [])
 
   useEffect(() => {
-    setSupplierQuery(new URLSearchParams(window.location.search).get("supplier")?.trim() || "")
+    setRequestedSupplier(new URLSearchParams(window.location.search).get("supplier")?.trim() || "")
   }, [])
 
   useEffect(() => {
@@ -178,321 +234,89 @@ export default function SpcSuppliersPage() {
     void loadData()
   }, [loadData])
 
-  useEffect(() => {
-    setDraft(savedDraft)
-  }, [savedDraft])
-
-  function updateInfo(key: keyof NonNullable<SupplierDraft["info"]>, value: string) {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            info: {
-              ...current.info,
-              [key]: value,
-            },
-          }
-        : current,
-    )
-  }
-
-  function updateContact(key: keyof NonNullable<SupplierDraft["contact"]>, value: string) {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            contact: {
-              ...current.contact,
-              [key]: value,
-            },
-          }
-        : current,
-    )
-  }
-
-  function updateBdn(rowNumber: number, key: keyof Omit<SpcSupplierBdnEntry, "id" | "supplier" | "rowNumber">, value: string) {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            bdnEntries: current.bdnEntries.map((entry) =>
-              entry.rowNumber === rowNumber
-                ? {
-                    ...entry,
-                    [key]: value,
-                  }
-                : entry,
-            ),
-          }
-        : current,
-    )
-  }
-
-  async function saveSupplier() {
-    if (!canEdit || !selectedSupplier || !draft || !dirty) return
-    setSaving(true)
-    setMessage("")
-    try {
-      const response = await fetch("/api/spc/suppliers", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          supplierKey: selectedSupplier.key,
-          ...draft,
-        }),
-      })
-      const data = (await response.json()) as SaveResponse
-      if (!response.ok || !data.dataset || !data.record) {
-        throw new Error(data.message || "Failed to save supplier.")
-      }
-
-      setDataset(data.dataset)
-      setSelectedKey(data.record.key)
-      setMessage(data.saved ? "Supplier saved." : "No changes to save.")
-      setMessageIsError(false)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save supplier.")
-      setMessageIsError(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
   return (
     <SpcShell title="SPC Supplier Database">
-      <div className="spc-page-heading">
-        <div>
-          <h1>Supplier Database</h1>
-          <p>
-            {dataset?.counts.suppliers || 0} suppliers · {dataset?.counts.activeBarges || 0} active barges ·{" "}
-            {dataset?.counts.coverageRows || 0} coverage rows
-          </p>
-        </div>
-        <div className="spc-supplier-heading-actions">
-          <a href={dataset?.spreadsheetUrl || "#"} target="_blank" rel="noreferrer">
-            Sheet
-          </a>
-          <button type="button" className="spc-page-action" onClick={() => void loadData()} disabled={loading}>
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
-
-      {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
-
-      <div className="spc-supplier-workspace">
-        <aside className="spc-panel spc-supplier-list-panel">
-          <div className="spc-panel-header">
-            <h2>Suppliers</h2>
-            <span>{filteredRecords.length}</span>
+      <div className="spc-supplier-db-page">
+        <div className="spc-page-heading spc-supplier-db-heading">
+          <div>
+            <h1>Supplier Database</h1>
+            <p>{dataset?.counts.suppliers || 0} suppliers · {dataset?.counts.fixtureRows || 0} fixture rows</p>
           </div>
-          <label className="spc-supplier-search">
-            <span className="sr-only">Search suppliers</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search supplier, barge, contact..."
-            />
-          </label>
-          <div className="spc-supplier-list">
-            {filteredRecords.map((record) => (
-              <button
-                type="button"
-                key={record.key}
-                className={selectedSupplier?.key === record.key ? "is-active" : ""}
-                onClick={() => {
-                  setSelectedKey(record.key)
-                  setActiveTab("overview")
-                }}
-              >
-                <strong>{record.name}</strong>
-                <span>
-                  {blank(record.info.payment)} DDD · {activeBargeCount(record)} active barges · {record.coverage.length} coverage
-                </span>
-              </button>
-            ))}
-            {!loading && filteredRecords.length === 0 ? <p className="spc-empty">No suppliers found.</p> : null}
+          <div className="spc-supplier-db-actions">
+            <label>
+              <span className="sr-only">Search supplier database</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="SEARCH"
+              />
+            </label>
+            <button type="button" onClick={() => void loadData()} disabled={loading}>
+              {loading ? "REFRESHING" : "REFRESH"}
+            </button>
           </div>
-        </aside>
+        </div>
 
-        <section className="spc-panel spc-supplier-detail-panel">
-          {selectedSupplier && draft ? (
-            <>
-              <div className="spc-supplier-detail-header">
-                <div>
-                  <h2>{selectedSupplier.name}</h2>
-                  <div className="spc-supplier-aliases">
-                    {selectedSupplier.aliases.slice(0, 4).map((alias) => (
-                      <span key={alias}>{alias}</span>
-                    ))}
-                  </div>
-                </div>
-                <button type="button" onClick={() => void saveSupplier()} disabled={!canEdit || !dirty || saving}>
-                  {saving ? "Saving..." : "Save"}
-                </button>
-              </div>
+        {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
 
-              <div className="spc-supplier-facts">
-                <div><span>Payment</span><strong>{blank(selectedSupplier.info.payment)}</strong></div>
-                <div><span>Quality Claim</span><strong>{blank(selectedSupplier.info.qualityClaim)}</strong></div>
-                <div><span>BDN Rows</span><strong>{selectedSupplier.bdnEntries.length}</strong></div>
-                <div><span>Barges</span><strong>{selectedSupplier.barges.length}</strong></div>
-              </div>
-
-              <div className="spc-supplier-tabs" role="tablist" aria-label="Supplier database sections">
-                {SUPPLIER_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === tab.id}
-                    className={activeTab === tab.id ? "is-active" : ""}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
+        <section className="spc-supplier-ledger-panel">
+          <div className="spc-table-wrap">
+            <table className="spc-table spc-supplier-ledger-table">
+              <thead>
+                <tr>
+                  <th>SUPPLIER</th>
+                  <th>PAYMENT TERMS</th>
+                  <th>QUALITY CLAIM BAR</th>
+                  <th>SUPPLIER TRADER</th>
+                  <th>AVAILABLE GRADE</th>
+                  <th>MORE INFO</th>
+                  <th>FIXTURE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecords.map((record) => (
+                  <tr key={record.key}>
+                    <td><strong>{record.name}</strong></td>
+                    <td>{blank(record.info.paymentTerms)}</td>
+                    <td>{blank(record.info.qualityClaimBar)}</td>
+                    <td>{blank(record.info.supplierTrader)}</td>
+                    <td>
+                      <div className="spc-supplier-grade-list">
+                        {gradeTokens(record.info.availableGrade).map((grade) => (
+                          <span key={grade}>{grade}</span>
+                        ))}
+                        {gradeTokens(record.info.availableGrade).length === 0 ? "-" : null}
+                      </div>
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
+                        MORE INFO
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)}>
+                        {fixtureSummary(record.fixtures)}
+                      </button>
+                    </td>
+                  </tr>
                 ))}
-              </div>
-
-              {activeTab === "overview" ? (
-                <div className="spc-supplier-form-grid">
-                  <label>
-                    <span>Payment</span>
-                    <input value={draft.info.payment || ""} onChange={(event) => updateInfo("payment", event.target.value)} disabled={!canEdit || !selectedSupplier.info.rowNumber} />
-                  </label>
-                  <label>
-                    <span>Quality Claim</span>
-                    <input value={draft.info.qualityClaim || ""} onChange={(event) => updateInfo("qualityClaim", event.target.value)} disabled={!canEdit || !selectedSupplier.info.rowNumber} />
-                  </label>
-                  <label>
-                    <span>HSFO</span>
-                    <input value={draft.info.hsfo || ""} onChange={(event) => updateInfo("hsfo", event.target.value)} disabled={!canEdit || !selectedSupplier.info.rowNumber} />
-                  </label>
-                  <label>
-                    <span>VLSFO / LSFO</span>
-                    <input value={draft.info.vlsfo || ""} onChange={(event) => updateInfo("vlsfo", event.target.value)} disabled={!canEdit || !selectedSupplier.info.rowNumber} />
-                  </label>
-                  <label>
-                    <span>LSMGO</span>
-                    <input value={draft.info.lsmgo || ""} onChange={(event) => updateInfo("lsmgo", event.target.value)} disabled={!canEdit || !selectedSupplier.info.rowNumber} />
-                  </label>
-                </div>
-              ) : null}
-
-              {activeTab === "contacts" ? (
-                <div className="spc-supplier-form-grid is-contacts">
-                  <label>
-                    <span>Sales</span>
-                    <textarea value={draft.contact.sales || ""} onChange={(event) => updateContact("sales", event.target.value)} disabled={!canEdit || !selectedSupplier.contact.rowNumber} />
-                  </label>
-                  <label>
-                    <span>Sales Mobile</span>
-                    <textarea value={draft.contact.salesMobile || ""} onChange={(event) => updateContact("salesMobile", event.target.value)} disabled={!canEdit || !selectedSupplier.contact.rowNumber} />
-                  </label>
-                  <label>
-                    <span>Ops</span>
-                    <textarea value={draft.contact.ops || ""} onChange={(event) => updateContact("ops", event.target.value)} disabled={!canEdit || !selectedSupplier.contact.rowNumber} />
-                  </label>
-                  <label>
-                    <span>Ops Mobile</span>
-                    <textarea value={draft.contact.opsMobile || ""} onChange={(event) => updateContact("opsMobile", event.target.value)} disabled={!canEdit || !selectedSupplier.contact.rowNumber} />
-                  </label>
-                </div>
-              ) : null}
-
-              {activeTab === "bdn" ? (
-                <div className="spc-table-wrap">
-                  <table className="spc-table spc-supplier-edit-table">
-                    <thead>
-                      <tr>
-                        <th>Selling Entity</th>
-                        <th>Terms</th>
-                        <th>BDN Fuel Oil</th>
-                        <th>BDN Gas Oil</th>
-                        <th>POP</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {draft.bdnEntries.map((entry) => (
-                        <tr key={entry.rowNumber}>
-                          <td><input value={entry.sellingEntity || ""} onChange={(event) => updateBdn(entry.rowNumber, "sellingEntity", event.target.value)} disabled={!canEdit} /></td>
-                          <td><input value={entry.terms || ""} onChange={(event) => updateBdn(entry.rowNumber, "terms", event.target.value)} disabled={!canEdit} /></td>
-                          <td><input value={entry.bdnFuelOil || ""} onChange={(event) => updateBdn(entry.rowNumber, "bdnFuelOil", event.target.value)} disabled={!canEdit} /></td>
-                          <td><input value={entry.bdnGasOil || ""} onChange={(event) => updateBdn(entry.rowNumber, "bdnGasOil", event.target.value)} disabled={!canEdit} /></td>
-                          <td><input value={entry.pop || ""} onChange={(event) => updateBdn(entry.rowNumber, "pop", event.target.value)} disabled={!canEdit} /></td>
-                        </tr>
-                      ))}
-                      {draft.bdnEntries.length === 0 ? <tr><td colSpan={5}>No BDN rows.</td></tr> : null}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-
-              {activeTab === "barges" ? (
-                <div className="spc-table-wrap">
-                  <table className="spc-table spc-supplier-read-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Barge Name</th>
-                        <th>IMO Number</th>
-                        <th>Load MT</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedSupplier.barges.map((barge) => (
-                        <tr key={barge.id}>
-                          <td>{blank(barge.grade)}</td>
-                          <td><strong>{blank(barge.bargeName)}</strong></td>
-                          <td>{blank(barge.imoNumber)}</td>
-                          <td>{blank(barge.loadMt)}</td>
-                          <td><span className={barge.status.toLowerCase() === "active" ? "spc-supplier-pill is-active" : "spc-supplier-pill"}>{blank(barge.status)}</span></td>
-                        </tr>
-                      ))}
-                      {selectedSupplier.barges.length === 0 ? <tr><td colSpan={5}>No barges.</td></tr> : null}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-
-              {activeTab === "coverage" ? (
-                <div className="spc-table-wrap">
-                  <table className="spc-table spc-supplier-read-table">
-                    <thead>
-                      <tr>
-                        <th>Trader</th>
-                        <th>Supplier Cell</th>
-                        <th>HSFO</th>
-                        <th>VLSFO</th>
-                        <th>LSMGO</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedSupplier.coverage.map((coverage) => (
-                        <tr key={coverage.id}>
-                          <td><strong>{coverage.trader}</strong></td>
-                          <td>{blank(coverage.supplier)}</td>
-                          <td>{blank(coverage.hsfo)}</td>
-                          <td>{blank(coverage.vlsfo)}</td>
-                          <td>{blank(coverage.lsmgo)}</td>
-                        </tr>
-                      ))}
-                      {selectedSupplier.coverage.length === 0 ? <tr><td colSpan={5}>No coverage rows.</td></tr> : null}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <p className="spc-empty">No supplier selected.</p>
-          )}
+                {!loading && filteredRecords.length === 0 ? (
+                  <tr><td colSpan={7}>NO SUPPLIERS FOUND.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
+
+        <LegacyFixtureList fixtures={dataset?.legacyFixtures || []} />
+
+        {moreInfoSupplier ? <MoreInfoDialog supplier={moreInfoSupplier} onClose={() => setMoreInfoKey("")} /> : null}
+        {fixtureSupplier ? <FixtureDialog supplier={fixtureSupplier} onClose={() => setFixtureKey("")} /> : null}
       </div>
     </SpcShell>
   )
