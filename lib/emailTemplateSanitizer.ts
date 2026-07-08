@@ -236,17 +236,88 @@ function tableHtmlToText(tableHtml: string) {
     .trim()
 }
 
-function replaceTablesWithPre(value: string) {
+function buildSafeTable(rows: string[][], labelStyle = false) {
+  const tableStyle = [
+    "border-collapse:collapse",
+    "mso-table-lspace:0pt",
+    "mso-table-rspace:0pt",
+    "font-family:Arial, Helvetica, sans-serif",
+    "font-size:14px",
+    "line-height:1.35",
+  ].join(";")
+  const baseCellStyle = "border:1px solid #b8c0c8;padding:4px 7px;vertical-align:top"
+  const labelCellStyle = `${baseCellStyle};font-weight:normal;white-space:nowrap;background:#f7f9fb`
+  const colonCellStyle = `${baseCellStyle};text-align:center;width:16px`
+  const valueCellStyle = `${baseCellStyle};min-width:150px`
+
+  const body = rows
+    .map((cells) => {
+      if (labelStyle) {
+        const label = cells[0] || ""
+        const value = cells[1] || ""
+        return `<tr><td style="${labelCellStyle}">${escapeHtml(label)}</td><td style="${colonCellStyle}">:</td><td style="${valueCellStyle}">${escapeHtml(value)}</td></tr>`
+      }
+
+      return `<tr>${cells
+        .map((cell) => `<td style="${baseCellStyle}">${escapeHtml(cell)}</td>`)
+        .join("")}</tr>`
+    })
+    .join("")
+
+  return `<table data-fc-safe-template-table="1" role="presentation" cellspacing="0" cellpadding="0" border="0" style="${tableStyle}"><tbody>${body}</tbody></table>`
+}
+
+function tableHtmlToSafeTable(tableHtml: string) {
+  const rows = Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
+    .map((match) => extractCells(match[1] || ""))
+    .map((cells) => cells.filter((cell, index) => cell || index < 3))
+    .filter((cells) => cells.some(Boolean))
+
+  if (!rows.length) {
+    const text = stripTagsToText(tableHtml).replace(/\s+/g, " ").trim()
+    return text ? buildSafeTable([[text]], false) : ""
+  }
+
+  const labelRows = rows.map((cells) => {
+    const colonIndex = cells.findIndex((cell) => cell.trim() === ":")
+    if (colonIndex >= 0) {
+      return {
+        label: cells.slice(0, colonIndex).join(" ").trim(),
+        value: cells.slice(colonIndex + 1).join(" ").trim(),
+      }
+    }
+    if (cells.length >= 2 && cells[0] && cells.length <= 3) {
+      return {
+        label: cells[0].trim(),
+        value: cells.slice(1).join(" ").trim(),
+      }
+    }
+    return null
+  })
+
+  const canUseLabelTable =
+    labelRows.some(Boolean) && labelRows.filter(Boolean).length >= Math.ceil(rows.length / 2)
+
+  if (canUseLabelTable) {
+    return buildSafeTable(
+      labelRows.map((row, index) => (row ? [row.label, row.value] : [rows[index].join("  ").trim(), ""])),
+      true
+    )
+  }
+
+  return buildSafeTable(rows, false)
+}
+
+function replaceTablesWithSafeTables(value: string) {
   return value.replace(/<table\b[\s\S]*?<\/table>/gi, (table) => {
-    const text = tableHtmlToText(table)
-    if (!text) return ""
-    return `<pre style="font-family: Arial, Helvetica, sans-serif; white-space: pre-wrap; margin: 0;">${escapeHtml(text)}</pre>`
+    return tableHtmlToSafeTable(table)
   })
 }
 
 export function htmlToPlainText(html: string) {
   return stripTagsToText(
-    replaceTablesWithPre(prepareRawContent(html))
+    prepareRawContent(html)
+      .replace(/<table\b[\s\S]*?<\/table>/gi, (table) => `\n${tableHtmlToText(table)}\n`)
       .replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_match, content) => `\n${decodeBasicHtmlEntities(content)}\n`)
       .replace(/<\/(p|div|pre)>/gi, "\n")
   )
@@ -266,16 +337,19 @@ export function sanitizeTemplateBodyHtml(value: string) {
     .replace(/<script\b[\s\S]*?<\/script>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "")
 
-  let converted = replaceTablesWithPre(withoutWrappers)
+  let converted = replaceTablesWithSafeTables(withoutWrappers)
     .replace(/(^|[^=])=\r?\n/g, "$1")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
 
-  if (/<(?:table|tbody|tr|td|th)\b/i.test(converted)) {
+  if (/<(?:tbody|tr|td|th)\b/i.test(converted) && !/<table\b[^>]*data-fc-safe-template-table="1"/i.test(converted)) {
     const text = sanitizeTemplateText(converted)
     converted = text
-      ? `<pre style="font-family: Arial, Helvetica, sans-serif; white-space: pre-wrap; margin: 0;">${escapeHtml(text)}</pre>`
+      ? buildSafeTable(
+          text.split(/\n+/).map((line) => [line.trim()]).filter((row) => row[0]),
+          false
+        )
       : ""
   }
 
@@ -329,7 +403,9 @@ export function findTemplateFormattingIssues(template: SanitizableEmailTemplate)
   if (/&nbs\s*=\s*p;|&nbsp\s*=\s*p;|&nb\s+sp;|&amp;nbsp;|&nbsp;/i.test(fields)) issues.push("encoded-space")
   if (/(^|[^=])=\r?\n|=[0-9a-fA-F]{2}/.test(fields)) issues.push("quoted-printable")
   if (/Content-Transfer-Encoding|This is a multi-part message|^--[_=][^\r\n]+/im.test(fields)) issues.push("mime-wrapper")
-  if (/<table\b|<tbody\b|<tr\b|<td\b/i.test(fields)) issues.push("html-table")
+  if (/<table\b(?![^>]*data-fc-safe-template-table="1")|<colgroup\b/i.test(fields)) {
+    issues.push("html-table")
+  }
   if (/[�]/.test(fields)) issues.push("replacement-character")
 
   return Array.from(new Set(issues))
