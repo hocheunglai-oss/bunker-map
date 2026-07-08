@@ -497,8 +497,8 @@ export default function SpcSuppliersPage() {
             </button>
             <span>
               {filteredRecords.length === records.length
-                ? `${records.length} SUPPLIERS`
-                : `${filteredRecords.length} / ${records.length} SUPPLIERS`}
+                ? `TOTAL: ${records.length} SUPPLIERS`
+                : `TOTAL: ${filteredRecords.length} / ${records.length} SUPPLIERS`}
             </span>
           </div>
           <label>
@@ -527,61 +527,61 @@ export default function SpcSuppliersPage() {
         {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
 
         <section className="spc-supplier-ledger-panel">
-          <div className="spc-supplier-ledger-grid">
-            <div className="spc-table-wrap">
-              <table className="spc-table spc-supplier-ledger-table">
-                <thead>
-                  <tr>
-                    <th>SUPPLIER</th>
-                    <th>PAYMENT TERMS</th>
-                    <th>QUALITY CLAIM BAR</th>
-                    <th>
-                      <button type="button" className="spc-supplier-sort-button" onClick={toggleTraderSort}>
-                        SUPPLIER TRADER{traderSort === "asc" ? " ↑" : traderSort === "desc" ? " ↓" : ""}
+          <div className="spc-table-wrap">
+            <table className="spc-table spc-supplier-ledger-table">
+              <thead>
+                <tr>
+                  <th>SUPPLIER</th>
+                  <th>PAYMENT TERMS</th>
+                  <th>QUALITY CLAIM BAR</th>
+                  <th>
+                    <div className="spc-supplier-trader-heading">
+                      <span>SUPPLIER TRADER</span>
+                      <button type="button" onClick={toggleTraderSort}>
+                        SORT BY TRADER{traderSort === "asc" ? " ↑" : traderSort === "desc" ? " ↓" : ""}
                       </button>
-                    </th>
-                    <th>AVAILABLE GRADE</th>
+                    </div>
+                  </th>
+                  <th>AVAILABLE GRADE</th>
+                  <th>MORE</th>
+                  <th>FIXTURES</th>
+                  <th>EDIT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecords.map((record) => (
+                  <tr key={record.key}>
+                    <td><strong>{record.name}</strong></td>
+                    <td className={isBelowThirty(record.info.paymentTerms) ? "is-supplier-alert-value" : ""}>
+                      {blank(record.info.paymentTerms)}
+                    </td>
+                    <td className={isBelowThirty(record.info.qualityClaimBar) ? "is-supplier-alert-value" : ""}>
+                      {blank(record.info.qualityClaimBar)}
+                    </td>
+                    <td>{blank(record.info.supplierTrader)}</td>
+                    <td><GradeCells value={record.info.availableGrade} /></td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
+                        MORE
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
+                        FIXTURES
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
+                        EDIT
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.map((record) => (
-                    <tr key={record.key}>
-                      <td><strong>{record.name}</strong></td>
-                      <td className={isBelowThirty(record.info.paymentTerms) ? "is-supplier-alert-value" : ""}>
-                        {blank(record.info.paymentTerms)}
-                      </td>
-                      <td className={isBelowThirty(record.info.qualityClaimBar) ? "is-supplier-alert-value" : ""}>
-                        {blank(record.info.qualityClaimBar)}
-                      </td>
-                      <td>{blank(record.info.supplierTrader)}</td>
-                      <td><GradeCells value={record.info.availableGrade} /></td>
-                    </tr>
-                  ))}
-                  {!loading && filteredRecords.length === 0 ? (
-                    <tr><td colSpan={5}>NO SUPPLIERS FOUND.</td></tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-            <div className="spc-supplier-action-column" aria-label="Supplier actions">
-              <div className="spc-supplier-action-header">ACTIONS</div>
-              {filteredRecords.map((record) => (
-                <div key={record.key} className="spc-supplier-action-row">
-                  <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
-                    MORE INFO
-                  </button>
-                  <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
-                    FIXTURES
-                  </button>
-                  <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
-                    EDIT
-                  </button>
-                </div>
-              ))}
-              {!loading && filteredRecords.length === 0 ? (
-                <div className="spc-supplier-action-row is-empty" />
-              ) : null}
-            </div>
+                ))}
+                {!loading && filteredRecords.length === 0 ? (
+                  <tr><td colSpan={8}>NO SUPPLIERS FOUND.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
 
