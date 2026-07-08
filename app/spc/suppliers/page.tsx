@@ -914,7 +914,17 @@ export default function SpcSuppliersPage() {
               <tbody>
                 {filteredRecords.map((record) => (
                   <tr key={record.key}>
-                    <td><strong>{record.name}</strong></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="spc-supplier-name-button"
+                        onClick={() => openEditor(record)}
+                        disabled={!canEdit}
+                        title={canEdit ? "Edit supplier" : undefined}
+                      >
+                        {record.name}
+                      </button>
+                    </td>
                     <td className={isBelowThirty(record.info.paymentTerms) ? "is-supplier-alert-value" : ""}>
                       {blank(record.info.paymentTerms)}
                     </td>
@@ -928,8 +938,13 @@ export default function SpcSuppliersPage() {
                         <button type="button" className="spc-supplier-mini-button is-more" onClick={() => setMoreInfoKey(record.key)}>
                           BDN
                         </button>
-                        <button type="button" className="spc-supplier-mini-button is-fixtures" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
-                          FIXTURES
+                        <button
+                          type="button"
+                          className={`spc-supplier-mini-button is-contact${record.contacts.length > 0 ? " has-contacts" : ""}`}
+                          onClick={() => openContactEditor(record)}
+                          title={`${record.contacts.length} CONTACT${record.contacts.length === 1 ? "" : "S"}`}
+                        >
+                          CONTACT
                         </button>
                         <button
                           type="button"
@@ -939,16 +954,8 @@ export default function SpcSuppliersPage() {
                         >
                           BARGE FLEET ({record.barges.length})
                         </button>
-                        <button
-                          type="button"
-                          className={`spc-supplier-mini-button is-contact${record.contacts.length > 0 ? " has-contacts" : ""}`}
-                          onClick={() => openContactEditor(record)}
-                          title={`${record.contacts.length} CONTACT${record.contacts.length === 1 ? "" : "S"}`}
-                        >
-                          CONTACT
-                        </button>
-                        <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
-                          EDIT
+                        <button type="button" className="spc-supplier-mini-button is-fixtures" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
+                          FIXTURES
                         </button>
                       </div>
                     </td>

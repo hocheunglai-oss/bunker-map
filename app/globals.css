@@ -5210,15 +5210,38 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-ledger-table th:nth-child(6),
 .spc-table.spc-supplier-ledger-table td:nth-child(6) {
-  width: 533px;
+  width: 474px;
   padding-left: 5px;
   padding-right: 5px;
   text-align: center;
 }
 
-.spc-table.spc-supplier-ledger-table td strong {
+.spc-table.spc-supplier-ledger-table th:nth-child(6) {
+  text-align: center;
+}
+
+.spc-supplier-name-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
   color: var(--fc-admin-heading);
+  cursor: pointer;
+  font: inherit;
   font-weight: 900;
+  line-height: 1.2;
+  padding: 0;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.spc-supplier-name-button:disabled {
+  cursor: default;
+}
+
+.spc-supplier-name-button:not(:disabled):hover {
+  color: #0758c7;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .spc-supplier-header-menu {
@@ -5296,7 +5319,8 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-supplier-info-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 54px 74px 112px 74px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -5327,13 +5351,6 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-supplier-mini-button.is-barge.has-barges,
 .spc-supplier-mini-button.is-contact.has-contacts {
-  border-color: #93c5fd;
-  background: #eff6ff;
-  color: #0758c7;
-}
-
-.spc-supplier-mini-button.is-edit {
-  min-width: 54px;
   border-color: #93c5fd;
   background: #eff6ff;
   color: #0758c7;
