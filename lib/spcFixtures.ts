@@ -127,6 +127,7 @@ const fuelColumns: Array<{ key: FuelKey; label: string }> = [
   { key: "vlsfo", label: "VLSFO" },
   { key: "lsmgo", label: "LSMGO" },
 ]
+const allFuelKeys = fuelColumns.map(({ key }) => key)
 const monthLabels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
 function formatIntegerString(value: unknown) {
@@ -204,6 +205,17 @@ function normalizeGradeField(value: unknown, keys: FuelKey[], options?: { numeri
       ? displaySupplierName(value)
       : cleanString(value)
   return plain || null
+}
+
+function normalizeSupplierField(value: unknown) {
+  return normalizeGradeField(value, allFuelKeys, { supplier: true })
+}
+
+function primarySupplierName(value: unknown) {
+  const text = cleanString(value)
+  const parsed = parseGradeValues(text)
+  if (parsed.encoded) return allFuelKeys.map((key) => cleanString(parsed.map[key])).find(Boolean) || ""
+  return text
 }
 
 function monthCode(value: unknown) {
@@ -347,6 +359,8 @@ function extractInitialFuel(text: string, aliases: string[]) {
 }
 
 function mapFixture(row: SpcFixtureRow): SpcFixture {
+  const supplierName = normalizeSupplierField(row.supplier_name)
+  const primarySupplier = primarySupplierName(supplierName)
   return {
     id: row.id,
     enquiryId: row.enquiry_id,
@@ -367,8 +381,8 @@ function mapFixture(row: SpcFixtureRow): SpcFixture {
     hsfo: row.hsfo,
     vlsfo: row.vlsfo,
     lsmgo: row.lsmgo,
-    supplierName: row.supplier_name,
-    supplierKey: row.supplier_key,
+    supplierName,
+    supplierKey: primarySupplier ? supplierKey(primarySupplier) : row.supplier_key ? supplierKey(row.supplier_key) : null,
     price: row.price,
     barging: row.barging,
     completedAt: row.completed_at,
@@ -391,10 +405,10 @@ function sortFixtures(fixtures: SpcFixture[]) {
   })
 }
 
-export async function listSpcFixtures(session: SpcSession, limit = 500) {
+export async function listSpcFixtures(session: SpcSession, limit = 5000) {
   const context = createSpcAuditContext(session, undefined, "spc-fixtures")
   const supabase = createSpcAuditedSupabaseClient(context)
-  const safeLimit = Math.min(Math.max(Number(limit || 500), 1), 500)
+  const safeLimit = Math.min(Math.max(Number(limit || 5000), 1), 5000)
   const { data, error } = await supabase
     .from("spc_fixtures")
     .select(`
@@ -447,6 +461,8 @@ export async function ensurePendingSpcFixtureForEnquiry(
   if (existingError) throw existingError
   if ((existing as { fixture_status?: string } | null)?.fixture_status === "completed") return
 
+  const initialSupplierName = normalizeSupplierField(meta.fixtureSupplier || enquiry.supplier_name)
+  const initialPrimarySupplier = primarySupplierName(initialSupplierName)
   const payload = {
     enquiry_id: enquiry.id,
     fixture_status: "pending",
@@ -464,8 +480,8 @@ export async function ensurePendingSpcFixtureForEnquiry(
     hsfo: optionalString(meta.hsfo || parsed.hsfo || extractInitialFuel(text, ["hsfo", "ifo"])),
     vlsfo: optionalString(meta.vlsfo || parsed.vlsfo || extractInitialFuel(text, ["vlsfo", "lsfo"])),
     lsmgo: optionalString(meta.lsmgo || parsed.lsmgo || extractInitialFuel(text, ["lsmgo", "mgo"])),
-    supplier_name: optionalString(meta.fixtureSupplier || enquiry.supplier_name),
-    supplier_key: supplierKey(meta.fixtureSupplier || enquiry.supplier_name),
+    supplier_name: initialSupplierName,
+    supplier_key: initialPrimarySupplier ? supplierKey(initialPrimarySupplier) : null,
     price: optionalString(meta.price),
     barging: optionalString(meta.barging),
   }
@@ -547,8 +563,9 @@ export async function updateSpcFixture(
   const supplierTrader = resolveUserChoice(users, input.supplierTrader)
   const buyerTrader = resolveUserChoice(users, input.buyerTrader)
 
-  if (!supplierTrader) throw new Error("Select a valid supplier trader.")
-  if (!buyerTrader) throw new Error("Select a valid buyer trader.")
+  const allowExistingTraderNames = existing.fixture_status === "completed" && action === "save"
+  if (!supplierTrader && !allowExistingTraderNames) throw new Error("Select a valid supplier trader.")
+  if (!buyerTrader && !allowExistingTraderNames) throw new Error("Select a valid buyer trader.")
 
   const fixtureDate = cleanDate(input.fixtureDate) || existing.fixture_date || hongKongDate()
   const account = normalizeAccount(input.account, users)
@@ -570,8 +587,8 @@ export async function updateSpcFixture(
   if (action === "complete") {
     const missing: string[] = []
     if (!fixtureDate) missing.push("DATE")
-    if (!supplierTrader.username) missing.push("SUPPLIER TRADER")
-    if (!buyerTrader.username) missing.push("BUYER TRADER")
+    if (!supplierTrader?.username) missing.push("SUPPLIER TRADER")
+    if (!buyerTrader?.username) missing.push("BUYER TRADER")
     if (!account) missing.push("ACCT")
     if (!earliestEta) missing.push("ETA")
     if (!vesselName) missing.push("VESSEL")
@@ -589,12 +606,12 @@ export async function updateSpcFixture(
   const payload = {
     fixture_status: completed ? "completed" : existing.fixture_status,
     fixture_date: fixtureDate,
-    supplier_trader_user_id: supplierTrader.id,
-    supplier_trader_username: supplierTrader.username,
-    supplier_trader_display_name: supplierTrader.displayName,
-    buyer_trader_user_id: buyerTrader.id,
-    buyer_trader_username: buyerTrader.username,
-    buyer_trader_display_name: buyerTrader.displayName,
+    supplier_trader_user_id: supplierTrader?.id || existing.supplier_trader_user_id,
+    supplier_trader_username: supplierTrader?.username || existing.supplier_trader_username,
+    supplier_trader_display_name: supplierTrader?.displayName || existing.supplier_trader_display_name,
+    buyer_trader_user_id: buyerTrader?.id || existing.buyer_trader_user_id,
+    buyer_trader_username: buyerTrader?.username || existing.buyer_trader_username,
+    buyer_trader_display_name: buyerTrader?.displayName || existing.buyer_trader_display_name,
     account,
     commission: optionalString(input.commission),
     earliest_eta: earliestEta,

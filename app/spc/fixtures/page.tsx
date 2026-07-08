@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
+import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
+import { displaySupplierName } from "@/lib/spcSupplierKeys"
 
 type SpcFixtureStatus = "pending" | "completed" | "cancelled"
 
@@ -225,6 +227,19 @@ function gradeValue(value: string | null | undefined, key: FuelKey | null, fallb
   return fallbackPlain ? text : ""
 }
 
+function normalizeSupplierDisplayField(value: string | null | undefined) {
+  const parsed = parseGradeValues(value)
+  if (parsed.encoded) {
+    const nextMap: Partial<Record<FuelKey, string>> = {}
+    fuelColumns.forEach(({ key }) => {
+      const supplier = displaySupplierName(parsed.map[key])
+      if (supplier) nextMap[key] = supplier
+    })
+    return serializeGradeValues(nextMap)
+  }
+  return displaySupplierName(value)
+}
+
 function gradeNumberDisplay(value: string | null | undefined, key: FuelKey | null) {
   return numericDisplay(gradeValue(value, key))
 }
@@ -332,10 +347,6 @@ function etaFromParts(parts: { startDay: string; startMonth: string; endDay: str
   return `${startDay} - ${endDay} ${startMonth}`
 }
 
-function userOptionValue(user: Pick<SpcUserOption, "username" | "displayName">) {
-  return user.displayName || user.username
-}
-
 function traderValue(displayName: string | null | undefined, username: string | null | undefined) {
   const cleanUsername = cleanText(username)
   return cleanText(displayName) || cleanUsername
@@ -346,10 +357,6 @@ function compactPersonName(value: string | null | undefined) {
   if (!cleaned) return ""
   const withoutDomain = cleaned.includes("@") ? cleaned.split("@")[0] : cleaned
   return withoutDomain.split(/\s+/)[0] || withoutDomain
-}
-
-function traderCodeName(value: string | null | undefined) {
-  return cleanText(value).split("-")[0]?.trim() || ""
 }
 
 function officeCode(value: string | null | undefined) {
@@ -381,30 +388,6 @@ function traderCode(user: SpcUserOption | null, fallback: string) {
   if (!name) return "-"
   const code = officeCode(user?.office)
   return code ? `${name}-${code}` : name
-}
-
-function userFromChoice(users: SpcUserOption[], value: string) {
-  const cleaned = cleanText(value)
-  if (!cleaned) return null
-  const lower = cleaned.toLowerCase()
-  const codeName = traderCodeName(cleaned).toLowerCase()
-  const username = cleaned.includes("|") ? cleanText(cleaned.split("|").pop()).toLowerCase() : lower
-  const exactMatch = users.find((user) => {
-    const userName = user.username.toLowerCase()
-    const displayName = user.displayName.toLowerCase()
-    const label = userOptionValue(user).toLowerCase()
-    return userName === username || userName === lower || displayName === lower || label === lower
-  })
-  if (exactMatch) return exactMatch
-
-  const firstNameMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === lower)
-  if (firstNameMatches.length === 1) return firstNameMatches[0]
-  if (codeName && codeName !== lower) {
-    const codeMatches = users.filter((user) => compactPersonName(user.displayName || user.username).toLowerCase() === codeName)
-    if (codeMatches.length === 1) return codeMatches[0]
-  }
-
-  return null
 }
 
 function dateInput(value: string | null | undefined) {
@@ -442,7 +425,7 @@ function draftFromFixture(fixture: SpcFixture): FixtureDraft {
     hsfo: formatQuantityString(fixture.hsfo),
     vlsfo: formatQuantityString(fixture.vlsfo),
     lsmgo: formatQuantityString(fixture.lsmgo),
-    supplierName: cleanText(fixture.supplierName),
+    supplierName: normalizeSupplierDisplayField(fixture.supplierName),
     price: parseGradeValues(fixture.price).encoded
       ? serializeGradeValues(parseGradeValues(fixture.price).map)
       : formatIntegerString(fixture.price),
@@ -480,6 +463,7 @@ export default function SpcFixturesPage() {
     () => fixtures.filter((fixture) => fixture.fixtureStatus === "pending"),
     [fixtures],
   )
+  const activeTraderResolver = useMemo(() => createActiveSpcTraderResolver(users), [users])
   const completedFixtures = useMemo(
     () => fixtures.filter((fixture) => fixture.fixtureStatus === "completed"),
     [fixtures],
@@ -515,7 +499,7 @@ export default function SpcFixturesPage() {
     ]
     const seen = new Set<string>()
     return values
-      .map((value) => value.trim())
+      .map((value) => displaySupplierName(value))
       .filter((value) => {
         const key = value.toLowerCase()
         if (!key || seen.has(key)) return false
@@ -547,7 +531,7 @@ export default function SpcFixturesPage() {
     setMessage("")
     try {
       const [fixtureResponse, supplierResponse] = await Promise.all([
-        fetch("/api/spc/fixtures?limit=500", { cache: "no-store" }),
+        fetch("/api/spc/fixtures?limit=5000", { cache: "no-store" }),
         fetch("/api/spc/suppliers", { cache: "no-store" }),
       ])
       const fixtureData = (await fixtureResponse.json()) as FixturesResponse
@@ -1077,8 +1061,22 @@ export default function SpcFixturesPage() {
     return rows.flatMap((fixture) => {
       const draft = drafts[fixture.id] || draftFromFixture(fixture)
       const rowCanEdit = canEditFixture(fixture, mode)
-      const supplierTrader = userFromChoice(users, draft.supplierTrader)
-      const buyerTrader = userFromChoice(users, draft.buyerTrader)
+      const supplierTrader = activeTraderResolver.resolveUser(
+        fixture.supplierTraderUsername,
+        fixture.supplierTraderDisplayName,
+      )
+      const buyerTrader = activeTraderResolver.resolveUser(
+        fixture.buyerTraderUsername,
+        fixture.buyerTraderDisplayName,
+      )
+      const supplierTraderDisplay = activeTraderResolver.displayNameOrRetired(
+        fixture.supplierTraderUsername,
+        fixture.supplierTraderDisplayName,
+      )
+      const buyerTraderDisplay = activeTraderResolver.displayNameOrRetired(
+        fixture.buyerTraderUsername,
+        fixture.buyerTraderDisplayName,
+      )
       const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)
       return gradeRows.map((fuelRow) => {
@@ -1097,8 +1095,8 @@ export default function SpcFixturesPage() {
             }}
           >
             <td>{displayDate(draft.fixtureDate)}</td>
-            <td>{traderCode(supplierTrader, draft.supplierTrader)}</td>
-            <td>{traderCode(buyerTrader, draft.buyerTrader)}</td>
+            <td>{traderCode(supplierTrader, supplierTraderDisplay)}</td>
+            <td>{traderCode(buyerTrader, buyerTraderDisplay)}</td>
             <td>{accountSelect(fixture, draft, editing)}</td>
             <td>{etaEditor(fixture, draft, editing)}</td>
             <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>

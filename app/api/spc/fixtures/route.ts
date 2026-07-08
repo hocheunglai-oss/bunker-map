@@ -48,7 +48,7 @@ function fixtureInput(source: Record<string, unknown>): SpcFixtureInput {
 export async function GET(request: Request) {
   try {
     const session = await requireSpcPagePermission("spc-fixtures", "view")
-    const limit = Number(new URL(request.url).searchParams.get("limit") || 500)
+    const limit = Number(new URL(request.url).searchParams.get("limit") || 5000)
     const [fixtures, users] = await Promise.all([
       listSpcFixtures(session, limit),
       listActiveSpcUserOptions(),

@@ -2,6 +2,7 @@ import type { SpcSession } from "@/lib/spcAuth"
 import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { normaliseSpcRole } from "@/lib/spcPages"
+import { displaySupplierName } from "@/lib/spcSupplierKeys"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
@@ -268,8 +269,8 @@ function fixtureMonthIndex(fixture: SpcStatisticsFixtureRow) {
 }
 
 function supplierForFuel(fixture: SpcStatisticsFixtureRow, fuelKey: FuelKey | null) {
-  if (!fuelKey) return upperText(fixture.supplier_name) || "UNKNOWN"
-  return upperText(gradeValue(fixture.supplier_name, fuelKey)) || upperText(fixture.supplier_name) || "UNKNOWN"
+  if (!fuelKey) return upperText(displaySupplierName(fixture.supplier_name)) || "UNKNOWN"
+  return upperText(displaySupplierName(gradeValue(fixture.supplier_name, fuelKey))) || upperText(displaySupplierName(fixture.supplier_name)) || "UNKNOWN"
 }
 
 function suffixOffice(displayName: string | null | undefined) {
