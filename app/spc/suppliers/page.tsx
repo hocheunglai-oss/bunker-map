@@ -6,8 +6,10 @@ import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import type {
+  SaveSpcSupplierInput,
   SpcSupplierDataset,
   SpcSupplierFixture,
+  SpcSupplierInfoInput,
   SpcSupplierLegacyFixture,
   SpcSupplierRecord,
 } from "@/lib/spcSupplierTypes"
@@ -15,6 +17,23 @@ import type {
 type SupplierResponse = SpcSupplierDataset & {
   message?: string
 }
+
+type SupplierDraft = {
+  key: string
+  name: string
+  paymentTerms: string
+  qualityClaimBar: string
+  supplierTrader: string
+  availableGrade: string[]
+  foBdn: string
+  goBdn: string
+}
+
+const gradeOptions = [
+  { value: "HSFO", className: "is-hsfo" },
+  { value: "VLSFO", className: "is-vlsfo" },
+  { value: "LSMGO", className: "is-lsmgo" },
+]
 
 function blank(value: string | null | undefined) {
   return value?.trim() || "-"
@@ -41,11 +60,156 @@ function fixtureSummary(fixtures: SpcSupplierFixture[]) {
   return latest ? `${fixtures.length} · ${latest}` : String(fixtures.length)
 }
 
+function isBelowThirty(value: string | null | undefined) {
+  const number = Number(String(value ?? "").match(/\d+(?:\.\d+)?/)?.[0] || Number.NaN)
+  return Number.isFinite(number) && number < 30
+}
+
+function draftFromRecord(record?: SpcSupplierRecord): SupplierDraft {
+  return {
+    key: record?.key || "",
+    name: record?.name || "",
+    paymentTerms: record?.info.paymentTerms || "",
+    qualityClaimBar: record?.info.qualityClaimBar || "",
+    supplierTrader: record?.info.supplierTrader || "",
+    availableGrade: gradeTokens(record?.info.availableGrade || ""),
+    foBdn: record?.info.foBdn || "",
+    goBdn: record?.info.goBdn || "",
+  }
+}
+
+function draftInfo(draft: SupplierDraft): SpcSupplierInfoInput {
+  return {
+    paymentTerms: draft.paymentTerms.trim(),
+    qualityClaimBar: draft.qualityClaimBar.trim(),
+    supplierTrader: draft.supplierTrader.trim(),
+    availableGrade: draft.availableGrade.join(", "),
+    foBdn: draft.foBdn.trim(),
+    goBdn: draft.goBdn.trim(),
+  }
+}
+
+function GradeCells({ value }: { value: string }) {
+  const selected = new Set(gradeTokens(value))
+  return (
+    <div className="spc-supplier-grade-grid">
+      {gradeOptions.map((grade) => {
+        const active = selected.has(grade.value)
+        return (
+          <span
+            key={grade.value}
+            className={`${grade.className}${active ? "" : " is-empty"}`}
+          >
+            {active ? grade.value : ""}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function SupplierWarning({ label }: { label: string }) {
   return (
     <span className="spc-supplier-warning" title={label} aria-label={label}>
       !
     </span>
+  )
+}
+
+function SupplierEditDialog({
+  draft,
+  traderOptions,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  draft: SupplierDraft
+  traderOptions: string[]
+  saving: boolean
+  onChange: (draft: SupplierDraft) => void
+  onClose: () => void
+  onSave: () => void
+  onDelete: () => void
+}) {
+  const isExisting = Boolean(draft.key)
+  const update = (field: keyof SupplierDraft, value: string | string[]) => {
+    onChange({ ...draft, [field]: value })
+  }
+  const toggleGrade = (grade: string) => {
+    const selected = new Set(draft.availableGrade)
+    if (selected.has(grade)) selected.delete(grade)
+    else selected.add(grade)
+    update("availableGrade", gradeOptions.map((option) => option.value).filter((option) => selected.has(option)))
+  }
+
+  return (
+    <div className="spc-supplier-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="spc-supplier-modal is-edit" role="dialog" aria-modal="true" aria-label="Edit supplier" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="spc-supplier-modal-header">
+          <div>
+            <h2>{isExisting ? draft.name : "ADD NEW SUPPLIER"}</h2>
+            <p>SUPPLIER DETAILS</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Close</button>
+        </div>
+        <div className="spc-supplier-edit-form">
+          <label className="is-wide">
+            <span>SUPPLIER</span>
+            <input value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={saving || isExisting} />
+          </label>
+          <label>
+            <span>PAYMENT TERMS</span>
+            <input value={draft.paymentTerms} inputMode="numeric" onChange={(event) => update("paymentTerms", event.target.value)} disabled={saving} />
+          </label>
+          <label>
+            <span>QUALITY CLAIM BAR</span>
+            <input value={draft.qualityClaimBar} inputMode="numeric" onChange={(event) => update("qualityClaimBar", event.target.value)} disabled={saving} />
+          </label>
+          <label className="is-wide">
+            <span>SUPPLIER TRADER</span>
+            <input list="spc-supplier-traders" value={draft.supplierTrader} onChange={(event) => update("supplierTrader", event.target.value)} disabled={saving} />
+            <datalist id="spc-supplier-traders">
+              {traderOptions.map((trader) => <option key={trader} value={trader} />)}
+            </datalist>
+          </label>
+          <div className="spc-supplier-grade-editor is-wide">
+            <span>AVAILABLE GRADE</span>
+            <div>
+              {gradeOptions.map((grade) => (
+                <label key={grade.value} className={grade.className}>
+                  <input
+                    type="checkbox"
+                    checked={draft.availableGrade.includes(grade.value)}
+                    onChange={() => toggleGrade(grade.value)}
+                    disabled={saving}
+                  />
+                  <span>{grade.value}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <label>
+            <span>FO BDN</span>
+            <input value={draft.foBdn} onChange={(event) => update("foBdn", event.target.value)} disabled={saving} />
+          </label>
+          <label>
+            <span>GO BDN</span>
+            <input value={draft.goBdn} onChange={(event) => update("goBdn", event.target.value)} disabled={saving} />
+          </label>
+        </div>
+        <div className="spc-supplier-edit-actions">
+          {isExisting ? (
+            <button type="button" className="is-danger" onClick={onDelete} disabled={saving}>DELETE</button>
+          ) : <span />}
+          <button type="button" onClick={onClose} disabled={saving}>CANCEL</button>
+          <button type="button" className="is-primary" onClick={onSave} disabled={saving}>
+            {saving ? "SAVING" : "SAVE"}
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -169,25 +333,56 @@ export default function SpcSuppliersPage() {
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const [dataset, setDataset] = useState<SpcSupplierDataset | null>(null)
   const [query, setQuery] = useState("")
+  const [traderFilter, setTraderFilter] = useState("ALL")
+  const [traderSort, setTraderSort] = useState<"none" | "asc" | "desc">("none")
   const [requestedSupplier, setRequestedSupplier] = useState("")
   const [moreInfoKey, setMoreInfoKey] = useState("")
   const [fixtureKey, setFixtureKey] = useState("")
+  const [editingDraft, setEditingDraft] = useState<SupplierDraft | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [messageIsError, setMessageIsError] = useState(false)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "view")
+  const canEdit = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-suppliers")
   const records = dataset?.records || []
   const searchValue = query.trim().toLowerCase()
 
+  const traderOptions = useMemo(() => {
+    return Array.from(new Set(records.map((record) => record.info.supplierTrader.trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+  }, [records])
+
   const filteredRecords = useMemo(() => {
-    if (!searchValue) return records
-    return records.filter((record) => record.searchText.includes(searchValue))
-  }, [records, searchValue])
+    const filtered = records.filter((record) => {
+      if (searchValue && !record.searchText.includes(searchValue)) return false
+      if (traderFilter !== "ALL" && record.info.supplierTrader.trim() !== traderFilter) return false
+      return true
+    })
+    if (traderSort === "none") return filtered
+    return [...filtered].sort((a, b) => {
+      const direction = traderSort === "asc" ? 1 : -1
+      return (
+        direction * a.info.supplierTrader.localeCompare(b.info.supplierTrader) ||
+        a.name.localeCompare(b.name)
+      )
+    })
+  }, [records, searchValue, traderFilter, traderSort])
 
   const moreInfoSupplier = records.find((record) => record.key === moreInfoKey) || null
   const fixtureSupplier = records.find((record) => record.key === fixtureKey) || null
+
+  function openEditor(record?: SpcSupplierRecord) {
+    if (!canEdit) return
+    setEditingDraft(draftFromRecord(record))
+    setMessage("")
+  }
+
+  function toggleTraderSort() {
+    setTraderSort((current) => current === "none" ? "asc" : current === "asc" ? "desc" : "none")
+  }
 
   const loadData = useCallback(async () => {
     if (!canView) return
@@ -217,6 +412,60 @@ export default function SpcSuppliersPage() {
     }
   }, [canView, requestedSupplier])
 
+  async function saveSupplierDraft() {
+    if (!editingDraft) return
+    const supplier: SaveSpcSupplierInput = {
+      key: editingDraft.key,
+      name: editingDraft.name,
+      info: draftInfo(editingDraft),
+    }
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", supplier }),
+      })
+      const data = (await response.json()) as SupplierResponse
+      if (!response.ok) throw new Error(data.message || "Failed to save supplier.")
+      setDataset(data)
+      setEditingDraft(null)
+      setMessage("Supplier saved.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save supplier.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteSupplierDraft() {
+    if (!editingDraft?.key) return
+    if (!window.confirm(`Delete ${editingDraft.name}?`)) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", key: editingDraft.key }),
+      })
+      const data = (await response.json()) as SupplierResponse
+      if (!response.ok) throw new Error(data.message || "Failed to delete supplier.")
+      setDataset(data)
+      setEditingDraft(null)
+      setMessage("Supplier deleted.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete supplier.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   useEffect(() => {
     document.title = "SPC Supplier Database"
   }, [])
@@ -241,75 +490,98 @@ export default function SpcSuppliersPage() {
   return (
     <SpcShell title="SPC Supplier Database">
       <div className="spc-supplier-db-page">
-        <div className="spc-page-heading spc-supplier-db-heading">
-          <div>
-            <h1>Supplier Database</h1>
-            <p>{dataset?.counts.suppliers || 0} suppliers · {dataset?.counts.fixtureRows || 0} fixture rows</p>
-          </div>
-          <div className="spc-supplier-db-actions">
-            <label>
-              <span className="sr-only">Search supplier database</span>
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="SEARCH"
-              />
-            </label>
-            <button type="button" onClick={() => void loadData()} disabled={loading}>
-              {loading ? "REFRESHING" : "REFRESH"}
+        <div className="spc-supplier-toolbar">
+          <div className="spc-supplier-add-group">
+            <button type="button" onClick={() => openEditor()} disabled={!canEdit}>
+              ADD NEW SUPPLIER
             </button>
+            <span>
+              {filteredRecords.length === records.length
+                ? `${records.length} SUPPLIERS`
+                : `${filteredRecords.length} / ${records.length} SUPPLIERS`}
+            </span>
           </div>
+          <label>
+            <span className="sr-only">Search supplier database</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="SEARCH"
+            />
+          </label>
+          <label>
+            <span className="sr-only">Filter by supplier trader</span>
+            <select value={traderFilter} onChange={(event) => setTraderFilter(event.target.value)}>
+              <option value="ALL">ALL TRADERS</option>
+              {traderOptions.map((trader) => (
+                <option key={trader} value={trader}>{trader}</option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={() => void loadData()} disabled={loading}>
+            {loading ? "REFRESHING" : "REFRESH"}
+          </button>
         </div>
 
         {message ? <div className={messageIsError ? "spc-alert is-error" : "spc-alert"}>{message}</div> : null}
 
         <section className="spc-supplier-ledger-panel">
-          <div className="spc-table-wrap">
-            <table className="spc-table spc-supplier-ledger-table">
-              <thead>
-                <tr>
-                  <th>SUPPLIER</th>
-                  <th>PAYMENT TERMS</th>
-                  <th>QUALITY CLAIM BAR</th>
-                  <th>SUPPLIER TRADER</th>
-                  <th>AVAILABLE GRADE</th>
-                  <th>MORE INFO</th>
-                  <th>FIXTURE</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRecords.map((record) => (
-                  <tr key={record.key}>
-                    <td><strong>{record.name}</strong></td>
-                    <td>{blank(record.info.paymentTerms)}</td>
-                    <td>{blank(record.info.qualityClaimBar)}</td>
-                    <td>{blank(record.info.supplierTrader)}</td>
-                    <td>
-                      <div className="spc-supplier-grade-list">
-                        {gradeTokens(record.info.availableGrade).map((grade) => (
-                          <span key={grade}>{grade}</span>
-                        ))}
-                        {gradeTokens(record.info.availableGrade).length === 0 ? "-" : null}
-                      </div>
-                    </td>
-                    <td>
-                      <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
-                        MORE INFO
+          <div className="spc-supplier-ledger-grid">
+            <div className="spc-table-wrap">
+              <table className="spc-table spc-supplier-ledger-table">
+                <thead>
+                  <tr>
+                    <th>SUPPLIER</th>
+                    <th>PAYMENT TERMS</th>
+                    <th>QUALITY CLAIM BAR</th>
+                    <th>
+                      <button type="button" className="spc-supplier-sort-button" onClick={toggleTraderSort}>
+                        SUPPLIER TRADER{traderSort === "asc" ? " ↑" : traderSort === "desc" ? " ↓" : ""}
                       </button>
-                    </td>
-                    <td>
-                      <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)}>
-                        {fixtureSummary(record.fixtures)}
-                      </button>
-                    </td>
+                    </th>
+                    <th>AVAILABLE GRADE</th>
                   </tr>
-                ))}
-                {!loading && filteredRecords.length === 0 ? (
-                  <tr><td colSpan={7}>NO SUPPLIERS FOUND.</td></tr>
-                ) : null}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredRecords.map((record) => (
+                    <tr key={record.key}>
+                      <td><strong>{record.name}</strong></td>
+                      <td className={isBelowThirty(record.info.paymentTerms) ? "is-supplier-alert-value" : ""}>
+                        {blank(record.info.paymentTerms)}
+                      </td>
+                      <td className={isBelowThirty(record.info.qualityClaimBar) ? "is-supplier-alert-value" : ""}>
+                        {blank(record.info.qualityClaimBar)}
+                      </td>
+                      <td>{blank(record.info.supplierTrader)}</td>
+                      <td><GradeCells value={record.info.availableGrade} /></td>
+                    </tr>
+                  ))}
+                  {!loading && filteredRecords.length === 0 ? (
+                    <tr><td colSpan={5}>NO SUPPLIERS FOUND.</td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <div className="spc-supplier-action-column" aria-label="Supplier actions">
+              <div className="spc-supplier-action-header">ACTIONS</div>
+              {filteredRecords.map((record) => (
+                <div key={record.key} className="spc-supplier-action-row">
+                  <button type="button" className="spc-supplier-mini-button" onClick={() => setMoreInfoKey(record.key)}>
+                    MORE INFO
+                  </button>
+                  <button type="button" className="spc-supplier-mini-button" onClick={() => setFixtureKey(record.key)} title={fixtureSummary(record.fixtures)}>
+                    FIXTURES
+                  </button>
+                  <button type="button" className="spc-supplier-mini-button is-edit" onClick={() => openEditor(record)} disabled={!canEdit}>
+                    EDIT
+                  </button>
+                </div>
+              ))}
+              {!loading && filteredRecords.length === 0 ? (
+                <div className="spc-supplier-action-row is-empty" />
+              ) : null}
+            </div>
           </div>
         </section>
 
@@ -317,6 +589,17 @@ export default function SpcSuppliersPage() {
 
         {moreInfoSupplier ? <MoreInfoDialog supplier={moreInfoSupplier} onClose={() => setMoreInfoKey("")} /> : null}
         {fixtureSupplier ? <FixtureDialog supplier={fixtureSupplier} onClose={() => setFixtureKey("")} /> : null}
+        {editingDraft ? (
+          <SupplierEditDialog
+            draft={editingDraft}
+            traderOptions={traderOptions}
+            saving={saving}
+            onChange={setEditingDraft}
+            onClose={() => setEditingDraft(null)}
+            onSave={() => void saveSupplierDraft()}
+            onDelete={() => void deleteSupplierDraft()}
+          />
+        ) : null}
       </div>
     </SpcShell>
   )

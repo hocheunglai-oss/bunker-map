@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
+import type { SpcAuditContext } from "@/lib/spcAudit"
 import {
   displaySupplierName,
   supplierKey,
@@ -8,14 +9,17 @@ import type {
   SpcSupplierDataset,
   SpcSupplierFixture,
   SpcSupplierInfo,
+  SpcSupplierInfoInput,
   SpcSupplierLegacyFixture,
   SpcSupplierRecord,
+  SaveSpcSupplierInput,
 } from "@/lib/spcSupplierTypes"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 const SPREADSHEET_ID = "1lr_WkDeuadBggAWki25qCLcTN76eI_K2lQFh1ZEIX7I"
 const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit`
 const SHEET_NAME = "Sheet1"
+const SUPPLIER_OVERRIDE_STORE_KEY = "spc-supplier-overrides"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 type SheetRow = Array<string | number | boolean | null | undefined>
@@ -42,6 +46,24 @@ type FixtureRow = {
   } | null
 }
 
+type SupplierStoreRow = {
+  key: string
+  payload: Record<string, unknown> | null
+  updated_at: string
+}
+
+type SupplierOverrideRecord = {
+  key: string
+  name: string
+  info: SpcSupplierInfoInput
+  deleted?: boolean
+  updatedAt: string
+}
+
+type SupplierOverrideStore = {
+  records: SupplierOverrideRecord[]
+}
+
 type MutableSupplierRecord = Omit<SpcSupplierRecord, "aliases" | "fixtures" | "searchText"> & {
   aliases: Set<string>
   fixtures: SpcSupplierFixture[]
@@ -62,6 +84,18 @@ function cleanText(value: unknown) {
 
 function compactText(value: unknown) {
   return cleanText(value).replace(/\s+/g, " ").trim()
+}
+
+function requireEnv(name: string) {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing environment variable: ${name}`)
+  return value
+}
+
+function getServiceClient() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for supplier database changes.")
+  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), serviceRoleKey)
 }
 
 function cell(row: SheetRow | undefined, index: number) {
@@ -132,6 +166,30 @@ function emptyInfo(row: SheetRow | undefined, rowNumber: number): SpcSupplierInf
   }
 }
 
+function cleanInfo(input: Partial<SpcSupplierInfoInput> | undefined): SpcSupplierInfoInput {
+  return {
+    paymentTerms: compactText(input?.paymentTerms),
+    qualityClaimBar: compactText(input?.qualityClaimBar),
+    supplierTrader: compactText(input?.supplierTrader),
+    availableGrade: normaliseAvailableGrade(input?.availableGrade),
+    foBdn: compactText(input?.foBdn),
+    goBdn: compactText(input?.goBdn),
+  }
+}
+
+function normaliseAvailableGrade(value: unknown) {
+  const selected = new Set(
+    compactText(value)
+      .split(/[,\n/]+/)
+      .map((grade) => grade.trim().toUpperCase())
+      .filter(Boolean),
+  )
+  return fuelColumns
+    .map((column) => column.label)
+    .filter((grade) => selected.has(grade))
+    .join(", ")
+}
+
 function buildSupplierRecords(rows: SheetRows) {
   const records = new Map<string, MutableSupplierRecord>()
   rows.slice(1).forEach((row, index) => {
@@ -154,6 +212,127 @@ function buildSupplierRecords(rows: SheetRows) {
     })
   })
   return records
+}
+
+function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
+  if (!payload || typeof payload !== "object") return { records: [] }
+  const records = (payload as { records?: unknown }).records
+  if (!Array.isArray(records)) return { records: [] }
+
+  return {
+    records: records.flatMap((record) => {
+      if (!record || typeof record !== "object") return []
+      const source = record as Record<string, unknown>
+      const name = displaySupplierName(compactText(source.name))
+      const key = supplierKey(compactText(source.key) || name)
+      if (!key || !name) return []
+      return [{
+        key,
+        name,
+        info: cleanInfo(source.info as Partial<SpcSupplierInfoInput> | undefined),
+        deleted: source.deleted === true,
+        updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date(0).toISOString(),
+      }]
+    }),
+  }
+}
+
+async function loadSupplierOverrideStore(supabase: ReturnType<typeof getServiceClient>) {
+  const { data, error } = await supabase
+    .from("office_calendar_store")
+    .select("key,payload,updated_at")
+    .eq("key", SUPPLIER_OVERRIDE_STORE_KEY)
+    .maybeSingle()
+
+  if (error) throw error
+  return {
+    storeRow: (data as unknown as SupplierStoreRow | null) || null,
+    store: parseSupplierOverrideStore(data?.payload),
+  }
+}
+
+async function loadSupplierOverrides() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!serviceRoleKey || !supabaseUrl || serviceRoleKey === "\"\"") return { records: [] }
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
+  const { store } = await loadSupplierOverrideStore(supabase)
+  return store
+}
+
+function applySupplierOverrides(records: Map<string, MutableSupplierRecord>, store: SupplierOverrideStore) {
+  store.records.forEach((override) => {
+    if (override.deleted) {
+      records.delete(override.key)
+      return
+    }
+
+    const existing = records.get(override.key)
+    const info: SpcSupplierInfo = {
+      ...override.info,
+      rowNumber: existing?.info.rowNumber ?? null,
+    }
+
+    if (existing) {
+      existing.name = override.name
+      existing.info = info
+      existing.aliases.add(override.name)
+      existing.updatedAt = override.updatedAt
+      return
+    }
+
+    records.set(override.key, {
+      key: override.key,
+      name: override.name,
+      aliases: new Set([override.name]),
+      info,
+      fixtures: [],
+      updatedAt: override.updatedAt,
+    })
+  })
+}
+
+async function writeSupplierStoreAudit(
+  supabase: ReturnType<typeof getServiceClient>,
+  context: SpcAuditContext,
+  operation: "INSERT" | "UPDATE" | "DELETE",
+  beforeRow: SupplierStoreRow | null,
+  afterRow: SupplierStoreRow,
+) {
+  await supabase.from("audit_logs").insert({
+    actor_id: `spc:${context.username}`,
+    actor_name: context.displayName || context.username,
+    actor_source: "app",
+    table_schema: "public",
+    table_name: "office_calendar_store",
+    operation,
+    record_pk: { key: SUPPLIER_OVERRIDE_STORE_KEY },
+    changed_fields: ["payload"],
+    before_row: beforeRow,
+    after_row: afterRow,
+    request_context: {
+      pageId: context.pageId,
+      pageLabel: context.pageLabel,
+      pagePath: context.pagePath,
+    },
+  })
+}
+
+async function writeSupplierOverrideStore(
+  store: SupplierOverrideStore,
+  context: SpcAuditContext,
+  beforeRow: SupplierStoreRow | null,
+  operation: "INSERT" | "UPDATE" | "DELETE",
+) {
+  const supabase = getServiceClient()
+  const afterRow: SupplierStoreRow = {
+    key: SUPPLIER_OVERRIDE_STORE_KEY,
+    payload: store,
+    updated_at: new Date().toISOString(),
+  }
+  const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
+  if (error) throw error
+  await writeSupplierStoreAudit(supabase, context, operation, beforeRow, afterRow)
 }
 
 function parseGradeValues(value: unknown) {
@@ -368,12 +547,79 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
 }
 
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
-  const [rows, fixtureRows, activeUsers] = await Promise.all([
+  const [rows, fixtureRows, activeUsers, overrides] = await Promise.all([
     readSupplierSheet(),
     loadCompletedFixtures(),
     loadActiveSpcUsers(),
+    loadSupplierOverrides(),
   ])
   const records = buildSupplierRecords(rows)
+  applySupplierOverrides(records, overrides)
   const legacyFixtures = attachFixtures(records, fixtureRows, activeUsers)
   return finaliseDataset(records, legacyFixtures)
+}
+
+export async function saveSpcSupplier(input: SaveSpcSupplierInput, context: SpcAuditContext) {
+  const name = displaySupplierName(compactText(input.name))
+  const key = supplierKey(name)
+  if (!name || !key) throw new Error("Supplier name is required.")
+
+  const supabase = getServiceClient()
+  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
+  const updatedAt = new Date().toISOString()
+  const originalKey = supplierKey(input.key || key)
+  const nextRecords = store.records.filter((record) => record.key !== key && record.key !== originalKey)
+  if (originalKey && originalKey !== key) {
+    nextRecords.push({
+      key: originalKey,
+      name: input.key || name,
+      info: cleanInfo({}),
+      deleted: true,
+      updatedAt,
+    })
+  }
+  nextRecords.push({
+    key,
+    name,
+    info: cleanInfo(input.info),
+    deleted: false,
+    updatedAt,
+  })
+
+  await writeSupplierOverrideStore(
+    { records: nextRecords },
+    context,
+    storeRow,
+    storeRow ? "UPDATE" : "INSERT",
+  )
+  return loadSpcSupplierDataset()
+}
+
+export async function deleteSpcSupplier(keyInput: string, context: SpcAuditContext) {
+  const key = supplierKey(keyInput)
+  if (!key) throw new Error("Supplier key is required.")
+
+  const supabase = getServiceClient()
+  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
+  const dataset = await loadSpcSupplierDataset()
+  const existing = dataset.records.find((record) => record.key === key)
+  if (!existing) throw new Error("Supplier not found.")
+
+  const updatedAt = new Date().toISOString()
+  const nextRecords = store.records.filter((record) => record.key !== key)
+  nextRecords.push({
+    key,
+    name: existing.name,
+    info: cleanInfo(existing.info),
+    deleted: true,
+    updatedAt,
+  })
+
+  await writeSupplierOverrideStore(
+    { records: nextRecords },
+    context,
+    storeRow,
+    storeRow ? "UPDATE" : "INSERT",
+  )
+  return loadSpcSupplierDataset()
 }

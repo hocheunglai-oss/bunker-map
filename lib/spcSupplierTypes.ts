@@ -8,6 +8,8 @@ export type SpcSupplierInfo = {
   rowNumber: number | null
 }
 
+export type SpcSupplierInfoInput = Omit<SpcSupplierInfo, "rowNumber">
+
 export type SpcSupplierFixture = {
   id: string
   fixtureDate: string | null
@@ -51,4 +53,10 @@ export type SpcSupplierDataset = {
     fixtureRows: number
     legacyFixtureRows: number
   }
+}
+
+export type SaveSpcSupplierInput = {
+  key?: string
+  name: string
+  info: SpcSupplierInfoInput
 }
