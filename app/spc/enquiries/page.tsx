@@ -1016,14 +1016,14 @@ export default function SpcEnquiriesPage() {
                     onClick={() => void runParserAi("new-enquiry")}
                     disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}
                   >
-                    {parserAiStatus === "loading" && parserAiTarget === "new-enquiry" ? "AI..." : "AI"}
+                    AI FIX
                   </button>
                   <button
                     type="button"
                     onClick={openDraftParserReport}
                     disabled={!canEdit || !draft.rawText.trim()}
                   >
-                    Report ({parserReportCount})
+                    REPORT
                   </button>
                 </span>
                 <textarea
@@ -1044,6 +1044,7 @@ export default function SpcEnquiriesPage() {
                   AI warning: {parserAiSuggestion.warnings.join(" / ")}
                 </p>
               ) : null}
+              <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               <div className="spc-form-actions">
                 <button type="submit" disabled={saving || !canEdit}>
                   {saving ? "Sending..." : "Send Enquiry"}
@@ -1267,14 +1268,14 @@ export default function SpcEnquiriesPage() {
                     onClick={() => void runParserAi("reoffer")}
                     disabled={saving || !reofferDraft.standardText.trim() || parserAiStatus === "loading"}
                   >
-                    {parserAiStatus === "loading" && parserAiTarget === "reoffer" ? "AI..." : "AI"}
+                    AI FIX
                   </button>
                   <button
                     type="button"
                     onClick={openReofferParserReport}
                     disabled={saving || !reofferDraft.standardText.trim()}
                   >
-                    Report ({parserReportCount})
+                    REPORT
                   </button>
                 </span>
                 <textarea value={reofferDraft.standardText} onChange={(event) => updateReofferDraft("standardText", event.target.value)} rows={3} disabled={saving} />
@@ -1289,6 +1290,7 @@ export default function SpcEnquiriesPage() {
                   AI warning: {parserAiSuggestion.warnings.join(" / ")}
                 </p>
               ) : null}
+              <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               <div className="spc-dialog-actions">
                 <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
                 <button type="submit" className="is-primary" disabled={saving || updatingId === reofferDraft.id}>

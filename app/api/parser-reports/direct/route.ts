@@ -8,6 +8,7 @@ import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
 import { parseSpcEnquiryText } from "@/lib/spcEnquiryText"
 
 const STORE_KEY = "parser-reports"
+const REVIEWED_REPORT_CUTOFF_MS = Date.parse("2026-07-08T03:40:00.000Z")
 
 export const dynamic = "force-dynamic"
 
@@ -112,6 +113,11 @@ function currentParserOutputFor(report: ParserReportRecord) {
   )
 }
 
+function isReviewedReport(report: ParserReportRecord) {
+  const timestamp = Date.parse(report.lastReportedAt || report.createdAt || "")
+  return Number.isFinite(timestamp) && timestamp <= REVIEWED_REPORT_CUTOFF_MS
+}
+
 function reportWithReviewState(report: ParserReportRecord) {
   const currentParserOutput = currentParserOutputFor(report)
   const resolved = Boolean(currentParserOutput.trim()) &&
@@ -121,16 +127,19 @@ function reportWithReviewState(report: ParserReportRecord) {
     ...report,
     currentParserOutput,
     resolved,
+    reviewed: !resolved && isReviewedReport(report),
   }
 }
 
 function countsFor(reports: Array<ReturnType<typeof reportWithReviewState>>) {
   const total = reports.length
   const resolved = reports.filter((report) => report.resolved).length
+  const reviewed = reports.filter((report) => report.reviewed).length
   return {
     total,
-    unresolved: total - resolved,
+    unresolved: total - resolved - reviewed,
     resolved,
+    reviewed,
   }
 }
 
@@ -159,7 +168,7 @@ export async function GET(request: Request) {
       : reportsWithState.filter((report) => report.source === source)
     const reports = includeResolved
       ? sourceReports
-      : sourceReports.filter((report) => !report.resolved)
+      : sourceReports.filter((report) => !report.resolved && !report.reviewed)
 
     const enquiryworksheet = reportsWithState.filter((report) => report.source === "enquiryworksheet")
     const spc = reportsWithState.filter((report) => report.source === "spc")

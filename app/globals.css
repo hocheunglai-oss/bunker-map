@@ -2900,7 +2900,7 @@ body {
 }
 
 .spc-preview-label-row button {
-  min-width: 88px;
+  min-width: 72px;
   min-height: 28px;
   border: 1px solid var(--fc-admin-button-border);
   border-radius: 999px;
@@ -2916,10 +2916,7 @@ body {
 }
 
 .spc-preview-label-row button.spc-ai-parser-button {
-  min-width: 48px;
-  border-color: #2459d6;
-  background: #edf4ff;
-  color: #1746a2;
+  min-width: 78px;
   font-weight: 900;
 }
 
@@ -3402,6 +3399,14 @@ body {
 
 .spc-parser-report-error {
   color: var(--fc-admin-danger-bg);
+}
+
+.spc-parser-reported-count {
+  margin: 0;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .spc-reoffer-form {

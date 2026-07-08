@@ -882,7 +882,7 @@ export default function EnquiryWorksheetPage() {
                 title="Ask AI to correct shortened enquiry"
                 data-admin-button-style="preserve"
               >
-                {parserAiStatus === "loading" ? "AI FIX..." : "AI FIX"}
+                AI FIX
               </button>
               <button
                 type="button"
