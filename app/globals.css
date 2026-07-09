@@ -4696,6 +4696,20 @@ body:has(.spc-statistics-page) .spc-main {
   opacity: 0.56;
 }
 
+.spc-office-row {
+  cursor: pointer;
+}
+
+.spc-office-row.is-active {
+  background: var(--fc-admin-selected-bg);
+  box-shadow: inset 3px 0 0 var(--fc-admin-primary-button-bg);
+}
+
+.spc-office-row:focus-visible {
+  outline: 2px solid var(--fc-admin-primary-button-bg);
+  outline-offset: -2px;
+}
+
 .spc-compact-row > span {
   min-width: 0;
   display: grid;
@@ -4818,6 +4832,50 @@ body:has(.spc-statistics-page) .spc-main {
   font-size: 10px;
   font-weight: 850;
   text-transform: uppercase;
+}
+
+.spc-office-users {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.spc-office-users-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 10px 12px;
+}
+
+.spc-office-users-summary strong {
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.spc-office-users-summary span {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.spc-office-user-edit {
+  min-height: 28px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 5px 10px;
+}
+
+.spc-office-user-edit:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .spc-authority-toggle {

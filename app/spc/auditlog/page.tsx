@@ -45,7 +45,6 @@ export default function SpcAuditLogPage() {
   const [pages, setPages] = useState<Array<{ id: string; label: string }>>([])
   const [users, setUsers] = useState<Array<{ value: string; label: string }>>([])
   const [pageId, setPageId] = useState("all")
-  const [operation, setOperation] = useState("all")
   const [actor, setActor] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -66,7 +65,6 @@ export default function SpcAuditLogPage() {
 
     const params = new URLSearchParams({ limit: "150" })
     if (pageId !== "all") params.set("page", pageId)
-    if (operation !== "all") params.set("operation", operation)
     if (actor !== "all") params.set("actor", actor)
 
     try {
@@ -87,7 +85,7 @@ export default function SpcAuditLogPage() {
     } finally {
       setLoading(false)
     }
-  }, [actor, authenticated, canView, operation, pageId])
+  }, [actor, authenticated, canView, pageId])
 
   async function undoSelected() {
     if (!selectedLog || !canEdit || !selectedLog.undoable) return
@@ -151,15 +149,6 @@ export default function SpcAuditLogPage() {
             </select>
           </label>
           <label>
-            <span>Action</span>
-            <select value={operation} onChange={(event) => setOperation(event.target.value)}>
-              <option value="all">All Actions</option>
-              <option value="INSERT">Created</option>
-              <option value="UPDATE">Updated</option>
-              <option value="DELETE">Deleted</option>
-            </select>
-          </label>
-          <label>
             <span>User</span>
             <select value={actor} onChange={(event) => setActor(event.target.value)}>
               <option value="all">All Users</option>
@@ -186,6 +175,7 @@ export default function SpcAuditLogPage() {
                 <small>{formatDate(log.occurredAt)}</small>
               </button>
             ))}
+            {loading && logs.length === 0 ? <p className="spc-empty">Loading SPC audit records...</p> : null}
             {!loading && logs.length === 0 ? <p className="spc-empty">No SPC audit records found.</p> : null}
           </div>
         </section>

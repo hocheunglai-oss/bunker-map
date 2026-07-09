@@ -31,14 +31,6 @@ type HealthResponse = {
   message?: string
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "-"
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value))
-}
-
 export default function SpcSystemHealthPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
@@ -85,19 +77,15 @@ export default function SpcSystemHealthPage() {
 
   return (
     <SpcShell title="SPC System Health">
-      <div className="spc-page-heading">
-        <div>
-          <h1>System Health</h1>
-          <p>SPC production checks · {formatDate(health?.checkedAt)}</p>
-        </div>
-        <button className="spc-page-action" type="button" onClick={() => void loadHealth()} disabled={loading}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
       {message ? <div className="spc-alert is-error">{message}</div> : null}
 
       <section className="spc-panel">
+        <div className="spc-panel-header">
+          <h2>Overview</h2>
+          <button type="button" onClick={() => void loadHealth()} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
         <div className="spc-health-grid">
           {[
             ["COMMIT", health?.deployment.shortCommit || "-"],

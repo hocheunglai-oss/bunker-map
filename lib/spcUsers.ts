@@ -113,6 +113,11 @@ export type SpcUserOption = {
   isActive?: boolean
 }
 
+export type SpcAuditUserOption = {
+  username: string
+  displayName: string
+}
+
 export type ManagedSpcRoleDefault = {
   role: SpcRoleId
   label: string
@@ -797,6 +802,27 @@ export async function listManagedSpcUsers(
     return ((data || []) as unknown as SpcUserRow[]).map((row) =>
       mapSpcUser(row, defaults, pages, userRoleMap, userProfileMap),
     )
+  } catch (error) {
+    throw friendlySpcUserError(error)
+  }
+}
+
+export async function listSpcAuditUserOptions(): Promise<SpcAuditUserOption[]> {
+  try {
+    const supabase = getServiceClient()
+    const { data, error } = await supabase
+      .from("spc_users")
+      .select("username,display_name")
+      .order("display_name", { ascending: true })
+      .order("username", { ascending: true })
+
+    if (error) throw error
+    return ((data || []) as Array<{ username: string; display_name: string | null }>)
+      .map((user) => ({
+        username: user.username,
+        displayName: user.display_name?.trim() || user.username,
+      }))
+      .filter((user) => user.username.trim())
   } catch (error) {
     throw friendlySpcUserError(error)
   }

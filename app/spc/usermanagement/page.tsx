@@ -59,10 +59,10 @@ type UserDraft = {
 }
 
 const USER_TABS: Array<{ id: UserTab; label: string }> = [
-  { id: "SUPPLIER TRADER", label: "Supplier Trader" },
-  { id: "BUYER TRADER", label: "Buyer Trader" },
-  { id: "ADMIN", label: "Admin" },
-  { id: "OFFICE", label: "Office" },
+  { id: "SUPPLIER TRADER", label: "SUPPLIER TRADER" },
+  { id: "BUYER TRADER", label: "BUYER TRADER" },
+  { id: "ADMIN", label: "ADMIN" },
+  { id: "OFFICE", label: "OFFICE" },
 ]
 
 const USER_ROLE_OPTIONS = USER_TABS.filter(
@@ -117,6 +117,7 @@ export default function SpcUserManagementPage() {
   const [roleDefaults, setRoleDefaults] = useState<ManagedSpcRoleDefault[]>([])
   const [activeTab, setActiveTab] = useState<UserTab>("SUPPLIER TRADER")
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null)
+  const [selectedOffice, setSelectedOffice] = useState("")
   const [officeDialogOpen, setOfficeDialogOpen] = useState(false)
   const [officeDraft, setOfficeDraft] = useState("")
   const [loading, setLoading] = useState(false)
@@ -138,6 +139,16 @@ export default function SpcUserManagementPage() {
       return map
     }, {})
   }, [firstOffice, users])
+  const activeOffice = offices.includes(selectedOffice) ? selectedOffice : firstOffice
+  const officeUsers = useMemo(() => {
+    return users
+      .filter((user) => cleanOffice(user.office || firstOffice) === activeOffice)
+      .sort((a, b) => {
+        const roleOrder = a.role.localeCompare(b.role)
+        if (roleOrder !== 0) return roleOrder
+        return (a.displayName || a.username).localeCompare(b.displayName || b.username)
+      })
+  }, [activeOffice, firstOffice, users])
   const roleCounts = useMemo(() => {
     return users.reduce<Record<string, number>>((map, user) => {
       map[user.role] = (map[user.role] || 0) + 1
@@ -165,6 +176,10 @@ export default function SpcUserManagementPage() {
       setOffices(data.offices?.length ? data.offices : DEFAULT_OFFICES)
       setPages(data.pages || [])
       setRoleDefaults(data.roleDefaults || [])
+      setSelectedOffice((current) => {
+        const nextOffices = data.offices?.length ? data.offices : DEFAULT_OFFICES
+        return current && nextOffices.includes(current) ? current : nextOffices[0] || DEFAULT_OFFICES[0]
+      })
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load SPC users.")
       setMessageIsError(true)
@@ -193,6 +208,11 @@ export default function SpcUserManagementPage() {
       return
     }
     setUserDraft(createDraft(activeTab, firstOffice))
+  }
+
+  function selectOffice(office: string) {
+    setSelectedOffice(office)
+    setMessage("")
   }
 
   function editUser(user: ManagedSpcUser) {
@@ -414,7 +434,19 @@ export default function SpcUserManagementPage() {
           <div className="spc-compact-list">
             {activeTab === "OFFICE"
               ? offices.map((office) => (
-                  <article key={office} className="spc-compact-row">
+                  <article
+                    key={office}
+                    className={office === activeOffice ? "spc-compact-row spc-office-row is-active" : "spc-compact-row spc-office-row"}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectOffice(office)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        selectOffice(office)
+                      }
+                    }}
+                  >
                     <span>
                       <strong>{office}</strong>
                       <small>{usersByOffice[office] || 0} users</small>
@@ -422,7 +454,10 @@ export default function SpcUserManagementPage() {
                     <div>
                       <button
                         type="button"
-                        onClick={() => void deleteOffice(office)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void deleteOffice(office)
+                        }}
                         disabled={!canEdit || saving}
                       >
                         Remove
@@ -459,18 +494,49 @@ export default function SpcUserManagementPage() {
 
         <section className="spc-panel spc-user-authority" aria-label="SPC user authority">
           <div className="spc-panel-header">
-            <h2>Authority</h2>
-            <button
-              type="button"
-              className="spc-authority-save"
-              onClick={() => void saveRoleAuthority()}
-              disabled={!canEdit || saving || activeTab === "OFFICE" || !selectedRoleDefault}
-            >
-              Save
-            </button>
+            <h2>{activeTab === "OFFICE" ? "USERS" : "AUTHORITY"}</h2>
+            {activeTab === "OFFICE" ? null : (
+              <button
+                type="button"
+                className="spc-authority-save"
+                onClick={() => void saveRoleAuthority()}
+                disabled={!canEdit || saving || !selectedRoleDefault}
+              >
+                SAVE
+              </button>
+            )}
           </div>
           {activeTab === "OFFICE" ? (
-            <p className="spc-empty">Select a user tab to edit page authority.</p>
+            <div className="spc-office-users">
+              <div className="spc-office-users-summary">
+                <strong>{activeOffice}</strong>
+                <span>{officeUsers.length} USER{officeUsers.length === 1 ? "" : "S"}</span>
+              </div>
+              {officeUsers.length ? (
+                <div className="spc-authority-list">
+                  {officeUsers.map((user) => (
+                    <article key={user.id} className={user.isActive ? "spc-authority-row" : "spc-authority-row is-disabled"}>
+                      <span>
+                        <strong>{user.displayName || user.username}</strong>
+                        <small>{user.roleLabel || roleLabel(user.role)} · {user.username}</small>
+                      </span>
+                      <div>
+                        <button
+                          type="button"
+                          className="spc-office-user-edit"
+                          onClick={() => editUser(user)}
+                          disabled={!canEdit}
+                        >
+                          EDIT
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="spc-empty">No users in this office.</p>
+              )}
+            </div>
           ) : pages.length ? (
             <div className="spc-authority-list">
               {pages.map((page) => (

@@ -9,7 +9,7 @@ import {
   type PresentedAuditLogRecord,
   undoAuditLog,
 } from "@/lib/auditLog"
-import { listManagedSpcRoleDefaults, listManagedSpcUsers } from "@/lib/spcUsers"
+import { listSpcAuditUserOptions } from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 
 const PAGE_TABLES: Record<string, string[]> = {
@@ -67,6 +67,37 @@ function shouldOfferHistoricalActor(record: PresentedAuditLogRecord, usersByUser
   return true
 }
 
+async function loadAuditUserMap() {
+  const users = await listSpcAuditUserOptions()
+  return new Map(
+    users.map((user) => [user.username.trim().toLowerCase(), user.displayName.trim() || user.username]),
+  )
+}
+
+function buildAuditUserFilters(
+  session: { username: string | null; displayName: string | null },
+  usersByUsername: Map<string, string>,
+  presented: PresentedAuditLogRecord[],
+) {
+  const userMap = new Map<string, { value: string; label: string }>()
+  const addUser = (value: string | null | undefined, label?: string | null) => {
+    const cleanValue = value?.trim()
+    if (!cleanValue) return
+    userMap.set(cleanValue.toLowerCase(), {
+      value: cleanValue,
+      label: label?.trim() || cleanValue,
+    })
+  }
+
+  addUser(session.username ? `spc:${session.username}` : null, session.displayName)
+  usersByUsername.forEach((displayName, username) => addUser(`spc:${username}`, displayName))
+  presented
+    .filter((record) => shouldOfferHistoricalActor(record, usersByUsername))
+    .forEach((record) => addUser(record.actorId, record.actorName || record.actorId))
+
+  return Array.from(userMap.values()).sort((a, b) => a.label.localeCompare(b.label))
+}
+
 export async function GET(request: Request) {
   try {
     const session = await requireSpcPagePermission("spc-audit-log", "view")
@@ -77,19 +108,17 @@ export async function GET(request: Request) {
     const actor = url.searchParams.get("actor")
     const tableNames = pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
     const operations = rawOperationsForDisplay(operation)
-    const candidateLimit = Math.min(Math.max(requestedLimit * (tableNames ? 2 : 3), requestedLimit), 500)
-    const records = await listAuditLogs({
-      limit: candidateLimit,
-      tableNames,
-      operations: operations ? [...operations] : undefined,
-      actorId: actor && actor !== "all" ? actor : undefined,
-      scope: "spc",
-    })
-    const roleDefaults = await listManagedSpcRoleDefaults(SPC_PAGE_DEFINITIONS)
-    const users = await listManagedSpcUsers(roleDefaults, SPC_PAGE_DEFINITIONS)
-    const usersByUsername = new Map(
-      users.map((user) => [user.username.trim().toLowerCase(), user.displayName.trim() || user.username]),
-    )
+    const candidateLimit = tableNames ? Math.min(requestedLimit * 2, 250) : requestedLimit
+    const [records, usersByUsername] = await Promise.all([
+      listAuditLogs({
+        limit: candidateLimit,
+        tableNames,
+        operations: operations ? [...operations] : undefined,
+        actorId: actor && actor !== "all" ? actor : undefined,
+        scope: "spc",
+      }),
+      loadAuditUserMap(),
+    ])
     const presented = normalizeSpcAuditActors(
       await presentAuditLogs(records, SPC_PAGE_DEFINITIONS),
       usersByUsername,
@@ -101,26 +130,10 @@ export async function GET(request: Request) {
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
 
-    const userMap = new Map<string, { value: string; label: string }>()
-    const addUser = (value: string | null | undefined, label?: string | null) => {
-      const cleanValue = value?.trim()
-      if (!cleanValue) return
-      userMap.set(cleanValue.toLowerCase(), {
-        value: cleanValue,
-        label: label?.trim() || cleanValue,
-      })
-    }
-
-    addUser(session.username ? `spc:${session.username}` : null, session.displayName)
-    users.forEach((user) => addUser(`spc:${user.username}`, user.displayName))
-    presented
-      .filter((record) => shouldOfferHistoricalActor(record, usersByUsername))
-      .forEach((record) => addUser(record.actorId, record.actorName || record.actorId))
-
     return NextResponse.json({
       logs,
       pages: SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
-      users: Array.from(userMap.values()).sort((a, b) => a.label.localeCompare(b.label)),
+      users: buildAuditUserFilters(session, usersByUsername, presented),
     })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {

@@ -82,13 +82,6 @@ export default function SpcTechStackPage() {
 
   return (
     <SpcShell title="SPC Tech Stack">
-      <div className="spc-page-heading">
-        <div>
-          <h1>Tech Stack</h1>
-          <p>Singapore Purchasing Center only</p>
-        </div>
-      </div>
-
       {message ? <div className="spc-alert is-error">{message}</div> : null}
 
       <section className="spc-panel">
