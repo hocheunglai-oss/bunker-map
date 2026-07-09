@@ -3428,8 +3428,17 @@ export default function CountryCompanyInfoPage() {
   const selectedDriveUrl = selectedPreviewFile ? getDriveUrl(selectedPreviewFile) : ""
   const previewUrl = selectedFileUrl
   const draggingFolder = draggingFolderPath ? folders.find((folder) => joinFolderPath(folder.folder_path, folder.name) === draggingFolderPath) : null
-  const hasNativeFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types || []).includes("Files")
-  const canDropOnFolderPath = (targetFolderPath: string) => Boolean(draggingFileId) || Boolean(draggingFolderPath && canMoveFolderToPath(draggingFolderPath, targetFolderPath))
+  const getDragTypes = (event: React.DragEvent) => Array.from(event.dataTransfer.types || [])
+  const hasNativeFiles = (event: React.DragEvent) => getDragTypes(event).includes("Files")
+  const hasFileDrag = (event?: React.DragEvent) =>
+    Boolean(draggingFileId || (event && getDragTypes(event).includes("application/x-ccinfo-file")))
+  const hasFolderDrag = (event?: React.DragEvent) =>
+    Boolean(draggingFolderPath || (event && getDragTypes(event).includes("application/x-ccinfo-folder")))
+  const canDropOnFolderPath = (targetFolderPath: string, event?: React.DragEvent) => {
+    if (hasFileDrag(event)) return true
+    if (draggingFolderPath) return canMoveFolderToPath(draggingFolderPath, targetFolderPath)
+    return hasFolderDrag(event) && targetFolderPath !== currentFolderPath
+  }
   const handleFolderPathDragOver = (event: React.DragEvent, targetFolderPath: string) => {
     if (hasNativeFiles(event)) {
       event.preventDefault()
@@ -3438,7 +3447,7 @@ export default function CountryCompanyInfoPage() {
       setFilePanelDropPath((current) => current === targetFolderPath ? current : targetFolderPath)
       return
     }
-    if (!canDropOnFolderPath(targetFolderPath)) return
+    if (!canDropOnFolderPath(targetFolderPath, event)) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
@@ -3449,7 +3458,7 @@ export default function CountryCompanyInfoPage() {
       handleFolderPathDragOver(event, currentFolderPath)
       return
     }
-    if (draggingFileId || draggingFolderPath) {
+    if (hasFileDrag(event) || hasFolderDrag(event)) {
       event.preventDefault()
       event.stopPropagation()
       event.dataTransfer.dropEffect = "none"
@@ -3463,7 +3472,7 @@ export default function CountryCompanyInfoPage() {
       void uploadFiles(droppedFiles, targetFolderPath)
       return
     }
-    if (!canDropOnFolderPath(targetFolderPath)) return
+    if (!canDropOnFolderPath(targetFolderPath, event)) return
     event.preventDefault()
     event.stopPropagation()
     const fileId = event.dataTransfer.getData("application/x-ccinfo-file") || event.dataTransfer.getData("text/plain")
@@ -3472,14 +3481,16 @@ export default function CountryCompanyInfoPage() {
       if (file) void moveFileToFolder(file, targetFolderPath)
       return
     }
-    if (draggingFolder) void moveFolderToPath(draggingFolder, targetFolderPath)
+    const folderPath = event.dataTransfer.getData("application/x-ccinfo-folder") || draggingFolderPath
+    const folder = folderPath ? folders.find((item) => joinFolderPath(item.folder_path, item.name) === folderPath) : draggingFolder
+    if (folder && canMoveFolderToPath(folderPath, targetFolderPath)) void moveFolderToPath(folder, targetFolderPath)
   }
   const handleFilePanelDrop = (event: React.DragEvent) => {
     if (hasNativeFiles(event)) {
       handleFolderPathDrop(event, currentFolderPath)
       return
     }
-    if (draggingFileId || draggingFolderPath) {
+    if (hasFileDrag(event) || hasFolderDrag(event)) {
       event.preventDefault()
       event.stopPropagation()
       setDropFolderPath(null)
@@ -3553,6 +3564,8 @@ export default function CountryCompanyInfoPage() {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
         <button
+          data-ccinfo-drop-target="HOME"
+          data-ccinfo-drop-path=""
           type="button"
           onClick={() => setCurrentFolderPath("")}
           onDragOver={(event) => handleFolderPathDragOver(event, "")}
@@ -3569,6 +3582,8 @@ export default function CountryCompanyInfoPage() {
           return (
             <div key={path} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
             <button
+              data-ccinfo-drop-target={segment}
+              data-ccinfo-drop-path={path}
               type="button"
               onClick={() => setCurrentFolderPath(path)}
               onDragOver={(event) => handleFolderPathDragOver(event, path)}
@@ -3589,7 +3604,7 @@ export default function CountryCompanyInfoPage() {
         </div>
       )}
       {hasInternalFilePanelDrag && destinationDropTargets.length > 0 && (
-        <div style={{ display: "grid", gap: "6px", padding: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "14px", background: "var(--fc-admin-panel-soft-bg)" }}>
+        <div style={{ position: "absolute", top: "74px", left: "12px", right: "12px", zIndex: 12, display: "grid", gap: "6px", padding: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "14px", background: "var(--fc-admin-panel-bg)", boxShadow: "0 14px 28px #00000018" }}>
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
             Drop destination
           </div>
@@ -3598,6 +3613,8 @@ export default function CountryCompanyInfoPage() {
               const active = dropFolderPath === target.path
               return (
                 <button
+                  data-ccinfo-drop-target={target.label}
+                  data-ccinfo-drop-path={target.path}
                   key={target.path || "home"}
                   type="button"
                   onDragOver={(event) => handleFolderPathDragOver(event, target.path)}
@@ -3646,6 +3663,7 @@ export default function CountryCompanyInfoPage() {
                 filePanelDropPath === folderPath
               return (
                 <div
+                  data-ccinfo-folder-row={folderPath}
                   key={folder.id}
                   onClick={() => setCurrentFolderPath(folderPath)}
                   onDoubleClick={() => setCurrentFolderPath(folderPath)}
@@ -3714,6 +3732,8 @@ export default function CountryCompanyInfoPage() {
             const fileTypeVisual = getFileTypeLabel(file.file_name, file.file_type)
             return (
               <div
+                data-ccinfo-file-row={file.id}
+                data-ccinfo-folder-path={file.folder_path || ""}
                 key={file.id}
                 onClick={() => setSelectedPreviewFile(file)}
                 onDoubleClick={() => {
