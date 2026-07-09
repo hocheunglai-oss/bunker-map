@@ -131,13 +131,6 @@ export default function SpcAuditLogPage() {
 
   return (
     <SpcShell title="SPC Audit Log">
-      <div className="spc-page-heading">
-        <div>
-          <h1>Audit Log</h1>
-          <p>{logs.length} SPC user actions</p>
-        </div>
-      </div>
-
       {message ? <div className="spc-alert is-error">{message}</div> : null}
 
       <section className="spc-panel">
