@@ -3548,49 +3548,6 @@ body {
   padding: 5px 8px;
 }
 
-.spc-fixture-filter-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.spc-fixture-filter-controls select {
-  width: auto;
-  min-width: 86px;
-  min-height: 26px;
-  height: 26px;
-  border: 1px solid #d1d5db;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #202124;
-  padding: 0 24px 0 10px;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.spc-fixture-filter-controls button {
-  min-height: 26px;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #0758c7;
-  cursor: pointer;
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 850;
-  line-height: 14px;
-  text-transform: uppercase;
-}
-
-.spc-fixture-filter-controls button:disabled {
-  border-color: #d1d5db;
-  background: #f3f4f6;
-  color: #6b7280;
-  cursor: default;
-  opacity: 0.7;
-}
-
 .spc-fixture-refresh-button {
   min-height: 26px;
   border: 1px solid #d1d5db;
@@ -3847,9 +3804,14 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 }
 
 .spc-fixture-section-filters {
+  position: sticky;
+  right: 6px;
+  z-index: 16;
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  background: #f5f5f7;
+  padding-left: 8px;
 }
 
 .spc-table.spc-fixture-table .spc-fixture-section-filters select {
@@ -3865,6 +3827,31 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-section-filters button {
+  width: auto;
+  min-width: 116px;
+  min-height: 18px;
+  height: 18px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #0758c7;
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-section-filters button:disabled {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: default;
+  opacity: 0.7;
 }
 
 .spc-table.spc-fixture-table .spc-fixture-empty-row td {
@@ -5203,6 +5190,7 @@ body:has(.spc-statistics-page) .spc-main {
 .spc-supplier-ledger-panel {
   width: fit-content;
   max-width: 100%;
+  justify-self: start;
   overflow: hidden;
   border: 1px solid var(--fc-admin-border);
   border-radius: 7px;
@@ -5218,7 +5206,7 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-table.spc-supplier-ledger-table {
-  width: min(1144px, 100%);
+  width: 1044px;
   min-width: 0;
   border-collapse: separate;
   border-spacing: 0;
@@ -5259,7 +5247,7 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-ledger-table th:nth-child(1),
 .spc-table.spc-supplier-ledger-table td:nth-child(1) {
-  width: 180px;
+  width: 166px;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(2),
@@ -5272,18 +5260,18 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-table.spc-supplier-ledger-table th:nth-child(4),
 .spc-table.spc-supplier-ledger-table td:nth-child(4) {
-  width: 196px;
+  width: 164px;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(5),
 .spc-table.spc-supplier-ledger-table td:nth-child(5) {
-  width: 200px;
+  width: 186px;
   text-align: center;
 }
 
 .spc-table.spc-supplier-ledger-table th:nth-child(6),
 .spc-table.spc-supplier-ledger-table td:nth-child(6) {
-  width: 356px;
+  width: 320px;
   padding-left: 4px;
   padding-right: 4px;
   text-align: center;
@@ -5393,30 +5381,30 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-supplier-info-actions {
   display: grid;
-  grid-template-columns: 52px 72px 112px 72px;
+  grid-template-columns: 48px 70px 104px 70px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   white-space: nowrap;
 }
 
 .spc-supplier-mini-button.is-more {
-  min-width: 54px;
+  min-width: 50px;
 }
 
 .spc-supplier-mini-button.is-fixtures {
-  min-width: 74px;
+  min-width: 70px;
 }
 
 .spc-supplier-mini-button.is-barge {
-  min-width: 112px;
+  min-width: 104px;
   border-color: #d1d5db;
   background: #f3f4f6;
   color: #4b5563;
 }
 
 .spc-supplier-mini-button.is-contact {
-  min-width: 74px;
+  min-width: 70px;
   border-color: #d1d5db;
   background: #f3f4f6;
   color: #4b5563;

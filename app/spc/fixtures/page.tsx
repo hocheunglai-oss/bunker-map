@@ -1136,38 +1136,6 @@ export default function SpcFixturesPage() {
     <SpcShell title="SPC FIXTURES">
       <section className="spc-panel spc-fixture-ledger-panel">
         <div className="spc-fixture-ledger-toolbar">
-          <span className="spc-fixture-filter-controls">
-            <select
-              aria-label="Fixture year filter"
-              value={fixtureYearFilter}
-              onChange={(event) => setFixtureYearFilter(event.target.value)}
-            >
-              <option value="">ALL YEARS</option>
-              {fixtureYearOptions.map((year) => (
-                <option key={year} value={year}>{year}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Fixture month filter"
-              value={fixtureMonthFilter}
-              onChange={(event) => setFixtureMonthFilter(event.target.value)}
-            >
-              <option value="">ALL MONTHS</option>
-              {monthOptions.map((month) => (
-                <option key={month.value} value={month.value}>{month.label}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                setFixtureYearFilter("")
-                setFixtureMonthFilter("")
-              }}
-              disabled={!fixtureYearFilter && !fixtureMonthFilter}
-            >
-              SHOW ALL RECORDS
-            </button>
-          </span>
           <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
             {loading ? "REFRESHING..." : "REFRESH"}
           </button>
@@ -1214,7 +1182,43 @@ export default function SpcFixturesPage() {
                 </tr>
               ) : null}
               <tr className="spc-fixture-section-row">
-                <td colSpan={fixtureColumnSpan}>FIXTURE TABLE</td>
+                <td colSpan={fixtureColumnSpan}>
+                  <div className="spc-fixture-section-content">
+                    <span>FIXTURE TABLE</span>
+                    <span className="spc-fixture-section-filters">
+                      <select
+                        aria-label="Fixture year filter"
+                        value={fixtureYearFilter}
+                        onChange={(event) => setFixtureYearFilter(event.target.value)}
+                      >
+                        <option value="">ALL YEARS</option>
+                        {fixtureYearOptions.map((year) => (
+                          <option key={year} value={year}>{year}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Fixture month filter"
+                        value={fixtureMonthFilter}
+                        onChange={(event) => setFixtureMonthFilter(event.target.value)}
+                      >
+                        <option value="">ALL MONTHS</option>
+                        {monthOptions.map((month) => (
+                          <option key={month.value} value={month.value}>{month.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFixtureYearFilter("")
+                          setFixtureMonthFilter("")
+                        }}
+                        disabled={!fixtureYearFilter && !fixtureMonthFilter}
+                      >
+                        SHOW ALL RECORDS
+                      </button>
+                    </span>
+                  </div>
+                </td>
               </tr>
               {renderFixtureRows(filteredCompletedFixtures, "completed")}
               {!loading && filteredCompletedFixtures.length === 0 ? (
