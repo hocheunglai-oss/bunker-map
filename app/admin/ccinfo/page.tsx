@@ -3449,6 +3449,21 @@ export default function CountryCompanyInfoPage() {
     if (dropFolderPath === targetFolderPath) setDropFolderPath(null)
     if (filePanelDropPath === targetFolderPath) setFilePanelDropPath(null)
   }
+  const handleFolderPathDragLeave = (event: React.DragEvent<HTMLElement>, targetFolderPath: string) => {
+    event.stopPropagation()
+    const relatedTarget = event.relatedTarget as Node | null
+    if (relatedTarget && event.currentTarget.contains(relatedTarget)) return
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const isStillInside =
+      event.clientX >= bounds.left &&
+      event.clientX <= bounds.right &&
+      event.clientY >= bounds.top &&
+      event.clientY <= bounds.bottom
+    if (isStillInside) return
+
+    clearFolderDropTarget(targetFolderPath)
+  }
   const folderDropButtonStyle = (targetFolderPath: string, active: boolean): React.CSSProperties => {
     const isDropTarget = dropFolderPath === targetFolderPath && canDropOnFolderPath(targetFolderPath)
     const isUploadTarget = filePanelDropPath === targetFolderPath
@@ -3467,7 +3482,17 @@ export default function CountryCompanyInfoPage() {
     <div
       onDragOver={(event) => handleFolderPathDragOver(event, currentFolderPath)}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        const relatedTarget = event.relatedTarget as Node | null
+        const bounds = event.currentTarget.getBoundingClientRect()
+        const isStillInside =
+          (relatedTarget && event.currentTarget.contains(relatedTarget)) ||
+          (
+            event.clientX >= bounds.left &&
+            event.clientX <= bounds.right &&
+            event.clientY >= bounds.top &&
+            event.clientY <= bounds.bottom
+          )
+        if (!isStillInside) {
           setDropFolderPath(null)
           setFilePanelDropPath(null)
         }
@@ -3496,7 +3521,7 @@ export default function CountryCompanyInfoPage() {
           type="button"
           onClick={() => setCurrentFolderPath("")}
           onDragOver={(event) => handleFolderPathDragOver(event, "")}
-          onDragLeave={() => clearFolderDropTarget("")}
+          onDragLeave={(event) => handleFolderPathDragLeave(event, "")}
           onDrop={(event) => handleFolderPathDrop(event, "")}
           style={folderDropButtonStyle("", !currentFolderPath)}
         >
@@ -3512,7 +3537,7 @@ export default function CountryCompanyInfoPage() {
               type="button"
               onClick={() => setCurrentFolderPath(path)}
               onDragOver={(event) => handleFolderPathDragOver(event, path)}
-              onDragLeave={() => clearFolderDropTarget(path)}
+              onDragLeave={(event) => handleFolderPathDragLeave(event, path)}
               onDrop={(event) => handleFolderPathDrop(event, path)}
               style={folderDropButtonStyle(path, active)}
             >
@@ -3547,6 +3572,9 @@ export default function CountryCompanyInfoPage() {
           <>
             {visibleFolders.map((folder) => {
               const folderPath = joinFolderPath(folder.folder_path, folder.name)
+              const folderIsDropTarget =
+                (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) ||
+                filePanelDropPath === folderPath
               return (
                 <div
                   key={folder.id}
@@ -3564,33 +3592,42 @@ export default function CountryCompanyInfoPage() {
                     setFilePanelDropPath(null)
                   }}
                   onDragOver={(event) => handleFolderPathDragOver(event, folderPath)}
-                  onDragLeave={() => clearFolderDropTarget(folderPath)}
+                  onDragLeave={(event) => handleFolderPathDragLeave(event, folderPath)}
                   onDrop={(event) => handleFolderPathDrop(event, folderPath)}
                   style={{
                     display: "grid",
                     gridTemplateColumns: isMobile ? "32px minmax(0,1fr)" : "42px minmax(0,1fr) auto",
                     gap: "8px",
                     alignItems: "center",
-                    padding: "7px 8px",
-                    borderRadius: "10px",
+                    minHeight: "46px",
+                    padding: "8px 9px",
+                    boxSizing: "border-box",
+                    borderRadius: "12px",
                     border:
-                      (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath
-                        ? "1px dashed var(--fc-admin-success-border)"
+                      folderIsDropTarget
+                        ? "2px solid var(--fc-admin-success-border)"
                         : "1px solid var(--fc-admin-border-soft)",
                     background:
-                      (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath
+                      folderIsDropTarget
                         ? "var(--fc-admin-success-bg)"
                         : "var(--fc-tool-input-bg)",
                     color: "var(--fc-admin-panel-text)",
                     cursor: "pointer",
-                    boxShadow: (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath ? "0 0 0 3px #2f9e4430" : "none",
+                    boxShadow: folderIsDropTarget ? "0 0 0 4px #2f9e4430" : "none",
                     opacity: draggingFolderPath === folderPath ? 0.62 : 1,
-                    transform: (dropFolderPath === folderPath && canDropOnFolderPath(folderPath)) || filePanelDropPath === folderPath ? "translateY(-1px)" : "none",
+                    transform: folderIsDropTarget ? "translateY(-1px)" : "none",
                   }}
                 >
                   <FolderIcon />
-                  <span style={{ fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
-                    <HighlightedInlineText value={folder.name} query={searchInPage} />
+                  <span style={{ display: "grid", gap: "2px", fontSize: "11px", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                    <span>
+                      <HighlightedInlineText value={folder.name} query={searchInPage} />
+                    </span>
+                    {folderIsDropTarget ? (
+                      <span style={{ color: "var(--fc-admin-success-text)", fontSize: "10px", fontWeight: 800 }}>
+                        {filePanelDropPath === folderPath ? `Drop to upload into ${folder.name}` : `Drop to move into ${folder.name}`}
+                      </span>
+                    ) : null}
                   </span>
                   <button
                     type="button"
@@ -3598,6 +3635,12 @@ export default function CountryCompanyInfoPage() {
                       event.stopPropagation()
                       openFilePanelEditor({ type: "folder", item: folder })
                     }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      handleFolderPathDragOver(event, folderPath)
+                    }}
+                    onDrop={(event) => handleFolderPathDrop(event, folderPath)}
                     style={{ ...buttonStyle, padding: "4px 7px", fontSize: "10px" }}
                   >
                     Edit
