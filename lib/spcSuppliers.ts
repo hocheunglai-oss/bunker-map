@@ -828,8 +828,7 @@ function gradeValue(value: unknown, key: FuelKey | null, fallbackPlain = true) {
 }
 
 function fixtureFuelLines(row: FixtureRow) {
-  const lines = fuelColumns
-    .map(({ key, label }) => ({
+  const lines = fuelColumns.map(({ key, label }) => ({
       key,
       grade: label,
       quantity: compactText(row[key]),
@@ -837,9 +836,9 @@ function fixtureFuelLines(row: FixtureRow) {
       price: gradeValue(row.price, key, false) || compactText(row.price),
       barging: gradeValue(row.barging, key, false) || compactText(row.barging),
     }))
-    .filter((line) => line.quantity || line.recordedSupplier)
+  const quantityLines = lines.filter((line) => line.quantity)
 
-  if (lines.length > 0) return lines
+  if (quantityLines.length > 0) return quantityLines
   return [{
     key: null,
     grade: "",
