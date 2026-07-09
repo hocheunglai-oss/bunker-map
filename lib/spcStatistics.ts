@@ -3,7 +3,7 @@ import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { normaliseSpcRole } from "@/lib/spcPages"
 import { displaySupplierName } from "@/lib/spcSupplierKeys"
-import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
+import { listSpcUserReferenceOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
@@ -307,9 +307,10 @@ function traderLabel(
   usersByUsername: Map<string, SpcUserOption>,
   username: string | null | undefined,
   displayName: string | null | undefined,
+  account?: string | null,
 ) {
   const user = activeTraders.resolveUser(username, displayName)
-  if (!user) return "RETIRED"
+  if (!user) return upperText(activeTraders.displayNameOrRetired(username, displayName, account)) || "UNKNOWN"
   const display = upperText(user.displayName || displayName || username)
   const office = officeFor(usersByUsername, user.username, user.displayName)
   const firstName = display.split(/\s+/)[0] || display
@@ -455,7 +456,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   const [fixtures, enquiries, users, spcBuyerEnquiryNumbers] = await Promise.all([
     loadFixtures(supabase, firstFixtureYear, lastFixtureYear),
     loadEnquiries(supabase, statisticsWindow.startIso, statisticsWindow.endIso),
-    listActiveSpcUserOptions(),
+    listSpcUserReferenceOptions(),
     loadSpcBuyerEnquiryNumbers(supabase),
   ])
   const usersByUsername = userMap(users)
@@ -489,7 +490,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   const traderFixtures = new Map<string, number>()
 
   users
-    .filter((user) => normaliseSpcRole(user.role) === "SUPPLIER TRADER")
+    .filter((user) => user.isActive !== false && normaliseSpcRole(user.role) === "SUPPLIER TRADER")
     .forEach((user) => {
       supplierTraderFixtureCount.set(traderLabel(activeTraders, usersByUsername, user.username, user.displayName), 0)
     })
@@ -516,7 +517,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
 
   tableFixtures.forEach((fixture) => {
     const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
-    const trader = traderLabel(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name)
+    const trader = traderLabel(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     const supplierTrader = traderLabel(activeTraders, usersByUsername, fixture.supplier_trader_username, fixture.supplier_trader_display_name)
     addMetric(officeFixtures, office)
     addMetric(traderFixtures, trader)

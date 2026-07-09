@@ -43,6 +43,7 @@ type SpcUserOption = {
   displayName: string
   role: string
   office: string
+  isActive?: boolean
 }
 
 type SupplierRecord = {
@@ -163,11 +164,21 @@ function cleanText(value: string | null | undefined) {
   return String(value || "").trim()
 }
 
+function formatNumberString(value: string | null | undefined) {
+  const match = cleanText(value)
+    .replace(/[–—]/g, "-")
+    .match(/\d[\d,]*(?:\.\d*)?/)
+  if (!match) return ""
+  const raw = match[0].replace(/,/g, "")
+  const [integerRaw, decimalRaw = ""] = raw.split(".")
+  const integer = (integerRaw || "0").replace(/^0+(?=\d)/, "") || "0"
+  const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  if (raw.includes(".")) return `${formattedInteger}.${decimalRaw}`
+  return formattedInteger
+}
+
 function formatIntegerString(value: string | null | undefined) {
-  const digits = cleanText(value).replace(/[^\d]/g, "")
-  if (!digits) return ""
-  const normalized = digits.replace(/^0+(?=\d)/, "")
-  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  return formatNumberString(value)
 }
 
 function formatQuantityString(value: string | null | undefined) {
@@ -1010,7 +1021,7 @@ export default function SpcFixturesPage() {
     if (editing) {
       return (
         <input
-          inputMode="numeric"
+          inputMode="decimal"
           value={formatIntegerString(value)}
           onChange={(event) => updateGradeDraft(fixture.id, field, key, event.target.value)}
           disabled={!canEdit}
@@ -1076,6 +1087,7 @@ export default function SpcFixturesPage() {
       const buyerTraderDisplay = activeTraderResolver.displayNameOrRetired(
         fixture.buyerTraderUsername,
         fixture.buyerTraderDisplayName,
+        fixture.account,
       )
       const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)

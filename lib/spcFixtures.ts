@@ -130,11 +130,21 @@ const fuelColumns: Array<{ key: FuelKey; label: string }> = [
 const allFuelKeys = fuelColumns.map(({ key }) => key)
 const monthLabels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
+function formatNumberString(value: unknown) {
+  const match = cleanString(value)
+    .replace(/[–—]/g, "-")
+    .match(/\d[\d,]*(?:\.\d*)?/)
+  if (!match) return ""
+  const raw = match[0].replace(/,/g, "")
+  const [integerRaw, decimalRaw = ""] = raw.split(".")
+  const integer = (integerRaw || "0").replace(/^0+(?=\d)/, "") || "0"
+  const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  if (raw.includes(".")) return `${formattedInteger}.${decimalRaw}`
+  return formattedInteger
+}
+
 function formatIntegerString(value: unknown) {
-  const digits = cleanString(value).replace(/[^\d]/g, "")
-  if (!digits) return ""
-  const normalized = digits.replace(/^0+(?=\d)/, "")
-  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  return formatNumberString(value)
 }
 
 function formatQuantityString(value: unknown) {

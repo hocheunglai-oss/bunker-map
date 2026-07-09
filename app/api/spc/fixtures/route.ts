@@ -6,7 +6,7 @@ import {
   updateSpcFixture,
   type SpcFixtureInput,
 } from "@/lib/spcFixtures"
-import { listActiveSpcUserOptions } from "@/lib/spcUsers"
+import { listSpcUserReferenceOptions } from "@/lib/spcUsers"
 
 export const dynamic = "force-dynamic"
 
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     const limit = Number(new URL(request.url).searchParams.get("limit") || 5000)
     const [fixtures, users] = await Promise.all([
       listSpcFixtures(session, limit),
-      listActiveSpcUserOptions(),
+      listSpcUserReferenceOptions(),
     ])
     return NextResponse.json(
       { fixtures, users },

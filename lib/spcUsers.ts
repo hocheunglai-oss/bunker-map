@@ -110,6 +110,7 @@ export type SpcUserOption = {
   displayName: string
   role: SpcRoleId
   office: string
+  isActive?: boolean
 }
 
 export type ManagedSpcRoleDefault = {
@@ -828,8 +829,32 @@ export async function listActiveSpcUserOptions(
       displayName: user.displayName || user.username,
       role: user.role,
       office: user.office,
+      isActive: true,
     }))
     .sort((a, b) => {
+      const roleOrder = a.role.localeCompare(b.role)
+      if (roleOrder !== 0) return roleOrder
+      return a.displayName.localeCompare(b.displayName)
+    })
+}
+
+export async function listSpcUserReferenceOptions(
+  roleDefaults?: ManagedSpcRoleDefault[],
+  pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
+): Promise<SpcUserOption[]> {
+  const users = await listManagedSpcUsers(roleDefaults, pages)
+  return users
+    .map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      role: user.role,
+      office: user.office,
+      isActive: user.isActive,
+    }))
+    .sort((a, b) => {
+      const activeOrder = Number(b.isActive) - Number(a.isActive)
+      if (activeOrder !== 0) return activeOrder
       const roleOrder = a.role.localeCompare(b.role)
       if (roleOrder !== 0) return roleOrder
       return a.displayName.localeCompare(b.displayName)

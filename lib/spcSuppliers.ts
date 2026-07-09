@@ -19,7 +19,7 @@ import type {
   SaveSpcSupplierContactsInput,
   SaveSpcSupplierInput,
 } from "@/lib/spcSupplierTypes"
-import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
+import { listSpcUserReferenceOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 const SPREADSHEET_ID = "1lr_WkDeuadBggAWki25qCLcTN76eI_K2lQFh1ZEIX7I"
 const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit`
@@ -888,7 +888,7 @@ async function loadActiveSpcUsers() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!serviceRoleKey || !supabaseUrl || serviceRoleKey === "\"\"") return []
-  return listActiveSpcUserOptions()
+  return listSpcUserReferenceOptions()
 }
 
 function fixtureSearchText(fixture: SpcSupplierFixture) {
