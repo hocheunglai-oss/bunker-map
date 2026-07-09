@@ -34,6 +34,11 @@ const officeNames: Record<string, string> = {
   VN: "VIETNAM",
 }
 
+const resignedTraderOfficeOverrides: Record<string, string> = {
+  SAM: "HONG KONG",
+  MIRKO: "ITALY",
+}
+
 function cleanText(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim()
 }
@@ -83,6 +88,14 @@ function domainOfficeName(value: unknown) {
   if (text.endsWith(".mc")) return "MONACO"
   if (text.endsWith(".gr")) return "GREECE"
   if (text.endsWith(".ae")) return "UNITED ARAB EMIRATES"
+  return ""
+}
+
+function resignedTraderOfficeName(username: unknown, fallbackDisplayName?: unknown) {
+  const displayToken = traderToken(fallbackDisplayName)
+  if (displayToken && resignedTraderOfficeOverrides[displayToken]) return resignedTraderOfficeOverrides[displayToken]
+  const usernameToken = traderToken(username)
+  if (usernameToken && resignedTraderOfficeOverrides[usernameToken]) return resignedTraderOfficeOverrides[usernameToken]
   return ""
 }
 
@@ -178,11 +191,12 @@ export function createActiveSpcTraderResolver(users: TraderUser[]) {
     const user = resolveAnyUser(username, fallbackDisplayName)
     return (
       officeName(user?.office) ||
-      officeName(fallbackOffice) ||
+      resignedTraderOfficeName(username, fallbackDisplayName) ||
       suffixOfficeName(fallbackDisplayName) ||
       suffixOfficeName(username) ||
       domainOfficeName(username) ||
       domainOfficeName(fallbackDisplayName) ||
+      officeName(fallbackOffice) ||
       ""
     )
   }

@@ -293,13 +293,21 @@ function userMap(users: SpcUserOption[]) {
 }
 
 function officeFor(
+  activeTraders: ReturnType<typeof createActiveSpcTraderResolver>,
   usersByUsername: Map<string, SpcUserOption>,
   username: string | null | undefined,
   displayName: string | null | undefined,
   account?: string | null,
 ) {
   const user = usersByUsername.get(cleanText(username).toLowerCase())
-  return upperText(user?.office) || upperText(account) || suffixOffice(displayName) || domainOffice(username) || "UNKNOWN"
+  return (
+    upperText(user?.office) ||
+    upperText(activeTraders.officeForTrader(username, displayName)) ||
+    upperText(account) ||
+    suffixOffice(displayName) ||
+    domainOffice(username) ||
+    "UNKNOWN"
+  )
 }
 
 function traderLabel(
@@ -312,7 +320,7 @@ function traderLabel(
   const user = activeTraders.resolveUser(username, displayName)
   if (!user) return upperText(activeTraders.displayNameOrRetired(username, displayName, account)) || "UNKNOWN"
   const display = upperText(user.displayName || displayName || username)
-  const office = officeFor(usersByUsername, user.username, user.displayName)
+  const office = officeFor(activeTraders, usersByUsername, user.username, user.displayName)
   const firstName = display.split(/\s+/)[0] || display
   const suffix = office === "HONG KONG" ? "HK" : office === "SINGAPORE" ? "SG" : office === "ITALY" ? "IT" : office === "MONACO" ? "MC" : office === "GREECE" ? "GR" : office === "UNITED ARAB EMIRATES" || office === "UAE" ? "AE" : office
   return suffix && firstName ? `${firstName}-${suffix}` : firstName || "UNKNOWN"
@@ -506,7 +514,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   })
 
   graphWindowFixtures.forEach((fixture) => {
-    const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
+    const office = officeFor(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     fuelLines(fixture).forEach((line) => {
       addMetric(volumeBySupplier, line.supplier, line.volume)
       addMetric(fixturesBySupplier, line.supplier)
@@ -516,7 +524,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   })
 
   tableFixtures.forEach((fixture) => {
-    const office = officeFor(usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
+    const office = officeFor(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     const trader = traderLabel(activeTraders, usersByUsername, fixture.buyer_trader_username, fixture.buyer_trader_display_name, fixture.account)
     const supplierTrader = traderLabel(activeTraders, usersByUsername, fixture.supplier_trader_username, fixture.supplier_trader_display_name)
     addMetric(officeFixtures, office)
@@ -525,7 +533,7 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   })
 
   tableEnquiries.forEach((enquiry) => {
-    const office = officeFor(usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
+    const office = officeFor(activeTraders, usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
     const trader = traderLabel(activeTraders, usersByUsername, enquiry.created_by_username, enquiry.created_by_display_name)
     addMetric(officeEnquiries, office)
     addMetric(traderEnquiries, trader)
