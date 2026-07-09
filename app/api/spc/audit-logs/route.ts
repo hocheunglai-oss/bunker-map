@@ -6,6 +6,7 @@ import {
   listAuditLogs,
   matchesAuditActor,
   presentAuditLogs,
+  type PresentedAuditLogRecord,
   undoAuditLog,
 } from "@/lib/auditLog"
 import { listManagedSpcRoleDefaults, listManagedSpcUsers } from "@/lib/spcUsers"
@@ -27,6 +28,45 @@ function rawOperationsForDisplay(operation: string | undefined) {
   return undefined
 }
 
+function actorUsername(actorId: string | null | undefined) {
+  const clean = actorId?.trim().toLowerCase() || ""
+  if (!clean) return ""
+  return clean.startsWith("spc:") ? clean.slice(4) : clean
+}
+
+function normalizeSpcAuditActors(
+  records: PresentedAuditLogRecord[],
+  usersByUsername: Map<string, string>,
+) {
+  const ottoDisplayName = usersByUsername.get("otto@cosulich.com.hk") || "OTTO LAI"
+
+  return records.map((record) => {
+    const id = record.actorId?.trim().toLowerCase() || ""
+    const name = record.actorName?.trim() || ""
+    const username = actorUsername(id)
+    const mappedName =
+      usersByUsername.get(username) ||
+      (id === "spc:spcadmin" || name.toUpperCase() === "SPC ADMIN" ? ottoDisplayName : "") ||
+      (name.toUpperCase() === "OL" && username === "otto@cosulich.com.hk" ? ottoDisplayName : "") ||
+      name
+
+    return {
+      ...record,
+      actorName: mappedName,
+    }
+  })
+}
+
+function shouldOfferHistoricalActor(record: PresentedAuditLogRecord, usersByUsername: Map<string, string>) {
+  const id = record.actorId?.trim().toLowerCase() || ""
+  const name = record.actorName?.trim().toLowerCase() || ""
+  if (!id) return false
+  if (id.includes("codex") || name === "codex") return true
+  if (id === "spc:spcadmin") return false
+  if (usersByUsername.has(actorUsername(id))) return false
+  return true
+}
+
 export async function GET(request: Request) {
   try {
     const session = await requireSpcPagePermission("spc-audit-log", "view")
@@ -45,7 +85,15 @@ export async function GET(request: Request) {
       actorId: actor && actor !== "all" ? actor : undefined,
       scope: "spc",
     })
-    const presented = await presentAuditLogs(records, SPC_PAGE_DEFINITIONS)
+    const roleDefaults = await listManagedSpcRoleDefaults(SPC_PAGE_DEFINITIONS)
+    const users = await listManagedSpcUsers(roleDefaults, SPC_PAGE_DEFINITIONS)
+    const usersByUsername = new Map(
+      users.map((user) => [user.username.trim().toLowerCase(), user.displayName.trim() || user.username]),
+    )
+    const presented = normalizeSpcAuditActors(
+      await presentAuditLogs(records, SPC_PAGE_DEFINITIONS),
+      usersByUsername,
+    )
     const logs = presented
       .filter((record) => record.pageId.startsWith("spc-"))
       .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
@@ -53,8 +101,6 @@ export async function GET(request: Request) {
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
 
-    const roleDefaults = await listManagedSpcRoleDefaults(SPC_PAGE_DEFINITIONS)
-    const users = await listManagedSpcUsers(roleDefaults, SPC_PAGE_DEFINITIONS)
     const userMap = new Map<string, { value: string; label: string }>()
     const addUser = (value: string | null | undefined, label?: string | null) => {
       const cleanValue = value?.trim()
@@ -67,7 +113,9 @@ export async function GET(request: Request) {
 
     addUser(session.username ? `spc:${session.username}` : null, session.displayName)
     users.forEach((user) => addUser(`spc:${user.username}`, user.displayName))
-    presented.forEach((record) => addUser(record.actorId, record.actorName || record.actorId))
+    presented
+      .filter((record) => shouldOfferHistoricalActor(record, usersByUsername))
+      .forEach((record) => addUser(record.actorId, record.actorName || record.actorId))
 
     return NextResponse.json({
       logs,

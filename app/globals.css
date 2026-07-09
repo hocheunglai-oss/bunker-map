@@ -3048,6 +3048,21 @@ body {
   overflow: hidden;
 }
 
+.spc-postponed-enquiries-header {
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: #f8fafc;
+  padding: 9px 12px;
+}
+
+.spc-postponed-enquiries-header h2 {
+  margin: 0;
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .spc-postponed-enquiries-list {
   max-height: 190px;
   overflow-y: auto;
@@ -3059,9 +3074,9 @@ body {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 3px 10px;
-  border: 1px solid #f4d37b;
+  border: 1px solid var(--fc-admin-border-soft);
   border-radius: 8px;
-  background: #fffaf0;
+  background: #ffffff;
   padding: 7px 9px;
 }
 
@@ -3071,7 +3086,7 @@ body {
 
 .spc-postponed-enquiry-card span {
   grid-column: 1;
-  color: #8a5a00;
+  color: var(--fc-admin-muted);
   font-size: 10px;
   font-weight: 850;
 }
@@ -3237,9 +3252,9 @@ body {
 .spc-enquiry-match {
   display: grid;
   gap: 4px;
-  border: 1px solid #f4d37b;
-  background: #fff8db;
-  color: #745400;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #0758c7;
 }
 
 .spc-enquiry-match strong,

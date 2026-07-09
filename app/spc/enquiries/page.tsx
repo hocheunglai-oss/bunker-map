@@ -312,7 +312,27 @@ function missingRecordSupplier(match: SpcEnquiry) {
     match.supplierName ||
     match.meta?.fixtureSupplier ||
     (match.status === "cancelled" ? match.meta?.lostReason : "") ||
-    "No supplier"
+    "NO SUPPLIER"
+}
+
+function stemRecordSupplier(match: SpcEnquiry) {
+  return match.meta?.fixtureSupplier || match.supplierName || ""
+}
+
+function recordLine(match: SpcEnquiry) {
+  const parts = [
+    statusLabel(match.status),
+    displayDate(match.meta?.outcomeAt || match.updatedAt),
+  ]
+
+  if (match.status === "quoted") {
+    parts.push(match.meta?.stemSupplierTraderDisplayName || "NO TRADER")
+    parts.push(stemRecordSupplier(match) || "SUPPLIER NOT SET")
+  } else {
+    parts.push(missingRecordSupplier(match))
+  }
+
+  return parts.filter(Boolean).join(" · ")
 }
 
 function reportEnquiryError(error: unknown, fallback: string) {
@@ -1028,8 +1048,7 @@ export default function SpcEnquiriesPage() {
                   <strong>RECORD</strong>
                   {draftPreviousMatches.slice(0, 3).map((match) => (
                     <span key={match.id}>
-                      {statusLabel(match.status)} · {displayDate(match.meta?.outcomeAt || match.updatedAt)} ·{" "}
-                      {missingRecordSupplier(match)}
+                      {recordLine(match)}
                     </span>
                   ))}
                 </div>
@@ -1090,6 +1109,9 @@ export default function SpcEnquiriesPage() {
 
           {postponedEnquiries.length > 0 ? (
             <section className="spc-postponed-enquiries-panel">
+              <div className="spc-postponed-enquiries-header">
+                <h2>POSTPONED ENQUIRY</h2>
+              </div>
               <div className="spc-postponed-enquiries-list">
                 {postponedEnquiries.map((enquiry) => (
                   <article key={enquiry.id} className="spc-postponed-enquiry-card">
@@ -1135,8 +1157,7 @@ export default function SpcEnquiriesPage() {
                       <strong>RECORD</strong>
                       {matches.slice(0, 3).map((match) => (
                         <span key={match.id}>
-                          {statusLabel(match.status)} · {displayDate(match.meta?.outcomeAt || match.updatedAt)} ·{" "}
-                          {missingRecordSupplier(match)}
+                          {recordLine(match)}
                         </span>
                       ))}
                     </div>
