@@ -3434,8 +3434,24 @@ export default function CountryCompanyInfoPage() {
     Boolean(draggingFileId || (event && getDragTypes(event).includes("application/x-ccinfo-file")))
   const hasFolderDrag = (event?: React.DragEvent) =>
     Boolean(draggingFolderPath || (event && getDragTypes(event).includes("application/x-ccinfo-folder")))
+  const hasStableDropIntent = (event: React.DragEvent, targetFolderPath: string) => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const inset = targetFolderPath ? 3 : 8
+    if (bounds.width <= inset * 2 || bounds.height <= inset * 2) return true
+    return (
+      event.clientX >= bounds.left + inset &&
+      event.clientX <= bounds.right - inset &&
+      event.clientY >= bounds.top + inset &&
+      event.clientY <= bounds.bottom - inset
+    )
+  }
   const canDropOnFolderPath = (targetFolderPath: string, event?: React.DragEvent) => {
-    if (hasFileDrag(event)) return true
+    if (hasFileDrag(event)) {
+      const sourceFolderPath = draggingFileId
+        ? files.find((item) => item.id === draggingFileId)?.folder_path || ""
+        : null
+      return sourceFolderPath === null || sourceFolderPath !== targetFolderPath
+    }
     if (draggingFolderPath) return canMoveFolderToPath(draggingFolderPath, targetFolderPath)
     return hasFolderDrag(event) && targetFolderPath !== currentFolderPath
   }
@@ -3447,7 +3463,7 @@ export default function CountryCompanyInfoPage() {
       setFilePanelDropPath((current) => current === targetFolderPath ? current : targetFolderPath)
       return
     }
-    if (!canDropOnFolderPath(targetFolderPath, event)) return
+    if (!canDropOnFolderPath(targetFolderPath, event) || !hasStableDropIntent(event, targetFolderPath)) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
@@ -3472,7 +3488,7 @@ export default function CountryCompanyInfoPage() {
       void uploadFiles(droppedFiles, targetFolderPath)
       return
     }
-    if (!canDropOnFolderPath(targetFolderPath, event)) return
+    if (!canDropOnFolderPath(targetFolderPath, event) || !hasStableDropIntent(event, targetFolderPath)) return
     event.preventDefault()
     event.stopPropagation()
     const fileId = event.dataTransfer.getData("application/x-ccinfo-file") || event.dataTransfer.getData("text/plain")
@@ -3516,14 +3532,6 @@ export default function CountryCompanyInfoPage() {
       transform: "none",
     }
   }
-  const hasInternalFilePanelDrag = Boolean(draggingFileId || draggingFolderPath)
-  const destinationDropTargets = [
-    { path: "", label: "HOME" },
-    ...breadcrumbSegments.map((segment, index) => ({
-      path: breadcrumbSegments.slice(0, index + 1).join("/"),
-      label: segment,
-    })),
-  ].filter((target) => target.path !== currentFolderPath && canDropOnFolderPath(target.path))
   const fileSection = !initialMode ? (
     <div
       onDragOver={handleFilePanelDragOver}
@@ -3601,42 +3609,6 @@ export default function CountryCompanyInfoPage() {
       {(filePanelDropPath === currentFolderPath || (dropFolderPath === currentFolderPath && canDropOnFolderPath(currentFolderPath))) && (
         <div style={{ border: "1px dashed var(--fc-admin-success-border)", borderRadius: "12px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", padding: "8px 10px", fontSize: "11px", fontWeight: 800, textAlign: "center" }}>
           {filePanelDropPath === currentFolderPath ? `Drop to upload into ${currentFolderPath || "HOME"}` : `Drop to move into ${currentFolderPath || "HOME"}`}
-        </div>
-      )}
-      {hasInternalFilePanelDrag && destinationDropTargets.length > 0 && (
-        <div style={{ position: "absolute", top: "74px", left: "12px", right: "12px", zIndex: 12, display: "grid", gap: "6px", padding: "8px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "14px", background: "var(--fc-admin-panel-bg)", boxShadow: "0 14px 28px #00000018" }}>
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Drop destination
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(86px, 1fr))", gap: "7px" }}>
-            {destinationDropTargets.map((target) => {
-              const active = dropFolderPath === target.path
-              return (
-                <button
-                  data-ccinfo-drop-target={target.label}
-                  data-ccinfo-drop-path={target.path}
-                  key={target.path || "home"}
-                  type="button"
-                  onDragOver={(event) => handleFolderPathDragOver(event, target.path)}
-                  onDragLeave={handleFolderPathDragLeave}
-                  onDrop={(event) => handleFolderPathDrop(event, target.path)}
-                  style={{
-                    ...buttonStyle,
-                    minHeight: "42px",
-                    justifyContent: "center",
-                    textAlign: "center",
-                    padding: "8px 10px",
-                    border: "1px solid var(--fc-admin-success-border)",
-                    background: active ? "var(--fc-admin-success-bg)" : "#ffffff",
-                    color: active ? "var(--fc-admin-success-text)" : "var(--fc-admin-panel-text)",
-                    boxShadow: active ? "0 0 0 4px #2f9e4430" : "none",
-                  }}
-                >
-                  {target.label}
-                </button>
-              )
-            })}
-          </div>
         </div>
       )}
       <div
