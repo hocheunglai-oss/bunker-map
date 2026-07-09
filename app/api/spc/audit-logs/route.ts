@@ -98,6 +98,24 @@ function buildAuditUserFilters(
   return Array.from(userMap.values()).sort((a, b) => a.label.localeCompare(b.label))
 }
 
+function presentAuditLogForClient(record: PresentedAuditLogRecord) {
+  return {
+    id: record.id,
+    occurredAt: record.occurredAt,
+    actorId: record.actorId,
+    actorName: record.actorName,
+    displayOperation: record.displayOperation,
+    pageId: record.pageId,
+    pageLabel: record.pageLabel,
+    recordLabel: record.recordLabel,
+    summary: record.summary,
+    details: record.details,
+    undoOfLogId: record.undoOfLogId,
+    undoneAt: record.undoneAt,
+    undoable: record.undoable,
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const session = await requireSpcPagePermission("spc-audit-log", "view")
@@ -129,6 +147,7 @@ export async function GET(request: Request) {
       .filter((record) => !operation || operation === "ALL" || record.displayOperation === operation)
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
+      .map(presentAuditLogForClient)
 
     return NextResponse.json({
       logs,
