@@ -191,12 +191,14 @@ export default function SpcStatisticsPage() {
   const canView = authenticated && canAccessSpcPage(permissions, "spc-statistics", "view")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-statistics")
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
     if (!canView) return
     setLoading(true)
     setMessage("")
     try {
-      const response = await fetch(`/api/spc/statistics?year=${year}`, { cache: "no-store" })
+      const params = new URLSearchParams({ year: String(year) })
+      if (forceRefresh) params.set("refresh", "1")
+      const response = await fetch(`/api/spc/statistics?${params.toString()}`, { cache: "no-store" })
       const data = (await response.json()) as SpcStatisticsPayload & { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to load SPC statistics.")
       setStatistics(data)
@@ -231,7 +233,7 @@ export default function SpcStatisticsPage() {
       <div className="spc-statistics-page">
         <div className="spc-stat-toolbar">
           <div className="spc-stat-controls">
-            <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+            <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData(true)} disabled={loading}>
               {loading ? "REFRESHING..." : "REFRESH"}
             </button>
           </div>

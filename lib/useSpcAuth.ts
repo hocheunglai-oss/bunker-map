@@ -32,6 +32,7 @@ let sharedSessionVersion = 0
 
 const SPC_ACTOR_STORAGE_KEY = "spc_actor"
 const SPC_SESSION_CHANGED_EVENT = "spc-session-changed"
+const SPC_SESSION_CACHE_MS = 30_000
 
 function emitSpcSessionChanged() {
   if (typeof window === "undefined") return
@@ -80,7 +81,7 @@ export function primeSpcClientSessionCache(data: SpcSessionPayload) {
 }
 
 function loadSpcSession() {
-  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < 5000) {
+  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < SPC_SESSION_CACHE_MS) {
     return Promise.resolve(sharedSessionResult.data)
   }
   if (sharedSessionPromise) return sharedSessionPromise

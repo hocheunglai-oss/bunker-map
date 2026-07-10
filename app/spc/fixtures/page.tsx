@@ -543,7 +543,7 @@ export default function SpcFixturesPage() {
     try {
       const [fixtureResponse, supplierResponse] = await Promise.all([
         fetch("/api/spc/fixtures?limit=5000", { cache: "no-store" }),
-        fetch("/api/spc/suppliers", { cache: "no-store" }),
+        fetch("/api/spc/suppliers?mode=options", { cache: "no-store" }),
       ])
       const fixtureData = (await fixtureResponse.json()) as FixturesResponse
       const supplierData = (await supplierResponse.json()) as SuppliersResponse
@@ -1089,7 +1089,6 @@ export default function SpcFixturesPage() {
         fixture.buyerTraderDisplayName,
         fixture.account,
       )
-      const missing = prepareDraftForSubmit(draft, true).errors
       const gradeRows = fuelRows(draft)
       return gradeRows.map((fuelRow) => {
         const rowKey = `${fixture.id}:${fuelRow.key || "all"}`

@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server"
 import { requireSpcSession } from "@/lib/spcAuth"
+import { timedJson } from "@/lib/serverTiming"
 
 const HKT_TIME_ZONE = "Asia/Hong_Kong"
 const REQUEST_TIMEOUT_MS = 8000
 const HOLIDAYS_PER_COUNTRY = 2
 const MAX_HOLIDAY_DAYS_AHEAD = 5
+const DASHBOARD_CACHE_MS = 6 * 60 * 60 * 1000
+const HOLIDAY_FETCH_REVALIDATE_SECONDS = 12 * 60 * 60
+
+type HolidayWatch = Awaited<ReturnType<typeof fetchUpcomingHolidays>>
+
+let cachedHolidayWatch: { value: HolidayWatch; expiresAt: number } | null = null
+let holidayWatchPromise: Promise<HolidayWatch> | null = null
 
 const HOLIDAY_COUNTRIES = [
   { code: "IT", label: "Italy" },
@@ -55,8 +63,8 @@ async function fetchWithTimeout(url: string) {
 
   try {
     const response = await fetch(url, {
-      cache: "no-store",
       headers: { Accept: "application/json" },
+      next: { revalidate: HOLIDAY_FETCH_REVALIDATE_SECONDS },
       signal: controller.signal,
     })
     if (!response.ok) throw new Error(`Request failed with status ${response.status}`)
@@ -76,18 +84,18 @@ async function fetchCountryHolidays(year: number, countryCode: string) {
 async function fetchUpcomingHolidays() {
   const fromDate = formatHktDateKey()
   const currentYear = yearFromDateKey(fromDate)
-  const countryResults = await Promise.allSettled(
+  const includeNextYear = fromDate >= `${currentYear}-12-27`
+  const years = includeNextYear ? [currentYear, currentYear + 1] : [currentYear]
+  const countryResults = await Promise.all(
     HOLIDAY_COUNTRIES.map(async (country) => {
-      const [currentYearResult, nextYearResult] = await Promise.allSettled([
-        fetchCountryHolidays(currentYear, country.code),
-        fetchCountryHolidays(currentYear + 1, country.code),
-      ])
-      const holidays = [
-        ...(currentYearResult.status === "fulfilled" ? currentYearResult.value : []),
-        ...(nextYearResult.status === "fulfilled" ? nextYearResult.value : []),
-      ]
+      const results = await Promise.allSettled(
+        years.map((year) => fetchCountryHolidays(year, country.code)),
+      )
+      const holidays = results.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : [],
+      )
 
-      return holidays
+      const items = holidays
         .map((holiday) => ({
           holiday,
           daysUntil: daysBetweenDateKeys(fromDate, holiday.date),
@@ -103,12 +111,18 @@ async function fetchUpcomingHolidays() {
           localName: holiday.localName || null,
           daysUntil,
         }))
+
+      return {
+        items,
+        failures: results.filter((result) => result.status === "rejected").length,
+        requests: results.length,
+      }
     }),
   )
 
-  const items = countryResults.flatMap((result) =>
-    result.status === "fulfilled" ? result.value : [],
-  )
+  const items = countryResults.flatMap((result) => result.items)
+  const failures = countryResults.reduce((total, result) => total + result.failures, 0)
+  const requests = countryResults.reduce((total, result) => total + result.requests, 0)
 
   items.sort((first, second) => {
     if (first.date !== second.date) return first.date.localeCompare(second.date)
@@ -120,21 +134,50 @@ async function fetchUpcomingHolidays() {
     fromDate,
     countries: HOLIDAY_COUNTRIES.map((country) => country.code).join(" "),
     items,
-    error: null,
+    error: failures === requests ? "Holiday service is temporarily unavailable." : null,
+  }
+}
+
+async function loadUpcomingHolidays() {
+  const currentDate = formatHktDateKey()
+  if (
+    cachedHolidayWatch &&
+    cachedHolidayWatch.value.fromDate === currentDate &&
+    cachedHolidayWatch.expiresAt > Date.now()
+  ) {
+    return { value: cachedHolidayWatch.value, cacheStatus: "hit" as const }
+  }
+  if (holidayWatchPromise) {
+    return { value: await holidayWatchPromise, cacheStatus: "deduped" as const }
+  }
+
+  const stale = cachedHolidayWatch?.value.fromDate === currentDate
+    ? cachedHolidayWatch.value
+    : null
+  holidayWatchPromise = fetchUpcomingHolidays()
+  try {
+    const value = await holidayWatchPromise
+    cachedHolidayWatch = { value, expiresAt: Date.now() + DASHBOARD_CACHE_MS }
+    return { value, cacheStatus: "miss" as const }
+  } catch (error) {
+    if (stale) return { value: stale, cacheStatus: "stale" as const }
+    throw error
+  } finally {
+    holidayWatchPromise = null
   }
 }
 
 export async function GET() {
+  const startedAt = Date.now()
   try {
     await requireSpcSession()
-    const holidays = await fetchUpcomingHolidays()
-    return NextResponse.json(
-      { holidays },
-      {
-        headers: {
-          "Cache-Control": "private, no-store",
-        },
-      },
+    const holidays = await loadUpcomingHolidays()
+    return timedJson(
+      "/api/spc/dashboard-watch",
+      startedAt,
+      { holidays: holidays.value },
+      { headers: { "Cache-Control": "private, no-store" } },
+      { cache: holidays.cacheStatus, returned: holidays.value.items.length },
     )
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {

@@ -7,11 +7,13 @@ import {
 import {
   deleteSpcSupplier,
   loadSpcSupplierDataset,
+  loadSpcSupplierOptions,
   saveSpcSupplierBarges,
   saveSpcSupplierContacts,
   saveSpcSupplier,
 } from "@/lib/spcSuppliers"
 import type { SaveSpcSupplierBargesInput, SaveSpcSupplierContactsInput, SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
+import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
 
@@ -33,15 +35,35 @@ async function requireSupplierView() {
   return session
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     await requireSupplierView()
+    const mode = new URL(request.url).searchParams.get("mode")
+    if (mode === "options") {
+      const records = await loadSpcSupplierOptions()
+      return timedJson(
+        "/api/spc/suppliers",
+        startedAt,
+        { records },
+        { headers: { "Cache-Control": "private, no-store" } },
+        { mode: "options", returned: records.length },
+      )
+    }
+
     const dataset = await loadSpcSupplierDataset()
-    return NextResponse.json(dataset, {
-      headers: {
-        "Cache-Control": "private, no-store",
+    return timedJson(
+      "/api/spc/suppliers",
+      startedAt,
+      dataset,
+      { headers: { "Cache-Control": "private, no-store" } },
+      {
+        mode: "full",
+        suppliers: dataset.counts.suppliers,
+        fixtureRows: dataset.counts.fixtureRows,
+        warnings: dataset.warnings?.length || 0,
       },
-    })
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load suppliers."
     return NextResponse.json({ message }, { status: statusForMessage(message) })

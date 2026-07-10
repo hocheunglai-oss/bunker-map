@@ -19,6 +19,7 @@ type AuditLogRecord = {
   recordLabel: string
   summary: string
   details: string[]
+  detailsLoaded?: boolean
   undoOfLogId: string | null
   undoneAt: string | null
   undoable: boolean
@@ -26,6 +27,7 @@ type AuditLogRecord = {
 
 type AuditResponse = {
   logs: AuditLogRecord[]
+  log?: AuditLogRecord
   pages: Array<{ id: string; label: string }>
   users: Array<{ value: string; label: string }>
   message?: string
@@ -48,6 +50,7 @@ export default function SpcAuditLogPage() {
   const [actor, setActor] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [undoingId, setUndoingId] = useState<string | null>(null)
   const [message, setMessage] = useState("")
 
@@ -122,6 +125,39 @@ export default function SpcAuditLogPage() {
   useEffect(() => {
     void loadLogs()
   }, [loadLogs])
+
+  useEffect(() => {
+    if (!authenticated || !selectedLog || selectedLog.detailsLoaded) return
+
+    let cancelled = false
+    const controller = new AbortController()
+    const loadDetails = async () => {
+      setDetailLoadingId(selectedLog.id)
+      try {
+        const response = await fetch(
+          `/api/spc/audit-logs?id=${encodeURIComponent(selectedLog.id)}`,
+          { cache: "no-store", signal: controller.signal },
+        )
+        const data = (await response.json()) as AuditResponse
+        if (!response.ok || !data.log || cancelled) return
+        setLogs((current) =>
+          current.map((log) => (log.id === data.log?.id ? data.log : log)),
+        )
+      } catch {
+        if (!cancelled && !controller.signal.aborted) {
+          setMessage("Failed to load SPC audit details.")
+        }
+      } finally {
+        if (!cancelled) setDetailLoadingId(null)
+      }
+    }
+
+    void loadDetails()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [authenticated, selectedLog])
 
   if (authLoading || !authenticated || !canView) {
     return <div className="spc-loading">Loading...</div>
@@ -202,11 +238,15 @@ export default function SpcAuditLogPage() {
             <div className="spc-audit-detail">
               <h3>{selectedLog.summary}</h3>
               <p>{selectedLog.pageLabel} · {selectedLog.displayOperation} · {formatDate(selectedLog.occurredAt)}</p>
-              <ul>
-                {selectedLog.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
+              {detailLoadingId === selectedLog.id ? (
+                <p className="spc-empty">Loading details...</p>
+              ) : (
+                <ul>
+                  {selectedLog.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           ) : (
             <p className="spc-empty">Select a record.</p>

@@ -74,6 +74,7 @@ export type SpcSupplierDataset = {
     bargeRows: number
     contactRows: number
   }
+  warnings?: string[]
 }
 
 export type SaveSpcSupplierInput = {

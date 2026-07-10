@@ -637,7 +637,7 @@ export default function SpcSuppliersPage() {
   const canView = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-suppliers", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-suppliers")
-  const records = dataset?.records || []
+  const records = useMemo(() => dataset?.records || [], [dataset])
   const searchValue = query.trim().toLowerCase()
 
   const traderOptions = useMemo(() => {
@@ -691,6 +691,7 @@ export default function SpcSuppliersPage() {
       const data = (await response.json()) as SupplierResponse
       if (!response.ok) throw new Error(data.message || "Failed to load supplier database.")
       setDataset(data)
+      setMessage((data.warnings || []).join(" "))
       if (requestedSupplier) {
         const target = requestedSupplier.toLowerCase()
         const match = data.records.find((record) =>

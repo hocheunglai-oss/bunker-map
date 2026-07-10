@@ -40,12 +40,15 @@ export default function SpcSystemHealthPage() {
   const canView = canAccessSpcPage(permissions, "spc-system-health", "view")
   const checks = useMemo(() => health?.checks || [], [health])
 
-  const loadHealth = useCallback(async () => {
+  const loadHealth = useCallback(async (forceRefresh = false) => {
     if (!authenticated || !canView) return
     setLoading(true)
     setMessage("")
     try {
-      const response = await fetch("/api/spc/system-health", { cache: "no-store" })
+      const response = await fetch(
+        forceRefresh ? "/api/spc/system-health?refresh=1" : "/api/spc/system-health",
+        { cache: "no-store" },
+      )
       const data = (await response.json()) as HealthResponse
       if (!response.ok) {
         setMessage(data.message || "Failed to load SPC system health.")
@@ -82,7 +85,7 @@ export default function SpcSystemHealthPage() {
       <section className="spc-panel">
         <div className="spc-panel-header">
           <h2>Overview</h2>
-          <button type="button" onClick={() => void loadHealth()} disabled={loading}>
+          <button type="button" onClick={() => void loadHealth(true)} disabled={loading}>
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>

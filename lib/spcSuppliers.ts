@@ -30,6 +30,9 @@ const BARGE_SHEET_NAME = "SUPPLIER BARGES"
 const CONTACTS_SHEET_GID = "927102689"
 const CONTACTS_SHEET_NAME = "CONTACTS"
 const SUPPLIER_OVERRIDE_STORE_KEY = "spc-supplier-overrides"
+const EXTERNAL_SHEET_CACHE_MS = 5 * 60 * 1000
+const EXTERNAL_SHEET_REVALIDATE_SECONDS = 5 * 60
+const EXTERNAL_SHEET_TIMEOUT_MS = 15_000
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 type SheetRow = Array<string | number | boolean | null | undefined>
@@ -115,6 +118,31 @@ function compactText(value: unknown) {
   return cleanText(value).replace(/\s+/g, " ").trim()
 }
 
+function createStaleCachedLoader<T>(loader: () => Promise<T>) {
+  let cached: { value: T; expiresAt: number } | null = null
+  let pending: Promise<T> | null = null
+
+  return async () => {
+    if (cached && cached.expiresAt > Date.now()) return cached.value
+    if (pending) return pending
+
+    pending = loader()
+      .then((value) => {
+        cached = { value, expiresAt: Date.now() + EXTERNAL_SHEET_CACHE_MS }
+        return value
+      })
+      .catch((error) => {
+        if (cached) return cached.value
+        throw error
+      })
+      .finally(() => {
+        pending = null
+      })
+
+    return pending
+  }
+}
+
 function requireEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing environment variable: ${name}`)
@@ -178,7 +206,10 @@ function parseCsv(csv: string): SheetRows {
 
 async function readSupplierSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}`
-  const response = await fetch(url, { cache: "no-store" })
+  const response = await fetch(url, {
+    next: { revalidate: EXTERNAL_SHEET_REVALIDATE_SECONDS },
+    signal: AbortSignal.timeout(EXTERNAL_SHEET_TIMEOUT_MS),
+  })
   if (!response.ok) throw new Error("Could not read supplier list from Google Sheets.")
   return parseCsv(await response.text())
 }
@@ -313,7 +344,10 @@ function parseBargeWorkbookSheet(xlsx: XlsxModule, sheet: XLSX.WorkSheet): Array
 
 async function readSupplierBargeSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${BARGE_SPREADSHEET_ID}/export?format=xlsx&gid=${BARGE_SHEET_GID}`
-  const response = await fetch(url, { cache: "no-store" })
+  const response = await fetch(url, {
+    next: { revalidate: EXTERNAL_SHEET_REVALIDATE_SECONDS },
+    signal: AbortSignal.timeout(EXTERNAL_SHEET_TIMEOUT_MS),
+  })
   if (!response.ok) throw new Error("Could not read supplier barge list from Google Sheets.")
   const xlsx = await import("xlsx")
   const workbook = xlsx.read(Buffer.from(await response.arrayBuffer()), {
@@ -571,7 +605,10 @@ function parseContactsWorkbookSheet(xlsx: XlsxModule, sheet: XLSX.WorkSheet): Ar
 
 async function readSupplierContactsSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${BARGE_SPREADSHEET_ID}/export?format=xlsx&gid=${CONTACTS_SHEET_GID}`
-  const response = await fetch(url, { cache: "no-store" })
+  const response = await fetch(url, {
+    next: { revalidate: EXTERNAL_SHEET_REVALIDATE_SECONDS },
+    signal: AbortSignal.timeout(EXTERNAL_SHEET_TIMEOUT_MS),
+  })
   if (!response.ok) throw new Error("Could not read supplier contacts from Google Sheets.")
   const xlsx = await import("xlsx")
   const workbook = xlsx.read(Buffer.from(await response.arrayBuffer()), {
@@ -585,6 +622,24 @@ async function readSupplierContactsSheet() {
   const sheet = sheetName ? workbook.Sheets[sheetName] : null
   if (!sheet) return []
   return parseContactsWorkbookSheet(xlsx, sheet)
+}
+
+const loadCachedSupplierSheet = createStaleCachedLoader(readSupplierSheet)
+const loadCachedSupplierBargeSheet = createStaleCachedLoader(readSupplierBargeSheet)
+const loadCachedSupplierContactsSheet = createStaleCachedLoader(readSupplierContactsSheet)
+
+async function loadOptionalSheetRows<T>(
+  label: string,
+  loader: () => Promise<T[]>,
+) {
+  try {
+    return { rows: await loader(), warning: null }
+  } catch {
+    return {
+      rows: [] as T[],
+      warning: `${label} is temporarily unavailable. Core supplier records are still shown.`,
+    }
+  }
 }
 
 function emptyInfo(row: SheetRow | undefined, rowNumber: number): SpcSupplierInfo {
@@ -1099,21 +1154,42 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
   }
 }
 
+export async function loadSpcSupplierOptions() {
+  const [rows, overrides] = await Promise.all([
+    loadCachedSupplierSheet(),
+    loadSupplierOverrides(),
+  ])
+  const records = buildSupplierRecords(rows)
+  applySupplierOverrides(records, overrides)
+
+  return Array.from(records.values())
+    .map((record) => ({
+      key: record.key,
+      name: record.name,
+      aliases: Array.from(record.aliases).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
-  const [rows, fixtureRows, activeUsers, overrides, bargeRows, contactRows] = await Promise.all([
-    readSupplierSheet(),
+  const [rows, fixtureRows, activeUsers, overrides, bargeSource, contactSource] = await Promise.all([
+    loadCachedSupplierSheet(),
     loadCompletedFixtures(),
     loadActiveSpcUsers(),
     loadSupplierOverrides(),
-    readSupplierBargeSheet(),
-    readSupplierContactsSheet(),
+    loadOptionalSheetRows("Supplier barge data", loadCachedSupplierBargeSheet),
+    loadOptionalSheetRows("Supplier contact data", loadCachedSupplierContactsSheet),
   ])
   const records = buildSupplierRecords(rows)
   applySupplierOverrides(records, overrides)
   const legacyFixtures = attachFixtures(records, fixtureRows, activeUsers)
-  attachBarges(records, bargeRows, overrides)
-  attachContacts(records, contactRows, overrides)
-  return finaliseDataset(records, legacyFixtures)
+  attachBarges(records, bargeSource.rows, overrides)
+  attachContacts(records, contactSource.rows, overrides)
+  const dataset = finaliseDataset(records, legacyFixtures)
+  const warnings = [bargeSource.warning, contactSource.warning].filter(
+    (warning): warning is string => Boolean(warning),
+  )
+  return warnings.length ? { ...dataset, warnings } : dataset
 }
 
 export async function saveSpcSupplier(input: SaveSpcSupplierInput, context: SpcAuditContext) {

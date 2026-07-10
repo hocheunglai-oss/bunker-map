@@ -424,21 +424,8 @@ export async function listSpcFixtures(session: SpcSession, limit = 5000) {
     .select(`
       *,
       enquiry:spc_enquiries!spc_fixtures_enquiry_id_fkey(
-        id,
         enquiry_number,
-        title,
-        vessel_name,
-        port,
-        product,
-        quantity,
-        delivery_date,
-        supplier_name,
-        status,
-        notes,
-        created_by_username,
-        created_by_display_name,
-        created_at,
-        updated_at
+        title
       )
     `)
     .order("created_at", { ascending: false })

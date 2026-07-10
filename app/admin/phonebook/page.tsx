@@ -1736,13 +1736,13 @@ export default function PhonebookPage() {
           if (selectedId === entry.after.id) setSelectedId("")
           await syncPhoneContacts(false, null, { deleteContactIds: [entry.after.id], successMessage: "Undone and synced." })
         } else if (entry.action === "delete" && entry.before) {
-          const { data, error } = await supabase.from("phonebook_contacts").insert(entry.before).select("*").single()
+          const { data, error } = await supabase.from("phonebook_contacts").insert(entry.before as Contact).select("*").single()
           if (error || !data) throw error || new Error("Unable to restore contact.")
           refreshContactCachesInBackground()
           setContacts((prev) => [data as Contact, ...prev])
           await syncPhoneContacts(false, [data.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but CardDAV sync failed." })
         } else if (entry.action === "update" && entry.before && entry.after) {
-          const { error } = await supabase.from("phonebook_contacts").update(entry.before).eq("id", entry.after.id)
+          const { error } = await supabase.from("phonebook_contacts").update(entry.before as Contact).eq("id", entry.after.id)
           if (error) throw error
           refreshContactCachesInBackground()
           setContacts((prev) => prev.map((item) => (item.id === entry.after!.id ? (entry.before as Contact) : item)))
@@ -1760,7 +1760,7 @@ export default function PhonebookPage() {
           setCompanies((prev) => prev.filter((item) => item.id !== entry.after!.id))
           if (selectedCompany === (entry.after as Company).name) setSelectedCompany("")
         } else if (entry.action === "delete" && entry.before) {
-          const { data, error } = await supabase.from("phonebook_companies").insert(entry.before).select("*").single()
+          const { data, error } = await supabase.from("phonebook_companies").insert(entry.before as Company).select("*").single()
           if (error || !data) throw error || new Error("Unable to restore company.")
           refreshContactCachesInBackground()
           setCompanies((prev) => [...prev, data as Company].sort((a, b) => a.name.localeCompare(b.name)))

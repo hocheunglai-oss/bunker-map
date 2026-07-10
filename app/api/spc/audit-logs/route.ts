@@ -3,14 +3,17 @@ import { requireSpcPagePermission } from "@/lib/spcAuth"
 import {
   canUndoAuditLogRecord,
   getAuditLogRecord,
+  isUserAuditRecord,
   listAuditLogs,
   matchesAuditActor,
+  matchesAuditScope,
   presentAuditLogs,
   type PresentedAuditLogRecord,
   undoAuditLog,
 } from "@/lib/auditLog"
 import { listSpcAuditUserOptions } from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
+import { timedJson } from "@/lib/serverTiming"
 
 const PAGE_TABLES: Record<string, string[]> = {
   "spc-user-management": ["spc_users", "office_calendar_store"],
@@ -20,6 +23,10 @@ const PAGE_TABLES: Record<string, string[]> = {
   "spc-statistics": ["spc_enquiries", "spc_fixtures"],
   "spc-suppliers": ["spc_suppliers", "office_calendar_store"],
 }
+
+const AUDIT_USER_CACHE_MS = 30_000
+let auditUserMapCache: { value: Map<string, string>; expiresAt: number } | null = null
+let auditUserMapPromise: Promise<Map<string, string>> | null = null
 
 function rawOperationsForDisplay(operation: string | undefined) {
   if (!operation || operation === "ALL") return undefined
@@ -68,10 +75,24 @@ function shouldOfferHistoricalActor(record: PresentedAuditLogRecord, usersByUser
 }
 
 async function loadAuditUserMap() {
-  const users = await listSpcAuditUserOptions()
-  return new Map(
-    users.map((user) => [user.username.trim().toLowerCase(), user.displayName.trim() || user.username]),
-  )
+  if (auditUserMapCache && auditUserMapCache.expiresAt > Date.now()) {
+    return auditUserMapCache.value
+  }
+  if (auditUserMapPromise) return auditUserMapPromise
+
+  auditUserMapPromise = listSpcAuditUserOptions()
+    .then((users) => {
+      const value = new Map(
+        users.map((user) => [user.username.trim().toLowerCase(), user.displayName.trim() || user.username]),
+      )
+      auditUserMapCache = { value, expiresAt: Date.now() + AUDIT_USER_CACHE_MS }
+      return value
+    })
+    .finally(() => {
+      auditUserMapPromise = null
+    })
+
+  return auditUserMapPromise
 }
 
 function buildAuditUserFilters(
@@ -98,7 +119,7 @@ function buildAuditUserFilters(
   return Array.from(userMap.values()).sort((a, b) => a.label.localeCompare(b.label))
 }
 
-function presentAuditLogForClient(record: PresentedAuditLogRecord) {
+function presentAuditLogForClient(record: PresentedAuditLogRecord, detailsLoaded = false) {
   return {
     id: record.id,
     occurredAt: record.occurredAt,
@@ -109,7 +130,8 @@ function presentAuditLogForClient(record: PresentedAuditLogRecord) {
     pageLabel: record.pageLabel,
     recordLabel: record.recordLabel,
     summary: record.summary,
-    details: record.details,
+    details: detailsLoaded ? record.details : [],
+    detailsLoaded,
     undoOfLogId: record.undoOfLogId,
     undoneAt: record.undoneAt,
     undoable: record.undoable,
@@ -117,16 +139,44 @@ function presentAuditLogForClient(record: PresentedAuditLogRecord) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     const session = await requireSpcPagePermission("spc-audit-log", "view")
     const url = new URL(request.url)
+    const requestedId = url.searchParams.get("id")?.trim()
+    if (requestedId) {
+      const [record, usersByUsername] = await Promise.all([
+        getAuditLogRecord(requestedId),
+        loadAuditUserMap(),
+      ])
+      if (!record || !isUserAuditRecord(record) || !matchesAuditScope(record, "spc")) {
+        return NextResponse.json({ message: "Audit log not found." }, { status: 404 })
+      }
+
+      const [presented] = normalizeSpcAuditActors(
+        await presentAuditLogs([record], SPC_PAGE_DEFINITIONS),
+        usersByUsername,
+      )
+      if (!presented?.pageId.startsWith("spc-")) {
+        return NextResponse.json({ message: "Audit log not found." }, { status: 404 })
+      }
+
+      return timedJson(
+        "/api/spc/audit-logs",
+        startedAt,
+        { log: presentAuditLogForClient(presented, true) },
+        undefined,
+        { mode: "detail" },
+      )
+    }
+
     const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 100), 1), 150)
     const pageId = url.searchParams.get("page")
     const operation = url.searchParams.get("operation")?.toUpperCase()
     const actor = url.searchParams.get("actor")
     const tableNames = pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
     const operations = rawOperationsForDisplay(operation)
-    const candidateLimit = tableNames ? Math.min(requestedLimit * 2, 250) : requestedLimit
+    const candidateLimit = Math.min(requestedLimit * (tableNames ? 2 : 3), 500)
     const [records, usersByUsername] = await Promise.all([
       listAuditLogs({
         limit: candidateLimit,
@@ -134,6 +184,7 @@ export async function GET(request: Request) {
         operations: operations ? [...operations] : undefined,
         actorId: actor && actor !== "all" ? actor : undefined,
         scope: "spc",
+        includeRows: false,
       }),
       loadAuditUserMap(),
     ])
@@ -147,13 +198,19 @@ export async function GET(request: Request) {
       .filter((record) => !operation || operation === "ALL" || record.displayOperation === operation)
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
-      .map(presentAuditLogForClient)
+      .map((record) => presentAuditLogForClient(record, false))
 
-    return NextResponse.json({
-      logs,
-      pages: SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
-      users: buildAuditUserFilters(session, usersByUsername, presented),
-    })
+    return timedJson(
+      "/api/spc/audit-logs",
+      startedAt,
+      {
+        logs,
+        pages: SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
+        users: buildAuditUserFilters(session, usersByUsername, presented),
+      },
+      undefined,
+      { mode: "index", returned: logs.length, candidateLimit },
+    )
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
@@ -181,14 +238,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Missing audit log id." }, { status: 400 })
     }
     const target = await getAuditLogRecord(payload.id)
-    if (!target) {
+    if (!target || !isUserAuditRecord(target) || !matchesAuditScope(target, "spc")) {
       return NextResponse.json({ message: "Audit log was not found." }, { status: 404 })
     }
     if (!canUndoAuditLogRecord(target)) {
       return NextResponse.json({ message: "This SPC supplier change must be edited from the supplier database." }, { status: 400 })
     }
 
-    const undoLogId = await undoAuditLog(payload.id, session)
+    const undoLogId = await undoAuditLog(payload.id, {
+      username: session.username ? `spc:${session.username}` : null,
+      displayName: session.displayName,
+    })
     return NextResponse.json({ success: true, undoLogId })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {

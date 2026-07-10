@@ -43,7 +43,7 @@ type SpcStatisticsFixtureRow = {
 type SpcStatisticsAuditRow = {
   actor_id: string | null
   request_context: Record<string, unknown> | null
-  after_row: Record<string, unknown> | null
+  enquiry_number: string | null
 }
 
 export type SpcChartPoint = {
@@ -135,7 +135,7 @@ function isSpcBuyerEnquiryAudit(row: SpcStatisticsAuditRow) {
 }
 
 function auditEnquiryNumber(row: SpcStatisticsAuditRow) {
-  return cleanText(row.after_row?.enquiry_number)
+  return cleanText(row.enquiry_number)
 }
 
 function hongKongYear() {
@@ -428,10 +428,12 @@ async function loadSpcBuyerEnquiryNumbers(
   while (true) {
     const { data, error } = await supabase
       .from("audit_logs")
-      .select("actor_id,request_context,after_row")
+      .select("actor_id,request_context,enquiry_number:after_row->>enquiry_number")
       .eq("table_schema", "public")
       .eq("table_name", "spc_enquiries")
       .eq("operation", "INSERT")
+      .like("actor_id", "spc:%")
+      .contains("request_context", { pageId: "spc-buyer-enquiries" })
       .order("occurred_at", { ascending: false })
       .range(from, from + pageSize - 1)
 
@@ -469,7 +471,6 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   ])
   const usersByUsername = userMap(users)
   const activeTraders = createActiveSpcTraderResolver(users)
-  const selectedFixtures = fixtures.filter((fixture) => fixtureYear(fixture) === selectedYear)
   const nativeEnquiries = enquiries.filter((enquiry) => (
     !isImportedEnquiry(enquiry.enquiry_number)
     && spcBuyerEnquiryNumbers.has(cleanText(enquiry.enquiry_number))
