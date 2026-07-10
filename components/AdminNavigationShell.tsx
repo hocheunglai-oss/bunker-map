@@ -13,6 +13,7 @@ import {
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
+  isExternalAdminPage,
   isAdminRole,
   type AdminPageDefinition,
   type AdminPagePermission,
@@ -124,6 +125,15 @@ function AdminPageIcon({ page }: { page: AdminPageDefinition }) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M8 4.5h8M9 3.5h6v3H9v-3ZM6 6h12v14H6V6Z" />
         <path d="M8.8 11h6.4M8.8 14h6.4M8.8 17h4.2" />
+      </svg>
+    )
+  }
+
+  if (page.id === "salesforce-data") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 17.5h10c1.7 0 3-1.3 3-3 0-1.5-1-2.8-2.4-3.1A5 5 0 0 0 8.1 9.1 3.8 3.8 0 0 0 7 17.5Z" />
+        <path d="M9 13.7c0 1 1.3 1.8 3 1.8s3-.8 3-1.8-1.3-1.8-3-1.8-3 .8-3 1.8ZM9 13.7v2.8c0 1 1.3 1.8 3 1.8s3-.8 3-1.8v-2.8" />
       </svg>
     )
   }
@@ -263,6 +273,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
         if (bPriority === -1) return -1
         return aPriority - bPriority
       })
+      .filter((page) => !isExternalAdminPage(page))
       .map((page) => page.path)
       .filter((path) => path !== pathname)
 
@@ -398,11 +409,37 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       <div className={`fc-admin-sidebar-permission is-${permission}`}>
         <div className="fc-admin-sidebar-link-list">
           {entries.map(({ page }) => {
+            const external = isExternalAdminPage(page)
             const active =
-              pathname === page.path ||
-              (page.matchPrefixes || []).some(
-                (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+              !external &&
+              (pathname === page.path ||
+                (page.matchPrefixes || []).some(
+                  (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+                ))
+            const content = (
+              <span className="fc-admin-sidebar-link-main">
+                <span className="fc-admin-sidebar-page-icon">
+                  <AdminPageIcon page={page} />
+                </span>
+                <span>{page.label}</span>
+              </span>
+            )
+            const title = `${page.label} (${permission === "edit" ? "Edit access" : "View access"})`
+
+            if (external) {
+              return (
+                <a
+                  key={page.id}
+                  href={page.path}
+                  className="fc-admin-sidebar-link"
+                  title={title}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {content}
+                </a>
               )
+            }
 
             return (
               <Link
@@ -410,14 +447,9 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                 href={page.path}
                 className={`fc-admin-sidebar-link${active ? " is-active" : ""}`}
                 aria-current={active ? "page" : undefined}
-                title={`${page.label} (${permission === "edit" ? "Edit access" : "View access"})`}
+                title={title}
               >
-                <span className="fc-admin-sidebar-link-main">
-                  <span className="fc-admin-sidebar-page-icon">
-                    <AdminPageIcon page={page} />
-                  </span>
-                  <span>{page.label}</span>
-                </span>
+                {content}
               </Link>
             )
           })}

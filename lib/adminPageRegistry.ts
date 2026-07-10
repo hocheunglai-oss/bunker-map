@@ -1,5 +1,6 @@
 import {
   ADMIN_PAGE_DEFINITIONS,
+  isExternalAdminPage,
   type AdminPageDefinition,
 } from "@/lib/adminPages"
 
@@ -8,6 +9,7 @@ export function getAdminPageByPathFromPages(
   pages: AdminPageDefinition[] = ADMIN_PAGE_DEFINITIONS
 ) {
   return pages.find((page) => {
+    if (isExternalAdminPage(page)) return false
     if (pathname === page.path) return true
     return (page.matchPrefixes || []).some(
       (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
@@ -29,11 +31,18 @@ export function normaliseAdminPageDefinitions(value: unknown): AdminPageDefiniti
     if (!page || typeof page !== "object") return false
 
     const candidate = page as Partial<AdminPageDefinition>
+    const pathIsLocal = typeof candidate.path === "string" && candidate.path.startsWith("/admin/")
+    const pathIsExternal =
+      candidate.external === true &&
+      typeof candidate.path === "string" &&
+      /^https?:\/\//i.test(candidate.path)
+
     return (
       typeof candidate.id === "string" &&
       typeof candidate.label === "string" &&
       typeof candidate.path === "string" &&
-      candidate.path.startsWith("/admin/") &&
+      (typeof candidate.external === "undefined" || typeof candidate.external === "boolean") &&
+      (pathIsLocal || pathIsExternal) &&
       (candidate.group === "reports" ||
         candidate.group === "trading" ||
         candidate.group === "contacts" ||

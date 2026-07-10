@@ -12,6 +12,7 @@ export type AdminPageDefinition = {
   group: "reports" | "trading" | "contacts" | "office" | "management"
   path: string
   matchPrefixes?: string[]
+  external?: boolean
 }
 
 export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
@@ -51,6 +52,13 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     label: "ENQUIRY WORKSHEET",
     group: "trading",
     path: "/admin/enquiryworksheet",
+  },
+  {
+    id: "salesforce-data",
+    label: "SALESFORCE DATA",
+    group: "trading",
+    path: "https://fcos.fcuno.com/",
+    external: true,
   },
   {
     id: "phonebook",
@@ -177,8 +185,13 @@ export function canAccessAdminPage(
   return ADMIN_PERMISSION_RANK[permissions[pageId] || "none"] >= ADMIN_PERMISSION_RANK[access]
 }
 
+export function isExternalAdminPage(page: Pick<AdminPageDefinition, "path" | "external">) {
+  return page.external === true || /^https?:\/\//i.test(page.path)
+}
+
 export function getAdminPageByPath(pathname: string) {
   return ADMIN_PAGE_DEFINITIONS.find((page) => {
+    if (isExternalAdminPage(page)) return false
     if (pathname === page.path) return true
     return (page.matchPrefixes || []).some(
       (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
