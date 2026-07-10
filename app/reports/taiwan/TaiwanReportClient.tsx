@@ -110,6 +110,15 @@ function arrow(change: number | null) {
   return change > 0 ? " ▲" : " ▼"
 }
 
+function formatHongKongToday() {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Hong_Kong",
+  }).format(new Date()).replace(/,/g, "")
+}
+
 function isHsfoUnavailablePort(portName: string) {
   return ["Keelung", "Taichung", "Hualien", "Suao"].includes(portName)
 }
@@ -165,6 +174,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
   const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
   const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
   const showOperationalNotice = operationalNotice.active && operationalNotice.message.trim().length > 0
+  const displayReportDate = showOperationalNotice ? formatHongKongToday() : reportDate
 
   useEffect(() => {
     let cancelled = false
@@ -298,11 +308,41 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
                 }}
               >
-                Report Date: {reportDate || "-"}
+                Report Date: {displayReportDate || "-"}
               </span>
             </div>
           </div>
         </div>
+
+        {showOperationalNotice && (
+          <div
+            style={{
+              ...cardStyle,
+              padding: "15px 16px",
+              marginBottom: "20px",
+              border: "1px solid rgba(255, 178, 84, 0.34)",
+              background:
+                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.22), transparent 34%), linear-gradient(180deg, rgba(75, 45, 16, 0.8) 0%, rgba(23, 23, 28, 0.84) 100%)",
+              boxShadow: "0 18px 42px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(255, 178, 84, 0.08)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "0.14em",
+                color: "#ffd59a",
+                marginBottom: "7px",
+                fontWeight: 800,
+              }}
+            >
+              {operationalNotice.title.trim() || "Operational Notice"}
+            </div>
+            <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700, whiteSpace: "pre-line" }}>
+              {operationalNotice.message.trim()}
+            </div>
+          </div>
+        )}
 
         <div style={{ ...cardStyle, overflow: "hidden", marginBottom: "24px" }}>
           <div style={{ overflowX: "auto" }}>
@@ -483,36 +523,6 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
             </table>
           </div>
         </div>
-
-        {showOperationalNotice && (
-          <div
-            style={{
-              ...cardStyle,
-              padding: "15px 16px",
-              marginBottom: "20px",
-              border: "1px solid rgba(255, 178, 84, 0.34)",
-              background:
-                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.22), transparent 34%), linear-gradient(180deg, rgba(75, 45, 16, 0.8) 0%, rgba(23, 23, 28, 0.84) 100%)",
-              boxShadow: "0 18px 42px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(255, 178, 84, 0.08)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "10px",
-                textTransform: "uppercase",
-                letterSpacing: "0.14em",
-                color: "#ffd59a",
-                marginBottom: "7px",
-                fontWeight: 800,
-              }}
-            >
-              {operationalNotice.title.trim() || "Operational Notice"}
-            </div>
-            <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700, whiteSpace: "pre-line" }}>
-              {operationalNotice.message.trim()}
-            </div>
-          </div>
-        )}
 
         {specialNotice.trim() && (
           <div
