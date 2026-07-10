@@ -4,12 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import {
+  buildTaiwanOperationalNoticeMessage,
   emptyTaiwanOperationalNotice,
   normaliseTaiwanOperationalNotice,
   parseTaiwanOperationalNotice,
   serializeTaiwanOperationalNotice,
   TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
-  taiwanTyphoonNoticeTemplate,
   type TaiwanOperationalNotice,
 } from "@/lib/taiwanOperationalNotice"
 
@@ -70,6 +70,7 @@ export default function AdminRemarks() {
   const [operationalNoticeDirty, setOperationalNoticeDirty] = useState<boolean>(false)
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const hasUnsavedChanges = isDirty || noticeDirty || operationalNoticeDirty
+  const operationalNoticePreview = buildTaiwanOperationalNoticeMessage(operationalNotice)
 
   useEffect(() => {
     const loadRemark = async () => {
@@ -173,12 +174,6 @@ export default function AdminRemarks() {
 
   function updateOperationalNotice(next: Partial<TaiwanOperationalNotice>) {
     setOperationalNotice((prev) => normaliseTaiwanOperationalNotice({ ...prev, ...next }))
-    setMessage("")
-    setOperationalNoticeDirty(true)
-  }
-
-  function applyTyphoonTemplate() {
-    setOperationalNotice(taiwanTyphoonNoticeTemplate)
     setMessage("")
     setOperationalNoticeDirty(true)
   }
@@ -297,24 +292,11 @@ export default function AdminRemarks() {
                   Operational Notice
                 </div>
                 <div style={{ marginTop: "4px", color: "var(--fc-admin-warning-text)", fontSize: "12px" }}>
-                  When active, Taiwan report Today prices show - and Change shows NA.
+                  Input typhoon name and expected reopen date. The report uses the fixed typhoon notice template.
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button
-                  onClick={applyTyphoonTemplate}
-                  style={{
-                    ...pillButtonStyle,
-                    padding: "8px 12px",
-                    border: "1px solid var(--fc-admin-warning-border)",
-                    background: "var(--fc-admin-warning-bg)",
-                    color: "var(--fc-admin-warning-text)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Use Typhoon Template
-                </button>
                 <button
                   onClick={clearOperationalNotice}
                   style={{
@@ -351,29 +333,51 @@ export default function AdminRemarks() {
               Show On Taiwan Report
             </label>
 
-            <input
-              style={{
-                ...textareaStyle,
-                minHeight: "auto",
-                padding: "12px 14px",
-                border: "1px solid var(--fc-admin-warning-border)",
-                background: "var(--fc-admin-warning-bg)",
-              }}
-              value={operationalNotice.title}
-              onChange={(event) => updateOperationalNotice({ title: event.target.value })}
-              placeholder="Notice title"
-            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+              <label style={{ display: "grid", gap: "7px", color: "var(--fc-admin-warning-text)", fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Typhoon Name
+                <input
+                  style={{
+                    ...textareaStyle,
+                    minHeight: "auto",
+                    padding: "12px 14px",
+                    border: "1px solid var(--fc-admin-warning-border)",
+                    background: "var(--fc-admin-warning-bg)",
+                  }}
+                  value={operationalNotice.typhoonName}
+                  onChange={(event) => updateOperationalNotice({ typhoonName: event.target.value })}
+                  placeholder="Bavi"
+                />
+              </label>
 
-            <textarea
+              <label style={{ display: "grid", gap: "7px", color: "var(--fc-admin-warning-text)", fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Expected Reopen Date
+                <input
+                  style={{
+                    ...textareaStyle,
+                    minHeight: "auto",
+                    padding: "12px 14px",
+                    border: "1px solid var(--fc-admin-warning-border)",
+                    background: "var(--fc-admin-warning-bg)",
+                  }}
+                  value={operationalNotice.expectedReopenDate}
+                  onChange={(event) => updateOperationalNotice({ expectedReopenDate: event.target.value })}
+                  placeholder="next Monday, 13 Jul"
+                />
+              </label>
+            </div>
+
+            <div
               style={{
                 ...textareaStyle,
+                minHeight: "132px",
                 border: "1px solid var(--fc-admin-warning-border)",
                 background: "var(--fc-admin-warning-bg)",
+                whiteSpace: "pre-line",
               }}
-              value={operationalNotice.message}
-              onChange={(event) => updateOperationalNotice({ message: event.target.value })}
-              placeholder="Write the operational notice..."
-            />
+            >
+              {operationalNoticePreview || "Preview will appear after both variables are entered."}
+            </div>
           </div>
 
           <div

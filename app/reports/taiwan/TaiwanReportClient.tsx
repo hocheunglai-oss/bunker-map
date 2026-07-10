@@ -6,6 +6,10 @@ import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import {
+  buildTaiwanOperationalNoticeMessage,
+  isTaiwanOperationalNoticeReady,
+} from "@/lib/taiwanOperationalNotice"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -173,7 +177,8 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
   const [operationalNotice, setOperationalNotice] = useState(initialData.operationalNotice)
   const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
   const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
-  const showOperationalNotice = operationalNotice.active && operationalNotice.message.trim().length > 0
+  const showOperationalNotice = isTaiwanOperationalNoticeReady(operationalNotice)
+  const operationalNoticeMessage = buildTaiwanOperationalNoticeMessage(operationalNotice)
   const displayReportDate = showOperationalNotice ? formatHongKongToday() : reportDate
 
   useEffect(() => {
@@ -336,10 +341,10 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                 fontWeight: 800,
               }}
             >
-              {operationalNotice.title.trim() || "Operational Notice"}
+              Typhoon Notice
             </div>
             <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700, whiteSpace: "pre-line" }}>
-              {operationalNotice.message.trim()}
+              {operationalNoticeMessage}
             </div>
           </div>
         )}
