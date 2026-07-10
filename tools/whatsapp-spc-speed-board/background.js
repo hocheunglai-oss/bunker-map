@@ -1,8 +1,11 @@
 const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
 const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
 const CRUDE_CACHE_TTL_MS = 15000
+const SPC_ENQUIRY_LIMIT = 160
 
 let crudeCache = { at: 0, payload: null }
+let enquiryCache = { payload: null, cursor: "" }
+let enquiryPromise = null
 
 function chromeCall(invoke) {
   return new Promise((resolve, reject) => {
@@ -152,6 +155,63 @@ async function fetchCrudeWatch() {
   return payload
 }
 
+function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT) {
+  const byId = new Map()
+  ;[...(current || []), ...(changes || [])].forEach((enquiry) => {
+    const id = String(enquiry?.id || "")
+    if (id) byId.set(id, enquiry)
+  })
+
+  return Array.from(byId.values())
+    .sort((first, second) => {
+      const dateOrder = String(second.createdAt || "").localeCompare(String(first.createdAt || ""))
+      return dateOrder || String(first.id || "").localeCompare(String(second.id || ""))
+    })
+    .slice(0, limit)
+}
+
+function latestEnquiryCursor(enquiries, fallback = "") {
+  return (enquiries || []).reduce(
+    (latest, enquiry) => !latest || Date.parse(enquiry?.updatedAt || "") > Date.parse(latest)
+      ? String(enquiry.updatedAt)
+      : latest,
+    fallback,
+  )
+}
+
+async function fetchSpcEnquiries() {
+  if (enquiryPromise) return enquiryPromise
+
+  const incremental = Array.isArray(enquiryCache.payload) && Boolean(enquiryCache.cursor)
+  const url = incremental
+    ? `${SPC_ENQUIRIES_URL}&updatedAfter=${encodeURIComponent(enquiryCache.cursor)}`
+    : SPC_ENQUIRIES_URL
+
+  enquiryPromise = fetch(url, {
+    cache: "no-store",
+    credentials: "include",
+  })
+    .then(async (response) => {
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.message || `SPC enquiries failed: ${response.status}`)
+      }
+
+      const changes = Array.isArray(data.enquiries) ? data.enquiries : []
+      const payload = incremental
+        ? mergeSpcEnquiries(enquiryCache.payload, changes)
+        : mergeSpcEnquiries([], changes)
+      const cursor = String(data.cursor || latestEnquiryCursor(changes, enquiryCache.cursor))
+      enquiryCache = { payload, cursor }
+      return payload
+    })
+    .finally(() => {
+      enquiryPromise = null
+    })
+
+  return enquiryPromise
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -243,17 +303,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type !== "load-spc-enquiries") return false
 
-  fetch(SPC_ENQUIRIES_URL, {
-    cache: "no-store",
-    credentials: "include",
-  })
-    .then(async (response) => {
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        throw new Error(data.message || `SPC enquiries failed: ${response.status}`)
-      }
-      sendResponse({ ok: true, enquiries: Array.isArray(data.enquiries) ? data.enquiries : [] })
-    })
+  fetchSpcEnquiries()
+    .then((enquiries) => sendResponse({ ok: true, enquiries }))
     .catch((error) => {
       sendResponse({
         ok: false,

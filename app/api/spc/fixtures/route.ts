@@ -7,6 +7,8 @@ import {
   type SpcFixtureInput,
 } from "@/lib/spcFixtures"
 import { listSpcUserReferenceOptions } from "@/lib/spcUsers"
+import { loadSpcSupplierOptions } from "@/lib/spcSuppliers"
+import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
 
@@ -46,20 +48,25 @@ function fixtureInput(source: Record<string, unknown>): SpcFixtureInput {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     const session = await requireSpcPagePermission("spc-fixtures", "view")
     const limit = Number(new URL(request.url).searchParams.get("limit") || 5000)
-    const [fixtures, users] = await Promise.all([
+    const [fixtures, users, supplierRecords] = await Promise.all([
       listSpcFixtures(session, limit),
       listSpcUserReferenceOptions(),
+      loadSpcSupplierOptions(),
     ])
-    return NextResponse.json(
-      { fixtures, users },
+    return timedJson(
+      "/api/spc/fixtures",
+      startedAt,
+      { fixtures, users, supplierRecords },
       {
         headers: {
           "Cache-Control": "private, no-store",
         },
       },
+      { fixtures: fixtures.length, supplierRecords: supplierRecords.length, users: users.length },
     )
   } catch (error) {
     return errorResponse(error, "Failed to load SPC fixtures.")

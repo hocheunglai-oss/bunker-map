@@ -47,6 +47,7 @@ type SupplierTrader = {
 
 type EnquiriesResponse = {
   enquiries?: SpcEnquiry[]
+  supplierTraders?: SupplierTrader[]
   message?: string
 }
 
@@ -420,28 +421,17 @@ export default function SpcEnquiriesPage() {
     if (!canView) return
     setLoading(true)
     try {
-      const response = await fetch("/api/spc/enquiries?limit=200", { cache: "no-store" })
+      const response = await fetch("/api/spc/enquiries?limit=200&bootstrap=1", { cache: "no-store" })
       const data = (await response.json()) as EnquiriesResponse
       if (!response.ok) throw new Error(data.message || "Failed to load enquiries.")
       setEnquiries(data.enquiries || [])
+      if (Array.isArray(data.supplierTraders)) setSupplierTraders(data.supplierTraders)
     } catch (error) {
       reportEnquiryError(error, "Failed to load enquiries.")
     } finally {
       setLoading(false)
     }
   }, [canView])
-
-  const loadSupplierTraders = useCallback(async () => {
-    if (!canEdit) return
-    try {
-      const response = await fetch("/api/spc/supplier-traders", { cache: "no-store" })
-      const data = (await response.json()) as { supplierTraders?: SupplierTrader[]; message?: string }
-      if (!response.ok) throw new Error(data.message || "Failed to load supplier traders.")
-      setSupplierTraders(data.supplierTraders || [])
-    } catch (error) {
-      reportEnquiryError(error, "Failed to load supplier traders.")
-    }
-  }, [canEdit])
 
   const loadParserReportCount = useCallback(async () => {
     if (!canView) {
@@ -450,7 +440,7 @@ export default function SpcEnquiriesPage() {
     }
 
     try {
-      const response = await fetch("/api/parser-reports?source=spc", { cache: "no-store" })
+      const response = await fetch("/api/parser-reports?source=spc&summary=1", { cache: "no-store" })
       const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
       if (!response.ok) throw new Error("Unable to load parser reports.")
       setParserReportCount(
@@ -477,10 +467,6 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     void loadEnquiries()
   }, [loadEnquiries])
-
-  useEffect(() => {
-    void loadSupplierTraders()
-  }, [loadSupplierTraders])
 
   useEffect(() => {
     void loadParserReportCount()

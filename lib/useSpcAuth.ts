@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { createContext, createElement, useContext, useEffect, useState } from "react"
+import type { ReactNode } from "react"
 import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
 
 type SpcAuthState = {
@@ -25,6 +26,8 @@ type SpcSessionPayload = {
   permissions?: SpcPagePermissionMap
   pages?: SpcPageDefinition[]
 }
+
+const SpcAuthContext = createContext<SpcAuthState | null>(null)
 
 let sharedSessionPromise: Promise<SpcSessionPayload> | null = null
 let sharedSessionResult: { data: SpcSessionPayload; loadedAt: number } | null = null
@@ -119,7 +122,7 @@ function readCachedSpcActor(): SpcSessionPayload | null {
   }
 }
 
-export function useSpcAuth(): SpcAuthState {
+function useSpcAuthState(): SpcAuthState {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
   const [username, setUsername] = useState<string | null>(null)
@@ -214,4 +217,15 @@ export function useSpcAuth(): SpcAuthState {
   }, [])
 
   return { loading, authenticated, username, displayName, role, office, mustChangePassword, permissions, pages }
+}
+
+export function SpcAuthProvider({ children }: { children: ReactNode }) {
+  const state = useSpcAuthState()
+  return createElement(SpcAuthContext.Provider, { value: state }, children)
+}
+
+export function useSpcAuth(): SpcAuthState {
+  const state = useContext(SpcAuthContext)
+  if (!state) throw new Error("useSpcAuth must be used within SpcAuthProvider.")
+  return state
 }

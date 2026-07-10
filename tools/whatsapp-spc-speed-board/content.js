@@ -108,6 +108,13 @@
     }
   }
 
+  function refreshVisibleBoard() {
+    if (document.visibilityState === "hidden") return
+    safeRun(loadEnquiries)
+    safeRun(loadCrudeWatch)
+    safeRun(refreshUnreadIndicators)
+  }
+
   function runtimeLastErrorMessage() {
     try {
       return chrome.runtime.lastError?.message || ""
@@ -1786,9 +1793,15 @@
     safeRun(loadCrudeWatch)
     safeRun(refreshUnreadIndicators)
     window.setTimeout(() => safeRun(trySendPending), 650)
-    unreadTimer = window.setInterval(() => safeRun(refreshUnreadIndicators), 1800)
-    enquiryTimer = window.setInterval(() => safeRun(loadEnquiries), 2000)
-    crudeTimer = window.setInterval(() => safeRun(loadCrudeWatch), CRUDE_REFRESH_MS)
+    unreadTimer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") safeRun(refreshUnreadIndicators)
+    }, 1800)
+    enquiryTimer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") safeRun(loadEnquiries)
+    }, 2000)
+    crudeTimer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") safeRun(loadCrudeWatch)
+    }, CRUDE_REFRESH_MS)
   }
 
   window.addEventListener("beforeunload", () => {
@@ -1797,8 +1810,10 @@
     if (crudeTimer) window.clearInterval(crudeTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
     if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
+    document.removeEventListener("visibilitychange", refreshVisibleBoard)
   })
 
+  document.addEventListener("visibilitychange", refreshVisibleBoard)
   document.addEventListener("dragover", blockExternalEnquiryDrop, true)
   document.addEventListener("drop", blockExternalEnquiryDrop, true)
   document.addEventListener("click", (event) => {

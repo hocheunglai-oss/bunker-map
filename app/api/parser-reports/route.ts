@@ -209,6 +209,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const source = sourceFrom(searchParams.get("source"))
+    const summaryOnly = searchParams.get("summary") === "1"
     if (!source) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
@@ -229,7 +230,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       source,
-      reports: unresolvedReports,
+      ...(summaryOnly ? {} : { reports: unresolvedReports }),
       unresolvedReports: unresolvedReports.length,
       totalReports: sourceReports.length,
       resolvedReports: sourceReports.length - unresolvedReports.length,

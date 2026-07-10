@@ -42,6 +42,7 @@ export type SaveSpcEnquiryInput = {
 export type SpcEnquiryListOptions = {
   status?: string
   limit?: number
+  updatedAfter?: string
 }
 
 export type SpcEnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
@@ -144,6 +145,10 @@ export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryL
 
   if (options.status) {
     query = query.eq("status", options.status)
+  }
+
+  if (options.updatedAfter) {
+    query = query.gt("updated_at", options.updatedAfter)
   }
 
   const { data, error } = await query

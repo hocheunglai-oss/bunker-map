@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { createContext, createElement, useContext, useEffect, useState } from "react"
+import type { ReactNode } from "react"
 import {
   ADMIN_PAGE_DEFINITIONS,
   normaliseAdminPagePermissions,
@@ -27,6 +28,8 @@ type AdminSessionPayload = {
   permissions?: AdminPagePermissionMap
   pages?: AdminPageDefinition[]
 }
+
+const AdminAuthContext = createContext<AuthState | null>(null)
 
 let sharedSessionPromise: Promise<AdminSessionPayload> | null = null
 let sharedSessionResult: { data: AdminSessionPayload; loadedAt: number } | null = null
@@ -65,7 +68,7 @@ function readCachedAdminActor(): AdminSessionPayload | null {
   }
 }
 
-export function useSimpleAdminAuth(): AuthState {
+function useSimpleAdminAuthState(): AuthState {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
   const [username, setUsername] = useState<string | null>(null)
@@ -141,4 +144,15 @@ export function useSimpleAdminAuth(): AuthState {
   }, [])
 
   return { loading, authenticated, username, displayName, role, permissions, pages }
+}
+
+export function SimpleAdminAuthProvider({ children }: { children: ReactNode }) {
+  const state = useSimpleAdminAuthState()
+  return createElement(AdminAuthContext.Provider, { value: state }, children)
+}
+
+export function useSimpleAdminAuth(): AuthState {
+  const state = useContext(AdminAuthContext)
+  if (!state) throw new Error("useSimpleAdminAuth must be used within SimpleAdminAuthProvider.")
+  return state
 }

@@ -7,6 +7,7 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Keeps a local Supplier/Buyer shortcut board for the trader's WhatsApp Web session.
 - Adds a second 360px enquiry panel beside the shortcut board.
 - Loads recent SPC enquiries from `https://spc.fcuno.com/api/spc/enquiries`.
+- Keeps the same two-second refresh while WhatsApp is visible, transfers only changed enquiries after the first load, and resumes immediately when the tab becomes visible.
 - Shows standard enquiry text, who sent it, new-enquiry badges, and STEM/LOST/POSTPONED/CANCELLED labels.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user select sent enquiry rows and send the selected text into the current WhatsApp chat.

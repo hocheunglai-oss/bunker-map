@@ -1,5 +1,6 @@
 import { AdminRouteGuard } from "@/components/AdminRouteGuard"
 import { AdminNavigationShell } from "@/components/AdminNavigationShell"
+import { SimpleAdminAuthProvider } from "@/lib/useSimpleAdminAuth"
 
 export default function AdminLayout({
   children,
@@ -8,9 +9,11 @@ export default function AdminLayout({
 }>) {
   return (
     <div className="fc-admin-scope">
-      <AdminNavigationShell>
-        <AdminRouteGuard>{children}</AdminRouteGuard>
-      </AdminNavigationShell>
+      <SimpleAdminAuthProvider>
+        <AdminNavigationShell>
+          <AdminRouteGuard>{children}</AdminRouteGuard>
+        </AdminNavigationShell>
+      </SimpleAdminAuthProvider>
     </div>
   )
 }

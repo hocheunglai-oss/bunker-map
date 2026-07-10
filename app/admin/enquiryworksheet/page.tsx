@@ -397,7 +397,7 @@ export default function EnquiryWorksheetPage() {
     }
 
     try {
-      const response = await fetch("/api/parser-reports?source=enquiryworksheet", { cache: "no-store" })
+      const response = await fetch("/api/parser-reports?source=enquiryworksheet&summary=1", { cache: "no-store" })
       const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
       if (!response.ok) throw new Error("Unable to load parser reports.")
       setParserReportCount(

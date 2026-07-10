@@ -73,12 +73,7 @@ type FixtureDraft = {
 type FixturesResponse = {
   fixtures?: SpcFixture[]
   users?: SpcUserOption[]
-  message?: string
-}
-
-type SuppliersResponse = {
-  records?: SupplierRecord[]
-  suppliers?: string[]
+  supplierRecords?: SupplierRecord[]
   message?: string
 }
 
@@ -541,19 +536,14 @@ export default function SpcFixturesPage() {
     setLoading(true)
     setMessage("")
     try {
-      const [fixtureResponse, supplierResponse] = await Promise.all([
-        fetch("/api/spc/fixtures?limit=5000", { cache: "no-store" }),
-        fetch("/api/spc/suppliers?mode=options", { cache: "no-store" }),
-      ])
+      const fixtureResponse = await fetch("/api/spc/fixtures?limit=5000", { cache: "no-store" })
       const fixtureData = (await fixtureResponse.json()) as FixturesResponse
-      const supplierData = (await supplierResponse.json()) as SuppliersResponse
       if (!fixtureResponse.ok) throw new Error(fixtureData.message || "Failed to load fixtures.")
-      if (!supplierResponse.ok) throw new Error(supplierData.message || "Failed to load suppliers.")
 
       const rows = fixtureData.fixtures || []
       setFixtures(rows)
       setUsers(fixtureData.users || [])
-      setSupplierRecords(supplierData.records || (supplierData.suppliers || []).map((name) => ({ key: name, name })))
+      setSupplierRecords(fixtureData.supplierRecords || [])
       setDrafts((current) => {
         const next: Record<string, FixtureDraft> = {}
         rows.forEach((fixture) => {

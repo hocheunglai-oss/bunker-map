@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
-import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { hasSpcPagePermission, requireSpcPagePermission } from "@/lib/spcAuth"
+import { timedJson } from "@/lib/serverTiming"
+import { listSupplierTraderOptions } from "@/lib/spcUsers"
 import {
   createSpcEnquiry,
   listSpcEnquiries,
@@ -39,19 +41,39 @@ function errorResponse(error: unknown, fallback: string) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     const session = await requireSpcPagePermission("spc-buyer-enquiries", "view")
     const searchParams = new URL(request.url).searchParams
     const status = searchParams.get("status")?.trim() || undefined
     const limit = Number(searchParams.get("limit") || 250)
-    const enquiries = await listSpcEnquiries(session, { status, limit })
-    return NextResponse.json(
-      { enquiries },
+    const bootstrap = searchParams.get("bootstrap") === "1"
+    const updatedAfterValue = searchParams.get("updatedAfter")?.trim() || ""
+    const updatedAfter = updatedAfterValue && !Number.isNaN(Date.parse(updatedAfterValue))
+      ? updatedAfterValue
+      : undefined
+    const [enquiries, supplierTraders] = await Promise.all([
+      listSpcEnquiries(session, { status, limit, updatedAfter }),
+      bootstrap && hasSpcPagePermission(session, "spc-buyer-enquiries", "edit")
+        ? listSupplierTraderOptions()
+        : Promise.resolve([]),
+    ])
+    const cursor = enquiries.reduce(
+      (latest, enquiry) => !latest || Date.parse(enquiry.updatedAt) > Date.parse(latest)
+        ? enquiry.updatedAt
+        : latest,
+      updatedAfter || "",
+    )
+    return timedJson(
+      "/api/spc/enquiries",
+      startedAt,
+      { enquiries, cursor, ...(bootstrap ? { supplierTraders } : {}) },
       {
         headers: {
           "Cache-Control": "private, no-store",
         },
       },
+      { bootstrap, incremental: Boolean(updatedAfter), returned: enquiries.length },
     )
   } catch (error) {
     return errorResponse(error, "Failed to load SPC enquiries.")
