@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
-import { google } from "googleapis"
+import type { drive_v3 } from "googleapis"
 import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -35,6 +36,7 @@ const DRIVE_FILE_MANIFEST_PREFIX = "drive-file-backup-manifest"
 const BACKUP_WARNING_AGE_HOURS = 8 * 24
 const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
+const CHECK_TIMEOUT_MS = 12_000
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -74,7 +76,8 @@ function getDeployment() {
   }
 }
 
-function getOAuthClient(refreshTokenEnv: string) {
+async function getOAuthClient(refreshTokenEnv: string) {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -96,8 +99,17 @@ async function runCheck(
   fn: () => Promise<HealthCheckResult>
 ): Promise<HealthCheck> {
   const checkedAt = new Date().toISOString()
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    const result = await fn()
+    const result = await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`Health check timed out after ${CHECK_TIMEOUT_MS / 1000} seconds.`)),
+          CHECK_TIMEOUT_MS,
+        )
+      }),
+    ])
     return { id, label, checkedAt, ...result }
   } catch (error) {
     return {
@@ -107,6 +119,8 @@ async function runCheck(
       status: "error",
       message: getErrorMessage(error),
     }
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
 }
 
@@ -165,7 +179,7 @@ function escapeDriveQueryValue(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
 }
 
-async function findDriveFolder(drive: ReturnType<typeof google.drive>, parentId: string, name: string, sharedDriveId: string | null) {
+async function findDriveFolder(drive: drive_v3.Drive, parentId: string, name: string, sharedDriveId: string | null) {
   const lookup = await drive.files.list({
     q: `trashed = false and mimeType = 'application/vnd.google-apps.folder' and name = '${escapeDriveQueryValue(name)}' and '${parentId}' in parents`,
     fields: "files(id,name,createdTime)",
@@ -179,7 +193,7 @@ async function findDriveFolder(drive: ReturnType<typeof google.drive>, parentId:
   return lookup.data.files?.[0] || null
 }
 
-async function readDriveJsonFile(drive: ReturnType<typeof google.drive>, fileId: string) {
+async function readDriveJsonFile(drive: drive_v3.Drive, fileId: string) {
   const response = await drive.files.get(
     {
       fileId,
@@ -198,7 +212,8 @@ async function readDriveJsonFile(drive: ReturnType<typeof google.drive>, fileId:
 }
 
 async function checkDriveBackup(): Promise<HealthCheckResult> {
-  const auth = getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
+  const { google } = await loadGoogleApis()
+  const auth = await getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
   const drive = google.drive({ version: "v3", auth })
   const rootFolderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID || requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID")
   const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
@@ -291,7 +306,8 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
     }
   }
 
-  const auth = getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
+  const { google } = await loadGoogleApis()
+  const auth = await getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
   const drive = google.drive({ version: "v3", auth })
   const rootFolderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID || requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID")
   const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
@@ -438,7 +454,8 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
 }
 
 async function checkGoogleCalendar(): Promise<HealthCheckResult> {
-  const calendar = google.calendar({ version: "v3", auth: getOAuthClient("GOOGLE_CALENDAR_REFRESH_TOKEN") })
+  const { google } = await loadGoogleApis()
+  const calendar = google.calendar({ version: "v3", auth: await getOAuthClient("GOOGLE_CALENDAR_REFRESH_TOKEN") })
   const calendarId = process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
   await calendar.events.list({
     calendarId,
@@ -458,7 +475,8 @@ async function checkGoogleCalendar(): Promise<HealthCheckResult> {
 }
 
 async function checkGoogleContacts(): Promise<HealthCheckResult> {
-  const people = google.people({ version: "v1", auth: getOAuthClient("GOOGLE_OAUTH_REFRESH_TOKEN") })
+  const { google } = await loadGoogleApis()
+  const people = google.people({ version: "v1", auth: await getOAuthClient("GOOGLE_OAUTH_REFRESH_TOKEN") })
   await people.people.connections.list({
     resourceName: "people/me",
     pageSize: 1,

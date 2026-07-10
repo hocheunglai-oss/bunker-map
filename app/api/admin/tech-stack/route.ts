@@ -83,6 +83,7 @@ export async function GET() {
         gitRepository: "hocheunglai-oss/bunker-map",
         branch: process.env.VERCEL_GIT_COMMIT_REF || "main",
         commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+        functionRegion: process.env.VERCEL_REGION || "bom1",
       },
       secrets: secretInventory(),
     })

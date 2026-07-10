@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import Image from "next/image"
 import { defaultExpandablePreviewRows } from "@/data/reportSections"
 import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -244,9 +246,12 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
                 textDecoration: "none",
               }}
             >
-              <img
+              <Image
                 src="/logo-trans.png"
                 alt="Bunker map logo"
+                width={600}
+                height={198}
+                priority
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "210px", opacity: 0.96 }}
               />
             </div>
@@ -460,7 +465,7 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
         )}
 
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
-          <a
+          <Link
             href="/"
             style={{
               ...pillButtonStyle,
@@ -473,7 +478,7 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
             }}
           >
             Back To Bunker Map
-          </a>
+          </Link>
         </div>
 
         <div style={{ marginTop: "20px" }}>

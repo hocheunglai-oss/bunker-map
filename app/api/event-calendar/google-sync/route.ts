@@ -1,9 +1,9 @@
 import fs from "fs"
 import path from "path"
 import { NextResponse } from "next/server"
-import { google } from "googleapis"
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
@@ -104,6 +104,7 @@ function buildGoogleEvent(event: OfficeCalendarEvent) {
 }
 
 async function getCalendarClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),

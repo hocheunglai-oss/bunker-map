@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
+  getAuditLogRecord,
+  isUserAuditRecord,
   listAuditLogs,
   matchesAuditActor,
+  matchesAuditScope,
   presentAuditLogs,
   undoAuditLog,
 } from "@/lib/auditLog"
@@ -11,6 +14,7 @@ import {
   listManagedAdminRoleDefaults,
   listManagedAdminUsers,
 } from "@/lib/adminUsers"
+import { timedJson } from "@/lib/serverTiming"
 
 const PAGE_TABLES: Record<string, string[]> = {
   ccinfo: [
@@ -93,11 +97,49 @@ function rawOperationsForDisplay(operation: string | undefined) {
   return undefined
 }
 
+function serializeAuditIndex(
+  record: Awaited<ReturnType<typeof presentAuditLogs>>[number],
+  detailsLoaded: boolean,
+) {
+  return {
+    id: record.id,
+    occurredAt: record.occurredAt,
+    actorId: record.actorId,
+    actorName: record.actorName,
+    operation: record.operation,
+    displayOperation: record.displayOperation,
+    pageId: record.pageId,
+    pageLabel: record.pageLabel,
+    recordLabel: record.recordLabel,
+    summary: record.summary,
+    details: detailsLoaded ? record.details : [],
+    detailsLoaded,
+    undoable: record.undoable,
+    undoOfLogId: record.undoOfLogId,
+    undoneAt: record.undoneAt,
+  }
+}
+
 export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     const session = await requireAdminPagePermission("audit-log", "view")
 
     const url = new URL(request.url)
+    const pages = await getDiscoveredAdminPages()
+    const requestedId = url.searchParams.get("id")?.trim()
+    if (requestedId) {
+      const record = await getAuditLogRecord(requestedId)
+      if (!record || !isUserAuditRecord(record) || !matchesAuditScope(record, "www")) {
+        return NextResponse.json({ message: "Audit log not found." }, { status: 404 })
+      }
+
+      const [presented] = await presentAuditLogs([record], pages)
+      return timedJson("/api/admin/audit-logs", startedAt, {
+        log: serializeAuditIndex(presented, true),
+      }, undefined, { mode: "detail" })
+    }
+
     const requestedLimit = Math.min(
       Math.max(Number(url.searchParams.get("limit") || 100), 1),
       150
@@ -109,7 +151,7 @@ export async function GET(request: Request) {
       : null
     const operation = url.searchParams.get("operation")?.toUpperCase()
     const actor = url.searchParams.get("actor")
-    const pages = await getDiscoveredAdminPages()
+    const includeRows = url.searchParams.get("details") === "1"
     const tableNames =
       pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
     const operations = rawOperationsForDisplay(operation)
@@ -123,9 +165,10 @@ export async function GET(request: Request) {
       operations: operations ? [...operations] : undefined,
       actorId: actor && actor !== "all" ? actor : undefined,
       scope: "www",
+      includeRows,
     })
     const presented = await presentAuditLogs(records, pages)
-    const logs = presented
+    const filteredLogs = presented
       .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
       .filter(
         (record) =>
@@ -135,6 +178,9 @@ export async function GET(request: Request) {
       )
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
+    const logs = includeRows
+      ? filteredLogs
+      : filteredLogs.map((record) => serializeAuditIndex(record, false))
 
     const managedUsers = await loadManagedUsersForFilters(pages)
 
@@ -154,12 +200,16 @@ export async function GET(request: Request) {
       addUser(record.actorId || record.actorName, record.actorName || record.actorId)
     )
 
-    return NextResponse.json({
+    return timedJson("/api/admin/audit-logs", startedAt, {
       logs,
       pages: pages.map(({ id, label }) => ({ id, label })),
       users: Array.from(userMap.values()).sort((a, b) =>
         a.label.localeCompare(b.label)
       ),
+    }, undefined, {
+      mode: includeRows ? "full" : "index",
+      returned: logs.length,
+      candidateLimit,
     })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {

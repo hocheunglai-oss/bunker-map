@@ -5,8 +5,6 @@ export const metadata: Metadata = {
   title: "Singapore Purchasing Center",
 }
 
-export const dynamic = "force-dynamic"
-
 export default function SpcLayout({
   children,
 }: Readonly<{

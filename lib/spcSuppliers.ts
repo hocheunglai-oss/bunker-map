@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
-import * as XLSX from "xlsx"
+import type * as XLSX from "xlsx"
 import type { SpcAuditContext } from "@/lib/spcAudit"
 import {
   displaySupplierName,
@@ -202,8 +202,10 @@ function stripStruckHtml(value: string) {
   )
 }
 
-function workbookCellText(sheet: XLSX.WorkSheet, row: number, column: number) {
-  const cellValue = sheet[XLSX.utils.encode_cell({ r: row, c: column })] as XLSX.CellObject | undefined
+type XlsxModule = typeof import("xlsx")
+
+function workbookCellText(xlsx: XlsxModule, sheet: XLSX.WorkSheet, row: number, column: number) {
+  const cellValue = sheet[xlsx.utils.encode_cell({ r: row, c: column })] as XLSX.CellObject | undefined
   if (!cellValue) return ""
   const html = typeof cellValue.h === "string" ? cellValue.h : ""
   if (/<s\b/i.test(html)) return compactText(stripStruckHtml(html))
@@ -241,12 +243,12 @@ function cleanStoredBarge(
   }
 }
 
-function parseBargeWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
+function parseBargeWorkbookSheet(xlsx: XlsxModule, sheet: XLSX.WorkSheet): Array<{
   supplierName: string
   supplierKey: string
   barge: StoredSupplierBarge
 }> {
-  const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null
+  const range = sheet["!ref"] ? xlsx.utils.decode_range(sheet["!ref"]) : null
   if (!range) return []
 
   let headerRow = -1
@@ -258,7 +260,7 @@ function parseBargeWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
 
   for (let row = range.s.r; row <= Math.min(range.e.r, range.s.r + 20); row += 1) {
     const headers = Array.from({ length: range.e.c - range.s.c + 1 }, (_, offset) =>
-      workbookCellText(sheet, row, range.s.c + offset).toUpperCase().replace(/[^A-Z0-9]/g, ""),
+      workbookCellText(xlsx, sheet, row, range.s.c + offset).toUpperCase().replace(/[^A-Z0-9]/g, ""),
     )
     const supplierIndex = headers.findIndex((header) => header === "SUPPLIER")
     const gradeIndex = headers.findIndex((header) => header === "GRADE")
@@ -286,16 +288,16 @@ function parseBargeWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
   let carriedSupplier = ""
 
   for (let row = headerRow + 1; row <= range.e.r; row += 1) {
-    const supplierText = workbookCellText(sheet, row, supplierColumn) || carriedSupplier
+    const supplierText = workbookCellText(xlsx, sheet, row, supplierColumn) || carriedSupplier
     if (supplierText) carriedSupplier = supplierText
     const key = supplierKey(supplierText)
     if (!key || key === supplierKey("KENOIL")) continue
 
     const barge = cleanStoredBarge(key, {
-      bargeName: workbookCellText(sheet, row, bargeColumn),
-      imo: workbookCellText(sheet, row, imoColumn),
-      grade: workbookCellText(sheet, row, gradeColumn),
-      capacity: capacityColumn >= 0 ? workbookCellText(sheet, row, capacityColumn) : "",
+      bargeName: workbookCellText(xlsx, sheet, row, bargeColumn),
+      imo: workbookCellText(xlsx, sheet, row, imoColumn),
+      grade: workbookCellText(xlsx, sheet, row, gradeColumn),
+      capacity: capacityColumn >= 0 ? workbookCellText(xlsx, sheet, row, capacityColumn) : "",
     }, row - headerRow - 1)
     if (!barge?.bargeName) continue
 
@@ -313,7 +315,8 @@ async function readSupplierBargeSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${BARGE_SPREADSHEET_ID}/export?format=xlsx&gid=${BARGE_SHEET_GID}`
   const response = await fetch(url, { cache: "no-store" })
   if (!response.ok) throw new Error("Could not read supplier barge list from Google Sheets.")
-  const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), {
+  const xlsx = await import("xlsx")
+  const workbook = xlsx.read(Buffer.from(await response.arrayBuffer()), {
     cellHTML: true,
     cellStyles: true,
     type: "buffer",
@@ -323,7 +326,7 @@ async function readSupplierBargeSheet() {
     workbook.SheetNames[0]
   const sheet = sheetName ? workbook.Sheets[sheetName] : null
   if (!sheet) return []
-  return parseBargeWorkbookSheet(sheet)
+  return parseBargeWorkbookSheet(xlsx, sheet)
 }
 
 function lineText(value: unknown) {
@@ -334,8 +337,8 @@ function lineText(value: unknown) {
     .join("\n")
 }
 
-function workbookContactCellText(sheet: XLSX.WorkSheet, row: number, column: number) {
-  const cellValue = sheet[XLSX.utils.encode_cell({ r: row, c: column })] as XLSX.CellObject | undefined
+function workbookContactCellText(xlsx: XlsxModule, sheet: XLSX.WorkSheet, row: number, column: number) {
+  const cellValue = sheet[xlsx.utils.encode_cell({ r: row, c: column })] as XLSX.CellObject | undefined
   if (!cellValue) return ""
   const html = typeof cellValue.h === "string" ? cellValue.h : ""
   if (/<s\b/i.test(html)) return lineText(stripStruckHtml(html))
@@ -490,12 +493,12 @@ function contactRowsFromGroup(
   return rows
 }
 
-function parseContactsWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
+function parseContactsWorkbookSheet(xlsx: XlsxModule, sheet: XLSX.WorkSheet): Array<{
   supplierName: string
   supplierKey: string
   contact: StoredSupplierContact
 }> {
-  const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null
+  const range = sheet["!ref"] ? xlsx.utils.decode_range(sheet["!ref"]) : null
   if (!range) return []
 
   let headerRow = -1
@@ -507,7 +510,7 @@ function parseContactsWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
 
   for (let row = range.s.r; row <= Math.min(range.e.r, range.s.r + 20); row += 1) {
     const headers = Array.from({ length: range.e.c - range.s.c + 1 }, (_, offset) =>
-      workbookContactCellText(sheet, row, range.s.c + offset).toUpperCase().replace(/[^A-Z0-9]/g, ""),
+      workbookContactCellText(xlsx, sheet, row, range.s.c + offset).toUpperCase().replace(/[^A-Z0-9]/g, ""),
     )
     const supplierIndex = headers.findIndex((header) => header === "SUPPLIER")
     const salesIndex = headers.findIndex((header) => header === "SALES")
@@ -536,7 +539,7 @@ function parseContactsWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
   }> = []
 
   for (let row = headerRow + 1; row <= range.e.r; row += 1) {
-    const supplierText = workbookContactCellText(sheet, row, supplierColumn)
+    const supplierText = workbookContactCellText(xlsx, sheet, row, supplierColumn)
     const key = supplierKey(supplierText)
     if (!key) continue
 
@@ -545,15 +548,15 @@ function parseContactsWorkbookSheet(sheet: XLSX.WorkSheet): Array<{
       ...contactRowsFromGroup(
         key,
         "sales",
-        workbookContactCellText(sheet, row, salesColumn),
-        workbookContactCellText(sheet, row, salesMobileColumn),
+        workbookContactCellText(xlsx, sheet, row, salesColumn),
+        workbookContactCellText(xlsx, sheet, row, salesMobileColumn),
         (row - headerRow - 1) * 10,
       ),
       ...contactRowsFromGroup(
         key,
         "ops",
-        workbookContactCellText(sheet, row, opsColumn),
-        workbookContactCellText(sheet, row, opsMobileColumn),
+        workbookContactCellText(xlsx, sheet, row, opsColumn),
+        workbookContactCellText(xlsx, sheet, row, opsMobileColumn),
         (row - headerRow - 1) * 10 + 5,
       ),
     ]
@@ -570,7 +573,8 @@ async function readSupplierContactsSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${BARGE_SPREADSHEET_ID}/export?format=xlsx&gid=${CONTACTS_SHEET_GID}`
   const response = await fetch(url, { cache: "no-store" })
   if (!response.ok) throw new Error("Could not read supplier contacts from Google Sheets.")
-  const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), {
+  const xlsx = await import("xlsx")
+  const workbook = xlsx.read(Buffer.from(await response.arrayBuffer()), {
     cellHTML: true,
     cellStyles: true,
     type: "buffer",
@@ -580,7 +584,7 @@ async function readSupplierContactsSheet() {
     workbook.SheetNames[0]
   const sheet = sheetName ? workbook.Sheets[sheetName] : null
   if (!sheet) return []
-  return parseContactsWorkbookSheet(sheet)
+  return parseContactsWorkbookSheet(xlsx, sheet)
 }
 
 function emptyInfo(row: SheetRow | undefined, rowNumber: number): SpcSupplierInfo {

@@ -1,6 +1,5 @@
 import fs from "node:fs"
 import path from "node:path"
-import { google } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
@@ -11,6 +10,7 @@ import {
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
 } from "@/lib/ccinfoDrivePaths"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -21,6 +21,7 @@ function requireEnv(name: string) {
 }
 
 async function getDriveClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -257,12 +258,13 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    let { data, error: readError } = await supabase
+    const { data: initialData, error: readError } = await supabase
       .from("cc_entry_files")
       .select("id")
       .eq("id", fileId)
       .maybeSingle()
     if (readError) throw readError
+    let data = initialData
 
     if (!data) {
       const fallbackLookup = await supabase

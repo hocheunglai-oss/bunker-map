@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { clearSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import {
@@ -42,6 +43,7 @@ function readStoredGroups() {
 
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { loading, authenticated, displayName, permissions, pages } = useSpcAuth()
   const [query, setQuery] = useState("")
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -178,9 +180,12 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
             <Link
               key={page.id}
               href={page.path}
+              prefetch={false}
               className={`fc-admin-sidebar-link${isActive(page) ? " is-active" : ""}`}
               aria-current={isActive(page) ? "page" : undefined}
               title={`${page.label} (${permission === "edit" ? "Edit access" : "View access"})`}
+              onPointerEnter={() => router.prefetch(page.path)}
+              onFocus={() => router.prefetch(page.path)}
             >
               <span className="fc-admin-sidebar-link-main">
                 <span>{page.label}</span>
@@ -231,7 +236,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
       <aside id="spc-sidebar" className="fc-admin-sidebar" data-admin-view-safe="true">
         <div className="fc-admin-sidebar-top">
           <Link href="/spc" className="fc-admin-sidebar-title">
-            <img src="/spc-sidebar-logo.png" alt="Singapore Purchasing Center" className="fc-admin-sidebar-logo is-spc-logo" />
+            <Image src="/spc-sidebar-logo.png" alt="Singapore Purchasing Center" width={800} height={143} className="fc-admin-sidebar-logo is-spc-logo" />
           </Link>
           <div className="fc-admin-sidebar-controls">
             <button

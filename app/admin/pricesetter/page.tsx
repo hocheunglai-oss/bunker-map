@@ -6,7 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
 import { chinaReportSections, compactReportSections } from "@/data/reportSections"
 import { hasFormulaForAnyFuel, parseSimpleFormula, resolvePortFuelValue } from "@/lib/portPricing"
-import { loadReportSnapshot, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
+import { loadReportSnapshot, loadReportSnapshots, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
 import { buildChinaReportSections } from "@/lib/chinaReport"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
@@ -141,10 +141,11 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
+    if (adminLoading || !authenticated) return
     async function loadPorts() {
       const { data, error } = await supabase
         .from("ports")
-        .select("*")
+        .select("id,name,type,lat,lng,hsfo,vlsfo,mgo,hsfo_formula,vlsfo_formula,mgo_formula,updated_at,display_order")
         .order("display_order", { ascending: true })
 
       if (error) {
@@ -156,33 +157,27 @@ export default function AdminPage() {
     }
 
     loadPorts()
-  }, [])
+  }, [adminLoading, authenticated])
 
   useEffect(() => {
-    async function loadReportDates() {
-      const entries = await Promise.all(
-        reportDateItems.map(async (item) => {
-          const snapshot = await loadReportSnapshot<{ reportDate?: string }>(item.key)
-          return [item.key, snapshot?.reportDate || ""] as const
-        })
-      )
+    if (adminLoading || !authenticated) return
+    async function loadReportConfig() {
+      const [snapshots, fallbacks] = await Promise.all([
+        loadReportSnapshots<{ reportDate?: string }>(reportDateItems.map((item) => item.key)),
+        loadReportFallbacks(),
+      ])
 
       setReportDates((prev) => ({
         ...prev,
-        ...Object.fromEntries(entries),
+        ...Object.fromEntries(
+          reportDateItems.map((item) => [item.key, snapshots[item.key]?.reportDate || ""]),
+        ),
       }))
+      setReportFallbacks(fallbacks)
     }
 
-    loadReportDates()
-  }, [])
-
-  useEffect(() => {
-    async function loadFallbacks() {
-      const next = await loadReportFallbacks()
-      setReportFallbacks(next)
-    }
-    loadFallbacks()
-  }, [])
+    loadReportConfig()
+  }, [adminLoading, authenticated])
 
   function updateValue(id: string, field: string, value: any) {
     setPorts((prev) =>

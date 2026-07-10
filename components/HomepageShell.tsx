@@ -1,3 +1,4 @@
+import Image from "next/image"
 import type { HomepageMarketData, PublicPort } from "@/lib/publicMarketData"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import { resolvePortFuelValue } from "@/lib/portPricing"
@@ -158,7 +159,7 @@ export default function HomepageShell({ initialData }: HomepageShellProps) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "center", marginBottom: "18px" }}>
-          <img src="/uno-transparent.png" alt="Bunker Map" style={{ height: "108px", width: "auto" }} />
+          <Image src="/uno-transparent.png" alt="Bunker Map" width={629} height={284} priority style={{ height: "108px", width: "auto" }} />
         </div>
 
         <div

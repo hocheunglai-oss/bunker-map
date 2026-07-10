@@ -78,6 +78,50 @@ const AUDIT_SELECT = [
   "undone_by_log_id",
 ].join(",")
 
+const AUDIT_PREVIEW_FIELDS = [
+  "id",
+  "key",
+  "name",
+  "full_name",
+  "display_name",
+  "username",
+  "email",
+  "title",
+  "subject",
+  "file_name",
+  "folder_name",
+  "group_name",
+  "phone_e164",
+  "body",
+  "port_id",
+  "recorded_at",
+  "hsfo",
+  "vlsfo",
+  "mgo",
+  "deleted_at",
+] as const
+
+const AUDIT_INDEX_SELECT = [
+  "id",
+  "occurred_at",
+  "actor_id",
+  "actor_name",
+  "actor_source",
+  "table_schema",
+  "table_name",
+  "operation",
+  "record_pk",
+  "changed_fields",
+  "request_context",
+  "undo_of_log_id",
+  "undone_at",
+  "undone_by_log_id",
+  ...AUDIT_PREVIEW_FIELDS.flatMap((field) => [
+    `before_${field}:before_row->>${field}`,
+    `after_${field}:after_row->>${field}`,
+  ]),
+].join(",")
+
 const TABLE_PAGE_IDS: Record<string, string> = {
   cc_countries: "ccinfo",
   cc_companies: "ccinfo",
@@ -278,6 +322,36 @@ function mapAuditLog(row: AuditLogRow): AuditLogRecord {
     undoOfLogId: row.undo_of_log_id,
     undoneAt: row.undone_at,
     undoneByLogId: row.undone_by_log_id,
+  }
+}
+
+function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
+  const previewRow = (prefix: "before" | "after") => {
+    const values: Record<string, unknown> = {}
+    for (const field of AUDIT_PREVIEW_FIELDS) {
+      const value = row[`${prefix}_${field}`]
+      if (value !== null && value !== undefined && value !== "") values[field] = value
+    }
+    return Object.keys(values).length ? values : null
+  }
+
+  return {
+    id: String(row.id || ""),
+    occurredAt: String(row.occurred_at || ""),
+    actorId: typeof row.actor_id === "string" ? row.actor_id : null,
+    actorName: typeof row.actor_name === "string" ? row.actor_name : null,
+    actorSource: String(row.actor_source || ""),
+    tableSchema: String(row.table_schema || ""),
+    tableName: String(row.table_name || ""),
+    operation: row.operation as AuditOperation,
+    recordPk: (row.record_pk as Record<string, unknown> | null) || {},
+    changedFields: (row.changed_fields as string[] | null) || [],
+    beforeRow: previewRow("before"),
+    afterRow: previewRow("after"),
+    requestContext: (row.request_context as Record<string, unknown> | null) || {},
+    undoOfLogId: typeof row.undo_of_log_id === "string" ? row.undo_of_log_id : null,
+    undoneAt: typeof row.undone_at === "string" ? row.undone_at : null,
+    undoneByLogId: typeof row.undone_by_log_id === "string" ? row.undone_by_log_id : null,
   }
 }
 
@@ -757,19 +831,25 @@ export function isUserAuditRecord(record: AuditLogRecord) {
   return true
 }
 
+export function matchesAuditScope(record: AuditLogRecord, scope: AuditLogScope) {
+  if (scope === "all") return true
+  return scope === "spc" ? isSpcAuditRecord(record) : !isSpcAuditRecord(record)
+}
+
 export async function listAuditLogs(options: {
   limit?: number
   tableNames?: string[]
   operations?: AuditOperation[]
   actorId?: string | null
   scope?: AuditLogScope
+  includeRows?: boolean
 }) {
   const supabase = getSupabaseAuditClient()
   const limit = Math.min(Math.max(options.limit || 100, 1), 500)
   const scope = options.scope || "www"
   let query = supabase
     .from("audit_logs")
-    .select(AUDIT_SELECT)
+    .select(options.includeRows === false ? AUDIT_INDEX_SELECT : AUDIT_SELECT)
     .eq("table_schema", "public")
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
@@ -797,14 +877,13 @@ export async function listAuditLogs(options: {
 
   const { data, error } = await query
   if (error) throw error
-  return ((data || []) as unknown as AuditLogRow[])
-    .map(mapAuditLog)
+  const records = options.includeRows === false
+    ? ((data || []) as unknown as Array<Record<string, unknown>>).map(mapAuditPreviewRow)
+    : ((data || []) as unknown as AuditLogRow[]).map(mapAuditLog)
+
+  return records
     .filter(isUserAuditRecord)
-    .filter((record) => {
-      if (scope === "all") return true
-      const isSpcRecord = isSpcAuditRecord(record)
-      return scope === "spc" ? isSpcRecord : !isSpcRecord
-    })
+    .filter((record) => matchesAuditScope(record, scope))
 }
 
 export async function undoAuditLog(

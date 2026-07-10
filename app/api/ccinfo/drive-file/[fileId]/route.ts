@@ -2,12 +2,12 @@ import fs from "node:fs/promises"
 import fsSync from "node:fs"
 import path from "node:path"
 import { Readable } from "node:stream"
-import { google } from "googleapis"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -25,6 +25,7 @@ function requireEnv(name: string) {
 }
 
 async function getDriveClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),

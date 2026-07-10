@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css"
 import "@maptiler/sdk/dist/maptiler-sdk.css"
 import L from "leaflet"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { resolvePortFuelValue } from "@/lib/portPricing"
 import DisclaimerLink from "@/components/DisclaimerLink"
@@ -93,7 +94,12 @@ function normaliseHomepageData(payload: HomepageDataResponse | HomepageMarketDat
 
 function MapController({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
   const map = useMap()
-  mapRef.current = map
+  useEffect(() => {
+    mapRef.current = map
+    return () => {
+      if (mapRef.current === map) mapRef.current = null
+    }
+  }, [map, mapRef])
   return null
 }
 
@@ -805,9 +811,12 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       >
         <div style={{ display: "flex", justifyContent: "center", marginBottom: isMobile ? "12px" : "18px" }}>
           <div style={{ width: "100%", display: "flex", justifyContent: "center", flexDirection: "column", alignItems: "center" }}>
-            <img
+            <Image
               src="/uno-transparent.png"
               alt="Bunker Map"
+              width={629}
+              height={284}
+              priority
               style={{ height: isMobile ? "78px" : "108px", width: "auto" }}
             />
           </div>

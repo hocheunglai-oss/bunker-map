@@ -216,7 +216,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
   }, [authenticated, loading, page, permissions, requestGuardKey, role])
 
   useEffect(() => {
-    if (!page || loading) return
+    if (!page || loading || !viewOnly) return
 
     const root = document.querySelector(".fc-admin-scope")
     if (!root) return
@@ -224,7 +224,14 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
     const apply = () => setViewOnlyControls(root, viewOnly)
     apply()
 
-    const observer = new MutationObserver(apply)
+    let frame = 0
+    const observer = new MutationObserver(() => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        apply()
+      })
+    })
     observer.observe(root, { childList: true, subtree: true })
 
     const blockSubmit = (event: Event) => {
@@ -236,6 +243,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
 
     return () => {
       observer.disconnect()
+      if (frame) window.cancelAnimationFrame(frame)
       root.removeEventListener("submit", blockSubmit, true)
       setViewOnlyControls(root, false)
     }

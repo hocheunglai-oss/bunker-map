@@ -22,6 +22,7 @@ type TechStackResponse = {
     gitRepository: string
     branch: string
     commit: string
+    functionRegion: string
   }
   secrets: SecretItem[]
   message?: string
@@ -29,6 +30,7 @@ type TechStackResponse = {
 
 const SERVICES = [
   ["APPLICATION", "NEXT.JS 16 / REACT 19 / TYPESCRIPT", "VERCEL", "FCUNO.COM"],
+  ["PERFORMANCE MONITORING", "SPEED INSIGHTS / WEB ANALYTICS", "VERCEL", "REAL-USER CORE WEB VITALS"],
   ["SOURCE CONTROL", "GIT / GITHUB", "GITHUB", "HOCHEUNGLAI-OSS/BUNKER-MAP"],
   ["PRIMARY DATABASE", "POSTGRESQL", "SUPABASE", "PROJECT GGLYUGBRNYVYFKTGWERT"],
   ["FILE SOURCE", "GOOGLE DRIVE", "GOOGLE WORKSPACE", "WIDER.CUSTOM@GMAIL.COM"],
@@ -147,6 +149,7 @@ export default function TechStackPage() {
             <div><span>GITHUB</span><strong>{data?.deployment.gitRepository || "HOCHEUNGLAI-OSS/BUNKER-MAP"}</strong></div>
             <div><span>BRANCH</span><strong>{data?.deployment.branch || "MAIN"}</strong></div>
             <div><span>COMMIT</span><strong>{data?.deployment.commit?.slice(0, 7) || "-"}</strong></div>
+            <div><span>FUNCTION REGION</span><strong>{data?.deployment.functionRegion?.toUpperCase() || "BOM1"}</strong></div>
           </div>
         </section>
 

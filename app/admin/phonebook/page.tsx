@@ -94,6 +94,7 @@ const PHONEBOOK_CACHE_DB_NAME = "phonebook-cache"
 const PHONEBOOK_CACHE_STORE = "entries"
 const PHONEBOOK_COMPANIES_CACHE_KEY = "companies"
 const PHONEBOOK_CONTACTS_CACHE_KEY = "contacts"
+const PHONEBOOK_CONTACTS_REFRESH_MS = 30 * 60 * 1000
 const MAX_RENDERED_COMPANIES = 300
 const MAX_RENDERED_CONTACTS = 400
 
@@ -468,13 +469,13 @@ async function readPhonebookCache<T>(key: string) {
   const db = await openPhonebookCacheDb()
   if (!db) return null
 
-  return new Promise<T[] | null>((resolve) => {
+  return new Promise<PhonebookCacheRecord<T> | null>((resolve) => {
     const transaction = db.transaction(PHONEBOOK_CACHE_STORE, "readonly")
     const request = transaction.objectStore(PHONEBOOK_CACHE_STORE).get(key)
 
     request.onsuccess = () => {
       const record = request.result as PhonebookCacheRecord<T> | undefined
-      resolve(Array.isArray(record?.items) ? record.items : null)
+      resolve(Array.isArray(record?.items) ? record : null)
     }
     request.onerror = () => resolve(null)
     transaction.oncomplete = () => db.close()
@@ -720,15 +721,6 @@ export default function PhonebookPage() {
         searchContactsCacheRef.current.set(queryKey, localResult)
         return localResult
       }
-      const warmPromise = contactsWarmPromiseRef.current || refreshContactCachesInBackground()
-      if (warmPromise) {
-        await warmPromise
-        const warmedResult = searchCachedContacts(queryKey)
-        if (warmedResult) {
-          searchContactsCacheRef.current.set(queryKey, warmedResult)
-          return warmedResult
-        }
-      }
     }
 
     const startedAt = performance.now()
@@ -877,21 +869,25 @@ export default function PhonebookPage() {
   }
 
   async function hydrateCachedContacts() {
-    const cachedContacts = await readPhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY)
-    if (!cachedContacts?.length) return false
+    const cachedRecord = await readPhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY)
+    if (!cachedRecord?.items.length) return { hydrated: false, fresh: false }
 
     const normalizeContactsStartedAt = performance.now()
-    const normalizedContacts = normalizeLoadedContacts(cachedContacts)
+    const normalizedContacts = normalizeLoadedContacts(cachedRecord.items)
     rebuildContactCaches(normalizedContacts, {
       fetchMs: 0,
       normalizeMs: Math.round(performance.now() - normalizeContactsStartedAt),
     })
-    return true
+    return {
+      hydrated: true,
+      fresh: Date.now() - cachedRecord.savedAt < PHONEBOOK_CONTACTS_REFRESH_MS,
+    }
   }
 
   function schedulePhonebookWarmup() {
     const hydrate = () => {
-      void hydrateCachedContacts().finally(() => {
+      void hydrateCachedContacts().then((result) => {
+        if (!result.hydrated || result.fresh) return
         window.setTimeout(() => refreshContactCachesInBackground(), 4000)
       })
     }
@@ -912,7 +908,8 @@ export default function PhonebookPage() {
     setLoading(true)
     let renderedFromCache = false
     try {
-      const cachedCompanies = await readPhonebookCache<Company>(PHONEBOOK_COMPANIES_CACHE_KEY)
+      const cachedCompanyRecord = await readPhonebookCache<Company>(PHONEBOOK_COMPANIES_CACHE_KEY)
+      const cachedCompanies = cachedCompanyRecord?.items
 
       if (cachedCompanies?.length) {
         const normalizeCompaniesStartedAt = performance.now()

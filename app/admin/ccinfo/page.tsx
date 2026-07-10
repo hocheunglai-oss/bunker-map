@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -910,7 +910,7 @@ function BlockTextBlock({
   query?: string
 }) {
   const editable = Boolean(onBlockDoubleClick || onInsertBlock || onBlockSave || onBlockCancel || onBlockDelete)
-  const instanceIdRef = useRef(`ccinfo-text-${Math.random().toString(36).slice(2)}`)
+  const instanceId = useId()
   const blockNodeRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [selectedBlockId, setSelectedBlockId] = useState("")
   const [actionPanelTop, setActionPanelTop] = useState(6)
@@ -921,13 +921,13 @@ function BlockTextBlock({
   useEffect(() => {
     function handleExternalSelection(event: Event) {
       const detail = (event as CustomEvent<{ instanceId?: string }>).detail
-      if (detail?.instanceId !== instanceIdRef.current && !editingBlockId) {
+      if (detail?.instanceId !== instanceId && !editingBlockId) {
         setSelectedBlockId("")
       }
     }
     window.addEventListener("ccinfo-text-block-selected", handleExternalSelection)
     return () => window.removeEventListener("ccinfo-text-block-selected", handleExternalSelection)
-  }, [editingBlockId])
+  }, [editingBlockId, instanceId])
 
   useEffect(() => {
     if (editingBlockId && blocks.some((block) => block.id === editingBlockId)) {
@@ -941,7 +941,7 @@ function BlockTextBlock({
 
   function selectBlock(blockId: string) {
     setSelectedBlockId(blockId)
-    window.dispatchEvent(new CustomEvent("ccinfo-text-block-selected", { detail: { instanceId: instanceIdRef.current } }))
+    window.dispatchEvent(new CustomEvent("ccinfo-text-block-selected", { detail: { instanceId } }))
   }
 
   useLayoutEffect(() => {
@@ -1590,13 +1590,16 @@ export default function CountryCompanyInfoPage() {
       .map((item) => item.trim())
       .filter(Boolean)
 
+    const controller = new AbortController()
     const timeout = setTimeout(async () => {
       const firstToken = tokens[0] || needle
       const [companies, countries, ports] = await Promise.all([
-        supabase.from("cc_companies").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30),
-        supabase.from("cc_countries").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30),
-        supabase.from("cc_ports").select("id,name,country_name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(40),
+        supabase.from("cc_companies").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30).abortSignal(controller.signal),
+        supabase.from("cc_countries").select("id,name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(30).abortSignal(controller.signal),
+        supabase.from("cc_ports").select("id,name,country_name").ilike("name", `%${firstToken}%`).order("name", { ascending: true }).limit(40).abortSignal(controller.signal),
       ])
+
+      if (controller.signal.aborted) return
 
       const matchesTokens = (value: string) => {
         const lower = value.toLowerCase()
@@ -1629,9 +1632,12 @@ export default function CountryCompanyInfoPage() {
         )
       }
       setSuggestions(next.slice(0, 20))
-    }, 120)
+    }, 275)
 
-    return () => clearTimeout(timeout)
+    return () => {
+      clearTimeout(timeout)
+      controller.abort()
+    }
   }, [adminLoading, authenticated, query])
 
   useEffect(() => {
@@ -1781,7 +1787,7 @@ export default function CountryCompanyInfoPage() {
   async function loadRecentAuditLogs() {
     setAuditLoading(true)
     try {
-      const response = await fetch("/api/admin/audit-logs?table=ccinfo&limit=300")
+      const response = await fetch("/api/admin/audit-logs?table=ccinfo&limit=60&details=1")
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message || "Unable to load audit logs.")
       const logs = ((payload.logs || []) as AuditLogRecord[])

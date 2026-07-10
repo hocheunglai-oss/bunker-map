@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
+import Image from "next/image"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
@@ -273,9 +275,12 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                 textDecoration: "none",
               }}
             >
-              <img
+              <Image
                 src="/logo-trans.png"
                 alt="Bunker map logo"
+                width={600}
+                height={198}
+                priority
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
             </div>
@@ -791,7 +796,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
         )}
 
         <div className="report-print-hidden" style={{ textAlign: "center", marginBottom: "24px" }}>
-          <a
+          <Link
             href="/"
             style={{
               ...pillButtonStyle,
@@ -804,7 +809,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
             }}
           >
             Back To Bunker Map
-          </a>
+          </Link>
         </div>
 
         <div className="report-print-hidden" style={{ marginTop: "20px" }}>

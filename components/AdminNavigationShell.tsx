@@ -1,14 +1,14 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
-  OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
-  OUTLOOK_TEMPLATES_CACHE_KEY,
+  OUTLOOK_TEMPLATES_INDEX_CACHE_KEY,
 } from "@/lib/adminClientCache"
 import {
   ADMIN_PAGE_GROUP_LABELS,
@@ -255,73 +255,6 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     return () => document.removeEventListener("keydown", focusSearch)
   }, [authenticated, loading])
 
-  useEffect(() => {
-    if (!authenticated || loading) return
-
-    const accessiblePages = pages
-      .filter(
-        (page) =>
-          isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"),
-      )
-    const priorityIds = ["outlook-addressbook", "email-templates"]
-    const accessiblePaths = [...accessiblePages]
-      .sort((a, b) => {
-        const aPriority = priorityIds.indexOf(a.id)
-        const bPriority = priorityIds.indexOf(b.id)
-        if (aPriority === bPriority) return 0
-        if (aPriority === -1) return 1
-        if (bPriority === -1) return -1
-        return aPriority - bPriority
-      })
-      .filter((page) => !isExternalAdminPage(page))
-      .map((page) => page.path)
-      .filter((path) => path !== pathname)
-
-    let cancelled = false
-    let nextIndex = 0
-    let timer: number | undefined
-
-    const prefetchNext = () => {
-      if (cancelled || nextIndex >= accessiblePaths.length) return
-      router.prefetch(accessiblePaths[nextIndex])
-      nextIndex += 1
-      timer = window.setTimeout(prefetchNext, 180)
-    }
-
-    const idleCallback =
-      "requestIdleCallback" in window
-        ? window.requestIdleCallback(prefetchNext, { timeout: 1200 })
-        : undefined
-
-    if (idleCallback === undefined) {
-      timer = window.setTimeout(prefetchNext, 500)
-    }
-
-    const warmTimer = window.setTimeout(() => {
-      if (accessiblePages.some((page) => page.id === "outlook-addressbook")) {
-        void fetchAdminClientJson(
-          OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
-          "/api/outlook-addressbook/bootstrap",
-        ).catch(() => undefined)
-      }
-      if (accessiblePages.some((page) => page.id === "email-templates")) {
-        void fetchAdminClientJson(
-          OUTLOOK_TEMPLATES_CACHE_KEY,
-          "/api/admin/email-templates",
-        ).catch(() => undefined)
-      }
-    }, 350)
-
-    return () => {
-      cancelled = true
-      if (timer !== undefined) window.clearTimeout(timer)
-      window.clearTimeout(warmTimer)
-      if (idleCallback !== undefined && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleCallback)
-      }
-    }
-  }, [authenticated, loading, pages, pathname, permissions, role, router])
-
   const navigationGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
 
@@ -399,6 +332,18 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     window.location.assign("/admin")
   }
 
+  function handlePageIntent(page: AdminPageDefinition) {
+    if (isExternalAdminPage(page) || page.path === pathname) return
+
+    router.prefetch(page.path)
+    if (page.id === "email-templates") {
+      void fetchAdminClientJson(
+        OUTLOOK_TEMPLATES_INDEX_CACHE_KEY,
+        "/api/admin/email-templates?mode=index",
+      ).catch(() => undefined)
+    }
+  }
+
   function renderPermissionSection(
     permission: VisiblePermission,
     entries: Array<{ page: AdminPageDefinition; permission: VisiblePermission }>,
@@ -445,9 +390,12 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
               <Link
                 key={page.id}
                 href={page.path}
+                prefetch={false}
                 className={`fc-admin-sidebar-link${active ? " is-active" : ""}`}
                 aria-current={active ? "page" : undefined}
                 title={title}
+                onPointerEnter={() => handlePageIntent(page)}
+                onFocus={() => handlePageIntent(page)}
               >
                 {content}
               </Link>
@@ -505,9 +453,11 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       >
         <div className="fc-admin-sidebar-top">
           <Link href="/admin" className="fc-admin-sidebar-title">
-            <img
+            <Image
               src="/fc-uno-sidebar-logo.png"
               alt="FC UNO"
+              width={723}
+              height={143}
               className="fc-admin-sidebar-logo"
             />
           </Link>

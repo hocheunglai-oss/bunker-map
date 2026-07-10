@@ -108,14 +108,17 @@ export default function SystemHealthPage() {
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "system-health", "view")
   const checks = useMemo(() => health?.checks || [], [health])
 
-  const loadHealth = useCallback(async () => {
+  const loadHealth = useCallback(async (forceRefresh = false) => {
     if (!authenticated || !canView) return
 
     setLoading(true)
     setMessage("")
 
     try {
-      const response = await fetch("/api/admin/system-health", { cache: "no-store" })
+      const response = await fetch(
+        forceRefresh ? "/api/admin/system-health?refresh=1" : "/api/admin/system-health",
+        { cache: "no-store" },
+      )
       const data = (await response.json()) as HealthResponse
       if (!response.ok) {
         setMessage(data.message || "Failed to load system health.")
@@ -143,7 +146,7 @@ export default function SystemHealthPage() {
         return
       }
       setBackupResult(data)
-      await loadHealth()
+      await loadHealth(true)
     } catch {
       setMessage("Backup failed.")
     } finally {
@@ -180,7 +183,7 @@ export default function SystemHealthPage() {
               <button type="button" onClick={createBackup} disabled={backingUp || loading} className={styles.backupButton}>
                 {backingUp ? "BACKING UP..." : "BACK UP NOW"}
               </button>
-              <button type="button" onClick={loadHealth} disabled={loading} className={styles.refreshButton}>
+              <button type="button" onClick={() => void loadHealth(true)} disabled={loading} className={styles.refreshButton}>
                 {loading ? "REFRESHING..." : "REFRESH"}
               </button>
             </div>

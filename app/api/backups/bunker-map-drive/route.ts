@@ -1,8 +1,9 @@
 import { Readable } from "node:stream"
 import { createClient } from "@supabase/supabase-js"
-import { drive_v3, google } from "googleapis"
+import type { drive_v3 } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -82,7 +83,8 @@ function getSupabaseClient() {
   )
 }
 
-function getDriveClient() {
+async function getDriveClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -97,7 +99,8 @@ function getDriveClient() {
   }
 }
 
-function getGoogleOAuthClient(refreshToken: string) {
+async function getGoogleOAuthClient(refreshToken: string) {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -108,10 +111,11 @@ function getGoogleOAuthClient(refreshToken: string) {
 }
 
 async function fetchGoogleContacts() {
+  const { google } = await loadGoogleApis()
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
   if (!refreshToken) throw new Error("GOOGLE_OAUTH_REFRESH_TOKEN is not configured.")
 
-  const people = google.people({ version: "v1", auth: getGoogleOAuthClient(refreshToken) })
+  const people = google.people({ version: "v1", auth: await getGoogleOAuthClient(refreshToken) })
   const contacts: unknown[] = []
   let pageToken: string | undefined
 
@@ -145,10 +149,11 @@ async function fetchGoogleContacts() {
 }
 
 async function fetchGoogleCalendarEvents() {
+  const { google } = await loadGoogleApis()
   const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN
   if (!refreshToken) throw new Error("GOOGLE_CALENDAR_REFRESH_TOKEN is not configured.")
 
-  const calendar = google.calendar({ version: "v3", auth: getGoogleOAuthClient(refreshToken) })
+  const calendar = google.calendar({ version: "v3", auth: await getGoogleOAuthClient(refreshToken) })
   const calendarId =
     process.env.GOOGLE_MEETING_CALENDAR_ID ||
     process.env.GOOGLE_CALENDAR_ID ||
@@ -350,7 +355,7 @@ async function createBackup() {
     const content = JSON.stringify(payload, null, 2)
     const stamp = new Date().toISOString().replace(/[:.]/g, "-")
     const fileName = `bunker-map-backup-${stamp}.json`
-    const { drive, rootFolderId, sharedDriveId } = getDriveClient()
+    const { drive, rootFolderId, sharedDriveId } = await getDriveClient()
     const backupRootId = await ensureDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
     const weeklyFolderId = await ensureDriveFolder(drive, backupRootId, WEEKLY_FOLDER_NAME, sharedDriveId)
     const uploaded = await uploadBackupFile(drive, weeklyFolderId, fileName, content)

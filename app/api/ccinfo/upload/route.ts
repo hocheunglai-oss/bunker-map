@@ -2,7 +2,6 @@ import fs from "node:fs/promises"
 import fsSync from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { google } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
@@ -14,6 +13,7 @@ import {
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
 } from "@/lib/ccinfoDrivePaths"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -24,6 +24,7 @@ function requireEnv(name: string) {
 }
 
 async function getDriveClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),

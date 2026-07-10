@@ -1,9 +1,10 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { google, people_v1 } from "googleapis"
+import type { people_v1 } from "googleapis"
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { loadGoogleApis } from "@/lib/googleApis"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-people-oauth-token.json")
 const SYNC_MARKER_KEY = "BUNKER_MAP_SYNC"
@@ -67,6 +68,7 @@ function isInvalidGrantError(error: unknown) {
 }
 
 async function getPeopleClient() {
+  const { google } = await loadGoogleApis()
   const auth = new google.auth.OAuth2(
     requireEnv("GOOGLE_OAUTH_CLIENT_ID"),
     requireEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -83,6 +85,8 @@ async function getPeopleClient() {
   }
   return google.people({ version: "v1", auth })
 }
+
+type GooglePeopleClient = Awaited<ReturnType<typeof getPeopleClient>>
 
 function normalizeText(value: string | null | undefined) {
   return value?.trim() || ""
@@ -266,7 +270,7 @@ async function fetchContacts(supabase: any, company: string | null) {
   return rows
 }
 
-async function listManagedGoogleContacts(people: ReturnType<typeof google.people>) {
+async function listManagedGoogleContacts(people: GooglePeopleClient) {
   const managed: string[] = []
   const byContactId = new Map<string, string[]>()
   let pageToken: string | undefined
@@ -301,7 +305,7 @@ async function listManagedGoogleContacts(people: ReturnType<typeof google.people
   return { managed, byContactId }
 }
 
-async function deleteManagedContacts(people: ReturnType<typeof google.people>, resourceNames: string[]) {
+async function deleteManagedContacts(people: GooglePeopleClient, resourceNames: string[]) {
   for (let index = 0; index < resourceNames.length; index += 1) {
     const resourceName = resourceNames[index]
 
@@ -335,7 +339,7 @@ async function deleteManagedContacts(people: ReturnType<typeof google.people>, r
   }
 }
 
-async function createContacts(people: ReturnType<typeof google.people>, contacts: PhonebookContact[]) {
+async function createContacts(people: GooglePeopleClient, contacts: PhonebookContact[]) {
   let synced = 0
   const failed: Array<{ id: string; label: string }> = []
 
@@ -408,7 +412,7 @@ export async function POST(request: Request) {
       contacts = contacts.filter((contact) => wanted.has(contact.id))
     }
 
-    let people: ReturnType<typeof google.people>
+    let people: GooglePeopleClient
     try {
       people = await getPeopleClient()
     } catch {

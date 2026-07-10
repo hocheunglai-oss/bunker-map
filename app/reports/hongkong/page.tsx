@@ -15,10 +15,7 @@ async function getInitialReportData() {
   try {
     return await getPublicReportData("hongkong")
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Missing environment variable")) {
-      console.error("Initial Hong Kong report data unavailable", error)
-      return getEmptyPublicReportData("hongkong")
-    }
-    throw error
+    console.error("Initial Hong Kong report data unavailable", error)
+    return getEmptyPublicReportData("hongkong")
   }
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
+import { unstable_cache } from "next/cache"
 import { requireAdminSession } from "@/lib/adminAuth"
+import { timedJson } from "@/lib/serverTiming"
 
 const HKT_TIME_ZONE = "Asia/Hong_Kong"
 const HOLIDAY_WINDOW_DAYS = 3
@@ -312,6 +314,18 @@ async function fetchTyphoonInfo() {
   }
 }
 
+const getCachedUpcomingHolidays = unstable_cache(
+  fetchUpcomingHolidays,
+  ["admin-dashboard-holidays-v1"],
+  { revalidate: 6 * 60 * 60 },
+)
+
+const getCachedTyphoonInfo = unstable_cache(
+  fetchTyphoonInfo,
+  ["admin-dashboard-typhoon-v1"],
+  { revalidate: 3 * 60 },
+)
+
 function fallbackHolidays(error: unknown) {
   const fromDate = formatHktDateKey()
   return {
@@ -336,15 +350,16 @@ function fallbackTyphoon(error: unknown) {
 }
 
 export async function GET() {
+  const startedAt = Date.now()
   try {
     await requireAdminSession()
 
     const [holidayResult, typhoonResult] = await Promise.allSettled([
-      fetchUpcomingHolidays(),
-      fetchTyphoonInfo(),
+      getCachedUpcomingHolidays(),
+      getCachedTyphoonInfo(),
     ])
 
-    return NextResponse.json({
+    return timedJson("/api/admin/dashboard-swatches", startedAt, {
       holidays:
         holidayResult.status === "fulfilled"
           ? holidayResult.value
@@ -353,6 +368,9 @@ export async function GET() {
         typhoonResult.status === "fulfilled"
           ? typhoonResult.value
           : fallbackTyphoon(typhoonResult.reason),
+    }, undefined, {
+      holidaysAvailable: holidayResult.status === "fulfilled",
+      typhoonAvailable: typhoonResult.status === "fulfilled",
     })
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {

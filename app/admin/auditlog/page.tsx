@@ -18,6 +18,8 @@ type AuditLogRecord = {
   recordLabel: string
   summary: string
   details: string[]
+  detailsLoaded?: boolean
+  undoable?: boolean
   undoOfLogId: string | null
   undoneAt: string | null
 }
@@ -34,6 +36,7 @@ type AuditUserOption = {
 
 type AuditResponse = {
   logs: AuditLogRecord[]
+  log?: AuditLogRecord
   pages: AuditPageOption[]
   users: AuditUserOption[]
   message?: string
@@ -165,6 +168,7 @@ export default function AuditLogPage() {
   const [actor, setActor] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [undoingId, setUndoingId] = useState<string | null>(null)
   const [message, setMessage] = useState("")
 
@@ -219,8 +223,39 @@ export default function AuditLogPage() {
     loadLogs()
   }, [loadLogs])
 
+  useEffect(() => {
+    if (!authenticated || !selectedLog || selectedLog.detailsLoaded) return
+
+    let cancelled = false
+    const controller = new AbortController()
+    const loadDetails = async () => {
+      setDetailLoadingId(selectedLog.id)
+      try {
+        const response = await fetch(
+          `/api/admin/audit-logs?id=${encodeURIComponent(selectedLog.id)}`,
+          { cache: "no-store", signal: controller.signal },
+        )
+        const data = (await response.json()) as AuditResponse
+        if (!response.ok || !data.log || cancelled) return
+        setLogs((current) =>
+          current.map((log) => (log.id === data.log?.id ? data.log : log)),
+        )
+      } catch {
+        if (!cancelled && !controller.signal.aborted) setMessage("Failed to load audit details.")
+      } finally {
+        if (!cancelled) setDetailLoadingId(null)
+      }
+    }
+
+    void loadDetails()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [authenticated, selectedLog])
+
   async function handleUndo(log: AuditLogRecord) {
-    if (log.undoneAt || log.undoOfLogId || !canEdit) return
+    if (log.undoneAt || log.undoOfLogId || log.undoable === false || !canEdit) return
 
     const confirmed = window.confirm(`Undo this change?\n\n${log.summary}`)
     if (!confirmed) return
@@ -377,7 +412,7 @@ export default function AuditLogPage() {
                 <tbody>
                   {logs.map((log) => {
                     const isSelected = selectedLog?.id === log.id
-                    const canUndo = canEdit && !log.undoneAt && !log.undoOfLogId
+                    const canUndo = canEdit && log.undoable !== false && !log.undoneAt && !log.undoOfLogId
 
                     return (
                       <tr
@@ -515,7 +550,11 @@ export default function AuditLogPage() {
                 </div>
 
                 <div style={{ display: "grid", gap: "8px" }}>
-                  {selectedLog.details.map((detail, index) => (
+                  {detailLoadingId === selectedLog.id ? (
+                    <div style={{ color: "var(--fc-admin-muted)", fontSize: "13px" }}>
+                      Loading details...
+                    </div>
+                  ) : selectedLog.details.map((detail, index) => (
                     <div
                       key={`${selectedLog.id}-${index}`}
                       style={{

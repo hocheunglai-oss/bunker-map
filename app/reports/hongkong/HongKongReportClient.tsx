@@ -1,6 +1,8 @@
 "use client"
 
 import { Fragment, useEffect, useState } from "react"
+import Link from "next/link"
+import Image from "next/image"
 import { type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatReportDate } from "@/lib/taiwanReport"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -200,9 +202,12 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
                 textDecoration: "none",
               }}
             >
-              <img
+              <Image
                 src="/logo-trans.png"
                 alt="Bunker map logo"
+                width={600}
+                height={198}
+                priority
                 style={{ width: "100%", height: "auto", maxWidth: isMobile ? "180px" : "250px", opacity: 0.96 }}
               />
             </div>
@@ -409,7 +414,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
         </div>
 
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
-          <a
+          <Link
             href="/"
             style={{
               ...pillButtonStyle,
@@ -422,7 +427,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
             }}
           >
             Back To Bunker Map
-          </a>
+          </Link>
         </div>
 
         <div style={{ marginTop: "20px" }}>
