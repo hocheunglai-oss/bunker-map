@@ -1,6 +1,12 @@
 import { unstable_cache } from "next/cache"
 import { createClient } from "@supabase/supabase-js"
 import { FALLBACK_REMARK_ID, type FallbackMap } from "@/lib/reportFallbackKeys"
+import {
+  emptyTaiwanOperationalNotice,
+  parseTaiwanOperationalNotice,
+  TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+  type TaiwanOperationalNotice,
+} from "@/lib/taiwanOperationalNotice"
 import type { HongKongReportRow } from "@/lib/hongKongReport"
 import type { TaiwanReportRow } from "@/lib/taiwanReport"
 import type { ChinaReportSection } from "@/lib/chinaReport"
@@ -66,6 +72,7 @@ export type PublicReportPayload =
       snapshot: TaiwanReportSnapshot | null
       fallbacks: FallbackMap
       specialNotice: string
+      operationalNotice: TaiwanOperationalNotice
     }
   | {
       key: "hongkong"
@@ -185,7 +192,7 @@ async function loadHomepageMarketData(): Promise<HomepageMarketData> {
 async function loadReportData(key: ReportSnapshotKey): Promise<PublicReportPayload> {
   const supabase = getSupabaseClient()
   const ids = key === "taiwan"
-    ? [REPORT_SNAPSHOT_IDS[key], FALLBACK_REMARK_ID, 2]
+    ? [REPORT_SNAPSHOT_IDS[key], FALLBACK_REMARK_ID, 2, TAIWAN_OPERATIONAL_NOTICE_REMARK_ID]
     : [REPORT_SNAPSHOT_IDS[key], FALLBACK_REMARK_ID]
 
   const { data, error } = await supabase
@@ -206,6 +213,7 @@ async function loadReportData(key: ReportSnapshotKey): Promise<PublicReportPaylo
       snapshot: parseJson<TaiwanReportSnapshot>(contentById.get(REPORT_SNAPSHOT_IDS[key])),
       fallbacks,
       specialNotice: contentById.get(2) || "",
+      operationalNotice: parseTaiwanOperationalNotice(contentById.get(TAIWAN_OPERATIONAL_NOTICE_REMARK_ID)),
     }
   }
 
@@ -249,6 +257,10 @@ export function getHomepageMarketData() {
 }
 
 export function getPublicReportData<Key extends ReportSnapshotKey>(key: Key) {
+  if (key === "taiwan") {
+    return loadReportData(key) as Promise<PublicReportPayloadByKey[Key]>
+  }
+
   return getCachedReportData(key) as Promise<PublicReportPayloadByKey[Key]>
 }
 
@@ -261,6 +273,7 @@ export function getEmptyPublicReportData<Key extends ReportSnapshotKey>(
       snapshot: null,
       fallbacks: {},
       specialNotice: "",
+      operationalNotice: emptyTaiwanOperationalNotice,
     } as PublicReportPayloadByKey[Key]
   }
 

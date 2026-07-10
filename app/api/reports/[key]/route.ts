@@ -18,7 +18,11 @@ export async function GET(
 
   try {
     return NextResponse.json(await getPublicReportData(key), {
-      headers: publicMarketCacheHeaders(),
+      headers: key === "taiwan"
+        ? {
+            "Cache-Control": "no-store, max-age=0",
+          }
+        : publicMarketCacheHeaders(),
     })
   } catch (error) {
     console.error("Report data load failed", error)

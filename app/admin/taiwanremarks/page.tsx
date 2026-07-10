@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import {
+  emptyTaiwanOperationalNotice,
+  normaliseTaiwanOperationalNotice,
+  parseTaiwanOperationalNotice,
+  serializeTaiwanOperationalNotice,
+  TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+  taiwanTyphoonNoticeTemplate,
+  type TaiwanOperationalNotice,
+} from "@/lib/taiwanOperationalNotice"
 
 function createEmptyMemo() {
   return { id: crypto.randomUUID(), text: "" }
@@ -52,22 +61,28 @@ const textareaStyle: React.CSSProperties = {
 export default function AdminRemarks() {
   const [memos, setMemos] = useState<Array<{ id: string; text: string }>>([])
   const [specialNotice, setSpecialNotice] = useState<string>("")
+  const [operationalNotice, setOperationalNotice] = useState<TaiwanOperationalNotice>(emptyTaiwanOperationalNotice)
   const [loading, setLoading] = useState<boolean>(true)
   const [saving, setSaving] = useState<boolean>(false)
   const [message, setMessage] = useState<string>("")
   const [isDirty, setIsDirty] = useState<boolean>(false)
   const [noticeDirty, setNoticeDirty] = useState<boolean>(false)
+  const [operationalNoticeDirty, setOperationalNoticeDirty] = useState<boolean>(false)
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const hasUnsavedChanges = isDirty || noticeDirty || operationalNoticeDirty
 
   useEffect(() => {
     const loadRemark = async () => {
       const { data: remarksData } = await supabase
         .from("remarks")
         .select("*")
-        .in("id", [1, 2])
+        .in("id", [1, 2, TAIWAN_OPERATIONAL_NOTICE_REMARK_ID])
 
       const remarkData = remarksData?.find((item) => item.id === 1)
       const noticeData = remarksData?.find((item) => item.id === 2)
+      const operationalNoticeData = remarksData?.find(
+        (item) => item.id === TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+      )
 
       const initialMemos =
         remarkData?.content
@@ -78,8 +93,10 @@ export default function AdminRemarks() {
 
       setMemos(initialMemos.length > 0 ? initialMemos : [createEmptyMemo()])
       setSpecialNotice(noticeData?.content || "")
+      setOperationalNotice(parseTaiwanOperationalNotice(operationalNoticeData?.content))
       setIsDirty(false)
       setNoticeDirty(false)
+      setOperationalNoticeDirty(false)
       setLoading(false)
     }
 
@@ -104,6 +121,10 @@ export default function AdminRemarks() {
       .upsert([
         { id: 1, content: serializedRemark },
         { id: 2, content: specialNotice.trim() },
+        {
+          id: TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+          content: serializeTaiwanOperationalNotice(operationalNotice),
+        },
       ])
 
     if (error) setMessage("Error saving remarks")
@@ -111,6 +132,7 @@ export default function AdminRemarks() {
       setMessage("Remarks saved successfully")
       setIsDirty(false)
       setNoticeDirty(false)
+      setOperationalNoticeDirty(false)
     }
 
     setSaving(false)
@@ -147,6 +169,24 @@ export default function AdminRemarks() {
     setSpecialNotice("")
     setMessage("")
     setNoticeDirty(true)
+  }
+
+  function updateOperationalNotice(next: Partial<TaiwanOperationalNotice>) {
+    setOperationalNotice((prev) => normaliseTaiwanOperationalNotice({ ...prev, ...next }))
+    setMessage("")
+    setOperationalNoticeDirty(true)
+  }
+
+  function applyTyphoonTemplate() {
+    setOperationalNotice(taiwanTyphoonNoticeTemplate)
+    setMessage("")
+    setOperationalNoticeDirty(true)
+  }
+
+  function clearOperationalNotice() {
+    setOperationalNotice(emptyTaiwanOperationalNotice)
+    setMessage("")
+    setOperationalNoticeDirty(true)
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -217,16 +257,125 @@ export default function AdminRemarks() {
                   : "var(--fc-admin-success-bg)",
                 color: "var(--fc-admin-success-text)",
                 textTransform: "uppercase",
-                border: isDirty || noticeDirty ? "1px solid var(--fc-admin-success-border)" : "1px solid var(--fc-admin-success-border)",
+                border: hasUnsavedChanges ? "1px solid var(--fc-admin-success-border)" : "1px solid var(--fc-admin-success-border)",
                 cursor: saving ? "wait" : "pointer",
               }}
             >
-              {saving ? "Saving..." : isDirty || noticeDirty ? "Save" : "Saved"}
+              {saving ? "Saving..." : hasUnsavedChanges ? "Save" : "Saved"}
             </button>
           </div>
         </div>
 
         <div style={{ display: "grid", gap: "14px" }}>
+          <div
+            style={{
+              ...memoCardStyle,
+              border: "1px solid var(--fc-admin-warning-border)",
+              background:
+                "linear-gradient(180deg, rgba(94, 61, 22, 0.66) 0%, rgba(42, 36, 32, 0.52) 100%)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    color: "var(--fc-admin-warning-text)",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Operational Notice
+                </div>
+                <div style={{ marginTop: "4px", color: "var(--fc-admin-warning-text)", fontSize: "12px" }}>
+                  When active, Taiwan report Today prices show - and Change shows NA.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  onClick={applyTyphoonTemplate}
+                  style={{
+                    ...pillButtonStyle,
+                    padding: "8px 12px",
+                    border: "1px solid var(--fc-admin-warning-border)",
+                    background: "var(--fc-admin-warning-bg)",
+                    color: "var(--fc-admin-warning-text)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Use Typhoon Template
+                </button>
+                <button
+                  onClick={clearOperationalNotice}
+                  style={{
+                    ...pillButtonStyle,
+                    padding: "8px 12px",
+                    border: "1px solid var(--fc-admin-danger-border)",
+                    background: "var(--fc-admin-danger-bg)",
+                    color: "var(--fc-admin-danger-text)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "10px",
+                color: "var(--fc-admin-warning-text)",
+                fontSize: "13px",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={operationalNotice.active}
+                onChange={(event) => updateOperationalNotice({ active: event.target.checked })}
+              />
+              Show On Taiwan Report
+            </label>
+
+            <input
+              style={{
+                ...textareaStyle,
+                minHeight: "auto",
+                padding: "12px 14px",
+                border: "1px solid var(--fc-admin-warning-border)",
+                background: "var(--fc-admin-warning-bg)",
+              }}
+              value={operationalNotice.title}
+              onChange={(event) => updateOperationalNotice({ title: event.target.value })}
+              placeholder="Notice title"
+            />
+
+            <textarea
+              style={{
+                ...textareaStyle,
+                border: "1px solid var(--fc-admin-warning-border)",
+                background: "var(--fc-admin-warning-bg)",
+              }}
+              value={operationalNotice.message}
+              onChange={(event) => updateOperationalNotice({ message: event.target.value })}
+              placeholder="Write the operational notice..."
+            />
+          </div>
+
           <div
             style={{
               ...memoCardStyle,

@@ -133,10 +133,25 @@ function renderUnavailableHsfo(portName: string) {
   )
 }
 
+function renderOperationalChangeNa() {
+  return (
+    <span
+      style={{
+        color: "#ffd59a",
+        fontSize: "13px",
+        fontWeight: 800,
+        letterSpacing: "0.04em",
+      }}
+    >
+      NA
+    </span>
+  )
+}
+
 type TaiwanReportPayload = PublicReportPayloadByKey["taiwan"]
 
 async function loadTaiwanReport(): Promise<TaiwanReportPayload | null> {
-  const response = await fetch("/api/reports/taiwan")
+  const response = await fetch("/api/reports/taiwan", { cache: "no-store" })
   if (!response.ok) return null
   return response.json() as Promise<TaiwanReportPayload>
 }
@@ -146,8 +161,10 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
   const [rows, setRows] = useState<TaiwanReportRow[]>(initialData.snapshot?.rows ?? [])
   const [remark, setRemark] = useState(initialData.snapshot?.remark ?? "")
   const [specialNotice, setSpecialNotice] = useState(initialData.specialNotice)
+  const [operationalNotice, setOperationalNotice] = useState(initialData.operationalNotice)
   const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
   const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
+  const showOperationalNotice = operationalNotice.active && operationalNotice.message.trim().length > 0
 
   useEffect(() => {
     let cancelled = false
@@ -160,6 +177,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
       setRows(payload.snapshot.rows)
       setRemark(payload.snapshot.remark)
       setSpecialNotice(payload.specialNotice)
+      setOperationalNotice(payload.operationalNotice)
       setFallbacks(payload.fallbacks)
     }
 
@@ -179,6 +197,11 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
 
   function fuelFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo") {
     return fallbacks[buildFallbackKey(port, fuel)] || "-"
+  }
+
+  function todayValue(port: string, fuel: "hsfo" | "vlsfo" | "mgo", value: number | null) {
+    if (showOperationalNotice) return "-"
+    return value ?? fuelFallback(port, fuel)
   }
 
   useEffect(() => {
@@ -373,8 +396,8 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {isHsfoUnavailablePort(row.port)
-                        ? renderUnavailableHsfo(row.port)
-                        : (row.hsfo.today ?? fuelFallback(row.port, "hsfo"))}
+                        ? (showOperationalNotice ? "-" : renderUnavailableHsfo(row.port))
+                        : todayValue(row.port, "hsfo", row.hsfo.today)}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {isHsfoUnavailablePort(row.port)
@@ -385,13 +408,19 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                       style={{
                         padding: "16px 10px",
                         fontWeight: 700,
-                        color: isHsfoUnavailablePort(row.port) ? unavailableHsfoColor(row.port) : color(row.hsfo.change),
+                        color: showOperationalNotice
+                          ? "#ffd59a"
+                          : isHsfoUnavailablePort(row.port)
+                            ? unavailableHsfoColor(row.port)
+                            : color(row.hsfo.change),
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                         borderRight: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >
-                      {isHsfoUnavailablePort(row.port)
-                        ? renderUnavailableHsfo(row.port)
+                      {showOperationalNotice
+                        ? renderOperationalChangeNa()
+                        : isHsfoUnavailablePort(row.port)
+                          ? renderUnavailableHsfo(row.port)
                         : (
                           <>
                             {fmt(row.hsfo.change)}
@@ -401,7 +430,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.vlsfo.today ?? fuelFallback(row.port, "vlsfo")}
+                      {todayValue(row.port, "vlsfo", row.vlsfo.today)}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {row.vlsfo.last ?? fuelFallback(row.port, "vlsfo")}
@@ -410,17 +439,23 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                       style={{
                         padding: "16px 10px",
                         fontWeight: 700,
-                        color: color(row.vlsfo.change),
+                        color: showOperationalNotice ? "#ffd59a" : color(row.vlsfo.change),
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                         borderRight: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >
-                      {fmt(row.vlsfo.change)}
-                      {arrow(row.vlsfo.change)}
+                      {showOperationalNotice ? (
+                        renderOperationalChangeNa()
+                      ) : (
+                        <>
+                          {fmt(row.vlsfo.change)}
+                          {arrow(row.vlsfo.change)}
+                        </>
+                      )}
                     </td>
 
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {row.mgo.today ?? fuelFallback(row.port, "mgo")}
+                      {todayValue(row.port, "mgo", row.mgo.today)}
                     </td>
                     <td style={{ padding: "16px 10px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       {row.mgo.last ?? fuelFallback(row.port, "mgo")}
@@ -429,12 +464,18 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
                       style={{
                         padding: "16px 10px",
                         fontWeight: 700,
-                        color: color(row.mgo.change),
+                        color: showOperationalNotice ? "#ffd59a" : color(row.mgo.change),
                         borderTop: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >
-                      {fmt(row.mgo.change)}
-                      {arrow(row.mgo.change)}
+                      {showOperationalNotice ? (
+                        renderOperationalChangeNa()
+                      ) : (
+                        <>
+                          {fmt(row.mgo.change)}
+                          {arrow(row.mgo.change)}
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -442,6 +483,36 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
             </table>
           </div>
         </div>
+
+        {showOperationalNotice && (
+          <div
+            style={{
+              ...cardStyle,
+              padding: "15px 16px",
+              marginBottom: "20px",
+              border: "1px solid rgba(255, 178, 84, 0.34)",
+              background:
+                "radial-gradient(circle at top left, rgba(255, 171, 64, 0.22), transparent 34%), linear-gradient(180deg, rgba(75, 45, 16, 0.8) 0%, rgba(23, 23, 28, 0.84) 100%)",
+              boxShadow: "0 18px 42px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(255, 178, 84, 0.08)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "0.14em",
+                color: "#ffd59a",
+                marginBottom: "7px",
+                fontWeight: 800,
+              }}
+            >
+              {operationalNotice.title.trim() || "Operational Notice"}
+            </div>
+            <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700, whiteSpace: "pre-line" }}>
+              {operationalNotice.message.trim()}
+            </div>
+          </div>
+        )}
 
         {specialNotice.trim() && (
           <div
