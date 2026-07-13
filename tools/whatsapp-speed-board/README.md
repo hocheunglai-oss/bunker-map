@@ -30,6 +30,7 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 - Click a contact to jump to the WhatsApp chat. Phone-number chats open directly with WhatsApp Web's `send?phone=` URL.
 - Name-only chats use WhatsApp Web's left chat search as a fallback; the extension does not use in-chat search.
 - Visible WhatsApp unread counts are mirrored as green badges on saved rows.
+- After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
 - In Enquiry Worksheet, edit the shortened enquiry if needed, then press the green WhatsApp send button.
 - WhatsApp Web receives the enquiry in the right-hand queue. Tick one or more enquiries and click `Send`, or drag them onto a saved contact.
 - The template above the queue can be enabled, disabled, or edited locally before sending.

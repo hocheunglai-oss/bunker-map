@@ -19,7 +19,6 @@
 
   const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
   if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
-    console.warn("FCUNO WhatsApp Speed Board did not start because another FCUNO board is already active.")
     return
   }
   document.documentElement?.setAttribute(BOARD_OWNER_ATTRIBUTE, BOARD_OWNER)
@@ -56,6 +55,7 @@
   let memorySendLock = { key: "", at: 0 }
   let extensionContextStopped = false
   let renderPending = false
+  let storageChangeListener = null
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -82,6 +82,7 @@
   }
 
   function stopExtensionContext() {
+    if (extensionContextStopped) return
     extensionContextStopped = true
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (crudeTimer) window.clearInterval(crudeTimer)
@@ -91,13 +92,29 @@
     crudeTimer = 0
     templateSaveTimer = 0
     contactMenuHideTimer = 0
+    if (storageChangeListener) {
+      try {
+        chrome.storage?.onChanged?.removeListener(storageChangeListener)
+      } catch {
+      }
+      storageChangeListener = null
+    }
+    window.removeEventListener("beforeunload", handleBeforeUnload)
+    document.removeEventListener("DOMContentLoaded", launch)
+    document.removeEventListener("dragover", blockExternalEnquiryDrop, true)
+    document.removeEventListener("drop", blockExternalEnquiryDrop, true)
+    document.removeEventListener("click", handleDocumentClick)
+    document.removeEventListener("keydown", handleDocumentKeydown)
+    document.getElementById(BOARD_ID)?.remove()
+    document.body?.classList.remove("fcuno-wa-collapsed", "fcuno-wa-active")
+    if (document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) === BOARD_OWNER) {
+      document.documentElement.removeAttribute(BOARD_OWNER_ATTRIBUTE)
+    }
   }
 
   function handleContentError(error) {
     if (isExtensionContextError(error)) {
       stopExtensionContext()
-      state.enquiryError = runtimeUnavailableMessage()
-      render()
       return true
     }
     console.error(error)
@@ -117,7 +134,8 @@
   function runtimeLastErrorMessage() {
     try {
       return chrome.runtime.lastError?.message || ""
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return runtimeUnavailableMessage()
     }
   }
@@ -131,7 +149,8 @@
         Boolean(chrome.runtime.id) &&
         typeof chrome.runtime.sendMessage === "function"
       )
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return false
     }
   }
@@ -143,7 +162,8 @@
         callback?.(response, runtimeLastErrorMessage())
       })
       return true
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return false
     }
   }
@@ -232,8 +252,14 @@
   }
 
   function getStorage() {
-    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null
-    return chrome.storage.local
+    if (extensionContextStopped) return null
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null
+      return chrome.storage.local
+    } catch (error) {
+      handleContentError(error)
+      return null
+    }
   }
 
   function readStorage(keys) {
@@ -435,19 +461,23 @@
   }
 
   function saveState() {
+    if (extensionContextStopped) return
     normalizeOrders()
     pruneEnquiryUiState()
     writeStorage({ [STORAGE_KEY]: statePayload() })
+    if (extensionContextStopped) return
     document.body.classList.toggle("fcuno-wa-collapsed", state.collapsed)
     document.body.classList.toggle("fcuno-wa-active", !state.collapsed)
   }
 
   function saveTemplateState() {
+    if (extensionContextStopped) return
     pruneEnquiryUiState()
     writeStorage({ [STORAGE_KEY]: statePayload() })
   }
 
   function scheduleTemplateSave() {
+    if (extensionContextStopped) return
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
     templateSaveTimer = window.setTimeout(() => {
       templateSaveTimer = 0
@@ -849,8 +879,16 @@
 
   function watchStorageEnquiries() {
     const storage = getStorage()
-    if (!storage || !chrome.storage?.onChanged) return
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (!storage || extensionContextStopped) return
+    let onChanged
+    try {
+      onChanged = chrome.storage?.onChanged
+    } catch (error) {
+      handleContentError(error)
+      return
+    }
+    if (!onChanged) return
+    storageChangeListener = (changes, areaName) => {
       if (areaName !== "local") return
       if (changes[ENQUIRY_STORAGE_KEY]) {
         applySavedEnquiryState(changes[ENQUIRY_STORAGE_KEY].newValue)
@@ -858,7 +896,13 @@
       }
       const legacy = changes[STORAGE_KEY]?.newValue
       if (legacy && Array.isArray(legacy.enquiries)) applySavedEnquiryState(legacy)
-    })
+    }
+    try {
+      onChanged.addListener(storageChangeListener)
+    } catch (error) {
+      handleContentError(error)
+      storageChangeListener = null
+    }
   }
 
   function loadCrudeWatch() {
@@ -1519,6 +1563,7 @@
   }
 
   function renderWhenIdle() {
+    if (extensionContextStopped) return
     if (state.templateEditing || state.draggingType) {
       renderPending = true
       return
@@ -1527,6 +1572,7 @@
   }
 
   function render() {
+    if (extensionContextStopped) return
     renderPending = false
     let host = document.getElementById(BOARD_ID)
     if (!host) {
@@ -1949,6 +1995,7 @@
   async function start() {
     document.getElementById(BOARD_ID)?.remove()
     await loadState()
+    if (extensionContextStopped) return
     saveState()
     render()
     watchStorageEnquiries()
@@ -1959,27 +2006,33 @@
     crudeTimer = window.setInterval(() => safeRun(loadCrudeWatch), CRUDE_REFRESH_MS)
   }
 
-  window.addEventListener("beforeunload", () => {
-    if (unreadTimer) window.clearInterval(unreadTimer)
-    if (crudeTimer) window.clearInterval(crudeTimer)
-    if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
-    if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
-  })
+  function handleBeforeUnload() {
+    stopExtensionContext()
+  }
 
-  document.addEventListener("dragover", blockExternalEnquiryDrop, true)
-  document.addEventListener("drop", blockExternalEnquiryDrop, true)
-  document.addEventListener("click", (event) => {
+  function handleDocumentClick(event) {
     if (!state.contactMenuId) return
     if (event.target instanceof Element && event.target.closest(`#${BOARD_ID} .fcuno-wa-row-actions`)) return
     closeContactMenu()
-  })
-  document.addEventListener("keydown", (event) => {
+  }
+
+  function handleDocumentKeydown(event) {
     if (event.key === "Escape") closeContactMenu()
-  })
+  }
+
+  function launch() {
+    start().catch(handleContentError)
+  }
+
+  window.addEventListener("beforeunload", handleBeforeUnload)
+  document.addEventListener("dragover", blockExternalEnquiryDrop, true)
+  document.addEventListener("drop", blockExternalEnquiryDrop, true)
+  document.addEventListener("click", handleDocumentClick)
+  document.addEventListener("keydown", handleDocumentKeydown)
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true })
+    document.addEventListener("DOMContentLoaded", launch, { once: true })
   } else {
-    start()
+    launch()
   }
 })()

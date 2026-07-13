@@ -72,7 +72,9 @@ const html = `<!doctype html>
       window.promptResponse = null;
       window.prompt = () => window.promptResponse;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
-      const firstRun = new URLSearchParams(window.location.search).get("firstRun") === "1";
+      const searchParams = new URLSearchParams(window.location.search);
+      const firstRun = searchParams.get("firstRun") === "1";
+      window.invalidateStorageOnRead = searchParams.get("invalidateStorage") === "1";
       window.storageData = firstRun ? {} : {
         "fcuno-wa-spc-board-v1": {
           feedStartedAt: "2026-06-30T00:00:00Z"
@@ -160,7 +162,10 @@ const html = `<!doctype html>
         },
         storage: {
           local: {
-            get: (keys, callback) => callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]]))),
+            get: (keys, callback) => {
+              if (window.invalidateStorageOnRead) throw new Error("Extension context invalidated.");
+              callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]])));
+            },
             set: (values, callback) => { Object.assign(window.storageData, values); callback?.(); }
           }
         }
@@ -385,49 +390,6 @@ async function main() {
       assert.equal(renamedResult.savedName, "OTTO")
       assert.equal(renamedResult.savedChatName, "Otto Tone")
 
-      const invalidRuntimeResult = await page.evaluate(() => {
-        const api = window.__FCUNO_WA_SPC_TEST_API__
-        const originalSendMessage = window.chrome.runtime.sendMessage
-        window.chrome.runtime.sendMessage = () => {
-          throw new Error("Extension context invalidated.")
-        }
-        api.state.loadingEnquiries = false
-        api.state.enquiryError = ""
-        api.loadEnquiries()
-        const result = {
-          loading: api.state.loadingEnquiries,
-          enquiryError: api.state.enquiryError,
-        }
-        window.chrome.runtime.sendMessage = originalSendMessage
-        return result
-      })
-
-      assert.equal(invalidRuntimeResult.loading, false)
-      assert.match(invalidRuntimeResult.enquiryError, /Reload WhatsApp Web/)
-
-      const invalidUnreadResult = await page.evaluate(() => {
-        const api = window.__FCUNO_WA_SPC_TEST_API__
-        const row = document.getElementById("renamedRow")
-        const originalQuerySelectorAll = row.querySelectorAll
-        row.style.display = "block"
-        row.querySelectorAll = () => {
-          throw new Error("Extension context invalidated.")
-        }
-        api.state.contacts = [{ id: "unread-contact", name: "Otto Tone", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }]
-        api.state.unreadById = { "unread-contact": "1" }
-        api.state.enquiryError = ""
-        api.refreshUnreadIndicators()
-        const result = {
-          unread: api.state.unreadById["unread-contact"] || "",
-          enquiryError: api.state.enquiryError,
-        }
-        row.querySelectorAll = originalQuerySelectorAll
-        return result
-      })
-
-      assert.equal(invalidUnreadResult.unread, "")
-      assert.match(invalidUnreadResult.enquiryError, /Reload WhatsApp Web/)
-
       const firstRunPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await firstRunPage.goto(`${url}?firstRun=1`, { waitUntil: "domcontentloaded" })
       await firstRunPage.waitForFunction(() => Boolean(window.__FCUNO_WA_SPC_TEST_API__?.state.feedStartedAt))
@@ -455,6 +417,57 @@ async function main() {
       await firstRunPage.waitForSelector("#fcuno-wa-spc-board [data-id='enq-new']")
       assert.equal(await firstRunPage.locator(".fcuno-wa-spc-enquiry").count(), 1)
       await firstRunPage.close()
+
+      const invalidStartPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      const invalidStartErrors = []
+      invalidStartPage.on("pageerror", (error) => invalidStartErrors.push(error.message))
+      await invalidStartPage.goto(`${url}?invalidateStorage=1`, { waitUntil: "domcontentloaded" })
+      await invalidStartPage.waitForTimeout(100)
+      const invalidStartState = await invalidStartPage.evaluate(() => ({
+        boards: document.querySelectorAll("#fcuno-wa-spc-board").length,
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+        activeClass: document.body.classList.contains("fcuno-wa-spc-active") || document.body.classList.contains("fcuno-wa-spc-collapsed"),
+      }))
+      assert.deepEqual(invalidStartState, { boards: 0, owner: "", activeClass: false })
+      assert.deepEqual(invalidStartErrors, [])
+      await invalidStartPage.close()
+
+      const lifecyclePage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      const lifecycleErrors = []
+      const lifecycleWarnings = []
+      lifecyclePage.on("pageerror", (error) => lifecycleErrors.push(error.message))
+      lifecyclePage.on("console", (message) => {
+        if (message.type() === "warning") lifecycleWarnings.push(message.text())
+      })
+      await lifecyclePage.goto(url, { waitUntil: "domcontentloaded" })
+      await lifecyclePage.waitForSelector("#fcuno-wa-spc-board")
+      await lifecyclePage.evaluate(() => {
+        const originalSet = window.chrome.storage.local.set
+        window.restoreStorageSet = () => { window.chrome.storage.local.set = originalSet }
+        window.chrome.storage.local.set = () => { throw new Error("Extension context invalidated.") }
+        window.promptResponse = "RELOAD TEST"
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.contacts = [{ id: "reload-contact", name: "Reload Contact", chatName: "Reload Contact", list: "supplier", order: 1000 }]
+        api.renameContact("reload-contact")
+      })
+      await lifecyclePage.waitForFunction(() => !document.getElementById("fcuno-wa-spc-board"))
+      const stoppedLifecycle = await lifecyclePage.evaluate(() => ({
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+        activeClass: document.body.classList.contains("fcuno-wa-spc-active") || document.body.classList.contains("fcuno-wa-spc-collapsed"),
+      }))
+      assert.deepEqual(stoppedLifecycle, { owner: "", activeClass: false })
+
+      await lifecyclePage.evaluate(() => window.restoreStorageSet())
+      await lifecyclePage.addScriptTag({ content: extensionSource })
+      await lifecyclePage.waitForSelector("#fcuno-wa-spc-board")
+      const restartedLifecycle = await lifecyclePage.evaluate(() => ({
+        boards: document.querySelectorAll("#fcuno-wa-spc-board").length,
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+      }))
+      assert.deepEqual(restartedLifecycle, { boards: 1, owner: "spc" })
+      assert.deepEqual(lifecycleErrors, [])
+      assert.equal(lifecycleWarnings.some((message) => message.includes("already active")), false)
+      await lifecyclePage.close()
     } finally {
       await browser.close()
     }

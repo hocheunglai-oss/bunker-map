@@ -56,6 +56,8 @@ const html = `<!doctype html>
       window.promptResponse = null;
       window.prompt = () => window.promptResponse;
       window.__FCUNO_WA_ENABLE_TEST_API__ = true;
+      window.invalidateStorageOnRead = new URLSearchParams(window.location.search).get("invalidateStorage") === "1";
+      window.storageListeners = new Set();
       window.storageData = {
         "fcuno-wa-speed-board-v1": {
           contacts: [{ id: "supplier-1", name: "Supplier Group", chatName: "Supplier Group", list: "supplier", order: 1000 }],
@@ -121,10 +123,16 @@ const html = `<!doctype html>
         },
         storage: {
           local: {
-            get: (keys, callback) => callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]]))),
+            get: (keys, callback) => {
+              if (window.invalidateStorageOnRead) throw new Error("Extension context invalidated.");
+              callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]])));
+            },
             set: (values, callback) => { Object.assign(window.storageData, values); callback?.(); }
           },
-          onChanged: { addListener: () => {} }
+          onChanged: {
+            addListener: (listener) => window.storageListeners.add(listener),
+            removeListener: (listener) => window.storageListeners.delete(listener)
+          }
         }
       };
     </script>
@@ -213,6 +221,59 @@ async function main() {
       assert.equal(result.insertCount, 1)
       assert.equal(result.enterCount, 1)
       assert.equal(result.chatTitle, "Supplier Group")
+
+      const invalidStartPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      const invalidStartErrors = []
+      invalidStartPage.on("pageerror", (error) => invalidStartErrors.push(error.message))
+      await invalidStartPage.goto(`${url}?invalidateStorage=1`, { waitUntil: "domcontentloaded" })
+      await invalidStartPage.waitForTimeout(100)
+      const invalidStartState = await invalidStartPage.evaluate(() => ({
+        boards: document.querySelectorAll("#fcuno-wa-board").length,
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+        activeClass: document.body.classList.contains("fcuno-wa-active") || document.body.classList.contains("fcuno-wa-collapsed"),
+      }))
+      assert.deepEqual(invalidStartState, { boards: 0, owner: "", activeClass: false })
+      assert.deepEqual(invalidStartErrors, [])
+      await invalidStartPage.close()
+
+      const lifecyclePage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      const lifecycleErrors = []
+      const lifecycleWarnings = []
+      lifecyclePage.on("pageerror", (error) => lifecycleErrors.push(error.message))
+      lifecyclePage.on("console", (message) => {
+        if (message.type() === "warning") lifecycleWarnings.push(message.text())
+      })
+      await lifecyclePage.goto(url, { waitUntil: "domcontentloaded" })
+      await lifecyclePage.waitForSelector("#fcuno-wa-board")
+      assert.equal(await lifecyclePage.evaluate(() => window.storageListeners.size), 1)
+
+      await lifecyclePage.evaluate(() => {
+        const originalSet = window.chrome.storage.local.set
+        window.restoreStorageSet = () => { window.chrome.storage.local.set = originalSet }
+        window.chrome.storage.local.set = () => { throw new Error("Extension context invalidated.") }
+        window.promptResponse = "RELOAD TEST"
+        window.__FCUNO_WA_TEST_API__.renameContact("supplier-1")
+      })
+      await lifecyclePage.waitForFunction(() => !document.getElementById("fcuno-wa-board"))
+      const stoppedLifecycle = await lifecyclePage.evaluate(() => ({
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+        activeClass: document.body.classList.contains("fcuno-wa-active") || document.body.classList.contains("fcuno-wa-collapsed"),
+        storageListeners: window.storageListeners.size,
+      }))
+      assert.deepEqual(stoppedLifecycle, { owner: "", activeClass: false, storageListeners: 0 })
+
+      await lifecyclePage.evaluate(() => window.restoreStorageSet())
+      await lifecyclePage.addScriptTag({ content: extensionSource })
+      await lifecyclePage.waitForSelector("#fcuno-wa-board")
+      const restartedLifecycle = await lifecyclePage.evaluate(() => ({
+        boards: document.querySelectorAll("#fcuno-wa-board").length,
+        owner: document.documentElement.getAttribute("data-fcuno-whatsapp-board-owner") || "",
+        storageListeners: window.storageListeners.size,
+      }))
+      assert.deepEqual(restartedLifecycle, { boards: 1, owner: "fcuno", storageListeners: 1 })
+      assert.deepEqual(lifecycleErrors, [])
+      assert.equal(lifecycleWarnings.some((message) => message.includes("already active")), false)
+      await lifecyclePage.close()
     } finally {
       await browser.close()
     }

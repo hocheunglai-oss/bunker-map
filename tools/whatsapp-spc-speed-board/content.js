@@ -18,7 +18,6 @@
 
   const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
   if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
-    console.warn("FCUNO SPC WhatsApp Board did not start because another FCUNO board is already active.")
     return
   }
   document.documentElement?.setAttribute(BOARD_OWNER_ATTRIBUTE, BOARD_OWNER)
@@ -84,6 +83,7 @@
   }
 
   function stopExtensionContext() {
+    if (extensionContextStopped) return
     extensionContextStopped = true
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (enquiryTimer) window.clearInterval(enquiryTimer)
@@ -95,14 +95,23 @@
     crudeTimer = 0
     templateSaveTimer = 0
     contactMenuHideTimer = 0
+    window.removeEventListener("beforeunload", handleBeforeUnload)
+    document.removeEventListener("DOMContentLoaded", launch)
+    document.removeEventListener("visibilitychange", refreshVisibleBoard)
+    document.removeEventListener("dragover", blockExternalEnquiryDrop, true)
+    document.removeEventListener("drop", blockExternalEnquiryDrop, true)
+    document.removeEventListener("click", handleDocumentClick)
+    document.removeEventListener("keydown", handleDocumentKeydown)
+    document.getElementById(BOARD_ID)?.remove()
+    document.body?.classList.remove("fcuno-wa-spc-collapsed", "fcuno-wa-spc-active")
+    if (document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) === BOARD_OWNER) {
+      document.documentElement.removeAttribute(BOARD_OWNER_ATTRIBUTE)
+    }
   }
 
   function handleContentError(error) {
     if (isExtensionContextError(error)) {
       stopExtensionContext()
-      state.loadingEnquiries = false
-      state.enquiryError = runtimeUnavailableMessage()
-      render()
       return true
     }
     console.error(error)
@@ -129,7 +138,8 @@
   function runtimeLastErrorMessage() {
     try {
       return chrome.runtime.lastError?.message || ""
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return runtimeUnavailableMessage()
     }
   }
@@ -143,7 +153,8 @@
         Boolean(chrome.runtime.id) &&
         typeof chrome.runtime.sendMessage === "function"
       )
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return false
     }
   }
@@ -155,7 +166,8 @@
         callback?.(response, runtimeLastErrorMessage())
       })
       return true
-    } catch {
+    } catch (error) {
+      handleContentError(error)
       return false
     }
   }
@@ -247,8 +259,14 @@
   }
 
   function getStorage() {
-    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null
-    return chrome.storage.local
+    if (extensionContextStopped) return null
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null
+      return chrome.storage.local
+    } catch (error) {
+      handleContentError(error)
+      return null
+    }
   }
 
   function readStorage(keys) {
@@ -400,19 +418,23 @@
   }
 
   function saveState() {
+    if (extensionContextStopped) return
     normalizeOrders()
     pruneEnquiryUiState()
     writeStorage({ [STORAGE_KEY]: statePayload() })
+    if (extensionContextStopped) return
     document.body.classList.toggle("fcuno-wa-spc-collapsed", state.collapsed)
     document.body.classList.toggle("fcuno-wa-spc-active", !state.collapsed)
   }
 
   function saveTemplateState() {
+    if (extensionContextStopped) return
     pruneEnquiryUiState()
     writeStorage({ [STORAGE_KEY]: statePayload() })
   }
 
   function scheduleTemplateSave() {
+    if (extensionContextStopped) return
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
     templateSaveTimer = window.setTimeout(() => {
       templateSaveTimer = 0
@@ -1517,6 +1539,7 @@
   }
 
   function renderWhenIdle() {
+    if (extensionContextStopped) return
     if (state.templateEditing || state.draggingType) {
       renderPending = true
       return
@@ -1525,6 +1548,7 @@
   }
 
   function render() {
+    if (extensionContextStopped) return
     renderPending = false
     let host = document.getElementById(BOARD_ID)
     if (!host) {
@@ -1949,6 +1973,7 @@
   async function start() {
     document.getElementById(BOARD_ID)?.remove()
     await loadState()
+    if (extensionContextStopped) return
     saveState()
     render()
     safeRun(loadEnquiries)
@@ -1966,30 +1991,34 @@
     }, CRUDE_REFRESH_MS)
   }
 
-  window.addEventListener("beforeunload", () => {
-    if (unreadTimer) window.clearInterval(unreadTimer)
-    if (enquiryTimer) window.clearInterval(enquiryTimer)
-    if (crudeTimer) window.clearInterval(crudeTimer)
-    if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
-    if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
-    document.removeEventListener("visibilitychange", refreshVisibleBoard)
-  })
+  function handleBeforeUnload() {
+    stopExtensionContext()
+  }
 
-  document.addEventListener("visibilitychange", refreshVisibleBoard)
-  document.addEventListener("dragover", blockExternalEnquiryDrop, true)
-  document.addEventListener("drop", blockExternalEnquiryDrop, true)
-  document.addEventListener("click", (event) => {
+  function handleDocumentClick(event) {
     if (!state.contactMenuId) return
     if (event.target instanceof Element && event.target.closest(`#${BOARD_ID} .fcuno-wa-spc-row-actions`)) return
     closeContactMenu()
-  })
-  document.addEventListener("keydown", (event) => {
+  }
+
+  function handleDocumentKeydown(event) {
     if (event.key === "Escape") closeContactMenu()
-  })
+  }
+
+  function launch() {
+    start().catch(handleContentError)
+  }
+
+  window.addEventListener("beforeunload", handleBeforeUnload)
+  document.addEventListener("visibilitychange", refreshVisibleBoard)
+  document.addEventListener("dragover", blockExternalEnquiryDrop, true)
+  document.addEventListener("drop", blockExternalEnquiryDrop, true)
+  document.addEventListener("click", handleDocumentClick)
+  document.addEventListener("keydown", handleDocumentKeydown)
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true })
+    document.addEventListener("DOMContentLoaded", launch, { once: true })
   } else {
-    start()
+    launch()
   }
 })()
