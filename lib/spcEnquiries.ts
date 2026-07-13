@@ -43,6 +43,7 @@ export type SpcEnquiryListOptions = {
   status?: string
   limit?: number
   updatedAfter?: string
+  updatedAfterId?: string
 }
 
 export type SpcEnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
@@ -140,21 +141,46 @@ export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryL
   let query = supabase
     .from("spc_enquiries")
     .select("*")
-    .order("created_at", { ascending: false })
     .limit(limit)
+
+  query = options.updatedAfter
+    ? query.order("updated_at", { ascending: true }).order("id", { ascending: true })
+    : query.order("created_at", { ascending: false }).order("id", { ascending: true })
 
   if (options.status) {
     query = query.eq("status", options.status)
   }
 
   if (options.updatedAfter) {
-    query = query.gt("updated_at", options.updatedAfter)
+    query = options.updatedAfterId
+      ? query.or(
+          `updated_at.gt.${options.updatedAfter},and(updated_at.eq.${options.updatedAfter},id.gt.${options.updatedAfterId})`,
+        )
+      : query.gt("updated_at", options.updatedAfter)
   }
 
   const { data, error } = await query
 
   if (error) throw error
   return ((data || []) as unknown as SpcEnquiryRow[]).map(mapEnquiry)
+}
+
+export async function listSpcEnquiryIds(session: SpcSession, options: SpcEnquiryListOptions = {}) {
+  const context = createSpcAuditContext(session, undefined, "spc-buyer-enquiries")
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const limit = Math.min(Math.max(Number(options.limit || 250), 1), 250)
+  let query = supabase
+    .from("spc_enquiries")
+    .select("id")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: true })
+    .limit(limit)
+
+  if (options.status) query = query.eq("status", options.status)
+
+  const { data, error } = await query
+  if (error) throw error
+  return (data || []).map((row) => String(row.id || "")).filter(Boolean)
 }
 
 export async function createSpcEnquiry(
@@ -356,7 +382,17 @@ export async function reofferSpcEnquiry(
     .eq("id", enquiryId)
 
   if (retireError) {
-    console.error("Failed to retire reoffered SPC enquiry", retireError)
+    const { error: rollbackError } = await supabase
+      .from("spc_enquiries")
+      .delete()
+      .eq("id", (data as SpcEnquiryRow).id)
+
+    if (rollbackError) {
+      throw new Error(
+        `Failed to retire the original enquiry and rollback the reoffer: ${retireError.message}; ${rollbackError.message}`,
+      )
+    }
+    throw retireError
   }
 
   return mapEnquiry(data as SpcEnquiryRow)

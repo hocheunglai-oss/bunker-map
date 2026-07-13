@@ -34,7 +34,7 @@ const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: bo
   { label: "Yosu", aliases: ["Yosu", "Yeosu"] },
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
   { label: "Inchon", aliases: ["Inchon", "Incheon"] },
-  { label: "Singapore", aliases: ["Singapore", "SGP", "SIN", "SG"], short: true },
+  { label: "Singapore", aliases: ["Singapore", "SGP", "SIN", "SG", "新加坡"], short: true },
   { label: "Hong Kong", aliases: ["Hong Kong", "Hongkong", "HK", "HKG", "香港"], short: true },
   { label: "Laemchabang", aliases: ["Laemchabang", "Laem Chabang"] },
   { label: "Ho Chi Minh", aliases: ["Ho Chi Minh", "Ho Chi Minh City", "Hochiminh City"] },
@@ -151,9 +151,9 @@ function getPortAliases(portNames: string[] = []) {
   return aliases
 }
 
-export function findEnquiryPortInText(value: string, options: EnquiryPortIndexOptions = {}) {
+export function findEnquiryPortsInText(value: string, options: EnquiryPortIndexOptions = {}) {
   const text = String(value || "")
-  if (!text.trim()) return ""
+  if (!text.trim()) return []
 
   const aliases = getPortAliases(options.portNames)
   const matches = aliases
@@ -174,7 +174,11 @@ export function findEnquiryPortInText(value: string, options: EnquiryPortIndexOp
       return b.aliasLength - a.aliasLength
     })
 
-  return matches[0]?.value || ""
+  return Array.from(new Set(matches.map((match) => match.value)))
+}
+
+export function findEnquiryPortInText(value: string, options: EnquiryPortIndexOptions = {}) {
+  return findEnquiryPortsInText(value, options)[0] || ""
 }
 
 export function normalizeIndexedEnquiryPort(value: string, options: EnquiryPortIndexOptions = {}) {

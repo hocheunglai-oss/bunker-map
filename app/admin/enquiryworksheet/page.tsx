@@ -370,7 +370,6 @@ export default function EnquiryWorksheetPage() {
   const [cacheReady, setCacheReady] = useState(false)
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
   const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle")
-  const [whatsappRequestId, setWhatsappRequestId] = useState("")
   const [parserReportDraft, setParserReportDraft] = useState<ParserReportDraft>({
     open: false,
     parserOutput: "",
@@ -385,6 +384,8 @@ export default function EnquiryWorksheetPage() {
   const [parserAiMessage, setParserAiMessage] = useState("")
   const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
   const preservedShortenedDraftRef = useRef("")
+  const whatsappRequestIdRef = useRef("")
+  const whatsappTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -692,14 +693,19 @@ export default function EnquiryWorksheetPage() {
         ? (event.data as { type?: unknown; ok?: unknown; requestId?: unknown; message?: unknown })
         : null
       if (!payload || payload.type !== WHATSAPP_EXTENSION_RESPONSE_TYPE) return
-      if (whatsappRequestId && payload.requestId !== whatsappRequestId) return
+      if (!whatsappRequestIdRef.current || payload.requestId !== whatsappRequestIdRef.current) return
 
+      if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
+      whatsappTimeoutRef.current = null
       setWhatsappStatus(payload.ok ? "sent" : "failed")
     }
 
     window.addEventListener("message", handleWhatsappResponse)
-    return () => window.removeEventListener("message", handleWhatsappResponse)
-  }, [whatsappRequestId])
+    return () => {
+      window.removeEventListener("message", handleWhatsappResponse)
+      if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
+    }
+  }, [])
 
   function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
     setVlsfoMaxRemarks((current) =>
@@ -725,7 +731,8 @@ export default function EnquiryWorksheetPage() {
     if (!text) return
 
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    setWhatsappRequestId(requestId)
+    whatsappRequestIdRef.current = requestId
+    if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
     setWhatsappStatus("sending")
     window.postMessage(
       {
@@ -737,8 +744,10 @@ export default function EnquiryWorksheetPage() {
       window.location.origin,
     )
 
-    window.setTimeout(() => {
-      setWhatsappStatus((current) => (current === "sending" ? "failed" : current))
+    whatsappTimeoutRef.current = window.setTimeout(() => {
+      if (whatsappRequestIdRef.current !== requestId) return
+      whatsappTimeoutRef.current = null
+      setWhatsappStatus("failed")
     }, 2500)
   }
 
@@ -844,7 +853,9 @@ export default function EnquiryWorksheetPage() {
     setVlsfoMaxRemarks([])
     setCopyStatus("idle")
     setWhatsappStatus("idle")
-    setWhatsappRequestId("")
+    whatsappRequestIdRef.current = ""
+    if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
+    whatsappTimeoutRef.current = null
     setShortenedDraft("")
     setParserAiStatus("idle")
     setParserAiMessage("")

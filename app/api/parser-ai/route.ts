@@ -410,7 +410,7 @@ function getHongKongDateKey() {
 function buildInstructions(source: ParserAiSource) {
   const today = getHongKongDateKey()
   const sourceRule = source === "spc"
-    ? "SPC output must not include port. Singapore is assumed. Leave buyer empty. Leave remarks empty unless the user explicitly wrote a non-product instruction that must be retained."
+    ? "SPC output must not include port. Singapore is assumed. Leave buyer and remarks empty. Do not auto-detect SPC remarks."
     : "Enquiryworksheet output must include port when known, including Singapore. Combine port and date into one slash segment, e.g. vessel / imo / taichung 10 - 14 jul / vlsfo 80mts, never vessel / imo / taichung / 10 - 14 jul / vlsfo 80mts. Return buyer only in the buyer field, not inside correctedOutput."
 
   return [
@@ -422,9 +422,11 @@ function buildInstructions(source: ParserAiSource) {
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
+    "The Chinese place name 新加坡 explicitly means Singapore; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
     "Normalize quantities to mts, e.g. 100mt -> 100mts and 735-770mt -> 735-770mts.",
-    "Classify VLSFO/LSFO/0.5/RMG180/RMG380/120CST/180CST as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
+    "Classify explicit VLSFO/LSFO/0.5 as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
+    "RMG180, RMG380, 120CST, and 180CST alone do not prove sulphur class. Use the explicit VLSFO/LSFO/0.5 or HSFO/HFO/IFO/3.5 context; 3.5% RMG380 is HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
     "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO as lsmgo.",
     "Only include 180CST MAX or 120CST MAX when the input explicitly says 180cst, 120cst, rmg180, rmg120, ls180cst, or ls120cst. If only 180 or 120 appears as a quantity/date, add a warning instead.",

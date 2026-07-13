@@ -19,6 +19,7 @@
 
   const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
   if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
+    console.warn("FCUNO Speed Board did not start because another WhatsApp board already owns this page.")
     return
   }
   document.documentElement?.setAttribute(BOARD_OWNER_ATTRIBUTE, BOARD_OWNER)

@@ -4,7 +4,7 @@ import {
   formatVlsfoMaxRemark,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
-import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
 
 export type ParsedSpcEnquiry = {
   rawText: string
@@ -147,7 +147,7 @@ function lowerText(value: string | null | undefined) {
 }
 
 function isImoToken(value: string) {
-  return /^\d{7}$/.test(value.trim())
+  return isValidImo(value.trim())
 }
 
 function looksLikeDateWindow(value: string) {
@@ -159,15 +159,15 @@ function looksLikeFuel(value: string) {
   return FUEL_PATTERN.test(value.trim())
 }
 
-type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
+export type SpcFuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
-function classifyFuel(value: string): FuelKey | "" {
+function classifyFuel(value: string): SpcFuelKey | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst)/i.test(compact)) {
+  if (/(?:vlsfo|lsfo|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0[,.]?50?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
-  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?=$|[^0-9])/i.test(value)) {
+  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "hsfo"
   }
   return ""
@@ -183,12 +183,13 @@ function normalizeQuantityNumber(value: string) {
 }
 
 function extractQuantity(value: string) {
-  const range = value.match(/\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/i)
+  const unit = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
+  const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*${unit}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
     return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
   }
 
-  const matches = Array.from(value.matchAll(/\b(\d+(?:[,.]\d+)?)\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?)\b/gi))
+  const matches = Array.from(value.matchAll(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*${unit}(?=$|[^A-Za-z0-9])`, "gi")))
     .map((match) => match[1])
   const quantity = matches.at(-1)
   return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
@@ -213,7 +214,7 @@ function stripVlsfoMaxRemarks(value: string) {
     .trim()
 }
 
-export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKey) {
+export function cleanSpcFuelValue(value: string | null | undefined, fuel: SpcFuelKey) {
   let text = lowerText(value)
   if (!text) return ""
 
@@ -224,9 +225,9 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKe
     .replace(/\s+/g, " ")
     .trim()
 
-  if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|3\s*[,.]\s*5)\b\s*[:/-]?\s*/i, "")
-  if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180|rmg\s*380)\s*[:/-]?\s*/i, "")
-  if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\b\s*[:/-]?\s*/i, "")
+  if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|rmg\s*380|3\s*[,.]\s*5)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
+  if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
+  if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
 
   const plainNumber = text.match(/^(\d+(?:[,.]\d+)?)$/)
   if (plainNumber) return `${normalizeQuantityNumber(plainNumber[1])}mts`
@@ -241,8 +242,14 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: FuelKe
   return text
 }
 
+export function spcFuelInputValue(value: string | null | undefined, fuel: SpcFuelKey) {
+  const cleaned = cleanSpcFuelValue(value, fuel)
+  const quantity = cleaned.match(/(\d+(?:[,.]\d+)?(?:\s*-\s*\d+(?:[,.]\d+)?)?)mts$/i)?.[1] || ""
+  return quantity.replace(/\s+/g, "").replace(/,/g, "")
+}
+
 export function formatSpcFuelSegment(
-  fuel: FuelKey,
+  fuel: SpcFuelKey,
   value: string | null | undefined,
   manualVlsfoRemarks: VlsfoMaxRemark[] = [],
 ) {

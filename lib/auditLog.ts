@@ -185,6 +185,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_fixtures: "SPC fixture",
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
+  parser_reports: "parser report",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -286,6 +287,11 @@ function isSpcAuditRecord(record: AuditLogRecord) {
   if (record.tableName === "office_calendar_store") {
     const row = record.afterRow || record.beforeRow || {}
     return String(row.key || "") === "spc-permission-groups"
+  }
+
+  if (record.tableName === "parser_reports") {
+    const row = record.afterRow || record.beforeRow || {}
+    return String(row.source || "") === "spc"
   }
 
   return false
@@ -466,7 +472,11 @@ function getAuditPage(
         ? inferRemarksPageId(record)
         : record.tableName === "office_calendar_store"
           ? inferOfficeCalendarPageId(record)
-      : TABLE_PAGE_IDS[record.tableName]
+          : record.tableName === "parser_reports"
+            ? String((record.afterRow || record.beforeRow || {}).source || "") === "spc"
+              ? "spc-buyer-enquiries"
+              : "enquiry-worksheet"
+            : TABLE_PAGE_IDS[record.tableName]
 
   const knownPage = pages.find((page) => page.id === pageId)
   if (knownPage) return withAuditPageLabel(knownPage)

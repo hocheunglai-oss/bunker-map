@@ -3,17 +3,9 @@ import fs from "node:fs"
 import vm from "node:vm"
 
 const code = fs.readFileSync(new URL("./bridge.js", import.meta.url), "utf8")
-const boardKey = "fcuno-wa-speed-board-v1"
-const queueKey = "fcuno-wa-speed-board-enquiries-v1"
-const boardState = {
-  contacts: [{ id: "supplier-1", name: "Supplier One", list: "supplier" }],
-  templateText: "Good day",
-  enquiries: [{ id: "legacy", body: "legacy enquiry", createdAt: "2026-07-01T00:00:00Z" }],
-}
-const storageData = { [boardKey]: structuredClone(boardState) }
 const messageListeners = []
 const postedMessages = []
-let notifications = 0
+const runtimeMessages = []
 
 const windowObject = {
   location: { origin: "https://fcuno.com" },
@@ -27,35 +19,22 @@ const windowObject = {
 
 const context = {
   console,
-  crypto,
-  structuredClone,
   window: windowObject,
   chrome: {
     runtime: {
       lastError: null,
-      sendMessage() {
-        notifications += 1
-      },
-    },
-    storage: {
-      local: {
-        get(keys, callback) {
-          const result = Object.fromEntries(keys.filter((key) => key in storageData).map((key) => [key, structuredClone(storageData[key])]))
-          queueMicrotask(() => callback(result))
-        },
-        set(values, callback) {
-          Object.assign(storageData, structuredClone(values))
-          queueMicrotask(callback)
-        },
+      sendMessage(message, callback) {
+        runtimeMessages.push(message)
+        queueMicrotask(() => callback({
+          ok: true,
+          id: `saved-${runtimeMessages.length}`,
+          createdAt: "2026-07-13T00:00:00.000Z",
+        }))
       },
     },
   },
-  Date,
-  Math,
   Promise,
   queueMicrotask,
-  setTimeout,
-  clearTimeout,
 }
 
 vm.createContext(context)
@@ -79,18 +58,16 @@ messageListeners[0]({
     type: "fcuno-wa-enquiry-send",
     requestId: "request-2",
     text: "new enquiry two",
-    buyer: "Trader One",
+    buyer: "Trader Two",
   },
 })
 
-await new Promise((resolve) => setTimeout(resolve, 20))
+await new Promise((resolve) => setTimeout(resolve, 0))
 
-assert.deepEqual(storageData[boardKey], boardState, "enqueue must not overwrite board contacts or settings")
-assert.equal(storageData[queueKey].enquiries.length, 3)
-assert.equal(storageData[queueKey].enquiries[0].body, "new enquiry two")
-assert.equal(storageData[queueKey].enquiries[1].body, "new enquiry one")
-assert.equal(storageData[queueKey].enquiries[2].id, "legacy")
-assert.equal(notifications, 2)
+assert.deepEqual(JSON.parse(JSON.stringify(runtimeMessages)), [
+  { type: "enqueue-fcuno-enquiry", text: "new enquiry one", buyer: "Trader One" },
+  { type: "enqueue-fcuno-enquiry", text: "new enquiry two", buyer: "Trader Two" },
+])
 assert.equal(postedMessages.length, 2)
 assert.equal(postedMessages[0].ok, true)
 assert.equal(postedMessages[0].requestId, "request-1")

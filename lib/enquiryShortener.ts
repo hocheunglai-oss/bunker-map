@@ -15,7 +15,7 @@ type ProductSegment = {
   detectedRemarks: VlsfoMaxRemark[]
 }
 
-const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|[吨噸])`
+const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
 
 const MONTHS: Record<string, string> = {
   "1": "jan",
@@ -154,10 +154,12 @@ function formatCurrentMonthDateRange(firstDay: string, secondDay: string) {
 function isContactOrAddressLine(value: string) {
   return /^(?:add|address|voice|voice\/fax|fax|mobile|phone|tel|e-?mail)\b/i.test(value) ||
     /[\w.-]+@[\w.-]+/.test(value) ||
-    /\+\d{1,3}[-\d\s]{5,}/.test(value)
+    /\+\d{1,3}[-\d\s]{5,}/.test(value) ||
+    /\b\d+(?:st|nd|rd|th)\s+(?:flr|floor)\b/i.test(value) ||
+    /\b(?:flr|floor|suite|unit|building|bldg|street|road|avenue|district|postal\s+code)\b/i.test(value)
 }
 
-function findDates(value: string) {
+export function findEnquiryDates(value: string) {
   const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
   const dates: string[] = []
   const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
@@ -213,13 +215,33 @@ function findDates(value: string) {
     if (range) dates.push(range)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*\\/\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)\s*(?:-|~|to)\s*(\d{1,2})(?:st|nd|rd|th)\b/gi)) {
+    const range = formatCurrentMonthDateRange(match[1], match[2])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})\\s*\\/\\s*(\\d{1,2})[./-](\\d{1,2}|${monthNamePattern})(?:[./-]\\d{2,4})?\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*['’]?\\d{2,4})?\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
     const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"))) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`(?<!\\d)(\\d{1,2})(?:st|nd|rd|th)?\\s*[./-]?\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const date = normalizeDate(match[1], match[2])
     if (date) dates.push(date)
   }
 
@@ -256,7 +278,7 @@ function extractDeliveryDate(text: string) {
   const labelledLines = candidateLines.filter((line) =>
     /^\s*(?:delivery|window|date|eta|etb|etd|ets)\b/i.test(line),
   )
-  const dates = findDates(labelledLines.join(" ") || candidateLines.join("\n"))
+  const dates = findEnquiryDates(labelledLines.join(" ") || candidateLines.join("\n"))
 
   return dates[0] || ""
 }
@@ -273,7 +295,7 @@ function extractDeliverySchedule(
 
   const entries: string[] = []
   for (const line of lines) {
-    const date = findDates(line)[0] || ""
+    const date = findEnquiryDates(line)[0] || ""
     if (!date) continue
 
     if (options.includePort) {
@@ -292,25 +314,13 @@ function extractDeliverySchedule(
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsfo|0[,.]?5|0[,.]?50|rmg180|rmg380|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact)) {
+  if (/(?:vlsfo|lsfo|rmg180|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact) || /(?:^|[^0-9])0[,.]?50?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
-  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?=$|[^0-9])/i.test(value)) {
+  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "hsfo"
   }
   return ""
-}
-
-function detectDirectVlsfoGrade(value: string): VlsfoMaxRemark[] {
-  const compact = value.toLowerCase().replace(/[^a-z0-9]+/g, "")
-  const remarks: VlsfoMaxRemark[] = []
-  if (/(?:^|[^0-9])(?:ls|rmg)?180cs+t/.test(compact) || /rmg180/.test(compact)) {
-    remarks.push("180cst max")
-  }
-  if (/(?:^|[^0-9])(?:ls|rmg)?120cs+t/.test(compact) || /rmg120/.test(compact)) {
-    remarks.push("120cst max")
-  }
-  return remarks
 }
 
 function containsProduct(value: string) {
@@ -323,6 +333,14 @@ function isSulphurSpecLine(value: string) {
 
 function isLabelLine(value: string) {
   return /^[A-Za-z][A-Za-z0-9\s/&().,-]{0,48}:/.test(value)
+}
+
+function isNonRequestProductReference(value: string) {
+  const hasExplicitQuantity = new RegExp(String.raw`\d+(?:[,.]\d+)?\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(value)
+  if (hasExplicitQuantity) return false
+
+  return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(value) ||
+    /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(value)
 }
 
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
@@ -364,8 +382,62 @@ function extractQuantityFromInlineUnit(value: string) {
   return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
 }
 
+function extractBareQuantity(value: string) {
+  const quantityText = value
+    .replace(/\biso\s*\d{3,5}(?:\s*[-:/]\s*\d{2,4})?\b/gi, " ")
+    .replace(/\b(?:rmg|rmk|dma|dmb)\s*[-:]?\s*\d+(?:[,.]\d+)?\b/gi, " ")
+    .replace(/\b\d+(?:[,.]\d+)?\s*cst\b/gi, " ")
+    .replace(/\b(?:sulphur|sulfur|flash\s+point|density)\b[^\n;/]*/gi, " ")
+  const ranges = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)(?!\s*%|[\d.,])/gi))
+    .filter((match) => isUsableQuantityNumber(match[1]) && isUsableQuantityNumber(match[2]))
+  const range = ranges.at(-1)
+  if (range) return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+
+  const numbers = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)(?!\s*(?:%|cst\b)|[\d.,])/gi))
+    .map((match) => match[1])
+    .filter(isUsableQuantityNumber)
+  const quantity = numbers.at(-1)
+  return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
+}
+
+function extractQuantityFromProductSegment(value: string) {
+  return extractQuantityFromInlineUnit(value) || extractBareQuantity(value)
+}
+
+function extractQuantityImmediatelyBeforeProduct(value: string) {
+  const range = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
+  if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
+    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+  }
+
+  const single = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
+  return single && isUsableQuantityNumber(single[1])
+    ? `${normalizeQuantityNumber(single[1])}mts`
+    : ""
+}
+
+function extractBareRangeImmediatelyBeforeProduct(value: string) {
+  const range = value.match(/(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*$/i)
+  return range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])
+    ? `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    : ""
+}
+
+function extractQuantityImmediatelyAfterProduct(value: string) {
+  const range = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
+  if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
+    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+  }
+
+  const single = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
+  if (!single || !isUsableQuantityNumber(single[1])) return ""
+  const remainder = value.slice(single[0].length)
+  if (/^\s*(?:%|cst\b)/i.test(remainder)) return ""
+  return `${normalizeQuantityNumber(single[1])}mts`
+}
+
 function extractQuantityFromBlock(lines: string[]) {
-  const inlineQuantity = extractQuantityFromInlineUnit(lines.join(" "))
+  const inlineQuantity = extractQuantityFromProductSegment(lines.join(" "))
   if (inlineQuantity) return inlineQuantity
 
   const unitIndex = lines.findIndex((line) => new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(line))
@@ -394,11 +466,20 @@ function productMatches(line: string) {
 function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: boolean) {
   const matches = productMatches(line)
   if (matches.length < 2) return []
+  if (/^\s*(?:prod(?:uct)?|grades?|spec(?:ification)?)\b\s*[:#-]?/i.test(line)) return []
 
   return matches.flatMap((match, index) => {
     const nextMatch = matches[index + 1]
     const segmentText = line.slice(match.index, nextMatch?.index ?? line.length)
-    const quantity = extractQuantityFromInlineUnit(segmentText)
+    const precedingText = line.slice(
+      index === 0 ? 0 : matches[index - 1].index + matches[index - 1].value.length,
+      match.index,
+    )
+    const quantity =
+      extractQuantityImmediatelyBeforeProduct(precedingText) ||
+      extractQuantityImmediatelyAfterProduct(segmentText.slice(match.value.length)) ||
+      extractBareRangeImmediatelyBeforeProduct(precedingText) ||
+      extractQuantityFromProductSegment(segmentText)
     if (!quantity) return []
 
     return [{
@@ -406,13 +487,26 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
       quantity,
       detectedRemarks:
         match.product === "vlsfo"
-          ? mergeRemarks(
-              detectDirectVlsfoGrade(match.value),
-              autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(segmentText) : [],
-            )
+          ? autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(segmentText) : []
           : [],
     }]
   })
+}
+
+function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
+  const nearby = lines.slice(Math.max(0, productIndex - 3), productIndex)
+  for (let index = nearby.length - 1; index >= 0; index -= 1) {
+    const line = nearby[index]
+    if (containsProduct(line)) break
+    const labelled = /^\s*(?:qty|quantity)\b/i.test(line)
+    const standalone = /^\s*\d+(?:[,.]\d+)?(?:\s*(?:-|~|to)\s*\d+(?:[,.]\d+)?)?\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])?\s*$/i.test(line)
+    if (!labelled && !standalone) continue
+
+    const combined = nearby.slice(index).join(" ")
+    const quantity = extractQuantityFromProductSegment(combined.replace(/^\s*(?:qty|quantity)\b\s*[:#-]?\s*/i, ""))
+    if (quantity) return quantity
+  }
+  return ""
 }
 
 function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
@@ -425,6 +519,7 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
+    if (isNonRequestProductReference(line)) continue
     const inlineSegments = extractInlineProductSegments(line, autoDetectVlsfoRemarks)
     if (inlineSegments.length > 0) {
       products.push(...inlineSegments)
@@ -439,7 +534,7 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
 
     for (let offset = index + 1; offset < Math.min(lines.length, index + 6); offset += 1) {
       const nextLine = lines[offset]
-      if (containsProduct(nextLine) && !isSulphurSpecLine(nextLine)) break
+      if (containsProduct(nextLine)) break
       if (isLabelLine(nextLine) && !isSulphurSpecLine(nextLine) && !/^(?:product|qty|quantity)\b/i.test(nextLine)) break
 
       block.push(nextLine)
@@ -448,18 +543,15 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
       if (new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(nextLine) || new RegExp(String.raw`${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(nextLine)) break
     }
 
-    const quantity = extractQuantityFromBlock(block)
+    const quantity = extractQuantityBeforeProduct(lines, index) || extractQuantityFromBlock(block)
     if (quantity) {
       products.push({
         product,
         quantity,
-        detectedRemarks:
-          product === "vlsfo"
-            ? mergeRemarks(
-                detectDirectVlsfoGrade(line),
-                autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(block.join(" ")) : [],
-              )
-            : [],
+          detectedRemarks:
+            product === "vlsfo"
+              ? autoDetectVlsfoRemarks ? detectVlsfoMaxRemarks(block.join(" ")) : []
+              : [],
       })
     }
 

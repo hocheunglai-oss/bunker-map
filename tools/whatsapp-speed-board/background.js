@@ -1,9 +1,99 @@
 const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
 const CRUDE_CACHE_TTL_MS = 15000
 const NETWORK_TIMEOUT_MS = 8000
+const STORAGE_KEY = "fcuno-wa-speed-board-v1"
+const ENQUIRY_STORAGE_KEY = "fcuno-wa-speed-board-enquiries-v1"
+const MAX_ENQUIRIES = 120
 
 let crudeCache = { at: 0, payload: null }
 const debuggerQueues = new Map()
+let enquiryQueue = Promise.resolve()
+
+function uid() {
+  if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  return `fcuno-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function cleanText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function cleanMessage(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim()
+}
+
+function readEnquiryState() {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get([STORAGE_KEY, ENQUIRY_STORAGE_KEY], (items) => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        reject(new Error(error.message || String(error)))
+        return
+      }
+      const board = items?.[STORAGE_KEY] && typeof items[STORAGE_KEY] === "object" ? items[STORAGE_KEY] : {}
+      const queue = items?.[ENQUIRY_STORAGE_KEY] && typeof items[ENQUIRY_STORAGE_KEY] === "object"
+        ? items[ENQUIRY_STORAGE_KEY]
+        : {}
+      resolve({ board, queue })
+    })
+  })
+}
+
+function writeEnquiryQueue(queue) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set({ [ENQUIRY_STORAGE_KEY]: queue }, () => {
+      const error = chrome.runtime.lastError
+      if (error) reject(new Error(error.message || String(error)))
+      else resolve()
+    })
+  })
+}
+
+function notifyNewEnquiries(count) {
+  const total = Math.max(Number(count || 0), 1)
+  if (!chrome.notifications?.create) return
+  chrome.notifications.create(`fcuno-enquiries-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "fc-uno-sidebar-logo.png",
+    title: "New FCUNO enquiry",
+    message: total === 1 ? "1 new enquiry is ready to send." : `${total} new enquiries are ready to send.`,
+  })
+}
+
+async function enqueueFcunoEnquiry(text, buyer) {
+  const message = cleanMessage(text)
+  if (!message) throw new Error("Shortened enquiry is empty.")
+
+  const { board, queue } = await readEnquiryState()
+  const id = uid()
+  const createdAt = new Date().toISOString()
+  const buyerName = cleanText(buyer)
+  const enquiries = Array.isArray(queue.enquiries)
+    ? queue.enquiries
+    : Array.isArray(board.enquiries)
+      ? board.enquiries
+      : []
+
+  await writeEnquiryQueue({
+    enquiries: [
+      {
+        id,
+        body: message,
+        title: message.split("\n").find(Boolean) || "ENQUIRY",
+        createdAt,
+        buyer: buyerName,
+        createdByDisplayName: buyerName,
+        source: "enquiryworksheet",
+      },
+      ...enquiries,
+    ].slice(0, MAX_ENQUIRIES),
+  })
+  notifyNewEnquiries(1)
+  return { id, createdAt }
+}
 
 async function fetchWithTimeout(url, options = {}) {
   if (typeof AbortController === "undefined") return fetch(url, options)
@@ -178,16 +268,22 @@ async function fetchCrudeWatch() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
+  if (message.type === "enqueue-fcuno-enquiry") {
+    const task = enquiryQueue
+      .catch(() => {})
+      .then(() => enqueueFcunoEnquiry(message.text, message.buyer))
+    enquiryQueue = task.catch(() => {})
+    task
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : "Could not enqueue FCUNO enquiry.",
+      }))
+    return true
+  }
+
   if (message.type === "notify-new-enquiries") {
-    const count = Math.max(Number(message.count || 0), 1)
-    if (chrome.notifications && chrome.notifications.create) {
-      chrome.notifications.create(`fcuno-enquiries-${Date.now()}`, {
-        type: "basic",
-        iconUrl: "fc-uno-sidebar-logo.png",
-        title: "New FCUNO enquiry",
-        message: count === 1 ? "1 new enquiry is ready to send." : `${count} new enquiries are ready to send.`,
-      })
-    }
+    notifyNewEnquiries(message.count)
     return false
   }
 

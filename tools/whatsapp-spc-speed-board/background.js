@@ -179,14 +179,19 @@ async function fetchCrudeWatch() {
   return payload
 }
 
-function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT) {
+function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT, activeIds) {
   const byId = new Map()
   ;[...(current || []), ...(changes || [])].forEach((enquiry) => {
     const id = String(enquiry?.id || "")
     if (id) byId.set(id, enquiry)
   })
 
+  const activeIdSet = Array.isArray(activeIds)
+    ? new Set(activeIds.map((id) => String(id || "")).filter(Boolean))
+    : null
+
   return Array.from(byId.values())
+    .filter((enquiry) => !activeIdSet || activeIdSet.has(String(enquiry.id || "")))
     .sort((first, second) => {
       const dateOrder = String(second.createdAt || "").localeCompare(String(first.createdAt || ""))
       return dateOrder || String(first.id || "").localeCompare(String(second.id || ""))
@@ -195,12 +200,18 @@ function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT) {
 }
 
 function latestEnquiryCursor(enquiries, fallback = "") {
-  return (enquiries || []).reduce(
-    (latest, enquiry) => !latest || Date.parse(enquiry?.updatedAt || "") > Date.parse(latest)
-      ? String(enquiry.updatedAt)
-      : latest,
-    fallback,
-  )
+  return (enquiries || []).reduce((latest, enquiry) => {
+    const updatedAt = String(enquiry?.updatedAt || "")
+    const id = String(enquiry?.id || "")
+    if (!updatedAt || !id) return latest
+    const candidate = `${updatedAt}|${id}`
+    if (!latest) return candidate
+    const [latestDate, latestId = ""] = String(latest).split("|")
+    const dateOrder = Date.parse(updatedAt) - Date.parse(latestDate)
+    return dateOrder > 0 || (dateOrder === 0 && id.localeCompare(latestId) > 0)
+      ? candidate
+      : latest
+  }, fallback)
 }
 
 async function fetchSpcEnquiries() {
@@ -239,7 +250,7 @@ async function fetchSpcEnquiries() {
 
     const changes = Array.isArray(data.enquiries) ? data.enquiries : []
     const payload = incremental
-      ? mergeSpcEnquiries(enquiryCache.payload, changes)
+      ? mergeSpcEnquiries(enquiryCache.payload, changes, SPC_ENQUIRY_LIMIT, data.activeIds)
       : mergeSpcEnquiries([], changes)
     const cursor = String(data.cursor || latestEnquiryCursor(changes, enquiryCache.cursor))
     enquiryCache = { payload, cursor, sessionKey }

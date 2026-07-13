@@ -10,6 +10,7 @@ import {
   cleanSpcEnquiryText,
   formatSpcFuelSegment,
   parseSpcEnquiryText,
+  spcFuelInputValue,
   writeSpcEnquiryNotes,
   type ParsedSpcEnquiry,
   type SpcEnquiryMeta,
@@ -201,23 +202,13 @@ function standardTextForDraft(
   return buildSpcStandardEnquiry({ ...draft, vlsfoMaxRemarks })
 }
 
-function cleanFuelEntry(value: string | null | undefined) {
-  return String(value || "")
-    .replace(/\b(?:120|180)\s*cst\s*max\b/gi, "")
-    .replace(/\b(?:120|180)\s*cst\b/gi, "")
-    .replace(/\bm\s*t?s?\b/gi, "")
-    .replace(/[^\d-]/g, "")
-    .replace(/-{2,}/g, "-")
-    .trim()
-}
-
 function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
   const parsed = parseSpcEnquiryText(rawText, vlsfoMaxRemarks)
   const draft = {
     ...parsed,
-    hsfo: cleanFuelEntry(parsed.hsfo),
-    vlsfo: cleanFuelEntry(parsed.vlsfo),
-    lsmgo: cleanFuelEntry(parsed.lsmgo),
+    hsfo: spcFuelInputValue(parsed.hsfo, "hsfo"),
+    vlsfo: spcFuelInputValue(parsed.vlsfo, "vlsfo"),
+    lsmgo: spcFuelInputValue(parsed.lsmgo, "lsmgo"),
   }
   return {
     ...draft,
@@ -251,9 +242,9 @@ function draftFromAiResponse(
     vesselName: fields.vesselName || parsed.vesselName,
     imo: fields.imo || parsed.imo,
     eta: fields.eta || parsed.eta,
-    hsfo: cleanFuelEntry(fields.hsfo || parsed.hsfo),
-    vlsfo: cleanFuelEntry(fields.vlsfo || parsed.vlsfo),
-    lsmgo: cleanFuelEntry(fields.lsmgo || parsed.lsmgo),
+    hsfo: spcFuelInputValue(fields.hsfo || parsed.hsfo, "hsfo"),
+    vlsfo: spcFuelInputValue(fields.vlsfo || parsed.vlsfo, "vlsfo"),
+    lsmgo: spcFuelInputValue(fields.lsmgo || parsed.lsmgo, "lsmgo"),
     remarks: fields.remarks || parsed.remarks,
   }
   draft.standardText = standardTextForDraft(draft, vlsfoRemarks)
@@ -496,17 +487,29 @@ export default function SpcEnquiriesPage() {
       return
     }
 
+    if (key === "standardText") {
+      setDraft((current) => {
+        const parsed = normaliseDraft(value, vlsfoMaxRemarks)
+        return {
+          ...current,
+          ...parsed,
+          rawText: current.rawText,
+          standardText: value,
+          title: [parsed.vesselName || "new enquiry", parsed.eta].filter(Boolean).join(" / "),
+        }
+      })
+      return
+    }
+
     setDraft((current) => {
       const next = {
         ...current,
-        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? cleanFuelEntry(value) : value,
+        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? spcFuelInputValue(value, key) : value,
       }
-      if (key !== "standardText") {
-        next.standardText = standardTextForDraft(next, vlsfoMaxRemarks)
-        next.title = [next.vesselName || "new enquiry", next.eta]
-          .filter(Boolean)
-          .join(" / ")
-      }
+      next.standardText = standardTextForDraft(next, vlsfoMaxRemarks)
+      next.title = [next.vesselName || "new enquiry", next.eta]
+        .filter(Boolean)
+        .join(" / ")
       return next
     })
   }
@@ -528,16 +531,31 @@ export default function SpcEnquiriesPage() {
       return
     }
 
+    if (key === "standardText") {
+      setReofferDraft((current) => {
+        if (!current) return current
+        const parsed = normaliseDraft(value, [])
+        return {
+          ...current,
+          ...parsed,
+          id: current.id,
+          enquiryNumber: current.enquiryNumber,
+          rawText: current.rawText,
+          standardText: value,
+          title: [parsed.vesselName || "reoffer", parsed.eta].filter(Boolean).join(" / "),
+        }
+      })
+      return
+    }
+
     setReofferDraft((current) => {
       if (!current) return current
       const next = {
         ...current,
-        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? cleanFuelEntry(value) : value,
+        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? spcFuelInputValue(value, key) : value,
       }
-      if (key !== "standardText") {
-        next.standardText = standardTextForDraft(next, [])
-        next.title = [next.vesselName || "reoffer", next.eta].filter(Boolean).join(" / ")
-      }
+      next.standardText = standardTextForDraft(next, [])
+      next.title = [next.vesselName || "reoffer", next.eta].filter(Boolean).join(" / ")
       return next
     })
   }

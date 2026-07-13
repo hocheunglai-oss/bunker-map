@@ -4,6 +4,7 @@ import { timedJson } from "@/lib/serverTiming"
 import { listSupplierTraderOptions } from "@/lib/spcUsers"
 import {
   createSpcEnquiry,
+  listSpcEnquiryIds,
   listSpcEnquiries,
   reofferSpcEnquiry,
   updateSpcEnquiryFixture,
@@ -40,6 +41,29 @@ function errorResponse(error: unknown, fallback: string) {
   return NextResponse.json({ message }, { status })
 }
 
+function parseUpdatedAfterCursor(value: string) {
+  const separator = value.lastIndexOf("|")
+  const timestamp = separator >= 0 ? value.slice(0, separator) : value
+  const id = separator >= 0 ? value.slice(separator + 1) : ""
+  if (!timestamp || Number.isNaN(Date.parse(timestamp))) return null
+  return {
+    timestamp,
+    id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : "",
+  }
+}
+
+function latestEnquiryCursor(enquiries: Array<{ id: string; updatedAt: string }>, fallback = "") {
+  return enquiries.reduce((latest, enquiry) => {
+    const candidate = `${enquiry.updatedAt}|${enquiry.id}`
+    if (!latest) return candidate
+    const [latestDate, latestId = ""] = latest.split("|")
+    const dateOrder = Date.parse(enquiry.updatedAt) - Date.parse(latestDate)
+    return dateOrder > 0 || (dateOrder === 0 && enquiry.id.localeCompare(latestId) > 0)
+      ? candidate
+      : latest
+  }, fallback)
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
@@ -49,25 +73,33 @@ export async function GET(request: Request) {
     const limit = Number(searchParams.get("limit") || 250)
     const bootstrap = searchParams.get("bootstrap") === "1"
     const updatedAfterValue = searchParams.get("updatedAfter")?.trim() || ""
-    const updatedAfter = updatedAfterValue && !Number.isNaN(Date.parse(updatedAfterValue))
-      ? updatedAfterValue
-      : undefined
-    const [enquiries, supplierTraders] = await Promise.all([
-      listSpcEnquiries(session, { status, limit, updatedAfter }),
-      bootstrap && hasSpcPagePermission(session, "spc-buyer-enquiries", "edit")
-        ? listSupplierTraderOptions()
-        : Promise.resolve([]),
+    const updatedAfterCursor = parseUpdatedAfterCursor(updatedAfterValue)
+    const updatedAfter = updatedAfterCursor?.timestamp
+    const supplierTradersPromise = bootstrap && hasSpcPagePermission(session, "spc-buyer-enquiries", "edit")
+      ? listSupplierTraderOptions()
+      : Promise.resolve([])
+    const enquiries = await listSpcEnquiries(session, {
+      status,
+      limit,
+      updatedAfter,
+      updatedAfterId: updatedAfterCursor?.id,
+    })
+    // Read the compact snapshot after the change page so inserts cannot be skipped by cursor advancement.
+    const [supplierTraders, activeIds] = await Promise.all([
+      supplierTradersPromise,
+      updatedAfter ? listSpcEnquiryIds(session, { status, limit }) : Promise.resolve(undefined),
     ])
-    const cursor = enquiries.reduce(
-      (latest, enquiry) => !latest || Date.parse(enquiry.updatedAt) > Date.parse(latest)
-        ? enquiry.updatedAt
-        : latest,
-      updatedAfter || "",
-    )
+    const cursor = latestEnquiryCursor(enquiries, updatedAfterValue)
     return timedJson(
       "/api/spc/enquiries",
       startedAt,
-      { enquiries, cursor, sessionKey: session.username, ...(bootstrap ? { supplierTraders } : {}) },
+      {
+        enquiries,
+        cursor,
+        sessionKey: session.username,
+        ...(activeIds ? { activeIds } : {}),
+        ...(bootstrap ? { supplierTraders } : {}),
+      },
       {
         headers: {
           "Cache-Control": "private, no-store",

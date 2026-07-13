@@ -79,21 +79,30 @@ const merged = context.mergeSpcEnquiries(
 )
 assert.deepEqual(Array.from(merged, (item) => item.id), ["new", "changed"])
 assert.equal(merged[1].status, "quoted")
-assert.equal(context.latestEnquiryCursor(merged), "2026-07-04T00:00:00Z")
+assert.equal(context.latestEnquiryCursor(merged), "2026-07-04T00:00:00Z|new")
+
+const reconciled = context.mergeSpcEnquiries(
+  merged,
+  [],
+  160,
+  ["new"],
+)
+assert.deepEqual(Array.from(reconciled, (item) => item.id), ["new"])
 
 enquiryResponses.push(
   {
     enquiries: [
       { id: "initial", createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-05T00:00:00.123456Z", status: "sent" },
     ],
-    cursor: "2026-07-05T00:00:00.123456Z",
+    cursor: "2026-07-05T00:00:00.123456Z|00000000-0000-4000-8000-000000000001",
     sessionKey: "trader-a",
   },
   {
     enquiries: [
       { id: "initial", createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-05T00:01:00.654321Z", status: "quoted" },
     ],
-    cursor: "2026-07-05T00:01:00.654321Z",
+    cursor: "2026-07-05T00:01:00.654321Z|00000000-0000-4000-8000-000000000001",
+    activeIds: ["initial"],
     sessionKey: "trader-a",
   },
   {
@@ -118,8 +127,8 @@ assert.equal(initialEnquiries[0].status, "sent")
 assert.equal(refreshedEnquiries[0].status, "quoted")
 assert.deepEqual(Array.from(nextTraderEnquiries, (item) => item.id), ["full-b"])
 assert.equal(fetchedUrls.length, 4)
-assert.match(fetchedUrls[1], /updatedAfter=2026-07-05T00%3A00%3A00\.123456Z/)
-assert.match(fetchedUrls[2], /updatedAfter=2026-07-05T00%3A01%3A00\.654321Z/)
+assert.match(fetchedUrls[1], /updatedAfter=2026-07-05T00%3A00%3A00\.123456Z%7C00000000-0000-4000-8000-000000000001/)
+assert.match(fetchedUrls[2], /updatedAfter=2026-07-05T00%3A01%3A00\.654321Z%7C00000000-0000-4000-8000-000000000001/)
 assert.equal(fetchedUrls[3], "https://spc.fcuno.com/api/spc/enquiries?limit=160")
 
 const debuggerOrder = []
