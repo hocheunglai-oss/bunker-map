@@ -5085,6 +5085,19 @@ body:has(.spc-statistics-page) .spc-main {
   font-size: 9px;
 }
 
+.spc-readme-voice-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px 0;
+}
+
+.spc-readme-voice-actions > span {
+  color: #657082;
+  font-size: 8px;
+  font-weight: 900;
+}
+
 .spc-readme-upload-status {
   margin: 9px 12px 0;
   color: #0b70e0;
@@ -5887,9 +5900,18 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-presenter-audio {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 12px;
   background: #07182c;
   padding: 0 24px 10px;
+}
+
+.spc-readme-presenter-audio span {
+  color: #aab6c6;
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .spc-readme-presenter-audio audio {

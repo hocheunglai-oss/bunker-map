@@ -7,6 +7,7 @@ import {
   completeSpcPresentationUpload,
   createPresentationContext,
   deleteSpcPresentationChunk,
+  generateSpcPresentationNarration,
   listSpcPresentationChunks,
   moveSpcPresentationChunk,
   prepareSpcPresentationUpload,
@@ -17,6 +18,7 @@ import {
 import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 60
 
 type PresentationActionPayload = {
   action?: string
@@ -122,6 +124,16 @@ export async function POST(request: Request) {
         payload.kind,
         payload.path,
         payload.mimeType || "application/octet-stream",
+        context,
+      )
+      return NextResponse.json({ success: true, chunk })
+    }
+
+    if (payload.action === "generate-narration") {
+      if (!payload.id) throw new Error("Chunk id is required.")
+      const chunk = await generateSpcPresentationNarration(
+        payload.id,
+        Math.max(Number(payload.revision || 0), 1),
         context,
       )
       return NextResponse.json({ success: true, chunk })

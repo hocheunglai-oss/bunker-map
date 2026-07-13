@@ -11,6 +11,16 @@ const PRESENTATION_BUCKET = "spc-presentation-media"
 const SIGNED_MEDIA_SECONDS = 8 * 60 * 60
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const MAX_NARRATION_BYTES = 50 * 1024 * 1024
+const OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+const OPENAI_TTS_VOICE = "cedar"
+const OPENAI_TTS_INSTRUCTIONS = [
+  "Speak as a calm, experienced bunker-trading trainer presenting to colleagues in a room.",
+  "Use natural international English with subtle warmth and varied intonation.",
+  "Keep a measured, conversational pace of about 130 words per minute, with short pauses between ideas.",
+  "Sound thoughtful and confident, not promotional, theatrical, or like a news announcer.",
+  "Give gentle emphasis to operational risks and human verification.",
+  "Pronounce AI as A-I, SPC as S-P-C, IMO as I-M-O, and fuel-grade abbreviations letter by letter.",
+].join(" ")
 
 const PRESENTATION_COLUMNS = [
   "id",
@@ -83,6 +93,7 @@ export type SpcPresentationChunk = {
   narrationUrl: string | null
   narrationMimeType: string | null
   narrationBytes: number
+  narrationIsAi: boolean
   durationSeconds: number | null
   mediaVersion: number
   revision: number
@@ -209,6 +220,7 @@ function presentRow(row: PresentationRow, mediaUrls: Map<string, string>): SpcPr
     narrationUrl: row.narration_path ? mediaUrls.get(row.narration_path) || null : null,
     narrationMimeType: row.narration_mime_type,
     narrationBytes: bytes(row.narration_bytes),
+    narrationIsAi: Boolean(row.narration_path?.includes("-openai-")),
     durationSeconds: row.duration_seconds,
     mediaVersion: row.media_version,
     revision: row.revision,
@@ -472,6 +484,91 @@ export async function completeSpcPresentationUpload(
   const previousPath = kind === "video" ? current.video_path : current.narration_path
   if (previousPath && previousPath !== path) {
     await client.storage.from(PRESENTATION_BUCKET).remove([previousPath])
+  }
+  return presentSingleRow(updated as unknown as PresentationRow)
+}
+
+export async function generateSpcPresentationNarration(
+  id: string,
+  revision: number,
+  context: SpcAuditContext,
+) {
+  const client = presentationClient()
+  const { data: current, error } = await client
+    .from(PRESENTATION_TABLE)
+    .select(PRESENTATION_COLUMNS)
+    .eq("id", id)
+    .maybeSingle()
+  if (error) throw new Error(`Could not load presentation chunk: ${error.message}`)
+  if (!current) throw new Error("Presentation chunk was not found.")
+
+  const row = current as unknown as PresentationRow
+  if (row.revision !== revision) {
+    throw new Error("This chunk changed in another session. Refresh before generating narration.")
+  }
+  const narration = row.narration.trim()
+  if (!narration) throw new Error("Add and save a narration script before generating its voice.")
+  if (narration.length > 4096) {
+    throw new Error("Narration scripts must be 4,096 characters or shorter for voice generation.")
+  }
+
+  const speechResponse = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${requireEnv("OPENAI_API_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_TTS_MODEL,
+      voice: OPENAI_TTS_VOICE,
+      input: narration,
+      instructions: OPENAI_TTS_INSTRUCTIONS,
+      response_format: "mp3",
+    }),
+    signal: AbortSignal.timeout(55_000),
+  })
+  if (!speechResponse.ok) {
+    const details = (await speechResponse.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null
+    throw new Error(details?.error?.message || "OpenAI could not generate narration.")
+  }
+
+  const audio = new Uint8Array(await speechResponse.arrayBuffer())
+  if (audio.byteLength <= 0 || audio.byteLength > MAX_NARRATION_BYTES) {
+    throw new Error("OpenAI returned an invalid narration file.")
+  }
+
+  await ensurePresentationBucket()
+  const path = `${id}/narration-${Date.now()}-openai-${OPENAI_TTS_MODEL}-${OPENAI_TTS_VOICE}.mp3`
+  const { error: uploadError } = await client.storage
+    .from(PRESENTATION_BUCKET)
+    .upload(path, audio, { contentType: "audio/mpeg", upsert: false })
+  if (uploadError) throw new Error(`Could not store generated narration: ${uploadError.message}`)
+
+  const { data: updated, error: updateError } = await createSpcAuditedSupabaseClient(context)
+    .from(PRESENTATION_TABLE)
+    .update({
+      narration_path: path,
+      narration_mime_type: "audio/mpeg",
+      narration_bytes: audio.byteLength,
+      media_version: row.media_version + 1,
+      revision: revision + 1,
+      updated_by_username: context.username,
+    })
+    .eq("id", id)
+    .eq("revision", revision)
+    .select(PRESENTATION_COLUMNS)
+    .maybeSingle()
+
+  if (updateError || !updated) {
+    await client.storage.from(PRESENTATION_BUCKET).remove([path])
+    if (updateError) throw new Error(`Could not attach generated narration: ${updateError.message}`)
+    throw new Error("This chunk changed while narration was being generated. Refresh and try again.")
+  }
+
+  if (row.narration_path && row.narration_path !== path) {
+    await client.storage.from(PRESENTATION_BUCKET).remove([row.narration_path])
   }
   return presentSingleRow(updated as unknown as PresentationRow)
 }

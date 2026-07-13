@@ -8,6 +8,8 @@ type PresentationMediaProps = {
   videoMimeType?: string | null
   narrationSrc?: string | null
   narrationMimeType?: string | null
+  narrationLabel?: string
+  autoPlay?: boolean
   onEnded?: () => void
 }
 
@@ -17,6 +19,8 @@ export function PresentationMedia({
   videoMimeType,
   narrationSrc,
   narrationMimeType,
+  narrationLabel = "NARRATION",
+  autoPlay = false,
   onEnded,
 }: PresentationMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -42,6 +46,7 @@ export function PresentationMedia({
       <video
         ref={videoRef}
         controls={!hasSeparateNarration}
+        autoPlay={autoPlay && !hasSeparateNarration}
         muted={hasSeparateNarration}
         playsInline
         preload="metadata"
@@ -52,9 +57,10 @@ export function PresentationMedia({
       </video>
       {narrationSrc ? (
         <div className="spc-readme-narration-control">
-          <span>NARRATION</span>
+          <span>{narrationLabel}</span>
           <audio
             controls
+            autoPlay={autoPlay}
             preload="metadata"
             onPlay={(event) => void handleNarrationPlay(event.currentTarget)}
             onPause={() => videoRef.current?.pause()}

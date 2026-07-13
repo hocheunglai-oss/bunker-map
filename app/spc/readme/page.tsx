@@ -42,9 +42,12 @@ type ChunkDraft = {
 }
 
 type MediaSource = {
+  chunkId: string
   video: string | null
   narration: string | null
 }
+
+const EMPTY_MEDIA_SOURCE: MediaSource = { chunkId: "", video: null, narration: null }
 
 type OfflineState = "idle" | "checking" | "preparing" | "ready" | "partial" | "unavailable"
 
@@ -131,7 +134,8 @@ export default function SpcReadmePage() {
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<"video" | "narration" | "">("")
-  const [mediaSource, setMediaSource] = useState<MediaSource>({ video: null, narration: null })
+  const [generatingNarration, setGeneratingNarration] = useState(false)
+  const [mediaSource, setMediaSource] = useState<MediaSource>(EMPTY_MEDIA_SOURCE)
   const [offlineState, setOfflineState] = useState<OfflineState>("idle")
   const [offlineProgress, setOfflineProgress] = useState({ complete: 0, total: 0, bytes: 0 })
   const [presenting, setPresenting] = useState(false)
@@ -141,6 +145,7 @@ export default function SpcReadmePage() {
 
   const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedId)
   const selected = selectedIndex >= 0 ? chunks[selectedIndex] : chunks[0] || null
+  const selectedMedia = mediaSource.chunkId === selected?.id ? mediaSource : EMPTY_MEDIA_SOURCE
 
   const loadChunks = useCallback(async () => {
     if (!authenticated || !canView) return
@@ -202,7 +207,7 @@ export default function SpcReadmePage() {
 
     async function resolveSources() {
       if (!selected) {
-        setMediaSource({ video: null, narration: null })
+        setMediaSource(EMPTY_MEDIA_SOURCE)
         return
       }
 
@@ -220,12 +225,12 @@ export default function SpcReadmePage() {
         resolveOne("video", selected.videoUrl),
         resolveOne("narration", selected.narrationUrl),
       ])
-      if (!cancelled) setMediaSource({ video, narration })
+      if (!cancelled) setMediaSource({ chunkId: selected.id, video, narration })
     }
 
     void resolveSources().catch(() => {
       if (!cancelled) {
-        setMediaSource({ video: selected.videoUrl, narration: selected.narrationUrl })
+        setMediaSource({ chunkId: selected.id, video: selected.videoUrl, narration: selected.narrationUrl })
       }
     })
 
@@ -426,6 +431,31 @@ export default function SpcReadmePage() {
     }
   }
 
+  async function generateNarration() {
+    if (!selected || !draft) return
+    if (draft.narration.trim() !== selected.narration.trim()) {
+      setError("Save the narration script before generating its voice.")
+      return
+    }
+    if (selected.narrationBytes && !window.confirm("Replace the existing narration with a newly generated AI voice?")) return
+    setGeneratingNarration(true)
+    setError("")
+    setMessage("")
+    try {
+      const result = await postAction({
+        action: "generate-narration",
+        id: selected.id,
+        revision: selected.revision,
+      })
+      if (result.chunk) updateChunk(result.chunk)
+      setMessage("AI narration generated with the Cedar voice.")
+    } catch (generationError) {
+      setError(generationError instanceof Error ? generationError.message : "Could not generate narration.")
+    } finally {
+      setGeneratingNarration(false)
+    }
+  }
+
   async function prepareOffline() {
     const items = chunkMediaItems(chunks.filter((chunk) => chunk.status === "published"))
     if (!("caches" in window)) {
@@ -579,13 +609,14 @@ export default function SpcReadmePage() {
                   <span>{formatDuration(selected.durationSeconds)}</span>
                 </div>
                 <div className="spc-readme-stage">
-                  {mediaSource.video ? (
+                  {selectedMedia.video ? (
                     <PresentationMedia
                       title={selected.title}
-                      videoSrc={mediaSource.video}
+                      videoSrc={selectedMedia.video}
                       videoMimeType={selected.videoMimeType}
-                      narrationSrc={mediaSource.narration}
+                      narrationSrc={selectedMedia.narration}
                       narrationMimeType={selected.narrationMimeType}
+                      narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
                       onEnded={() => setQuestionBreak(true)}
                     />
                   ) : (
@@ -596,8 +627,8 @@ export default function SpcReadmePage() {
                     />
                   )}
                 </div>
-                {!mediaSource.video && mediaSource.narration ? (
-                  <div className="spc-readme-motion-audio"><span>NARRATION</span><audio controls src={mediaSource.narration} /></div>
+                {!selectedMedia.video && selectedMedia.narration ? (
+                  <div className="spc-readme-motion-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio controls src={selectedMedia.narration} /></div>
                 ) : null}
                 <p className="spc-readme-summary">{selected.summary}</p>
               </>
@@ -633,6 +664,10 @@ export default function SpcReadmePage() {
               <div className="spc-readme-media-inputs">
                 <label><span>VIDEO {selected.videoBytes ? `/ ${formatBytes(selected.videoBytes)}` : ""}</span><input type="file" accept="video/mp4,video/webm" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("video", file); event.currentTarget.value = "" }} /></label>
                 <label><span>NARRATION {selected.narrationBytes ? `/ ${formatBytes(selected.narrationBytes)}` : ""}</span><input type="file" accept="audio/*" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("narration", file); event.currentTarget.value = "" }} /></label>
+              </div>
+              <div className="spc-readme-voice-actions">
+                <button type="button" className="is-primary" onClick={() => void generateNarration()} disabled={saving || Boolean(uploading) || generatingNarration || !selected.narration.trim()}>{generatingNarration ? "GENERATING VOICE..." : "GENERATE AI VOICE"}</button>
+                <span>OPENAI CEDAR / AI-GENERATED VOICE</span>
               </div>
               {uploading ? <p className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</p> : null}
               <div className="spc-readme-order-actions">
@@ -672,20 +707,22 @@ export default function SpcReadmePage() {
                 <span>Q&amp;A BREAK</span>
                 <strong>{selected.questionPrompt || "Questions?"}</strong>
               </div>
-            ) : mediaSource.video ? (
+            ) : selectedMedia.video ? (
               <PresentationMedia
                 title={selected.title}
-                videoSrc={mediaSource.video}
+                videoSrc={selectedMedia.video}
                 videoMimeType={selected.videoMimeType}
-                narrationSrc={mediaSource.narration}
+                narrationSrc={selectedMedia.narration}
                 narrationMimeType={selected.narrationMimeType}
+                narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
+                autoPlay
                 onEnded={() => setQuestionBreak(true)}
               />
             ) : (
               <PresentationMotionScene scene={selected.visualKind} title={selected.title} keyPoints={selected.keyPoints} />
             )}
           </main>
-          {!questionBreak && !mediaSource.video && mediaSource.narration ? <div className="spc-readme-presenter-audio"><audio controls src={mediaSource.narration} onEnded={() => setQuestionBreak(true)} /></div> : null}
+          {!questionBreak && !selectedMedia.video && selectedMedia.narration ? <div className="spc-readme-presenter-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio controls autoPlay src={selectedMedia.narration} onEnded={() => setQuestionBreak(true)} /></div> : null}
           <footer>
             <button type="button" onClick={showPreviousChunk} disabled={selectedIndex <= 0}>PREVIOUS</button>
             <button type="button" className={questionBreak ? "is-active" : ""} onClick={() => setQuestionBreak((current) => !current)}>{questionBreak ? "RETURN" : "Q&A"}</button>
