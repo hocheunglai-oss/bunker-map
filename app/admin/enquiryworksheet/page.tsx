@@ -130,6 +130,8 @@ const ENQUIRY_WORKSHEET_CACHE_KEY = "fc-admin-enquiry-worksheet-draft-v1"
 const WHATSAPP_EXTENSION_REQUEST_TYPE = "fcuno-wa-enquiry-send"
 const WHATSAPP_EXTENSION_RESPONSE_TYPE = "fcuno-wa-enquiry-send-result"
 const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["180cst max", "120cst max"]
+const worksheetBuyerSectionPattern =
+  /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,}|$)/i
 
 function toCaps(value: string) {
   return value.toUpperCase()
@@ -177,6 +179,24 @@ function cleanEnquiryForReading(value: string) {
   }
 
   return cleaned.join("\n")
+}
+
+function formatWorksheetWorkingNotes(value: string) {
+  const formattedLines: string[] = []
+
+  for (const line of value.replace(/\r\n?/g, "\n").split("\n")) {
+    const previousLine = formattedLines[formattedLines.length - 1] || ""
+    const shouldAddBuyerSpacer =
+      Boolean(line.trim()) &&
+      formattedLines.length > 0 &&
+      Boolean(previousLine.trim()) &&
+      worksheetBuyerSectionPattern.test(line)
+
+    if (shouldAddBuyerSpacer) formattedLines.push("")
+    formattedLines.push(line)
+  }
+
+  return formattedLines.join("\n")
 }
 
 function todayShort() {
@@ -838,7 +858,7 @@ export default function EnquiryWorksheetPage() {
       vesselName: toCaps(nextGuess.vesselName),
       imo: nextGuess.imo.replace(/\D/g, "").slice(0, 7),
       buyer: toCaps(nextGuess.buyer),
-      workingNotes: getParserSourceText(),
+      workingNotes: formatWorksheetWorkingNotes(getParserSourceText()),
     })
   }
 
