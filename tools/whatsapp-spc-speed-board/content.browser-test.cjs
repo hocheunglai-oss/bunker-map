@@ -5,6 +5,7 @@ const path = require("node:path")
 const { chromium } = require("playwright")
 
 const extensionSource = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
+const extensionStyles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
 const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
@@ -35,6 +36,7 @@ const html = `<!doctype html>
       #decoySend { margin: 24px; padding: 8px 12px; }
       #sent { white-space: pre-wrap; border-top: 1px solid #ddd; padding: 10px; }
     </style>
+    <style>${extensionStyles.replaceAll("</style>", "<\/style>")}</style>
   </head>
   <body>
     <div id="side">
@@ -102,6 +104,7 @@ const html = `<!doctype html>
                   formattedText: ${JSON.stringify(enquiry)},
                   createdAt: "2026-07-01T08:00:00Z",
                   status: "sent",
+                  createdByUsername: "barry@cosulich.com.sg",
                   createdByDisplayName: "OL"
                 },
                 {
@@ -109,6 +112,7 @@ const html = `<!doctype html>
                   formattedText: ${JSON.stringify(enquiry2)},
                   createdAt: "2026-07-01T08:05:00Z",
                   status: "sent",
+                  createdByUsername: "otto@cosulich.com.hk",
                   createdByDisplayName: "OL"
                 },
                 {
@@ -116,13 +120,28 @@ const html = `<!doctype html>
                   formattedText: ${JSON.stringify(enquiry3)},
                   createdAt: "2026-07-01T08:10:00Z",
                   status: "sent",
+                  createdByUsername: "barry@cosulich.com.sg",
                   createdByDisplayName: "OL"
                 }
               ];
               if (window.extraEnquiry) enquiries.push(window.extraEnquiry);
               callback({
                 ok: true,
-                enquiries
+                enquiries,
+                senderContacts: {
+                  "barry@cosulich.com.sg": {
+                    username: "barry@cosulich.com.sg",
+                    displayName: "BARRY KHOO",
+                    phone: "6590000001",
+                    phonebookContactId: "phonebook-barry"
+                  },
+                  "otto@cosulich.com.hk": {
+                    username: "otto@cosulich.com.hk",
+                    displayName: "OTTO LAI",
+                    phone: "85290000002",
+                    phonebookContactId: "phonebook-otto"
+                  }
+                }
               });
               return;
             }
@@ -197,7 +216,7 @@ async function main() {
     try {
       const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
-      await page.waitForSelector("#fcuno-wa-spc-board [data-action='toggle-enquiry'][data-id='enq-1']")
+      await page.waitForSelector("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']")
       await page.waitForFunction(() => document.querySelector(".fcuno-wa-spc-crude strong")?.textContent === "73.14")
 
       const crudeResult = await page.evaluate(() => ({
@@ -249,7 +268,32 @@ async function main() {
       await page.click("#fcuno-wa-spc-board [data-action='edit-template']", { force: true })
       await page.waitForSelector("#fcuno-wa-spc-board [data-id='enq-4']")
 
-      await page.check("#fcuno-wa-spc-board [data-action='toggle-enquiry'][data-id='enq-1']", { force: true })
+      const enquiryUi = await page.evaluate(() => {
+        const row = document.querySelector("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']")
+        const arrow = row?.querySelector("[data-action='open-enquiry-chat']")
+        return {
+          checkboxCount: row?.querySelectorAll("input[type='checkbox']").length || 0,
+          arrowHref: arrow?.href || "",
+          arrowText: arrow?.textContent?.trim() || "",
+          arrowWidth: arrow ? getComputedStyle(arrow).width : "",
+          arrowHeight: arrow ? getComputedStyle(arrow).height : "",
+        }
+      })
+      assert.deepEqual(enquiryUi, {
+        checkboxCount: 0,
+        arrowHref: "https://web.whatsapp.com/send?phone=6590000001",
+        arrowText: "→",
+        arrowWidth: "34px",
+        arrowHeight: "34px",
+      })
+
+      const firstEnquiryText = page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] em")
+      await firstEnquiryText.click({ force: true })
+      assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => row.classList.contains("is-selected")), true)
+      assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => getComputedStyle(row).backgroundColor), "rgb(231, 243, 255)")
+      await firstEnquiryText.click({ force: true })
+      assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => row.classList.contains("is-selected")), false)
+      await firstEnquiryText.click({ force: true })
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']", { force: true })
       await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 3000 })
       await page.waitForTimeout(100)

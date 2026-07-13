@@ -5,11 +5,13 @@ import vm from "node:vm"
 const code = fs.readFileSync(new URL("./background.js", import.meta.url), "utf8")
 const listeners = []
 const fetchedUrls = []
+const fetchedOptions = []
 const enquiryResponses = []
 const context = {
   console,
-  fetch: async (url) => {
+  fetch: async (url, options = {}) => {
     fetchedUrls.push(String(url))
+    fetchedOptions.push(options)
     const payload = enquiryResponses.shift()
     if (!payload) throw new Error("Unexpected fetch in background test.")
     return {
@@ -130,6 +132,37 @@ assert.equal(fetchedUrls.length, 4)
 assert.match(fetchedUrls[1], /updatedAfter=2026-07-05T00%3A00%3A00\.123456Z%7C00000000-0000-4000-8000-000000000001/)
 assert.match(fetchedUrls[2], /updatedAfter=2026-07-05T00%3A01%3A00\.654321Z%7C00000000-0000-4000-8000-000000000001/)
 assert.equal(fetchedUrls[3], "https://spc.fcuno.com/api/spc/enquiries?limit=160")
+
+enquiryResponses.push({
+  contacts: [
+    {
+      username: "barry@cosulich.com.sg",
+      displayName: "BARRY KHOO",
+      phone: "6590000001",
+      phonebookContactId: "phonebook-barry",
+    },
+  ],
+})
+const senderContacts = await context.fetchSpcEnquiryChatContacts(
+  ["BARRY@COSULICH.COM.SG", "missing@cosulich.com.sg"],
+  "trader-b",
+)
+assert.deepEqual(JSON.parse(JSON.stringify(senderContacts)), {
+  "barry@cosulich.com.sg": {
+    username: "barry@cosulich.com.sg",
+    displayName: "BARRY KHOO",
+    phone: "6590000001",
+    phonebookContactId: "phonebook-barry",
+  },
+})
+assert.equal(
+  fetchedUrls.at(-1),
+  "https://spc.fcuno.com/api/spc/enquiry-chat-contacts?username=barry%40cosulich.com.sg&username=missing%40cosulich.com.sg",
+)
+assert.equal(fetchedOptions.at(-1).method, undefined)
+const senderFetchCount = fetchedUrls.length
+await context.fetchSpcEnquiryChatContacts(["barry@cosulich.com.sg"], "trader-b")
+assert.equal(fetchedUrls.length, senderFetchCount)
 
 const debuggerOrder = []
 let releaseDebugger

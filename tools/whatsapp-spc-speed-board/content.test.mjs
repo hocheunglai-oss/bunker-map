@@ -475,4 +475,18 @@ api.state.enquiries = [
 api.state.selectedEnquiries = { "enq-1": true, "enq-2": true }
 assert.equal(api.selectedEnquiryText(), duplicateMessage)
 
+api.state.senderContacts = api.sanitizeSenderContacts({
+  "BARRY@COSULICH.COM.SG": {
+    username: "barry@cosulich.com.sg",
+    displayName: "BARRY KHOO",
+    phone: "+65 9000 0001",
+    phonebookContactId: "phonebook-barry",
+  },
+})
+assert.equal(
+  api.enquirySenderChatUrl({ createdByUsername: "BARRY@COSULICH.COM.SG" }),
+  "https://web.whatsapp.com/send?phone=6590000001",
+)
+assert.equal(api.enquirySenderChatUrl({ createdByUsername: "missing@cosulich.com.sg" }), "")
+
 console.log("SPC WhatsApp content tests passed")

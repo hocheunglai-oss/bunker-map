@@ -28,6 +28,7 @@
     contacts: [],
     unreadById: {},
     enquiries: [],
+    senderContacts: {},
     selectedEnquiries: {},
     hiddenEnquiryIds: {},
     templateEnabled: true,
@@ -829,9 +830,12 @@
         return
       }
       const nextEnquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
+      const nextSenderContacts = sanitizeSenderContacts(response.senderContacts)
       const nextFingerprint = enquiriesFingerprint(nextEnquiries)
-      const changed = nextFingerprint !== lastEnquiryFingerprint
+      const contactsChanged = JSON.stringify(nextSenderContacts) !== JSON.stringify(state.senderContacts)
+      const changed = nextFingerprint !== lastEnquiryFingerprint || contactsChanged
       state.enquiries = nextEnquiries
+      state.senderContacts = nextSenderContacts
       lastEnquiryFingerprint = nextFingerprint
       const initializedFeed = initializeFeedBaseline()
       pruneEnquiryUiState()
@@ -950,10 +954,45 @@
     return enquiry.createdAt || enquiry.created_at || ""
   }
 
-  function markEnquirySeen(enquiry) {
+  function enquirySenderUsername(enquiry) {
+    return cleanText(enquiry?.createdByUsername || enquiry?.created_by_username).toLowerCase()
+  }
+
+  function sanitizeSenderContacts(value) {
+    if (!value || typeof value !== "object") return {}
+    return Object.fromEntries(Object.entries(value).flatMap(([key, contact]) => {
+      if (!contact || typeof contact !== "object") return []
+      const username = cleanText(contact.username || key).toLowerCase()
+      const phone = phoneDigits(contact.phone)
+      if (!username || phone.length < 8 || phone.length > 15) return []
+      return [[username, {
+        username,
+        displayName: cleanText(contact.displayName || username),
+        phone,
+        phonebookContactId: cleanText(contact.phonebookContactId),
+      }]]
+    }))
+  }
+
+  function enquirySenderChatUrl(enquiry) {
+    const contact = state.senderContacts[enquirySenderUsername(enquiry)]
+    return contact ? getDirectUrl(contact.phone) : ""
+  }
+
+  function recordEnquirySeen(enquiry) {
     const createdAt = enquiryCreatedAt(enquiry)
-    if (!createdAt || createdAt <= state.lastSeenEnquiryAt) return
+    if (!createdAt || createdAt <= state.lastSeenEnquiryAt) return false
     state.lastSeenEnquiryAt = createdAt
+    return true
+  }
+
+  function toggleEnquirySelection(enquiry) {
+    if (!enquiry) return
+    if (isSendableEnquiry(enquiry)) {
+      if (state.selectedEnquiries[enquiry.id]) delete state.selectedEnquiries[enquiry.id]
+      else state.selectedEnquiries[enquiry.id] = true
+    }
+    recordEnquirySeen(enquiry)
     saveState()
     render()
   }
@@ -1448,12 +1487,16 @@
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
+      const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
+      const senderChatUrl = enquirySenderChatUrl(enquiry)
       return `
-        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="seen-enquiry" data-id="${escapeHtml(enquiry.id)}">
-          ${sendable ? `<input type="checkbox" data-action="toggle-enquiry" data-id="${escapeHtml(enquiry.id)}" ${state.selectedEnquiries[enquiry.id] ? "checked" : ""} />` : `<span class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</span>`}
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
+          ${senderChatUrl
+            ? `<a class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" href="${escapeHtml(senderChatUrl)}" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}">→</a>`
+            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}">→</button>`}
           <span>
             <em>${escapeHtml(body || enquiry.title || "ENQUIRY")}</em>
-            <small>${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
+            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
         </div>
@@ -1900,18 +1943,17 @@
         hideEnquiry(button.dataset.id || "")
       })
     })
-    host.querySelectorAll("[data-action='seen-enquiry']").forEach((row) => {
+    host.querySelectorAll("[data-action='select-enquiry']").forEach((row) => {
       row.addEventListener("click", () => {
         const enquiry = state.enquiries.find((item) => item.id === row.dataset.id)
-        if (enquiry) markEnquirySeen(enquiry)
+        toggleEnquirySelection(enquiry)
       })
     })
-    host.querySelectorAll("[data-action='toggle-enquiry']").forEach((checkbox) => {
-      checkbox.addEventListener("click", (event) => event.stopPropagation())
-      checkbox.addEventListener("change", () => {
-        state.selectedEnquiries[checkbox.dataset.id || ""] = checkbox.checked
-        const enquiry = state.enquiries.find((item) => item.id === checkbox.dataset.id)
-        if (enquiry) markEnquirySeen(enquiry)
+    host.querySelectorAll("[data-action='open-enquiry-chat']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        const enquiry = state.enquiries.find((item) => item.id === button.dataset.id)
+        if (enquiry && recordEnquirySeen(enquiry)) saveState()
       })
     })
     host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
@@ -1950,6 +1992,7 @@
       findSendButton,
       getCurrentChat,
       enquiryTextForIds,
+      enquirySenderChatUrl,
       loadCrudeWatch,
       insertComposerText,
       loadEnquiries,
@@ -1960,6 +2003,7 @@
       renameContact,
       render,
       sanitizeSavedState,
+      sanitizeSenderContacts,
       visibleEnquiries,
       selectedEnquiryText,
       selectedSendableEnquiryIds,
@@ -1967,6 +2011,7 @@
       sendSelectedToContact,
       sendTextToContact,
       textMatchesContact,
+      toggleEnquirySelection,
       withTemplate,
     }
   }

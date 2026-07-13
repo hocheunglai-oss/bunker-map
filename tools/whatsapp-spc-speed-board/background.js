@@ -1,4 +1,5 @@
 const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
+const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
 const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
 const CRUDE_CACHE_TTL_MS = 15000
 const SPC_ENQUIRY_LIMIT = 160
@@ -7,6 +8,8 @@ const NETWORK_TIMEOUT_MS = 8000
 let crudeCache = { at: 0, payload: null }
 let enquiryCache = { payload: null, cursor: "", sessionKey: "" }
 let enquiryPromise = null
+let senderContactCache = { sessionKey: "", byUsername: new Map() }
+let senderContactPromise = null
 const debuggerQueues = new Map()
 
 async function fetchWithTimeout(url, options = {}) {
@@ -242,6 +245,7 @@ async function fetchSpcEnquiries() {
     let sessionKey = String(data.sessionKey || "")
     if (incremental && enquiryCache.sessionKey && sessionKey && enquiryCache.sessionKey !== sessionKey) {
       enquiryCache = { payload: null, cursor: "", sessionKey: "" }
+      senderContactCache = { sessionKey: "", byUsername: new Map() }
       incremental = false
       url = SPC_ENQUIRIES_URL
       data = await requestEnquiries(url)
@@ -260,6 +264,65 @@ async function fetchSpcEnquiries() {
   })
 
   return enquiryPromise
+}
+
+function enquirySenderUsernames(enquiries) {
+  return Array.from(new Set((enquiries || [])
+    .map((enquiry) => String(enquiry?.createdByUsername || enquiry?.created_by_username || "").trim().toLowerCase())
+    .filter(Boolean)))
+}
+
+async function fetchSpcEnquiryChatContacts(usernames, sessionKey = enquiryCache.sessionKey) {
+  const requested = Array.from(new Set((usernames || []).map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)))
+  if (requested.length === 0) return {}
+
+  if (senderContactCache.sessionKey !== sessionKey) {
+    senderContactCache = { sessionKey, byUsername: new Map() }
+    senderContactPromise = null
+  }
+
+  const missing = requested.filter((username) => !senderContactCache.byUsername.has(username))
+  if (missing.length && !senderContactPromise) {
+    senderContactPromise = (async () => {
+      for (let index = 0; index < missing.length; index += 40) {
+        const usernameChunk = missing.slice(index, index + 40)
+        const query = usernameChunk.map((username) => `username=${encodeURIComponent(username)}`).join("&")
+        const response = await fetchWithTimeout(`${SPC_ENQUIRY_CHAT_CONTACTS_URL}?${query}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            senderContactCache = { sessionKey: "", byUsername: new Map() }
+          }
+          throw new Error(data.message || `SPC chat contacts failed: ${response.status}`)
+        }
+
+        usernameChunk.forEach((username) => senderContactCache.byUsername.set(username, null))
+        ;(Array.isArray(data.contacts) ? data.contacts : []).forEach((contact) => {
+          const username = String(contact?.username || "").trim().toLowerCase()
+          const phone = String(contact?.phone || "").replace(/\D/g, "")
+          if (!username || phone.length < 8 || phone.length > 15) return
+          senderContactCache.byUsername.set(username, {
+            username,
+            displayName: String(contact?.displayName || username).trim(),
+            phone,
+            phonebookContactId: String(contact?.phonebookContactId || ""),
+          })
+        })
+      }
+    })().finally(() => {
+      senderContactPromise = null
+    })
+  }
+
+  if (senderContactPromise) await senderContactPromise
+  return Object.fromEntries(requested.flatMap((username) => {
+    const contact = senderContactCache.byUsername.get(username)
+    return contact ? [[username, contact]] : []
+  }))
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -354,7 +417,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== "load-spc-enquiries") return false
 
   fetchSpcEnquiries()
-    .then((enquiries) => sendResponse({ ok: true, enquiries }))
+    .then(async (enquiries) => {
+      const usernames = enquirySenderUsernames(enquiries)
+      const senderContacts = await fetchSpcEnquiryChatContacts(usernames).catch(() => ({}))
+      sendResponse({ ok: true, enquiries, senderContacts })
+    })
     .catch((error) => {
       sendResponse({
         ok: false,
