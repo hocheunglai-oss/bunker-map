@@ -28,6 +28,31 @@ function SceneHeader({ label }: { label: string; title: string }) {
   )
 }
 
+function ChapterIntroScene() {
+  return (
+    <div className="spc-readme-motion-layout is-intro">
+      <div className="spc-readme-intro-kicker">INTERMEDIATE SESSION</div>
+      <div className="spc-readme-intro-title">
+        <span>INCORPORATE</span>
+        <strong>AI INTO TRADING</strong>
+        <p>Start with the operating problem. Keep the trader in control.</p>
+      </div>
+      <div className="spc-readme-intro-flow" aria-label="Session approach">
+        {[
+          ["01", "TRADING PRESSURE"],
+          ["02", "AI THINKING PARTNER"],
+          ["03", "HUMAN JUDGEMENT"],
+        ].map(([number, label], index) => (
+          <div style={{ animationDelay: `${index * 1.25}s` }} key={label}>
+            <span>{number}</span>
+            <strong>{label}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DailyPressureScene({ title }: { title: string }) {
   return (
     <div className="spc-readme-motion-layout is-pressure">
@@ -182,7 +207,8 @@ function TakeawayScene({ title, keyPoints }: { title: string; keyPoints: string[
 
 export function PresentationMotionScene({ scene, title, keyPoints, compact = false }: PresentationMotionSceneProps) {
   let content: React.ReactNode
-  if (scene === "daily-pressure") content = <DailyPressureScene title={title} />
+  if (scene === "chapter-intro") content = <ChapterIntroScene />
+  else if (scene === "daily-pressure") content = <DailyPressureScene title={title} />
   else if (scene === "varied-formats") content = <VariedFormatsScene title={title} />
   else if (scene === "whatsapp-load") content = <WhatsappLoadScene title={title} />
   else if (scene === "prompt-structure") content = <PromptStructureScene title={title} />

@@ -171,9 +171,16 @@ export function getDefaultSpcPermissionsForRole(
 ) {
   const roleId = normaliseSpcRole(role)
 
-  if (roleId === "BUYER TRADER" || roleId === "ADMIN") {
+  if (roleId === "ADMIN") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
       permissions[page.id] = "edit"
+      return permissions
+    }, {})
+  }
+
+  if (roleId === "BUYER TRADER") {
+    return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
+      permissions[page.id] = page.id === "spc-readme" ? "view" : "edit"
       return permissions
     }, {})
   }

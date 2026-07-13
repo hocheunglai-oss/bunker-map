@@ -30,6 +30,7 @@ type UploadResponse = {
 }
 
 type ChunkDraft = {
+  chapterLabel: string
   sectionLabel: string
   title: string
   summary: string
@@ -50,6 +51,7 @@ type MediaSource = {
 const EMPTY_MEDIA_SOURCE: MediaSource = { chunkId: "", video: null, narration: null }
 
 type OfflineState = "idle" | "checking" | "preparing" | "ready" | "partial" | "unavailable"
+type PresenterMode = "manual" | "chapter" | null
 
 function formatDuration(seconds: number | null) {
   if (!seconds) return "--:--"
@@ -65,6 +67,7 @@ function formatBytes(value: number) {
 
 function chunkDraft(chunk: SpcPresentationChunk): ChunkDraft {
   return {
+    chapterLabel: chunk.chapterLabel,
     sectionLabel: chunk.sectionLabel,
     title: chunk.title,
     summary: chunk.summary,
@@ -134,17 +137,22 @@ export default function SpcReadmePage() {
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<"video" | "narration" | "">("")
-  const [generatingNarration, setGeneratingNarration] = useState(false)
   const [mediaSource, setMediaSource] = useState<MediaSource>(EMPTY_MEDIA_SOURCE)
   const [offlineState, setOfflineState] = useState<OfflineState>("idle")
   const [offlineProgress, setOfflineProgress] = useState({ complete: 0, total: 0, bytes: 0 })
-  const [presenting, setPresenting] = useState(false)
+  const [presenterMode, setPresenterMode] = useState<PresenterMode>(null)
   const [questionBreak, setQuestionBreak] = useState(false)
+  const [playbackBlocked, setPlaybackBlocked] = useState(false)
   const [online, setOnline] = useState(true)
   const presenterRef = useRef<HTMLDivElement>(null)
+  const presenterAudioRef = useRef<HTMLAudioElement>(null)
 
   const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedId)
   const selected = selectedIndex >= 0 ? chunks[selectedIndex] : chunks[0] || null
+  const chapterLabels = Array.from(new Set(chunks.map((chunk) => chunk.chapterLabel)))
+  const activeChapter = selected?.chapterLabel || chapterLabels[0] || ""
+  const chapterChunks = chunks.filter((chunk) => chunk.chapterLabel === activeChapter)
+  const chapterSelectedIndex = chapterChunks.findIndex((chunk) => chunk.id === selected?.id)
   const selectedMedia = mediaSource.chunkId === selected?.id ? mediaSource : EMPTY_MEDIA_SOURCE
 
   const loadChunks = useCallback(async () => {
@@ -156,8 +164,10 @@ export default function SpcReadmePage() {
       const result = (await response.json()) as ReadmeResponse
       if (!response.ok) throw new Error(result.message || "Could not load README content.")
       const nextChunks = result.chunks || []
+      const nextCanEdit = Boolean(result.canEdit)
       setChunks(nextChunks)
-      setCanEdit(Boolean(result.canEdit))
+      setCanEdit(nextCanEdit)
+      if (!nextCanEdit) setEditing(false)
       setSelectedId((current) =>
         nextChunks.some((chunk) => chunk.id === current) ? current : nextChunks[0]?.id || "",
       )
@@ -273,15 +283,68 @@ export default function SpcReadmePage() {
   }, [chunks, checkOffline])
 
   useEffect(() => {
-    if (!presenting) return
+    if (!presenterMode) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPresenting(false)
-      if (event.key === "ArrowRight" && !editing) showNextChunk()
-      if (event.key === "ArrowLeft" && !editing) showPreviousChunk()
+      if (event.key === "Escape") setPresenterMode(null)
+      if (event.key === "ArrowRight" && !editing) {
+        const nextId = chapterChunks[chapterSelectedIndex + 1]?.id
+        if (nextId) setSelectedId(nextId)
+        setQuestionBreak(false)
+      }
+      if (event.key === "ArrowLeft" && !editing) {
+        const previousId = chapterChunks[chapterSelectedIndex - 1]?.id
+        if (previousId) setSelectedId(previousId)
+        setQuestionBreak(false)
+      }
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
   })
+
+  useEffect(() => {
+    if (
+      presenterMode !== "chapter" ||
+      questionBreak ||
+      !selected ||
+      mediaSource.chunkId !== selected.id ||
+      mediaSource.video ||
+      mediaSource.narration
+    ) {
+      return
+    }
+
+    const nextId = chapterChunks[chapterSelectedIndex + 1]?.id
+    const timer = window.setTimeout(() => {
+      if (nextId) setSelectedId(nextId)
+      else setQuestionBreak(true)
+    }, Math.max(selected.durationSeconds || 8, 3) * 1000)
+    return () => window.clearTimeout(timer)
+  }, [
+    chapterChunks,
+    chapterSelectedIndex,
+    mediaSource,
+    presenterMode,
+    questionBreak,
+    selected,
+  ])
+
+  useEffect(() => {
+    if (!presenterMode || questionBreak || !selectedMedia.narration) return
+    const audio = presenterAudioRef.current
+    if (!audio) return
+
+    let cancelled = false
+    void audio.play()
+      .then(() => {
+        if (!cancelled) setPlaybackBlocked(false)
+      })
+      .catch(() => {
+        if (!cancelled) setPlaybackBlocked(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [presenterMode, questionBreak, selected?.id, selectedMedia.narration])
 
   function updateChunk(chunk: SpcPresentationChunk) {
     setChunks((current) =>
@@ -314,6 +377,7 @@ export default function SpcReadmePage() {
         chunk: {
           id: selected.id,
           revision: selected.revision,
+          chapterLabel: draft.chapterLabel,
           sectionLabel: draft.sectionLabel,
           title: draft.title,
           summary: draft.summary,
@@ -342,6 +406,7 @@ export default function SpcReadmePage() {
       const result = await postAction({
         action: "save",
         chunk: {
+          chapterLabel: activeChapter || "CHAPTER 1",
           sectionLabel: "NEW CHUNK",
           title: "UNTITLED CHUNK",
           summary: "",
@@ -431,31 +496,6 @@ export default function SpcReadmePage() {
     }
   }
 
-  async function generateNarration() {
-    if (!selected || !draft) return
-    if (draft.narration.trim() !== selected.narration.trim()) {
-      setError("Save the narration script before generating its voice.")
-      return
-    }
-    if (selected.narrationBytes && !window.confirm("Replace the existing narration with a newly generated AI voice?")) return
-    setGeneratingNarration(true)
-    setError("")
-    setMessage("")
-    try {
-      const result = await postAction({
-        action: "generate-narration",
-        id: selected.id,
-        revision: selected.revision,
-      })
-      if (result.chunk) updateChunk(result.chunk)
-      setMessage("AI narration generated with the Cedar voice.")
-    } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : "Could not generate narration.")
-    } finally {
-      setGeneratingNarration(false)
-    }
-  }
-
   async function prepareOffline() {
     const items = chunkMediaItems(chunks.filter((chunk) => chunk.status === "published"))
     if (!("caches" in window)) {
@@ -517,15 +557,59 @@ export default function SpcReadmePage() {
   }
 
   function showPreviousChunk() {
-    if (selectedIndex <= 0) return
-    setSelectedId(chunks[selectedIndex - 1].id)
+    if (chapterSelectedIndex <= 0) return
+    setSelectedId(chapterChunks[chapterSelectedIndex - 1].id)
     setQuestionBreak(false)
+    setPlaybackBlocked(false)
   }
 
   function showNextChunk() {
-    if (selectedIndex < 0 || selectedIndex >= chunks.length - 1) return
-    setSelectedId(chunks[selectedIndex + 1].id)
+    if (chapterSelectedIndex < 0 || chapterSelectedIndex >= chapterChunks.length - 1) return
+    setSelectedId(chapterChunks[chapterSelectedIndex + 1].id)
     setQuestionBreak(false)
+    setPlaybackBlocked(false)
+  }
+
+  function selectChapter(chapterLabel: string) {
+    const firstChunk = chunks.find((chunk) => chunk.chapterLabel === chapterLabel)
+    if (!firstChunk) return
+    setSelectedId(firstChunk.id)
+    setEditing(false)
+    setQuestionBreak(false)
+    setPlaybackBlocked(false)
+  }
+
+  function startPresentation(mode: Exclude<PresenterMode, null>) {
+    if (!selected) return
+    if (mode === "chapter") {
+      const firstChunk = chapterChunks[0]
+      if (!firstChunk) return
+      setSelectedId(firstChunk.id)
+    }
+    setQuestionBreak(false)
+    setPlaybackBlocked(false)
+    setPresenterMode(mode)
+  }
+
+  function handlePlaybackEnded() {
+    if (presenterMode === "chapter" && chapterSelectedIndex < chapterChunks.length - 1) {
+      setSelectedId(chapterChunks[chapterSelectedIndex + 1].id)
+      setQuestionBreak(false)
+      setPlaybackBlocked(false)
+      return
+    }
+    setQuestionBreak(true)
+  }
+
+  async function startBlockedPlayback() {
+    const audio = presenterAudioRef.current
+    if (!audio) return
+    try {
+      await audio.play()
+      setPlaybackBlocked(false)
+    } catch {
+      setPlaybackBlocked(true)
+    }
   }
 
   async function enterFullscreen() {
@@ -558,7 +642,7 @@ export default function SpcReadmePage() {
         <header className="spc-readme-toolbar">
           <div>
             <strong>INCORPORATE AI INTO TRADING</strong>
-            <span>INTERMEDIATE / CHAPTER 1</span>
+            <span>INTERMEDIATE / {activeChapter || "NO CHAPTER"}</span>
           </div>
           <div className="spc-readme-session-status">
             <span className={online ? "is-online" : "is-offline"}>{online ? "ONLINE" : "OFFLINE"}</span>
@@ -568,8 +652,11 @@ export default function SpcReadmePage() {
             <button type="button" onClick={() => void prepareOffline()} disabled={offlineState === "preparing"}>
               PREPARE OFFLINE
             </button>
-            <button type="button" className="is-primary" onClick={() => setPresenting(true)} disabled={!selected}>
+            <button type="button" onClick={() => startPresentation("manual")} disabled={!selected}>
               PRESENT
+            </button>
+            <button type="button" className="is-primary" onClick={() => startPresentation("chapter")} disabled={chapterChunks.length === 0}>
+              PLAY CHAPTER
             </button>
             {canEdit ? (
               <button type="button" className={editing ? "is-active" : ""} onClick={() => setEditing((current) => !current)} disabled={!selected}>
@@ -579,6 +666,21 @@ export default function SpcReadmePage() {
           </div>
         </header>
 
+        <nav className="spc-readme-chapter-tabs" role="tablist" aria-label="Presentation chapters">
+          {chapterLabels.map((chapterLabel) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={chapterLabel === activeChapter}
+              className={chapterLabel === activeChapter ? "is-active" : ""}
+              onClick={() => selectChapter(chapterLabel)}
+              key={chapterLabel}
+            >
+              {chapterLabel}
+            </button>
+          ))}
+        </nav>
+
         <div className={`spc-readme-workspace${editing ? " is-editing" : ""}`}>
           <nav className="spc-readme-chunk-list" aria-label="Presentation chunks">
             <div className="spc-readme-chunk-list-header">
@@ -586,7 +688,7 @@ export default function SpcReadmePage() {
               {canEdit ? <button type="button" onClick={() => void addChunk()} disabled={saving}>ADD</button> : null}
             </div>
             {loading ? <p className="spc-readme-empty">Loading...</p> : null}
-            {chunks.map((chunk, index) => (
+            {chapterChunks.map((chunk, index) => (
               <button
                 type="button"
                 className={chunk.id === selected?.id ? "is-active" : ""}
@@ -598,7 +700,7 @@ export default function SpcReadmePage() {
                 <span><small>{formatDuration(chunk.durationSeconds)}</small>{chunk.status === "draft" ? <i>DRAFT</i> : null}</span>
               </button>
             ))}
-            {!loading && chunks.length === 0 ? <p className="spc-readme-empty">No presentation chunks.</p> : null}
+            {!loading && chapterChunks.length === 0 ? <p className="spc-readme-empty">No presentation chunks.</p> : null}
           </nav>
 
           <main className="spc-readme-stage-pane">
@@ -617,7 +719,6 @@ export default function SpcReadmePage() {
                       narrationSrc={selectedMedia.narration}
                       narrationMimeType={selected.narrationMimeType}
                       narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
-                      onEnded={() => setQuestionBreak(true)}
                     />
                   ) : (
                     <PresentationMotionScene
@@ -640,6 +741,7 @@ export default function SpcReadmePage() {
           {selected && editing && draft ? (
             <aside className="spc-readme-editor" aria-label="Edit presentation chunk">
               <div className="spc-readme-editor-header"><strong>EDIT CHUNK</strong><span>REV {selected.revision}</span></div>
+              <label><span>CHAPTER</span><input value={draft.chapterLabel} onChange={(event) => setDraft({ ...draft, chapterLabel: event.target.value })} /></label>
               <label><span>SECTION</span><input value={draft.sectionLabel} onChange={(event) => setDraft({ ...draft, sectionLabel: event.target.value })} /></label>
               <label><span>TITLE</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
               <label><span>SUMMARY</span><textarea rows={3} value={draft.summary} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} /></label>
@@ -648,6 +750,7 @@ export default function SpcReadmePage() {
               <label><span>Q&amp;A PROMPT</span><textarea rows={3} value={draft.questionPrompt} onChange={(event) => setDraft({ ...draft, questionPrompt: event.target.value })} /></label>
               <div className="spc-readme-editor-row">
                 <label><span>SCENE</span><select value={draft.visualKind} onChange={(event) => setDraft({ ...draft, visualKind: event.target.value })}>
+                  <option value="chapter-intro">CHAPTER INTRO</option>
                   <option value="daily-pressure">DAILY PRESSURE</option>
                   <option value="varied-formats">VARIED FORMATS</option>
                   <option value="whatsapp-load">WHATSAPP LOAD</option>
@@ -665,14 +768,10 @@ export default function SpcReadmePage() {
                 <label><span>VIDEO {selected.videoBytes ? `/ ${formatBytes(selected.videoBytes)}` : ""}</span><input type="file" accept="video/mp4,video/webm" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("video", file); event.currentTarget.value = "" }} /></label>
                 <label><span>NARRATION {selected.narrationBytes ? `/ ${formatBytes(selected.narrationBytes)}` : ""}</span><input type="file" accept="audio/*" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("narration", file); event.currentTarget.value = "" }} /></label>
               </div>
-              <div className="spc-readme-voice-actions">
-                <button type="button" className="is-primary" onClick={() => void generateNarration()} disabled={saving || Boolean(uploading) || generatingNarration || !selected.narration.trim()}>{generatingNarration ? "GENERATING VOICE..." : "GENERATE AI VOICE"}</button>
-                <span>OPENAI MARIN / AI-GENERATED VOICE</span>
-              </div>
               {uploading ? <p className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</p> : null}
               <div className="spc-readme-order-actions">
-                <button type="button" onClick={() => void moveChunk("earlier")} disabled={saving || selectedIndex <= 0}>EARLIER</button>
-                <button type="button" onClick={() => void moveChunk("later")} disabled={saving || selectedIndex >= chunks.length - 1}>LATER</button>
+                <button type="button" onClick={() => void moveChunk("earlier")} disabled={saving || chapterSelectedIndex <= 0}>EARLIER</button>
+                <button type="button" onClick={() => void moveChunk("later")} disabled={saving || chapterSelectedIndex >= chapterChunks.length - 1}>LATER</button>
               </div>
               <div className="spc-readme-editor-actions">
                 <button type="button" onClick={() => { setDraft(chunkDraft(selected)); setEditing(false) }} disabled={saving}>CANCEL</button>
@@ -695,20 +794,28 @@ export default function SpcReadmePage() {
         </div>
       </section>
 
-      {presenting && selected ? (
+      {presenterMode && selected ? (
         <div className="spc-readme-presenter" ref={presenterRef} role="dialog" aria-modal="true" aria-label="Presentation mode">
           <header>
-            <div><span>{String(selectedIndex + 1).padStart(2, "0")} / {String(chunks.length).padStart(2, "0")}</span><strong>{selected.title}</strong></div>
-            <div><button type="button" onClick={() => void enterFullscreen()}>FULL SCREEN</button><button type="button" onClick={() => setPresenting(false)}>CLOSE</button></div>
+            <div>
+              <span>{activeChapter} / {String(chapterSelectedIndex + 1).padStart(2, "0")} OF {String(chapterChunks.length).padStart(2, "0")}</span>
+              <strong>{selected.title}</strong>
+            </div>
+            <div>
+              {presenterMode === "chapter" ? <span className="spc-readme-presenter-mode">CONTINUOUS</span> : null}
+              <button type="button" onClick={() => void enterFullscreen()}>FULL SCREEN</button>
+              <button type="button" onClick={() => { setPresenterMode(null); setPlaybackBlocked(false) }}>CLOSE</button>
+            </div>
           </header>
           <main>
             {questionBreak ? (
               <div className="spc-readme-presenter-question">
-                <span>Q&amp;A BREAK</span>
+                <span>{presenterMode === "chapter" ? "CHAPTER COMPLETE" : "Q&A BREAK"}</span>
                 <strong>{selected.questionPrompt || "Questions?"}</strong>
               </div>
             ) : selectedMedia.video ? (
               <PresentationMedia
+                key={selected.id}
                 title={selected.title}
                 videoSrc={selectedMedia.video}
                 videoMimeType={selected.videoMimeType}
@@ -716,17 +823,26 @@ export default function SpcReadmePage() {
                 narrationMimeType={selected.narrationMimeType}
                 narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
                 autoPlay
-                onEnded={() => setQuestionBreak(true)}
+                onEnded={handlePlaybackEnded}
               />
             ) : (
               <PresentationMotionScene scene={selected.visualKind} title={selected.title} keyPoints={selected.keyPoints} />
             )}
+            {playbackBlocked ? (
+              <button type="button" className="spc-readme-playback-start" onClick={() => void startBlockedPlayback()}>
+                START {presenterMode === "chapter" ? "CHAPTER" : "PRESENTATION"}
+              </button>
+            ) : null}
           </main>
-          {!questionBreak && !selectedMedia.video && selectedMedia.narration ? <div className="spc-readme-presenter-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio controls autoPlay src={selectedMedia.narration} onEnded={() => setQuestionBreak(true)} /></div> : null}
+          {!questionBreak && !selectedMedia.video && selectedMedia.narration ? <div className="spc-readme-presenter-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio ref={presenterAudioRef} key={selected.id} controls autoPlay src={selectedMedia.narration} onEnded={handlePlaybackEnded} /></div> : null}
           <footer>
-            <button type="button" onClick={showPreviousChunk} disabled={selectedIndex <= 0}>PREVIOUS</button>
-            <button type="button" className={questionBreak ? "is-active" : ""} onClick={() => setQuestionBreak((current) => !current)}>{questionBreak ? "RETURN" : "Q&A"}</button>
-            <button type="button" className="is-primary" onClick={showNextChunk} disabled={selectedIndex >= chunks.length - 1}>NEXT CHUNK</button>
+            <button type="button" onClick={showPreviousChunk} disabled={chapterSelectedIndex <= 0}>PREVIOUS</button>
+            {presenterMode === "chapter" ? (
+              <button type="button" className={questionBreak ? "is-active" : ""} onClick={() => startPresentation("chapter")}>RESTART CHAPTER</button>
+            ) : (
+              <button type="button" className={questionBreak ? "is-active" : ""} onClick={() => setQuestionBreak((current) => !current)}>{questionBreak ? "RETURN" : "Q&A"}</button>
+            )}
+            <button type="button" className="is-primary" onClick={showNextChunk} disabled={chapterSelectedIndex >= chapterChunks.length - 1}>NEXT CHUNK</button>
           </footer>
         </div>
       ) : null}
