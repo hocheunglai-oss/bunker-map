@@ -25,7 +25,8 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 ## Trading Use
 
 - Open a WhatsApp chat, then click `Add as Supplier` or `Add as Buyer`.
-- Drag contacts to reorder. Use the handle menu to send selected enquiries or remove a saved contact; the menu hides shortly after you move away from it.
+- Drag contacts to reorder. Use the handle menu to rename, send selected enquiries, or remove a saved contact; the menu hides shortly after you move away from it.
+- Use `Rename` in the handle menu to set a local display name. The original WhatsApp contact or group name remains the routing identity and is shown underneath the alias.
 - Click a contact to jump to the WhatsApp chat. Phone-number chats open directly with WhatsApp Web's `send?phone=` URL.
 - Name-only chats use WhatsApp Web's left chat search as a fallback; the extension does not use in-chat search.
 - Visible WhatsApp unread counts are mirrored as green badges on saved rows.

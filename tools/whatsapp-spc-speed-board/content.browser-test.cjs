@@ -69,7 +69,15 @@ const html = `<!doctype html>
       window.nativeClickCount = 0;
       window.nativeInsertCount = 0;
       window.nativeEnterShouldSend = false;
+      window.promptResponse = null;
+      window.prompt = () => window.promptResponse;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
+      const firstRun = new URLSearchParams(window.location.search).get("firstRun") === "1";
+      window.storageData = firstRun ? {} : {
+        "fcuno-wa-spc-board-v1": {
+          feedStartedAt: "2026-06-30T00:00:00Z"
+        }
+      };
       window.setChatTitle = (name) => {
         const title = document.getElementById("chatTitle");
         title.textContent = name;
@@ -152,8 +160,8 @@ const html = `<!doctype html>
         },
         storage: {
           local: {
-            get: (_keys, callback) => callback({}),
-            set: () => {}
+            get: (keys, callback) => callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]]))),
+            set: (values, callback) => { Object.assign(window.storageData, values); callback?.(); }
           }
         }
       };
@@ -313,10 +321,10 @@ async function main() {
         return { disabledButtons, activeButtons }
       })
 
-      assert.deepEqual(contactMenuResult.disabledButtons.map((button) => button.text), ["Send Selected", "Remove"])
-      assert.equal(contactMenuResult.disabledButtons[0].disabled, true)
-      assert.deepEqual(contactMenuResult.activeButtons.map((button) => button.text), ["Send Selected", "Remove"])
-      assert.equal(contactMenuResult.activeButtons[0].disabled, false)
+      assert.deepEqual(contactMenuResult.disabledButtons.map((button) => button.text), ["Rename", "Send Selected", "Remove"])
+      assert.equal(contactMenuResult.disabledButtons[1].disabled, true)
+      assert.deepEqual(contactMenuResult.activeButtons.map((button) => button.text), ["Rename", "Send Selected", "Remove"])
+      assert.equal(contactMenuResult.activeButtons[1].disabled, false)
 
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
@@ -330,10 +338,18 @@ async function main() {
       assert.equal(await page.locator(".fcuno-wa-spc-contact-menu").count(), 1)
       await page.waitForFunction(() => !document.querySelector(".fcuno-wa-spc-contact-menu"), undefined, { timeout: 3000 })
 
+      await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const contact = { id: "renamed-contact", name: "Otto Tone", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }
+        api.state.contacts = [contact]
+        api.state.contactMenuId = contact.id
+        window.promptResponse = "OTTO"
+        api.render()
+      })
+      await page.click("#fcuno-wa-spc-board [data-action='rename-contact'][data-id='renamed-contact']", { force: true })
       await page.evaluate((message) => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
-        const contact = { id: "renamed-contact", name: "OTTO", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }
-        api.state.contacts = [contact]
+        const contact = api.state.contacts.find((item) => item.id === "renamed-contact")
         window.sentMessages = []
         window.editorModel = ""
         document.getElementById("sent").textContent = ""
@@ -353,6 +369,10 @@ async function main() {
         sentCount: window.sentMessages.length,
         chatTitle: document.getElementById("chatTitle").getAttribute("title"),
         searchText: document.getElementById("search").value,
+        alias: document.querySelector(".fcuno-wa-spc-row strong")?.textContent || "",
+        originalName: document.querySelector(".fcuno-wa-spc-original-name")?.textContent || "",
+        savedName: window.storageData["fcuno-wa-spc-board-v1"]?.contacts?.[0]?.name || "",
+        savedChatName: window.storageData["fcuno-wa-spc-board-v1"]?.contacts?.[0]?.chatName || "",
       }))
 
       assert.equal(renamedResult.sentText, enquiry)
@@ -360,6 +380,10 @@ async function main() {
       assert.equal(renamedResult.sentCount, 1)
       assert.equal(renamedResult.chatTitle, "Otto Tone")
       assert.equal(renamedResult.searchText, "")
+      assert.equal(renamedResult.alias, "OTTO")
+      assert.equal(renamedResult.originalName, "Otto Tone")
+      assert.equal(renamedResult.savedName, "OTTO")
+      assert.equal(renamedResult.savedChatName, "Otto Tone")
 
       const invalidRuntimeResult = await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
@@ -403,6 +427,34 @@ async function main() {
 
       assert.equal(invalidUnreadResult.unread, "")
       assert.match(invalidUnreadResult.enquiryError, /Reload WhatsApp Web/)
+
+      const firstRunPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      await firstRunPage.goto(`${url}?firstRun=1`, { waitUntil: "domcontentloaded" })
+      await firstRunPage.waitForFunction(() => Boolean(window.__FCUNO_WA_SPC_TEST_API__?.state.feedStartedAt))
+      const firstRunResult = await firstRunPage.evaluate(() => ({
+        baseline: window.__FCUNO_WA_SPC_TEST_API__.state.feedStartedAt,
+        visibleCount: window.__FCUNO_WA_SPC_TEST_API__.visibleEnquiries().length,
+        renderedRows: document.querySelectorAll(".fcuno-wa-spc-enquiry").length,
+        savedBaseline: window.storageData["fcuno-wa-spc-board-v1"]?.feedStartedAt || "",
+      }))
+      assert.equal(firstRunResult.baseline, "2026-07-01T08:10:00Z")
+      assert.equal(firstRunResult.visibleCount, 0)
+      assert.equal(firstRunResult.renderedRows, 0)
+      assert.equal(firstRunResult.savedBaseline, "2026-07-01T08:10:00Z")
+
+      await firstRunPage.evaluate(() => {
+        window.extraEnquiry = {
+          id: "enq-new",
+          formattedText: "new enquiry after installation",
+          createdAt: "2026-07-01T08:15:00Z",
+          status: "sent",
+          createdByDisplayName: "OL"
+        }
+        window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+      })
+      await firstRunPage.waitForSelector("#fcuno-wa-spc-board [data-id='enq-new']")
+      assert.equal(await firstRunPage.locator(".fcuno-wa-spc-enquiry").count(), 1)
+      await firstRunPage.close()
     } finally {
       await browser.close()
     }

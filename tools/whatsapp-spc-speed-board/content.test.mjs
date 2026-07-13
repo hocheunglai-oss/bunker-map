@@ -243,6 +243,7 @@ const document = {
 
 const window = {
   __FCUNO_WA_SPC_ENABLE_TEST_API__: true,
+  promptResponse: null,
   addEventListener() {},
   clearTimeout,
   document,
@@ -261,6 +262,9 @@ const window = {
     },
   },
   setTimeout,
+  prompt() {
+    return this.promptResponse
+  },
 }
 
 const context = vm.createContext({
@@ -387,6 +391,28 @@ const aliasOnlyContact = { name: "OTTO", phone: "" }
 assert.equal(api.textMatchesContact(aliasOnlyContact, "Otto Tone"), false)
 setHeaderTitles("Otto Tone")
 assert.equal(api.currentChatMatchesContact(aliasOnlyContact), false)
+
+const renameSafeContact = {
+  id: "rename-safe",
+  name: "Cosulich - Sumitomo (South Korea/Taiwan)",
+  chatName: "Cosulich - Sumitomo (South Korea/Taiwan)",
+  phone: "",
+  list: "supplier",
+  order: 1000,
+}
+api.state.contacts = [renameSafeContact]
+window.promptResponse = "SUMITOMO DESK"
+api.renameContact(renameSafeContact.id)
+assert.equal(renameSafeContact.name, "SUMITOMO DESK")
+assert.equal(renameSafeContact.chatName, "Cosulich - Sumitomo (South Korea/Taiwan)")
+const restoredRename = api.sanitizeSavedState({ contacts: [renameSafeContact] }).contacts[0]
+assert.equal(restoredRename.name, "SUMITOMO DESK")
+assert.equal(restoredRename.chatName, "Cosulich - Sumitomo (South Korea/Taiwan)")
+assert.equal(api.contactSearchText(renameSafeContact), "Cosulich - Sumitomo (South Korea/Taiwan)")
+setHeaderTitles("Cosulich - Sumitomo (South Korea/Taiwan)")
+assert.equal(api.currentChatMatchesContact(renameSafeContact), true)
+setHeaderTitles("SUMITOMO DESK")
+assert.equal(api.currentChatMatchesContact(renameSafeContact), false)
 
 const enquiry = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 let composer = setComposer(enquiry)

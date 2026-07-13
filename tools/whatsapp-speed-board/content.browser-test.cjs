@@ -21,7 +21,10 @@ const html = `<!doctype html>
     <title>FCUNO WhatsApp Send Harness</title>
     <style>
       body { margin: 0; font-family: Arial, sans-serif; }
-      #main { width: 720px; min-height: 540px; }
+      #side { width: 320px; float: left; min-height: 540px; border-right: 1px solid #ddd; }
+      #search { width: 270px; margin: 16px; padding: 10px; }
+      #supplierRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
+      #main { width: 720px; min-height: 540px; margin-left: 320px; }
       header { height: 56px; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 360px; background: #f6efe5; }
       .composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 12px; }
@@ -31,8 +34,14 @@ const html = `<!doctype html>
     </style>
   </head>
   <body>
+    <div id="side">
+      <input id="search" type="text" aria-label="Search input textbox" />
+      <div id="supplierRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Supplier Group')">
+        <span title="Supplier Group">Supplier Group</span>
+      </div>
+    </div>
     <div id="main">
-      <header><span title="Supplier One">Supplier One</span></header>
+      <header><span id="chatTitle" title="Supplier Group">Supplier Group</span></header>
       <div class="messages"><div id="sent"></div></div>
       <div class="composer-row">
         <div id="composer" contenteditable="true" role="textbox"></div>
@@ -44,10 +53,12 @@ const html = `<!doctype html>
       window.editorModel = "";
       window.nativeInsertCount = 0;
       window.nativeEnterCount = 0;
+      window.promptResponse = null;
+      window.prompt = () => window.promptResponse;
       window.__FCUNO_WA_ENABLE_TEST_API__ = true;
-      const storageData = {
+      window.storageData = {
         "fcuno-wa-speed-board-v1": {
-          contacts: [{ id: "supplier-1", name: "Supplier One", chatName: "Supplier One", list: "supplier", order: 1000 }],
+          contacts: [{ id: "supplier-1", name: "Supplier Group", chatName: "Supplier Group", list: "supplier", order: 1000 }],
           templateEnabled: true,
           templateText: "Good day, please quote for the following enquiries."
         },
@@ -55,6 +66,15 @@ const html = `<!doctype html>
           enquiries: [{ id: "enq-1", body: ${JSON.stringify(enquiry)}, createdAt: "2026-07-13T08:00:00Z", buyer: "OL" }]
         }
       };
+      window.setChatTitle = (name) => {
+        const title = document.getElementById("chatTitle");
+        title.textContent = name;
+        title.setAttribute("title", name);
+      };
+      document.getElementById("search").addEventListener("input", (event) => {
+        const value = String(event.target.value || "").toLowerCase();
+        document.getElementById("supplierRow").style.display = value.includes("supplier group") ? "block" : "none";
+      });
       document.getElementById("composer").addEventListener("input", (event) => {
         window.editorModel = event.currentTarget.innerText;
       });
@@ -101,8 +121,8 @@ const html = `<!doctype html>
         },
         storage: {
           local: {
-            get: (keys, callback) => callback(Object.fromEntries(keys.filter((key) => key in storageData).map((key) => [key, storageData[key]]))),
-            set: (values, callback) => { Object.assign(storageData, values); callback?.(); }
+            get: (keys, callback) => callback(Object.fromEntries(keys.filter((key) => key in window.storageData).map((key) => [key, window.storageData[key]]))),
+            set: (values, callback) => { Object.assign(window.storageData, values); callback?.(); }
           },
           onChanged: { addListener: () => {} }
         }
@@ -137,7 +157,38 @@ async function main() {
         contact: document.querySelector(".fcuno-wa-row strong")?.textContent,
       }))
       assert.equal(loaded.selected, true)
-      assert.equal(loaded.contact, "Supplier One")
+      assert.equal(loaded.contact, "Supplier Group")
+
+      await page.click("#fcuno-wa-board [data-action='contact-menu'][data-id='supplier-1']", { force: true })
+      const contactMenuLabels = await page.locator(".fcuno-wa-contact-menu button").allTextContents()
+      assert.deepEqual(contactMenuLabels.map((label) => label.trim()), ["Rename", "Send Selected", "Remove"])
+      await page.evaluate(() => { window.promptResponse = "LOCAL SUPPLIER" })
+      await page.click("#fcuno-wa-board [data-action='rename-contact'][data-id='supplier-1']", { force: true })
+      const renamed = await page.evaluate(() => {
+        const saved = window.storageData["fcuno-wa-speed-board-v1"]
+        const restored = window.__FCUNO_WA_TEST_API__.sanitizeSavedState(saved).contacts[0]
+        return {
+          alias: document.querySelector(".fcuno-wa-row strong")?.textContent || "",
+          original: document.querySelector(".fcuno-wa-original-name")?.textContent || "",
+          savedName: restored?.name || "",
+          savedChatName: restored?.chatName || "",
+        }
+      })
+      assert.deepEqual(renamed, {
+        alias: "LOCAL SUPPLIER",
+        original: "Supplier Group",
+        savedName: "LOCAL SUPPLIER",
+        savedChatName: "Supplier Group",
+      })
+
+      await page.evaluate(() => {
+        window.setChatTitle("Other Chat")
+        document.getElementById("search").value = ""
+        document.getElementById("supplierRow").style.display = "none"
+      })
+      await page.click("#fcuno-wa-board [data-action='open-contact'][data-id='supplier-1']", { force: true })
+      await page.waitForFunction(() => document.getElementById("chatTitle")?.getAttribute("title") === "Supplier Group")
+      await page.waitForFunction(() => document.getElementById("search")?.value === "")
 
       const boardMainStable = await page.evaluate(() => {
         const api = window.__FCUNO_WA_TEST_API__
@@ -147,18 +198,21 @@ async function main() {
       })
       assert.equal(boardMainStable, true)
 
-      await page.click("#fcuno-wa-board [data-action='send-selected']", { force: true })
+      await page.click("#fcuno-wa-board [data-action='contact-menu'][data-id='supplier-1']", { force: true })
+      await page.click("#fcuno-wa-board [data-action='send-selected-contact'][data-id='supplier-1']", { force: true })
       await page.waitForFunction(() => window.sentMessages.length === 1, { timeout: 3000 })
       const result = await page.evaluate(() => ({
         sent: document.getElementById("sent").innerText,
         composer: document.getElementById("composer").innerText,
         insertCount: window.nativeInsertCount,
         enterCount: window.nativeEnterCount,
+        chatTitle: document.getElementById("chatTitle").getAttribute("title"),
       }))
       assert.equal(result.sent, expected)
       assert.equal(result.composer, "")
       assert.equal(result.insertCount, 1)
       assert.equal(result.enterCount, 1)
+      assert.equal(result.chatTitle, "Supplier Group")
     } finally {
       await browser.close()
     }

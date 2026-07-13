@@ -308,6 +308,12 @@ body.fcuno-wa-collapsed #fcuno-wa-board {
   font-size: 11px;
 }
 
+.fcuno-wa-list-button .fcuno-wa-original-name {
+  color: #8696a0;
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .fcuno-wa-row-actions {
   position: relative;
   display: flex;

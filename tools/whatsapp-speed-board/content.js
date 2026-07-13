@@ -385,11 +385,12 @@
         ? source.contacts
             .filter((contact) => contact && typeof contact === "object")
             .map((contact, index) => {
-              const chatName = cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName || contact.name)
+              const savedName = cleanText(contact.name)
+              const chatName = cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName || savedName)
               const phone = cleanText(contact.phone)
               return {
                 id: String(contact.id || uid()),
-                name: chatName || phone || "Unnamed chat",
+                name: savedName || chatName || phone || "Unnamed chat",
                 chatName,
                 company: cleanText(contact.company),
                 phone,
@@ -467,6 +468,10 @@
 
   function contactChatName(contact) {
     return cleanText(contact?.chatName || contact?.searchName || contact?.whatsappName || contact?.originalName)
+  }
+
+  function contactDisplayName(contact) {
+    return cleanText(contact?.name) || contactChatName(contact) || cleanText(contact?.phone) || "Unnamed chat"
   }
 
   function contactSearchText(contact) {
@@ -580,7 +585,9 @@
     })
 
     if (duplicate) {
-      duplicate.name = keyName
+      const previousChatName = contactChatName(duplicate)
+      const hasAlias = previousChatName && cleanText(duplicate.name).toLowerCase() !== previousChatName.toLowerCase()
+      if (!hasAlias) duplicate.name = keyName
       duplicate.chatName = keyName
       duplicate.phone = chat.phone || duplicate.phone
       duplicate.directUrl = chat.directUrl || duplicate.directUrl
@@ -616,6 +623,20 @@
     if (!contact) return
     if (!window.confirm(`Remove ${contact.name} from the FCUNO board?`)) return
     removeContact(id)
+  }
+
+  function renameContact(id) {
+    const contact = state.contacts.find((item) => item.id === id)
+    if (!contact) return
+    const originalName = contactChatName(contact) || cleanText(contact.phone)
+    const currentName = contactDisplayName(contact)
+    const value = window.prompt("Display name", currentName)
+    if (value === null) return
+    contact.name = cleanText(value) || originalName || currentName
+    contact.updatedAt = new Date().toISOString()
+    state.contactMenuId = ""
+    saveState()
+    render()
   }
 
   function moveContact(id, targetList, targetId, position = "before") {
@@ -1345,18 +1366,23 @@
     const hasSelectedEnquiries = selectedSendableEnquiryIds().length > 0
     const rows = contactsFor(list).map((contact) => {
       const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
+      const displayName = contactDisplayName(contact)
+      const originalName = contactChatName(contact)
+      const showOriginalName = originalName && displayName.toLowerCase() !== originalName.toLowerCase()
       const menuOpen = state.contactMenuId === contact.id
       return `
         <div class="fcuno-wa-row" draggable="true" data-id="${escapeHtml(contact.id)}" data-list="${list}">
           <button class="fcuno-wa-list-button" type="button" data-action="open-contact" data-id="${escapeHtml(contact.id)}">
-            <strong>${escapeHtml(contact.name)}</strong>
+            <strong>${escapeHtml(displayName)}</strong>
+            ${showOriginalName ? `<span class="fcuno-wa-original-name">${escapeHtml(originalName)}</span>` : ""}
             ${details ? `<span>${escapeHtml(details)}</span>` : ""}
           </button>
           <div class="fcuno-wa-row-actions">
             ${state.unreadById[contact.id] ? `<span class="fcuno-wa-unread">${escapeHtml(state.unreadById[contact.id])}</span>` : ""}
-            <button class="fcuno-wa-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or remove">☰</button>
+            <button class="fcuno-wa-contact-action" type="button" draggable="true" data-action="contact-menu" data-id="${escapeHtml(contact.id)}" title="Drag or manage">☰</button>
             ${menuOpen ? `
               <div class="fcuno-wa-contact-menu" role="menu">
+                <button type="button" data-action="rename-contact" data-id="${escapeHtml(contact.id)}">Rename</button>
                 <button type="button" data-action="send-selected-contact" data-id="${escapeHtml(contact.id)}" ${hasSelectedEnquiries ? "" : "disabled"}>Send Selected</button>
                 <button type="button" data-action="remove-contact" data-id="${escapeHtml(contact.id)}">Remove</button>
               </div>
@@ -1722,6 +1748,14 @@
       })
     })
 
+    host.querySelectorAll("[data-action='rename-contact']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        cancelContactMenuAutoHide()
+        renameContact(button.dataset.id || "")
+      })
+    })
+
     host.querySelectorAll("[data-action='send-selected-contact']").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation()
@@ -1899,7 +1933,9 @@
       phoneDigits,
       prepareComposerTextForSend,
       refreshUnreadIndicators,
+      renameContact,
       render,
+      sanitizeSavedState,
       selectedEnquiryText,
       selectedSendableEnquiryIds,
       acquireSendLock,

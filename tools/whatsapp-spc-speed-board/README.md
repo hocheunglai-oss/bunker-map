@@ -13,7 +13,9 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Lets the user select sent enquiry rows and send the selected text into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
 - Lets each trader locally remove one enquiry or clear the visible list without affecting other traders.
-- The handle beside each saved chat opens Send Selected/Remove on click, hides shortly after you move away, and works as the drag handle when held.
+- The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and works as the drag handle when held.
+- A new installation starts with an empty enquiry panel by baselining the existing API history; only enquiries created after that first successful load appear.
+- `Rename` changes only the local display label. The original WhatsApp contact or group name remains the routing identity and is shown underneath the alias.
 
 ## Install
 
