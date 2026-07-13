@@ -23,6 +23,9 @@ type EnquiryPayload = {
   notes?: string
 }
 
+const ISO_CURSOR_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
+
 function errorResponse(error: unknown, fallback: string) {
   const message =
     error instanceof Error
@@ -45,7 +48,7 @@ function parseUpdatedAfterCursor(value: string) {
   const separator = value.lastIndexOf("|")
   const timestamp = separator >= 0 ? value.slice(0, separator) : value
   const id = separator >= 0 ? value.slice(separator + 1) : ""
-  if (!timestamp || Number.isNaN(Date.parse(timestamp))) return null
+  if (!ISO_CURSOR_TIMESTAMP_PATTERN.test(timestamp) || Number.isNaN(Date.parse(timestamp))) return null
   return {
     timestamp,
     id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : "",
