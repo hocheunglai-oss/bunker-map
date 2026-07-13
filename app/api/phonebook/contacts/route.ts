@@ -61,6 +61,7 @@ async function fetchAllContacts(supabase: any, company?: string) {
       .select("*")
       .order("favorite", { ascending: false })
       .order("full_name", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1)
 
     if (company) query = query.eq("company", company)
@@ -86,6 +87,7 @@ async function fetchContactsBySearch(supabase: any, query: string) {
     .select("*")
     .order("favorite", { ascending: false })
     .order("full_name", { ascending: true })
+    .order("id", { ascending: true })
     .limit(SEARCH_LIMIT)
 
   for (const token of tokens) {
@@ -127,6 +129,7 @@ async function fetchContactsBySearch(supabase: any, query: string) {
       .in("company", chunk)
       .order("favorite", { ascending: false })
       .order("full_name", { ascending: true })
+      .order("id", { ascending: true })
       .limit(SEARCH_LIMIT)
 
     if (chunkError) throw chunkError

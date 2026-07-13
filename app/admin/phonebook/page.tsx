@@ -276,6 +276,19 @@ const iconButtonStyle: React.CSSProperties = {
   boxShadow: "none",
 }
 
+function CopyIcon({ copied = false }: { copied?: boolean }) {
+  return copied ? (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="14" height="14" fill="none">
+      <path d="m4.5 10.5 3.3 3.3 7.7-8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="14" height="14" fill="none">
+      <rect x="7" y="7" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M13 7V5.5A1.5 1.5 0 0 0 11.5 4h-7A1.5 1.5 0 0 0 3 5.5v7A1.5 1.5 0 0 0 4.5 14H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 const modalOverlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -695,7 +708,7 @@ export default function PhonebookPage() {
     }
   }
 
-  async function loadVisibleContacts(params: { company?: string; query?: string }) {
+  async function loadVisibleContacts(params: { company?: string; query?: string; signal?: AbortSignal }) {
     if (params.company) {
       const cached = companyContactsCacheRef.current.get(params.company)
       if (cached) {
@@ -704,7 +717,7 @@ export default function PhonebookPage() {
           limited: false,
         }
       }
-      const contacts = await loadCompanyContactsFromSupabase(params.company)
+      const contacts = await loadCompanyContactsFromSupabase(params.company, params.signal)
       companyContactsCacheRef.current.set(params.company, contacts)
       return {
         contacts,
@@ -729,6 +742,7 @@ export default function PhonebookPage() {
 
     const response = await fetch(`/api/phonebook/contacts?${search.toString()}`, {
       cache: "no-store",
+      signal: params.signal,
     })
     const payload = (await response.json().catch(() => ({}))) as {
       contacts?: Contact[]
@@ -793,10 +807,10 @@ export default function PhonebookPage() {
     }
   }
 
-  async function loadCompanyContactsFromSupabase(companyName: string) {
+  async function loadCompanyContactsFromSupabase(companyName: string, signal?: AbortSignal) {
     const response = await fetch(
       `/api/phonebook/contacts?company=${encodeURIComponent(companyName)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal },
     )
     const payload = (await response.json().catch(() => ({}))) as {
       contacts?: Contact[]
@@ -952,6 +966,7 @@ export default function PhonebookPage() {
 
     const activeQuery = deferredQuery.trim()
     const requestId = ++contactsRequestIdRef.current
+    const controller = new AbortController()
     let cancelled = false
 
     if (!selectedCompany && !activeQuery) {
@@ -982,13 +997,14 @@ export default function PhonebookPage() {
 
       try {
         const payload = selectedCompany
-          ? await loadVisibleContacts({ company: selectedCompany })
-          : await loadVisibleContacts({ query: activeQuery })
+          ? await loadVisibleContacts({ company: selectedCompany, signal: controller.signal })
+          : await loadVisibleContacts({ query: activeQuery, signal: controller.signal })
 
         if (contactsRequestIdRef.current !== requestId) return
         setContacts(payload.contacts)
         setSearchResultsLimited(payload.limited)
       } catch (error) {
+        if (controller.signal.aborted) return
         if (contactsRequestIdRef.current !== requestId) return
         setContacts([])
         setSearchResultsLimited(false)
@@ -1002,6 +1018,7 @@ export default function PhonebookPage() {
 
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [adminLoading, authenticated, deferredQuery, selectedCompany])
 
@@ -1151,14 +1168,18 @@ export default function PhonebookPage() {
       .slice(0, 10)
   }, [companies, companyNameSuggestions, draft?.company])
 
+  const contactOrderIndex = useMemo(() => {
+    const order = selectedCompany ? contactOrderByCompany[selectedCompanyKey] || [] : []
+    return new Map(order.map((contactId, index) => [contactId, index]))
+  }, [contactOrderByCompany, selectedCompany, selectedCompanyKey])
+
   const filteredContacts = useMemo(() => {
     const next = [...contacts].sort((a, b) => {
       if (selectedCompany) {
-        const order = contactOrderByCompany[selectedCompanyKey] || []
-        const aIndex = order.indexOf(a.id)
-        const bIndex = order.indexOf(b.id)
-        const aOrdered = aIndex !== -1
-        const bOrdered = bIndex !== -1
+        const aIndex = contactOrderIndex.get(a.id)
+        const bIndex = contactOrderIndex.get(b.id)
+        const aOrdered = aIndex !== undefined
+        const bOrdered = bIndex !== undefined
         if (aOrdered && bOrdered && aIndex !== bIndex) return aIndex - bIndex
         if (aOrdered && !bOrdered) return -1
         if (!aOrdered && bOrdered) return 1
@@ -1171,8 +1192,8 @@ export default function PhonebookPage() {
       return (a.full_name || "").localeCompare(b.full_name || "")
     })
     return next
-  }, [contactOrderByCompany, contacts, selectedCompany, selectedCompanyKey])
-  const visibleContacts = useMemo(() => filteredContacts, [filteredContacts])
+  }, [contactOrderIndex, contacts, selectedCompany])
+  const visibleContacts = filteredContacts
 
   async function saveCurrent() {
     if (!draft) return
@@ -2445,17 +2466,8 @@ export default function PhonebookPage() {
                       <button onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "6px 10px", fontSize: "11px" }}>Cancel</button>
                     </div>
                   ) : null}
-                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) auto", gap: "10px", alignItems: "end" }}>
-                  <div>
-                    <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
-                    {editing ? (
-                      <input value={draft?.full_name || ""} onChange={(event) => updateCapsField("full_name", event.target.value)} style={detailInputStyle} />
-                    ) : (
-                      <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15, textTransform: "uppercase" }}>{current?.full_name || "(No Name)"}</div>
-                    )}
-                  </div>
                   {!editing ? (
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
                       <button
                         type="button"
                         onClick={() =>
@@ -2465,11 +2477,16 @@ export default function PhonebookPage() {
                         }
                         style={{
                           ...buttonStyle,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "7px 11px",
                           background: "var(--fc-admin-primary-button-bg)",
                           color: "var(--fc-admin-primary-button-text)",
                           border: "1px solid var(--fc-admin-selected-border)",
                         }}
                       >
+                        <CopyIcon copied={copiedKey === "contact-all"} />
                         {copiedKey === "contact-all" ? "Copied" : "Copy Contact"}
                       </button>
                       <button
@@ -2481,6 +2498,7 @@ export default function PhonebookPage() {
                         disabled={!current}
                         style={{
                           ...buttonStyle,
+                          padding: "7px 11px",
                           background: "var(--fc-admin-warning-bg)",
                           color: "var(--fc-admin-warning-text)",
                           border: "1px solid var(--fc-admin-warning-border)",
@@ -2490,6 +2508,29 @@ export default function PhonebookPage() {
                       </button>
                     </div>
                   ) : null}
+                  <div>
+                    <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Name</div>
+                    {editing ? (
+                      <input value={draft?.full_name || ""} onChange={(event) => updateCapsField("full_name", event.target.value)} style={detailInputStyle} />
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "2px 0" }}>
+                        <span style={{ fontSize: "15px", fontWeight: 800, lineHeight: 1.5, textTransform: "uppercase" }}>{current?.full_name || "(No Name)"}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            copyToClipboard(current?.full_name || "", (status) => {
+                              if (status === "Copied") setCopiedKey("name")
+                            })
+                          }
+                          style={iconButtonStyle}
+                          title="Copy name"
+                          aria-label="Copy name"
+                        >
+                          <CopyIcon copied={copiedKey === "name"} />
+                        </button>
+                        {copiedKey === "name" ? <span style={{ color: "var(--fc-admin-success-text)", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2564,8 +2605,9 @@ export default function PhonebookPage() {
                         }
                         style={iconButtonStyle}
                         title="Copy"
+                        aria-label="Copy company"
                       >
-                        {copiedKey === "company" ? "✓" : "⧉"}
+                        <CopyIcon copied={copiedKey === "company"} />
                       </button>
                       {copiedKey === "company" ? <span style={{ color: "var(--fc-admin-success-text)", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                     </div>
@@ -2649,8 +2691,9 @@ export default function PhonebookPage() {
                                   }
                                   style={iconButtonStyle}
                                   title="Copy"
+                                  aria-label={`Copy ${label}`}
                                 >
-                                  {copiedKey === field ? "✓" : "⧉"}
+                                  <CopyIcon copied={copiedKey === field} />
                                 </button>
                                 {copiedKey === field ? <span style={{ color: "var(--fc-admin-success-text)", fontSize: "12px", fontWeight: 700 }}>Copied</span> : null}
                               </div>

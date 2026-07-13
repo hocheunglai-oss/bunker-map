@@ -28,6 +28,7 @@ async function loadCompanies(supabase: any) {
           .from("phonebook_companies")
           .select(COMPANY_COLUMNS)
           .order("name", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, from + PAGE_SIZE - 1),
       ),
     )
