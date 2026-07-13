@@ -1,7 +1,31 @@
 const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
 const CRUDE_CACHE_TTL_MS = 15000
+const NETWORK_TIMEOUT_MS = 8000
 
 let crudeCache = { at: 0, payload: null }
+const debuggerQueues = new Map()
+
+async function fetchWithTimeout(url, options = {}) {
+  if (typeof AbortController === "undefined") return fetch(url, options)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function enqueueDebuggerAction(tabId, action) {
+  const previous = debuggerQueues.get(tabId) || Promise.resolve()
+  const current = previous.catch(() => {}).then(action)
+  debuggerQueues.set(tabId, current)
+  const cleanup = () => {
+    if (debuggerQueues.get(tabId) === current) debuggerQueues.delete(tabId)
+  }
+  current.then(cleanup, cleanup)
+  return current
+}
 
 function chromeCall(invoke) {
   return new Promise((resolve, reject) => {
@@ -139,7 +163,7 @@ async function fetchCrudeWatch() {
   const now = Date.now()
   if (crudeCache.payload && now - crudeCache.at < CRUDE_CACHE_TTL_MS) return crudeCache.payload
 
-  const response = await fetch(BRENT_CHART_URL, {
+  const response = await fetchWithTimeout(BRENT_CHART_URL, {
     cache: "no-store",
     headers: { Accept: "application/json" },
   })
@@ -176,7 +200,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false
     }
 
-    nativeClick(tabId, x, y)
+    enqueueDebuggerAction(tabId, () => nativeClick(tabId, x, y))
       .then(() => sendResponse({ ok: true }))
       .catch((error) => {
         sendResponse({
@@ -195,7 +219,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false
     }
 
-    nativeEnter(tabId)
+    enqueueDebuggerAction(tabId, () => nativeEnter(tabId))
       .then(() => sendResponse({ ok: true }))
       .catch((error) => {
         sendResponse({
@@ -215,7 +239,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false
     }
 
-    nativeInsertText(tabId, text)
+    enqueueDebuggerAction(tabId, () => nativeInsertText(tabId, text))
       .then(() => sendResponse({ ok: true }))
       .catch((error) => {
         sendResponse({

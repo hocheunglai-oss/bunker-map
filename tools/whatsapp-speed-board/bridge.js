@@ -1,7 +1,9 @@
 (function () {
   const STORAGE_KEY = "fcuno-wa-speed-board-v1"
+  const ENQUIRY_STORAGE_KEY = "fcuno-wa-speed-board-enquiries-v1"
   const REQUEST_TYPE = "fcuno-wa-enquiry-send"
   const RESPONSE_TYPE = "fcuno-wa-enquiry-send-result"
+  let enqueueChain = Promise.resolve()
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -26,25 +28,29 @@
 
   function readState() {
     const storage = getStorage()
-    if (!storage) return Promise.resolve({})
+    if (!storage) return Promise.resolve({ board: {}, queue: {} })
 
     return new Promise((resolve) => {
-      storage.get([STORAGE_KEY], (items) => {
+      storage.get([STORAGE_KEY, ENQUIRY_STORAGE_KEY], (items) => {
         if (chrome.runtime.lastError) {
-          resolve({})
+          resolve({ board: {}, queue: {} })
           return
         }
-        resolve(items && items[STORAGE_KEY] && typeof items[STORAGE_KEY] === "object" ? items[STORAGE_KEY] : {})
+        const board = items && items[STORAGE_KEY] && typeof items[STORAGE_KEY] === "object" ? items[STORAGE_KEY] : {}
+        const queue = items && items[ENQUIRY_STORAGE_KEY] && typeof items[ENQUIRY_STORAGE_KEY] === "object"
+          ? items[ENQUIRY_STORAGE_KEY]
+          : {}
+        resolve({ board, queue })
       })
     })
   }
 
-  function writeState(state) {
+  function writeQueue(queue) {
     const storage = getStorage()
     if (!storage) return Promise.resolve(false)
 
     return new Promise((resolve) => {
-      storage.set({ [STORAGE_KEY]: state }, () => {
+      storage.set({ [ENQUIRY_STORAGE_KEY]: queue }, () => {
         resolve(!chrome.runtime.lastError)
       })
     })
@@ -63,21 +69,16 @@
     if (!message) throw new Error("Shortened enquiry is empty.")
     const buyerName = cleanText(buyer)
 
-    const current = await readState()
+    const { board, queue } = await readState()
     const id = uid()
     const now = new Date().toISOString()
-    const enquiries = Array.isArray(current.enquiries) ? current.enquiries : []
-    const hiddenEnquiryIds =
-      current.hiddenEnquiryIds && typeof current.hiddenEnquiryIds === "object"
-        ? current.hiddenEnquiryIds
-        : {}
-    const selectedEnquiries =
-      current.selectedEnquiries && typeof current.selectedEnquiries === "object"
-        ? current.selectedEnquiries
-        : {}
+    const enquiries = Array.isArray(queue.enquiries)
+      ? queue.enquiries
+      : Array.isArray(board.enquiries)
+        ? board.enquiries
+        : []
 
-    const nextState = {
-      ...current,
+    const nextQueue = {
       enquiries: [
         {
           id,
@@ -90,18 +91,9 @@
         },
         ...enquiries,
       ].slice(0, 120),
-      hiddenEnquiryIds: {
-        ...hiddenEnquiryIds,
-        [id]: false,
-      },
-      selectedEnquiries: {
-        ...selectedEnquiries,
-        [id]: true,
-      },
-      lastNotifiedEnquiryAt: now,
     }
 
-    const ok = await writeState(nextState)
+    const ok = await writeQueue(nextQueue)
     if (!ok) throw new Error("Could not write to FCUNO WhatsApp Speed Board storage.")
     notifyNewEnquiry()
     return { id, createdAt: now }
@@ -112,7 +104,12 @@
     const payload = event.data && typeof event.data === "object" ? event.data : null
     if (!payload || payload.type !== REQUEST_TYPE) return
 
-    enqueueEnquiry(payload.text, payload.buyer)
+    const enqueueTask = enqueueChain
+      .catch(() => {})
+      .then(() => enqueueEnquiry(payload.text, payload.buyer))
+    enqueueChain = enqueueTask.catch(() => {})
+
+    enqueueTask
       .then((result) => {
         window.postMessage(
           {

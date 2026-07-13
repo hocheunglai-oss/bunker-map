@@ -20,6 +20,8 @@ Local Chrome extension for the trading-hour WhatsApp workflow.
    `/Users/hocheunglai/Desktop/bunker-map/tools/whatsapp-speed-board`
 6. Open `https://fcuno.com/admin/enquiryworksheet` and `https://web.whatsapp.com` in the same Chrome profile.
 
+Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC extensions are enabled accidentally, the first board loaded keeps control and the other does not mount over it.
+
 ## Trading Use
 
 - Open a WhatsApp chat, then click `Add as Supplier` or `Add as Buyer`.
@@ -30,8 +32,9 @@ Local Chrome extension for the trading-hour WhatsApp workflow.
 - In Enquiry Worksheet, edit the shortened enquiry if needed, then press the green WhatsApp send button.
 - WhatsApp Web receives the enquiry in the right-hand queue. Tick one or more enquiries and click `Send`, or drag them onto a saved contact.
 - The template above the queue can be enabled, disabled, or edited locally before sending.
-- Everything is stored in Chrome extension storage under `fcuno-wa-speed-board-v1`, so the board remains after WhatsApp Web logout/login.
+- Board settings are stored under `fcuno-wa-speed-board-v1`, while the worksheet queue is isolated under `fcuno-wa-speed-board-enquiries-v1`. This prevents a newly queued enquiry from overwriting contact or template changes made at the same time.
 
 ## Notes
 
 This extension does not use SPC enquiries or SPC outcome buttons. It uses Chrome's debugger permission only to make WhatsApp Web text insertion and send clicks more reliable when normal DOM events are ignored.
+Crude and unread updates patch only their own indicators, so background refreshes do not interrupt template editing or dragging.

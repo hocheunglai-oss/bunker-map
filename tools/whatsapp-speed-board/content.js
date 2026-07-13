@@ -1,6 +1,9 @@
 (function () {
   const STORAGE_KEY = "fcuno-wa-speed-board-v1"
+  const ENQUIRY_STORAGE_KEY = "fcuno-wa-speed-board-enquiries-v1"
   const BOARD_ID = "fcuno-wa-board"
+  const BOARD_OWNER_ATTRIBUTE = "data-fcuno-whatsapp-board-owner"
+  const BOARD_OWNER = "fcuno"
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
@@ -13,6 +16,13 @@
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("fc-uno-sidebar-logo.png")
       : "https://fcuno.com/fc-uno-sidebar-logo.png"
+
+  const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
+  if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
+    console.warn("FCUNO WhatsApp Speed Board did not start because another FCUNO board is already active.")
+    return
+  }
+  document.documentElement?.setAttribute(BOARD_OWNER_ATTRIBUTE, BOARD_OWNER)
 
   const state = {
     collapsed: false,
@@ -45,6 +55,7 @@
   let recentSend = { key: "", at: 0 }
   let memorySendLock = { key: "", at: 0 }
   let extensionContextStopped = false
+  let renderPending = false
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -225,6 +236,44 @@
     return chrome.storage.local
   }
 
+  function readStorage(keys) {
+    const storage = getStorage()
+    if (!storage) return Promise.resolve({})
+    return new Promise((resolve) => {
+      try {
+        storage.get(keys, (items) => {
+          const runtimeError = runtimeLastErrorMessage()
+          if (runtimeError) {
+            if (isExtensionContextError(runtimeError)) handleContentError(new Error(runtimeError))
+            resolve({})
+            return
+          }
+          resolve(items && typeof items === "object" ? items : {})
+        })
+      } catch (error) {
+        handleContentError(error)
+        resolve({})
+      }
+    })
+  }
+
+  function writeStorage(values) {
+    const storage = getStorage()
+    if (!storage || extensionContextStopped) return false
+    try {
+      storage.set(values, () => {
+        const runtimeError = runtimeLastErrorMessage()
+        if (runtimeError && isExtensionContextError(runtimeError)) {
+          handleContentError(new Error(runtimeError))
+        }
+      })
+      return true
+    } catch (error) {
+      handleContentError(error)
+      return false
+    }
+  }
+
   function normalizeOrders() {
     LISTS.forEach((list) => {
       contactsFor(list).forEach((contact, index) => {
@@ -253,7 +302,6 @@
     return {
       collapsed: state.collapsed,
       contacts: state.contacts,
-      enquiries: state.enquiries,
       selectedEnquiries: state.selectedEnquiries,
       hiddenEnquiryIds: state.hiddenEnquiryIds,
       templateEnabled: state.templateEnabled,
@@ -262,6 +310,10 @@
       lastNotifiedEnquiryAt: state.lastNotifiedEnquiryAt,
       pendingSend: state.pendingSend,
     }
+  }
+
+  function enquiryQueuePayload() {
+    return { enquiries: state.enquiries }
   }
 
   function sanitizeEnquiry(value) {
@@ -317,8 +369,8 @@
         source.selectedEnquiries && typeof source.selectedEnquiries === "object"
           ? Object.fromEntries(
               Object.entries(source.selectedEnquiries)
-                .filter((entry) => entry[1])
-                .map((entry) => [String(entry[0]), true]),
+                .filter((entry) => typeof entry[1] === "boolean")
+                .map((entry) => [String(entry[0]), entry[1]]),
             )
           : {},
       hiddenEnquiryIds:
@@ -353,17 +405,16 @@
   }
 
   async function loadState() {
-    const storage = getStorage()
-    let parsed = {}
-    if (storage) {
-      parsed = await new Promise((resolve) => {
-        storage.get([STORAGE_KEY], (items) => resolve(items && items[STORAGE_KEY] ? items[STORAGE_KEY] : {}))
-      })
-    }
+    const items = await readStorage([STORAGE_KEY, ENQUIRY_STORAGE_KEY])
+    const parsed = items[STORAGE_KEY] || {}
     const saved = sanitizeSavedState(parsed)
+    const queueSource = items[ENQUIRY_STORAGE_KEY]
+    const queued = queueSource && typeof queueSource === "object" && Array.isArray(queueSource.enquiries)
+      ? queueSource.enquiries
+      : saved.enquiries
     state.collapsed = saved.collapsed
     state.contacts = saved.contacts
-    state.enquiries = dedupeEnquiries(saved.enquiries)
+    state.enquiries = dedupeEnquiries(queued)
     state.selectedEnquiries = saved.selectedEnquiries
     state.hiddenEnquiryIds = saved.hiddenEnquiryIds
     state.templateEnabled = saved.templateEnabled
@@ -371,21 +422,28 @@
     state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt
     state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt
     state.pendingSend = saved.pendingSend
+    state.enquiries.forEach((enquiry) => {
+      if (typeof state.selectedEnquiries[enquiry.id] !== "boolean") {
+        state.selectedEnquiries[enquiry.id] = true
+      }
+    })
+    pruneEnquiryUiState()
     lastEnquiryFingerprint = enquiriesFingerprint(state.enquiries)
     normalizeOrders()
+    if (!queueSource && state.enquiries.length) writeStorage({ [ENQUIRY_STORAGE_KEY]: enquiryQueuePayload() })
   }
 
   function saveState() {
     normalizeOrders()
-    const storage = getStorage()
-    if (storage) storage.set({ [STORAGE_KEY]: statePayload() })
+    pruneEnquiryUiState()
+    writeStorage({ [STORAGE_KEY]: statePayload() })
     document.body.classList.toggle("fcuno-wa-collapsed", state.collapsed)
     document.body.classList.toggle("fcuno-wa-active", !state.collapsed)
   }
 
   function saveTemplateState() {
-    const storage = getStorage()
-    if (storage) storage.set({ [STORAGE_KEY]: statePayload() })
+    pruneEnquiryUiState()
+    writeStorage({ [STORAGE_KEY]: statePayload() })
   }
 
   function scheduleTemplateSave() {
@@ -734,7 +792,7 @@
     })
     if (JSON.stringify(next) === JSON.stringify(state.unreadById)) return
     state.unreadById = next
-    render()
+    updateUnreadBadges()
   }
 
   function enquiriesFingerprint(enquiries) {
@@ -748,32 +806,37 @@
       .join("\n")
   }
 
-  function applySavedEnquiryState(saved) {
-    const nextEnquiries = dedupeEnquiries(saved.enquiries || [])
+  function applySavedEnquiryState(queue) {
+    const nextEnquiries = dedupeEnquiries(queue?.enquiries || [])
     const nextFingerprint = enquiriesFingerprint(nextEnquiries)
     const changed = nextFingerprint !== lastEnquiryFingerprint
+    const previousIds = new Set(state.enquiries.map((enquiry) => enquiry.id))
 
     state.enquiries = nextEnquiries
-    state.selectedEnquiries = saved.selectedEnquiries || {}
-    state.hiddenEnquiryIds = saved.hiddenEnquiryIds || {}
-    state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt || state.lastSeenEnquiryAt
-    state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt || state.lastNotifiedEnquiryAt
-    lastEnquiryFingerprint = nextFingerprint
-
-    Object.keys(state.selectedEnquiries).forEach((id) => {
-      const enquiry = state.enquiries.find((item) => item.id === id)
-      if (!enquiry || state.hiddenEnquiryIds[id]) delete state.selectedEnquiries[id]
+    state.enquiries.forEach((enquiry) => {
+      if (!previousIds.has(enquiry.id) && typeof state.selectedEnquiries[enquiry.id] !== "boolean") {
+        state.selectedEnquiries[enquiry.id] = true
+      }
     })
-
-    if (!state.templateEditing && changed) render()
+    pruneEnquiryUiState()
+    lastEnquiryFingerprint = nextFingerprint
+    if (changed) {
+      saveState()
+      renderWhenIdle()
+    }
   }
 
   function watchStorageEnquiries() {
     const storage = getStorage()
     if (!storage || !chrome.storage?.onChanged) return
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes[STORAGE_KEY]) return
-      applySavedEnquiryState(sanitizeSavedState(changes[STORAGE_KEY].newValue))
+      if (areaName !== "local") return
+      if (changes[ENQUIRY_STORAGE_KEY]) {
+        applySavedEnquiryState(changes[ENQUIRY_STORAGE_KEY].newValue)
+        return
+      }
+      const legacy = changes[STORAGE_KEY]?.newValue
+      if (legacy && Array.isArray(legacy.enquiries)) applySavedEnquiryState(legacy)
     })
   }
 
@@ -796,7 +859,7 @@
       state.crudeError = ""
       if (fingerprint !== lastCrudeFingerprint) {
         lastCrudeFingerprint = fingerprint
-        render()
+        updateCrudeWatch()
       }
     })
 
@@ -808,6 +871,16 @@
 
   function visibleEnquiries() {
     return state.enquiries.filter((enquiry) => !state.hiddenEnquiryIds[enquiry.id])
+  }
+
+  function pruneEnquiryUiState() {
+    const enquiryIds = new Set(state.enquiries.map((enquiry) => enquiry.id))
+    Object.keys(state.selectedEnquiries).forEach((id) => {
+      if (!enquiryIds.has(id) || state.hiddenEnquiryIds[id]) delete state.selectedEnquiries[id]
+    })
+    Object.keys(state.hiddenEnquiryIds).forEach((id) => {
+      if (!enquiryIds.has(id)) delete state.hiddenEnquiryIds[id]
+    })
   }
 
   function dedupeEnquiries(enquiries) {
@@ -1200,7 +1273,6 @@
       clearPendingSend()
       return
     }
-    saveState()
     window.setTimeout(trySendPending, 250)
   }
 
@@ -1380,7 +1452,56 @@
     `
   }
 
+  function renderedElement(markup) {
+    const template = document.createElement("template")
+    template.innerHTML = String(markup || "").trim()
+    return template.content.firstElementChild
+  }
+
+  function updateCrudeWatch() {
+    const current = document.querySelector(`#${BOARD_ID} .fcuno-wa-crude`)
+    const next = renderedElement(renderCrudeWatch())
+    if (!current || !next) {
+      renderWhenIdle()
+      return
+    }
+    current.replaceWith(next)
+  }
+
+  function updateUnreadBadges() {
+    const host = document.getElementById(BOARD_ID)
+    if (!host) {
+      renderWhenIdle()
+      return
+    }
+    host.querySelectorAll(".fcuno-wa-row[data-id]").forEach((row) => {
+      const actions = row.querySelector(".fcuno-wa-row-actions")
+      if (!actions) return
+      const unread = state.unreadById[row.dataset.id || ""] || ""
+      let badge = actions.querySelector(".fcuno-wa-unread")
+      if (!unread) {
+        badge?.remove()
+        return
+      }
+      if (!badge) {
+        badge = document.createElement("span")
+        badge.className = "fcuno-wa-unread"
+        actions.prepend(badge)
+      }
+      badge.textContent = unread
+    })
+  }
+
+  function renderWhenIdle() {
+    if (state.templateEditing || state.draggingType) {
+      renderPending = true
+      return
+    }
+    render()
+  }
+
   function render() {
+    renderPending = false
     let host = document.getElementById(BOARD_ID)
     if (!host) {
       host = document.createElement("aside")
@@ -1424,11 +1545,13 @@
   }
 
   function clearDragState(root = document) {
+    const shouldRender = renderPending
     state.dragging = null
     state.draggingType = ""
     state.draggingEnquiryIds = []
     clearDropMarkers(root)
     clearEnquiryDragMarkers(root)
+    if (shouldRender) window.setTimeout(renderWhenIdle, 0)
   }
 
   function dragHasType(event, type) {

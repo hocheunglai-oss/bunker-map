@@ -86,31 +86,33 @@ const html = `<!doctype html>
           getURL: (asset) => asset,
           sendMessage: (message, callback) => {
             if (message && message.type === "load-spc-enquiries") {
+              const enquiries = [
+                {
+                  id: "enq-1",
+                  formattedText: ${JSON.stringify(enquiry)},
+                  createdAt: "2026-07-01T08:00:00Z",
+                  status: "sent",
+                  createdByDisplayName: "OL"
+                },
+                {
+                  id: "enq-2",
+                  formattedText: ${JSON.stringify(enquiry2)},
+                  createdAt: "2026-07-01T08:05:00Z",
+                  status: "sent",
+                  createdByDisplayName: "OL"
+                },
+                {
+                  id: "enq-3",
+                  formattedText: ${JSON.stringify(enquiry3)},
+                  createdAt: "2026-07-01T08:10:00Z",
+                  status: "sent",
+                  createdByDisplayName: "OL"
+                }
+              ];
+              if (window.extraEnquiry) enquiries.push(window.extraEnquiry);
               callback({
                 ok: true,
-                enquiries: [
-                  {
-                    id: "enq-1",
-                    formattedText: ${JSON.stringify(enquiry)},
-                    createdAt: "2026-07-01T08:00:00Z",
-                    status: "sent",
-                    createdByDisplayName: "OL"
-                  },
-                  {
-                    id: "enq-2",
-                    formattedText: ${JSON.stringify(enquiry2)},
-                    createdAt: "2026-07-01T08:05:00Z",
-                    status: "sent",
-                    createdByDisplayName: "OL"
-                  },
-                  {
-                    id: "enq-3",
-                    formattedText: ${JSON.stringify(enquiry3)},
-                    createdAt: "2026-07-01T08:10:00Z",
-                    status: "sent",
-                    createdByDisplayName: "OL"
-                  }
-                ]
+                enquiries
               });
               return;
             }
@@ -195,6 +197,44 @@ async function main() {
       assert.equal(crudeResult.change, "-0.28 -0.38%")
       assert.match(crudeResult.path, /^M/)
       assert.match(crudeResult.path, /L/)
+
+      const stableRefresh = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const boardMain = document.querySelector(".fcuno-wa-spc-main")
+        api.loadEnquiries()
+        api.loadCrudeWatch()
+        return boardMain === document.querySelector(".fcuno-wa-spc-main")
+      })
+      assert.equal(stableRefresh, true, "unchanged background refresh must not replace the board")
+
+      await page.click("#fcuno-wa-spc-board [data-action='edit-template']", { force: true })
+      const editingRefresh = await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const textarea = document.querySelector("[data-action='template-text']")
+        textarea.focus()
+        textarea.value = "Good day, please quote for the following enquiries."
+        textarea.setSelectionRange(6, 6)
+        window.extraEnquiry = {
+          id: "enq-4",
+          formattedText: "new background enquiry",
+          createdAt: "2026-07-01T08:15:00Z",
+          status: "sent",
+          createdByDisplayName: "OL"
+        }
+        api.loadEnquiries()
+        return {
+          sameTextarea: textarea === document.querySelector("[data-action='template-text']"),
+          value: textarea.value,
+          selectionStart: textarea.selectionStart,
+          stateLoaded: api.state.enquiries.some((item) => item.id === "enq-4"),
+        }
+      })
+      assert.equal(editingRefresh.sameTextarea, true)
+      assert.equal(editingRefresh.value, "Good day, please quote for the following enquiries.")
+      assert.equal(editingRefresh.selectionStart, 6)
+      assert.equal(editingRefresh.stateLoaded, true)
+      await page.click("#fcuno-wa-spc-board [data-action='edit-template']", { force: true })
+      await page.waitForSelector("#fcuno-wa-spc-board [data-id='enq-4']")
 
       await page.check("#fcuno-wa-spc-board [data-action='toggle-enquiry'][data-id='enq-1']", { force: true })
       await page.click("#fcuno-wa-spc-board [data-action='send-selected']", { force: true })

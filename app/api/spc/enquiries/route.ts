@@ -67,7 +67,7 @@ export async function GET(request: Request) {
     return timedJson(
       "/api/spc/enquiries",
       startedAt,
-      { enquiries, cursor, ...(bootstrap ? { supplierTraders } : {}) },
+      { enquiries, cursor, sessionKey: session.username, ...(bootstrap ? { supplierTraders } : {}) },
       {
         headers: {
           "Cache-Control": "private, no-store",

@@ -87,19 +87,59 @@ enquiryResponses.push(
       { id: "initial", createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-05T00:00:00.123456Z", status: "sent" },
     ],
     cursor: "2026-07-05T00:00:00.123456Z",
+    sessionKey: "trader-a",
   },
   {
     enquiries: [
       { id: "initial", createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-05T00:01:00.654321Z", status: "quoted" },
     ],
     cursor: "2026-07-05T00:01:00.654321Z",
+    sessionKey: "trader-a",
+  },
+  {
+    enquiries: [
+      { id: "partial-b", createdAt: "2026-07-05T00:02:00Z", updatedAt: "2026-07-05T00:02:00Z", status: "sent" },
+    ],
+    cursor: "2026-07-05T00:02:00Z",
+    sessionKey: "trader-b",
+  },
+  {
+    enquiries: [
+      { id: "full-b", createdAt: "2026-07-05T00:03:00Z", updatedAt: "2026-07-05T00:03:00Z", status: "sent" },
+    ],
+    cursor: "2026-07-05T00:03:00Z",
+    sessionKey: "trader-b",
   },
 )
 const initialEnquiries = await context.fetchSpcEnquiries()
 const refreshedEnquiries = await context.fetchSpcEnquiries()
+const nextTraderEnquiries = await context.fetchSpcEnquiries()
 assert.equal(initialEnquiries[0].status, "sent")
 assert.equal(refreshedEnquiries[0].status, "quoted")
-assert.equal(fetchedUrls.length, 2)
+assert.deepEqual(Array.from(nextTraderEnquiries, (item) => item.id), ["full-b"])
+assert.equal(fetchedUrls.length, 4)
 assert.match(fetchedUrls[1], /updatedAfter=2026-07-05T00%3A00%3A00\.123456Z/)
+assert.match(fetchedUrls[2], /updatedAfter=2026-07-05T00%3A01%3A00\.654321Z/)
+assert.equal(fetchedUrls[3], "https://spc.fcuno.com/api/spc/enquiries?limit=160")
+
+const debuggerOrder = []
+let releaseDebugger
+const debuggerGate = new Promise((resolve) => {
+  releaseDebugger = resolve
+})
+const firstDebuggerAction = context.enqueueDebuggerAction(7, async () => {
+  debuggerOrder.push("first-start")
+  await debuggerGate
+  debuggerOrder.push("first-end")
+})
+const secondDebuggerAction = context.enqueueDebuggerAction(7, async () => {
+  debuggerOrder.push("second-start")
+  debuggerOrder.push("second-end")
+})
+await new Promise((resolve) => setTimeout(resolve, 0))
+assert.deepEqual(debuggerOrder, ["first-start"])
+releaseDebugger()
+await Promise.all([firstDebuggerAction, secondDebuggerAction])
+assert.deepEqual(debuggerOrder, ["first-start", "first-end", "second-start", "second-end"])
 
 console.log("SPC WhatsApp background tests passed")

@@ -1,6 +1,8 @@
 (function () {
   const STORAGE_KEY = "fcuno-wa-spc-board-v1"
   const BOARD_ID = "fcuno-wa-spc-board"
+  const BOARD_OWNER_ATTRIBUTE = "data-fcuno-whatsapp-board-owner"
+  const BOARD_OWNER = "spc"
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
@@ -13,6 +15,13 @@
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
       : "https://spc.fcuno.com/spc-sidebar-logo.png"
+
+  const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
+  if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
+    console.warn("FCUNO SPC WhatsApp Board did not start because another FCUNO board is already active.")
+    return
+  }
+  document.documentElement?.setAttribute(BOARD_OWNER_ATTRIBUTE, BOARD_OWNER)
 
   const state = {
     collapsed: false,
@@ -47,6 +56,7 @@
   let recentSend = { key: "", at: 0 }
   let memorySendLock = { key: "", at: 0 }
   let extensionContextStopped = false
+  let renderPending = false
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -240,6 +250,44 @@
     return chrome.storage.local
   }
 
+  function readStorage(keys) {
+    const storage = getStorage()
+    if (!storage) return Promise.resolve({})
+    return new Promise((resolve) => {
+      try {
+        storage.get(keys, (items) => {
+          const runtimeError = runtimeLastErrorMessage()
+          if (runtimeError) {
+            if (isExtensionContextError(runtimeError)) handleContentError(new Error(runtimeError))
+            resolve({})
+            return
+          }
+          resolve(items && typeof items === "object" ? items : {})
+        })
+      } catch (error) {
+        handleContentError(error)
+        resolve({})
+      }
+    })
+  }
+
+  function writeStorage(values) {
+    const storage = getStorage()
+    if (!storage || extensionContextStopped) return false
+    try {
+      storage.set(values, () => {
+        const runtimeError = runtimeLastErrorMessage()
+        if (runtimeError && isExtensionContextError(runtimeError)) {
+          handleContentError(new Error(runtimeError))
+        }
+      })
+      return true
+    } catch (error) {
+      handleContentError(error)
+      return false
+    }
+  }
+
   function normalizeOrders() {
     LISTS.forEach((list) => {
       contactsFor(list).forEach((contact, index) => {
@@ -332,13 +380,8 @@
   }
 
   async function loadState() {
-    const storage = getStorage()
-    let parsed = {}
-    if (storage) {
-      parsed = await new Promise((resolve) => {
-        storage.get([STORAGE_KEY], (items) => resolve(items && items[STORAGE_KEY] ? items[STORAGE_KEY] : {}))
-      })
-    }
+    const items = await readStorage([STORAGE_KEY])
+    const parsed = items[STORAGE_KEY] || {}
     const saved = sanitizeSavedState(parsed)
     state.collapsed = saved.collapsed
     state.contacts = saved.contacts
@@ -353,15 +396,15 @@
 
   function saveState() {
     normalizeOrders()
-    const storage = getStorage()
-    if (storage) storage.set({ [STORAGE_KEY]: statePayload() })
+    pruneEnquiryUiState()
+    writeStorage({ [STORAGE_KEY]: statePayload() })
     document.body.classList.toggle("fcuno-wa-spc-collapsed", state.collapsed)
     document.body.classList.toggle("fcuno-wa-spc-active", !state.collapsed)
   }
 
   function saveTemplateState() {
-    const storage = getStorage()
-    if (storage) storage.set({ [STORAGE_KEY]: statePayload() })
+    pruneEnquiryUiState()
+    writeStorage({ [STORAGE_KEY]: statePayload() })
   }
 
   function scheduleTemplateSave() {
@@ -710,7 +753,7 @@
     })
     if (JSON.stringify(next) === JSON.stringify(state.unreadById)) return
     state.unreadById = next
-    render()
+    updateUnreadBadges()
   }
 
   function enquiriesFingerprint(enquiries) {
@@ -728,13 +771,13 @@
   function loadEnquiries() {
     if (state.loadingEnquiries) return
     state.loadingEnquiries = true
+    const previousError = state.enquiryError
     state.enquiryError = ""
-    if (state.enquiries.length === 0) render()
     const sent = sendRuntimeMessage({ type: "load-spc-enquiries" }, (response, runtimeError) => {
       state.loadingEnquiries = false
       if (runtimeError || !response || !response.ok) {
         state.enquiryError = response?.message || runtimeError || "Open spc.fcuno.com and log in."
-        render()
+        if (state.enquiryError !== previousError) renderWhenIdle()
         return
       }
       const nextEnquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
@@ -742,19 +785,14 @@
       const changed = nextFingerprint !== lastEnquiryFingerprint
       state.enquiries = nextEnquiries
       lastEnquiryFingerprint = nextFingerprint
-      Object.keys(state.selectedEnquiries).forEach((id) => {
-        const enquiry = state.enquiries.find((item) => item.id === id)
-        if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
-          delete state.selectedEnquiries[id]
-        }
-      })
+      pruneEnquiryUiState()
       notifyNewEnquiries()
-      if (!state.templateEditing || changed) render()
+      if (changed || previousError) renderWhenIdle()
     })
     if (!sent) {
       state.loadingEnquiries = false
       state.enquiryError = runtimeUnavailableMessage()
-      render()
+      if (state.enquiryError !== previousError) renderWhenIdle()
     }
   }
 
@@ -777,7 +815,7 @@
       state.crudeError = ""
       if (fingerprint !== lastCrudeFingerprint) {
         lastCrudeFingerprint = fingerprint
-        render()
+        updateCrudeWatch()
       }
     })
 
@@ -789,6 +827,19 @@
 
   function visibleEnquiries() {
     return state.enquiries.filter((enquiry) => !state.hiddenEnquiryIds[enquiry.id])
+  }
+
+  function pruneEnquiryUiState() {
+    const enquiryById = new Map(state.enquiries.map((enquiry) => [enquiry.id, enquiry]))
+    Object.keys(state.selectedEnquiries).forEach((id) => {
+      const enquiry = enquiryById.get(id)
+      if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
+        delete state.selectedEnquiries[id]
+      }
+    })
+    Object.keys(state.hiddenEnquiryIds).forEach((id) => {
+      if (!enquiryById.has(id)) delete state.hiddenEnquiryIds[id]
+    })
   }
 
   function dedupeEnquiries(enquiries) {
@@ -1196,7 +1247,6 @@
       clearPendingSend()
       return
     }
-    saveState()
     window.setTimeout(trySendPending, 250)
   }
 
@@ -1376,7 +1426,56 @@
     `
   }
 
+  function renderedElement(markup) {
+    const template = document.createElement("template")
+    template.innerHTML = String(markup || "").trim()
+    return template.content.firstElementChild
+  }
+
+  function updateCrudeWatch() {
+    const current = document.querySelector(`#${BOARD_ID} .fcuno-wa-spc-crude`)
+    const next = renderedElement(renderCrudeWatch())
+    if (!current || !next) {
+      renderWhenIdle()
+      return
+    }
+    current.replaceWith(next)
+  }
+
+  function updateUnreadBadges() {
+    const host = document.getElementById(BOARD_ID)
+    if (!host) {
+      renderWhenIdle()
+      return
+    }
+    host.querySelectorAll(".fcuno-wa-spc-row[data-id]").forEach((row) => {
+      const actions = row.querySelector(".fcuno-wa-spc-row-actions")
+      if (!actions) return
+      const unread = state.unreadById[row.dataset.id || ""] || ""
+      let badge = actions.querySelector(".fcuno-wa-spc-unread")
+      if (!unread) {
+        badge?.remove()
+        return
+      }
+      if (!badge) {
+        badge = document.createElement("span")
+        badge.className = "fcuno-wa-spc-unread"
+        actions.prepend(badge)
+      }
+      badge.textContent = unread
+    })
+  }
+
+  function renderWhenIdle() {
+    if (state.templateEditing || state.draggingType) {
+      renderPending = true
+      return
+    }
+    render()
+  }
+
   function render() {
+    renderPending = false
     let host = document.getElementById(BOARD_ID)
     if (!host) {
       host = document.createElement("aside")
@@ -1420,11 +1519,13 @@
   }
 
   function clearDragState(root = document) {
+    const shouldRender = renderPending
     state.dragging = null
     state.draggingType = ""
     state.draggingEnquiryIds = []
     clearDropMarkers(root)
     clearEnquiryDragMarkers(root)
+    if (shouldRender) window.setTimeout(renderWhenIdle, 0)
   }
 
   function dragHasType(event, type) {

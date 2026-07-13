@@ -53,4 +53,24 @@ assert.equal(crude.changePercent.toFixed(2), "0.64")
 assert.deepEqual(crude.points, [73.28, 73.29, 73.19, 70.84, 70.75])
 assert.equal(crude.points.includes(0), false)
 
+const debuggerOrder = []
+let releaseDebugger
+const debuggerGate = new Promise((resolve) => {
+  releaseDebugger = resolve
+})
+const firstDebuggerAction = context.enqueueDebuggerAction(7, async () => {
+  debuggerOrder.push("first-start")
+  await debuggerGate
+  debuggerOrder.push("first-end")
+})
+const secondDebuggerAction = context.enqueueDebuggerAction(7, async () => {
+  debuggerOrder.push("second-start")
+  debuggerOrder.push("second-end")
+})
+await new Promise((resolve) => setTimeout(resolve, 0))
+assert.deepEqual(debuggerOrder, ["first-start"])
+releaseDebugger()
+await Promise.all([firstDebuggerAction, secondDebuggerAction])
+assert.deepEqual(debuggerOrder, ["first-start", "first-end", "second-start", "second-end"])
+
 console.log("FCUNO WhatsApp background tests passed")
