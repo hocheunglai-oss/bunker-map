@@ -667,7 +667,7 @@ export default function SpcReadmePage() {
               </div>
               <div className="spc-readme-voice-actions">
                 <button type="button" className="is-primary" onClick={() => void generateNarration()} disabled={saving || Boolean(uploading) || generatingNarration || !selected.narration.trim()}>{generatingNarration ? "GENERATING VOICE..." : "GENERATE AI VOICE"}</button>
-                <span>OPENAI CEDAR / AI-GENERATED VOICE</span>
+                <span>OPENAI MARIN / AI-GENERATED VOICE</span>
               </div>
               {uploading ? <p className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</p> : null}
               <div className="spc-readme-order-actions">
