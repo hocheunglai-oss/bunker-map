@@ -544,7 +544,7 @@ export async function generateSpcPresentationNarration(
     },
     body: JSON.stringify({
       model: OPENAI_AUDIO_MODEL,
-      modalities: ["audio"],
+      modalities: ["text", "audio"],
       audio: { voice: OPENAI_AUDIO_VOICE, format: "mp3" },
       messages: [
         {
