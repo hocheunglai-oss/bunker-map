@@ -257,6 +257,10 @@ export function getHomepageMarketData() {
 }
 
 export function getPublicReportData<Key extends ReportSnapshotKey>(key: Key) {
+  if (key === "taiwan" || key === "hongkong") {
+    return loadReportData(key) as Promise<PublicReportPayloadByKey[Key]>
+  }
+
   return getCachedReportData(key) as Promise<PublicReportPayloadByKey[Key]>
 }
 

@@ -202,6 +202,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
       if (document.visibilityState === "visible") void refreshReport()
     }
 
+    void refreshReport()
     window.addEventListener("focus", refreshVisibleReport)
     document.addEventListener("visibilitychange", refreshVisibleReport)
 

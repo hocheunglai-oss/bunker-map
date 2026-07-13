@@ -10,6 +10,7 @@ import { loadReportSnapshot, loadReportSnapshots, saveReportSnapshot, type Repor
 import { buildChinaReportSections } from "@/lib/chinaReport"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
+import { savePriceHistoryForMarketDate } from "@/lib/priceHistoryRecords"
 import { useIsMobile } from "@/lib/useIsMobile"
 import {
   buildFallbackKey,
@@ -204,10 +205,6 @@ export default function AdminPage() {
     const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
 
     const now = new Date()
-    const dayStart = new Date(now)
-    dayStart.setHours(0, 0, 0, 0)
-    const dayEnd = new Date(now)
-    dayEnd.setHours(23, 59, 59, 999)
 
     const updatePayload = {
       name: port.name,
@@ -233,31 +230,20 @@ export default function AdminPage() {
       return
     }
 
-    const historyPayload = {
-      port_id: port.id,
-      hsfo: port.hsfo ? Number(port.hsfo) : null,
-      vlsfo: port.vlsfo ? Number(port.vlsfo) : null,
-      mgo: port.mgo ? Number(port.mgo) : null,
-      recorded_at: now.toISOString(),
-    }
-
-    const { data: existingHistory } = await supabase
-      .from("price_history")
-      .select("id")
-      .eq("port_id", port.id)
-      .gte("recorded_at", dayStart.toISOString())
-      .lte("recorded_at", dayEnd.toISOString())
-      .order("recorded_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(1)
-
-    if (existingHistory && existingHistory.length > 0) {
-      await supabase
-        .from("price_history")
-        .update(historyPayload)
-        .eq("id", existingHistory[0].id)
-    } else {
-      await supabase.from("price_history").insert(historyPayload)
+    try {
+      await savePriceHistoryForMarketDate(supabase, {
+        portId: port.id,
+        recordedAt: now.toISOString(),
+        values: {
+          hsfo: port.hsfo ? Number(port.hsfo) : null,
+          vlsfo: port.vlsfo ? Number(port.vlsfo) : null,
+          mgo: port.mgo ? Number(port.mgo) : null,
+        },
+      })
+    } catch (error) {
+      console.error(error)
+      setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
+      return
     }
 
     const portsByName = new Map(

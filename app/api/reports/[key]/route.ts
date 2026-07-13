@@ -18,7 +18,7 @@ export async function GET(
 
   try {
     return NextResponse.json(await getPublicReportData(key), {
-      headers: key === "taiwan"
+      headers: key === "taiwan" || key === "hongkong"
         ? {
             "Cache-Control": "no-store, max-age=0",
           }

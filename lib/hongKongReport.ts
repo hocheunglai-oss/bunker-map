@@ -1,3 +1,8 @@
+import {
+  distinctPriceHistoryDates,
+  type PriceHistoryPortId,
+} from "@/lib/priceHistoryRecords"
+
 export type HongKongFuelSnapshot = {
   today: number | null
   last1: number | null
@@ -15,12 +20,12 @@ export type HongKongReportRow = {
 }
 
 type PortRecord = {
-  id: number
+  id: PriceHistoryPortId
   name: string
 }
 
 type PriceHistoryRecord = {
-  port_id: number
+  port_id: PriceHistoryPortId
   hsfo: number | null
   vlsfo: number | null
   mgo: number | null
@@ -46,12 +51,16 @@ export function buildHongKongReportRows(
   history: PriceHistoryRecord[],
   portOrder: string[]
 ): HongKongReportRow[] {
-  const historyByPortId = new Map<number, PriceHistoryRecord[]>()
+  const historyByPortId = new Map<PriceHistoryPortId, PriceHistoryRecord[]>()
 
   for (const entry of history) {
     const existing = historyByPortId.get(entry.port_id) ?? []
     existing.push(entry)
     historyByPortId.set(entry.port_id, existing)
+  }
+
+  for (const [portId, entries] of historyByPortId) {
+    historyByPortId.set(portId, distinctPriceHistoryDates(entries))
   }
 
   return [...ports]

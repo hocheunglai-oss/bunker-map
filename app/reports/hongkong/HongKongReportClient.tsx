@@ -102,7 +102,7 @@ function shortDate(value: string | null) {
 type HongKongReportPayload = PublicReportPayloadByKey["hongkong"]
 
 async function loadHongKongReport(): Promise<HongKongReportPayload | null> {
-  const response = await fetch("/api/reports/hongkong")
+  const response = await fetch("/api/reports/hongkong", { cache: "no-store" })
   if (!response.ok) return null
   return response.json() as Promise<HongKongReportPayload>
 }
@@ -129,6 +129,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
       if (document.visibilityState === "visible") void refreshReport()
     }
 
+    void refreshReport()
     window.addEventListener("focus", refreshVisibleReport)
     document.addEventListener("visibilitychange", refreshVisibleReport)
 

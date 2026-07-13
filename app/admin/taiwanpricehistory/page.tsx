@@ -6,10 +6,17 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { saveReportSnapshot } from "@/lib/reportSnapshots"
 import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
+import {
+  getMarketDateKey,
+  getNextMarketDateKey,
+  savePriceHistoryForMarketDate,
+  type PriceHistoryPortId,
+  type PriceHistoryRecordId,
+} from "@/lib/priceHistoryRecords"
 
 type HistoryRow = {
-  id: number
-  port_id: number
+  id: PriceHistoryRecordId
+  port_id: PriceHistoryPortId
   hsfo: number | null
   vlsfo: number | null
   mgo: number | null
@@ -123,10 +130,10 @@ const taiwanEntryGridColumns = "220px 120px repeat(4, 128px) minmax(196px, 1fr)"
 export default function TaiwanPriceHistoryPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [rows, setRows] = useState<HistoryRow[]>([])
-  const [kaohsiungPortId, setKaohsiungPortId] = useState<number | null>(null)
-  const [taichungPortId, setTaichungPortId] = useState<number | null>(null)
+  const [kaohsiungPortId, setKaohsiungPortId] = useState<PriceHistoryPortId | null>(null)
+  const [taichungPortId, setTaichungPortId] = useState<PriceHistoryPortId | null>(null)
   const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<PriceHistoryRecordId | null>(null)
   const [saving, setSaving] = useState(false)
   const [selectedYear, setSelectedYear] = useState("all")
   const [selectedMonth, setSelectedMonth] = useState("all")
@@ -297,15 +304,21 @@ export default function TaiwanPriceHistoryPage() {
     )
     if (!secondConfirm) return
 
-    const idsToDelete = [row.kaohsiungRow?.id, row.taichungRow?.id].filter(
-      (value): value is number => value != null
+    const portIds = [kaohsiungPortId, taichungPortId].filter(
+      (value): value is PriceHistoryPortId => value != null
     )
+    if (portIds.length === 0) return
 
-    if (idsToDelete.length === 0) return
-
-    setDeletingId(idsToDelete[0])
-    await supabase.from("price_history").delete().in("id", idsToDelete)
-    setRows((prev) => prev.filter((item) => !idsToDelete.includes(item.id)))
+    setDeletingId(row.kaohsiungRow?.id ?? row.taichungRow?.id ?? null)
+    await supabase
+      .from("price_history")
+      .delete()
+      .in("port_id", portIds)
+      .gte("recorded_at", `${row.dateKey}T00:00:00`)
+      .lt("recorded_at", `${getNextMarketDateKey(row.dateKey)}T00:00:00`)
+    setRows((prev) =>
+      prev.filter((item) => getMarketDateKey(item.recorded_at) !== row.dateKey)
+    )
     if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
     if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
     setDeletingId(null)
@@ -314,27 +327,28 @@ export default function TaiwanPriceHistoryPage() {
   async function insertTaiwanHistory(recordedAt: string) {
     if (!kaohsiungPortId || !taichungPortId) return []
 
-    const { data } = await supabase
-      .from("price_history")
-      .insert([
-        {
-          port_id: kaohsiungPortId,
+    const [kaohsiungRow, taichungRow] = await Promise.all([
+      savePriceHistoryForMarketDate(supabase, {
+        portId: kaohsiungPortId,
+        recordedAt,
+        values: {
           hsfo: formHsfo ? Number(formHsfo) : null,
           vlsfo: formVlsfoKaohsiung ? Number(formVlsfoKaohsiung) : null,
           mgo: formMgoKaohsiung ? Number(formMgoKaohsiung) : null,
-          recorded_at: recordedAt,
         },
-        {
-          port_id: taichungPortId,
+      }),
+      savePriceHistoryForMarketDate(supabase, {
+        portId: taichungPortId,
+        recordedAt,
+        values: {
           hsfo: null,
           vlsfo: formVlsfoTaichung ? Number(formVlsfoTaichung) : null,
           mgo: formMgoTaichung ? Number(formMgoTaichung) : null,
-          recorded_at: recordedAt,
         },
-      ])
-      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
+      }),
+    ])
 
-    return data ?? []
+    return [kaohsiungRow, taichungRow]
   }
 
   function resetForm() {
@@ -356,7 +370,12 @@ export default function TaiwanPriceHistoryPage() {
 
     if (inserted.length > 0) {
       setRows((prev) =>
-        [...prev, ...inserted].sort(
+        [
+          ...prev.filter(
+            (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(`${formDate}T12:00:00+08:00`)
+          ),
+          ...inserted,
+        ].sort(
           (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
         )
       )
@@ -385,7 +404,12 @@ export default function TaiwanPriceHistoryPage() {
 
     if (inserted.length > 0) {
       setRows((prev) =>
-        [...prev, ...inserted].sort(
+        [
+          ...prev.filter(
+            (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(`${today}T12:00:00+08:00`)
+          ),
+          ...inserted,
+        ].sort(
           (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
         )
       )

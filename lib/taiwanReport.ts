@@ -4,6 +4,11 @@ import {
   type FuelKey,
   type FormulaCapablePort,
 } from "@/lib/portPricing"
+import {
+  distinctPriceHistoryDates,
+  getMarketDateKey,
+  type PriceHistoryPortId,
+} from "@/lib/priceHistoryRecords"
 
 export type FuelSnapshot = {
   today: number | null
@@ -19,11 +24,11 @@ export type TaiwanReportRow = {
 }
 
 type PortRecord = FormulaCapablePort & {
-  id: number
+  id: PriceHistoryPortId
 }
 
 type PriceHistoryRecord = {
-  port_id: number
+  port_id: PriceHistoryPortId
   hsfo: number | null
   vlsfo: number | null
   mgo: number | null
@@ -47,7 +52,7 @@ function buildFuelSnapshot(today: number | null, last: number | null): FuelSnaps
 function resolveValue(
   port: PortRecord,
   portsByName: Map<string, PortRecord>,
-  historyByPortId: Map<number, PriceHistoryRecord[]>,
+  historyByPortId: Map<PriceHistoryPortId, PriceHistoryRecord[]>,
   fuel: FuelKey,
   version: "today" | "last",
   seen = new Set<string>()
@@ -86,12 +91,13 @@ function resolveValue(
 }
 
 export function formatReportDate(recordedAt: string): string {
-  const reportTime = new Date(recordedAt)
+  const [year, month, day] = getMarketDateKey(recordedAt).split("-").map(Number)
+  const reportTime = new Date(Date.UTC(year, month - 1, day))
 
   return [
-    String(reportTime.getDate()).padStart(2, "0"),
-    reportTime.toLocaleString("en-GB", { month: "short" }),
-    reportTime.getFullYear(),
+    String(reportTime.getUTCDate()).padStart(2, "0"),
+    reportTime.toLocaleString("en-GB", { month: "short", timeZone: "UTC" }),
+    reportTime.getUTCFullYear(),
   ].join(" ")
 }
 
@@ -103,12 +109,16 @@ export function buildTaiwanReportRows(
   const portsByName = new Map(
     ports.map((port) => [port.name.toLowerCase(), port] as const)
   )
-  const historyByPortId = new Map<number, PriceHistoryRecord[]>()
+  const historyByPortId = new Map<PriceHistoryPortId, PriceHistoryRecord[]>()
 
   for (const entry of history) {
     const existing = historyByPortId.get(entry.port_id) ?? []
     existing.push(entry)
     historyByPortId.set(entry.port_id, existing)
+  }
+
+  for (const [portId, entries] of historyByPortId) {
+    historyByPortId.set(portId, distinctPriceHistoryDates(entries))
   }
 
   return [...ports]

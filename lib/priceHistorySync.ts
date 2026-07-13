@@ -1,4 +1,5 @@
 import { parseSimpleFormula } from "@/lib/portPricing"
+import type { PriceHistoryPortId } from "@/lib/priceHistoryRecords"
 
 type SupabaseLike = {
   from: (table: string) => any
@@ -37,7 +38,7 @@ function throwIfError(result: { error?: unknown }, action: string) {
 
 export async function syncPortFromLatestHistory(
   supabase: SupabaseLike,
-  currentPortId: number
+  currentPortId: PriceHistoryPortId
 ) {
   const latestHistoryResult = await supabase
     .from("price_history")

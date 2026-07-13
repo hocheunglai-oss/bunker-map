@@ -4,7 +4,8 @@ import {
   getPublicReportData,
 } from "@/lib/publicMarketData"
 
-export const revalidate = 120
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 export default async function HongKongReportPage() {
   const initialData = await getInitialReportData()

@@ -7,10 +7,16 @@ import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongR
 import { formatReportDate } from "@/lib/taiwanReport"
 import { saveReportSnapshot } from "@/lib/reportSnapshots"
 import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
+import {
+  getMarketDateKey,
+  savePriceHistoryForMarketDate,
+  type PriceHistoryPortId,
+  type PriceHistoryRecordId,
+} from "@/lib/priceHistoryRecords"
 
 type HistoryRow = {
-  id: number
-  port_id: number
+  id: PriceHistoryRecordId
+  port_id: PriceHistoryPortId
   hsfo: number | null
   vlsfo: number | null
   mgo: number | null
@@ -55,7 +61,7 @@ function sortHistoryRows(rows: HistoryRow[]) {
   return [...rows].sort((a, b) => {
     const dateDelta = new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
     if (dateDelta !== 0) return dateDelta
-    return b.id - a.id
+    return String(b.id).localeCompare(String(a.id))
   })
 }
 
@@ -124,9 +130,9 @@ const secondaryButtonStyle: React.CSSProperties = {
 export default function HongKongPriceHistoryPage() {
   const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
   const [rows, setRows] = useState<HistoryRow[]>([])
-  const [portId, setPortId] = useState<number | null>(null)
+  const [portId, setPortId] = useState<PriceHistoryPortId | null>(null)
   const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<PriceHistoryRecordId | null>(null)
   const [saving, setSaving] = useState(false)
   const [selectedYear, setSelectedYear] = useState("all")
   const [selectedMonth, setSelectedMonth] = useState("all")
@@ -254,22 +260,23 @@ export default function HongKongPriceHistoryPage() {
 
     setSaving(true)
 
-    const recordedAt = `${formDate}T12:00:00+08:00`
-
-    const { data: inserted } = await supabase
-      .from("price_history")
-      .insert({
-        port_id: portId,
+    const inserted = await savePriceHistoryForMarketDate(supabase, {
+      portId,
+      recordedAt: `${formDate}T12:00:00+08:00`,
+      values: {
         hsfo: formHsfo ? Number(formHsfo) : null,
         vlsfo: formVlsfo ? Number(formVlsfo) : null,
         mgo: formMgo ? Number(formMgo) : null,
-        recorded_at: recordedAt,
-      })
-      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-      .single()
+      },
+    })
 
     if (inserted) {
-      setRows((prev) => sortHistoryRows([...prev, inserted]))
+      setRows((prev) => sortHistoryRows([
+        ...prev.filter(
+          (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(inserted.recorded_at)
+        ),
+        inserted,
+      ]))
       setFormDate("")
       setFormHsfo("")
       setFormVlsfo("")
@@ -296,21 +303,23 @@ export default function HongKongPriceHistoryPage() {
 
     setSaving(true)
 
-    const recordedAt = `${today}T12:00:00+08:00`
-    const { data: inserted } = await supabase
-      .from("price_history")
-      .insert({
-        port_id: portId,
+    const inserted = await savePriceHistoryForMarketDate(supabase, {
+      portId,
+      recordedAt: `${today}T12:00:00+08:00`,
+      values: {
         hsfo: formHsfo ? Number(formHsfo) : null,
         vlsfo: formVlsfo ? Number(formVlsfo) : null,
         mgo: formMgo ? Number(formMgo) : null,
-        recorded_at: recordedAt,
-      })
-      .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-      .single()
+      },
+    })
 
     if (inserted) {
-      setRows((prev) => sortHistoryRows([...prev, inserted]))
+      setRows((prev) => sortHistoryRows([
+        ...prev.filter(
+          (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(inserted.recorded_at)
+        ),
+        inserted,
+      ]))
       setFormHsfo("")
       setFormVlsfo("")
       setFormMgo("")
