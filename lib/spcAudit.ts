@@ -13,6 +13,7 @@ export type SpcAuditContext = {
 const SPC_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
+  "spc-readme": "SPC README",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
   "spc-statistics": "SPC STATISTICS",

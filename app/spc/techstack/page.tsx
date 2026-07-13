@@ -38,11 +38,13 @@ const SERVICES = [
   ["OBSERVABILITY", "SERVER-TIMING / STRUCTURED REQUEST LOGS", "VERCEL", "SPC API ROUTES"],
   ["WHATSAPP ENQUIRY BOARD", "CHROME EXTENSION / SPC ENQUIRY FEED", "TRADER BROWSER", "TOOLS/WHATSAPP-SPC-SPEED-BOARD"],
   ["CHROME EXTENSION GUIDE", "NEXT.JS PAGE / AUTH-GATED ZIP DOWNLOAD", "SPC APP", "/SPC/CHROME"],
+  ["README / PRESENTATION", "CHUNK EDITOR / PRESENTER / VERIFIED OFFLINE MEDIA", "SPC APP / SUPABASE STORAGE", "/SPC/README"],
 ] as const
 
 const DATABASE_GROUPS = [
   { title: "SPC AUTH", tables: ["spc_users", "office_calendar_store: spc-permission-groups"] },
   { title: "SPC OPERATIONS", tables: ["spc_enquiries", "spc_fixtures"] },
+  { title: "SPC PRESENTATION", tables: ["spc_presentation_chunks", "Supabase Storage: spc-presentation-media"] },
   { title: "SPC SUPPLIERS", tables: ["Google Sheet: INFO", "Google Sheet: COVERAGE", "Google Sheet: SUPPLIER BDN", "Google Sheet: CONTACTS", "Google Sheet: SUPPLIER BARGES", "office_calendar_store: spc-supplier-overrides"] },
   { title: "SPC AUDIT", tables: ["audit_logs"] },
 ] as const

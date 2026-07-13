@@ -30,6 +30,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/chrome", "/spc/chrome"],
   },
   {
+    id: "spc-readme",
+    label: "README",
+    group: "trading",
+    path: "/spc/readme",
+    matchPrefixes: ["/readme", "/spc/readme"],
+  },
+  {
     id: "spc-fixtures",
     label: "FIXTURES",
     group: "records",
@@ -176,6 +183,7 @@ export function getDefaultSpcPermissionsForRole(
       permissions[page.id] =
         page.id === "spc-buyer-enquiries" ||
         page.id === "spc-chrome-extension" ||
+        page.id === "spc-readme" ||
         page.id === "spc-fixtures" ||
         page.id === "spc-lost-record" ||
         page.id === "spc-statistics"
@@ -218,6 +226,7 @@ export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | nul
     "spc-audit-log",
     "spc-system-health",
     "spc-tech-stack",
+    "spc-readme",
   ]
   const pageId = priority.find((id) => canAccessSpcPage(permissions, id, "view"))
   return SPC_PAGE_DEFINITIONS.find((page) => page.id === pageId)?.path || "/spc"

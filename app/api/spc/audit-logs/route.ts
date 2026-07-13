@@ -22,6 +22,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   "spc-lost-record": ["spc_enquiries"],
   "spc-statistics": ["spc_enquiries", "spc_fixtures"],
   "spc-suppliers": ["spc_suppliers", "office_calendar_store"],
+  "spc-readme": ["spc_presentation_chunks"],
 }
 
 const AUDIT_USER_CACHE_MS = 30_000

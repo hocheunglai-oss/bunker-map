@@ -143,6 +143,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_fixtures: "spc-fixtures",
   spc_role_defaults: "spc-user-management",
   spc_suppliers: "spc-suppliers",
+  spc_presentation_chunks: "spc-readme",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -151,6 +152,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-user-management": "SPC USER MANAGEMENT",
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
+  "spc-readme": "SPC README",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
   "spc-statistics": "SPC STATISTICS",
