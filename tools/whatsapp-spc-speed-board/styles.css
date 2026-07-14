@@ -308,12 +308,6 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   font-size: 11px;
 }
 
-.fcuno-wa-spc-list-button .fcuno-wa-spc-original-name {
-  color: #8696a0;
-  font-size: 10px;
-  font-weight: 500;
-}
-
 .fcuno-wa-spc-row-actions {
   position: relative;
   display: flex;
@@ -574,10 +568,17 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   background: #00a884;
   color: #ffffff;
   cursor: pointer;
-  font-size: 23px;
-  font-weight: 900;
   line-height: 1;
   text-decoration: none;
+}
+
+.fcuno-wa-spc-send-glyph {
+  width: 18px;
+  height: 16px;
+  display: block;
+  flex: 0 0 auto;
+  background: currentColor;
+  clip-path: polygon(0 18%, 52% 18%, 52% 0, 100% 50%, 52% 100%, 52% 82%, 0 82%);
 }
 
 .fcuno-wa-spc-enquiry-chat:hover {
@@ -591,7 +592,7 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   cursor: not-allowed;
 }
 
-.fcuno-wa-spc-enquiry span {
+.fcuno-wa-spc-enquiry-copy {
   min-width: 0;
   display: grid;
   gap: 5px;
@@ -609,6 +610,12 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   font-style: normal;
   font-weight: 800;
   line-height: 1.35;
+}
+
+.fcuno-wa-spc-enquiry em .fcuno-wa-spc-enquiry-vessel,
+.fcuno-wa-spc-enquiry-sender {
+  color: #1683e8;
+  font-weight: 900;
 }
 
 .fcuno-wa-spc-enquiry small {

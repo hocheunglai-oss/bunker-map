@@ -631,6 +631,7 @@
   function moveContact(id, targetList, targetId, position = "before") {
     const moving = state.contacts.find((contact) => contact.id === id)
     if (!moving || !LISTS.includes(targetList)) return
+    if (moving.id === targetId) return
     const next = {
       supplier: contactsFor("supplier").filter((contact) => contact.id !== id),
       buyer: contactsFor("buyer").filter((contact) => contact.id !== id),
@@ -1059,6 +1060,16 @@
     return cleanText(enquiry?.formattedText || enquiry?.notes || enquiry?.title || "")
   }
 
+  function enquiryBodyHtml(enquiry) {
+    const body = enquiryBodyText(enquiry)
+    const separatorIndex = body.indexOf("/")
+    if (separatorIndex <= 0) return escapeHtml(body)
+    const vessel = body.slice(0, separatorIndex).trim()
+    const details = body.slice(separatorIndex)
+    if (!vessel) return escapeHtml(body)
+    return `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(vessel)}</strong> ${escapeHtml(details)}`
+  }
+
   function enquiryTextForDrag(id) {
     return enquiryTextForIds(activeDragEnquiryIds(id))
   }
@@ -1427,14 +1438,11 @@
     const rows = contactsFor(list).map((contact) => {
       const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
       const displayName = contactDisplayName(contact)
-      const originalName = contactChatName(contact)
-      const showOriginalName = originalName && displayName.toLowerCase() !== originalName.toLowerCase()
       const menuOpen = state.contactMenuId === contact.id
       return `
-        <div class="fcuno-wa-spc-row" draggable="true" data-id="${escapeHtml(contact.id)}" data-list="${list}">
+        <div class="fcuno-wa-spc-row" data-id="${escapeHtml(contact.id)}" data-list="${list}">
           <button class="fcuno-wa-spc-list-button" type="button" data-action="open-contact" data-id="${escapeHtml(contact.id)}">
             <strong>${escapeHtml(displayName)}</strong>
-            ${showOriginalName ? `<span class="fcuno-wa-spc-original-name">${escapeHtml(originalName)}</span>` : ""}
             ${details ? `<span>${escapeHtml(details)}</span>` : ""}
           </button>
           <div class="fcuno-wa-spc-row-actions">
@@ -1492,11 +1500,11 @@
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           ${senderChatUrl
-            ? `<a class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" href="${escapeHtml(senderChatUrl)}" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}">→</a>`
-            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}">→</button>`}
-          <span>
-            <em>${escapeHtml(body || enquiry.title || "ENQUIRY")}</em>
-            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}${escapeHtml(sender)} · ${escapeHtml(formatTime(createdAt))}</small>
+            ? `<a class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" href="${escapeHtml(senderChatUrl)}" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}"><span class="fcuno-wa-spc-send-glyph" aria-hidden="true"></span></a>`
+            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><span class="fcuno-wa-spc-send-glyph" aria-hidden="true"></span></button>`}
+          <span class="fcuno-wa-spc-enquiry-copy">
+            <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
+            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
         </div>
@@ -1672,7 +1680,7 @@
   }
 
   function enquiryDragIds(event) {
-    if (!event.dataTransfer) return state.draggingEnquiryIds || []
+    if (!event.dataTransfer) return state.draggingType === "enquiry" ? state.draggingEnquiryIds || [] : []
     const rawIds = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-ids")
     if (rawIds) {
       try {
@@ -1681,16 +1689,18 @@
       } catch {
       }
     }
-    const id = event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id") || state.dragging || ""
+    const id =
+      event.dataTransfer.getData("application/x-fcuno-spc-enquiry-id") ||
+      (state.draggingType === "enquiry" ? state.dragging : "")
     return id ? [id] : []
   }
 
   function contactDragId(event) {
-    if (!event.dataTransfer) return state.dragging || ""
+    if (!event.dataTransfer) return state.draggingType === "contact" ? state.dragging || "" : ""
     return (
       event.dataTransfer.getData("application/x-fcuno-spc-contact-id") ||
-      event.dataTransfer.getData("text/plain") ||
-      state.dragging ||
+      (state.draggingType === "contact" ? event.dataTransfer.getData("text/plain") : "") ||
+      (state.draggingType === "contact" ? state.dragging : "") ||
       ""
     )
   }
@@ -1850,13 +1860,6 @@
         state.contactMenuId = ""
         const contact = state.contacts.find((item) => item.id === row.dataset.id)
         if (contact) void openContact(contact)
-      })
-      row.addEventListener("dragstart", (event) => {
-        state.dragging = row.dataset.id || ""
-        state.draggingType = "contact"
-        prepareDragData(event, "move")
-        setContactDragData(event, state.dragging)
-        setRowDragImage(event, row)
       })
       row.addEventListener("drop", (event) => {
         event.preventDefault()

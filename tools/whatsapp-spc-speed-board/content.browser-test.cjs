@@ -275,16 +275,26 @@ async function main() {
           checkboxCount: row?.querySelectorAll("input[type='checkbox']").length || 0,
           arrowHref: arrow?.href || "",
           arrowText: arrow?.textContent?.trim() || "",
+          glyphCount: arrow?.querySelectorAll(".fcuno-wa-spc-send-glyph").length || 0,
           arrowWidth: arrow ? getComputedStyle(arrow).width : "",
           arrowHeight: arrow ? getComputedStyle(arrow).height : "",
+          vesselText: row?.querySelector(".fcuno-wa-spc-enquiry-vessel")?.textContent || "",
+          vesselColor: row?.querySelector(".fcuno-wa-spc-enquiry-vessel") ? getComputedStyle(row.querySelector(".fcuno-wa-spc-enquiry-vessel")).color : "",
+          senderText: row?.querySelector(".fcuno-wa-spc-enquiry-sender")?.textContent || "",
+          senderColor: row?.querySelector(".fcuno-wa-spc-enquiry-sender") ? getComputedStyle(row.querySelector(".fcuno-wa-spc-enquiry-sender")).color : "",
         }
       })
       assert.deepEqual(enquiryUi, {
         checkboxCount: 0,
         arrowHref: "https://web.whatsapp.com/send?phone=6590000001",
-        arrowText: "→",
+        arrowText: "",
+        glyphCount: 1,
         arrowWidth: "34px",
         arrowHeight: "34px",
+        vesselText: "taisei maru no.15",
+        vesselColor: "rgb(22, 131, 232)",
+        senderText: "OL",
+        senderColor: "rgb(22, 131, 232)",
       })
 
       const firstEnquiryText = page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] em")
@@ -377,6 +387,30 @@ async function main() {
 
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.contacts = [
+          { id: "supplier-a", name: "Supplier A", chatName: "Supplier A", phone: "", list: "supplier", order: 1000 },
+          { id: "supplier-b", name: "Supplier B", chatName: "Supplier B", phone: "", list: "supplier", order: 2000 },
+          { id: "supplier-c", name: "Supplier C", chatName: "Supplier C", phone: "", list: "supplier", order: 3000 },
+        ]
+        api.state.contactMenuId = ""
+        api.render()
+      })
+      await page.locator("[data-action='contact-menu'][data-id='supplier-c']").dragTo(
+        page.locator(".fcuno-wa-spc-row[data-id='supplier-a']"),
+        { targetPosition: { x: 18, y: 2 } },
+      )
+      const reorderedContacts = await page.evaluate(() => ({
+        rendered: Array.from(document.querySelectorAll(".fcuno-wa-spc-contact-list[data-list='supplier'] .fcuno-wa-spc-row")).map((row) => row.dataset.id),
+        saved: (window.storageData["fcuno-wa-spc-board-v1"]?.contacts || [])
+          .filter((contact) => contact.list === "supplier")
+          .sort((a, b) => Number(a.order) - Number(b.order))
+          .map((contact) => contact.id),
+      }))
+      assert.deepEqual(reorderedContacts.rendered, ["supplier-c", "supplier-a", "supplier-b"])
+      assert.deepEqual(reorderedContacts.saved, ["supplier-c", "supplier-a", "supplier-b"])
+
+      await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
         api.state.contacts = [{ id: "menu-contact", name: "Menu Contact", chatName: "Menu Contact", phone: "", list: "supplier", order: 1000 }]
         api.state.contactMenuId = "menu-contact"
         api.render()
@@ -430,7 +464,7 @@ async function main() {
       assert.equal(renamedResult.chatTitle, "Otto Tone")
       assert.equal(renamedResult.searchText, "")
       assert.equal(renamedResult.alias, "OTTO")
-      assert.equal(renamedResult.originalName, "Otto Tone")
+      assert.equal(renamedResult.originalName, "")
       assert.equal(renamedResult.savedName, "OTTO")
       assert.equal(renamedResult.savedChatName, "Otto Tone")
 
