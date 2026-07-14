@@ -573,12 +573,11 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 }
 
 .fcuno-wa-spc-send-glyph {
-  width: 18px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   display: block;
   flex: 0 0 auto;
-  background: currentColor;
-  clip-path: polygon(0 18%, 52% 18%, 52% 0, 100% 50%, 52% 100%, 52% 82%, 0 82%);
+  fill: currentColor;
 }
 
 .fcuno-wa-spc-enquiry-chat:hover {

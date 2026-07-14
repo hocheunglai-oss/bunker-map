@@ -27,6 +27,7 @@ const html = `<!doctype html>
       #side { width: 360px; float: left; min-height: 540px; border-right: 1px solid #ddd; }
       #search { width: 300px; margin: 16px; padding: 10px; }
       #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
+      #senderRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 360px; background: #f6efe5; }
@@ -43,6 +44,10 @@ const html = `<!doctype html>
       <input id="search" type="text" aria-label="Search input textbox" />
       <div id="renamedRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')">
         <span title="Otto Tone">Otto Tone</span>
+      </div>
+      <div id="senderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('BARRY KHOO')">
+        <span title="BARRY KHOO">BARRY KHOO</span>
+        <span>+65 9000 0001</span>
       </div>
     </div>
     <div id="main">
@@ -90,6 +95,7 @@ const html = `<!doctype html>
       document.getElementById("search").addEventListener("input", (event) => {
         const value = String(event.target.value || "").toLowerCase();
         document.getElementById("renamedRow").style.display = value.includes("otto tone") ? "block" : "none";
+        document.getElementById("senderRow").style.display = value.includes("barry khoo") || value.includes("6590000001") ? "block" : "none";
       });
       window.chrome = {
         runtime: {
@@ -273,9 +279,11 @@ async function main() {
         const arrow = row?.querySelector("[data-action='open-enquiry-chat']")
         return {
           checkboxCount: row?.querySelectorAll("input[type='checkbox']").length || 0,
-          arrowHref: arrow?.href || "",
+          arrowTag: arrow?.tagName || "",
+          arrowHref: arrow?.getAttribute("href") || "",
           arrowText: arrow?.textContent?.trim() || "",
-          glyphCount: arrow?.querySelectorAll(".fcuno-wa-spc-send-glyph").length || 0,
+          glyphCount: arrow?.querySelectorAll("svg.fcuno-wa-spc-send-glyph path").length || 0,
+          glyphViewBox: arrow?.querySelector("svg.fcuno-wa-spc-send-glyph")?.getAttribute("viewBox") || "",
           arrowWidth: arrow ? getComputedStyle(arrow).width : "",
           arrowHeight: arrow ? getComputedStyle(arrow).height : "",
           vesselText: row?.querySelector(".fcuno-wa-spc-enquiry-vessel")?.textContent || "",
@@ -286,15 +294,42 @@ async function main() {
       })
       assert.deepEqual(enquiryUi, {
         checkboxCount: 0,
-        arrowHref: "https://web.whatsapp.com/send?phone=6590000001",
+        arrowTag: "BUTTON",
+        arrowHref: "",
         arrowText: "",
         glyphCount: 1,
+        glyphViewBox: "0 0 24 24",
         arrowWidth: "34px",
         arrowHeight: "34px",
         vesselText: "taisei maru no.15",
         vesselColor: "rgb(22, 131, 232)",
         senderText: "OL",
         senderColor: "rgb(22, 131, 232)",
+      })
+      if (process.env.SPC_BROWSER_SCREENSHOT) {
+        await page.screenshot({ path: process.env.SPC_BROWSER_SCREENSHOT })
+      }
+
+      const senderOpenBeforeUrl = page.url()
+      await page.evaluate(() => {
+        window.senderOpenDocument = document.documentElement
+        window.setChatTitle("Other Chat")
+        document.getElementById("search").value = ""
+        document.getElementById("senderRow").style.display = "none"
+      })
+      await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
+      await page.waitForFunction(() => document.getElementById("chatTitle")?.getAttribute("title") === "BARRY KHOO", { timeout: 3000 })
+      await page.waitForTimeout(180)
+      const senderOpenResult = await page.evaluate(() => ({
+        sameDocument: window.senderOpenDocument === document.documentElement,
+        chatTitle: document.getElementById("chatTitle")?.getAttribute("title") || "",
+        searchText: document.getElementById("search")?.value || "",
+      }))
+      assert.equal(page.url(), senderOpenBeforeUrl)
+      assert.deepEqual(senderOpenResult, {
+        sameDocument: true,
+        chatTitle: "BARRY KHOO",
+        searchText: "",
       })
 
       const firstEnquiryText = page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] em")

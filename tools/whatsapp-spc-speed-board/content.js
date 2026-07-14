@@ -467,6 +467,14 @@
     return contactChatName(contact) || cleanText(contact?.phone) || cleanText(contact?.name)
   }
 
+  function contactSearchCandidates(contact) {
+    const phone = phoneDigits(contact?.phone)
+    const candidates = contact?.preferPhoneSearch
+      ? [phone, contactSearchText(contact), contactDisplayName(contact)]
+      : [contactSearchText(contact), phone, contactDisplayName(contact)]
+    return Array.from(new Set(candidates.map(cleanText).filter(Boolean)))
+  }
+
   function contactLookupNames(contact) {
     const name = contactChatName(contact) || cleanText(contact?.name)
     return name ? [name] : []
@@ -752,31 +760,47 @@
   async function searchAndOpenContact(contact) {
     const searchBox = findSideSearchBox()
     if (!searchBox) return false
-    setEditableText(searchBox, contactSearchText(contact))
-    for (const delay of [250, 550, 950]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-      const row = findVisibleChatRow(contact)
-      if (row) {
-        activateChatRow(row)
-        window.setTimeout(() => clearEditableText(searchBox), 120)
+
+    for (const searchText of contactSearchCandidates(contact)) {
+      setEditableText(searchBox, searchText)
+      const immediateRow = findVisibleChatRow(contact)
+      if (immediateRow) {
+        activateChatRow(immediateRow)
+        window.setTimeout(() => clearEditableText(searchBox), 80)
         return true
       }
+      for (const delay of [120, 260, 480]) {
+        await new Promise((resolve) => window.setTimeout(resolve, delay))
+        const row = findVisibleChatRow(contact)
+        if (row) {
+          activateChatRow(row)
+          window.setTimeout(() => clearEditableText(searchBox), 80)
+          return true
+        }
+      }
     }
+
+    clearEditableText(searchBox)
     return false
   }
 
-  async function openContact(contact) {
+  async function openContact(contact, { allowNavigation = true } = {}) {
+    if (currentChatMatchesContact(contact)) return true
     const row = findVisibleChatRow(contact)
     if (row) {
       activateChatRow(row)
-      return
+      return true
     }
-    if (await searchAndOpenContact(contact)) return
+    if (await searchAndOpenContact(contact)) return true
 
-    const directUrl = canUseDirectUrl(contact)
+    const directUrl = allowNavigation && canUseDirectUrl(contact)
       ? getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
       : ""
-    if (directUrl) window.location.assign(directUrl)
+    if (directUrl) {
+      window.location.assign(directUrl)
+      return true
+    }
+    return false
   }
 
   function unreadCount(row) {
@@ -975,9 +999,23 @@
     }))
   }
 
-  function enquirySenderChatUrl(enquiry) {
-    const contact = state.senderContacts[enquirySenderUsername(enquiry)]
-    return contact ? getDirectUrl(contact.phone) : ""
+  function enquirySenderContact(enquiry) {
+    const username = enquirySenderUsername(enquiry)
+    const contact = state.senderContacts[username]
+    if (!contact) return null
+    return {
+      id: `spc-sender:${username}`,
+      name: contact.displayName || contact.phone,
+      chatName: contact.displayName,
+      phone: contact.phone,
+      directUrl: "",
+      preferPhoneSearch: true,
+    }
+  }
+
+  function openEnquirySenderChat(enquiry) {
+    const contact = enquirySenderContact(enquiry)
+    return contact ? openContact(contact, { allowNavigation: false }) : Promise.resolve(false)
   }
 
   function recordEnquirySeen(enquiry) {
@@ -1496,12 +1534,12 @@
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
-      const senderChatUrl = enquirySenderChatUrl(enquiry)
+      const senderContact = enquirySenderContact(enquiry)
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
-          ${senderChatUrl
-            ? `<a class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" href="${escapeHtml(senderChatUrl)}" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}"><span class="fcuno-wa-spc-send-glyph" aria-hidden="true"></span></a>`
-            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><span class="fcuno-wa-spc-send-glyph" aria-hidden="true"></span></button>`}
+          ${senderContact
+            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}"><svg class="fcuno-wa-spc-send-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 20.5v-17L22 12 4 20.5Zm2-3L16.85 12 6 6.5v3.85L11.5 12 6 13.65v3.85Z"></path></svg></button>`
+            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><svg class="fcuno-wa-spc-send-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 20.5v-17L22 12 4 20.5Zm2-3L16.85 12 6 6.5v3.85L11.5 12 6 13.65v3.85Z"></path></svg></button>`}
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
@@ -1954,9 +1992,12 @@
     })
     host.querySelectorAll("[data-action='open-enquiry-chat']").forEach((button) => {
       button.addEventListener("click", (event) => {
+        event.preventDefault()
         event.stopPropagation()
         const enquiry = state.enquiries.find((item) => item.id === button.dataset.id)
-        if (enquiry && recordEnquirySeen(enquiry)) saveState()
+        if (!enquiry) return
+        if (recordEnquirySeen(enquiry)) saveState()
+        void openEnquirySenderChat(enquiry)
       })
     })
     host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
@@ -1995,7 +2036,7 @@
       findSendButton,
       getCurrentChat,
       enquiryTextForIds,
-      enquirySenderChatUrl,
+      enquirySenderContact,
       loadCrudeWatch,
       insertComposerText,
       loadEnquiries,

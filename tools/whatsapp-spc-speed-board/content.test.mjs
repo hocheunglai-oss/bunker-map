@@ -483,10 +483,17 @@ api.state.senderContacts = api.sanitizeSenderContacts({
     phonebookContactId: "phonebook-barry",
   },
 })
-assert.equal(
-  api.enquirySenderChatUrl({ createdByUsername: "BARRY@COSULICH.COM.SG" }),
-  "https://web.whatsapp.com/send?phone=6590000001",
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.enquirySenderContact({ createdByUsername: "BARRY@COSULICH.COM.SG" }))),
+  {
+    id: "spc-sender:barry@cosulich.com.sg",
+    name: "BARRY KHOO",
+    chatName: "BARRY KHOO",
+    phone: "6590000001",
+    directUrl: "",
+    preferPhoneSearch: true,
+  },
 )
-assert.equal(api.enquirySenderChatUrl({ createdByUsername: "missing@cosulich.com.sg" }), "")
+assert.equal(api.enquirySenderContact({ createdByUsername: "missing@cosulich.com.sg" }), null)
 
 console.log("SPC WhatsApp content tests passed")
