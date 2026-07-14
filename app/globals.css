@@ -5857,6 +5857,7 @@ body:has(.spc-statistics-page) .spc-main {
 .spc-readme-presenter > main {
   position: relative;
   grid-row: 2;
+  container-type: size;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -5884,7 +5885,7 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-readme-presenter > main > .spc-readme-motion-scene {
-  width: min(1600px, 100%);
+  width: min(1600px, 100%, 177.7778cqh);
   height: auto;
   aspect-ratio: 16 / 9;
 }
