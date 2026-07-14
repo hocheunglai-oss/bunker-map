@@ -3,6 +3,8 @@ import test from "node:test"
 import {
   buildShortenedEnquiry,
   detectAttentionTerms,
+  normalizeEnquiryQuantityNumber,
+  normalizeEnquiryQuantityText,
 } from "../lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
 import { parseSpcEnquiryText } from "../lib/spcEnquiryText"
@@ -221,4 +223,74 @@ test("replays the remaining distinct historical report formats", () => {
   for (const item of spcCases) {
     assert.equal(parseSpcEnquiryText(item.raw).standardText, item.expected)
   }
+})
+
+test("replays the July 14 reported parser formats", () => {
+  const aalKembla = [
+    "Account: AAL - Austral Asia Line Pte. Ltd.",
+    "Vessel: AAL Kembla",
+    "IMO No: 9498353",
+    "Port: Incheon",
+    "Terminal/Berth: TBA",
+    "ETA: July 27th 2026",
+    "ETB: TBA",
+    "ETS: July 29th 2026",
+    "Product & Qty: VLSFO RMG 380 0,5%",
+    "880",
+    "-",
+    "1000",
+    "mt",
+    "Product & Qty: LSMGO DMA 0,10",
+    "100",
+    "mt",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(aalKembla),
+    "aal kembla / 9498353 / inchon eta 27 jul, etd 29 jul / vlsfo 880-1,000mts / lsmgo 100mts",
+  )
+  assert.equal(
+    worksheetOutput("VESSEL: TEST SHIP\nPORT: INCHEON\nE.T.A.: 27 JUL\nE.T.S.: 29 JUL\nVLSFO 10MT"),
+    "test ship / inchon eta 27 jul, etd 29 jul / vlsfo 10mts",
+  )
+
+  assert.equal(
+    worksheetOutput("YN BUSAN (9805300) / ZHOUSHAN / 30 JUL / VLSFO 100MT / LSMGO 50MT"),
+    "yn busan / 9805300 / zhoushan 30 jul / vlsfo 100mts / lsmgo 50mts",
+  )
+
+  const timestampedYeosu = [
+    "[13/07/2026, 16:28:17] SEAN LEE: YN YEOSU (9805116) / HONG KONG / 21 JUL / VLSFO 90MT / LSMGO 30MT",
+    "[13/07/2026, 16:28:23] SEAN LEE: lets try this one",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(timestampedYeosu),
+    "yn yeosu / 9805116 / hk 21 jul / vlsfo 90mts / lsmgo 30mts",
+  )
+
+  const lngtOceania = [
+    "Kindly be advised that Our vessel “LNGT OCEANIA” will need around 1.500 mt LSMGO bunkering at Malaysia Linggi Anchorage.",
+    "Below provided ETA’s are tentative.",
+    "IMO : 8608884",
+    "ETA : 15.07.2026",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(lngtOceania),
+    "lngt oceania / 8608884 / linggi 15 jul / lsmgo 1,500mts",
+  )
+
+  assert.equal(
+    parseSpcEnquiryText("pacific hornbill / sg 17 - 22 jul / vlsfo 500mts / lsmgo 40mts").standardText,
+    "pacific hornbill / 17 - 22 jul / vlsfo 500mts / lsmgo 40mts",
+  )
+})
+
+test("normalises decimal and thousands punctuation without changing small decimals", () => {
+  assert.equal(normalizeEnquiryQuantityNumber("1.500"), "1,500")
+  assert.equal(normalizeEnquiryQuantityNumber("1,500"), "1,500")
+  assert.equal(normalizeEnquiryQuantityNumber("1,5"), "1.5")
+  assert.equal(normalizeEnquiryQuantityNumber("0,500"), "0.500")
+  assert.equal(
+    normalizeEnquiryQuantityText("9498353 / vlsfo 880-1000mt / lsmgo 100 mts"),
+    "9498353 / vlsfo 880-1,000mts / lsmgo 100mts",
+  )
 })

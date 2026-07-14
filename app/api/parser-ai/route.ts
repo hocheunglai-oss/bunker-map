@@ -3,6 +3,7 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
+  normalizeEnquiryQuantityText,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import {
@@ -373,7 +374,7 @@ function normalizeEnquiryWorksheetAiOutput(output: string) {
       continue
     }
 
-    normalized.push(normalizeHongKongScheduleSegment(part))
+    normalized.push(normalizeEnquiryQuantityText(normalizeHongKongScheduleSegment(part)))
   }
 
   return normalized.join(" / ")
@@ -419,12 +420,15 @@ function buildInstructions(source: ParserAiSource) {
     sourceRule,
     "Return one corrected slash-separated enquiry line in correctedOutput.",
     "Do not invent vessel name, port, buyer, date, product, or quantity. Use empty strings and warnings when unclear.",
+    "The raw enquiry is authoritative. If current fields or parser output conflict with the raw enquiry, correct them from the raw enquiry instead of preserving the existing field.",
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
     "The Chinese place name 新加坡 explicitly means Singapore; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
-    "Normalize quantities to mts, e.g. 100mt -> 100mts and 735-770mt -> 735-770mts.",
+    "Normalize quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts.",
+    "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
+    "When two or more dated operational events are given, keep their labels in the schedule segment. Preserve eta and etb; normalize etd, etcd, ets, and etc to etd, e.g. inchon eta 27 jul, etd 29 jul.",
     "Classify explicit VLSFO/LSFO/0.5 as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
     "RMG180, RMG380, 120CST, and 180CST alone do not prove sulphur class. Use the explicit VLSFO/LSFO/0.5 or HSFO/HFO/IFO/3.5 context; 3.5% RMG380 is HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",

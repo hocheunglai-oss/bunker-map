@@ -16,6 +16,8 @@ type ProductSegment = {
 }
 
 const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
+const OPERATIONAL_SCHEDULE_LINE_PATTERN =
+  /^\s*(e\s*\.?\s*t\s*\.?\s*(?:a|b|d|s|c(?:\s*\.?\s*d)?)\s*\.?)\s*[:#-]?\s*(.*)$/i
 
 const MONTHS: Record<string, string> = {
   "1": "jan",
@@ -88,8 +90,16 @@ function formatShortenedPort(value: string) {
   return normalized === "hong kong" || normalized === "hongkong" || normalized === "hkg" ? "hk" : normalized
 }
 
-function normalizeQuantityNumber(value: string) {
-  const normalized = value.replace(/,/g, "")
+function normalizeQuantityNumericText(value: string) {
+  const compact = value.replace(/\s+/g, "").trim()
+  if (/^0[,.]\d+$/.test(compact)) return compact.replace(",", ".")
+  if (/^[1-9]\d{0,2}(?:[,.]\d{3})+$/.test(compact)) return compact.replace(/[,.]/g, "")
+  if (/^\d+,\d{1,2}$/.test(compact)) return compact.replace(",", ".")
+  return compact.replace(/,/g, "")
+}
+
+export function normalizeEnquiryQuantityNumber(value: string) {
+  const normalized = normalizeQuantityNumericText(value)
   if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
   if (/^\d+$/.test(normalized) && Number(normalized) >= 1000) {
     return Number(normalized).toLocaleString("en-US")
@@ -97,8 +107,20 @@ function normalizeQuantityNumber(value: string) {
   return normalized
 }
 
+export function normalizeEnquiryQuantityText(value: string) {
+  return value.replace(
+    /\b(\d+(?:[,.]\d+)?)\s*(?:-\s*(\d+(?:[,.]\d+)?))?\s*(mt|mts)\b/gi,
+    (_match, first: string, second: string | undefined) => {
+      const quantity = second
+        ? `${normalizeEnquiryQuantityNumber(first)}-${normalizeEnquiryQuantityNumber(second)}`
+        : normalizeEnquiryQuantityNumber(first)
+      return `${quantity}mts`
+    },
+  )
+}
+
 function numericValue(value: string) {
-  const normalized = value.replace(",", ".")
+  const normalized = normalizeQuantityNumericText(value)
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -276,22 +298,57 @@ function extractDeliveryDate(text: string) {
 
   const candidateLines = lines.filter((line) => !isContactOrAddressLine(line))
   const labelledLines = candidateLines.filter((line) =>
-    /^\s*(?:delivery|window|date|eta|etb|etd|ets)\b/i.test(line),
+    /^\s*(?:delivery|window|date)\b/i.test(line) || OPERATIONAL_SCHEDULE_LINE_PATTERN.test(line),
   )
   const dates = findEnquiryDates(labelledLines.join(" ") || candidateLines.join("\n"))
 
   return dates[0] || ""
 }
 
+type OperationalScheduleEntry = {
+  label: "eta" | "etb" | "etd"
+  date: string
+}
+
+function extractOperationalSchedule(lines: string[]) {
+  const entries = new Map<OperationalScheduleEntry["label"], OperationalScheduleEntry>()
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(OPERATIONAL_SCHEDULE_LINE_PATTERN)
+    if (!match) continue
+
+    const rawLabel = match[1].replace(/[^a-z]/gi, "").toLowerCase()
+    const label: OperationalScheduleEntry["label"] = rawLabel === "eta" || rawLabel === "etb"
+      ? rawLabel
+      : "etd"
+    const inlineValue = match[2].trim()
+    const date = findEnquiryDates(inlineValue)[0] ||
+      (!inlineValue ? findEnquiryDates(lines[index + 1] || "")[0] : "") ||
+      ""
+    if (date && !entries.has(label)) entries.set(label, { label, date })
+  }
+
+  return Array.from(entries.values())
+}
+
 function extractDeliverySchedule(
   text: string,
-  options: Pick<BuildShortenedEnquiryOptions, "includePort" | "portNames"> = {},
+  options: Pick<BuildShortenedEnquiryOptions, "includePort" | "port" | "portNames"> = {},
 ) {
   const lines = normalizeInput(text)
     .split("\n")
     .map(cleanSpaces)
     .filter(Boolean)
     .filter((line) => !isContactOrAddressLine(line))
+
+  const operationalSchedule = extractOperationalSchedule(lines)
+  if (operationalSchedule.length > 1) {
+    const port = options.includePort
+      ? formatShortenedPort(options.port?.trim() || extractEnquiryPort(text, { portNames: options.portNames }))
+      : ""
+    const events = operationalSchedule.map((entry) => `${entry.label} ${entry.date}`).join(", ")
+    return [port, events].filter(Boolean).join(" ")
+  }
 
   const entries: string[] = []
   for (const line of lines) {
@@ -371,7 +428,7 @@ export function detectAttentionTerms(value: string) {
 function extractQuantityFromInlineUnit(value: string) {
   const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
-    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
 
   const matches = Array.from(value.matchAll(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "gi")))
@@ -379,7 +436,7 @@ function extractQuantityFromInlineUnit(value: string) {
     .filter(isUsableQuantityNumber)
 
   const quantity = matches.at(-1)
-  return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
+  return quantity ? `${normalizeEnquiryQuantityNumber(quantity)}mts` : ""
 }
 
 function extractBareQuantity(value: string) {
@@ -391,13 +448,13 @@ function extractBareQuantity(value: string) {
   const ranges = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)(?!\s*%|[\d.,])/gi))
     .filter((match) => isUsableQuantityNumber(match[1]) && isUsableQuantityNumber(match[2]))
   const range = ranges.at(-1)
-  if (range) return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+  if (range) return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
 
   const numbers = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)(?!\s*(?:%|cst\b)|[\d.,])/gi))
     .map((match) => match[1])
     .filter(isUsableQuantityNumber)
   const quantity = numbers.at(-1)
-  return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
+  return quantity ? `${normalizeEnquiryQuantityNumber(quantity)}mts` : ""
 }
 
 function extractQuantityFromProductSegment(value: string) {
@@ -407,33 +464,33 @@ function extractQuantityFromProductSegment(value: string) {
 function extractQuantityImmediatelyBeforeProduct(value: string) {
   const range = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
-    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
 
   const single = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
   return single && isUsableQuantityNumber(single[1])
-    ? `${normalizeQuantityNumber(single[1])}mts`
+    ? `${normalizeEnquiryQuantityNumber(single[1])}mts`
     : ""
 }
 
 function extractBareRangeImmediatelyBeforeProduct(value: string) {
   const range = value.match(/(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*$/i)
   return range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])
-    ? `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    ? `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
     : ""
 }
 
 function extractQuantityImmediatelyAfterProduct(value: string) {
   const range = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
-    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
 
   const single = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
   if (!single || !isUsableQuantityNumber(single[1])) return ""
   const remainder = value.slice(single[0].length)
   if (/^\s*(?:%|cst\b)/i.test(remainder)) return ""
-  return `${normalizeQuantityNumber(single[1])}mts`
+  return `${normalizeEnquiryQuantityNumber(single[1])}mts`
 }
 
 function extractQuantityFromBlock(lines: string[]) {
@@ -446,7 +503,7 @@ function extractQuantityFromBlock(lines: string[]) {
     .map((line) => line.match(/^\d+(?:[,.]\d+)?$/)?.[0] || "")
     .find((value) => value && isUsableQuantityNumber(value))
 
-  return numericLine ? `${normalizeQuantityNumber(numericLine)}mts` : ""
+  return numericLine ? `${normalizeEnquiryQuantityNumber(numericLine)}mts` : ""
 }
 
 function productMatches(line: string) {
@@ -495,8 +552,10 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
 
 function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
   const nearby = lines.slice(Math.max(0, productIndex - 3), productIndex)
+  const unitOnlyPattern = new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i")
   for (let index = nearby.length - 1; index >= 0; index -= 1) {
     const line = nearby[index]
+    if (unitOnlyPattern.test(line)) break
     if (containsProduct(line)) break
     const labelled = /^\s*(?:qty|quantity)\b/i.test(line)
     const standalone = /^\s*\d+(?:[,.]\d+)?(?:\s*(?:-|~|to)\s*\d+(?:[,.]\d+)?)?\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])?\s*$/i.test(line)

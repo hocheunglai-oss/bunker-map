@@ -21,6 +21,7 @@ const supplementalPorts = [
   "Hakata",
   "Hong Kong",
   "Laemchabang",
+  "Linggi",
   "Nagasaki",
   "Pyeongtaek",
   "Shimonoseki",

@@ -2,6 +2,7 @@ import {
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
   formatVlsfoMaxRemark,
+  normalizeEnquiryQuantityNumber,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
@@ -173,26 +174,17 @@ function classifyFuel(value: string): SpcFuelKey | "" {
   return ""
 }
 
-function normalizeQuantityNumber(value: string) {
-  const normalized = value.replace(/,/g, "")
-  if (/^\d+\.0+$/.test(normalized)) return normalized.split(".")[0]
-  if (/^\d+$/.test(normalized) && Number(normalized) >= 1000) {
-    return Number(normalized).toLocaleString("en-US")
-  }
-  return normalized
-}
-
 function extractQuantity(value: string) {
   const unit = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
   const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)\s*${unit}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
-    return `${normalizeQuantityNumber(range[1])}-${normalizeQuantityNumber(range[2])}mts`
+    return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
 
   const matches = Array.from(value.matchAll(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*${unit}(?=$|[^A-Za-z0-9])`, "gi")))
     .map((match) => match[1])
   const quantity = matches.at(-1)
-  return quantity ? `${normalizeQuantityNumber(quantity)}mts` : ""
+  return quantity ? `${normalizeEnquiryQuantityNumber(quantity)}mts` : ""
 }
 
 function vlsfoRemarks(value: string) {
@@ -230,10 +222,10 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: SpcFue
   if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
 
   const plainNumber = text.match(/^(\d+(?:[,.]\d+)?)$/)
-  if (plainNumber) return `${normalizeQuantityNumber(plainNumber[1])}mts`
+  if (plainNumber) return `${normalizeEnquiryQuantityNumber(plainNumber[1])}mts`
   const plainRange = text.match(/^(\d+(?:[,.]\d+)?)\s*(?:-|to)\s*(\d+(?:[,.]\d+)?)$/)
   if (plainRange) {
-    return `${normalizeQuantityNumber(plainRange[1])}-${normalizeQuantityNumber(plainRange[2])}mts`
+    return `${normalizeEnquiryQuantityNumber(plainRange[1])}-${normalizeEnquiryQuantityNumber(plainRange[2])}mts`
   }
 
   const quantity = extractQuantity(text)

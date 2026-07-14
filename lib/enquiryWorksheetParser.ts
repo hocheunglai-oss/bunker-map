@@ -187,6 +187,19 @@ function extractLabelledVessel(lines: string[]) {
   return ""
 }
 
+function extractProseVessel(lines: string[]) {
+  for (const line of lines.slice(0, 10)) {
+    const quoted = line.match(/\b(?:our\s+|the\s+)?vessel\s+["']([^"']{2,60})["']/i)?.[1] || ""
+    const unquoted = line.match(
+      /\b(?:our\s+|the\s+)?vessel\s+((?:m\s*[./-]?\s*[vt]|mv|mt)?\.?\s*[A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s+(?:will|is|needs?|requires?|eta|at)\b)/i,
+    )?.[1] || ""
+    const cleaned = cleanVesselName(quoted || unquoted)
+    if (isPlausibleVesselName(cleaned)) return cleaned
+  }
+
+  return ""
+}
+
 function extractFallbackVessel(lines: string[], imo: string) {
   if (!imo) return ""
 
@@ -334,6 +347,32 @@ function cleanPortName(
   return next.toLowerCase()
 }
 
+function extractStructuredSlashPort(
+  lines: string[],
+  options: EnquiryWorksheetParseOptions,
+) {
+  for (const line of lines) {
+    const structuredLine = line.replace(/^\s*\[[^\]]+\]\s*[^:]{1,40}:\s*/i, "")
+    const parts = structuredLine.split("/").map(cleanSpaces).filter(Boolean)
+    if (parts.length < 2) continue
+
+    const firstPart = parts[0]
+    const hasVesselIdentity = /\b\d{7}\b/.test(firstPart) ||
+      isPlausibleVesselName(cleanVesselName(firstPart))
+    const tradingText = parts.slice(1).join(" / ")
+    const hasTradingDetails = /\b(?:eta|etb|etd|ets|vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|mt|mts|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(tradingText) ||
+      /\b\d{1,2}\s*(?:-|~|to)?\s*\d{0,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(tradingText)
+    if (!hasVesselIdentity || !hasTradingDetails) continue
+
+    for (const part of parts.slice(1)) {
+      const port = findKnownPort(part, { ...options, includeShortAliases: true })
+      if (port) return port
+    }
+  }
+
+  return ""
+}
+
 export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseOptions = {}) {
   const lines = normalizeInput(text)
     .split("\n")
@@ -368,6 +407,9 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     })
     if (nextPort) return nextPort
   }
+
+  const structuredSlashPort = extractStructuredSlashPort(lines, options)
+  if (structuredSlashPort) return structuredSlashPort
 
   for (const line of lines) {
     if (NON_PORT_CONTEXT_PATTERN.test(line) || /[\w.-]+@[\w.-]+/.test(line)) continue
@@ -464,6 +506,7 @@ export function parseEnquiryWorksheetGuess(
   const vesselName =
     (imoLine ? extractVesselFromImoLine(imoLine, imo) : "") ||
     extractLabelledVessel(lines) ||
+    extractProseVessel(lines) ||
     extractFallbackVessel(lines, imo) ||
     extractColonProductVessel(lines) ||
     extractDelimitedHeaderVessel(lines, options) ||
