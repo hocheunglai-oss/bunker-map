@@ -5856,6 +5856,7 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-presenter > main {
   position: relative;
+  grid-row: 2;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -5891,8 +5892,14 @@ body:has(.spc-statistics-page) .spc-main {
 .spc-readme-presenter > main > .spc-readme-media {
   width: min(1600px, 100%);
   height: 100%;
+  min-height: 0;
   max-height: 100%;
+  overflow: hidden;
   aspect-ratio: auto;
+}
+
+.spc-readme-presenter .spc-readme-media > video {
+  min-height: 0;
 }
 
 .spc-readme-presenter .spc-readme-scene-heading span {
@@ -6083,6 +6090,7 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-readme-presenter-audio {
+  grid-row: 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6100,6 +6108,10 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-presenter-audio audio {
   width: min(820px, 100%);
+}
+
+.spc-readme-presenter > footer {
+  grid-row: 4;
 }
 
 @media (max-width: 1180px) {
