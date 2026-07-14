@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 type PresentationMediaProps = {
   title: string
@@ -24,7 +24,27 @@ export function PresentationMedia({
   onEnded,
 }: PresentationMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const narrationRef = useRef<HTMLAudioElement>(null)
+  const [playbackBlocked, setPlaybackBlocked] = useState(false)
   const hasSeparateNarration = Boolean(narrationSrc)
+
+  useEffect(() => {
+    if (!autoPlay) return
+    const media = hasSeparateNarration ? narrationRef.current : videoRef.current
+    if (!media) return
+
+    let cancelled = false
+    void media.play()
+      .then(() => {
+        if (!cancelled) setPlaybackBlocked(false)
+      })
+      .catch(() => {
+        if (!cancelled) setPlaybackBlocked(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [autoPlay, hasSeparateNarration, narrationSrc, videoSrc])
 
   function syncVideoToNarration(audio: HTMLAudioElement) {
     const video = videoRef.current
@@ -35,10 +55,22 @@ export function PresentationMedia({
   }
 
   async function handleNarrationPlay(audio: HTMLAudioElement) {
+    setPlaybackBlocked(false)
     const video = videoRef.current
     if (!video) return
     syncVideoToNarration(audio)
     await video.play().catch(() => undefined)
+  }
+
+  async function startBlockedPlayback() {
+    const media = hasSeparateNarration ? narrationRef.current : videoRef.current
+    if (!media) return
+    try {
+      await media.play()
+      setPlaybackBlocked(false)
+    } catch {
+      setPlaybackBlocked(true)
+    }
   }
 
   return (
@@ -51,6 +83,9 @@ export function PresentationMedia({
         playsInline
         preload="metadata"
         aria-label={title}
+        onPlay={() => {
+          if (!hasSeparateNarration) setPlaybackBlocked(false)
+        }}
         onEnded={hasSeparateNarration ? undefined : onEnded}
       >
         <source src={videoSrc} type={videoMimeType || "video/mp4"} />
@@ -59,6 +94,7 @@ export function PresentationMedia({
         <div className="spc-readme-narration-control">
           <span>{narrationLabel}</span>
           <audio
+            ref={narrationRef}
             controls
             autoPlay={autoPlay}
             preload="metadata"
@@ -74,6 +110,11 @@ export function PresentationMedia({
             <source src={narrationSrc} type={narrationMimeType || "audio/mpeg"} />
           </audio>
         </div>
+      ) : null}
+      {playbackBlocked ? (
+        <button type="button" className="spc-readme-playback-start" onClick={() => void startBlockedPlayback()}>
+          START VIDEO
+        </button>
       ) : null}
     </div>
   )
