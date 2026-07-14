@@ -165,7 +165,7 @@ function cleanVisualCopy(value: unknown): SpcPresentationVisualText[] {
       .replace(/^-+|-+$/g, "")
     if (!id || seen.has(id)) continue
     const label = cleanText(record.label, 100) || id.replace(/-/g, " ").toUpperCase()
-    const text = typeof record.text === "string" ? record.text.trim().slice(0, 400) : ""
+    const text = typeof record.text === "string" ? record.text.trim().slice(0, 8000) : ""
     seen.add(id)
     items.push({ id, label, text })
     if (items.length >= 40) break
