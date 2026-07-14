@@ -24,6 +24,7 @@ const PRESENTATION_COLUMNS = [
   "key_points",
   "q_and_a_prompt",
   "visual_kind",
+  "visual_copy",
   "video_path",
   "video_mime_type",
   "video_bytes",
@@ -52,6 +53,7 @@ type PresentationRow = {
   key_points: string[] | null
   q_and_a_prompt: string
   visual_kind: string
+  visual_copy: unknown
   video_path: string | null
   video_mime_type: string | null
   video_bytes: number | string | null
@@ -68,6 +70,12 @@ type PresentationRow = {
   updated_at: string
 }
 
+export type SpcPresentationVisualText = {
+  id: string
+  label: string
+  text: string
+}
+
 export type SpcPresentationChunk = {
   id: string
   slug: string
@@ -80,6 +88,7 @@ export type SpcPresentationChunk = {
   keyPoints: string[]
   questionPrompt: string
   visualKind: string
+  visualCopy: SpcPresentationVisualText[]
   videoUrl: string | null
   videoMimeType: string | null
   videoBytes: number
@@ -105,6 +114,7 @@ export type SaveSpcPresentationChunkInput = {
   keyPoints?: string[]
   questionPrompt?: string
   visualKind?: string
+  visualCopy?: SpcPresentationVisualText[]
   durationSeconds?: number | null
   status?: "draft" | "published"
 }
@@ -139,6 +149,28 @@ function cleanKeyPoints(value: unknown) {
     .map((item) => cleanText(item, 220))
     .filter(Boolean)
     .slice(0, 8)
+}
+
+function cleanVisualCopy(value: unknown): SpcPresentationVisualText[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const items: SpcPresentationVisualText[] = []
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const record = item as Record<string, unknown>
+    const id = cleanText(record.id, 80)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+    if (!id || seen.has(id)) continue
+    const label = cleanText(record.label, 100) || id.replace(/-/g, " ").toUpperCase()
+    const text = typeof record.text === "string" ? record.text.trim().slice(0, 400) : ""
+    seen.add(id)
+    items.push({ id, label, text })
+    if (items.length >= 40) break
+  }
+  return items
 }
 
 function cleanDuration(value: unknown) {
@@ -209,6 +241,7 @@ function presentRow(row: PresentationRow, mediaUrls: Map<string, string>): SpcPr
     keyPoints: row.key_points || [],
     questionPrompt: row.q_and_a_prompt,
     visualKind: row.visual_kind,
+    visualCopy: cleanVisualCopy(row.visual_copy),
     videoUrl: row.video_path ? mediaUrls.get(row.video_path) || null : null,
     videoMimeType: row.video_mime_type,
     videoBytes: bytes(row.video_bytes),
@@ -257,6 +290,7 @@ function savePayload(input: SaveSpcPresentationChunkInput, username: string) {
     key_points: cleanKeyPoints(input.keyPoints),
     q_and_a_prompt: cleanText(input.questionPrompt, 500),
     visual_kind: cleanVisualKind(input.visualKind),
+    visual_copy: cleanVisualCopy(input.visualCopy),
     duration_seconds: cleanDuration(input.durationSeconds),
     status: input.status === "draft" ? "draft" : "published",
     updated_by_username: username,

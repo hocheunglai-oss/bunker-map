@@ -38,6 +38,7 @@ type ChunkDraft = {
   keyPoints: string
   questionPrompt: string
   visualKind: string
+  visualCopy: SpcPresentationChunk["visualCopy"]
   durationSeconds: string
   status: "draft" | "published"
 }
@@ -75,6 +76,7 @@ function chunkDraft(chunk: SpcPresentationChunk): ChunkDraft {
     keyPoints: chunk.keyPoints.join("\n"),
     questionPrompt: chunk.questionPrompt,
     visualKind: chunk.visualKind,
+    visualCopy: chunk.visualCopy.map((item) => ({ ...item })),
     durationSeconds: chunk.durationSeconds ? String(chunk.durationSeconds) : "",
     status: chunk.status,
   }
@@ -385,6 +387,7 @@ export default function SpcReadmePage() {
           keyPoints: draft.keyPoints.split("\n").map((line) => line.trim()).filter(Boolean),
           questionPrompt: draft.questionPrompt,
           visualKind: draft.visualKind,
+          visualCopy: draft.visualCopy,
           durationSeconds: draft.durationSeconds ? Number(draft.durationSeconds) : null,
           status: draft.status,
         },
@@ -414,6 +417,7 @@ export default function SpcReadmePage() {
           keyPoints: [],
           questionPrompt: "",
           visualKind: "chapter-takeaway",
+          visualCopy: [],
           durationSeconds: null,
           status: "draft",
         },
@@ -745,6 +749,24 @@ export default function SpcReadmePage() {
               <label><span>SECTION</span><input value={draft.sectionLabel} onChange={(event) => setDraft({ ...draft, sectionLabel: event.target.value })} /></label>
               <label><span>TITLE</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
               <label><span>SUMMARY</span><textarea rows={3} value={draft.summary} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} /></label>
+              <section className="spc-readme-video-copy" aria-label="Video text">
+                <header><strong>VIDEO TEXT</strong><span>USED FOR THE NEXT VIDEO RENDER</span></header>
+                {draft.visualCopy.length > 0 ? draft.visualCopy.map((item) => (
+                  <label key={item.id}>
+                    <span>{item.label}</span>
+                    <textarea
+                      rows={2}
+                      value={item.text}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        visualCopy: draft.visualCopy.map((entry) => (
+                          entry.id === item.id ? { ...entry, text: event.target.value } : entry
+                        )),
+                      })}
+                    />
+                  </label>
+                )) : <p>NO VIDEO TEXT HAS BEEN DEFINED FOR THIS CHUNK.</p>}
+              </section>
               <label><span>KEY POINTS / ONE PER LINE</span><textarea rows={5} value={draft.keyPoints} onChange={(event) => setDraft({ ...draft, keyPoints: event.target.value })} /></label>
               <label><span>NARRATION SCRIPT</span><textarea rows={9} value={draft.narration} onChange={(event) => setDraft({ ...draft, narration: event.target.value })} /></label>
               <label><span>Q&amp;A PROMPT</span><textarea rows={3} value={draft.questionPrompt} onChange={(event) => setDraft({ ...draft, questionPrompt: event.target.value })} /></label>

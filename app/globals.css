@@ -5072,10 +5072,46 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-editor > label,
 .spc-readme-editor-row label,
-.spc-readme-media-inputs label {
+.spc-readme-media-inputs label,
+.spc-readme-video-copy label {
   display: grid;
   gap: 6px;
   padding: 9px 12px 0;
+}
+
+.spc-readme-video-copy {
+  margin-top: 12px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  padding-bottom: 10px;
+}
+
+.spc-readme-video-copy > header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #f5f7fa;
+  padding: 9px 12px;
+}
+
+.spc-readme-video-copy > header strong {
+  color: #002855;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.spc-readme-video-copy > header span,
+.spc-readme-video-copy > p {
+  color: #6c7685;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.spc-readme-video-copy > p {
+  margin: 0;
+  padding: 14px 12px 4px;
 }
 
 .spc-readme-editor label > span {

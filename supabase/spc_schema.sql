@@ -129,6 +129,7 @@ create table if not exists public.spc_presentation_chunks (
   key_points text[] not null default '{}',
   q_and_a_prompt text not null default '',
   visual_kind text not null default 'video',
+  visual_copy jsonb not null default '[]'::jsonb,
   video_path text,
   video_mime_type text,
   video_bytes bigint,
@@ -149,7 +150,9 @@ create table if not exists public.spc_presentation_chunks (
   constraint spc_presentation_chunks_media_version_check
     check (media_version > 0),
   constraint spc_presentation_chunks_revision_check
-    check (revision > 0)
+    check (revision > 0),
+  constraint spc_presentation_chunks_visual_copy_check
+    check (jsonb_typeof(visual_copy) = 'array')
 );
 
 create unique index if not exists spc_presentation_chunks_slug_key
