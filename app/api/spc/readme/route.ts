@@ -77,13 +77,13 @@ export async function POST(request: Request) {
     const context = createPresentationContext(session, request)
 
     if (payload.action === "save") {
-      if (!payload.chunk) throw new Error("Chunk details are required.")
+      if (!payload.chunk) throw new Error("Section details are required.")
       const chunk = await saveSpcPresentationChunk(payload.chunk, context)
       return NextResponse.json({ success: true, chunk })
     }
 
     if (payload.action === "move") {
-      if (!payload.id) throw new Error("Chunk id is required.")
+      if (!payload.id) throw new Error("Section id is required.")
       if (payload.direction !== "earlier" && payload.direction !== "later") {
         throw new Error("Invalid move direction.")
       }
@@ -92,13 +92,13 @@ export async function POST(request: Request) {
     }
 
     if (payload.action === "delete") {
-      if (!payload.id) throw new Error("Chunk id is required.")
+      if (!payload.id) throw new Error("Section id is required.")
       await deleteSpcPresentationChunk(payload.id, context)
       return NextResponse.json({ success: true })
     }
 
     if (payload.action === "prepare-upload") {
-      if (!payload.id) throw new Error("Chunk id is required.")
+      if (!payload.id) throw new Error("Section id is required.")
       if (payload.kind !== "video" && payload.kind !== "narration") {
         throw new Error("Invalid media type.")
       }

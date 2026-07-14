@@ -267,7 +267,7 @@ export async function listSpcPresentationChunks(includeDrafts: boolean) {
   if (!includeDrafts) query = query.eq("status", "published")
 
   const { data, error } = await query
-  if (error) throw new Error(`Could not load presentation chunks: ${error.message}`)
+  if (error) throw new Error(`Could not load presentation sections: ${error.message}`)
   const rows = (data || []) as unknown as PresentationRow[]
   const mediaUrls = await createSignedMediaUrls(rows)
   return rows.map((row) => presentRow(row, mediaUrls))
@@ -279,7 +279,7 @@ async function presentSingleRow(row: PresentationRow) {
 
 function savePayload(input: SaveSpcPresentationChunkInput, username: string) {
   const title = cleanText(input.title, 140)
-  if (!title) throw new Error("Chunk title is required.")
+  if (!title) throw new Error("Section title is required.")
 
   return {
     chapter_label: cleanText(input.chapterLabel, 40) || "CHAPTER 1",
@@ -311,7 +311,7 @@ export async function saveSpcPresentationChunk(
       .order("sort_order", { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (orderError) throw new Error(`Could not determine chunk order: ${orderError.message}`)
+    if (orderError) throw new Error(`Could not determine section order: ${orderError.message}`)
 
     const slugBase = safeSlug(payload.title)
     const slug = `${slugBase}-${Date.now().toString(36)}`
@@ -325,7 +325,7 @@ export async function saveSpcPresentationChunk(
       })
       .select(PRESENTATION_COLUMNS)
       .single()
-    if (error) throw new Error(`Could not create presentation chunk: ${error.message}`)
+    if (error) throw new Error(`Could not create presentation section: ${error.message}`)
     return presentSingleRow(data as unknown as PresentationRow)
   }
 
@@ -337,8 +337,8 @@ export async function saveSpcPresentationChunk(
     .eq("revision", revision)
     .select(PRESENTATION_COLUMNS)
     .maybeSingle()
-  if (error) throw new Error(`Could not save presentation chunk: ${error.message}`)
-  if (!data) throw new Error("This chunk changed in another session. Refresh before saving again.")
+  if (error) throw new Error(`Could not save presentation section: ${error.message}`)
+  if (!data) throw new Error("This section changed in another session. Refresh before saving again.")
   return presentSingleRow(data as unknown as PresentationRow)
 }
 
@@ -352,7 +352,7 @@ export async function moveSpcPresentationChunk(
     .select("id,sort_order,revision,chapter_label")
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true })
-  if (error) throw new Error(`Could not load chunk order: ${error.message}`)
+  if (error) throw new Error(`Could not load section order: ${error.message}`)
 
   const allRows = (data || []) as Array<{
     id: string
@@ -384,8 +384,8 @@ export async function moveSpcPresentationChunk(
     .eq("revision", row.revision)
     .select("id")
     .maybeSingle()
-  if (updateError) throw new Error(`Could not move presentation chunk: ${updateError.message}`)
-  if (!updated) throw new Error("This chunk changed in another session. Refresh before moving it.")
+  if (updateError) throw new Error(`Could not move presentation section: ${updateError.message}`)
+  if (!updated) throw new Error("This section changed in another session. Refresh before moving it.")
   return listSpcPresentationChunks(true)
 }
 
@@ -395,14 +395,14 @@ export async function deleteSpcPresentationChunk(id: string, context: SpcAuditCo
     .select("video_path,narration_path")
     .eq("id", id)
     .maybeSingle()
-  if (error) throw new Error(`Could not load presentation chunk: ${error.message}`)
-  if (!row) throw new Error("Presentation chunk was not found.")
+  if (error) throw new Error(`Could not load presentation section: ${error.message}`)
+  if (!row) throw new Error("Presentation section was not found.")
 
   const { error: deleteError } = await createSpcAuditedSupabaseClient(context)
     .from(PRESENTATION_TABLE)
     .delete()
     .eq("id", id)
-  if (deleteError) throw new Error(`Could not delete presentation chunk: ${deleteError.message}`)
+  if (deleteError) throw new Error(`Could not delete presentation section: ${deleteError.message}`)
 
   const paths = [row.video_path, row.narration_path].filter(
     (path): path is string => typeof path === "string" && Boolean(path),
@@ -458,8 +458,8 @@ export async function prepareSpcPresentationUpload(
     .select("id")
     .eq("id", id)
     .maybeSingle()
-  if (error) throw new Error(`Could not load presentation chunk: ${error.message}`)
-  if (!chunk) throw new Error("Presentation chunk was not found.")
+  if (error) throw new Error(`Could not load presentation section: ${error.message}`)
+  if (!chunk) throw new Error("Presentation section was not found.")
 
   await ensurePresentationBucket()
   const path = `${id}/${kind}-${Date.now()}-${safeFileName(fileName)}`
@@ -486,10 +486,10 @@ export async function completeSpcPresentationUpload(
     .select("video_path,narration_path,media_version,revision")
     .eq("id", id)
     .maybeSingle()
-  if (error) throw new Error(`Could not load presentation chunk: ${error.message}`)
-  if (!current) throw new Error("Presentation chunk was not found.")
+  if (error) throw new Error(`Could not load presentation section: ${error.message}`)
+  if (!current) throw new Error("Presentation section was not found.")
   if (Number(current.revision) !== revision) {
-    throw new Error("This chunk changed in another session. Refresh before attaching media.")
+    throw new Error("This section changed in another session. Refresh before attaching media.")
   }
 
   const fileName = path.split("/").pop() || ""
@@ -518,7 +518,7 @@ export async function completeSpcPresentationUpload(
     .select(PRESENTATION_COLUMNS)
     .maybeSingle()
   if (updateError) throw new Error(`Could not attach presentation media: ${updateError.message}`)
-  if (!updated) throw new Error("This chunk changed in another session. Refresh before attaching media.")
+  if (!updated) throw new Error("This section changed in another session. Refresh before attaching media.")
 
   const previousPath = kind === "video" ? current.video_path : current.narration_path
   if (previousPath && previousPath !== path) {

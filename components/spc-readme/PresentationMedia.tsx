@@ -11,17 +11,17 @@ type PresentationMediaProps = {
   narrationLabel?: string
   autoPlay?: boolean
   onEnded?: () => void
+  startLabel?: string
 }
 
 export function PresentationMedia({
   title,
   videoSrc,
-  videoMimeType,
   narrationSrc,
-  narrationMimeType,
   narrationLabel = "NARRATION",
   autoPlay = false,
   onEnded,
+  startLabel = "START VIDEO",
 }: PresentationMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const narrationRef = useRef<HTMLAudioElement>(null)
@@ -77,27 +77,27 @@ export function PresentationMedia({
     <div className="spc-readme-media">
       <video
         ref={videoRef}
+        src={videoSrc}
         controls={!hasSeparateNarration}
         autoPlay={autoPlay && !hasSeparateNarration}
         muted={hasSeparateNarration}
         playsInline
-        preload="metadata"
+        preload={autoPlay ? "auto" : "metadata"}
         aria-label={title}
         onPlay={() => {
           if (!hasSeparateNarration) setPlaybackBlocked(false)
         }}
         onEnded={hasSeparateNarration ? undefined : onEnded}
-      >
-        <source src={videoSrc} type={videoMimeType || "video/mp4"} />
-      </video>
+      />
       {narrationSrc ? (
         <div className="spc-readme-narration-control">
           <span>{narrationLabel}</span>
           <audio
             ref={narrationRef}
+            src={narrationSrc}
             controls
             autoPlay={autoPlay}
-            preload="metadata"
+            preload={autoPlay ? "auto" : "metadata"}
             onPlay={(event) => void handleNarrationPlay(event.currentTarget)}
             onPause={() => videoRef.current?.pause()}
             onSeeking={(event) => syncVideoToNarration(event.currentTarget)}
@@ -106,14 +106,12 @@ export function PresentationMedia({
               videoRef.current?.pause()
               onEnded?.()
             }}
-          >
-            <source src={narrationSrc} type={narrationMimeType || "audio/mpeg"} />
-          </audio>
+          />
         </div>
       ) : null}
       {playbackBlocked ? (
         <button type="button" className="spc-readme-playback-start" onClick={() => void startBlockedPlayback()}>
-          START VIDEO
+          {startLabel}
         </button>
       ) : null}
     </div>
