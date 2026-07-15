@@ -137,6 +137,20 @@ function toCaps(value: string) {
   return value.toUpperCase()
 }
 
+function preserveTextInputSelection(input: HTMLInputElement | HTMLTextAreaElement) {
+  const { selectionStart, selectionEnd } = input
+  if (selectionStart === null || selectionEnd === null) return
+
+  window.requestAnimationFrame(() => {
+    if (document.activeElement !== input) return
+    const valueLength = input.value.length
+    input.setSelectionRange(
+      Math.min(selectionStart, valueLength),
+      Math.min(selectionEnd, valueLength),
+    )
+  })
+}
+
 function normalizeEnquiryText(value: string) {
   return value
     .replace(/\r\n?/g, "\n")
@@ -514,11 +528,22 @@ export default function EnquiryWorksheetPage() {
     setWorksheet((current) => ({ ...current, [key]: value }))
   }
 
-  function updateCapsField<K extends keyof Worksheet>(key: K, value: string) {
+  function updateCapsField<K extends keyof Worksheet>(
+    key: K,
+    value: string,
+    input?: HTMLInputElement,
+  ) {
+    if (input) preserveTextInputSelection(input)
     updateField(key, toCaps(value) as Worksheet[K])
   }
 
-  function updateWorkflow(key: WorkflowKey, field: keyof WorkflowRow, value: string | boolean) {
+  function updateWorkflow(
+    key: WorkflowKey,
+    field: keyof WorkflowRow,
+    value: string | boolean,
+    input?: HTMLInputElement,
+  ) {
+    if (typeof value === "string" && input) preserveTextInputSelection(input)
     setWorksheet((current) => ({
       ...current,
       workflow: {
@@ -531,7 +556,8 @@ export default function EnquiryWorksheetPage() {
     }))
   }
 
-  function updateWorksheetHeader(value: string) {
+  function updateWorksheetHeader(value: string, input?: HTMLInputElement) {
+    if (input) preserveTextInputSelection(input)
     const next = toCaps(value)
     const imoMatch = next.match(/(?:^|\s+-\s+|\s+)(\d{7})\s*$/)
     const nextImo = imoMatch?.[1] || ""
@@ -1021,9 +1047,10 @@ export default function EnquiryWorksheetPage() {
               <span>VESSEL NAME</span>
               <input
                 value={guesses.vesselName}
-                onChange={(event) =>
+                onChange={(event) => {
+                  preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
-                }
+                }}
                 className={styles.capsInput}
               />
             </label>
@@ -1038,12 +1065,13 @@ export default function EnquiryWorksheetPage() {
               </span>
               <input
                 value={guesses.imo}
-                onChange={(event) =>
+                onChange={(event) => {
+                  preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({
                     ...current,
                     imo: event.target.value.replace(/\D/g, "").slice(0, 7),
                   }))
-                }
+                }}
                 inputMode="numeric"
                 maxLength={7}
               />
@@ -1052,18 +1080,20 @@ export default function EnquiryWorksheetPage() {
               <span>PORT</span>
               <input
                 value={guesses.port}
-                onChange={(event) =>
+                onChange={(event) => {
+                  preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({ ...current, port: event.target.value.toLowerCase() }))
-                }
+                }}
               />
             </label>
             <label>
               <span>BUYER</span>
               <input
                 value={guesses.buyer}
-                onChange={(event) =>
+                onChange={(event) => {
+                  preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
-                }
+                }}
                 className={styles.capsInput}
               />
             </label>
@@ -1111,7 +1141,7 @@ export default function EnquiryWorksheetPage() {
           <div className={styles.vesselLine}>
             <input
               value={getWorksheetHeader(worksheet)}
-              onChange={(event) => updateWorksheetHeader(event.target.value)}
+              onChange={(event) => updateWorksheetHeader(event.target.value, event.currentTarget)}
               aria-label="Vessel name and IMO"
               placeholder="VESSEL NAME - IMO"
               className={styles.capsInput}
@@ -1129,7 +1159,7 @@ export default function EnquiryWorksheetPage() {
               <span>BUYER</span>
               <input
                 value={worksheet.buyer}
-                onChange={(event) => updateCapsField("buyer", event.target.value)}
+                onChange={(event) => updateCapsField("buyer", event.target.value, event.currentTarget)}
                 className={styles.capsInput}
               />
             </label>
@@ -1137,7 +1167,7 @@ export default function EnquiryWorksheetPage() {
               <span>CREDIT USED / CL</span>
               <input
                 value={worksheet.credit}
-                onChange={(event) => updateCapsField("credit", event.target.value)}
+                onChange={(event) => updateCapsField("credit", event.target.value, event.currentTarget)}
                 className={styles.capsInput}
               />
             </label>
@@ -1153,7 +1183,9 @@ export default function EnquiryWorksheetPage() {
               <span>UNOFFICIAL COMPENSATION?</span>
               <input
                 value={worksheet.unofficialCompensation}
-                onChange={(event) => updateCapsField("unofficialCompensation", event.target.value)}
+                onChange={(event) =>
+                  updateCapsField("unofficialCompensation", event.target.value, event.currentTarget)
+                }
                 aria-label="Unofficial compensation yes or no"
                 placeholder="YES / NO"
                 className={styles.capsInput}
@@ -1187,7 +1219,9 @@ export default function EnquiryWorksheetPage() {
                         />
                         <input
                           value={row[`${field}Text`]}
-                          onChange={(event) => updateWorkflow(key, `${field}Text`, event.target.value)}
+                          onChange={(event) =>
+                            updateWorkflow(key, `${field}Text`, event.target.value, event.currentTarget)
+                          }
                           aria-label={`${label} ${field} text`}
                           className={styles.capsInput}
                         />
@@ -1199,7 +1233,7 @@ export default function EnquiryWorksheetPage() {
                     <span>{label}</span>
                     <input
                       value={row.note}
-                      onChange={(event) => updateWorkflow(key, "note", event.target.value)}
+                      onChange={(event) => updateWorkflow(key, "note", event.target.value, event.currentTarget)}
                       className={styles.capsInput}
                     />
                   </label>
