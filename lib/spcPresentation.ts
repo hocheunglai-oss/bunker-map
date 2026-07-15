@@ -11,6 +11,7 @@ const PRESENTATION_BUCKET = "spc-presentation-media"
 const SIGNED_MEDIA_SECONDS = 8 * 60 * 60
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const MAX_NARRATION_BYTES = 50 * 1024 * 1024
+const MAX_VISUAL_COPY_ITEMS = 120
 
 const PRESENTATION_COLUMNS = [
   "id",
@@ -168,7 +169,7 @@ function cleanVisualCopy(value: unknown): SpcPresentationVisualText[] {
     const text = typeof record.text === "string" ? record.text.trim().slice(0, 8000) : ""
     seen.add(id)
     items.push({ id, label, text })
-    if (items.length >= 40) break
+    if (items.length >= MAX_VISUAL_COPY_ITEMS) break
   }
   return items
 }
