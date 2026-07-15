@@ -1115,8 +1115,8 @@
   function sendSelectionLabel() {
     const count = new Set(selectedSendableEnquiryIds()).size
     if (!count) return "Send"
-    const enquiries = `${count} Enq${count === 1 ? "" : "s"} selected`
-    return state.templateEnabled ? `Temp & ${enquiries}` : enquiries
+    const enquiries = `${count} Enq${count === 1 ? "" : "s"}`
+    return state.templateEnabled ? `Send Temp & ${enquiries}` : `Send ${enquiries}`
   }
 
   function activeDragEnquiryIds(draggedId) {

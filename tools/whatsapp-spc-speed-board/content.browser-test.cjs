@@ -343,7 +343,7 @@ async function main() {
         width: getComputedStyle(button).width,
         height: getComputedStyle(button).height,
       }))
-      assert.equal(sendButtonAfterSelection.text, "Temp & 1 Enq selected")
+      assert.equal(sendButtonAfterSelection.text, "Send Temp & 1 Enq")
       assert.equal(sendButtonAfterSelection.width, sendButtonBeforeSelection.width)
       assert.equal(sendButtonAfterSelection.height, sendButtonBeforeSelection.height)
       if (process.env.SPC_BROWSER_SCREENSHOT) {
@@ -405,8 +405,8 @@ async function main() {
 
       assert.deepEqual(dragRuleResult.noneSelected, ["enq-2"])
       assert.deepEqual(dragRuleResult.oneSelected, ["enq-2"])
-      assert.equal(dragRuleResult.twoSelectedLabel, "2 Enqs selected")
-      assert.equal(dragRuleResult.templateAndTwoSelectedLabel, "Temp & 2 Enqs selected")
+      assert.equal(dragRuleResult.twoSelectedLabel, "Send 2 Enqs")
+      assert.equal(dragRuleResult.templateAndTwoSelectedLabel, "Send Temp & 2 Enqs")
       assert.deepEqual(dragRuleResult.manySelected, ["enq-1", "enq-3"])
       assert.equal(
         dragRuleResult.manyText,

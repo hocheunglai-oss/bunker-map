@@ -474,11 +474,11 @@ api.state.enquiries = [
 ]
 api.state.selectedEnquiries = { "enq-1": true, "enq-2": true }
 assert.equal(api.selectedEnquiryText(), duplicateMessage)
-assert.equal(api.sendSelectionLabel(), "2 Enqs selected")
+assert.equal(api.sendSelectionLabel(), "Send 2 Enqs")
 api.state.templateEnabled = true
-assert.equal(api.sendSelectionLabel(), "Temp & 2 Enqs selected")
+assert.equal(api.sendSelectionLabel(), "Send Temp & 2 Enqs")
 api.state.selectedEnquiries = { "enq-1": true }
-assert.equal(api.sendSelectionLabel(), "Temp & 1 Enq selected")
+assert.equal(api.sendSelectionLabel(), "Send Temp & 1 Enq")
 api.state.selectedEnquiries = {}
 assert.equal(api.sendSelectionLabel(), "Send")
 
