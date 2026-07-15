@@ -4706,7 +4706,8 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-chapter-tabs button {
   position: relative;
-  min-width: 120px;
+  min-width: max-content;
+  flex: 0 0 auto;
   border: 0;
   background: transparent;
   color: #657082;
@@ -4715,6 +4716,20 @@ body:has(.spc-statistics-page) .spc-main {
   font-size: 10px;
   font-weight: 900;
   white-space: nowrap;
+}
+
+@media (min-width: 761px) and (max-width: 1600px) {
+  .spc-readme-chapter-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-block: 3px 0;
+  }
+
+  .spc-readme-chapter-tabs button {
+    min-width: 220px;
+    flex: 1 1 220px;
+    white-space: normal;
+  }
 }
 
 .spc-readme-chapter-tabs button:hover {
@@ -6185,12 +6200,16 @@ body:has(.spc-statistics-page) .spc-main {
   }
 
   .spc-readme-chapter-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
     padding: 0 8px;
   }
 
   .spc-readme-chapter-tabs button {
     min-width: 108px;
+    flex: 0 0 auto;
     padding-inline: 12px;
+    white-space: nowrap;
   }
 
   .spc-readme-session-status,
