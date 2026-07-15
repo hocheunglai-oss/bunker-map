@@ -29,7 +29,7 @@ const VESSEL_LABEL_PATTERN =
   /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|船名)/i
 
 const VESSEL_FIELD_PATTERN =
-  /^\s*['"]?\s*(?:[-•*]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|船名)\s*(?:[:：#\-/\t]|\s{2,})/i
+  /^\s*['"]?\s*(?:[-•*]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
 
 const BUYER_LABEL_PATTERN =
   /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
@@ -110,7 +110,7 @@ function findBestImo(lines: string[]) {
 
 function removeVesselLabel(value: string) {
   return value
-    .replace(/^\s*船名\s*(?:[:：]\s*)?/i, "")
+    .replace(/^\s*船名(?:\s*\(\s*IMO(?:\s*NO\.?|\s*NUMBER)?\s*\.?\s*\))?\s*(?:[:：]\s*)?/i, "")
     .replace(
       /^\s*(?:performing\s+vessel|vessel\s*(?:name|\s*\/\s*imo|\(\s*imo\s*\))?|vsl(?:\s+name)?|ship(?:\s+name)?)\s*[:#\-/]?\s*/i,
       "",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
+  applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
   normalizeEnquiryQuantityText,
@@ -433,7 +434,7 @@ function buildInstructions(source: ParserAiSource) {
     "RMG180, RMG380, 120CST, and 180CST alone do not prove sulphur class. Use the explicit VLSFO/LSFO/0.5 or HSFO/HFO/IFO/3.5 context; 3.5% RMG380 is HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
     "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO as lsmgo.",
-    "Only include 180CST MAX or 120CST MAX when the input explicitly says 180cst, 120cst, rmg180, rmg120, ls180cst, or ls120cst. If only 180 or 120 appears as a quantity/date, add a warning instead.",
+    "Do not infer or add 180CST MAX or 120CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO max remarks; the user controls these manually.",
     "If RMK, CBM, or KL appears, add a warning.",
     "Return vlsfoMaxRemarks as lower-case enum values only.",
   ].join("\n")
@@ -667,10 +668,11 @@ export async function POST(request: Request) {
     }
 
     const model = process.env.OPENAI_PARSER_MODEL || MODEL
+    const manualVlsfoMaxRemarks = cleanVlsfoMaxRemarks(payload.manualVlsfoMaxRemarks)
     const input = [
       `Source: ${source}`,
       `Context: ${cleanText(payload.context) || "parser-correction"}`,
-      `Manual VLSFO max remarks: ${JSON.stringify(cleanVlsfoMaxRemarks(payload.manualVlsfoMaxRemarks))}`,
+      `Manual VLSFO max remarks: ${JSON.stringify(manualVlsfoMaxRemarks)}`,
       `Current fields JSON: ${JSON.stringify(payload.fields || {})}`,
       `Current deterministic parser output:\n${parserOutput || "(empty)"}`,
       `Current user-edited output:\n${currentOutput || "(empty)"}`,
@@ -715,11 +717,19 @@ export async function POST(request: Request) {
       throw new Error("OpenAI returned an unreadable parser correction.")
     }
 
+    const aiDraft = normalizeDraft(parsed)
     let draft = normalizeOutputForSource(
       source,
       rawText,
       cleanedText,
-      normalizeDraft(parsed),
+      {
+        ...aiDraft,
+        correctedOutput: applyVlsfoMaxRemarksToShortenedEnquiry(
+          aiDraft.correctedOutput,
+          manualVlsfoMaxRemarks,
+        ),
+        vlsfoMaxRemarks: manualVlsfoMaxRemarks,
+      },
     )
 
     if (draft.imo && !textContainsImo(draft.imo, rawText, cleanedText, parserOutput, currentOutput)) {

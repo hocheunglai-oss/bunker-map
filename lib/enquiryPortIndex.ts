@@ -32,7 +32,7 @@ const supplementalPorts = [
 
 const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: boolean }> = [
   { label: "Busan", aliases: ["Busan", "Pusan"] },
-  { label: "Yosu", aliases: ["Yosu", "Yeosu"] },
+  { label: "Yosu", aliases: ["Yosu", "Yeosu", "Yeasu"] },
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
   { label: "Inchon", aliases: ["Inchon", "Incheon"] },
   { label: "Singapore", aliases: ["Singapore", "SGP", "SIN", "SG", "新加坡"], short: true },

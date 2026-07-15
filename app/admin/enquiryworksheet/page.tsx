@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
   detectAttentionTerms,
   detectVlsfoMaxRemarks,
@@ -720,7 +721,6 @@ export default function EnquiryWorksheetPage() {
       }
 
       applyCorrectedShortenedEnquiry(payload.correctedOutput, payload.fields || {})
-      if (suggestion.vlsfoMaxRemarks.length > 0) setVlsfoMaxRemarks(suggestion.vlsfoMaxRemarks)
       setParserAiSuggestion(suggestion)
       setParserAiStatus("applied")
       setParserAiMessage("AI correction applied. Double check before sending.")
@@ -754,11 +754,19 @@ export default function EnquiryWorksheetPage() {
   }, [])
 
   function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
-    setVlsfoMaxRemarks((current) =>
-      current.includes(remark)
-        ? current.filter((item) => item !== remark)
-        : [...current, remark],
+    const nextRemarks = vlsfoMaxRemarks.includes(remark)
+      ? vlsfoMaxRemarks.filter((item) => item !== remark)
+      : [...vlsfoMaxRemarks, remark]
+    const nextDraft = applyVlsfoMaxRemarksToShortenedEnquiry(
+      shortenedDraft || shortenedEnquiry,
+      nextRemarks,
     )
+
+    preservedShortenedDraftRef.current = nextDraft
+    setShortenedDraft(nextDraft)
+    setVlsfoMaxRemarks(nextRemarks)
+    setCopyStatus("idle")
+    setWhatsappStatus("idle")
   }
 
   async function copyShortenedEnquiry() {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
   detectAttentionTerms,
   normalizeEnquiryQuantityNumber,
@@ -292,5 +293,48 @@ test("normalises decimal and thousands punctuation without changing small decima
   assert.equal(
     normalizeEnquiryQuantityText("9498353 / vlsfo 880-1000mt / lsmgo 100 mts"),
     "9498353 / vlsfo 880-1,000mts / lsmgo 100mts",
+  )
+})
+
+test("replays the July 15 FCUNO reports without rebuilding manual edits", () => {
+  const zhida = [
+    "船名（IMO NO.)：MV ZHIDA 2（9602851)",
+    "航次号：10-504",
+    "加油港口（挂靠）：YEOSU,KOREA 定油公司： LYNUX SHIPPING LIMITED",
+    "ETA YEASU: 2-6 AUG",
+    "ETA ZHOUSHAN: 1-10 AUG",
+    "加油量及规格: LSFO(180CST) 250-300MT +LSMGO 5MT",
+    "Thanks & B.rgds // Gyeongseop Jeong",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(zhida, ["180cst max"]),
+    "zhida 2 / 9602851 / yosu 2 - 6 aug / vlsfo 180CST MAX 250-300mts / lsmgo 5mts",
+  )
+
+  const xinrunchen = [
+    "船名 MV. XINRUNCHEN6",
+    "IMO: 9556791",
+    "加油港口：YOSU（挂靠）",
+    "ETA/D YOSU 27TH JUL-06TH AUG",
+    "LSFO 120- 170MT (RMG 180)",
+    "LSMGO 20-40 MT",
+    "VLSFO SPEC : ISO 8217:2017 MAX0.5% SULPHUR M/M",
+    "LSMGO SPEC : ISO 8217:2017 MAX0.1% SULPHUR M/M",
+    "#1707, Uion Center, 310 Gangnam-daero, Gangnam-gu,",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(xinrunchen, ["180cst max"]),
+    "xinrunchen6 / 9556791 / yosu 27 jul - 6 aug / vlsfo 180CST MAX 120-170mts / lsmgo 20-40mts",
+  )
+
+  const editedDraft = "zhida 2 / 9602851 / zhoushan 2 - 6 aug / vlsfo 250-300mts / lsmgo 5mts"
+  const withRemark = applyVlsfoMaxRemarksToShortenedEnquiry(editedDraft, ["180cst max"])
+  assert.equal(
+    withRemark,
+    "zhida 2 / 9602851 / zhoushan 2 - 6 aug / vlsfo 180CST MAX 250-300mts / lsmgo 5mts",
+  )
+  assert.equal(
+    applyVlsfoMaxRemarksToShortenedEnquiry(withRemark, []),
+    editedDraft,
   )
 })

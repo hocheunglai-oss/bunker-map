@@ -350,7 +350,7 @@ function extractDeliverySchedule(
     return [port, events].filter(Boolean).join(" ")
   }
 
-  const entries: string[] = []
+  const entries: Array<{ port: string; date: string }> = []
   for (const line of lines) {
     const date = findEnquiryDates(line)[0] || ""
     if (!date) continue
@@ -358,14 +358,22 @@ function extractDeliverySchedule(
     if (options.includePort) {
       const port = extractEnquiryPort(line, { portNames: options.portNames })
       if (!port) continue
-      entries.push(`${formatShortenedPort(port)} ${date}`)
+      entries.push({ port: formatShortenedPort(port), date })
       continue
     }
 
-    entries.push(date)
+    entries.push({ port: "", date })
   }
 
-  return Array.from(new Set(entries)).join(", ")
+  const requestedPort = options.includePort ? formatShortenedPort(options.port?.trim() || "") : ""
+  const requestedPortEntries = requestedPort
+    ? entries.filter((entry) => entry.port === requestedPort)
+    : []
+  const selectedEntries = requestedPortEntries.length > 0 ? requestedPortEntries : entries
+
+  return Array.from(
+    new Set(selectedEntries.map((entry) => [entry.port, entry.date].filter(Boolean).join(" "))),
+  ).join(", ")
 }
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
@@ -397,6 +405,7 @@ function isNonRequestProductReference(value: string) {
   if (hasExplicitQuantity) return false
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(value) ||
+    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(value) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(value)
 }
 
@@ -626,6 +635,32 @@ function mergeRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
 
 export function formatVlsfoMaxRemark(remark: VlsfoMaxRemark) {
   return remark === "180cst max" ? "180CST MAX" : "120CST MAX"
+}
+
+export function applyVlsfoMaxRemarksToShortenedEnquiry(
+  value: string,
+  remarks: VlsfoMaxRemark[],
+) {
+  const formattedRemarks = Array.from(new Set(remarks)).map(formatVlsfoMaxRemark)
+
+  return value
+    .split(/\s*\/\s*/)
+    .map((segment) => {
+      const trimmed = segment.trim()
+      if (!/^vlsfo\b/i.test(trimmed)) return trimmed
+
+      const withoutRemarks = trimmed
+        .replace(/\s+(?:180|120)\s*CST\s+MAX\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+
+      return withoutRemarks.replace(
+        /^vlsfo\b/i,
+        ["vlsfo", ...formattedRemarks].join(" "),
+      )
+    })
+    .filter(Boolean)
+    .join(" / ")
 }
 
 function formatProductSegment(segment: ProductSegment, manualVlsfoRemarks: VlsfoMaxRemark[]) {
