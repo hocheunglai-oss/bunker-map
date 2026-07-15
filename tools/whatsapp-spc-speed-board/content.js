@@ -1060,12 +1060,6 @@
     }, "")
   }
 
-  function newEnquiryCount() {
-    const visible = visibleEnquiries()
-    if (!state.lastSeenEnquiryAt) return visible.length
-    return visible.filter((enquiry) => enquiryCreatedAt(enquiry) > state.lastSeenEnquiryAt).length
-  }
-
   function notifyNewEnquiries() {
     const latest = latestEnquiryAt()
     if (!latest) return
@@ -1116,6 +1110,13 @@
     return visibleEnquiries()
       .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
       .map((enquiry) => enquiry.id)
+  }
+
+  function sendSelectionLabel() {
+    const count = new Set(selectedSendableEnquiryIds()).size
+    if (!count) return "Send"
+    const enquiries = `${count} Enq${count === 1 ? "" : "s"} selected`
+    return state.templateEnabled ? `Temp & ${enquiries}` : enquiries
   }
 
   function activeDragEnquiryIds(draggedId) {
@@ -1523,7 +1524,6 @@
   }
 
   function renderEnquiries() {
-    const count = newEnquiryCount()
     const rows = visibleEnquiries().map((enquiry) => {
       const createdAt = enquiryCreatedAt(enquiry)
       const isNew = !state.lastSeenEnquiryAt || createdAt > state.lastSeenEnquiryAt
@@ -1553,7 +1553,7 @@
       <section class="fcuno-wa-spc-enquiry-panel">
         <div class="fcuno-wa-spc-enquiry-actions">
           <button type="button" data-action="clear-enquiries">Clear All</button>
-          <button type="button" class="is-primary" data-action="send-selected">Send${count ? ` · ${count} new` : ""}</button>
+          <button type="button" class="is-primary" data-action="send-selected">${escapeHtml(sendSelectionLabel())}</button>
         </div>
         ${renderTemplate()}
         <div class="fcuno-wa-spc-enquiry-list">
@@ -2048,6 +2048,7 @@
       render,
       sanitizeSavedState,
       sanitizeSenderContacts,
+      sendSelectionLabel,
       visibleEnquiries,
       selectedEnquiryText,
       selectedSendableEnquiryIds,

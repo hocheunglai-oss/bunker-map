@@ -474,6 +474,13 @@ api.state.enquiries = [
 ]
 api.state.selectedEnquiries = { "enq-1": true, "enq-2": true }
 assert.equal(api.selectedEnquiryText(), duplicateMessage)
+assert.equal(api.sendSelectionLabel(), "2 Enqs selected")
+api.state.templateEnabled = true
+assert.equal(api.sendSelectionLabel(), "Temp & 2 Enqs selected")
+api.state.selectedEnquiries = { "enq-1": true }
+assert.equal(api.sendSelectionLabel(), "Temp & 1 Enq selected")
+api.state.selectedEnquiries = {}
+assert.equal(api.sendSelectionLabel(), "Send")
 
 api.state.senderContacts = api.sanitizeSenderContacts({
   "BARRY@COSULICH.COM.SG": {

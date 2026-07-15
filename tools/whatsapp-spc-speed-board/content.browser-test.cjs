@@ -306,10 +306,6 @@ async function main() {
         senderText: "OL",
         senderColor: "rgb(22, 131, 232)",
       })
-      if (process.env.SPC_BROWSER_SCREENSHOT) {
-        await page.screenshot({ path: process.env.SPC_BROWSER_SCREENSHOT })
-      }
-
       const senderOpenBeforeUrl = page.url()
       await page.evaluate(() => {
         window.senderOpenDocument = document.documentElement
@@ -333,9 +329,26 @@ async function main() {
       })
 
       const firstEnquiryText = page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] em")
+      const sendButtonBeforeSelection = await page.locator("#fcuno-wa-spc-board [data-action='send-selected']").evaluate((button) => ({
+        text: button.textContent.trim(),
+        width: getComputedStyle(button).width,
+        height: getComputedStyle(button).height,
+      }))
+      assert.equal(sendButtonBeforeSelection.text, "Send")
       await firstEnquiryText.click({ force: true })
       assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => row.classList.contains("is-selected")), true)
       assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => getComputedStyle(row).backgroundColor), "rgb(231, 243, 255)")
+      const sendButtonAfterSelection = await page.locator("#fcuno-wa-spc-board [data-action='send-selected']").evaluate((button) => ({
+        text: button.textContent.trim(),
+        width: getComputedStyle(button).width,
+        height: getComputedStyle(button).height,
+      }))
+      assert.equal(sendButtonAfterSelection.text, "Temp & 1 Enq selected")
+      assert.equal(sendButtonAfterSelection.width, sendButtonBeforeSelection.width)
+      assert.equal(sendButtonAfterSelection.height, sendButtonBeforeSelection.height)
+      if (process.env.SPC_BROWSER_SCREENSHOT) {
+        await page.screenshot({ path: process.env.SPC_BROWSER_SCREENSHOT })
+      }
       await firstEnquiryText.click({ force: true })
       assert.equal(await page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']").evaluate((row) => row.classList.contains("is-selected")), false)
       await firstEnquiryText.click({ force: true })
@@ -381,13 +394,19 @@ async function main() {
         api.state.selectedEnquiries = { "enq-1": true }
         const oneSelected = api.activeDragEnquiryIds("enq-2")
         api.state.selectedEnquiries = { "enq-1": true, "enq-3": true }
+        api.state.templateEnabled = false
+        const twoSelectedLabel = api.sendSelectionLabel()
+        api.state.templateEnabled = true
+        const templateAndTwoSelectedLabel = api.sendSelectionLabel()
         const manySelected = api.activeDragEnquiryIds("enq-2")
         const manyText = api.enquiryTextForIds(manySelected)
-        return { noneSelected, oneSelected, manySelected, manyText }
+        return { noneSelected, oneSelected, twoSelectedLabel, templateAndTwoSelectedLabel, manySelected, manyText }
       })
 
       assert.deepEqual(dragRuleResult.noneSelected, ["enq-2"])
       assert.deepEqual(dragRuleResult.oneSelected, ["enq-2"])
+      assert.equal(dragRuleResult.twoSelectedLabel, "2 Enqs selected")
+      assert.equal(dragRuleResult.templateAndTwoSelectedLabel, "Temp & 2 Enqs selected")
       assert.deepEqual(dragRuleResult.manySelected, ["enq-1", "enq-3"])
       assert.equal(
         dragRuleResult.manyText,
