@@ -74,6 +74,7 @@ export async function POST(request: Request) {
           "Do not accelerate lists, later paragraphs, or the final section.",
           "Pause naturally at full stops and use a slightly longer pause between paragraphs.",
           "Use a clear corporate presentation tone without dramatic, promotional, theatrical, or conversational voice changes.",
+          "Pronounce the word screen with a clear final N consonant. Never pronounce it as scream.",
           "Pronounce A-I, S-P-C, and I-M-O as individual letters, and pronounce WhatsApp normally.",
         ].join(" "),
         response_format: "mp3",
