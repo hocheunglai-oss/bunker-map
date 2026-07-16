@@ -28,13 +28,29 @@ export function PresentationMedia({
   const narrationRef = useRef<HTMLAudioElement>(null)
   const [playbackBlocked, setPlaybackBlocked] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isFallbackFullscreen, setIsFallbackFullscreen] = useState(false)
   const hasSeparateNarration = Boolean(narrationSrc)
+  const isExpanded = isFullscreen || isFallbackFullscreen
 
   useEffect(() => {
     const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === mediaRef.current)
     document.addEventListener("fullscreenchange", handleFullscreenChange)
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange)
   }, [])
+
+  useEffect(() => {
+    if (!isFallbackFullscreen) return
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsFallbackFullscreen(false)
+    }
+    document.body.style.overflow = "hidden"
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isFallbackFullscreen])
 
   useEffect(() => {
     if (!autoPlay) return
@@ -82,21 +98,30 @@ export function PresentationMedia({
   }
 
   async function toggleFullscreen() {
+    if (isFallbackFullscreen) {
+      setIsFallbackFullscreen(false)
+      return
+    }
     if (document.fullscreenElement === mediaRef.current) {
       await document.exitFullscreen()
       return
     }
-    await mediaRef.current?.requestFullscreen()
+    try {
+      await mediaRef.current?.requestFullscreen()
+    } catch {
+      setIsFallbackFullscreen(true)
+    }
   }
 
   return (
-    <div className="spc-readme-media" ref={mediaRef}>
+    <div className={`spc-readme-media${isFallbackFullscreen ? " is-expanded" : ""}`} ref={mediaRef}>
       <button
         type="button"
         className="spc-readme-media-fullscreen"
         onClick={() => void toggleFullscreen()}
-        aria-label={isFullscreen ? "Exit full screen" : "View full screen"}
-        title={isFullscreen ? "Exit full screen" : "Full screen"}
+        aria-label={isExpanded ? "Exit full screen" : "View full screen"}
+        aria-pressed={isExpanded}
+        title={isExpanded ? "Exit full screen" : "Full screen"}
       >
         <span aria-hidden="true">⛶</span>
       </button>

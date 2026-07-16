@@ -4964,6 +4964,15 @@ body:has(.spc-statistics-page) .spc-main {
   background: #06172d;
 }
 
+.spc-readme-media.is-expanded {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #06172d;
+}
+
 .spc-readme-media > video {
   height: 100%;
   display: block;
