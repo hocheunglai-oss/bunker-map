@@ -78,7 +78,7 @@ export async function POST(request: Request) {
           "Pronounce the word screen with a clear final N consonant. Never pronounce it as scream.",
           "Pronounce A-I, S-P-C, and I-M-O as individual letters, and pronounce WhatsApp normally.",
         ].join(" "),
-        response_format: "wav",
+        response_format: "flac",
         speed,
       }),
     })
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: providerMessage(result, "OpenAI speech generation failed.") }, { status: response.status })
     }
     return new Response(await response.arrayBuffer(), {
-      headers: { "Cache-Control": "private, no-store", "Content-Type": "audio/wav" },
+      headers: { "Cache-Control": "private, no-store", "Content-Type": "audio/flac" },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Generation failed."
