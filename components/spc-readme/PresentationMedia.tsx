@@ -23,10 +23,18 @@ export function PresentationMedia({
   onEnded,
   startLabel = "START VIDEO",
 }: PresentationMediaProps) {
+  const mediaRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const narrationRef = useRef<HTMLAudioElement>(null)
   const [playbackBlocked, setPlaybackBlocked] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const hasSeparateNarration = Boolean(narrationSrc)
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === mediaRef.current)
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange)
+  }, [])
 
   useEffect(() => {
     if (!autoPlay) return
@@ -73,8 +81,25 @@ export function PresentationMedia({
     }
   }
 
+  async function toggleFullscreen() {
+    if (document.fullscreenElement === mediaRef.current) {
+      await document.exitFullscreen()
+      return
+    }
+    await mediaRef.current?.requestFullscreen()
+  }
+
   return (
-    <div className="spc-readme-media">
+    <div className="spc-readme-media" ref={mediaRef}>
+      <button
+        type="button"
+        className="spc-readme-media-fullscreen"
+        onClick={() => void toggleFullscreen()}
+        aria-label={isFullscreen ? "Exit full screen" : "View full screen"}
+        title={isFullscreen ? "Exit full screen" : "Full screen"}
+      >
+        <span aria-hidden="true">⛶</span>
+      </button>
       <video
         ref={videoRef}
         src={videoSrc}

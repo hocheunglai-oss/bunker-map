@@ -4794,15 +4794,6 @@ body:has(.spc-statistics-page) .spc-main {
   font-weight: 900;
 }
 
-.spc-readme-chunk-list-header button {
-  border: 0;
-  background: transparent;
-  color: #0b70e0;
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 900;
-}
-
 .spc-readme-chunk-list > button {
   width: 100%;
   min-height: 65px;
@@ -4939,6 +4930,40 @@ body:has(.spc-statistics-page) .spc-main {
   background: #07182c;
 }
 
+.spc-readme-media-fullscreen {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 4px;
+  background: rgba(7, 24, 44, 0.82);
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0;
+  backdrop-filter: blur(8px);
+}
+
+.spc-readme-media-fullscreen:hover {
+  border-color: #ffffff;
+  background: #002855;
+}
+
+.spc-readme-media-fullscreen span {
+  font-size: 23px;
+  line-height: 1;
+}
+
+.spc-readme-media:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #06172d;
+}
+
 .spc-readme-media > video {
   height: 100%;
   display: block;
@@ -4974,13 +4999,6 @@ body:has(.spc-statistics-page) .spc-main {
   border-top: 0;
 }
 
-.spc-readme-summary {
-  margin: 14px 0 0;
-  color: #4c596b;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 .spc-readme-empty-stage {
   min-height: 360px;
   display: grid;
@@ -4995,60 +5013,15 @@ body:has(.spc-statistics-page) .spc-main {
   border-left: 1px solid var(--fc-admin-border-soft);
 }
 
-.spc-readme-reference-tabs {
+.spc-readme-reference-heading {
   min-height: 43px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-}
-
-.spc-readme-reference-tabs button {
-  border: 0;
-  border-right: 1px solid var(--fc-admin-border-soft);
-  background: #f8f9fb;
-  color: #6c7685;
-  cursor: pointer;
-  font-size: 9px;
-  font-weight: 900;
-}
-
-.spc-readme-reference-tabs button:last-child {
-  border-right: 0;
-}
-
-.spc-readme-reference-tabs button.is-active {
   background: #ffffff;
   color: #002855;
-  box-shadow: inset 0 -3px 0 #e2492f;
-}
-
-.spc-readme-key-points {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: readme-points;
-}
-
-.spc-readme-key-points li {
-  min-height: 64px;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: start;
-  gap: 10px;
-  border-bottom: 1px solid var(--fc-admin-border-soft);
-  color: #263244;
-  padding: 14px;
-  font-size: 12px;
-  line-height: 1.45;
-  counter-increment: readme-points;
-}
-
-.spc-readme-key-points li::before {
-  content: counter(readme-points, decimal-leading-zero);
-  color: #e2492f;
-  font-size: 10px;
+  padding: 0 18px;
+  font-size: 9px;
   font-weight: 900;
 }
 
@@ -5058,27 +5031,6 @@ body:has(.spc-statistics-page) .spc-main {
   font-size: 13px;
   line-height: 1.72;
   white-space: pre-wrap;
-}
-
-.spc-readme-question {
-  min-height: 280px;
-  display: grid;
-  align-content: center;
-  gap: 13px;
-  padding: 24px;
-}
-
-.spc-readme-question span {
-  color: #e2492f;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.spc-readme-question strong {
-  color: #002855;
-  font-size: 24px;
-  font-weight: 900;
-  line-height: 1.25;
 }
 
 .spc-readme-editor {
@@ -5948,6 +5900,10 @@ body:has(.spc-statistics-page) .spc-main {
   max-height: 100%;
   overflow: hidden;
   aspect-ratio: auto;
+}
+
+.spc-readme-presenter .spc-readme-media-fullscreen {
+  display: none;
 }
 
 .spc-readme-presenter .spc-readme-media > video {

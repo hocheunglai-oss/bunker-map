@@ -167,7 +167,6 @@ export default function SpcReadmePage() {
   const [canEdit, setCanEdit] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<ChunkDraft | null>(null)
-  const [referenceTab, setReferenceTab] = useState<"points" | "script" | "questions">("points")
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
@@ -427,38 +426,6 @@ export default function SpcReadmePage() {
       setMessage("README section updated.")
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the section.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function addChunk() {
-    setSaving(true)
-    setError("")
-    try {
-      const result = await postAction({
-        action: "save",
-        chunk: {
-          chapterLabel: activeChapter || "CHAPTER 1",
-          sectionLabel: "NEW SECTION",
-          title: "UNTITLED SECTION",
-          summary: "",
-          narration: "",
-          keyPoints: [],
-          questionPrompt: "",
-          visualKind: "chapter-takeaway",
-          visualCopy: [],
-          durationSeconds: null,
-          status: "draft",
-        },
-      })
-      if (result.chunk) {
-        setChunks((current) => [...current, result.chunk!].sort((a, b) => a.sortOrder - b.sortOrder))
-        setSelectedId(result.chunk.id)
-        setEditing(true)
-      }
-    } catch (addError) {
-      setError(addError instanceof Error ? addError.message : "Could not add the section.")
     } finally {
       setSaving(false)
     }
@@ -744,7 +711,6 @@ export default function SpcReadmePage() {
           <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
             <div className="spc-readme-chunk-list-header">
               <span>SECTIONS</span>
-              {canEdit ? <button type="button" onClick={() => void addChunk()} disabled={saving}>ADD</button> : null}
             </div>
             {loading ? <p className="spc-readme-empty">Loading...</p> : null}
             {chapterChunks.map((chunk, index) => (
@@ -791,7 +757,6 @@ export default function SpcReadmePage() {
                 {!selectedMedia.video && selectedMedia.narration ? (
                   <div className="spc-readme-motion-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio controls src={selectedMedia.narration} /></div>
                 ) : null}
-                <p className="spc-readme-summary">{selected.summary}</p>
               </>
             ) : (
               <div className="spc-readme-empty-stage">No presentation content.</div>
@@ -859,14 +824,8 @@ export default function SpcReadmePage() {
             </aside>
           ) : selected ? (
             <aside className="spc-readme-reference">
-              <div className="spc-readme-reference-tabs" role="tablist" aria-label="Section reference">
-                <button type="button" className={referenceTab === "points" ? "is-active" : ""} onClick={() => setReferenceTab("points")}>KEY POINTS</button>
-                <button type="button" className={referenceTab === "script" ? "is-active" : ""} onClick={() => setReferenceTab("script")}>SCRIPT</button>
-                <button type="button" className={referenceTab === "questions" ? "is-active" : ""} onClick={() => setReferenceTab("questions")}>Q&amp;A</button>
-              </div>
-              {referenceTab === "points" ? <ol className="spc-readme-key-points">{selected.keyPoints.map((point) => <li key={point}>{point}</li>)}</ol> : null}
-              {referenceTab === "script" ? <div className="spc-readme-script">{selected.narration}</div> : null}
-              {referenceTab === "questions" ? <div className="spc-readme-question"><span>AUDIENCE BREAK</span><strong>{selected.questionPrompt || "Questions?"}</strong></div> : null}
+              <div className="spc-readme-reference-heading">SCRIPT</div>
+              <div className="spc-readme-script">{selected.narration}</div>
             </aside>
           ) : null}
         </div>
