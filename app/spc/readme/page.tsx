@@ -185,6 +185,7 @@ export default function SpcReadmePage() {
   const presenterAudioRef = useRef<HTMLAudioElement>(null)
   const presenterObjectUrlsRef = useRef<string[]>([])
   const presenterTransitioningRef = useRef(false)
+  const completedPresenterChunksRef = useRef(new Set<string>())
 
   const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedId)
   const selected = selectedIndex >= 0 ? chunks[selectedIndex] : chunks[0] || null
@@ -589,11 +590,12 @@ export default function SpcReadmePage() {
     }
   }
 
-  async function activatePresenterSection(chunk: SpcPresentationChunk) {
+  async function activatePresenterSection(chunk: SpcPresentationChunk, replay = true) {
     if (presenterTransitioningRef.current) return false
     presenterTransitioningRef.current = true
     setPresenterTransitioning(true)
     try {
+      if (replay) completedPresenterChunksRef.current.delete(chunk.id)
       const resolved = await resolveChunkMediaSource(chunk)
       const previousObjectUrls = presenterObjectUrlsRef.current
       presenterObjectUrlsRef.current = resolved.objectUrls
@@ -612,6 +614,7 @@ export default function SpcReadmePage() {
   function closePresentation() {
     setPresenterMode(null)
     setPresenterMediaSource(EMPTY_MEDIA_SOURCE)
+    completedPresenterChunksRef.current.clear()
     presenterTransitioningRef.current = false
     setPresenterTransitioning(false)
     setPlaybackBlocked(false)
@@ -643,12 +646,15 @@ export default function SpcReadmePage() {
     if (!selected) return
     const target = mode === "chapter" ? chapterChunks[0] : selected
     if (!target) return
+    completedPresenterChunksRef.current.clear()
     if (await activatePresenterSection(target)) setPresenterMode(mode)
   }
 
-  function handlePlaybackEnded() {
+  function handlePlaybackEnded(chunkId: string) {
+    if (chunkId !== selected?.id || completedPresenterChunksRef.current.has(chunkId)) return
+    completedPresenterChunksRef.current.add(chunkId)
     if (presenterMode === "chapter" && chapterSelectedIndex < chapterChunks.length - 1) {
-      void activatePresenterSection(chapterChunks[chapterSelectedIndex + 1])
+      void activatePresenterSection(chapterChunks[chapterSelectedIndex + 1], false)
       return
     }
     setQuestionBreak(true)
@@ -766,6 +772,7 @@ export default function SpcReadmePage() {
                 <div className="spc-readme-stage">
                   {selectedMedia.video ? (
                     <PresentationMedia
+                      key={selected.id}
                       title={selected.title}
                       videoSrc={selectedMedia.video}
                       videoMimeType={selected.videoMimeType}
@@ -886,6 +893,7 @@ export default function SpcReadmePage() {
               </div>
             ) : selectedMedia.video ? (
               <PresentationMedia
+                key={selected.id}
                 title={selected.title}
                 videoSrc={selectedMedia.video}
                 videoMimeType={selected.videoMimeType}
@@ -893,7 +901,7 @@ export default function SpcReadmePage() {
                 narrationMimeType={selected.narrationMimeType}
                 narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
                 autoPlay
-                onEnded={handlePlaybackEnded}
+                onEnded={() => handlePlaybackEnded(selected.id)}
                 startLabel={presenterMode === "chapter" ? "START CHAPTER" : "START PRESENTATION"}
               />
             ) : (
@@ -905,7 +913,7 @@ export default function SpcReadmePage() {
               </button>
             ) : null}
           </main>
-          {!questionBreak && !selectedMedia.video && selectedMedia.narration ? <div className="spc-readme-presenter-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio ref={presenterAudioRef} controls autoPlay src={selectedMedia.narration} onEnded={handlePlaybackEnded} /></div> : null}
+          {!questionBreak && !selectedMedia.video && selectedMedia.narration ? <div className="spc-readme-presenter-audio"><span>{selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}</span><audio key={selected.id} ref={presenterAudioRef} controls autoPlay src={selectedMedia.narration} onEnded={() => handlePlaybackEnded(selected.id)} /></div> : null}
           <footer>
             <button type="button" onClick={showPreviousSection} disabled={chapterSelectedIndex <= 0 || presenterTransitioning}>PREVIOUS</button>
             {presenterMode === "chapter" ? (
