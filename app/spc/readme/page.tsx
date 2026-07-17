@@ -745,6 +745,7 @@ export default function SpcReadmePage() {
                       narrationSrc={selectedMedia.narration}
                       narrationMimeType={selected.narrationMimeType}
                       narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
+                      videoHasEmbeddedAudio={selected.videoHasEmbeddedAudio}
                     />
                   ) : (
                     <PresentationMotionScene
@@ -859,6 +860,7 @@ export default function SpcReadmePage() {
                 narrationSrc={selectedMedia.narration}
                 narrationMimeType={selected.narrationMimeType}
                 narrationLabel={selected.narrationIsAi ? "AI-GENERATED VOICE" : "NARRATION"}
+                videoHasEmbeddedAudio={selected.videoHasEmbeddedAudio}
                 autoPlay
                 onEnded={() => handlePlaybackEnded(selected.id)}
                 startLabel={presenterMode === "chapter" ? "START CHAPTER" : "START PRESENTATION"}

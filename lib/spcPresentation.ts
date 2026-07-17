@@ -93,6 +93,7 @@ export type SpcPresentationChunk = {
   videoUrl: string | null
   videoMimeType: string | null
   videoBytes: number
+  videoHasEmbeddedAudio: boolean
   narrationUrl: string | null
   narrationMimeType: string | null
   narrationBytes: number
@@ -246,6 +247,7 @@ function presentRow(row: PresentationRow, mediaUrls: Map<string, string>): SpcPr
     videoUrl: row.video_path ? mediaUrls.get(row.video_path) || null : null,
     videoMimeType: row.video_mime_type,
     videoBytes: bytes(row.video_bytes),
+    videoHasEmbeddedAudio: /(?:^|[-_])synced\.(?:mp4|webm)$/i.test(row.video_path || ""),
     narrationUrl: row.narration_path ? mediaUrls.get(row.narration_path) || null : null,
     narrationMimeType: row.narration_mime_type,
     narrationBytes: bytes(row.narration_bytes),

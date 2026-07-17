@@ -9,6 +9,7 @@ type PresentationMediaProps = {
   narrationSrc?: string | null
   narrationMimeType?: string | null
   narrationLabel?: string
+  videoHasEmbeddedAudio?: boolean
   autoPlay?: boolean
   onEnded?: () => void
   startLabel?: string
@@ -19,6 +20,7 @@ export function PresentationMedia({
   videoSrc,
   narrationSrc,
   narrationLabel = "NARRATION",
+  videoHasEmbeddedAudio = false,
   autoPlay = false,
   onEnded,
   startLabel = "START VIDEO",
@@ -29,7 +31,7 @@ export function PresentationMedia({
   const [playbackBlocked, setPlaybackBlocked] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isFallbackFullscreen, setIsFallbackFullscreen] = useState(false)
-  const hasSeparateNarration = Boolean(narrationSrc)
+  const hasSeparateNarration = Boolean(narrationSrc) && !videoHasEmbeddedAudio
   const isExpanded = isFullscreen || isFallbackFullscreen
 
   useEffect(() => {
@@ -139,7 +141,7 @@ export function PresentationMedia({
         }}
         onEnded={hasSeparateNarration ? undefined : onEnded}
       />
-      {narrationSrc ? (
+      {hasSeparateNarration && narrationSrc ? (
         <div className="spc-readme-narration-control">
           <span>{narrationLabel}</span>
           <audio
