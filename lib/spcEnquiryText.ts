@@ -52,7 +52,7 @@ export type SpcEnquiryTextInput = {
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
-const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|mgo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
+const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|mgo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "imo",
   "lostReason",
@@ -165,7 +165,7 @@ export type SpcFuelKey = "hsfo" | "vlsfo" | "lsmgo"
 function classifyFuel(value: string): SpcFuelKey | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsfo|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0[,.]?50?(?=$|[^0-9])/i.test(value)) {
+  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
   if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
@@ -218,7 +218,7 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: SpcFue
     .trim()
 
   if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|rmg\s*380|3\s*[,.]\s*5)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
-  if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
+  if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
   if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
 
   const plainNumber = text.match(/^(\d+(?:[,.]\d+)?)$/)

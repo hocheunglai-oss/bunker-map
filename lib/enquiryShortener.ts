@@ -16,6 +16,8 @@ type ProductSegment = {
 }
 
 const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
+const EXPLICIT_PORT_LINE_PATTERN =
+  /^\s*(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)(?:\s|[:#(（-]|$)/i
 const OPERATIONAL_SCHEDULE_LINE_PATTERN =
   /^\s*(e\s*\.?\s*t\s*\.?\s*(?:a|b|d|s|c(?:\s*\.?\s*d)?)\s*\.?)\s*[:#-]?\s*(.*)$/i
 
@@ -56,6 +58,8 @@ const MONTHS: Record<string, string> = {
   july: "jul",
   aug: "aug",
   august: "aug",
+  agu: "aug",
+  agust: "aug",
   sep: "sep",
   sept: "sep",
   september: "sep",
@@ -109,7 +113,7 @@ export function normalizeEnquiryQuantityNumber(value: string) {
 
 export function normalizeEnquiryQuantityText(value: string) {
   return value.replace(
-    /\b(\d+(?:[,.]\d+)?)\s*(?:-\s*(\d+(?:[,.]\d+)?))?\s*(mt|mts)\b/gi,
+    /\b(\d+(?:[,.]\d+)?)\s*(?:[-/]\s*(\d+(?:[,.]\d+)?))?\s*(mt|mts)\b/gi,
     (_match, first: string, second: string | undefined) => {
       const quantity = second
         ? `${normalizeEnquiryQuantityNumber(first)}-${normalizeEnquiryQuantityNumber(second)}`
@@ -184,7 +188,7 @@ function isContactOrAddressLine(value: string) {
 export function findEnquiryDates(value: string) {
   const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
   const dates: string[] = []
-  const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+  const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|agu(?:st)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
   for (const match of normalized.matchAll(/(?:\d{4}\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?\s*(?:-|~|to|至|到)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*[日号]/gi)) {
     const range = formatDateRange(match[2], match[1], match[4], match[3] || match[1])
@@ -221,6 +225,11 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*[./]\\s*(${monthNamePattern})\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*[./]\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[2], match[3], match[4])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(/\b(\d{1,2})[./](\d{1,2})\s*(?:-|~|\/|to)\s*(?:(\d{1,2})[./])?(\d{1,2})\b/gi)) {
     const rangeMonth = match[3] || match[1]
     const range = formatDateRange(match[2], match[1], match[4], rangeMonth)
@@ -233,6 +242,11 @@ export function findEnquiryDates(value: string) {
   }
 
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*\\/\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
   }
@@ -252,7 +266,7 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`(?<!/)\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
   }
@@ -366,20 +380,26 @@ function extractDeliverySchedule(
   }
 
   const requestedPort = options.includePort ? formatShortenedPort(options.port?.trim() || "") : ""
-  const requestedPortEntries = requestedPort
+  const hasExplicitRequestedPort = requestedPort && lines.some((line) =>
+    EXPLICIT_PORT_LINE_PATTERN.test(line) &&
+    formatShortenedPort(extractEnquiryPort(line, { portNames: options.portNames })) === requestedPort,
+  )
+  const requestedPortEntries = hasExplicitRequestedPort
     ? entries.filter((entry) => entry.port === requestedPort)
     : []
   const selectedEntries = requestedPortEntries.length > 0 ? requestedPortEntries : entries
 
-  return Array.from(
+  const uniqueEntries = Array.from(
     new Set(selectedEntries.map((entry) => [entry.port, entry.date].filter(Boolean).join(" "))),
-  ).join(", ")
+  )
+  const distinctPorts = new Set(selectedEntries.map((entry) => entry.port).filter(Boolean))
+  return uniqueEntries.join(distinctPorts.size > 1 ? " and " : ", ")
 }
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsfo|rmg180|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact) || /(?:^|[^0-9])0[,.]?50?(?=$|[^0-9])/i.test(value)) {
+  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
   if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
@@ -405,7 +425,7 @@ function isNonRequestProductReference(value: string) {
   if (hasExplicitQuantity) return false
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(value) ||
-    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(value) ||
+    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(value) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(value)
 }
 
@@ -435,7 +455,7 @@ export function detectAttentionTerms(value: string) {
 }
 
 function extractQuantityFromInlineUnit(value: string) {
-  const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
+  const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
     return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
@@ -454,7 +474,7 @@ function extractBareQuantity(value: string) {
     .replace(/\b(?:rmg|rmk|dma|dmb)\s*[-:]?\s*\d+(?:[,.]\d+)?\b/gi, " ")
     .replace(/\b\d+(?:[,.]\d+)?\s*cst\b/gi, " ")
     .replace(/\b(?:sulphur|sulfur|flash\s+point|density)\b[^\n;/]*/gi, " ")
-  const ranges = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)(?!\s*%|[\d.,])/gi))
+  const ranges = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)\s*(?:-|~|\/|to)\s*(\d+(?:[,.]\d+)?)(?!\s*%|[\d.,])/gi))
     .filter((match) => isUsableQuantityNumber(match[1]) && isUsableQuantityNumber(match[2]))
   const range = ranges.at(-1)
   if (range) return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
@@ -471,7 +491,7 @@ function extractQuantityFromProductSegment(value: string) {
 }
 
 function extractQuantityImmediatelyBeforeProduct(value: string) {
-  const range = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
+  const range = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
     return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
@@ -483,14 +503,14 @@ function extractQuantityImmediatelyBeforeProduct(value: string) {
 }
 
 function extractBareRangeImmediatelyBeforeProduct(value: string) {
-  const range = value.match(/(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*$/i)
+  const range = value.match(/(\d+(?:[,.]\d+)?)\s*(?:-|~|\/|to)\s*(\d+(?:[,.]\d+)?)\s*$/i)
   return range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])
     ? `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
     : ""
 }
 
 function extractQuantityImmediatelyAfterProduct(value: string) {
-  const range = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:-|~|to)\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
+  const range = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
     return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
   }
@@ -517,7 +537,7 @@ function extractQuantityFromBlock(lines: string[]) {
 
 function productMatches(line: string) {
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|l\s*s\s*(?:120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|l\s*s\s*(?:120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,
@@ -685,7 +705,9 @@ export function buildShortenedEnquiry(
     : ""
   const schedule = extractDeliverySchedule(sourceText, options)
   const portAndDate = schedule || [port, date].filter(Boolean).join(" ")
+  const productOrder: Record<ProductSegment["product"], number> = { hsfo: 0, vlsfo: 1, lsmgo: 2 }
   const products = extractProducts(sourceText, autoDetectVlsfoRemarks)
+    .sort((first, second) => productOrder[first.product] - productOrder[second.product])
     .map((product) => formatProductSegment(product, manualVlsfoRemarks))
 
   return [vesselName.toLowerCase(), imo, portAndDate || date, ...products]

@@ -338,3 +338,25 @@ test("replays the July 15 FCUNO reports without rebuilding manual edits", () => 
     editedDraft,
   )
 })
+
+test("replays the July 17 FCUNO reports with canonical schedules and fuels", () => {
+  assert.equal(
+    worksheetOutput("mv neng yuan (9185762) eta Busan(bunker call) 26/30th july\nabt vlsfo 350/550 mts"),
+    "neng yuan / 9185762 / busan 26 - 30 jul / vlsfo 350-550mts",
+  )
+
+  assert.equal(
+    worksheetOutput("JIN XU XIANG 88(imo:9989405) ETA安特卫普 27/July -08/Agu 2026 LSMGO:60MT\nLSMFO. 100MT"),
+    "jin xu xiang 88 / 9989405 / antwerp 27 jul - 8 aug / vlsfo 100mts / lsmgo 60mts",
+  )
+
+  assert.equal(
+    worksheetOutput("TS Shanghai / IMO 9937517\nETA Xiamen 05-12 Aug\nETA Nansha 07-14 Aug\n1,200 mt HSFO max 3,5%"),
+    "ts shanghai / 9937517 / xiamen 5 - 12 aug and nansha 7 - 14 aug / HSFO 1,200mts",
+  )
+
+  assert.equal(
+    parseSpcEnquiryText("TEST SHIP / 5 - 12 aug / LSMFO 100MT / LSMGO 60MT").standardText,
+    "test ship / 5 - 12 aug / vlsfo 100mts / lsmgo 60mts",
+  )
+})

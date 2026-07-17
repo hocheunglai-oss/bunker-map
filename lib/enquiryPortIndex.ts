@@ -16,6 +16,7 @@ export type EnquiryPortIndexOptions = {
 }
 
 const supplementalPorts = [
+  "Antwerp",
   "Caofeidian",
   "Colombo",
   "Hakata",
@@ -31,6 +32,7 @@ const supplementalPorts = [
 ]
 
 const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: boolean }> = [
+  { label: "Antwerp", aliases: ["Antwerp", "安特卫普"] },
   { label: "Busan", aliases: ["Busan", "Pusan"] },
   { label: "Yosu", aliases: ["Yosu", "Yeosu", "Yeasu"] },
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
