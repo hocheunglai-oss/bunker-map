@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { requireSpcPagePermission } from "@/lib/spcAuth"
-
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
@@ -15,7 +13,11 @@ function providerMessage(payload: unknown, fallback: string) {
 
 export async function POST(request: Request) {
   try {
-    await requireSpcPagePermission("spc-readme", "edit")
+    const expectedToken = process.env.SPC_PRESENTATION_GENERATION_TOKEN
+    const suppliedToken = request.headers.get("x-presentation-generation-token")
+    if (!expectedToken || !suppliedToken || suppliedToken !== expectedToken) {
+      return NextResponse.json({ message: "Not found." }, { status: 404 })
+    }
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.")
 
