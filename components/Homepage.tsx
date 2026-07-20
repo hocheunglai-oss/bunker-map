@@ -30,16 +30,14 @@ type HomepageProps = {
 }
 
 const mapTilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY
-const mapTilerStyle =
-  process.env.NEXT_PUBLIC_MAPTILER_STYLE ||
-  "https://api.maptiler.com/maps/basic-v2-dark/style.json"
+const mapTilerRasterStyle =
+  process.env.NEXT_PUBLIC_MAPTILER_RASTER_STYLE?.trim() || "basic-v2-dark"
 const KEY_PORT_NAMES = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Kaohsiung"]
 
 function getMapTilerRasterUrl() {
   if (!mapTilerKey) return null
 
-  const styleId = mapTilerStyle.match(/\/maps\/([^/]+)\/style\.json(?:\?|$)/)?.[1] || "basic-v2-dark"
-  return `https://api.maptiler.com/maps/${encodeURIComponent(styleId)}/{z}/{x}/{y}.png?key=${encodeURIComponent(mapTilerKey)}`
+  return `https://api.maptiler.com/maps/${encodeURIComponent(mapTilerRasterStyle)}/{z}/{x}/{y}.png?key=${encodeURIComponent(mapTilerKey)}`
 }
 
 const glassPanelStyle: React.CSSProperties = {
@@ -115,23 +113,61 @@ function BaseMapLayer() {
 
   useEffect(() => {
     const mapTilerRasterUrl = getMapTilerRasterUrl()
-    const layer = mapTilerRasterUrl
-      ? L.tileLayer(mapTilerRasterUrl, {
-          tileSize: 512,
-          zoomOffset: -1,
-          minZoom: 1,
-          crossOrigin: true,
-          attribution:
-            '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>',
-        })
-      : L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "© OpenStreetMap contributors",
-        })
+    const probeController = new AbortController()
+    let primaryLayer: L.TileLayer | null = null
+    let fallbackLayer: L.TileLayer | null = null
 
-    layer.addTo(map)
+    const showFallbackLayer = () => {
+      if (fallbackLayer) return
+
+      if (primaryLayer && map.hasLayer(primaryLayer)) {
+        map.removeLayer(primaryLayer)
+      }
+
+      fallbackLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map)
+    }
+
+    if (mapTilerRasterUrl) {
+      primaryLayer = L.tileLayer(mapTilerRasterUrl, {
+        tileSize: 512,
+        zoomOffset: -1,
+        minZoom: 1,
+        crossOrigin: true,
+        attribution:
+          '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>',
+      })
+      primaryLayer.once("tileerror", showFallbackLayer)
+      primaryLayer.addTo(map)
+
+      const probeUrl = mapTilerRasterUrl
+        .replace("{z}", "0")
+        .replace("{x}", "0")
+        .replace("{y}", "0")
+
+      fetch(probeUrl, {
+        method: "HEAD",
+        cache: "no-store",
+        signal: probeController.signal,
+      })
+        .then((response) => {
+          if (!response.ok) showFallbackLayer()
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            showFallbackLayer()
+          }
+        })
+    } else {
+      showFallbackLayer()
+    }
 
     return () => {
-      map.removeLayer(layer)
+      probeController.abort()
+      primaryLayer?.off("tileerror", showFallbackLayer)
+      if (primaryLayer && map.hasLayer(primaryLayer)) map.removeLayer(primaryLayer)
+      if (fallbackLayer && map.hasLayer(fallbackLayer)) map.removeLayer(fallbackLayer)
     }
   }, [map])
 
