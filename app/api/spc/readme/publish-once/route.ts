@@ -31,6 +31,7 @@ const ALLOWED_SLUGS = new Set([
   "engineer-safety",
   "refine-with-traders",
 ])
+const ALLOWED_CHAPTER_PREFIXES = ["CHAPTER 2:", "CHAPTER 3:"]
 const context: SpcAuditContext = {
   username: "Codex",
   displayName: "Codex",
@@ -62,7 +63,12 @@ async function allowed(id: string | undefined) {
   if (!id) return false
   if (ALLOWED_IDS.has(id)) return true
   const chunks = await listSpcPresentationChunks(true)
-  return chunks.some((chunk) => chunk.id === id && ALLOWED_SLUGS.has(chunk.slug))
+  return chunks.some((chunk) => (
+    chunk.id === id && (
+      ALLOWED_SLUGS.has(chunk.slug) ||
+      ALLOWED_CHAPTER_PREFIXES.some((prefix) => chunk.chapterLabel.startsWith(prefix))
+    )
+  ))
 }
 
 export async function POST(request: Request) {
@@ -71,7 +77,10 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Payload
 
     if (payload.action === "load") {
-      const chunks = (await listSpcPresentationChunks(true)).filter((chunk) => ALLOWED_SLUGS.has(chunk.slug))
+      const chunks = (await listSpcPresentationChunks(true)).filter((chunk) => (
+        ALLOWED_SLUGS.has(chunk.slug) ||
+        ALLOWED_CHAPTER_PREFIXES.some((prefix) => chunk.chapterLabel.startsWith(prefix))
+      ))
       return NextResponse.json({ chunks })
     }
 
