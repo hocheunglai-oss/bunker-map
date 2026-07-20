@@ -23,6 +23,14 @@ const ALLOWED_IDS = new Set([
   "3e0f18fd-8a85-4a65-acd4-280c01dd5b52",
   "b2e4061c-e77a-424b-950f-e9d2bb20447f",
 ])
+const ALLOWED_SLUGS = new Set([
+  "first-system-prompt",
+  "actual-first-response",
+  "build-first-tool",
+  "inspect-real-work",
+  "engineer-safety",
+  "refine-with-traders",
+])
 const context: SpcAuditContext = {
   username: "Codex",
   displayName: "Codex",
@@ -50,8 +58,11 @@ function authorised(request: Request) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-function allowed(id: string | undefined) {
-  return Boolean(id && ALLOWED_IDS.has(id))
+async function allowed(id: string | undefined) {
+  if (!id) return false
+  if (ALLOWED_IDS.has(id)) return true
+  const chunks = await listSpcPresentationChunks(true)
+  return chunks.some((chunk) => chunk.id === id && ALLOWED_SLUGS.has(chunk.slug))
 }
 
 export async function POST(request: Request) {
@@ -60,17 +71,17 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Payload
 
     if (payload.action === "load") {
-      const chunks = (await listSpcPresentationChunks(true)).filter((chunk) => ALLOWED_IDS.has(chunk.id))
+      const chunks = (await listSpcPresentationChunks(true)).filter((chunk) => ALLOWED_SLUGS.has(chunk.slug))
       return NextResponse.json({ chunks })
     }
 
     if (payload.action === "save") {
-      if (!allowed(payload.chunk?.id)) throw new Error("Invalid section.")
+      if (!(await allowed(payload.chunk?.id))) throw new Error("Invalid section.")
       return NextResponse.json({ chunk: await saveSpcPresentationChunk(payload.chunk!, context) })
     }
 
     if (payload.action === "prepare-upload") {
-      if (!allowed(payload.id)) throw new Error("Invalid section.")
+      if (!(await allowed(payload.id))) throw new Error("Invalid section.")
       const upload = await prepareSpcPresentationUpload(
         payload.id!,
         "video",
@@ -82,7 +93,7 @@ export async function POST(request: Request) {
     }
 
     if (payload.action === "complete-upload") {
-      if (!allowed(payload.id)) throw new Error("Invalid section.")
+      if (!(await allowed(payload.id))) throw new Error("Invalid section.")
       const chunk = await completeSpcPresentationUpload(
         payload.id!,
         Math.max(Number(payload.revision || 0), 1),
