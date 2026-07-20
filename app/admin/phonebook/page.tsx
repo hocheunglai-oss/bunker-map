@@ -95,7 +95,9 @@ const PHONEBOOK_CACHE_STORE = "entries"
 const PHONEBOOK_COMPANIES_CACHE_KEY = "companies"
 const PHONEBOOK_CONTACTS_CACHE_KEY = "contacts"
 const PHONEBOOK_CONTACTS_REFRESH_MS = 30 * 60 * 1000
-const MAX_RENDERED_COMPANIES = 300
+const INITIAL_RENDERED_COMPANIES = 120
+const COMPANY_RENDER_STEP = 120
+const MAX_SEARCH_RENDERED_COMPANIES = 300
 const MAX_RENDERED_CONTACTS = 400
 
 type ContactSyncFailure = {
@@ -542,6 +544,7 @@ export default function PhonebookPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
+  const [companyRenderLimit, setCompanyRenderLimit] = useState(INITIAL_RENDERED_COMPANIES)
   const [selectedCompany, setSelectedCompany] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [current, setCurrent] = useState<Contact | null>(null)
@@ -1143,8 +1146,11 @@ export default function PhonebookPage() {
     })
   }, [companies, companiesWithMatchingContacts, queryTokens])
   const visibleCompanies = useMemo(
-    () => (queryTokens.length === 0 ? filteredCompanies : filteredCompanies.slice(0, MAX_RENDERED_COMPANIES)),
-    [filteredCompanies, queryTokens],
+    () => filteredCompanies.slice(
+      0,
+      queryTokens.length === 0 ? companyRenderLimit : MAX_SEARCH_RENDERED_COMPANIES,
+    ),
+    [companyRenderLimit, filteredCompanies, queryTokens.length],
   )
 
   const companyNameSuggestions = useMemo(
@@ -1900,6 +1906,7 @@ export default function PhonebookPage() {
 
   function clearSearchAndSelection() {
     setQuery("")
+    setCompanyRenderLimit(INITIAL_RENDERED_COMPANIES)
     setSelectedCompany("")
     setSelectedId("")
     setEditing(false)
@@ -2193,6 +2200,7 @@ export default function PhonebookPage() {
               onChange={(event) => {
                 const nextValue = event.target.value
                 setQuery(nextValue)
+                if (!nextValue.trim()) setCompanyRenderLimit(INITIAL_RENDERED_COMPANIES)
                 if (selectedCompany) {
                   startTransition(() => {
                     setSelectedCompany("")
@@ -2201,6 +2209,7 @@ export default function PhonebookPage() {
               }}
               onFocus={() => {
                 setQuery("")
+                setCompanyRenderLimit(INITIAL_RENDERED_COMPANIES)
                 setSelectedCompany("")
                 setSelectedId("")
                 setEditing(false)
@@ -2283,9 +2292,20 @@ export default function PhonebookPage() {
                 </button>
               </div>
             </div>
-            {queryTokens.length > 0 && filteredCompanies.length > visibleCompanies.length ? (
-              <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
-                Showing first {visibleCompanies.length} of {filteredCompanies.length} companies. Refine search for a faster exact match.
+            {filteredCompanies.length > visibleCompanies.length ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 14px", fontSize: "12px", color: "var(--fc-admin-muted)", borderBottom: "1px solid var(--fc-admin-border-soft)" }}>
+                <span>
+                  Showing first {visibleCompanies.length} of {filteredCompanies.length} companies. {queryTokens.length > 0 ? "Refine search for a faster exact match." : "Search to jump directly to any company."}
+                </span>
+                {queryTokens.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setCompanyRenderLimit((current) => current + COMPANY_RENDER_STEP)}
+                    style={{ ...buttonStyle, padding: "5px 9px", fontSize: "10px", whiteSpace: "nowrap" }}
+                  >
+                    Show more
+                  </button>
+                ) : null}
               </div>
             ) : null}
             <div style={{ maxHeight: isMobile ? "unset" : "calc(72vh - 74px)", overflowY: "auto", background: "var(--fc-admin-panel-bg)" }}>

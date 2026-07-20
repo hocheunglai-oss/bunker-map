@@ -241,25 +241,31 @@ export default function SpcStatisticsPage() {
 
         {message ? <div className="spc-alert is-error">{message}</div> : null}
 
-        <MonthlyVolumeChart
-          points={statistics?.monthlyVolume || []}
-          selectedYear={statistics?.selectedYear || year}
-          lastYear={statistics?.lastYear || year - 1}
-        />
+        {loading && !statistics ? (
+          <div className="spc-loading">LOADING STATISTICS...</div>
+        ) : (
+          <>
+            <MonthlyVolumeChart
+              points={statistics?.monthlyVolume || []}
+              selectedYear={statistics?.selectedYear || year}
+              lastYear={statistics?.lastYear || year - 1}
+            />
 
-        <div className="spc-stat-chart-grid">
-          <HorizontalBarChart title="GRAPH 2 · VOLUME BY SUPPLIER" points={statistics?.volumeBySupplier || []} valueLabel={`${windowLabel} · MTS`} />
-          <HorizontalBarChart title="GRAPH 3 · FIXTURES BY SUPPLIER" points={statistics?.fixturesBySupplier || []} valueLabel={`${windowLabel} · COUNT`} />
-          <HorizontalBarChart title="GRAPH 4 · VOLUME BY OFFICE" points={statistics?.volumeByOffice || []} valueLabel={`${windowLabel} · MTS`} />
-          <HorizontalBarChart title="GRAPH 5 · FIXTURES BY OFFICE" points={statistics?.fixturesByOffice || []} valueLabel={`${windowLabel} · COUNT`} />
-        </div>
+            <div className="spc-stat-chart-grid">
+              <HorizontalBarChart title="GRAPH 2 · VOLUME BY SUPPLIER" points={statistics?.volumeBySupplier || []} valueLabel={`${windowLabel} · MTS`} />
+              <HorizontalBarChart title="GRAPH 3 · FIXTURES BY SUPPLIER" points={statistics?.fixturesBySupplier || []} valueLabel={`${windowLabel} · COUNT`} />
+              <HorizontalBarChart title="GRAPH 4 · VOLUME BY OFFICE" points={statistics?.volumeByOffice || []} valueLabel={`${windowLabel} · MTS`} />
+              <HorizontalBarChart title="GRAPH 5 · FIXTURES BY OFFICE" points={statistics?.fixturesByOffice || []} valueLabel={`${windowLabel} · COUNT`} />
+            </div>
 
-        <div className="spc-stat-table-grid">
-          <WorkloadTable rows={statistics?.workload || []} windowLabel={windowLabel} />
-          <HitRateTable title="TABLE 2 · BUYER OFFICE HIT RATE" rows={statistics?.buyerOfficeHitRate || []} windowLabel={windowLabel} />
-          <HitRateTable title="TABLE 3 · BUYER TRADER HIT RATE" rows={statistics?.buyerTraderHitRate || []} windowLabel={windowLabel} />
-          <SupplierTraderCountTable rows={statistics?.supplierTraderFixtureCount || []} windowLabel={windowLabel} />
-        </div>
+            <div className="spc-stat-table-grid">
+              <WorkloadTable rows={statistics?.workload || []} windowLabel={windowLabel} />
+              <HitRateTable title="TABLE 2 · BUYER OFFICE HIT RATE" rows={statistics?.buyerOfficeHitRate || []} windowLabel={windowLabel} />
+              <HitRateTable title="TABLE 3 · BUYER TRADER HIT RATE" rows={statistics?.buyerTraderHitRate || []} windowLabel={windowLabel} />
+              <SupplierTraderCountTable rows={statistics?.supplierTraderFixtureCount || []} windowLabel={windowLabel} />
+            </div>
+          </>
+        )}
       </div>
     </SpcShell>
   )

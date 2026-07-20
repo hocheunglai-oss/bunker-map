@@ -420,7 +420,7 @@ export default function SpcUserManagementPage() {
                 }}
               >
                 <span>{tab.label}</span>
-                <em>{tab.id === "OFFICE" ? offices.length : roleCounts[tab.id] || 0}</em>
+                <em>{loading ? "…" : tab.id === "OFFICE" ? offices.length : roleCounts[tab.id] || 0}</em>
               </button>
             ))}
           </div>
@@ -510,9 +510,11 @@ export default function SpcUserManagementPage() {
             <div className="spc-office-users">
               <div className="spc-office-users-summary">
                 <strong>{activeOffice}</strong>
-                <span>{officeUsers.length} USER{officeUsers.length === 1 ? "" : "S"}</span>
+                <span>{loading ? "LOADING USERS..." : `${officeUsers.length} USER${officeUsers.length === 1 ? "" : "S"}`}</span>
               </div>
-              {officeUsers.length ? (
+              {loading ? (
+                <p className="spc-empty">Loading users...</p>
+              ) : officeUsers.length ? (
                 <div className="spc-authority-list">
                   {officeUsers.map((user) => (
                     <article key={user.id} className={user.isActive ? "spc-authority-row" : "spc-authority-row is-disabled"}>
@@ -562,7 +564,7 @@ export default function SpcUserManagementPage() {
               ))}
             </div>
           ) : (
-            <p className="spc-empty">Loading authority settings...</p>
+            <p className="spc-empty">{loading ? "Loading authority settings..." : "No authority settings configured."}</p>
           )}
         </section>
       </div>

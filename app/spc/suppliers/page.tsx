@@ -857,7 +857,9 @@ export default function SpcSuppliersPage() {
               ADD NEW SUPPLIER
             </button>
             <span>
-              {filteredRecords.length === records.length
+              {loading && records.length === 0
+                ? "TOTAL: LOADING SUPPLIERS..."
+                : filteredRecords.length === records.length
                 ? `TOTAL: ${records.length} SUPPLIERS`
                 : `TOTAL: ${filteredRecords.length} / ${records.length} SUPPLIERS`}
             </span>

@@ -1,14 +1,5 @@
-import Script from "next/script"
+import { redirect } from "next/navigation"
 
 export default function OutlookAddinCommandsPage() {
-  return (
-    <html>
-      <body>
-        <Script
-          src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"
-          strategy="beforeInteractive"
-        />
-      </body>
-    </html>
-  )
+  redirect("/api/outlook-addin/commands")
 }

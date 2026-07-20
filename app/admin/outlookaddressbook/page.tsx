@@ -85,6 +85,9 @@ const EXCHANGE_SYNC_TIMEOUT_MS = 10 * 60 * 1000
 const SOURCE_ALL = "__all_contacts__"
 const SOURCE_NEW = "__new_source_book__"
 const DEFAULT_SOURCE_BOOK = "FC-OUTLOOK"
+const INITIAL_DIRECTORY_ITEMS = 120
+const DIRECTORY_RENDER_STEP = 120
+const MAX_SEARCH_DIRECTORY_ITEMS = 600
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -517,6 +520,7 @@ export default function OutlookAddressBookPage() {
   const [selectedGroupId, setSelectedGroupId] = useState("")
   const [selectedSourceBook, setSelectedSourceBook] = useState(SOURCE_ALL)
   const [directorySearch, setDirectorySearch] = useState("")
+  const [directoryRenderLimit, setDirectoryRenderLimit] = useState(INITIAL_DIRECTORY_ITEMS)
   const [addMemberSearch, setAddMemberSearch] = useState("")
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
   const [createDraftType, setCreateDraftType] = useState<CreateDraftType | null>(null)
@@ -651,8 +655,7 @@ export default function OutlookAddressBookPage() {
     () =>
       contacts
         .filter((contact) => selectedSourceBook === SOURCE_ALL || cleanText(contact.source_book) === selectedSourceBook)
-        .filter((contact) => matchesSearch([contact.display_name, contact.primary_email, contact.nickname, contact.source_book], directorySearch))
-        .slice(0, 500),
+        .filter((contact) => matchesSearch([contact.display_name, contact.primary_email, contact.nickname, contact.source_book], directorySearch)),
     [contacts, directorySearch, selectedSourceBook]
   )
 
@@ -660,12 +663,11 @@ export default function OutlookAddressBookPage() {
     () =>
       groups
         .filter((group) => selectedSourceBook === SOURCE_ALL || cleanText(group.source_book) === selectedSourceBook)
-        .filter((group) => matchesSearch([group.name, group.nickname, group.source_book], directorySearch))
-        .slice(0, 500),
+        .filter((group) => matchesSearch([group.name, group.nickname, group.source_book], directorySearch)),
     [directorySearch, groups, selectedSourceBook]
   )
 
-  const directoryItems = useMemo<DirectoryItem[]>(() => {
+  const allDirectoryItems = useMemo<DirectoryItem[]>(() => {
     const contactItems: DirectoryItem[] = visibleContacts.map((contact) => ({
       type: "contact",
       id: contact.id,
@@ -683,10 +685,15 @@ export default function OutlookAddressBookPage() {
       group,
       count: groupMemberCounts.get(group.id) || 0,
     }))
-    return [...contactItems, ...groupItems]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 600)
+    return [...contactItems, ...groupItems].sort((a, b) => a.name.localeCompare(b.name))
   }, [groupMemberCounts, visibleContacts, visibleGroups])
+
+  const hasDirectorySearch = Boolean(cleanText(directorySearch))
+  const directoryItems = useMemo(
+    () => allDirectoryItems.slice(0, hasDirectorySearch ? MAX_SEARCH_DIRECTORY_ITEMS : directoryRenderLimit),
+    [allDirectoryItems, directoryRenderLimit, hasDirectorySearch],
+  )
+  const hasMoreDirectoryItems = !hasDirectorySearch && directoryItems.length < allDirectoryItems.length
 
   const addableContacts = useMemo(
     () =>
@@ -1385,17 +1392,24 @@ export default function OutlookAddressBookPage() {
           <div style={{ padding: "8px", display: "grid", gap: "8px" }}>
             <input
               value={directorySearch}
-              onChange={(event) => setDirectorySearch(event.target.value)}
+              onChange={(event) => {
+                setDirectorySearch(event.target.value)
+                setDirectoryRenderLimit(INITIAL_DIRECTORY_ITEMS)
+              }}
               onFocus={() => {
                 setDirectorySearch("")
                 setSelectedSourceBook(SOURCE_ALL)
+                setDirectoryRenderLimit(INITIAL_DIRECTORY_ITEMS)
               }}
               placeholder="Search contacts or groups"
               style={inputStyle}
             />
             <select
               value={selectedSourceBook}
-              onChange={(event) => setSelectedSourceBook(event.target.value)}
+              onChange={(event) => {
+                setSelectedSourceBook(event.target.value)
+                setDirectoryRenderLimit(INITIAL_DIRECTORY_ITEMS)
+              }}
               style={inputStyle}
             >
               <option value={SOURCE_ALL}>ALL CONTACTS</option>
@@ -1446,6 +1460,21 @@ export default function OutlookAddressBookPage() {
                 </button>
               )
             })}
+            {hasMoreDirectoryItems ? (
+              <div style={{ display: "grid", gap: "6px", padding: "6px 2px 2px", textAlign: "center" }}>
+                <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>
+                  Showing {directoryItems.length} of {allDirectoryItems.length}. Search checks the full directory.
+                </span>
+                <button
+                  type="button"
+                  data-admin-button-style="preserve"
+                  onClick={() => setDirectoryRenderLimit((current) => current + DIRECTORY_RENDER_STEP)}
+                  style={{ ...buttonStyle, justifyContent: "center" }}
+                >
+                  Show more
+                </button>
+              </div>
+            ) : null}
           </div>
         </section>
 

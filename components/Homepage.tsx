@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CircleMarker, MapContainer, Popup, useMap } from "react-leaflet"
 import "leaflet/dist/leaflet.css"
-import "@maptiler/sdk/dist/maptiler-sdk.css"
 import L from "leaflet"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
@@ -34,6 +33,14 @@ const mapTilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY
 const mapTilerStyle =
   process.env.NEXT_PUBLIC_MAPTILER_STYLE ||
   "https://api.maptiler.com/maps/basic-v2-dark/style.json"
+const KEY_PORT_NAMES = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Kaohsiung"]
+
+function getMapTilerRasterUrl() {
+  if (!mapTilerKey) return null
+
+  const styleId = mapTilerStyle.match(/\/maps\/([^/]+)\/style\.json(?:\?|$)/)?.[1] || "basic-v2-dark"
+  return `https://api.maptiler.com/maps/${encodeURIComponent(styleId)}/{z}/{x}/{y}.png?key=${encodeURIComponent(mapTilerKey)}`
+}
 
 const glassPanelStyle: React.CSSProperties = {
   background:
@@ -107,37 +114,24 @@ function BaseMapLayer() {
   const map = useMap()
 
   useEffect(() => {
-    let mounted = true
-    let layer: L.Layer | null = null
-
-    async function loadLayer() {
-      if (!mapTilerKey) {
-        layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "© OpenStreetMap",
+    const mapTilerRasterUrl = getMapTilerRasterUrl()
+    const layer = mapTilerRasterUrl
+      ? L.tileLayer(mapTilerRasterUrl, {
+          tileSize: 512,
+          zoomOffset: -1,
+          minZoom: 1,
+          crossOrigin: true,
+          attribution:
+            '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>',
         })
-        layer.addTo(map)
-        return
-      }
+      : L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OpenStreetMap contributors",
+        })
 
-      const { MaptilerLayer } = await import("@maptiler/leaflet-maptilersdk")
-
-      if (!mounted) return
-
-      layer = new MaptilerLayer({
-        apiKey: mapTilerKey,
-        style: mapTilerStyle,
-      })
-
-      layer.addTo(map)
-    }
-
-    loadLayer()
+    layer.addTo(map)
 
     return () => {
-      mounted = false
-      if (layer) {
-        map.removeLayer(layer)
-      }
+      map.removeLayer(layer)
     }
   }, [map])
 
@@ -291,76 +285,18 @@ function OilWidget() {
   )
 }
 
-function IconButton({
-  label,
-  title,
-  children,
-  onClick,
-  href,
-}: {
-  label: string
-  title: string
-  children: React.ReactNode
-  onClick?: () => void
-  href?: string
-}) {
-  const sharedStyle: React.CSSProperties = {
-    width: "50px",
-    height: "50px",
-    borderRadius: "999px",
-    border: "1px solid rgba(210,236,255,0.16)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.1) 100%)",
-    color: "#d7e8ff",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-    backdropFilter: "blur(14px)",
-    WebkitBackdropFilter: "blur(14px)",
-    textDecoration: "none",
-  }
-
-  if (href) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={label}
-        title={title}
-        style={sharedStyle}
-      >
-        {children}
-      </a>
-    )
-  }
-
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={title}
-      style={sharedStyle}
-    >
-      {children}
-    </button>
-  )
-}
-
 export default function Homepage({ initialData, onReady }: HomepageProps) {
   const isMobile = useIsMobile()
   const initialMarketData = useMemo(() => normaliseHomepageData(initialData), [initialData])
   const [ports, setPorts] = useState<Port[]>(() => initialMarketData.ports)
   const [search, setSearch] = useState("")
-  const [results, setResults] = useState<Port[]>([])
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const [selectedPortId, setSelectedPortId] = useState<number | null>(null)
   const [reportsOpen, setReportsOpen] = useState(false)
   const [hoveredAction, setHoveredAction] = useState<string | null>(null)
   const [fallbacks, setFallbacks] = useState<FallbackMap>(() => initialMarketData.fallbacks)
   const [marketDataStatus, setMarketDataStatus] = useState<"loading" | "ready" | "error">(
-    () => initialMarketData.ports.length > 0 ? "ready" : "loading"
+    () => initialData?.unavailable ? "error" : initialMarketData.ports.length > 0 ? "ready" : "loading"
   )
 
   const mapRef = useRef<L.Map | null>(null)
@@ -421,9 +357,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       refreshTimer = window.setTimeout(() => {
         void loadHomepageData(false)
       }, 60000)
-    } else if (initialData?.unavailable) {
-      setMarketDataStatus("error")
-    } else {
+    } else if (!initialData?.unavailable) {
       void loadHomepageData(true)
     }
 
@@ -431,7 +365,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       cancelled = true
       if (refreshTimer != null) window.clearTimeout(refreshTimer)
     }
-  }, [initialMarketData.ports.length])
+  }, [initialData?.unavailable, initialMarketData.ports.length])
 
   function fuelFallback(portName: string, fuel: "hsfo" | "vlsfo" | "mgo") {
     return fallbacks[buildFallbackKey(portName, fuel)] || "-"
@@ -442,21 +376,13 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
     return String(value)
   }
 
-  useEffect(() => {
-    if (!search) {
-      setResults([])
-      return
-    }
-
-    const filtered = ports.filter(
-      (port) =>
-        port.type !== "divider" &&
-        port.name.toLowerCase().includes(search.toLowerCase())
-    )
-
-    setResults(filtered.slice(0, 8))
-    setSelectedIndex(-1)
-  }, [search, ports])
+  const results = useMemo(() => {
+    if (!search) return []
+    const normalisedSearch = search.toLowerCase()
+    return ports
+      .filter((port) => port.type !== "divider" && port.name.toLowerCase().includes(normalisedSearch))
+      .slice(0, 8)
+  }, [ports, search])
 
   useEffect(() => {
     return () => clearReportsCloseTimeout()
@@ -467,10 +393,9 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
     window.scrollTo(0, 0)
   }, [isMobile])
 
-  const keyPortNames = ["Singapore", "Hong Kong", "Zhoushan", "Busan", "Kaohsiung"]
   const keyPorts = useMemo(
     () =>
-      keyPortNames
+      KEY_PORT_NAMES
         .map((name) => ports.find((port) => port.name === name))
         .filter((port): port is Port => port != null),
     [ports]
@@ -516,7 +441,6 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
     } else {
       setSearch(port.name)
     }
-    setResults([])
     setReportsOpen(false)
   }
 
@@ -830,6 +754,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
             onChange={(event) => {
               setSearch(event.target.value)
               setSelectedPortId(null)
+              setSelectedIndex(-1)
             }}
             onKeyDown={handleKeyDown}
             style={{
@@ -845,7 +770,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
             }}
           />
 
-          {results.length > 0 && (
+          {results.length > 0 && selectedPortId == null && (
             <div
               style={{
                 position: "absolute",

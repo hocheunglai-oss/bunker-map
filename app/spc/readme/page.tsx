@@ -760,7 +760,7 @@ export default function SpcReadmePage() {
                 ) : null}
               </>
             ) : (
-              <div className="spc-readme-empty-stage">No presentation content.</div>
+              <div className="spc-readme-empty-stage">{loading ? "Loading presentation..." : "No presentation content."}</div>
             )}
           </main>
 
