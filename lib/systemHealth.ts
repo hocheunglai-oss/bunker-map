@@ -37,6 +37,7 @@ const BACKUP_WARNING_AGE_HOURS = 8 * 24
 const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const CHECK_TIMEOUT_MS = 12_000
+const SUPABASE_HEALTH_PAGE_SIZE = 1_000
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -129,6 +130,36 @@ function getSupabaseClient() {
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
   )
+}
+
+async function listActiveDriveFileIds(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  table: "cc_company_files" | "cc_entry_files",
+) {
+  const fileIds: string[] = []
+
+  for (let from = 0; ; from += SUPABASE_HEALTH_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("id,drive_file_id")
+      .not("drive_file_id", "is", null)
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, from + SUPABASE_HEALTH_PAGE_SIZE - 1)
+
+    if (error) throw error
+
+    const rows = data || []
+    fileIds.push(
+      ...rows
+        .map((row) => row.drive_file_id)
+        .filter((fileId): fileId is string => typeof fileId === "string" && Boolean(fileId)),
+    )
+
+    if (rows.length < SUPABASE_HEALTH_PAGE_SIZE) break
+  }
+
+  return fileIds
 }
 
 async function checkSupabase(): Promise<HealthCheckResult> {
@@ -273,24 +304,10 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
 
 async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const supabase = getSupabaseClient()
-  const [companyFiles, entryFiles] = await Promise.all([
-    supabase
-      .from("cc_company_files")
-      .select("drive_file_id")
-      .not("drive_file_id", "is", null)
-      .is("deleted_at", null),
-    supabase
-      .from("cc_entry_files")
-      .select("drive_file_id")
-      .not("drive_file_id", "is", null)
-      .is("deleted_at", null),
+  const [companyFileIds, entryFileIds] = await Promise.all([
+    listActiveDriveFileIds(supabase, "cc_company_files"),
+    listActiveDriveFileIds(supabase, "cc_entry_files"),
   ])
-
-  if (companyFiles.error) throw companyFiles.error
-  if (entryFiles.error) throw entryFiles.error
-
-  const companyFileIds = (companyFiles.data || []).map((row) => row.drive_file_id).filter(Boolean)
-  const entryFileIds = (entryFiles.data || []).map((row) => row.drive_file_id).filter(Boolean)
   const companyFileCount = companyFileIds.length
   const entryFileCount = entryFileIds.length
   const total = companyFileCount + entryFileCount
