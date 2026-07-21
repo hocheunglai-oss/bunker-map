@@ -29,7 +29,7 @@ const VESSEL_LABEL_PATTERN =
   /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|船名)/i
 
 const VESSEL_FIELD_PATTERN =
-  /^\s*['"]?\s*(?:[-•*]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
+  /^\s*['"]?\s*(?:[-•*=]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
 
 const BUYER_LABEL_PATTERN =
   /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
@@ -38,7 +38,7 @@ const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 const PORT_LABEL_PATTERN =
-  /^\s*(?:[-•*]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:[-•*=]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
@@ -52,6 +52,7 @@ function normalizeInput(text: string) {
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[：]/g, ":")
+    .replace(/[，]/g, ",")
     .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
     .replace(/\u00ad/g, "")
     .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
@@ -122,7 +123,7 @@ function cleanVesselName(value: string) {
 
   next = next.replace(/^\s*\[[^\]]+\]\s*[^:]{1,40}:\s*/i, "")
   next = next.replace(/^\s*\d+\s*[\).:-]\s*/, "")
-  next = next.replace(/^\s*['"]?\s*[-•*]\s*/, "")
+  next = next.replace(/^\s*['"]?\s*[-•*=]\s*/, "")
   next = removeVesselLabel(next)
   next = next.replace(/\bIMO(?:\s*NO\.?|\s*NUMBER)?\b[\s:#.-]*\d{0,7}.*$/i, "")
   next = next.replace(/^\s*(?:M\s*[./-]?\s*V|M\s*[./-]?\s*T|MV|MT)\b\s*/i, "")
@@ -320,7 +321,7 @@ function cleanPortName(
   })
   if (indexedInline) return indexedInline
 
-  next = next.replace(/^\s*(?:[-•*]\s*\.?\s*)?(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
+  next = next.replace(/^\s*(?:[-•*=]\s*\.?\s*)?(?:or\s+)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|加油港口|港口)\s*[:：#\-\t]?\s*/i, "")
   next = next.replace(/\([^)]*\)/g, " ")
   next = next.replace(/\b(?:bunkers?\s+only|bunker(?:ing)?|call|berth|discharging|loading|unloading)\b.*$/i, "")
   next = next.replace(/\b(?:eta|etb|etd|ets|wp\/agw|iagw)\b.*$/i, "")
@@ -510,10 +511,10 @@ export function parseEnquiryWorksheetGuess(
     extractFallbackVessel(lines, imo) ||
     extractColonProductVessel(lines) ||
     extractDelimitedHeaderVessel(lines, options) ||
-    extractSlashPrefixVessel(lines) ||
     extractLeadingVesselBeforeTradingDetails(lines) ||
     extractLeadingVesselBeforeChineseSchedule(lines) ||
-    extractHeaderVessel(lines)
+    extractHeaderVessel(lines) ||
+    extractSlashPrefixVessel(lines)
 
   if (bestImo && !imo) warnings.push("No valid IMO was found.")
   if (!vesselName) warnings.push("Vessel name could not be identified with high confidence.")

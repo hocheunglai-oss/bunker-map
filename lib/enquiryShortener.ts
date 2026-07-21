@@ -80,6 +80,7 @@ function normalizeInput(text: string) {
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[：]/g, ":")
+    .replace(/[，]/g, ",")
     .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
     .replace(/\u00ad/g, "")
     .replace(/[\u00a0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, " ")
@@ -200,6 +201,11 @@ export function findEnquiryDates(value: string) {
     if (date) dates.push(date)
   }
 
+  for (const match of normalized.matchAll(/\b\d{4}[./-](\d{1,2})[./-](\d{1,2})\b/g)) {
+    const date = normalizeDate(match[2], match[1])
+    if (date) dates.push(date)
+  }
+
   for (const match of normalized.matchAll(/(?:^|\n)\s*[A-Za-z][A-Za-z .'-]{1,36}\s+(\d{1,2})[./](\d{1,2})(?=$|[^\d])/gm)) {
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
@@ -256,7 +262,7 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)\s*(?:-|~|to)\s*(\d{1,2})(?:st|nd|rd|th)\b/gi)) {
+  for (const match of normalized.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|~|to)\s*(\d{1,2})(?:st|nd|rd|th)\b/gi)) {
     const range = formatCurrentMonthDateRange(match[1], match[2])
     if (range) dates.push(range)
   }
@@ -426,6 +432,7 @@ function isNonRequestProductReference(value: string) {
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(value) ||
     /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(value) ||
+    /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(value) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(value)
 }
 
@@ -553,6 +560,9 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
   const matches = productMatches(line)
   if (matches.length < 2) return []
   if (/^\s*(?:prod(?:uct)?|grades?|spec(?:ification)?)\b\s*[:#-]?/i.test(line)) return []
+  const quantityBeforeStyle = Boolean(
+    extractQuantityImmediatelyBeforeProduct(line.slice(0, matches[0].index)),
+  )
 
   return matches.flatMap((match, index) => {
     const nextMatch = matches[index + 1]
@@ -561,11 +571,15 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
       index === 0 ? 0 : matches[index - 1].index + matches[index - 1].value.length,
       match.index,
     )
-    const quantity =
+    const precedingQuantity =
       extractQuantityImmediatelyBeforeProduct(precedingText) ||
+      extractBareRangeImmediatelyBeforeProduct(precedingText)
+    const followingQuantity =
       extractQuantityImmediatelyAfterProduct(segmentText.slice(match.value.length)) ||
-      extractBareRangeImmediatelyBeforeProduct(precedingText) ||
       extractQuantityFromProductSegment(segmentText)
+    const quantity = quantityBeforeStyle
+      ? precedingQuantity || followingQuantity
+      : followingQuantity || precedingQuantity
     if (!quantity) return []
 
     return [{

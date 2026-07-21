@@ -424,6 +424,7 @@ function buildInstructions(source: ParserAiSource) {
     "The raw enquiry is authoritative. If current fields or parser output conflict with the raw enquiry, correct them from the raw enquiry instead of preserving the existing field.",
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
+    "Remove generic MV, M/V, MT, and M/T prefixes from the vessel name in correctedOutput.",
     "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
     "The Chinese place name 新加坡 explicitly means Singapore; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",

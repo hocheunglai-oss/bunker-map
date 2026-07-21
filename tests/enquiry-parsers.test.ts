@@ -360,3 +360,45 @@ test("replays the July 17 FCUNO reports with canonical schedules and fuels", () 
     "test ship / 5 - 12 aug / vlsfo 100mts / lsmgo 60mts",
   )
 })
+
+test("replays the July 21 FCUNO samples without leaking schedule or offer numbers", () => {
+  assert.equal(
+    worksheetOutput("mv guang yuan eta hk 25/28th july abt 350/450 mts vlsfo (mfm apply w/o density fake)"),
+    "guang yuan / hk 25 - 28 jul / vlsfo 350-450mts",
+  )
+
+  assert.equal(
+    worksheetOutput("=VESSEL : MV VALENTE VENUS (IMO 9424637)\n=PORT : HONGKONG\nETA HONGKONG : 29 JUL\n=SPEC / QTY :\nVLSFO - 380 CST S 0.5% : 210~250 MT"),
+    "valente venus / 9424637 / hk 29 jul / vlsfo 210-250mts",
+  )
+
+  const minRong = [
+    "We are going to bunker our LNG vessel \"Min Rong\" in the name of Min Rong LNG Shipping Co., Ltd.",
+    "1. Date: Scheduled 8th-9th August, 2026",
+    "2. Quantity: LSMGO- 650MT(S< 0.1 %)",
+    "3. Position: Hong Kong",
+    "Other Conditions: Please make LSMGO bunkering carry out within 1 barge as possible.",
+    "Please send the best price BEFORE 1730 PM today. The offer shall remain valid no later than 1745 PM.",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(minRong),
+    "min rong / hk 8 - 9 aug / lsmgo 650mts",
+  )
+
+  assert.equal(
+    worksheetOutput("MV QI HANG，8853776，ETA BUSAN 28-31ST，0.1LSMGO/60-80MT\n如果跨月8/2，价格多少"),
+    "qi hang / 8853776 / busan 28 - 31 jul / lsmgo 60-80mts",
+  )
+
+  const tangShan = [
+    "Pls offer before 18:30 with validity till 19:00 JST",
+    "TANG SHAN GANG JI 1",
+    "9216858",
+    "Incheon 2026/07/28",
+    "VLSFO 380CST 240MT LSMGO 50MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(tangShan),
+    "tang shan gang ji 1 / 9216858 / inchon 28 jul / vlsfo 240mts / lsmgo 50mts",
+  )
+})
