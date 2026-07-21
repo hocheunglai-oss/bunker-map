@@ -13,7 +13,7 @@ import {
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-const TOKEN_DIGEST = "7a1542614b5a920b080f808450c8d01df785cc82802d22baee28844da338cf80"
+const TOKEN_DIGEST = "774081c8ffc42d1f9fc696207970092742adbd4ee73e6cc9d8c3db683342b005"
 const EXPIRES_AT = Date.parse("2026-07-22T23:59:00+08:00")
 const CHAPTER_ONE_ID = "6ff280dd-e46a-4a65-acd4-280c01dd5b52"
 const context: SpcAuditContext = {
