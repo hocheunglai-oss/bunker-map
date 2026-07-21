@@ -14,7 +14,7 @@ import {
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-const TOKEN_DIGEST = "a3a7cc813971fb14fa40c1bdab7773c62587d03754bf147d5f87e59aa940beaa"
+const TOKEN_DIGEST = "82217b635ccd6f818ce7c2f7425c14aa534061a5858055565f468c91429e29e4"
 const EXPIRES_AT = Date.parse("2026-07-23T18:00:00+08:00")
 const ALLOWED_IDS = new Set([
   "2856b506-c0ff-4b4c-9410-1eb78e86af5a",
