@@ -390,12 +390,14 @@ function Mark-SupersededQueueRows($AllRows, $EffectiveRows, [hashtable]$Stats) {
   foreach ($row in $AllRows) {
     $rowId = Clean-Text $row.id
     if ($rowId -and -not (Has-MapKey $effectiveIds $rowId)) {
+      $skipReason = "Skipped because a newer pending change exists for the same entity."
       Update-ExchangeQueueRow $rowId @{
         status = "skipped"
-        error_message = "Skipped because a newer pending change exists for the same entity."
+        error_message = $skipReason
         completed_at = (Get-Date).ToUniversalTime().ToString("o")
       }
       Increment-Stat $Stats "skippedQueueRows"
+      Increment-Stat $Stats "supersededQueueRows"
     }
   }
 }
@@ -451,11 +453,232 @@ function Get-QueueChangeSummary($Row) {
   }
 }
 
+function Get-QueueDisplayName($Row) {
+  $name = Clean-Text $Row.display_name
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "contact" "DisplayName" }
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "group" "GroupName" }
+  if (-not $name) { $name = Clean-Text $Row.entity_email }
+  if (-not $name) { $name = Clean-Text $Row.entity_alias }
+  if (-not $name) { $name = Clean-Text $Row.entity_id }
+  if (-not $name) { $name = "Unknown item" }
+  return $name
+}
+
+function Get-QueueActionLabel($Action) {
+  switch (Clean-Text $Action) {
+    "create_contact" { return "Create contact" }
+    "update_contact" { return "Update contact" }
+    "delete_contact" { return "Delete contact" }
+    "create_group" { return "Create group" }
+    "update_group" { return "Update group" }
+    "delete_group" { return "Delete group" }
+    "update_group_members" { return "Update group members" }
+    default {
+      $label = (Clean-Text $Action) -replace "_", " "
+      if (-not $label) { return "Unknown action" }
+      return $label
+    }
+  }
+}
+
+function Get-QueueEntityLabel($EntityType) {
+  switch (Clean-Text $EntityType) {
+    "contact" { return "Contact" }
+    "group" { return "Group" }
+    "group_members" { return "Group members" }
+    "full_sync" { return "Full address book" }
+    default {
+      $label = (Clean-Text $EntityType) -replace "_", " "
+      if (-not $label) { return "Item" }
+      return $label
+    }
+  }
+}
+
+function Get-QueueIdentifier($Row) {
+  $email = Normalize-Email $Row.entity_email
+  if (-not $email) { $email = Normalize-Email (Get-QueuePayloadValue $Row "contact" "ExternalEmailAddress") }
+  $alias = Clean-Text $Row.entity_alias
+  if (-not $alias) { $alias = Get-QueuePayloadValue $Row "contact" "Alias" }
+  if (-not $alias) { $alias = Get-QueuePayloadValue $Row "group" "Alias" }
+
+  if ($email -and $alias) { return "$email / $alias" }
+  if ($email) { return $email }
+  if ($alias) { return $alias }
+  return Clean-Text $Row.entity_id
+}
+
+function Add-SyncChangeDetail([hashtable]$Stats, $Row, $Status, $Result) {
+  if (-not (Has-MapKey $Stats "changeDetails")) { $Stats["changeDetails"] = @() }
+  $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
+    status = (Clean-Text $Status).ToLower()
+    action = Clean-Text $Row.action
+    actionLabel = Get-QueueActionLabel $Row.action
+    entityType = Get-QueueEntityLabel $Row.entity_type
+    displayName = Get-QueueDisplayName $Row
+    identifier = Get-QueueIdentifier $Row
+    result = Clean-Text $Result
+    queueRowId = Clean-Text $Row.id
+    requestedBy = Clean-Text $Row.requested_by
+    queuedAt = Format-HongKongTime $Row.created_at
+    attempt = ([int]$Row.attempts + 1)
+  }
+}
+
 function Add-SyncChange([hashtable]$Stats, $Row) {
   $summary = Get-QueueChangeSummary $Row
   if (-not $summary) { return }
   if (-not (Has-MapKey $Stats "changes")) { $Stats["changes"] = @() }
   $Stats["changes"] = @($Stats["changes"]) + $summary
+}
+
+function Get-QueueCounterSnapshot([hashtable]$Stats) {
+  $snapshot = @{}
+  foreach ($key in @("skippedQueueRows", "verifiedQueueRows", "createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
+    $value = 0
+    if ((Has-MapKey $Stats $key)) { $value = [int](Get-MapValue $Stats $key) }
+    $snapshot[$key] = $value
+  }
+  $addedMemberEmails = @()
+  $removedMemberEmails = @()
+  if ((Has-MapKey $Stats "addedMemberEmails")) { $addedMemberEmails = @(Get-MapValue $Stats "addedMemberEmails") }
+  if ((Has-MapKey $Stats "removedMemberEmails")) { $removedMemberEmails = @(Get-MapValue $Stats "removedMemberEmails") }
+  $snapshot["addedMemberEmailsCount"] = $addedMemberEmails.Count
+  $snapshot["removedMemberEmailsCount"] = $removedMemberEmails.Count
+  return $snapshot
+}
+
+function Get-QueueCounterDelta([hashtable]$Before, [hashtable]$After, $Name) {
+  $beforeValue = 0
+  $afterValue = 0
+  if ((Has-MapKey $Before $Name)) { $beforeValue = [int](Get-MapValue $Before $Name) }
+  if ((Has-MapKey $After $Name)) { $afterValue = [int](Get-MapValue $After $Name) }
+  return $afterValue - $beforeValue
+}
+
+function Get-QueueNewValues([hashtable]$Before, [hashtable]$After, $Name) {
+  $countKey = "$Name" + "Count"
+  $startIndex = 0
+  if ((Has-MapKey $Before $countKey)) { $startIndex = [int](Get-MapValue $Before $countKey) }
+  $values = @()
+  if ((Has-MapKey $After $Name)) { $values = @(Get-MapValue $After $Name) }
+  if ($values.Count -le $startIndex) { return @() }
+
+  $newValues = @()
+  for ($index = $startIndex; $index -lt $values.Count; $index += 1) {
+    $value = Clean-Text $values[$index]
+    if ($value) { $newValues += $value }
+  }
+  return $newValues
+}
+
+function Get-QueueMemberChangeMessage([hashtable]$Before, [hashtable]$After) {
+  $parts = @()
+  $addedEmails = @(Get-QueueNewValues $Before $After "addedMemberEmails")
+  $removedEmails = @(Get-QueueNewValues $Before $After "removedMemberEmails")
+  if ($addedEmails.Count -gt 0) { $parts += "Added member(s): $($addedEmails -join ', ')" }
+  if ($removedEmails.Count -gt 0) { $parts += "Removed member(s): $($removedEmails -join ', ')" }
+  return ($parts -join ". ")
+}
+
+function Get-QueueResultMessage($Row, [hashtable]$Before, [hashtable]$After) {
+  $action = Clean-Text $Row.action
+  $createdContacts = Get-QueueCounterDelta $Before $After "createdContacts"
+  $updatedContacts = Get-QueueCounterDelta $Before $After "updatedContacts"
+  $removedContacts = Get-QueueCounterDelta $Before $After "removedContacts"
+  $createdGroups = Get-QueueCounterDelta $Before $After "createdGroups"
+  $updatedGroups = Get-QueueCounterDelta $Before $After "updatedGroups"
+  $removedGroups = Get-QueueCounterDelta $Before $After "removedGroups"
+  $verified = Get-QueueCounterDelta $Before $After "verifiedQueueRows"
+  $memberChanges = Get-QueueMemberChangeMessage $Before $After
+
+  switch ($action) {
+    "create_contact" {
+      if ($createdContacts -gt 0) { return "Created the contact in Exchange and verified it." }
+      if ($updatedContacts -gt 0) { return "The contact already existed; updated it in Exchange and verified it." }
+      if ($verified -gt 0) { return "Verified the contact in Exchange; no creation was required." }
+    }
+    "update_contact" {
+      if ($createdContacts -gt 0) { return "The contact was missing; created it in Exchange and verified it." }
+      if ($updatedContacts -gt 0) { return "Updated the contact in Exchange and verified it." }
+      if ($verified -gt 0) { return "Verified the contact in Exchange; no profile update was required." }
+    }
+    "delete_contact" {
+      if ($removedContacts -gt 0) { return "Deleted the managed contact from Exchange and verified its removal." }
+      if ($verified -gt 0) { return "The contact was already absent from Exchange; verified that no deletion was required." }
+    }
+    "create_group" {
+      $groupResult = ""
+      if ($removedGroups -gt 0) { return "The source group was missing or had no eligible members; deleted the managed group from Exchange and verified its removal." }
+      if ($createdGroups -gt 0) { $groupResult = "Created the group in Exchange and verified it." }
+      elseif ($updatedGroups -gt 0) { $groupResult = "The group already existed; updated it in Exchange and verified it." }
+      elseif ($verified -gt 0) { $groupResult = "The source group was missing or had no eligible members, and the Exchange group was already absent; verified that no deletion was required." }
+      if ($memberChanges) { return "$groupResult $memberChanges." }
+      if ($groupResult) { return $groupResult }
+    }
+    "update_group" {
+      $groupResult = ""
+      if ($removedGroups -gt 0) { return "The source group was missing or had no eligible members; deleted the managed group from Exchange and verified its removal." }
+      if ($createdGroups -gt 0) { $groupResult = "The group was missing; created it in Exchange and verified it." }
+      elseif ($updatedGroups -gt 0) { $groupResult = "Updated the group in Exchange and verified it." }
+      elseif ($verified -gt 0) { $groupResult = "The source group was missing or had no eligible members, and the Exchange group was already absent; verified that no deletion was required." }
+      if ($memberChanges) { return "$groupResult $memberChanges." }
+      if ($groupResult) { return $groupResult }
+    }
+    "delete_group" {
+      if ($removedGroups -gt 0) { return "Deleted the managed group from Exchange and verified its removal." }
+      if ($verified -gt 0) { return "The group was already absent from Exchange; verified that no deletion was required." }
+    }
+    "update_group_members" {
+      $parts = @()
+      if ($removedGroups -gt 0) { return "The source group was missing or had no eligible members; deleted the managed group from Exchange and verified its removal." }
+      if ($createdGroups -gt 0) { $parts += "created the group" }
+      if ($updatedGroups -gt 0) { $parts += "updated the group" }
+      $groupResult = ""
+      if ($parts.Count -gt 0) {
+        $groupText = $parts -join ", "
+        $groupResult = $groupText.Substring(0, 1).ToUpper() + $groupText.Substring(1) + "."
+      }
+      if (-not $groupResult -and $verified -gt 0) { return "The source group was missing or had no eligible members, and the Exchange group was already absent; verified that no deletion was required." }
+      if ($memberChanges) { return "$groupResult $memberChanges." }
+      if ($groupResult) { return "$groupResult No membership change was required." }
+    }
+  }
+
+  return "Exchange processing completed for this queue row."
+}
+
+function Get-QueuePartialProgressMessage([hashtable]$Before, [hashtable]$After) {
+  if (-not $Before) { return "" }
+  $parts = @()
+  $counterLabels = @{
+    createdContacts = "created contact(s)"
+    updatedContacts = "updated contact(s)"
+    removedContacts = "removed contact(s)"
+    createdGroups = "created group(s)"
+    updatedGroups = "updated group(s)"
+    removedGroups = "removed group(s)"
+  }
+  foreach ($key in @("createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups")) {
+    $delta = Get-QueueCounterDelta $Before $After $key
+    if ($delta -gt 0) { $parts += "$delta $($counterLabels[$key])" }
+  }
+  $memberChanges = Get-QueueMemberChangeMessage $Before $After
+  if ($memberChanges) { $parts += $memberChanges }
+  if ($parts.Count -le 0) { return "" }
+  return "Before the failure, Exchange reported: $($parts -join '; ')."
+}
+
+function Get-QueueSkipReason($Row) {
+  switch (Clean-Text $Row.action) {
+    "create_contact" { return "Skipped because the source contact was missing, internal-only, or had no eligible external email address." }
+    "update_contact" { return "Skipped because the source contact was missing, internal-only, or had no eligible external email address." }
+    "create_group" { return "Skipped because the source group had no usable Exchange alias." }
+    "update_group" { return "Skipped because the source group had no usable Exchange alias." }
+    "update_group_members" { return "Skipped because the source group had no usable Exchange alias or eligible membership state." }
+    "delete_group" { return "Skipped because the queued group deletion had no usable Exchange alias." }
+    default { return "Skipped because the queue row did not contain enough eligible data for an Exchange change." }
+  }
 }
 
 function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
@@ -593,9 +816,10 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
     try {
       Add-DistributionGroupMember -Identity $Group.Alias -Member $email -ErrorAction Stop
       Increment-Stat $Stats "addedMembers"
+      $Stats["addedMemberEmails"] = @($Stats["addedMemberEmails"]) + $email
     } catch {
       if ($_.Exception.Message -notmatch "already a member") {
-        Write-Warning ("Could not add {0} to {1}: {2}" -f $email, $Group.GroupName, $_.Exception.Message)
+        throw ("Could not add {0} to {1}: {2}" -f $email, $Group.GroupName, $_.Exception.Message)
       }
     }
   }
@@ -606,7 +830,33 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
     if ($currentEmail -and -not (Has-MapKey $desiredMembers $currentEmail)) {
       Remove-DistributionGroupMember -Identity $Group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
       Increment-Stat $Stats "removedMembers"
+      $Stats["removedMemberEmails"] = @($Stats["removedMemberEmails"]) + $currentEmail
     }
+  }
+
+  $missingEmails = @()
+  $unexpectedEmails = @()
+  $membershipVerified = $false
+  for ($verificationAttempt = 1; $verificationAttempt -le 4; $verificationAttempt += 1) {
+    if ($verificationAttempt -gt 1) { Start-Sleep -Seconds 2 }
+    $verifiedMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction Stop)
+    $verifiedEmails = @{}
+    foreach ($verifiedMember in $verifiedMembers) {
+      $verifiedEmail = Get-RecipientEmail $verifiedMember
+      if ($verifiedEmail) { $verifiedEmails[$verifiedEmail] = $true }
+    }
+    $missingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $verifiedEmails $_) } | Sort-Object)
+    $unexpectedEmails = @($verifiedEmails.Keys | Where-Object { -not (Has-MapKey $desiredMembers $_) } | Sort-Object)
+    if ($missingEmails.Count -le 0 -and $unexpectedEmails.Count -le 0) {
+      $membershipVerified = $true
+      break
+    }
+  }
+  if (-not $membershipVerified) {
+    $verificationParts = @()
+    if ($missingEmails.Count -gt 0) { $verificationParts += "missing after verification retries: $($missingEmails -join ', ')" }
+    if ($unexpectedEmails.Count -gt 0) { $verificationParts += "unexpected after verification retries: $($unexpectedEmails -join ', ')" }
+    throw "Exchange group membership verification failed for $($Group.GroupName) ($($verificationParts -join '; '))."
   }
 }
 
@@ -674,8 +924,12 @@ function Invoke-IncrementalExchangeSync {
     completedQueueRows = 0
     failedQueueRows = 0
     skippedQueueRows = 0
+    supersededQueueRows = 0
     verifiedQueueRows = 0
     changes = @()
+    changeDetails = @()
+    addedMemberEmails = @()
+    removedMemberEmails = @()
     createdContacts = 0
     updatedContacts = 0
     removedContacts = 0
@@ -698,6 +952,7 @@ function Invoke-IncrementalExchangeSync {
   foreach ($row in $effectiveRows) {
     $rowId = Clean-Text $row.id
     if (-not $rowId) { continue }
+    $beforeCounters = $null
     try {
       Update-ExchangeQueueRow $rowId @{
         status = "processing"
@@ -707,23 +962,55 @@ function Invoke-IncrementalExchangeSync {
       }
       Increment-Stat $stats "processedQueueRows"
       Write-Host ("Processing Exchange queue row {0}: {1} {2}" -f $rowId, (Clean-Text $row.action), (Clean-Text $row.display_name))
+      $beforeCounters = Get-QueueCounterSnapshot $stats
       Process-ExchangeQueueRow $row $stats
-      Update-ExchangeQueueRow $rowId @{
-        status = "completed"
-        exchange_verified_at = (Get-Date).ToUniversalTime().ToString("o")
-        completed_at = (Get-Date).ToUniversalTime().ToString("o")
-        error_message = $null
+      $skippedForRow = Get-QueueCounterDelta $beforeCounters $stats "skippedQueueRows"
+      if ($skippedForRow -gt 0) {
+        $skipReason = Get-QueueSkipReason $row
+        Update-ExchangeQueueRow $rowId @{
+          status = "skipped"
+          completed_at = (Get-Date).ToUniversalTime().ToString("o")
+          error_message = $skipReason
+        }
+        Add-SyncChangeDetail $stats $row "skipped" $skipReason
+        Write-Warning ("Skipped Exchange queue row {0}: {1}" -f $rowId, $skipReason)
+      } else {
+        $resultMessage = Get-QueueResultMessage $row $beforeCounters $stats
+        Update-ExchangeQueueRow $rowId @{
+          status = "completed"
+          exchange_verified_at = (Get-Date).ToUniversalTime().ToString("o")
+          completed_at = (Get-Date).ToUniversalTime().ToString("o")
+          error_message = $null
+        }
+        Increment-Stat $stats "completedQueueRows"
+        Add-SyncChange $stats $row
+        Add-SyncChangeDetail $stats $row "completed" $resultMessage
+        Write-Host ("Completed Exchange queue row {0}" -f $rowId)
       }
-      Increment-Stat $stats "completedQueueRows"
-      Add-SyncChange $stats $row
-      Write-Host ("Completed Exchange queue row {0}" -f $rowId)
     } catch {
-      Update-ExchangeQueueRow $rowId @{
-        status = "failed"
-        error_message = $_.Exception.Message
+      $rowError = Clean-Text $_.Exception.Message
+      $failureResult = "Error: $rowError"
+      if ($beforeCounters) {
+        $skippedBeforeFailure = Get-QueueCounterDelta $beforeCounters $stats "skippedQueueRows"
+        if ($skippedBeforeFailure -gt 0) {
+          Increment-Stat $stats "skippedQueueRows" (-1 * $skippedBeforeFailure)
+        }
+        $partialProgress = Get-QueuePartialProgressMessage $beforeCounters $stats
+        if ($partialProgress) { $failureResult = "$partialProgress Error: $rowError" }
+      }
+      try {
+        Update-ExchangeQueueRow $rowId @{
+          status = "failed"
+          error_message = $rowError
+        }
+      } catch {
+        $statusError = Clean-Text $_.Exception.Message
+        $failureResult += " Queue status persistence also failed: $statusError"
+        Write-Warning ("Could not persist failed status for Exchange queue row {0}: {1}" -f $rowId, $statusError)
       }
       Increment-Stat $stats "failedQueueRows"
-      Write-Warning ("Exchange queue row {0} failed: {1}" -f $rowId, $_.Exception.Message)
+      Add-SyncChangeDetail $stats $row "failed" $failureResult
+      Write-Warning ("Exchange queue row {0} failed: {1}" -f $rowId, $rowError)
     }
   }
 
@@ -848,6 +1135,31 @@ function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
   }
 }
 
+function Get-SyncSummaryLabel($Key) {
+  switch ($Key) {
+    "syncMode" { return "Sync mode" }
+    "queuedRows" { return "Queued changes" }
+    "processedQueueRows" { return "Processed changes" }
+    "completedQueueRows" { return "Completed changes" }
+    "failedQueueRows" { return "Failed changes" }
+    "skippedQueueRows" { return "Skipped rows (including superseded)" }
+    "supersededQueueRows" { return "Earlier saves superseded" }
+    "verifiedQueueRows" { return "Verified operations" }
+    "contacts" { return "Contacts processed" }
+    "groups" { return "Groups processed" }
+    "groupMembers" { return "Group members processed" }
+    "createdContacts" { return "Contacts created" }
+    "updatedContacts" { return "Contacts updated" }
+    "removedContacts" { return "Contacts removed" }
+    "createdGroups" { return "Groups created" }
+    "updatedGroups" { return "Groups updated" }
+    "removedGroups" { return "Groups removed" }
+    "addedMembers" { return "Group members added" }
+    "removedMembers" { return "Group members removed" }
+    default { return Clean-Text $Key }
+  }
+}
+
 function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayload) {
   $Details = Get-StatsObject $Details
   $recipients = Get-NotificationRecipients $WebhookPayload
@@ -859,34 +1171,123 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   if (-not $requestedBy) { $requestedBy = "Admin" }
   $startedAt = Format-HongKongTime $WebhookPayload.requestedAt
 
-  $statusText = if ($Status -eq "completed") { "Completed" } else { "Failed" }
-  $changesRows = ""
-  $changes = Get-DetailValue $Details "changes"
-  if ($changes) {
-    $index = 0
-    foreach ($change in @($changes)) {
-      if ($index -ge 25) { break }
-      $changeText = Clean-Text $change
-      if ($changeText) {
-        $changesRows += "<li style='margin:0 0 4px;'>$(Escape-Html $changeText)</li>"
-        $index += 1
-      }
-    }
-    $remainingChanges = @($changes).Count - $index
-    if ($remainingChanges -gt 0) {
-      $changesRows += "<li style='margin:0;color:#64748b;'>$(Escape-Html "and $remainingChanges more...")</li>"
-    }
+  $queuedValue = Get-DetailValue $Details "queuedRows"
+  $hasQueueStats = $null -ne $queuedValue
+  $queuedRows = if ($hasQueueStats) { [int]$queuedValue } else { 0 }
+  $completedRows = [int](Get-DetailValue $Details "completedQueueRows")
+  $failedRows = [int](Get-DetailValue $Details "failedQueueRows")
+  $skippedRows = [int](Get-DetailValue $Details "skippedQueueRows")
+  $supersededRows = [int](Get-DetailValue $Details "supersededQueueRows")
+  $actionableSkippedRows = [Math]::Max(0, $skippedRows - $supersededRows)
+  $statusText = "Completed"
+  $statusColor = "#166534"
+  $statusBackground = "#dcfce7"
+  $statusBorder = "#86efac"
+  if ($Status -ne "completed") {
+    $statusText = "Failed"
+    $statusColor = "#991b1b"
+    $statusBackground = "#fee2e2"
+    $statusBorder = "#fca5a5"
+  } elseif ($failedRows -gt 0) {
+    $statusText = "Completed with errors"
+    $statusColor = "#9a3412"
+    $statusBackground = "#ffedd5"
+    $statusBorder = "#fdba74"
+  } elseif ($actionableSkippedRows -gt 0) {
+    $statusText = "Completed with skipped changes"
+    $statusColor = "#854d0e"
+    $statusBackground = "#fef9c3"
+    $statusBorder = "#fde047"
   }
-  if (-not $changesRows) {
-    $changesRows = "<li style='margin:0;color:#64748b;'>No individual changes were reported.</li>"
+
+  $changeRows = ""
+  $changeDetails = Get-DetailValue $Details "changeDetails"
+  $changeIndex = 0
+  $maxChangeRows = 200
+  foreach ($change in @($changeDetails)) {
+    if ($null -eq $change -or $changeIndex -ge $maxChangeRows) { continue }
+
+    $changeStatus = (Clean-Text (Get-DetailValue $change "status")).ToLower()
+    $changeStatusText = "Completed"
+    $changeStatusColor = "#166534"
+    $changeStatusBackground = "#dcfce7"
+    $rowBackground = "#ffffff"
+    if ($changeStatus -eq "failed") {
+      $changeStatusText = "Failed"
+      $changeStatusColor = "#991b1b"
+      $changeStatusBackground = "#fee2e2"
+      $rowBackground = "#fff7f7"
+    } elseif ($changeStatus -eq "skipped") {
+      $changeStatusText = "Skipped"
+      $changeStatusColor = "#854d0e"
+      $changeStatusBackground = "#fef9c3"
+      $rowBackground = "#fffdf2"
+    }
+
+    $actionLabel = Clean-Text (Get-DetailValue $change "actionLabel")
+    if (-not $actionLabel) { $actionLabel = Get-QueueActionLabel (Get-DetailValue $change "action") }
+    $entityType = Clean-Text (Get-DetailValue $change "entityType")
+    $displayName = Clean-Text (Get-DetailValue $change "displayName")
+    if (-not $displayName) { $displayName = "Unknown item" }
+    $identifier = Clean-Text (Get-DetailValue $change "identifier")
+    $result = Clean-Text (Get-DetailValue $change "result")
+    if (-not $result) { $result = "No result detail was recorded." }
+    $queueRowId = Clean-Text (Get-DetailValue $change "queueRowId")
+    $rowRequestedBy = Clean-Text (Get-DetailValue $change "requestedBy")
+    $rowQueuedAt = Clean-Text (Get-DetailValue $change "queuedAt")
+    $rowAttempt = [int](Get-DetailValue $change "attempt")
+
+    $identifierHtml = ""
+    if ($identifier) {
+      $identifierHtml = "<div style='margin-top:3px;color:#475569;font-size:12px;'>$(Escape-Html $identifier)</div>"
+    }
+    $queueMetadata = @()
+    if ($rowRequestedBy) { $queueMetadata += "Requested by $(Escape-Html $rowRequestedBy)" }
+    if ($rowQueuedAt) { $queueMetadata += "Queued $(Escape-Html $rowQueuedAt)" }
+    if ($rowAttempt -gt 0) { $queueMetadata += "Attempt $(Escape-Html $rowAttempt)" }
+    if ($queueRowId) { $queueMetadata += "Queue row $(Escape-Html $queueRowId)" }
+    $queueRowHtml = ""
+    if ($queueMetadata.Count -gt 0) {
+      $queueRowHtml = "<div style='margin-top:5px;color:#94a3b8;font-size:10px;'>$($queueMetadata -join ' &middot; ')</div>"
+    }
+
+    $changeRows += @"
+<tr style="background:$rowBackground;">
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;white-space:nowrap;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:$changeStatusBackground;color:$changeStatusColor;font-size:11px;font-weight:800;">$(Escape-Html $changeStatusText)</span></td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $actionLabel)</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><div style="font-weight:700;">$(Escape-Html $displayName)</div><div style="margin-top:2px;color:#64748b;font-size:11px;">$(Escape-Html $entityType)</div>$identifierHtml</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">$(Escape-Html $result)$queueRowHtml</td>
+</tr>
+"@
+    $changeIndex += 1
+  }
+
+  $changeCount = @($changeDetails).Count
+  if (-not $changeRows) {
+    $fallbackAction = if ($hasQueueStats) { "Incremental sync" } else { "Full sync" }
+    $fallbackItem = if ($hasQueueStats -and $queuedRows -le 0) { "No pending changes" } else { "Address book sync" }
+    $fallbackStatus = if ($Status -eq "completed") { "Completed" } else { "Failed" }
+    $fallbackStatusColor = if ($Status -eq "completed") { "#166534" } else { "#991b1b" }
+    $fallbackStatusBackground = if ($Status -eq "completed") { "#dcfce7" } else { "#fee2e2" }
+    $changeRows = @"
+<tr>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:$fallbackStatusBackground;color:$fallbackStatusColor;font-size:11px;font-weight:800;">$(Escape-Html $fallbackStatus)</span></td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $fallbackAction)</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $fallbackItem)</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">$(Escape-Html $Message)</td>
+</tr>
+"@
+  } elseif ($changeCount -gt $changeIndex) {
+    $remainingChanges = $changeCount - $changeIndex
+    $changeRows += "<tr><td colspan='4' style='padding:10px 8px;color:#64748b;background:#f8fafc;'>$(Escape-Html "$remainingChanges additional queue result(s) were omitted from this email.")</td></tr>"
   }
 
   $detailsRows = ""
   if ($Details) {
-    foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "skippedQueueRows", "verifiedQueueRows", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
+    foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "skippedQueueRows", "supersededQueueRows", "verifiedQueueRows", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
       $detailValue = Get-DetailValue $Details $key
       if ($null -ne $detailValue) {
-        $detailsRows += "<tr><td style='padding:4px 10px 4px 0;color:#475569;'>$(Escape-Html $key)</td><td style='padding:4px 0;font-weight:700;'>$(Escape-Html $detailValue)</td></tr>"
+        $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;'>$(Escape-Html $detailValue)</td></tr>"
       }
     }
   }
@@ -894,22 +1295,75 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
     $detailsRows = "<tr><td style='padding:4px 0;color:#475569;'>No count details available.</td></tr>"
   }
 
+  $metricsHtml = ""
+  if ($hasQueueStats) {
+    $metricsHtml = @"
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin:16px -8px 0;">
+  <tr>
+    <td style="width:25%;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;"><div style="color:#1e40af;font-size:11px;font-weight:800;text-transform:uppercase;">Processed</div><div style="margin-top:3px;color:#1e3a8a;font-size:22px;font-weight:900;">$(Escape-Html ([int](Get-DetailValue $Details "processedQueueRows")))</div></td>
+    <td style="width:25%;padding:10px;border:1px solid #86efac;border-radius:10px;background:#f0fdf4;"><div style="color:#166534;font-size:11px;font-weight:800;text-transform:uppercase;">Completed</div><div style="margin-top:3px;color:#14532d;font-size:22px;font-weight:900;">$(Escape-Html $completedRows)</div></td>
+    <td style="width:25%;padding:10px;border:1px solid #fca5a5;border-radius:10px;background:#fff7f7;"><div style="color:#991b1b;font-size:11px;font-weight:800;text-transform:uppercase;">Failed</div><div style="margin-top:3px;color:#7f1d1d;font-size:22px;font-weight:900;">$(Escape-Html $failedRows)</div></td>
+    <td style="width:25%;padding:10px;border:1px solid #fde047;border-radius:10px;background:#fffdf2;"><div style="color:#854d0e;font-size:11px;font-weight:800;text-transform:uppercase;">Skipped</div><div style="margin-top:3px;color:#713f12;font-size:22px;font-weight:900;">$(Escape-Html $actionableSkippedRows)</div></td>
+  </tr>
+</table>
+"@
+  }
+
+  $followUpHtml = ""
+  if ($failedRows -gt 0) {
+    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fdba74;border-radius:10px;background:#fff7ed;color:#9a3412;'><strong>Action required:</strong> Failed changes are not retried automatically. Review each error below, correct the cause, then requeue the change.</div>"
+  } elseif ($actionableSkippedRows -gt 0) {
+    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fde047;border-radius:10px;background:#fefce8;color:#854d0e;'><strong>Note:</strong> Skipped changes made no Exchange update. Each skipped reason is shown below.</div>"
+  } elseif ($supersededRows -gt 0) {
+    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1e40af;'><strong>Note:</strong> $supersededRows earlier autosave row(s) were safely superseded by the final value and are not listed as separate changes below.</div>"
+  }
+
   $html = @"
-<div style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.45;">
-  <h2 style="margin:0 0 12px;">Exchange address book sync $statusText</h2>
-  <p><strong>Status:</strong> $(Escape-Html $Status)</p>
-  <p><strong>Message:</strong> $(Escape-Html $Message)</p>
-  <p><strong>Requested by:</strong> $(Escape-Html $requestedBy)</p>
-  <p><strong>Requested at:</strong> $(Escape-Html $startedAt)</p>
-  <h3 style="margin:16px 0 8px;">Changes</h3>
-  <ul style="margin:0 0 12px;padding-left:18px;">$changesRows</ul>
-  <h3 style="margin:16px 0 8px;">Summary</h3>
-  <table style="border-collapse:collapse;margin-top:12px;">$detailsRows</table>
+<div style="margin:0;padding:20px;background:#f1f5f9;font-family:Roboto,Arial,sans-serif;color:#0f172a;line-height:1.45;">
+  <div style="max-width:920px;margin:0 auto;border:1px solid #cbd5e1;border-radius:14px;background:#ffffff;overflow:hidden;">
+    <div style="padding:20px 22px;background:#0f172a;color:#ffffff;">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#cbd5e1;">FC Uno Exchange</div>
+      <h2 style="margin:5px 0 0;font-size:22px;">Address book sync</h2>
+    </div>
+    <div style="padding:20px 22px;">
+      <span style="display:inline-block;padding:5px 10px;border:1px solid $statusBorder;border-radius:999px;background:$statusBackground;color:$statusColor;font-size:12px;font-weight:900;">$(Escape-Html $statusText)</span>
+      <p style="margin:12px 0 0;font-size:14px;">$(Escape-Html $Message)</p>
+      <table role="presentation" style="margin-top:12px;border-collapse:collapse;font-size:12px;color:#475569;">
+        <tr><td style="padding:2px 12px 2px 0;font-weight:700;">Requested by</td><td style="padding:2px 0;">$(Escape-Html $requestedBy)</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;font-weight:700;">Requested at</td><td style="padding:2px 0;">$(Escape-Html $startedAt)</td></tr>
+      </table>
+      $metricsHtml
+      $followUpHtml
+
+      <h3 style="margin:22px 0 8px;font-size:16px;">Change results</h3>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px;">
+          <thead>
+            <tr style="background:#e2e8f0;color:#334155;text-align:left;">
+              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Status</th>
+              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Requested change</th>
+              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Item</th>
+              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Exchange result</th>
+            </tr>
+          </thead>
+          <tbody>$changeRows</tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:22px 0 8px;font-size:16px;">Summary</h3>
+      <table style="width:100%;max-width:460px;border-collapse:collapse;font-size:12px;">$detailsRows</table>
+      <p style="margin:18px 0 0;color:#94a3b8;font-size:10px;">Queue result statuses and Exchange verification details are recorded for audit and troubleshooting.</p>
+    </div>
+  </div>
 </div>
 "@
 
   try {
-    Send-ExchangeSmtpMail $from @($recipients) "Exchange address book sync $statusText" $html
+    $subject = "Exchange address book sync: $statusText"
+    if ($hasQueueStats) {
+      $subject += " - $completedRows completed, $failedRows failed, $actionableSkippedRows skipped"
+    }
+    Send-ExchangeSmtpMail $from @($recipients) $subject $html
   } catch {
     Write-Warning ("Exchange sync notification email failed: {0}" -f $_.Exception.Message)
   }
@@ -942,13 +1396,24 @@ try {
     Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
     $failedRows = [int]$details.failedQueueRows
     $completedRows = [int]$details.completedQueueRows
+    $skippedRows = [int]$details.skippedQueueRows
+    $supersededRows = [int]$details.supersededQueueRows
+    $actionableSkippedRows = [Math]::Max(0, $skippedRows - $supersededRows)
     if ($failedRows -gt 0) {
-      $message = "Exchange incremental sync completed with $failedRows warning row(s)."
       $status = if ($completedRows -gt 0) { "completed" } else { "failed" }
+      $message = if ($status -eq "completed") {
+        "Exchange incremental sync completed with $failedRows failed change(s)."
+      } else {
+        "Exchange incremental sync failed for $failedRows change(s)."
+      }
       Save-SyncStatus $status $message $details
       Send-ExchangeSyncNotification $status $message $details $webhookPayload
     } elseif ([int]$details.queuedRows -le 0) {
       $message = "Exchange incremental sync completed. No pending changes were queued."
+      Save-SyncStatus "completed" $message $details
+      Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
+    } elseif ($actionableSkippedRows -gt 0) {
+      $message = "Exchange incremental sync completed with $actionableSkippedRows skipped change(s)."
       Save-SyncStatus "completed" $message $details
       Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
     } else {
