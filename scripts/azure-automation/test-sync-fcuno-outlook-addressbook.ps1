@@ -114,6 +114,15 @@ function Get-MailContact {
       CustomAttribute2 = "FCUNO_CONTACT:different-owner"
     }
   }
+  if ($Filter -like "ExternalEmailAddress -eq 'drifted-owner@example.com'") {
+    return [pscustomobject]@{
+      Identity = "drifted-owner"
+      DisplayName = "Expected Drifted Contact"
+      ExternalEmailAddress = "drifted-owner@example.com"
+      CustomAttribute1 = ""
+      CustomAttribute2 = "FCUNO_CONTACT:different-owner"
+    }
+  }
   return $null
 }
 function Remove-MailContact {
@@ -146,6 +155,16 @@ try {
 Assert-True $wrongNameFailedClosed "An audit cleanup without a source key must match both email and display name"
 Assert-True (-not $script:removeCalled) "An exact-identity mismatch must not call Remove-MailContact"
 
+$script:removeCalled = $false
+$driftedOwnerFailedClosed = $false
+try {
+  Remove-ManagedExchangeMailContact "drifted-owner@example.com" "" $guardStats "c-expected" "Expected Drifted Contact" $true
+} catch {
+  $driftedOwnerFailedClosed = $_.Exception.Message -match "owned by source key"
+}
+Assert-True $driftedOwnerFailedClosed "A contact source-key mismatch must fail closed even when its managed marker drifted"
+Assert-True (-not $script:removeCalled) "A drifted-marker ownership mismatch must not call Remove-MailContact"
+
 $script:CanonicalExchangeRows = @{
   Groups = @([pscustomobject]@{
     SourceGroupId = "g-new"
@@ -157,6 +176,7 @@ $script:CanonicalExchangeRows = @{
 $script:syncedGroupIds = @()
 $script:recreatedGroupRemoved = $false
 $script:aliasAlreadyCurrent = $false
+$script:legacyMarkerWrongName = $false
 function Load-SingleRow {
   param($Table, $Column, $Value)
   return $null
@@ -198,6 +218,24 @@ function Get-DistributionGroup {
       }
     }
   }
+  if ($Identity -eq "legacy-alias" -and $script:legacyMarkerWrongName) {
+    return [pscustomobject]@{
+      Identity = "wrong-legacy-group"
+      DisplayName = "Different Legacy Group"
+      Alias = "legacy-alias"
+      CustomAttribute1 = $ManagedMarker
+      CustomAttribute2 = ""
+    }
+  }
+  if ($Identity -eq "drifted-owner-alias") {
+    return [pscustomobject]@{
+      Identity = "drifted-owner-group"
+      DisplayName = "Expected Drifted Group"
+      Alias = "drifted-owner-alias"
+      CustomAttribute1 = ""
+      CustomAttribute2 = "FCUNO_GROUP:different-owner"
+    }
+  }
   return $null
 }
 function Remove-DistributionGroup {
@@ -228,5 +266,24 @@ $script:syncedGroupIds = @()
 Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
 Assert-True $script:recreatedGroupRemoved "A detached obsolete source-key group must be removed even when the shared alias already belongs to the current group"
 Assert-Equal "g-new" $script:syncedGroupIds[0] "The current alias owner must remain synchronized after detached stale-owner cleanup"
+
+$script:legacyMarkerWrongName = $true
+$legacyMarkerFailedClosed = $false
+try {
+  Remove-ManagedExchangeDistributionGroup "legacy-alias" @{} "g-expected" "Expected Legacy Group" $true
+} catch {
+  $legacyMarkerFailedClosed = $_.Exception.Message -match "exact legacy alias and display name"
+}
+Assert-True $legacyMarkerFailedClosed "A marker-only legacy group must still match the exact audited alias and display name"
+
+$script:recreatedGroupRemoved = $false
+$driftedGroupOwnerFailedClosed = $false
+try {
+  Remove-ManagedExchangeDistributionGroup "drifted-owner-alias" @{} "g-expected" "Expected Drifted Group" $true
+} catch {
+  $driftedGroupOwnerFailedClosed = $_.Exception.Message -match "owned by source key"
+}
+Assert-True $driftedGroupOwnerFailedClosed "A group source-key mismatch must fail closed even when its managed marker drifted"
+Assert-True (-not $script:recreatedGroupRemoved) "A drifted-marker ownership mismatch must not call Remove-DistributionGroup"
 
 Write-Output "Exchange address book runbook tests passed."

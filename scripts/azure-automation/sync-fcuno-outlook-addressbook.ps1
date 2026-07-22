@@ -1014,7 +1014,7 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
     return
   }
   $existingOwnerKey = Clean-Text $existing.CustomAttribute2
-  if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+  if ($sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
     throw "Exchange contact $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
   }
   $actualName = Clean-Text $existing.DisplayName
@@ -1128,13 +1128,14 @@ function Remove-ManagedExchangeDistributionGroup($Alias, [hashtable]$Stats, $Sou
     return
   }
   $existingOwnerKey = Clean-Text $existing.CustomAttribute2
-  if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+  $existingIsManaged = (Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker
+  if ($sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
     throw "Exchange group $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
   }
-  if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker) {
+  if (-not $sourceKey -or -not $existingIsManaged -or -not $existingOwnerKey) {
     $exactMatch = $AllowUntaggedExactDelete -and $aliasText -and (Clean-Text $existing.Alias).ToLowerInvariant() -eq $aliasText.ToLowerInvariant() -and (Clean-Text $ExpectedDisplayName) -and (Clean-Text $existing.DisplayName) -eq (Clean-Text $ExpectedDisplayName)
     if (-not $exactMatch) {
-      throw "Exchange group $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker and the queue does not authorize an exact legacy deletion."
+      throw "Exchange group $($existing.DisplayName) was not deleted because the queue does not authorize that exact legacy alias and display name."
     }
   }
 
