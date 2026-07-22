@@ -17,7 +17,6 @@ const PAGE_TABLES: Record<string, Set<string>> = {
   ]),
   phonebook: new Set(["phonebook_companies", "phonebook_contacts"]),
   "outlook-addressbook": new Set([
-    "outlook_exchange_sync_queue",
     "shared_addressbook_contacts",
     "shared_addressbook_group_members",
     "shared_addressbook_groups",
