@@ -232,6 +232,208 @@ function Assert-ExchangeRecipientName($Recipient, $ExpectedName, $Label) {
   }
 }
 
+function Get-ExchangeMailContactMismatches($Existing, $Contact, $Profile = $null) {
+  $mismatches = @()
+  if (-not $Existing) { return @("mail contact is missing") }
+  if (-not $Contact) { return @("desired contact is missing") }
+  $expectedEmail = Normalize-Email $Contact.ExternalEmailAddress
+  $expectedAlias = Clean-Text $Contact.Alias
+  $expectedName = Clean-Text $Contact.DisplayName
+  $expectedSourceKey = Clean-Text $Contact.SourceKey
+  if ((Normalize-Email (Get-RecipientEmail $Existing)) -ne $expectedEmail) { $mismatches += "external email" }
+  if (-not (Clean-Text $Existing.Alias).Equals($expectedAlias, [StringComparison]::OrdinalIgnoreCase)) { $mismatches += "alias" }
+  if ((Clean-Text $Existing.Name) -cne $expectedName) { $mismatches += "name" }
+  if ((Clean-Text $Existing.DisplayName) -cne $expectedName) { $mismatches += "display name" }
+  if ((Clean-Text $Existing.CustomAttribute1) -cne $ManagedMarker) { $mismatches += "managed marker" }
+  if ((Clean-Text $Existing.CustomAttribute2) -cne $expectedSourceKey) { $mismatches += "source key" }
+  if ([bool]$Existing.HiddenFromAddressListsEnabled) { $mismatches += "address-list visibility" }
+  if (-not $Profile) {
+    $mismatches += "contact profile"
+  } else {
+    if ((Clean-Text $Profile.FirstName) -cne (Clean-Text $Contact.FirstName)) { $mismatches += "first name" }
+    if ((Clean-Text $Profile.LastName) -cne (Clean-Text $Contact.LastName)) { $mismatches += "last name" }
+  }
+  return $mismatches
+}
+
+function Test-ExchangeMailContactMatches($Existing, $Contact, $Profile = $null) {
+  return @(Get-ExchangeMailContactMismatches $Existing $Contact $Profile).Count -eq 0
+}
+
+function Get-ExchangeDistributionGroupMismatches($Existing, $Group) {
+  $mismatches = @()
+  if (-not $Existing) { return @("distribution group is missing") }
+  if (-not $Group) { return @("desired group is missing") }
+  $expectedAlias = Clean-Text $Group.Alias
+  $expectedName = Clean-Text $Group.GroupName
+  $expectedSourceKey = Clean-Text $Group.SourceKey
+  if (-not (Clean-Text $Existing.Alias).Equals($expectedAlias, [StringComparison]::OrdinalIgnoreCase)) { $mismatches += "alias" }
+  if ((Clean-Text $Existing.Name) -cne $expectedName) { $mismatches += "name" }
+  if ((Clean-Text $Existing.DisplayName) -cne $expectedName) { $mismatches += "display name" }
+  if ((Clean-Text $Existing.Notes) -cne (Clean-Text $Group.Description)) { $mismatches += "description" }
+  if ((Clean-Text $Existing.CustomAttribute1) -cne $ManagedMarker) { $mismatches += "managed marker" }
+  if ((Clean-Text $Existing.CustomAttribute2) -cne $expectedSourceKey) { $mismatches += "source key" }
+  if ([bool]$Existing.HiddenFromAddressListsEnabled) { $mismatches += "address-list visibility" }
+  return $mismatches
+}
+
+function Test-ExchangeDistributionGroupMatches($Existing, $Group) {
+  return @(Get-ExchangeDistributionGroupMismatches $Existing $Group).Count -eq 0
+}
+
+function Add-ExchangeLookupEntry([hashtable]$Map, $Key, $Value) {
+  $cleanKey = Clean-Text $Key
+  if (-not $cleanKey) { return }
+  if (Has-MapKey $Map $cleanKey) {
+    $Map[$cleanKey] = @($Map[$cleanKey]) + @($Value)
+  } else {
+    $Map[$cleanKey] = @($Value)
+  }
+}
+
+function Get-ExchangeObjectJoinKeys($ExchangeObject) {
+  if (-not $ExchangeObject) { return @() }
+  $seen = @{}
+  foreach ($propertyName in @("Identity", "Guid", "ExternalDirectoryObjectId", "DistinguishedName")) {
+    $value = Clean-Text $ExchangeObject.$propertyName
+    if (-not $value -or $value -eq "00000000-0000-0000-0000-000000000000") { continue }
+    $key = $value.ToLowerInvariant()
+    if (Has-MapKey $seen $key) { continue }
+    $seen[$key] = $true
+    Write-Output $key
+  }
+}
+
+function New-ExchangeContactProfileLookup($Profiles) {
+  $lookup = @{ ByJoinKey = @{} }
+  $profilePosition = 0
+  foreach ($profile in @($Profiles)) {
+    $entry = [pscustomobject]@{ Position = $profilePosition; Profile = $profile }
+    $profilePosition += 1
+    foreach ($joinKey in @(Get-ExchangeObjectJoinKeys $profile)) {
+      Add-ExchangeLookupEntry $lookup.ByJoinKey $joinKey $entry
+    }
+  }
+  return $lookup
+}
+
+function Resolve-ExchangeContactProfileHint($MailContact, $Lookup) {
+  if (-not $MailContact -or -not $Lookup) { return $null }
+  $matchedEntries = @{}
+  foreach ($joinKey in @(Get-ExchangeObjectJoinKeys $MailContact)) {
+    foreach ($entry in @($Lookup.ByJoinKey[$joinKey])) {
+      if ($null -eq $entry) { continue }
+      $matchedEntries[[string]$entry.Position] = $entry
+    }
+  }
+  if ($matchedEntries.Count -gt 1) {
+    throw "More than one Exchange contact profile matches mail contact '$($MailContact.Identity)'."
+  }
+  if ($matchedEntries.Count -eq 1) {
+    return @($matchedEntries.Values)[0].Profile
+  }
+  return $null
+}
+
+function Test-ExchangeObjectsRepresentSameRecipient($First, $Second) {
+  if (-not $First -or -not $Second) { return $false }
+  if ([object]::ReferenceEquals($First, $Second)) { return $true }
+  $firstKeys = @{}
+  foreach ($key in @(Get-ExchangeObjectJoinKeys $First)) { $firstKeys[$key] = $true }
+  foreach ($key in @(Get-ExchangeObjectJoinKeys $Second)) {
+    if (Has-MapKey $firstKeys $key) { return $true }
+  }
+  return $false
+}
+
+function Resolve-ExchangeMailContactCandidates($Contact, $SourceMatches, $EmailMatches) {
+  $sourceKey = Clean-Text $Contact.SourceKey
+  $email = Normalize-Email $Contact.ExternalEmailAddress
+  $sourceCandidates = @($SourceMatches)
+  $emailCandidates = @($EmailMatches)
+  if ($sourceCandidates.Count -gt 1) { throw "More than one Exchange contact is tagged with source key $sourceKey." }
+  if ($emailCandidates.Count -gt 1) { throw "More than one Exchange contact uses $email." }
+
+  $sourceCandidate = if ($sourceCandidates.Count -eq 1) { $sourceCandidates[0] } else { $null }
+  $emailCandidate = if ($emailCandidates.Count -eq 1) { $emailCandidates[0] } else { $null }
+  if ($sourceCandidate -and $emailCandidate -and -not (Test-ExchangeObjectsRepresentSameRecipient $sourceCandidate $emailCandidate)) {
+    throw "Exchange source key $sourceKey and email $email resolve to different contact objects, so neither object was changed."
+  }
+  if (-not $sourceCandidate -and $emailCandidate) {
+    $emailOwnerKey = Clean-Text $emailCandidate.CustomAttribute2
+    if ($emailOwnerKey -and $emailOwnerKey -ne $sourceKey) {
+      $allowedOwnerKeys = @($Contact.AllowedOwnerSourceKeys | ForEach-Object { Clean-Text $_ })
+      if ($allowedOwnerKeys -notcontains $emailOwnerKey) {
+        throw "Exchange email $email belongs to source key $emailOwnerKey, not $sourceKey, so ownership was not transferred."
+      }
+    }
+  }
+  if ($sourceCandidate) { return $sourceCandidate }
+  if ($emailCandidate) { return $emailCandidate }
+  return $null
+}
+
+function New-ExchangeMailContactLookup($Contacts) {
+  $lookup = @{ BySourceKey = @{}; ByEmail = @{} }
+  foreach ($contact in @($Contacts)) {
+    Add-ExchangeLookupEntry $lookup.BySourceKey (Clean-Text $contact.CustomAttribute2) $contact
+    Add-ExchangeLookupEntry $lookup.ByEmail (Normalize-Email (Get-RecipientEmail $contact)) $contact
+  }
+  return $lookup
+}
+
+function Resolve-ExchangeMailContactHint($Contact, $Lookup) {
+  $sourceKey = Clean-Text $Contact.SourceKey
+  $sourceMatches = if ($sourceKey) { @($Lookup.BySourceKey[$sourceKey]) } else { @() }
+  $email = Normalize-Email $Contact.ExternalEmailAddress
+  $emailMatches = if ($email) { @($Lookup.ByEmail[$email]) } else { @() }
+  return Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
+}
+
+function New-ExchangeDistributionGroupLookup($Groups) {
+  $lookup = @{ BySourceKey = @{}; ByAlias = @{}; ByDisplayName = @{} }
+  foreach ($group in @($Groups)) {
+    Add-ExchangeLookupEntry $lookup.BySourceKey (Clean-Text $group.CustomAttribute2) $group
+    Add-ExchangeLookupEntry $lookup.ByAlias ((Clean-Text $group.Alias).ToLowerInvariant()) $group
+    Add-ExchangeLookupEntry $lookup.ByDisplayName (Clean-Text $group.DisplayName) $group
+  }
+  return $lookup
+}
+
+function Resolve-ExchangeDistributionGroupHint($Group, $Lookup) {
+  $sourceKey = Clean-Text $Group.SourceKey
+  $sourceMatches = if ($sourceKey) { @($Lookup.BySourceKey[$sourceKey]) } else { @() }
+  if ($sourceMatches.Count -gt 1) { throw "More than one Exchange group is tagged with source key $sourceKey." }
+  if ($sourceMatches.Count -eq 1) { return $sourceMatches[0] }
+
+  $alias = (Clean-Text $Group.Alias).ToLowerInvariant()
+  $aliasMatches = if ($alias) { @($Lookup.ByAlias[$alias]) } else { @() }
+  if ($aliasMatches.Count -gt 1) { throw "More than one Exchange group uses alias '$alias'." }
+  if ($aliasMatches.Count -eq 1) {
+    $existing = $aliasMatches[0]
+    $existingOwnerKey = Clean-Text $existing.CustomAttribute2
+    if ($existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+      throw "Exchange alias $alias belongs to source key $existingOwnerKey, not $sourceKey."
+    }
+    if ((Clean-Text $existing.DisplayName) -ne (Clean-Text $Group.GroupName)) {
+      throw "Exchange alias $alias belongs to group '$($existing.DisplayName)', not '$($Group.GroupName)'."
+    }
+    return $existing
+  }
+
+  $displayName = Clean-Text $Group.GroupName
+  $nameMatches = if ($displayName) { @($Lookup.ByDisplayName[$displayName]) } else { @() }
+  if ($nameMatches.Count -gt 1) { throw "More than one Exchange group is named '$displayName', so legacy ownership could not be determined safely." }
+  if ($nameMatches.Count -eq 1) {
+    $candidateOwnerKey = Clean-Text $nameMatches[0].CustomAttribute2
+    if ($candidateOwnerKey -and $candidateOwnerKey -ne $sourceKey) {
+      throw "Exchange group '$displayName' is owned by source key $candidateOwnerKey, not $sourceKey."
+    }
+    return $nameMatches[0]
+  }
+  return $null
+}
+
 function Format-HongKongTime($Value) {
   $date = [DateTimeOffset]::MinValue
   $text = Clean-Text $Value
@@ -387,6 +589,12 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     $contactById[(Clean-Text $contact.id)] = $row
   }
 
+  foreach ($email in @($contactByEmail.Keys)) {
+    $canonicalContact = $contactByEmail[$email]
+    $allowedOwnerSourceKeys = @($contactIdsByEmail[$email] | ForEach-Object { Get-ContactSourceKey $_ })
+    $canonicalContact | Add-Member -NotePropertyName AllowedOwnerSourceKeys -NotePropertyValue $allowedOwnerSourceKeys -Force
+  }
+
   $groupRows = @()
   $orderedGroups = @($Groups | Sort-Object `
     @{ Expression = { (Clean-Text $(if ($_.nickname) { $_.nickname } else { $_.name })).ToLowerInvariant() }; Ascending = $true }, `
@@ -456,7 +664,7 @@ function Get-CanonicalExchangeRows {
   return $script:CanonicalExchangeRows
 }
 
-function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats) {
+function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false) {
   $base = Clean-Text $BaseAlias
   if (-not $base) { return }
   $rows = Get-CanonicalExchangeRows
@@ -474,9 +682,9 @@ function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats) {
     @{ Expression = { Clean-Text $_.Value.SourceKey }; Ascending = $true })
   foreach ($peer in $orderedPeers) {
     if ($peer.Kind -eq "contact") {
-      Upsert-ExchangeMailContact $peer.Value $Stats
+      Upsert-ExchangeMailContact $peer.Value $Stats $SkipNoOpWrites
     } else {
-      Upsert-ExchangeDistributionGroup $peer.Value $Stats
+      Upsert-ExchangeDistributionGroup $peer.Value $Stats $SkipNoOpWrites
     }
   }
 }
@@ -927,7 +1135,7 @@ function Get-QueueSkipReason($Row) {
   }
 }
 
-function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
+function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingHint = $null, [bool]$UseExistingHint = $false, $ExistingProfileHint = $null) {
   if (-not $Contact) {
     Increment-Stat $Stats "skippedQueueRows"
     return
@@ -938,19 +1146,22 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
   $sourceKey = Clean-Text $Contact.SourceKey
   $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
   $escapedEmail = Escape-ExchangeFilterValue $email
-  $sourceMatches = @()
-  if ($sourceKey) {
-    $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
-    if ($sourceMatches.Count -gt 1) { throw "More than one Exchange contact is tagged with source key $sourceKey." }
-  }
-  $existing = if ($sourceMatches.Count -eq 1) { $sourceMatches[0] } else { $null }
-  if (-not $existing) {
+  $existing = $null
+  if ($UseExistingHint) {
+    $existing = $ExistingHint
+  } else {
+    $sourceMatches = @()
+    if ($sourceKey) {
+      $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    }
     $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
-    if ($emailMatches.Count -gt 1) { throw "More than one Exchange contact uses $email." }
-    if ($emailMatches.Count -eq 1) { $existing = $emailMatches[0] }
+    $existing = Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
   }
 
-  if ($existing) {
+  if ($existing -and $SkipNoOpWrites -and (Test-ExchangeMailContactMatches $existing $Contact $ExistingProfileHint)) {
+    Increment-Stat $Stats "verifiedQueueRows"
+    return
+  } elseif ($existing) {
     $identity = $existing.Identity
     try {
       Set-MailContact -Identity $identity -ExternalEmailAddress $email -Alias $Contact.Alias -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
@@ -1048,7 +1259,7 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
-function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
+function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingHint = $null, [bool]$UseExistingHint = $false) {
   $alias = Clean-Text $Group.Alias
   if (-not $alias) {
     Increment-Stat $Stats "skippedQueueRows"
@@ -1057,42 +1268,53 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
 
   $sourceKey = Clean-Text $Group.SourceKey
   $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
-  $sourceMatches = @()
-  if ($sourceKey) {
-    $sourceMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
-    if ($sourceMatches.Count -gt 1) { throw "More than one Exchange group is tagged with source key $sourceKey." }
-  }
-  $existing = if ($sourceMatches.Count -eq 1) { $sourceMatches[0] } else { $null }
-  if (-not $existing) {
-    $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
-    if ($existing) {
-      $existingOwnerKey = Clean-Text $existing.CustomAttribute2
-      if ($existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
-        throw "Exchange alias $alias belongs to source key $existingOwnerKey, not $sourceKey."
+  $existing = $null
+  if ($UseExistingHint) {
+    $existing = $ExistingHint
+  } else {
+    $sourceMatches = @()
+    if ($sourceKey) {
+      $sourceMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+      if ($sourceMatches.Count -gt 1) { throw "More than one Exchange group is tagged with source key $sourceKey." }
+    }
+    $existing = if ($sourceMatches.Count -eq 1) { $sourceMatches[0] } else { $null }
+    if (-not $existing) {
+      $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
+      if ($existing) {
+        $existingOwnerKey = Clean-Text $existing.CustomAttribute2
+        if ($existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+          throw "Exchange alias $alias belongs to source key $existingOwnerKey, not $sourceKey."
+        }
+        if ((Clean-Text $existing.DisplayName) -ne (Clean-Text $Group.GroupName)) {
+          throw "Exchange alias $alias belongs to group '$($existing.DisplayName)', not '$($Group.GroupName)'."
+        }
       }
-      if ((Clean-Text $existing.DisplayName) -ne (Clean-Text $Group.GroupName)) {
-        throw "Exchange alias $alias belongs to group '$($existing.DisplayName)', not '$($Group.GroupName)'."
+    }
+    if (-not $existing) {
+      $escapedDisplayName = Escape-ExchangeFilterValue $Group.GroupName
+      $nameMatches = @(Get-DistributionGroup -Filter "DisplayName -eq '$escapedDisplayName'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+      if ($nameMatches.Count -gt 1) { throw "More than one Exchange group is named '$($Group.GroupName)', so legacy ownership could not be determined safely." }
+      if ($nameMatches.Count -eq 1) {
+        $candidateOwnerKey = Clean-Text $nameMatches[0].CustomAttribute2
+        if ($candidateOwnerKey -and $candidateOwnerKey -ne $sourceKey) {
+          throw "Exchange group '$($Group.GroupName)' is owned by source key $candidateOwnerKey, not $sourceKey."
+        }
+        $existing = $nameMatches[0]
       }
     }
   }
-  if (-not $existing) {
-    $escapedDisplayName = Escape-ExchangeFilterValue $Group.GroupName
-    $nameMatches = @(Get-DistributionGroup -Filter "DisplayName -eq '$escapedDisplayName'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
-    if ($nameMatches.Count -gt 1) { throw "More than one Exchange group is named '$($Group.GroupName)', so legacy ownership could not be determined safely." }
-    if ($nameMatches.Count -eq 1) {
-      $candidateOwnerKey = Clean-Text $nameMatches[0].CustomAttribute2
-      if ($candidateOwnerKey -and $candidateOwnerKey -ne $sourceKey) {
-        throw "Exchange group '$($Group.GroupName)' is owned by source key $candidateOwnerKey, not $sourceKey."
-      }
-      $existing = $nameMatches[0]
-    }
-  }
-  if ($existing) {
-    Set-DistributionGroup -Identity $existing.Identity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -Notes $Group.Description -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+  if ($existing -and $SkipNoOpWrites -and (Test-ExchangeDistributionGroupMatches $existing $Group)) {
+    Increment-Stat $Stats "verifiedQueueRows"
+    return
+  } elseif ($existing) {
+    $groupIdentity = $(if (Clean-Text $existing.Guid) { Clean-Text $existing.Guid } else { $existing.Identity })
+    Set-DistributionGroup -Identity $groupIdentity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-Group -Identity $groupIdentity -Notes $Group.Description -ErrorAction Stop
     Increment-Stat $Stats "updatedGroups"
   } else {
     New-DistributionGroup -Name $Group.GroupName -Alias $alias -ErrorAction Stop | Out-Null
-    Set-DistributionGroup -Identity $alias -Notes $Group.Description -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-DistributionGroup -Identity $alias -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-Group -Identity $alias -Notes $Group.Description -ErrorAction Stop
     Increment-Stat $Stats "createdGroups"
   }
 
@@ -1152,8 +1374,52 @@ function Remove-ManagedExchangeDistributionGroup($Alias, [hashtable]$Stats, $Sou
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
-function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
-  Upsert-ExchangeDistributionGroup $Group $Stats
+function Get-ExchangeGroupMembershipState($Members) {
+  $emailCounts = @{}
+  $unresolvedMembers = @()
+  foreach ($member in @($Members)) {
+    $email = Get-RecipientEmail $member
+    if (-not $email) {
+      $identity = Clean-Text $member.Identity
+      $unresolvedMembers += $(if ($identity) { $identity } else { "<missing identity>" })
+      continue
+    }
+    if (-not (Has-MapKey $emailCounts $email)) { $emailCounts[$email] = 0 }
+    $emailCounts[$email] = [int]$emailCounts[$email] + 1
+  }
+  return @{ EmailCounts = $emailCounts; UnresolvedMembers = $unresolvedMembers }
+}
+
+function Get-ExchangeGroupMembershipMismatches($DesiredMembers, $ActualMembers) {
+  $mismatches = @()
+  $desiredEmailCounts = @{}
+  foreach ($member in @($DesiredMembers)) {
+    $email = Normalize-Email $member.MemberEmail
+    if (-not $email) {
+      $mismatches += "desired member has no valid email"
+      continue
+    }
+    if (-not (Has-MapKey $desiredEmailCounts $email)) { $desiredEmailCounts[$email] = 0 }
+    $desiredEmailCounts[$email] = [int]$desiredEmailCounts[$email] + 1
+  }
+
+  $actualState = Get-ExchangeGroupMembershipState $ActualMembers
+  foreach ($email in @($desiredEmailCounts.Keys | Sort-Object)) {
+    $actualCount = if (Has-MapKey $actualState.EmailCounts $email) { [int]$actualState.EmailCounts[$email] } else { 0 }
+    $expectedCount = [int]$desiredEmailCounts[$email]
+    if ($actualCount -ne $expectedCount) { $mismatches += "$email expected $expectedCount, found $actualCount" }
+  }
+  foreach ($email in @($actualState.EmailCounts.Keys | Where-Object { -not (Has-MapKey $desiredEmailCounts $_) } | Sort-Object)) {
+    $mismatches += "$email is unexpected (found $($actualState.EmailCounts[$email]))"
+  }
+  foreach ($identity in @($actualState.UnresolvedMembers | Sort-Object)) {
+    $mismatches += "unresolved member $identity"
+  }
+  return $mismatches
+}
+
+function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingGroupHint = $null, [bool]$UseExistingGroupHint = $false) {
+  Upsert-ExchangeDistributionGroup $Group $Stats $SkipNoOpWrites $ExistingGroupHint $UseExistingGroupHint
 
   $desiredMembers = @{}
   foreach ($member in @($Members)) {
@@ -1161,7 +1427,21 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
     if ($email) { $desiredMembers[$email] = $true }
   }
 
+  $currentMembers = @()
+  $currentMembershipState = @{ EmailCounts = @{}; UnresolvedMembers = @() }
+  if ($SkipNoOpWrites) {
+    $currentMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction Stop)
+    $currentMembershipState = Get-ExchangeGroupMembershipState $currentMembers
+    $initialMissingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $currentMembershipState.EmailCounts $_) })
+    $initialUnexpectedEmails = @($currentMembershipState.EmailCounts.Keys | Where-Object { -not (Has-MapKey $desiredMembers $_) })
+    $initialDuplicateEmails = @($currentMembershipState.EmailCounts.Keys | Where-Object { [int]$currentMembershipState.EmailCounts[$_] -gt 1 })
+    if ($initialMissingEmails.Count -le 0 -and $initialUnexpectedEmails.Count -le 0 -and $initialDuplicateEmails.Count -le 0 -and @($currentMembershipState.UnresolvedMembers).Count -le 0) {
+      return
+    }
+  }
+
   foreach ($email in $desiredMembers.Keys) {
+    if ($SkipNoOpWrites -and (Has-MapKey $currentMembershipState.EmailCounts $email)) { continue }
     try {
       Add-DistributionGroupMember -Identity $Group.Alias -Member $email -ErrorAction Stop
       Increment-Stat $Stats "addedMembers"
@@ -1173,11 +1453,14 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
     }
   }
 
-  $currentMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
+  if (-not $SkipNoOpWrites) {
+    $currentMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
+  }
   foreach ($currentMember in $currentMembers) {
     $currentEmail = Get-RecipientEmail $currentMember
-    if ($currentEmail -and -not (Has-MapKey $desiredMembers $currentEmail)) {
-      Remove-DistributionGroupMember -Identity $Group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
+    $currentIdentity = Clean-Text $currentMember.Identity
+    if ($currentEmail -and $currentIdentity -and -not (Has-MapKey $desiredMembers $currentEmail)) {
+      Remove-DistributionGroupMember -Identity $Group.Alias -Member $currentIdentity -Confirm:$false -ErrorAction Stop
       Increment-Stat $Stats "removedMembers"
       $Stats["removedMemberEmails"] = @($Stats["removedMemberEmails"]) + $currentEmail
     }
@@ -1185,18 +1468,18 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
 
   $missingEmails = @()
   $unexpectedEmails = @()
+  $duplicateEmails = @()
+  $unresolvedMembers = @()
   $membershipVerified = $false
   for ($verificationAttempt = 1; $verificationAttempt -le 4; $verificationAttempt += 1) {
     if ($verificationAttempt -gt 1) { Start-Sleep -Seconds 2 }
     $verifiedMembers = @(Get-DistributionGroupMember -Identity $Group.Alias -ResultSize Unlimited -ErrorAction Stop)
-    $verifiedEmails = @{}
-    foreach ($verifiedMember in $verifiedMembers) {
-      $verifiedEmail = Get-RecipientEmail $verifiedMember
-      if ($verifiedEmail) { $verifiedEmails[$verifiedEmail] = $true }
-    }
-    $missingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $verifiedEmails $_) } | Sort-Object)
-    $unexpectedEmails = @($verifiedEmails.Keys | Where-Object { -not (Has-MapKey $desiredMembers $_) } | Sort-Object)
-    if ($missingEmails.Count -le 0 -and $unexpectedEmails.Count -le 0) {
+    $verifiedState = Get-ExchangeGroupMembershipState $verifiedMembers
+    $missingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $verifiedState.EmailCounts $_) } | Sort-Object)
+    $unexpectedEmails = @($verifiedState.EmailCounts.Keys | Where-Object { -not (Has-MapKey $desiredMembers $_) } | Sort-Object)
+    $duplicateEmails = @($verifiedState.EmailCounts.Keys | Where-Object { [int]$verifiedState.EmailCounts[$_] -gt 1 } | Sort-Object)
+    $unresolvedMembers = @($verifiedState.UnresolvedMembers | Sort-Object)
+    if ($missingEmails.Count -le 0 -and $unexpectedEmails.Count -le 0 -and $duplicateEmails.Count -le 0 -and $unresolvedMembers.Count -le 0) {
       $membershipVerified = $true
       break
     }
@@ -1205,6 +1488,8 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
     $verificationParts = @()
     if ($missingEmails.Count -gt 0) { $verificationParts += "missing after verification retries: $($missingEmails -join ', ')" }
     if ($unexpectedEmails.Count -gt 0) { $verificationParts += "unexpected after verification retries: $($unexpectedEmails -join ', ')" }
+    if ($duplicateEmails.Count -gt 0) { $verificationParts += "duplicate resolved emails after verification retries: $($duplicateEmails -join ', ')" }
+    if ($unresolvedMembers.Count -gt 0) { $verificationParts += "unresolved member identities after verification retries: $($unresolvedMembers -join ', ')" }
     throw "Exchange group membership verification failed for $($Group.GroupName) ($($verificationParts -join '; '))."
   }
 }
@@ -1259,13 +1544,32 @@ function Get-QueueContactBeforeBaseAlias($Row) {
   return Get-ExchangeAlias $seed ("contact-" + (Clean-Text $Row.entity_id))
 }
 
-function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$UseQueuedSourceKeyForDelete) {
+function Copy-ExchangeContactWithAllowedOwnerSourceKey($Contact, $AdditionalSourceKey) {
+  if (-not $Contact) { return $null }
+  $clone = [pscustomobject]@{}
+  foreach ($property in @($Contact.PSObject.Properties)) {
+    $clone | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+  }
+  $allowedOwnerSourceKeys = @($Contact.AllowedOwnerSourceKeys | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
+  $additionalKey = Clean-Text $AdditionalSourceKey
+  if ($additionalKey -and $allowedOwnerSourceKeys -notcontains $additionalKey) {
+    $allowedOwnerSourceKeys += $additionalKey
+  }
+  $clone | Add-Member -NotePropertyName AllowedOwnerSourceKeys -NotePropertyValue @($allowedOwnerSourceKeys | Select-Object -Unique) -Force
+  return $clone
+}
+
+function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$UseQueuedSourceKeyForDelete, [bool]$AllowQueuedHistoricalOwner = $false) {
   $email = Normalize-Email $Email
   if (-not $email) { return }
   $rows = Get-CanonicalExchangeRows
   $desiredContact = if (Has-MapKey $rows.ContactByEmail $email) { $rows.ContactByEmail[$email] } else { $null }
   if ($desiredContact -and -not (Is-InternalEmail $email)) {
-    Upsert-ExchangeMailContact $desiredContact $Stats
+    $contactForUpsert = $desiredContact
+    if ($AllowQueuedHistoricalOwner -and (Get-QueueAuditAuthorized $Row)) {
+      $contactForUpsert = Copy-ExchangeContactWithAllowedOwnerSourceKey $desiredContact (Get-ContactSourceKey $Row.entity_id)
+    }
+    Upsert-ExchangeMailContact $contactForUpsert $Stats
     return
   }
   if ($desiredContact -and (Is-InternalEmail $email)) { return }
@@ -1294,14 +1598,14 @@ function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
   $beforeEmailReconciled = $false
 
   if ($beforeEmail -and $beforeEmail -ne $currentEmail) {
-    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats (-not $sourceContact)
+    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats (-not $sourceContact) (Get-QueueAuditAuthorized $Row)
     $beforeEmailReconciled = $true
   }
   if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
   if ($currentEmail) {
-    Reconcile-ExchangeContactEmail $currentEmail $Row $Stats $false
+    Reconcile-ExchangeContactEmail $currentEmail $Row $Stats $false $false
   } elseif ($beforeEmail -and -not $beforeEmailReconciled) {
-    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats $true
+    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats $true (Get-QueueAuditAuthorized $Row)
   }
 
   foreach ($email in @($beforeEmail, $currentEmail) | Where-Object { $_ } | Select-Object -Unique) {
@@ -1936,6 +2240,115 @@ function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Iden
   }
 }
 
+function Confirm-FinalExchangeProjection($ExchangeRows, $MailContacts, $ContactProfiles, $DistributionGroups, [hashtable]$Stats) {
+  $mailContactLookup = New-ExchangeMailContactLookup $MailContacts
+  $contactProfileLookup = New-ExchangeContactProfileLookup $ContactProfiles
+  $distributionGroupLookup = New-ExchangeDistributionGroupLookup $DistributionGroups
+  $desiredContactSourceKeys = @{}
+  $desiredGroupSourceKeys = @{}
+
+  foreach ($contact in @($ExchangeRows.Contacts)) {
+    $sourceKey = Clean-Text $contact.SourceKey
+    if ($sourceKey) { $desiredContactSourceKeys[$sourceKey] = $true }
+    $sourceMatches = if ($sourceKey) { @($mailContactLookup.BySourceKey[$sourceKey]) } else { @() }
+    $email = Normalize-Email $contact.ExternalEmailAddress
+    $emailMatches = if ($email) { @($mailContactLookup.ByEmail[$email]) } else { @() }
+    if ($sourceMatches.Count -ne 1) {
+      Add-FullSyncFailure $Stats "Contact" $contact.DisplayName $sourceKey "Final Exchange certification expected exactly one contact with this source key; found $($sourceMatches.Count)."
+      continue
+    }
+    if ($emailMatches.Count -ne 1 -or -not (Test-ExchangeObjectsRepresentSameRecipient $sourceMatches[0] $emailMatches[0])) {
+      Add-FullSyncFailure $Stats "Contact" $contact.DisplayName $sourceKey "Final Exchange certification found that the expected source key and email do not resolve to the same unique contact."
+      continue
+    }
+
+    $profile = $null
+    try {
+      $profile = Resolve-ExchangeContactProfileHint $sourceMatches[0] $contactProfileLookup
+    } catch {
+      Add-FullSyncFailure $Stats "Contact" $contact.DisplayName $sourceKey ("Final Exchange certification could not resolve one authoritative contact profile: " + $_.Exception.Message)
+      continue
+    }
+    if (-not $profile) {
+      Add-FullSyncFailure $Stats "Contact" $contact.DisplayName $sourceKey "Final Exchange certification could not resolve an authoritative contact profile."
+      continue
+    }
+    $mismatches = @(Get-ExchangeMailContactMismatches $sourceMatches[0] $contact $profile)
+    if ($mismatches.Count -gt 0) {
+      Add-FullSyncFailure $Stats "Contact" $contact.DisplayName $sourceKey ("Final Exchange metadata differs for: " + ($mismatches -join ", ") + ".")
+    }
+  }
+
+  foreach ($group in @($ExchangeRows.Groups)) {
+    $sourceKey = Clean-Text $group.SourceKey
+    if ($sourceKey) { $desiredGroupSourceKeys[$sourceKey] = $true }
+    $sourceMatches = if ($sourceKey) { @($distributionGroupLookup.BySourceKey[$sourceKey]) } else { @() }
+    $alias = (Clean-Text $group.Alias).ToLowerInvariant()
+    $aliasMatches = if ($alias) { @($distributionGroupLookup.ByAlias[$alias]) } else { @() }
+    if ($sourceMatches.Count -ne 1) {
+      Add-FullSyncFailure $Stats "Group" $group.GroupName $sourceKey "Final Exchange certification expected exactly one group with this source key; found $($sourceMatches.Count)."
+      continue
+    }
+    if ($aliasMatches.Count -ne 1 -or -not (Test-ExchangeObjectsRepresentSameRecipient $sourceMatches[0] $aliasMatches[0])) {
+      Add-FullSyncFailure $Stats "Group" $group.GroupName $sourceKey "Final Exchange certification found that the expected source key and alias do not resolve to the same unique group."
+      continue
+    }
+    $mismatches = @(Get-ExchangeDistributionGroupMismatches $sourceMatches[0] $group)
+    if ($mismatches.Count -gt 0) {
+      Add-FullSyncFailure $Stats "Group" $group.GroupName $sourceKey ("Final Exchange metadata differs for: " + ($mismatches -join ", ") + ".")
+    }
+  }
+
+  $managedContacts = @($MailContacts | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
+  $managedGroups = @($DistributionGroups | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
+  foreach ($managedContact in $managedContacts) {
+    $sourceKey = Clean-Text $managedContact.CustomAttribute2
+    if (-not $sourceKey -or -not (Has-MapKey $desiredContactSourceKeys $sourceKey)) {
+      Add-FullSyncFailure $Stats "Contact" $managedContact.DisplayName $sourceKey "Final Exchange certification found an unexpected managed contact."
+    }
+  }
+  foreach ($managedGroup in $managedGroups) {
+    $sourceKey = Clean-Text $managedGroup.CustomAttribute2
+    if (-not $sourceKey -or -not (Has-MapKey $desiredGroupSourceKeys $sourceKey)) {
+      Add-FullSyncFailure $Stats "Group" $managedGroup.DisplayName $sourceKey "Final Exchange certification found an unexpected managed group."
+    }
+  }
+
+  $Stats["verifiedManagedContacts"] = $managedContacts.Count
+  $Stats["verifiedManagedGroups"] = $managedGroups.Count
+  if ($managedContacts.Count -ne @($ExchangeRows.Contacts).Count) {
+    Add-FullSyncFailure $Stats "Full address book" "Managed contacts" "$($managedContacts.Count) in Exchange / $(@($ExchangeRows.Contacts).Count) in FCUNO" "Final managed-contact count does not match the canonical FCUNO projection."
+  }
+  if ($managedGroups.Count -ne @($ExchangeRows.Groups).Count) {
+    Add-FullSyncFailure $Stats "Full address book" "Managed groups" "$($managedGroups.Count) in Exchange / $(@($ExchangeRows.Groups).Count) in FCUNO" "Final managed-group count does not match the canonical FCUNO projection."
+  }
+}
+
+function Confirm-FinalExchangeGroupMemberships($ExchangeRows, [hashtable]$Stats) {
+  $membersByGroupId = @{}
+  foreach ($member in @($ExchangeRows.Members)) {
+    $groupId = Clean-Text $member.SourceGroupId
+    if (-not (Has-MapKey $membersByGroupId $groupId)) { $membersByGroupId[$groupId] = @() }
+    $membersByGroupId[$groupId] = @($membersByGroupId[$groupId]) + @($member)
+  }
+
+  $groupPosition = 0
+  foreach ($group in @($ExchangeRows.Groups)) {
+    $groupPosition += 1
+    if ($groupPosition % 20 -eq 0) { Renew-ExchangeSyncLock }
+    try {
+      $actualMembers = @(Get-DistributionGroupMember -Identity $group.Alias -ResultSize Unlimited -ErrorAction Stop)
+      $desiredMembers = if (Has-MapKey $membersByGroupId (Clean-Text $group.SourceGroupId)) { @($membersByGroupId[(Clean-Text $group.SourceGroupId)]) } else { @() }
+      $mismatches = @(Get-ExchangeGroupMembershipMismatches $desiredMembers $actualMembers)
+      if ($mismatches.Count -gt 0) {
+        Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership differs: " + ($mismatches -join "; ") + ".")
+      }
+    } catch {
+      Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership certification failed: " + $_.Exception.Message)
+    }
+  }
+}
+
 function Invoke-FullExchangeSync {
   $stats = @{
     syncMode = "full"
@@ -1977,33 +2390,52 @@ function Invoke-FullExchangeSync {
   }
   foreach ($baseAlias in @($aliasCounts.Keys | Where-Object { [int]$aliasCounts[$_] -gt 1 } | Sort-Object)) {
     try {
-      Sync-ExchangeAliasPeers $baseAlias $stats
+      Sync-ExchangeAliasPeers $baseAlias $stats $true
     } catch {
       Add-FullSyncFailure $stats "Alias collision" $baseAlias $baseAlias $_.Exception.Message
     }
   }
 
-  $contactIndex = 0
+  Renew-ExchangeSyncLock
+  $exchangeMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeContactProfiles = @(Get-Contact -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeDistributionGroups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop)
+  $mailContactLookup = New-ExchangeMailContactLookup $exchangeMailContacts
+  $contactProfileLookup = New-ExchangeContactProfileLookup $exchangeContactProfiles
+  $distributionGroupLookup = New-ExchangeDistributionGroupLookup $exchangeDistributionGroups
+  $contactLookupSnapshotCurrent = $true
+  $groupLookupSnapshotCurrent = $true
+
+  $contactPosition = 0
   foreach ($contact in @($exchangeRows.Contacts)) {
-    $contactIndex += 1
+    $contactPosition += 1
     try {
-      if ($contactIndex % 50 -eq 0) { Renew-ExchangeSyncLock }
-      Upsert-ExchangeMailContact $contact $stats
-      if ($contactIndex % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactIndex, @($exchangeRows.Contacts).Count) }
+      if ($contactPosition % 50 -eq 0) { Renew-ExchangeSyncLock }
+      $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
+      $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
+      $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
+      if (-not $useExistingHint) { $contactLookupSnapshotCurrent = $false }
+      Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
+      if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }
     } catch {
+      $contactLookupSnapshotCurrent = $false
       Add-FullSyncFailure $stats "Contact" $contact.DisplayName $contact.ExternalEmailAddress $_.Exception.Message
       Write-Warning ("Full reconciliation failed for contact {0}: {1}" -f $contact.DisplayName, $_.Exception.Message)
     }
   }
 
-  $groupIndex = 0
+  $groupPosition = 0
   foreach ($group in @($exchangeRows.Groups)) {
-    $groupIndex += 1
+    $groupPosition += 1
     try {
-      if ($groupIndex % 20 -eq 0) { Renew-ExchangeSyncLock }
+      if ($groupPosition % 20 -eq 0) { Renew-ExchangeSyncLock }
+      $existingHint = Resolve-ExchangeDistributionGroupHint $group $distributionGroupLookup
+      $useExistingHint = $null -ne $existingHint -and (Test-ExchangeDistributionGroupMatches $existingHint $group)
+      if (-not $useExistingHint) { $groupLookupSnapshotCurrent = $false }
       $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq (Clean-Text $group.SourceGroupId) })
-      Sync-ExchangeGroupMembers $group $members $stats
+      Sync-ExchangeGroupMembers $group $members $stats $true $existingHint $useExistingHint
     } catch {
+      $groupLookupSnapshotCurrent = $false
       Add-FullSyncFailure $stats "Group" $group.GroupName $group.Alias $_.Exception.Message
       Write-Warning ("Full reconciliation failed for group {0}: {1}" -f $group.GroupName, $_.Exception.Message)
     }
@@ -2015,12 +2447,18 @@ function Invoke-FullExchangeSync {
     $desiredContactSourceKeys[(Clean-Text $contact.SourceKey)] = $true
     $desiredContactEmails[(Normalize-Email $contact.ExternalEmailAddress)] = $true
   }
-  $managedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $managedContacts = if ($contactLookupSnapshotCurrent) {
+    @($exchangeMailContacts | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
+  } else {
+    @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  }
+  $reuseManagedContactsForFinalCount = $true
   foreach ($managedContact in $managedContacts) {
     $sourceKey = Clean-Text $managedContact.CustomAttribute2
     $email = Get-RecipientEmail $managedContact
     $isDesired = ($sourceKey -and (Has-MapKey $desiredContactSourceKeys $sourceKey)) -or ($email -and (Has-MapKey $desiredContactEmails $email))
     if ($isDesired) { continue }
+    $reuseManagedContactsForFinalCount = $false
     try {
       Remove-MailContact -Identity $managedContact.Identity -Confirm:$false -ErrorAction Stop
       $verified = Get-MailContact -Identity $managedContact.Identity -ErrorAction SilentlyContinue
@@ -2037,12 +2475,18 @@ function Invoke-FullExchangeSync {
     $desiredGroupSourceKeys[(Clean-Text $group.SourceKey)] = $true
     $desiredGroupAliases[(Clean-Text $group.Alias).ToLowerInvariant()] = $true
   }
-  $managedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $managedGroups = if ($groupLookupSnapshotCurrent) {
+    @($exchangeDistributionGroups | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
+  } else {
+    @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  }
+  $reuseManagedGroupsForFinalCount = $true
   foreach ($managedGroup in $managedGroups) {
     $sourceKey = Clean-Text $managedGroup.CustomAttribute2
     $alias = (Clean-Text $managedGroup.Alias).ToLowerInvariant()
     $isDesired = ($sourceKey -and (Has-MapKey $desiredGroupSourceKeys $sourceKey)) -or ($alias -and (Has-MapKey $desiredGroupAliases $alias))
     if ($isDesired) { continue }
+    $reuseManagedGroupsForFinalCount = $false
     try {
       Remove-DistributionGroup -Identity $managedGroup.Identity -Confirm:$false -ErrorAction Stop
       $verified = Get-DistributionGroup -Identity $managedGroup.Identity -ErrorAction SilentlyContinue
@@ -2053,16 +2497,12 @@ function Invoke-FullExchangeSync {
     }
   }
 
-  $finalManagedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
-  $finalManagedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
-  $stats["verifiedManagedContacts"] = $finalManagedContacts.Count
-  $stats["verifiedManagedGroups"] = $finalManagedGroups.Count
-  if ($finalManagedContacts.Count -ne @($exchangeRows.Contacts).Count) {
-    Add-FullSyncFailure $stats "Full address book" "Managed contacts" "$($finalManagedContacts.Count) in Exchange / $(@($exchangeRows.Contacts).Count) in FCUNO" "Final managed-contact count does not match the canonical FCUNO projection."
-  }
-  if ($finalManagedGroups.Count -ne @($exchangeRows.Groups).Count) {
-    Add-FullSyncFailure $stats "Full address book" "Managed groups" "$($finalManagedGroups.Count) in Exchange / $(@($exchangeRows.Groups).Count) in FCUNO" "Final managed-group count does not match the canonical FCUNO projection."
-  }
+  Renew-ExchangeSyncLock
+  $finalMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)
+  $finalContactProfiles = @(Get-Contact -ResultSize Unlimited -ErrorAction Stop)
+  $finalDistributionGroups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop)
+  Confirm-FinalExchangeProjection $exchangeRows $finalMailContacts $finalContactProfiles $finalDistributionGroups $stats
+  Confirm-FinalExchangeGroupMemberships $exchangeRows $stats
 
   return $stats
 }
