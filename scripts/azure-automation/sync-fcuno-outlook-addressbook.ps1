@@ -251,6 +251,14 @@ function Get-ExchangeContactDirectoryName($Contact) {
   return $directoryName
 }
 
+function Get-ExchangeGroupDirectoryName($Group) {
+  $directoryName = Clean-Text (Get-MapValue $Group "DirectoryName")
+  if (-not $directoryName) { $directoryName = Clean-Text (Get-MapValue $Group "GroupName") }
+  if (-not $directoryName) { throw "The Exchange group directory name is missing." }
+  if ($directoryName.Length -gt 64) { throw "The Exchange group directory name exceeds 64 characters." }
+  return $directoryName
+}
+
 function Set-ExchangeContactProfile($Identity, $Contact) {
   $profile = @{
     Identity = $Identity
@@ -327,11 +335,12 @@ function Get-ExchangeDistributionGroupMismatches($Existing, $Group, $Profile = $
   if (-not $Existing) { return @("distribution group is missing") }
   if (-not $Group) { return @("desired group is missing") }
   $expectedAlias = Clean-Text $Group.Alias
-  $expectedName = Clean-Text $Group.GroupName
+  $expectedName = Get-ExchangeGroupDirectoryName $Group
+  $expectedDisplayName = Clean-Text $Group.GroupName
   $expectedSourceKey = Clean-Text $Group.SourceKey
   if (-not (Clean-Text $Existing.Alias).Equals($expectedAlias, [StringComparison]::OrdinalIgnoreCase)) { $mismatches += "alias" }
   if ((Clean-Text $Existing.Name) -cne $expectedName) { $mismatches += "name" }
-  if ((Clean-Text $Existing.DisplayName) -cne $expectedName) { $mismatches += "display name" }
+  if ((Clean-Text $Existing.DisplayName) -cne $expectedDisplayName) { $mismatches += "display name" }
   if (-not $Profile) {
     $mismatches += "group profile"
   } elseif ((Clean-Text $Profile.Notes) -cne (Clean-Text $Group.Description)) {
@@ -600,6 +609,7 @@ function Set-ExchangeDistributionGroupMetadataWithRetry(
   if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for metadata mutation." }
   $alias = Clean-Text $Group.Alias
   $groupName = Clean-Text $Group.GroupName
+  $directoryName = Get-ExchangeGroupDirectoryName $Group
   $sourceKey = Clean-Text $Group.SourceKey
   if (-not $alias -or -not $groupName -or -not $sourceKey) {
     throw "$Label is missing the desired alias, group name, or source key for metadata mutation."
@@ -612,7 +622,7 @@ function Set-ExchangeDistributionGroupMetadataWithRetry(
       Set-DistributionGroup `
         -Identity $distributionIdentity `
         -Alias $alias `
-        -Name $groupName `
+        -Name $directoryName `
         -DisplayName $groupName `
         -CustomAttribute1 $ManagedMarker `
         -CustomAttribute2 $sourceKey `
@@ -1138,6 +1148,24 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     }
   }
 
+  # Empty FCUNO groups are deliberately absent from Exchange, so they must not reserve a
+  # directory Name. When multiple projected groups share one base name, suffix every peer
+  # deterministically so no input-order-dependent peer owns the unsuffixed identity.
+  $projectedGroupRows = @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })
+  $groupDirectoryNameCounts = @{}
+  foreach ($groupRow in $projectedGroupRows) {
+    $baseName = Get-ExchangeDirectoryNameBase $groupRow.GroupName
+    $baseKey = $baseName.ToLowerInvariant()
+    if (-not (Has-MapKey $groupDirectoryNameCounts $baseKey)) { $groupDirectoryNameCounts[$baseKey] = 0 }
+    $groupDirectoryNameCounts[$baseKey] = [int]$groupDirectoryNameCounts[$baseKey] + 1
+  }
+  foreach ($groupRow in $projectedGroupRows) {
+    $baseName = Get-ExchangeDirectoryNameBase $groupRow.GroupName
+    $forceStableSuffix = [int]$groupDirectoryNameCounts[$baseName.ToLowerInvariant()] -gt 1
+    $directoryName = Get-UniqueExchangeDirectoryName $groupRow.GroupName $seenDirectoryNames $groupRow.SourceKey $forceStableSuffix
+    $groupRow | Add-Member -NotePropertyName DirectoryName -NotePropertyValue $directoryName -Force
+  }
+
   $rawMemberContactIds = @{}
   foreach ($member in @($Members)) {
     $rawContactId = Clean-Text $member.contact_id
@@ -1219,7 +1247,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
 
   return @{
     Contacts = $contactRows
-    Groups = @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })
+    Groups = $projectedGroupRows
     Members = $memberRows
     ContactById = $contactById
     ContactDependencyById = $contactDependencyById
@@ -1262,6 +1290,7 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
     groups = @($Rows.Groups | Sort-Object SourceKey | ForEach-Object {
       [ordered]@{
         sourceGroupId = Clean-Text $_.SourceGroupId
+        directoryName = Clean-Text $_.DirectoryName
         groupName = Clean-Text $_.GroupName
         baseAlias = Clean-Text $_.BaseAlias
         alias = Clean-Text $_.Alias
@@ -1396,16 +1425,38 @@ function Sync-ExchangeDirectoryNamePeers($DisplayName, [hashtable]$Stats, $Exclu
   if (-not $displayNameText) { return }
   $directoryBase = Get-ExchangeDirectoryNameBase $displayNameText
   $rows = Get-CanonicalExchangeRows
-  $allPeers = @($rows.Contacts | Where-Object {
+  $allPeers = @()
+  foreach ($contact in @($rows.Contacts | Where-Object {
     (Get-ExchangeDirectoryNameBase $_.DisplayName).Equals($directoryBase, [StringComparison]::OrdinalIgnoreCase)
-  })
+  })) {
+    $allPeers += [pscustomobject]@{ Kind = "contact"; Value = $contact }
+  }
+  foreach ($group in @($rows.Groups | Where-Object {
+    (Get-ExchangeDirectoryNameBase $_.GroupName).Equals($directoryBase, [StringComparison]::OrdinalIgnoreCase)
+  })) {
+    $allPeers += [pscustomobject]@{ Kind = "group"; Value = $group }
+  }
   if ($allPeers.Count -eq 0 -or ($allPeers.Count -eq 1 -and -not $IncludeSinglePeer)) { return }
 
   $excludedSourceKey = Clean-Text $ExcludeSourceKey
-  foreach ($peer in @($allPeers | Sort-Object SourceKey)) {
-    if ($excludedSourceKey -and (Clean-Text $peer.SourceKey) -eq $excludedSourceKey) { continue }
+  $orderedPeers = @($allPeers | Sort-Object `
+    @{ Expression = {
+      $desiredDirectoryName = if ($_.Kind -eq "contact") {
+        Get-ExchangeContactDirectoryName $_.Value
+      } else {
+        Get-ExchangeGroupDirectoryName $_.Value
+      }
+      if ($desiredDirectoryName.Equals($directoryBase, [StringComparison]::OrdinalIgnoreCase)) { 1 } else { 0 }
+    }; Ascending = $true }, `
+    @{ Expression = { Clean-Text $_.Value.SourceKey }; Ascending = $true })
+  foreach ($peer in $orderedPeers) {
+    if ($excludedSourceKey -and (Clean-Text $peer.Value.SourceKey) -eq $excludedSourceKey) { continue }
     Renew-ExchangeSyncLockIfDue
-    Upsert-ExchangeMailContact $peer $Stats $true
+    if ($peer.Kind -eq "contact") {
+      Upsert-ExchangeMailContact $peer.Value $Stats $true
+    } else {
+      Upsert-ExchangeDistributionGroup $peer.Value $Stats $true
+    }
     Renew-ExchangeSyncLockIfDue
   }
 }
@@ -2401,7 +2452,7 @@ function Get-FullContactMutationFieldChanges($Existing, $Profile, $Contact, [boo
 function Get-FullGroupMutationFieldChanges($Existing, $Profile, $Group, [bool]$Created) {
   $beforeMissing = $(if ($Created) { "(missing)" } else { "(blank)" })
   $fields = @(
-    [pscustomobject]@{ Label = "Name"; Before = $(if ($Existing) { Clean-Text $Existing.Name } else { $beforeMissing }); After = Clean-Text $Group.GroupName },
+    [pscustomobject]@{ Label = "Name"; Before = $(if ($Existing) { Clean-Text $Existing.Name } else { $beforeMissing }); After = Get-ExchangeGroupDirectoryName $Group },
     [pscustomobject]@{ Label = "Group name"; Before = $(if ($Existing) { Clean-Text $Existing.DisplayName } else { $beforeMissing }); After = Clean-Text $Group.GroupName },
     [pscustomobject]@{ Label = "Alias"; Before = $(if ($Existing) { Clean-Text $Existing.Alias } else { $beforeMissing }); After = Clean-Text $Group.Alias },
     [pscustomobject]@{ Label = "Description"; Before = $(if ($Profile) { Clean-Text $Profile.Notes } elseif ($Created) { $beforeMissing } else { "(unresolved)" }); After = Clean-Text $Group.Description },
@@ -2772,7 +2823,11 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     Increment-Stat $Stats "updatedGroups"
   } else {
     $fullMutationAction = "Create group"
-    $newGroup = New-DistributionGroup -Name $Group.GroupName -Alias $alias -ErrorAction Stop
+    $newGroup = New-DistributionGroup `
+      -Name (Get-ExchangeGroupDirectoryName $Group) `
+      -DisplayName $Group.GroupName `
+      -Alias $alias `
+      -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     $newGroupIdentity = Get-ExchangeStrongCommandIdentity $newGroup
     if (-not $newGroupIdentity) { throw "New Exchange group $alias did not return an immutable identity, so Notes/marker mutation was blocked." }
@@ -3227,6 +3282,9 @@ function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$
     if ($AllowQueuedHistoricalOwner -and (Get-QueueAuditAuthorized $Row)) {
       $contactForUpsert = Copy-ExchangeContactWithAllowedOwnerSourceKey $desiredContact (Get-ContactSourceKey $Row.entity_id)
     }
+    # The canonical owner of an email can change to a different duplicate source row whose
+    # display name was not present on the queued row. Vacate that desired Name before upsert.
+    Sync-ExchangeDirectoryNamePeers $desiredContact.DisplayName $Stats $desiredContact.SourceKey $false
     Upsert-ExchangeMailContact $contactForUpsert $Stats
     return
   }
@@ -3243,6 +3301,9 @@ function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$
       (Clean-Text $contactForDelete.DisplayName) `
       $false `
       @($contactForDelete.AllowedOwnerSourceKeys)
+    # Internal recipients do not reserve managed MailContact Names. Repair any projected
+    # external/group peer only after the stale managed copy has been removed.
+    Sync-ExchangeDirectoryNamePeers $desiredContact.DisplayName $Stats $desiredContact.SourceKey $true
     return
   }
 
@@ -3290,19 +3351,19 @@ function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
     $beforeEmailReconciled = $true
   }
   if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats ([bool]$currentIsInternal) ([bool]$currentIsInternal) }
-  if ($currentDisplayName) {
-    Sync-ExchangeDirectoryNamePeers $currentDisplayName $Stats $currentSourceKey $false
-  }
-  if ($beforeDisplayName -and (
-    -not $currentRow -or
-    -not $beforeDisplayName.Equals($currentDisplayName, [StringComparison]::OrdinalIgnoreCase)
-  )) {
-    Sync-ExchangeDirectoryNamePeers $beforeDisplayName $Stats $currentSourceKey $true
-  }
   if ($currentEmail) {
     Reconcile-ExchangeContactEmail $currentEmail $Row $Stats $false $false
   } elseif ($beforeEmail -and -not $beforeEmailReconciled) {
     Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats $true (Get-QueueAuditAuthorized $Row)
+  }
+  $currentInternalNameAlreadyReconciled = $currentIsInternal -and $beforeDisplayName -and $beforeDisplayName.Equals($currentDisplayName, [StringComparison]::OrdinalIgnoreCase)
+  if ($beforeDisplayName -and (
+    -not $currentRow -or
+    -not $beforeDisplayName.Equals($currentDisplayName, [StringComparison]::OrdinalIgnoreCase)
+  ) -and -not $currentInternalNameAlreadyReconciled) {
+    # Reconcile the old-name peers only after the queued contact has vacated its old
+    # Exchange Name; otherwise a peer reverting to the unsuffixed name can collide.
+    Sync-ExchangeDirectoryNamePeers $beforeDisplayName $Stats $currentSourceKey $true
   }
 
   foreach ($email in @($beforeEmail, $currentEmail) | Where-Object { $_ } | Select-Object -Unique) {
@@ -3334,9 +3395,12 @@ function Get-CanonicalExchangeGroupByAlias($Alias) {
 function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
   $sourceGroup = Load-SingleRow "shared_addressbook_groups" "id" $Row.entity_id
   $beforeBaseAlias = Get-QueueGroupBeforeBaseAlias $Row
+  $beforeDisplayName = Get-QueueExpectedGroupName $Row
   $currentRows = if ($sourceGroup) { Get-GroupExchangeRowsFromSource $Row.entity_id } else { $null }
   $currentGroup = if ($currentRows -and @($currentRows.Groups).Count -gt 0) { @($currentRows.Groups)[0] } else { $null }
   $currentBaseAlias = if ($currentGroup) { Clean-Text $currentGroup.BaseAlias } else { "" }
+  $currentDisplayName = if ($currentGroup) { Clean-Text $currentGroup.GroupName } else { "" }
+  $currentSourceKey = Get-GroupSourceKey $Row.entity_id
 
   if (-not $sourceGroup) {
     $queuedAlias = Clean-Text $Row.entity_alias
@@ -3369,17 +3433,31 @@ function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
           (Get-QueueAuditAuthorized $Row)
       }
       Sync-ExchangeGroupState $currentAliasOwner.SourceGroupId "" $Stats
+      if ($beforeDisplayName) {
+        Sync-ExchangeDirectoryNamePeers $beforeDisplayName $Stats (Get-GroupSourceKey $Row.entity_id) $true
+      }
       return
     }
   }
 
   if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
+  if ($currentDisplayName) {
+    # New-name peers move first so the queued group can safely claim its projected Name.
+    Sync-ExchangeDirectoryNamePeers $currentDisplayName $Stats $currentSourceKey $false
+  }
   Sync-ExchangeGroupState `
     $Row.entity_id `
     $Row.entity_alias `
     $Stats `
     (Get-QueueExpectedGroupName $Row) `
     $(if ($sourceGroup) { $false } else { Get-QueueAuditAuthorized $Row })
+  if ($beforeDisplayName -and (
+    -not $currentGroup -or
+    -not $beforeDisplayName.Equals($currentDisplayName, [StringComparison]::OrdinalIgnoreCase)
+  )) {
+    # Old-name peers move only after the queued group has vacated or deleted its old Name.
+    Sync-ExchangeDirectoryNamePeers $beforeDisplayName $Stats $currentSourceKey $true
+  }
   if ($beforeBaseAlias -and -not $beforeBaseAlias.Equals($currentBaseAlias, [StringComparison]::OrdinalIgnoreCase)) {
     Sync-ExchangeAliasPeers $beforeBaseAlias $Stats $true $true
   }
@@ -4328,10 +4406,14 @@ function Remove-StaleManagedExchangeContacts($ManagedContacts, $ExchangeRows, [h
   $desiredContactSourceKeys = @{}
   $desiredContactEmails = @{}
   $protectedInvalidContactSourceKeys = @{}
+  $failedDirectoryBases = @{}
   foreach ($contact in @($ExchangeRows.Contacts)) {
     $sourceKey = Clean-Text $contact.SourceKey
     $email = Normalize-Email $contact.ExternalEmailAddress
-    if ($sourceKey) { $desiredContactSourceKeys[$sourceKey] = $true }
+    foreach ($allowedSourceKey in @($sourceKey) + @($contact.AllowedOwnerSourceKeys)) {
+      $allowedKey = Clean-Text $allowedSourceKey
+      if ($allowedKey) { $desiredContactSourceKeys[$allowedKey] = $true }
+    }
     if ($email) { $desiredContactEmails[$email] = $true }
   }
   foreach ($invalid in @($ExchangeRows.InvalidContacts) + @($ExchangeRows.SkippedInvalidContacts)) {
@@ -4347,7 +4429,11 @@ function Remove-StaleManagedExchangeContacts($ManagedContacts, $ExchangeRows, [h
       Increment-Stat $Stats "preservedInvalidContacts"
       continue
     }
-    $isDesired = ($sourceKey -and (Has-MapKey $desiredContactSourceKeys $sourceKey)) -or ($email -and (Has-MapKey $desiredContactEmails $email))
+    $isDesired = if ($sourceKey) {
+      Has-MapKey $desiredContactSourceKeys $sourceKey
+    } else {
+      $email -and (Has-MapKey $desiredContactEmails $email)
+    }
     if ($isDesired) { continue }
     try {
       $deleteIdentity = Get-ExchangeStrongCommandIdentity $managedContact
@@ -4366,14 +4452,96 @@ function Remove-StaleManagedExchangeContacts($ManagedContacts, $ExchangeRows, [h
         $(if (Get-ExchangeStrongCommandIdentity $managedContact) { Get-ExchangeStrongCommandIdentity $managedContact } else { Clean-Text $managedContact.Identity }) `
         "Deleted the stale managed Exchange contact and verified that its identity is absent." `
         @(
+          "Name: $(Clean-Text $managedContact.Name) -> (missing)",
           "Display name: $(Clean-Text $managedContact.DisplayName) -> (missing)",
           "Email: $email -> (missing)",
           "Alias: $(Clean-Text $managedContact.Alias) -> (missing)"
         )
     } catch {
-      Add-FullSyncFailure $Stats "Contact" $managedContact.DisplayName $email ("Could not remove stale managed contact: " + $_.Exception.Message)
+      $message = "Could not remove stale managed contact: " + $_.Exception.Message
+      $failedDirectoryBases[(Get-ExchangeDirectoryNameBase $managedContact.DisplayName).ToLowerInvariant()] = $message
+      Add-FullSyncFailure $Stats "Contact" $managedContact.DisplayName $email $message
     }
   }
+  return $failedDirectoryBases
+}
+
+function Remove-StaleManagedExchangeGroups($ManagedGroups, $ExchangeRows, [hashtable]$Stats) {
+  $desiredGroupSourceKeys = @{}
+  $desiredGroupAliases = @{}
+  $failedDirectoryBases = @{}
+  foreach ($group in @($ExchangeRows.Groups)) {
+    $desiredGroupSourceKeys[(Clean-Text $group.SourceKey)] = $true
+    $desiredGroupAliases[(Clean-Text $group.Alias).ToLowerInvariant()] = $true
+  }
+
+  foreach ($managedGroup in @($ManagedGroups)) {
+    Renew-ExchangeSyncLockIfDue
+    $sourceKey = Clean-Text $managedGroup.CustomAttribute2
+    $alias = (Clean-Text $managedGroup.Alias).ToLowerInvariant()
+    $isDesired = if ($sourceKey) {
+      Has-MapKey $desiredGroupSourceKeys $sourceKey
+    } else {
+      $alias -and (Has-MapKey $desiredGroupAliases $alias)
+    }
+    if ($isDesired) { continue }
+    try {
+      $deleteIdentity = Get-ExchangeStrongCommandIdentity $managedGroup
+      if (-not $deleteIdentity) { throw "The stale managed group has no immutable Exchange identity, so deletion was blocked." }
+      Remove-DistributionGroup -Identity $deleteIdentity -Confirm:$false -ErrorAction Stop
+      Renew-ExchangeSyncLockIfDue
+      Confirm-ExchangeDistributionGroupDeletion $managedGroup $alias $sourceKey
+      Increment-Stat $Stats "removedGroups"
+      Add-FullSyncMutationDetail `
+        $Stats `
+        "Delete stale group" `
+        "Group" `
+        $managedGroup.DisplayName `
+        $alias `
+        $sourceKey `
+        $(if (Get-ExchangeStrongCommandIdentity $managedGroup) { Get-ExchangeStrongCommandIdentity $managedGroup } else { Clean-Text $managedGroup.Identity }) `
+        "Deleted the stale managed Exchange group and verified that its identity is absent." `
+        @(
+          "Name: $(Clean-Text $managedGroup.Name) -> (missing)",
+          "Group name: $(Clean-Text $managedGroup.DisplayName) -> (missing)",
+          "Alias: $alias -> (missing)"
+        )
+    } catch {
+      $message = "Could not remove stale managed group: " + $_.Exception.Message
+      $failedDirectoryBases[(Get-ExchangeDirectoryNameBase $managedGroup.DisplayName).ToLowerInvariant()] = $message
+      Add-FullSyncFailure $Stats "Group" $managedGroup.DisplayName $alias $message
+    }
+  }
+  return $failedDirectoryBases
+}
+
+function Sync-ExchangeGroupDirectoryNamePrerequisites($ExchangeRows, [hashtable]$Stats, [hashtable]$BlockedDirectoryBases = $null) {
+  $failedDirectoryBases = @{}
+  if ($BlockedDirectoryBases) {
+    foreach ($key in @($BlockedDirectoryBases.Keys)) { $failedDirectoryBases[$key] = $BlockedDirectoryBases[$key] }
+  }
+  if (-not $ExchangeRows) { return $failedDirectoryBases }
+
+  foreach ($group in @($ExchangeRows.Groups | Sort-Object SourceKey)) {
+    $directoryName = Get-ExchangeGroupDirectoryName $group
+    $groupName = Clean-Text $group.GroupName
+    if ($directoryName -ceq $groupName) { continue }
+    $baseKey = (Get-ExchangeDirectoryNameBase $groupName).ToLowerInvariant()
+    if (Has-MapKey $failedDirectoryBases $baseKey) { continue }
+    try {
+      Renew-ExchangeSyncLockIfDue
+      # Full reconciliation creates contacts later. Move/create every collision-safe group
+      # first so no existing group still owns the unsuffixed Name required by a contact.
+      Upsert-ExchangeDistributionGroup $group $Stats $true
+      Renew-ExchangeSyncLockIfDue
+    } catch {
+      $message = Clean-Text $_.Exception.Message
+      $failedDirectoryBases[$baseKey] = $message
+      Add-FullSyncFailure $Stats "Group directory prerequisite" $group.GroupName $group.Alias $message
+      Write-Warning ("Full group directory prerequisite failed for {0}: {1}" -f $group.GroupName, $message)
+    }
+  }
+  return $failedDirectoryBases
 }
 
 function Invoke-FullExchangeSync {
@@ -4417,6 +4585,24 @@ function Invoke-FullExchangeSync {
     Add-FullSyncFailure $stats "Contact" $invalid.DisplayName $invalid.Email "FCUNO validation failed: $($invalid.Reason). Any existing managed Exchange contact with source key $invalidSourceKey is preserved but uncertified; no Exchange mutation was attempted for this row."
   }
 
+  # Delete only source/alias-certified stale managed recipients before any desired object
+  # claims a newly freed directory Name, then take fresh bulk snapshots below.
+  Renew-ExchangeSyncLockIfDue -Force
+  $preCleanupManagedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  Renew-ExchangeSyncLockIfDue
+  $preCleanupManagedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  Renew-ExchangeSyncLockIfDue
+  $failedStaleDirectoryCleanup = @{}
+  foreach ($failureMap in @(
+    (Remove-StaleManagedExchangeContacts $preCleanupManagedContacts $exchangeRows $stats),
+    (Remove-StaleManagedExchangeGroups $preCleanupManagedGroups $exchangeRows $stats)
+  )) {
+    if (-not $failureMap) { continue }
+    foreach ($key in @($failureMap.Keys)) { $failedStaleDirectoryCleanup[$key] = $failureMap[$key] }
+  }
+
+  $failedDirectoryPrerequisites = Sync-ExchangeGroupDirectoryNamePrerequisites $exchangeRows $stats $failedStaleDirectoryCleanup
+
   $aliasCounts = @{}
   foreach ($recipient in @($exchangeRows.Contacts) + @($exchangeRows.Groups)) {
     $baseAlias = (Clean-Text $recipient.BaseAlias).ToLowerInvariant()
@@ -4426,6 +4612,13 @@ function Invoke-FullExchangeSync {
   }
   foreach ($baseAlias in @($aliasCounts.Keys | Where-Object { [int]$aliasCounts[$_] -gt 1 } | Sort-Object)) {
     try {
+      $blockedAliasContacts = @($exchangeRows.Contacts | Where-Object {
+        (Clean-Text $_.BaseAlias).Equals($baseAlias, [StringComparison]::OrdinalIgnoreCase) -and
+        (Has-MapKey $failedDirectoryPrerequisites (Get-ExchangeDirectoryNameBase $_.DisplayName).ToLowerInvariant())
+      })
+      if ($blockedAliasContacts.Count -gt 0) {
+        throw "Alias peer reconciliation was blocked because a collision-safe group directory prerequisite failed for $($blockedAliasContacts[0].DisplayName)."
+      }
       Sync-ExchangeAliasPeers $baseAlias $stats $true
     } catch {
       Add-FullSyncFailure $stats "Alias collision" $baseAlias $baseAlias $_.Exception.Message
@@ -4445,22 +4638,22 @@ function Invoke-FullExchangeSync {
   $contactProfileLookup = New-ExchangeContactProfileLookup $exchangeContactProfiles
   $distributionGroupLookup = New-ExchangeDistributionGroupLookup $exchangeDistributionGroups
   $groupProfileLookup = New-ExchangeGroupProfileLookup $exchangeGroupProfiles
-  $contactLookupSnapshotCurrent = $true
-  $groupLookupSnapshotCurrent = $true
 
   $contactPosition = 0
   foreach ($contact in @($exchangeRows.Contacts)) {
     $contactPosition += 1
     try {
       Renew-ExchangeSyncLockIfDue
+      $contactDirectoryBase = (Get-ExchangeDirectoryNameBase $contact.DisplayName).ToLowerInvariant()
+      if (Has-MapKey $failedDirectoryPrerequisites $contactDirectoryBase) {
+        throw "Contact reconciliation was blocked because its collision-safe group directory prerequisite failed: $($failedDirectoryPrerequisites[$contactDirectoryBase])"
+      }
       $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
       $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
       $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
-      if (-not $useExistingHint) { $contactLookupSnapshotCurrent = $false }
       Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }
     } catch {
-      $contactLookupSnapshotCurrent = $false
       Add-FullSyncFailure $stats "Contact" $contact.DisplayName $contact.ExternalEmailAddress $_.Exception.Message
       Write-Warning ("Full reconciliation failed for contact {0}: {1}" -f $contact.DisplayName, $_.Exception.Message)
     }
@@ -4474,64 +4667,11 @@ function Invoke-FullExchangeSync {
       $existingHint = Resolve-ExchangeDistributionGroupHint $group $distributionGroupLookup
       $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeGroupProfileHint $existingHint $groupProfileLookup } else { $null }
       $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeDistributionGroupMatches $existingHint $group $existingProfileHint)
-      if (-not $useExistingHint) { $groupLookupSnapshotCurrent = $false }
       $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq (Clean-Text $group.SourceGroupId) })
       Sync-ExchangeGroupMembers $group $members $stats $true $existingHint $useExistingHint $existingProfileHint
     } catch {
-      $groupLookupSnapshotCurrent = $false
       Add-FullSyncFailure $stats "Group" $group.GroupName $group.Alias $_.Exception.Message
       Write-Warning ("Full reconciliation failed for group {0}: {1}" -f $group.GroupName, $_.Exception.Message)
-    }
-  }
-
-  $managedContacts = if ($contactLookupSnapshotCurrent) {
-    @($exchangeMailContacts | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
-  } else {
-    @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
-  }
-  Remove-StaleManagedExchangeContacts $managedContacts $exchangeRows $stats
-
-  $desiredGroupSourceKeys = @{}
-  $desiredGroupAliases = @{}
-  foreach ($group in @($exchangeRows.Groups)) {
-    $desiredGroupSourceKeys[(Clean-Text $group.SourceKey)] = $true
-    $desiredGroupAliases[(Clean-Text $group.Alias).ToLowerInvariant()] = $true
-  }
-  $managedGroups = if ($groupLookupSnapshotCurrent) {
-    @($exchangeDistributionGroups | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
-  } else {
-    @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
-  }
-  $reuseManagedGroupsForFinalCount = $true
-  foreach ($managedGroup in $managedGroups) {
-    Renew-ExchangeSyncLockIfDue
-    $sourceKey = Clean-Text $managedGroup.CustomAttribute2
-    $alias = (Clean-Text $managedGroup.Alias).ToLowerInvariant()
-    $isDesired = ($sourceKey -and (Has-MapKey $desiredGroupSourceKeys $sourceKey)) -or ($alias -and (Has-MapKey $desiredGroupAliases $alias))
-    if ($isDesired) { continue }
-    $reuseManagedGroupsForFinalCount = $false
-    try {
-      $deleteIdentity = Get-ExchangeStrongCommandIdentity $managedGroup
-      if (-not $deleteIdentity) { throw "The stale managed group has no immutable Exchange identity, so deletion was blocked." }
-      Remove-DistributionGroup -Identity $deleteIdentity -Confirm:$false -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
-      Confirm-ExchangeDistributionGroupDeletion $managedGroup $alias $sourceKey
-      Increment-Stat $stats "removedGroups"
-      Add-FullSyncMutationDetail `
-        $stats `
-        "Delete stale group" `
-        "Group" `
-        $managedGroup.DisplayName `
-        $alias `
-        $sourceKey `
-        $(if (Get-ExchangeStrongCommandIdentity $managedGroup) { Get-ExchangeStrongCommandIdentity $managedGroup } else { Clean-Text $managedGroup.Identity }) `
-        "Deleted the stale managed Exchange group and verified that its identity is absent." `
-        @(
-          "Group name: $(Clean-Text $managedGroup.DisplayName) -> (missing)",
-          "Alias: $alias -> (missing)"
-        )
-    } catch {
-      Add-FullSyncFailure $stats "Group" $managedGroup.DisplayName $alias ("Could not remove stale managed group: " + $_.Exception.Message)
     }
   }
 

@@ -141,6 +141,7 @@ Assert-Equal 2 @($built.Members).Count "Memberships from every duplicate source 
 Assert-Equal "c-new" $built.ContactByEmail["dup@example.com"].SourceContactId "Newest source row must be the canonical duplicate owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-old") "A canonical duplicate must record its previous eligible source owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
+Assert-Equal "Group One" $built.GroupById["g-1"].DirectoryName "A non-colliding group must retain its exact FCUNO name as its Exchange directory name"
 
 $singaporeExternalRows = Build-ExchangeRows @(
   [pscustomobject]@{ id = "fcbs-bunker"; source_book = "FC-GENERAL"; display_name = "FCBS"; primary_email = "bunker@cosulich.com.sg"; nickname = "FCBS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" }
@@ -339,15 +340,113 @@ Assert-True ($oceanAnderson.DirectoryName -match '^OCEAN PARTNERS \[[0-9a-f]{8,3
 Assert-Equal $oceanAnderson.DirectoryName $oceanRowsReversed.ContactByEmail["anderson@op-energy.co.kr"].DirectoryName "Duplicate directory naming must be independent of input order"
 Assert-Equal $oceanBunkers.DirectoryName $oceanRowsReversed.ContactByEmail["bunkers@op-energy.co.kr"].DirectoryName "Every duplicate directory name must be deterministic"
 
+$contactGroupCollisionContacts = @(
+  [pscustomobject]@{ id = "g-ocean-contact"; source_book = "FCUNO"; display_name = "G OCEAN"; primary_email = "enquiries@g-ocean.com.sg"; nickname = "G OCEAN"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+  [pscustomobject]@{ id = "other-group-member"; source_book = "FCUNO"; display_name = "Other Group Member"; primary_email = "other.group.member@example.com"; nickname = "OTHER GROUP MEMBER"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+)
+$contactGroupCollisionGroups = @(
+  [pscustomobject]@{ id = "g-ocean-group"; source_book = "FCUNO"; name = "G OCEAN"; nickname = "G OCEAN"; source_uid = "g-ocean-group"; description = "G OCEAN group" },
+  [pscustomobject]@{ id = "other-group"; source_book = "FCUNO"; name = "Other Group"; nickname = "OTHER GROUP"; source_uid = "other-group"; description = "Other group" }
+)
+$contactGroupCollisionMembers = @(
+  [pscustomobject]@{ group_id = "g-ocean-group"; contact_id = "g-ocean-contact"; source_book = "FCUNO" },
+  [pscustomobject]@{ group_id = "other-group"; contact_id = "other-group-member"; source_book = "FCUNO" }
+)
+$contactGroupCollisionRows = Build-ExchangeRows $contactGroupCollisionContacts $contactGroupCollisionGroups $contactGroupCollisionMembers
+$contactGroupCollisionRowsReversed = Build-ExchangeRows `
+  @($contactGroupCollisionContacts[1], $contactGroupCollisionContacts[0]) `
+  @($contactGroupCollisionGroups[1], $contactGroupCollisionGroups[0]) `
+  @($contactGroupCollisionMembers[1], $contactGroupCollisionMembers[0])
+$gOceanCollisionContact = $contactGroupCollisionRows.ContactById["g-ocean-contact"]
+$gOceanCollisionGroup = $contactGroupCollisionRows.GroupById["g-ocean-group"]
+Assert-Equal "G OCEAN" $gOceanCollisionContact.DirectoryName "A lone managed contact must retain the unsuffixed Exchange directory name"
+Assert-Equal "G OCEAN" $gOceanCollisionGroup.GroupName "A group/contact collision must preserve the exact visible FCUNO group name"
+Assert-True ($gOceanCollisionGroup.DirectoryName -cne $gOceanCollisionGroup.GroupName) "A group whose visible name matches a mail contact must receive a distinct Exchange directory name"
+Assert-True ($gOceanCollisionGroup.DirectoryName -match '^G OCEAN \[[0-9a-f]{8,32}\]$') "A colliding group directory name must use its stable FCUNO source-key hash suffix"
+Assert-True ($gOceanCollisionGroup.DirectoryName.Length -le 64) "A collision-safe group directory name must remain within Exchange's 64-character limit"
+Assert-Equal $gOceanCollisionGroup.DirectoryName $contactGroupCollisionRowsReversed.GroupById["g-ocean-group"].DirectoryName "Group directory naming must be deterministic regardless of input order"
+Assert-Equal "Other Group" $contactGroupCollisionRows.GroupById["other-group"].DirectoryName "An unrelated non-colliding group must retain its visible name as its directory name"
+
+$emptyGroupNameRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "live-group-member"; source_book = "FCUNO"; display_name = "Live Group Member"; primary_email = "live.group.member@example.com"; nickname = "LIVE GROUP MEMBER"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @(
+  [pscustomobject]@{ id = "a-empty-group"; source_book = "FCUNO"; name = "EMPTY NAME PEER"; nickname = "EMPTY NAME PEER"; source_uid = "a-empty-group"; description = "Empty" },
+  [pscustomobject]@{ id = "z-live-group"; source_book = "FCUNO"; name = "EMPTY NAME PEER"; nickname = "EMPTY NAME PEER"; source_uid = "z-live-group"; description = "Projected" }
+) @(
+  [pscustomobject]@{ group_id = "z-live-group"; contact_id = "live-group-member"; source_book = "FCUNO" }
+)
+Assert-Equal 1 @($emptyGroupNameRows.Groups).Count "Only populated FCUNO groups may enter the Exchange projection"
+Assert-Equal "EMPTY NAME PEER" $emptyGroupNameRows.GroupById["z-live-group"].DirectoryName "An empty same-name group must not reserve or suffix the populated group's Exchange directory Name"
+Assert-True (-not $emptyGroupNameRows.GroupById["a-empty-group"].PSObject.Properties["DirectoryName"]) "An empty FCUNO group must not receive an Exchange directory Name"
+
+$duplicateGroupNameContacts = @(
+  [pscustomobject]@{ id = "duplicate-group-member-a"; source_book = "FCUNO"; display_name = "Duplicate Group Member A"; primary_email = "duplicate.group.a@example.com"; nickname = "DUPLICATE GROUP MEMBER A"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+  [pscustomobject]@{ id = "duplicate-group-member-b"; source_book = "FCUNO"; display_name = "Duplicate Group Member B"; primary_email = "duplicate.group.b@example.com"; nickname = "DUPLICATE GROUP MEMBER B"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+)
+$duplicateGroupNames = @(
+  [pscustomobject]@{ id = "duplicate-group-a"; source_book = "FCUNO"; name = "DUPLICATE GROUP NAME"; nickname = "DUPLICATE GROUP NAME"; source_uid = "duplicate-group-a"; description = "A" },
+  [pscustomobject]@{ id = "duplicate-group-b"; source_book = "FCUNO"; name = "DUPLICATE GROUP NAME"; nickname = "DUPLICATE GROUP NAME"; source_uid = "duplicate-group-b"; description = "B" }
+)
+$duplicateGroupNameMembers = @(
+  [pscustomobject]@{ group_id = "duplicate-group-a"; contact_id = "duplicate-group-member-a"; source_book = "FCUNO" },
+  [pscustomobject]@{ group_id = "duplicate-group-b"; contact_id = "duplicate-group-member-b"; source_book = "FCUNO" }
+)
+$duplicateGroupNameRows = Build-ExchangeRows $duplicateGroupNameContacts $duplicateGroupNames $duplicateGroupNameMembers
+$duplicateGroupNameRowsReversed = Build-ExchangeRows @($duplicateGroupNameContacts[1], $duplicateGroupNameContacts[0]) @($duplicateGroupNames[1], $duplicateGroupNames[0]) @($duplicateGroupNameMembers[1], $duplicateGroupNameMembers[0])
+$duplicateGroupNameA = $duplicateGroupNameRows.GroupById["duplicate-group-a"].DirectoryName
+$duplicateGroupNameB = $duplicateGroupNameRows.GroupById["duplicate-group-b"].DirectoryName
+Assert-True ($duplicateGroupNameA -match '^DUPLICATE GROUP NAME \[[0-9a-f]{8,32}\]$') "Every projected duplicate group name must use a stable suffix"
+Assert-True ($duplicateGroupNameB -match '^DUPLICATE GROUP NAME \[[0-9a-f]{8,32}\]$') "No projected duplicate group may own the order-dependent unsuffixed Name"
+Assert-True ($duplicateGroupNameA -cne $duplicateGroupNameB) "Same-name projected groups must receive distinct Exchange directory Names"
+Assert-Equal $duplicateGroupNameA $duplicateGroupNameRowsReversed.GroupById["duplicate-group-a"].DirectoryName "Duplicate group directory naming must be independent of input order"
+Assert-Equal $duplicateGroupNameB $duplicateGroupNameRowsReversed.GroupById["duplicate-group-b"].DirectoryName "Every duplicate group directory Name must remain stable"
+
+$gOceanExactRecipient = [pscustomobject]@{
+  Name = $gOceanCollisionGroup.DirectoryName
+  DisplayName = $gOceanCollisionGroup.GroupName
+  Alias = $gOceanCollisionGroup.Alias
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = $gOceanCollisionGroup.SourceKey
+  HiddenFromAddressListsEnabled = $false
+}
+$gOceanExactProfile = [pscustomobject]@{ Notes = $gOceanCollisionGroup.Description }
+Assert-True (Test-ExchangeDistributionGroupMatches $gOceanExactRecipient $gOceanCollisionGroup $gOceanExactProfile) "Group verification must accept a collision-safe directory Name while preserving the exact DisplayName"
+$gOceanWrongNameRecipient = [pscustomobject]@{
+  Name = $gOceanCollisionGroup.GroupName
+  DisplayName = $gOceanCollisionGroup.GroupName
+  Alias = $gOceanCollisionGroup.Alias
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = $gOceanCollisionGroup.SourceKey
+  HiddenFromAddressListsEnabled = $false
+}
+$gOceanWrongNameMismatches = @(Get-ExchangeDistributionGroupMismatches $gOceanWrongNameRecipient $gOceanCollisionGroup $gOceanExactProfile)
+Assert-True ($gOceanWrongNameMismatches -contains "name") "Group verification must reject the colliding visible name when the collision-safe directory Name is required"
+Assert-True ($gOceanWrongNameMismatches -notcontains "display name") "A correct visible group DisplayName must remain independent of the collision-safe directory Name"
+$gOceanCreateChanges = @(Get-FullGroupMutationFieldChanges $null $null $gOceanCollisionGroup $true)
+Assert-True ($gOceanCreateChanges -contains "Name: (missing) -> $($gOceanCollisionGroup.DirectoryName)") "The sync notice must report the exact collision-safe group directory Name"
+Assert-True ($gOceanCreateChanges -contains "Group name: (missing) -> G OCEAN") "The sync notice must separately preserve the exact visible group name"
+
+$contactGroupCollisionFingerprint = Get-CanonicalExchangeProjectionFingerprint $contactGroupCollisionRows
+$contactGroupCollisionFingerprintVariant = Build-ExchangeRows $contactGroupCollisionContacts $contactGroupCollisionGroups $contactGroupCollisionMembers
+$contactGroupCollisionFingerprintVariant.GroupById["g-ocean-group"].DirectoryName = "G OCEAN [fingerprint-variant]"
+Assert-True ($contactGroupCollisionFingerprint -cne (Get-CanonicalExchangeProjectionFingerprint $contactGroupCollisionFingerprintVariant)) "The canonical fingerprint must include each group's collision-safe directory Name"
+
 $differentAliasNamePeers = Build-ExchangeRows @(
   [pscustomobject]@{ id = "peer-existing"; source_book = "FCUNO"; display_name = "SHARED VISIBLE NAME"; primary_email = "existing@example.com"; nickname = "EXISTING NICKNAME"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
   [pscustomobject]@{ id = "peer-new"; source_book = "FCUNO"; display_name = "SHARED VISIBLE NAME"; primary_email = "new@example.com"; nickname = "DIFFERENT NICKNAME"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
 ) @() @()
 $savedDirectoryPeerUpsert = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock
+$savedDirectoryPeerGroupUpsert = (Get-Item Function:Upsert-ExchangeDistributionGroup).ScriptBlock
 $script:directoryPeerUpserts = @()
+$script:directoryPeerEvents = @()
 Set-Item Function:Upsert-ExchangeMailContact -Value {
   param($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites)
   $script:directoryPeerUpserts += [pscustomobject]@{ SourceKey = Clean-Text $Contact.SourceKey; SkipNoOpWrites = $SkipNoOpWrites }
+  $script:directoryPeerEvents += "contact:$(Clean-Text $Contact.SourceKey)"
+}
+Set-Item Function:Upsert-ExchangeDistributionGroup -Value {
+  param($Group, [hashtable]$Stats, [bool]$SkipNoOpWrites)
+  $script:directoryPeerEvents += "group:$(Clean-Text $Group.SourceKey)"
 }
 try {
   $script:CanonicalExchangeRows = $differentAliasNamePeers
@@ -365,6 +464,33 @@ try {
   Assert-Equal 1 $script:directoryPeerUpserts.Count "Deleting or internalizing a duplicate must repair the lone survivor's directory name"
   Assert-Equal "SHARED VISIBLE NAME" $loneDirectorySurvivor.Contacts[0].DirectoryName "A lone survivor must deterministically revert to the unsuffixed directory name"
 
+  $mixedDirectoryPeerRows = Build-ExchangeRows @(
+    [pscustomobject]@{ id = "mixed-contact-survivor"; source_book = "FCUNO"; display_name = "MIXED DIRECTORY NAME"; primary_email = "mixed.survivor@example.com"; nickname = "MIXED CONTACT"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+  ) @(
+    [pscustomobject]@{ id = "mixed-group"; source_book = "FCUNO"; name = "MIXED DIRECTORY NAME"; nickname = "MIXED GROUP"; source_uid = "mixed-group"; description = "Mixed peer group" }
+  ) @(
+    [pscustomobject]@{ group_id = "mixed-group"; contact_id = "mixed-contact-survivor"; source_book = "FCUNO" }
+  )
+  $script:CanonicalExchangeRows = $mixedDirectoryPeerRows
+  $script:directoryPeerEvents = @()
+  Sync-ExchangeDirectoryNamePeers "MIXED DIRECTORY NAME" @{} "FCUNO_CONTACT:mixed-contact-deleted" $true
+  Assert-Equal `
+    "group:FCUNO_GROUP:mixed-group,contact:FCUNO_CONTACT:mixed-contact-survivor" `
+    ($script:directoryPeerEvents -join ",") `
+    "A collision peer vacating the unsuffixed Name must update before the surviving contact claims it"
+
+  $script:directoryPeerEvents = @()
+  Reconcile-ExchangeContactEmail `
+    "mixed.survivor@example.com" `
+    ([pscustomobject]@{ entity_id = "mixed-contact-deleted"; entity_alias = "mixed-contact-deleted" }) `
+    @{} `
+    $false `
+    $false
+  Assert-Equal `
+    "group:FCUNO_GROUP:mixed-group,contact:FCUNO_CONTACT:mixed-contact-survivor" `
+    ($script:directoryPeerEvents -join ",") `
+    "A promoted canonical duplicate must vacate its desired Name peers before the contact upsert"
+
   $internalAliasCollisionRows = Build-ExchangeRows @(
     [pscustomobject]@{ id = "internal-alias-owner"; source_book = "FC-INTERNAL"; display_name = "Internal Alias Owner"; primary_email = "z-internal@lantana.hk"; nickname = "RESERVED ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
     [pscustomobject]@{ id = "external-alias-peer"; source_book = "FCUNO"; display_name = "External Alias Peer"; primary_email = "a-external@example.com"; nickname = "RESERVED ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
@@ -377,6 +503,7 @@ try {
   Assert-True ($internalAliasCollisionRows.Contacts[0].Alias -ne "reserved-alias") "The managed external peer must retain the deterministic collision-safe alias reserved by FC-INTERNAL"
 } finally {
   Set-Item Function:Upsert-ExchangeMailContact -Value $savedDirectoryPeerUpsert
+  Set-Item Function:Upsert-ExchangeDistributionGroup -Value $savedDirectoryPeerGroupUpsert
   $script:CanonicalExchangeRows = $null
 }
 
@@ -466,6 +593,128 @@ try {
   Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncAliasPeersForInternalAlias
   Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncDirectoryPeersForInternalAlias
   $script:CanonicalExchangeRows = $null
+}
+
+$contactQueueOrderingRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "contact-ordering"; source_book = "FCUNO"; display_name = "NEW CONTACT NAME"; primary_email = "contact.ordering@example.com"; nickname = "CONTACT ORDERING"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @() @()
+$savedLoadSingleRowForContactOrder = (Get-Item Function:Load-SingleRow).ScriptBlock
+$savedReconcileEmailForContactOrder = (Get-Item Function:Reconcile-ExchangeContactEmail).ScriptBlock
+$savedSyncGroupsForContactOrder = (Get-Item Function:Sync-ExchangeGroupsForEmail).ScriptBlock
+$savedSyncAliasPeersForContactOrder = (Get-Item Function:Sync-ExchangeAliasPeers).ScriptBlock
+$savedSyncDirectoryPeersForContactOrder = (Get-Item Function:Sync-ExchangeDirectoryNamePeers).ScriptBlock
+$script:contactOrderSourceExists = $true
+$script:contactQueueOrderEvents = @()
+Set-Item Function:Load-SingleRow -Value {
+  param($Table, $Column, $Value)
+  if (-not $script:contactOrderSourceExists) { return $null }
+  return [pscustomobject]@{ id = "contact-ordering"; source_book = "FCUNO"; display_name = "NEW CONTACT NAME"; primary_email = "contact.ordering@example.com"; nickname = "CONTACT ORDERING" }
+}
+Set-Item Function:Reconcile-ExchangeContactEmail -Value {
+  param($Email, $Row, [hashtable]$Stats, [bool]$UseQueuedSourceKeyForDelete, [bool]$AllowQueuedHistoricalOwner)
+  $script:contactQueueOrderEvents += "mutate:$(Normalize-Email $Email)"
+}
+Set-Item Function:Sync-ExchangeGroupsForEmail -Value { param($Email, [hashtable]$Stats) }
+Set-Item Function:Sync-ExchangeAliasPeers -Value { param($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites, [bool]$IncludeSinglePeer) }
+Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value {
+  param($DisplayName, [hashtable]$Stats, $ExcludeSourceKey, [bool]$IncludeSinglePeer)
+  $script:contactQueueOrderEvents += "peers:$(Clean-Text $DisplayName):$IncludeSinglePeer"
+}
+try {
+  $script:CanonicalExchangeRows = $contactQueueOrderingRows
+  $contactRenameQueueRow = [pscustomobject]@{
+    entity_id = "contact-ordering"
+    entity_alias = "contact-ordering"
+    entity_email = "contact.ordering@example.com"
+    display_name = "OLD CONTACT NAME"
+    payload = [pscustomobject]@{
+      beforeContact = [pscustomobject]@{ display_name = "OLD CONTACT NAME"; primary_email = "contact.ordering@example.com"; nickname = "CONTACT ORDERING" }
+    }
+  }
+  Sync-ExchangeContactQueueState $contactRenameQueueRow @{}
+  Assert-Equal `
+    "mutate:contact.ordering@example.com,peers:OLD CONTACT NAME:True" `
+    ($script:contactQueueOrderEvents -join ",") `
+    "After contact reconciliation handles the new Name, the queue must repair old-name survivors only after the contact vacates its old Name"
+
+  $script:contactOrderSourceExists = $false
+  $script:contactQueueOrderEvents = @()
+  Sync-ExchangeContactQueueState $contactRenameQueueRow @{}
+  Assert-Equal `
+    "mutate:contact.ordering@example.com,peers:OLD CONTACT NAME:True" `
+    ($script:contactQueueOrderEvents -join ",") `
+    "A deleted contact must be removed before an old-name peer can reclaim the unsuffixed Exchange Name"
+} finally {
+  Set-Item Function:Load-SingleRow -Value $savedLoadSingleRowForContactOrder
+  Set-Item Function:Reconcile-ExchangeContactEmail -Value $savedReconcileEmailForContactOrder
+  Set-Item Function:Sync-ExchangeGroupsForEmail -Value $savedSyncGroupsForContactOrder
+  Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncAliasPeersForContactOrder
+  Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncDirectoryPeersForContactOrder
+  $script:CanonicalExchangeRows = $null
+}
+
+$savedLoadSingleRowForGroupOrder = (Get-Item Function:Load-SingleRow).ScriptBlock
+$savedGetGroupRowsForGroupOrder = (Get-Item Function:Get-GroupExchangeRowsFromSource).ScriptBlock
+$savedSyncGroupStateForGroupOrder = (Get-Item Function:Sync-ExchangeGroupState).ScriptBlock
+$savedSyncAliasPeersForGroupOrder = (Get-Item Function:Sync-ExchangeAliasPeers).ScriptBlock
+$savedSyncDirectoryPeersForGroupOrder = (Get-Item Function:Sync-ExchangeDirectoryNamePeers).ScriptBlock
+$script:groupOrderProjected = $true
+$script:groupQueueOrderEvents = @()
+$groupQueueOrderingDesired = [pscustomobject]@{
+  SourceGroupId = "group-ordering"
+  GroupName = "NEW GROUP NAME"
+  DirectoryName = "NEW GROUP NAME"
+  BaseAlias = "new-group-name"
+  Alias = "new-group-name"
+  Description = "Ordering test"
+  MemberCount = 1
+  SourceKey = "FCUNO_GROUP:group-ordering"
+}
+Set-Item Function:Load-SingleRow -Value {
+  param($Table, $Column, $Value)
+  return [pscustomobject]@{ id = "group-ordering"; source_book = "FCUNO"; name = "NEW GROUP NAME"; nickname = "NEW GROUP NAME" }
+}
+Set-Item Function:Get-GroupExchangeRowsFromSource -Value {
+  param($GroupId)
+  return @{ Groups = $(if ($script:groupOrderProjected) { @($groupQueueOrderingDesired) } else { @() }); Members = @() }
+}
+Set-Item Function:Sync-ExchangeGroupState -Value {
+  param($GroupId, $FallbackAlias, [hashtable]$Stats, $FallbackDisplayName = "", [bool]$AllowUntaggedExactDelete = $false)
+  $script:groupQueueOrderEvents += "mutate:$(Clean-Text $GroupId)"
+}
+Set-Item Function:Sync-ExchangeAliasPeers -Value { param($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites, [bool]$IncludeSinglePeer) }
+Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value {
+  param($DisplayName, [hashtable]$Stats, $ExcludeSourceKey, [bool]$IncludeSinglePeer)
+  $script:groupQueueOrderEvents += "peers:$(Clean-Text $DisplayName):$IncludeSinglePeer"
+}
+try {
+  $groupRenameQueueRow = [pscustomobject]@{
+    entity_id = "group-ordering"
+    entity_alias = "old-group-name"
+    display_name = "OLD GROUP NAME"
+    payload = [pscustomobject]@{
+      beforeGroup = [pscustomobject]@{ name = "OLD GROUP NAME"; nickname = "OLD GROUP NAME" }
+    }
+  }
+  Sync-ExchangeGroupQueueState $groupRenameQueueRow @{}
+  Assert-Equal `
+    "peers:NEW GROUP NAME:False,mutate:group-ordering,peers:OLD GROUP NAME:True" `
+    ($script:groupQueueOrderEvents -join ",") `
+    "A group rename must move new-name blockers before mutation and repair old-name survivors only after the group vacates its old Name"
+
+  $script:groupOrderProjected = $false
+  $script:groupQueueOrderEvents = @()
+  Sync-ExchangeGroupQueueState $groupRenameQueueRow @{}
+  Assert-Equal `
+    "mutate:group-ordering,peers:OLD GROUP NAME:True" `
+    ($script:groupQueueOrderEvents -join ",") `
+    "A last-member removal must delete the now-empty Exchange group before an old-name peer reclaims its Name"
+} finally {
+  Set-Item Function:Load-SingleRow -Value $savedLoadSingleRowForGroupOrder
+  Set-Item Function:Get-GroupExchangeRowsFromSource -Value $savedGetGroupRowsForGroupOrder
+  Set-Item Function:Sync-ExchangeGroupState -Value $savedSyncGroupStateForGroupOrder
+  Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncAliasPeersForGroupOrder
+  Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncDirectoryPeersForGroupOrder
 }
 
 $shuffled = Build-ExchangeRows @($contacts[2], $contacts[1], $contacts[0]) @($groups[1], $groups[0]) @($members[1], $members[0])
@@ -1253,7 +1502,9 @@ $script:CanonicalExchangeRows = @{
     SourceKey = "FCUNO_GROUP:g-new"
   })
 }
+$savedSyncDirectoryPeersForGroupQueue = (Get-Item Function:Sync-ExchangeDirectoryNamePeers).ScriptBlock
 $script:syncedGroupIds = @()
+$script:groupQueueDirectoryEvents = @()
 $script:recreatedGroupRemoved = $false
 $script:aliasAlreadyCurrent = $false
 $script:legacyMarkerWrongName = $false
@@ -1330,6 +1581,11 @@ function Remove-DistributionGroup {
 function Sync-ExchangeGroupState {
   param($GroupId, $FallbackAlias, [hashtable]$Stats, $FallbackDisplayName = "", [bool]$AllowUntaggedExactDelete = $false)
   $script:syncedGroupIds += (Clean-Text $GroupId)
+  $script:groupQueueDirectoryEvents += "group-state:$(Clean-Text $GroupId)"
+}
+function Sync-ExchangeDirectoryNamePeers {
+  param($DisplayName, [hashtable]$Stats, $ExcludeSourceKey = "", [bool]$IncludeSinglePeer = $false)
+  $script:groupQueueDirectoryEvents += "directory-peers:$(Clean-Text $DisplayName)"
 }
 $recreatedGroupRow = [pscustomobject]@{
   entity_id = "g-old"
@@ -1343,10 +1599,12 @@ $recreatedGroupRow = [pscustomobject]@{
 Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
 Assert-True $script:recreatedGroupRemoved "A tagged obsolete group owner must be removed before transferring its reused alias"
 Assert-Equal "g-new" $script:syncedGroupIds[0] "A recreated current group must be upserted instead of deleting its reused alias"
+Assert-Equal "group-state:g-new,directory-peers:Reused Group" ($script:groupQueueDirectoryEvents -join ",") "A deleted group must vacate its old Exchange Name before repairing directory-name peers"
 
 $script:recreatedGroupRemoved = $false
 $script:aliasAlreadyCurrent = $true
 $script:syncedGroupIds = @()
+$script:groupQueueDirectoryEvents = @()
 Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
 Assert-True $script:recreatedGroupRemoved "A detached obsolete source-key group must be removed even when the shared alias already belongs to the current group"
 Assert-Equal "g-new" $script:syncedGroupIds[0] "The current alias owner must remain synchronized after detached stale-owner cleanup"
@@ -1369,6 +1627,7 @@ try {
 }
 Assert-True $driftedGroupOwnerFailedClosed "A group source-key mismatch must fail closed even when its managed marker drifted"
 Assert-True (-not $script:recreatedGroupRemoved) "A drifted-marker ownership mismatch must not call Remove-DistributionGroup"
+Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncDirectoryPeersForGroupQueue
 
 $desiredNoOpContact = [pscustomobject]@{
   DirectoryName = "Unchanged Contact"
@@ -1816,6 +2075,7 @@ try {
 
 $desiredNoOpGroup = [pscustomobject]@{
   SourceGroupId = "g-unchanged"
+  DirectoryName = "Unchanged Group"
   GroupName = "Unchanged Group"
   Alias = "unchanged-group"
   Description = "Current description"
@@ -1847,6 +2107,8 @@ $script:setDistributionGroupCalls = 0
 $script:setGroupCalls = 0
 $script:newDistributionGroupCalls = 0
 $script:newDistributionGroup = $null
+$script:newDistributionGroupInitialName = ""
+$script:newDistributionGroupInitialDisplayName = ""
 $script:newGroupProfile = $null
 $script:newGroupProfilePropagationMisses = 0
 $script:newGroupMetadataWriteMisses = 0
@@ -2005,16 +2267,18 @@ function Set-Group {
 }
 function New-DistributionGroup {
   [CmdletBinding()]
-  param($Name, $Alias)
+  param($Name, $DisplayName, $Alias)
   if ($Alias -eq "new-group") {
     $script:newDistributionGroupCalls += 1
+    $script:newDistributionGroupInitialName = $Name
+    $script:newDistributionGroupInitialDisplayName = $DisplayName
     $script:newDistributionGroup = [pscustomobject]@{
       Identity = "new-group"
       Guid = "44444444-4444-4444-8444-444444444444"
       ExternalDirectoryObjectId = "external-new-group"
       DistinguishedName = "CN=New Group,OU=Groups,DC=example,DC=com"
       Name = $Name
-      DisplayName = $Name
+      DisplayName = $DisplayName
       Alias = $Alias
       CustomAttribute1 = ""
       CustomAttribute2 = ""
@@ -2058,6 +2322,7 @@ Assert-Equal 1 $fullNoOpGroupStats.verifiedQueueRows "A skipped no-op group must
 
 $desiredCollisionRenameGroup = [pscustomobject]@{
   SourceGroupId = "g-ocean-collision"
+  DirectoryName = "G OCEAN [managed-group]"
   GroupName = "G OCEAN"
   BaseAlias = "g-ocean"
   Alias = "g-ocean-bba895"
@@ -2071,6 +2336,8 @@ Upsert-ExchangeDistributionGroup $desiredCollisionRenameGroup $collisionRenameSt
 Assert-Equal "group profile,distribution recipient" ($script:collisionRenameOrder -join ",") "A stale group whose alias changes after a contact/group collision must update its immutable group profile before renaming the distribution recipient"
 Assert-Equal $script:collisionRenameGroupProfile.Guid $script:collisionRenameSetGroupIdentity "Set-Group must use the correlated Get-Group profile identity, never the distribution-recipient identity"
 Assert-Equal "g-ocean-bba895" $script:collisionRenameDistributionGroup.Alias "The collision-suffixed group alias must be applied in place"
+Assert-Equal $desiredCollisionRenameGroup.DirectoryName $script:collisionRenameDistributionGroup.Name "A contact/group collision must update the group to its distinct directory Name"
+Assert-Equal $desiredCollisionRenameGroup.GroupName $script:collisionRenameDistributionGroup.DisplayName "A collision-safe directory rename must preserve the exact visible group DisplayName"
 Assert-Equal 1 $collisionRenameStats.updatedGroups "A collision-suffixed existing group must be counted as updated"
 Assert-Equal 1 $collisionRenameStats.verifiedQueueRows "A collision-suffixed existing group must pass exact post-rename verification"
 
@@ -2168,6 +2435,7 @@ try {
 
 $newDesiredGroup = [pscustomobject]@{
   SourceGroupId = "g-new"
+  DirectoryName = "New Group [collision-safe]"
   GroupName = "New Group"
   Alias = "new-group"
   Description = "New group notes"
@@ -2193,6 +2461,8 @@ try {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
+Assert-Equal $newDesiredGroup.DirectoryName $script:newDistributionGroupInitialName "New-DistributionGroup must use the collision-safe directory Name from the canonical projection"
+Assert-Equal $newDesiredGroup.GroupName $script:newDistributionGroupInitialDisplayName "New-DistributionGroup must preserve the exact visible FCUNO group name as DisplayName"
 Assert-Equal 3 $script:newGroupMetadataSetAttempts "A newly created group marker write must retry the exact live transport-prefixed cross-DC not-found response"
 Assert-Equal 3 $script:newGroupProfileSetAttempts "A newly created group Notes write must retry transient cross-DC not-found responses"
 Assert-Equal 5 $script:getGroupCalls "Transient Notes-write misses must force four immutable profile resolutions before the final exact verification read"
@@ -2472,6 +2742,95 @@ Remove-StaleManagedExchangeContacts @($shadowManagedContact) $shadowProtectionRo
 Assert-True (-not $script:removeCalled) "A stale managed contact owned by a skipped group-shadow placeholder must be preserved, never deleted"
 Assert-Equal 1 $shadowProtectionStats.preservedInvalidContacts "A preserved group-shadow placeholder contact must be included in the preservation count"
 Assert-Equal 0 $shadowProtectionStats.removedContacts "Group-shadow placeholder preservation must report zero removals"
+
+$fullDuplicateOwnerRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "full-duplicate-old"; source_book = "FCUNO"; display_name = "Full Duplicate Old"; primary_email = "full.duplicate@example.com"; nickname = "FULL DUPLICATE OLD"; first_name = ""; last_name = ""; updated_at = "2026-07-21T02:00:00Z" },
+  [pscustomobject]@{ id = "full-duplicate-new"; source_book = "FCUNO"; display_name = "Full Duplicate New"; primary_email = "full.duplicate@example.com"; nickname = "FULL DUPLICATE NEW"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @() @()
+$validDuplicateOwnerContact = [pscustomobject]@{
+  Identity = "valid-duplicate-owner"
+  Guid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+  Name = "Full Duplicate Old"
+  DisplayName = "Full Duplicate Old"
+  ExternalEmailAddress = "full.duplicate@example.com"
+  Alias = "full-duplicate-old"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:full-duplicate-old"
+}
+$script:removeCalled = $false
+$validDuplicateOwnerStats = @{ removedContacts = 0; preservedInvalidContacts = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeContacts @($validDuplicateOwnerContact) $fullDuplicateOwnerRows $validDuplicateOwnerStats | Out-Null
+Assert-True (-not $script:removeCalled) "Full cleanup must preserve a managed contact owned by any still-valid duplicate source row"
+Assert-Equal 0 $validDuplicateOwnerStats.removedContacts "A valid duplicate source owner must not be counted as stale"
+
+$obsoleteReusedEmailContact = [pscustomobject]@{
+  Identity = "obsolete-reused-email-owner"
+  Guid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+  Name = "Obsolete Reused Email Owner"
+  DisplayName = "Obsolete Reused Email Owner"
+  ExternalEmailAddress = "full.duplicate@example.com"
+  Alias = "obsolete-reused-email-owner"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:obsolete-reused-email-owner"
+}
+$script:removeCalled = $false
+$obsoleteReusedEmailStats = @{ removedContacts = 0; preservedInvalidContacts = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeContacts @($obsoleteReusedEmailContact) $fullDuplicateOwnerRows $obsoleteReusedEmailStats | Out-Null
+Assert-True $script:removeCalled "Full cleanup must remove a stale foreign source owner even when a current FCUNO contact reuses its email"
+Assert-Equal 1 $obsoleteReusedEmailStats.removedContacts "A verified stale reused-email owner deletion must be counted exactly once"
+Assert-True (@($obsoleteReusedEmailStats.changeDetails[0].fieldChanges) -contains "Name: Obsolete Reused Email Owner -> (missing)") "A stale-contact deletion notice must report the exact Exchange Name"
+
+$fullStaleGroupRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "full-stale-group-member"; source_book = "FCUNO"; display_name = "Full Stale Group Member"; primary_email = "full.stale.group.member@example.com"; nickname = "FULL STALE GROUP MEMBER"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @(
+  [pscustomobject]@{ id = "full-current-group"; source_book = "FCUNO"; name = "FULL CURRENT GROUP"; nickname = "FULL CURRENT GROUP"; source_uid = "full-current-group"; description = "Current" }
+) @(
+  [pscustomobject]@{ group_id = "full-current-group"; contact_id = "full-stale-group-member"; source_book = "FCUNO" }
+)
+$desiredFullGroup = $fullStaleGroupRows.GroupById["full-current-group"]
+$obsoleteReusedAliasGroup = [pscustomobject]@{
+  Identity = "obsolete-reused-alias-group"
+  Guid = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+  Name = "Obsolete Reused Alias Group"
+  DisplayName = "FULL CURRENT GROUP"
+  Alias = $desiredFullGroup.Alias
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_GROUP:obsolete-reused-alias-group"
+}
+$script:recreatedGroupRemoved = $false
+$obsoleteReusedAliasStats = @{ removedGroups = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeGroups @($obsoleteReusedAliasGroup) $fullStaleGroupRows $obsoleteReusedAliasStats | Out-Null
+Assert-True $script:recreatedGroupRemoved "Full cleanup must remove a stale managed group owner even when a current FCUNO group reuses its alias"
+Assert-Equal 1 $obsoleteReusedAliasStats.removedGroups "A verified stale reused-alias group deletion must be counted exactly once"
+Assert-True (@($obsoleteReusedAliasStats.changeDetails[0].fieldChanges) -contains "Name: Obsolete Reused Alias Group -> (missing)") "A stale-group deletion notice must report its exact Exchange Name separately"
+Assert-True (@($obsoleteReusedAliasStats.changeDetails[0].fieldChanges) -contains "Group name: FULL CURRENT GROUP -> (missing)") "A stale-group deletion notice must preserve the visible DisplayName separately"
+
+$legacyDesiredAliasGroup = [pscustomobject]@{
+  Identity = "legacy-desired-alias-group"
+  Guid = "abababab-abab-4bab-8bab-abababababab"
+  Name = "FULL CURRENT GROUP"
+  DisplayName = "FULL CURRENT GROUP"
+  Alias = $desiredFullGroup.Alias
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = ""
+}
+$script:recreatedGroupRemoved = $false
+$legacyDesiredAliasStats = @{ removedGroups = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeGroups @($legacyDesiredAliasGroup) $fullStaleGroupRows $legacyDesiredAliasStats | Out-Null
+Assert-True (-not $script:recreatedGroupRemoved) "A legacy managed group with no source key must be preserved by an exact desired alias for safe in-place adoption"
+Assert-Equal 0 $legacyDesiredAliasStats.removedGroups "A preserved legacy desired-alias group must not be counted as stale"
+
+$fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
+$fullPreCleanupSnapshotIndex = $fullSyncFunctionText.IndexOf('$preCleanupManagedContacts = @(Get-MailContact')
+$fullStaleContactCleanupIndex = $fullSyncFunctionText.IndexOf('Remove-StaleManagedExchangeContacts $preCleanupManagedContacts')
+$fullDirectoryPrerequisiteIndex = $fullSyncFunctionText.IndexOf('Sync-ExchangeGroupDirectoryNamePrerequisites $exchangeRows')
+$fullFreshRecipientSnapshotIndex = $fullSyncFunctionText.IndexOf('$exchangeMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)')
+$fullDesiredContactLoopIndex = $fullSyncFunctionText.IndexOf('$contactPosition = 0')
+Assert-True ($fullPreCleanupSnapshotIndex -ge 0) "Full sync must take the managed-recipient cleanup snapshot"
+Assert-True ($fullPreCleanupSnapshotIndex -lt $fullStaleContactCleanupIndex) "Full sync must snapshot before exact stale cleanup"
+Assert-True ($fullStaleContactCleanupIndex -lt $fullDirectoryPrerequisiteIndex) "Full sync must delete verified stale recipients before collision-safe directory prerequisites"
+Assert-True ($fullDirectoryPrerequisiteIndex -lt $fullFreshRecipientSnapshotIndex) "Full sync must finish directory and alias prepasses before taking lookup snapshots"
+Assert-True ($fullFreshRecipientSnapshotIndex -lt $fullDesiredContactLoopIndex) "Desired upserts must use a fresh post-prepass Exchange snapshot"
 
 $desiredNoOpGroupMembers = @(
   [pscustomobject]@{ MemberEmail = "existing@example.com" },
