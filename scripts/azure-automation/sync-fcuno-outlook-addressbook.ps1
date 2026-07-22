@@ -1340,6 +1340,21 @@ function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
     $queuedAlias = Clean-Text $Row.entity_alias
     $currentAliasOwner = Get-CanonicalExchangeGroupByAlias $queuedAlias
     if ($currentAliasOwner -and (Clean-Text $currentAliasOwner.SourceGroupId) -ne (Clean-Text $Row.entity_id)) {
+      $existingAliasOwner = Get-DistributionGroup -Identity $queuedAlias -ErrorAction SilentlyContinue
+      $currentOwnerKey = Clean-Text $currentAliasOwner.SourceKey
+      $existingOwnerKey = if ($existingAliasOwner) { Clean-Text $existingAliasOwner.CustomAttribute2 } else { "" }
+      $existingIsCurrentOwner = $existingAliasOwner -and (
+        ($existingOwnerKey -and $existingOwnerKey -eq $currentOwnerKey) -or
+        (-not $existingOwnerKey -and (Clean-Text $existingAliasOwner.DisplayName) -eq (Clean-Text $currentAliasOwner.GroupName))
+      )
+      if (-not $existingIsCurrentOwner) {
+        Remove-ManagedExchangeDistributionGroup `
+          $queuedAlias `
+          $Stats `
+          $Row.entity_id `
+          (Get-QueueExpectedGroupName $Row) `
+          (Get-QueueAuditAuthorized $Row)
+      }
       Sync-ExchangeGroupState $currentAliasOwner.SourceGroupId "" $Stats
       return
     }

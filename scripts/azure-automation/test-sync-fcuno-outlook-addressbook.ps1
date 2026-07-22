@@ -150,9 +150,12 @@ $script:CanonicalExchangeRows = @{
   Groups = @([pscustomobject]@{
     SourceGroupId = "g-new"
     Alias = "reused-group"
+    GroupName = "Reused Group"
+    SourceKey = "FCUNO_GROUP:g-new"
   })
 }
 $script:syncedGroupIds = @()
+$script:recreatedGroupRemoved = $false
 function Load-SingleRow {
   param($Table, $Column, $Value)
   return $null
@@ -161,6 +164,26 @@ function Get-GroupExchangeRowsFromSource {
   param($GroupId)
   return $null
 }
+function Get-DistributionGroup {
+  [CmdletBinding()]
+  param($Filter, $ResultSize, $Identity)
+  if ($script:recreatedGroupRemoved) { return $null }
+  if ($Identity -eq "reused-group" -or $Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-old'") {
+    return [pscustomobject]@{
+      Identity = "old-group"
+      DisplayName = "Reused Group"
+      Alias = "reused-group"
+      CustomAttribute1 = $ManagedMarker
+      CustomAttribute2 = "FCUNO_GROUP:g-old"
+    }
+  }
+  return $null
+}
+function Remove-DistributionGroup {
+  [CmdletBinding(SupportsShouldProcess)]
+  param($Identity)
+  $script:recreatedGroupRemoved = $true
+}
 function Sync-ExchangeGroupState {
   param($GroupId, $FallbackAlias, [hashtable]$Stats, $FallbackDisplayName = "", [bool]$AllowUntaggedExactDelete = $false)
   $script:syncedGroupIds += (Clean-Text $GroupId)
@@ -168,11 +191,14 @@ function Sync-ExchangeGroupState {
 $recreatedGroupRow = [pscustomobject]@{
   entity_id = "g-old"
   entity_alias = "reused-group"
+  audit_log_id = "62f00b1f-66ea-4495-ae13-61d5e65f214e"
   payload = [pscustomobject]@{
     beforeGroup = [pscustomobject]@{ name = "Reused Group"; nickname = "Reused Group" }
+    userAuthorized = $true
   }
 }
 Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
+Assert-True $script:recreatedGroupRemoved "A tagged obsolete group owner must be removed before transferring its reused alias"
 Assert-Equal "g-new" $script:syncedGroupIds[0] "A recreated current group must be upserted instead of deleting its reused alias"
 
 Write-Output "Exchange address book runbook tests passed."
