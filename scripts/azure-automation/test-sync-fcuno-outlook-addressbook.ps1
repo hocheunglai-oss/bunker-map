@@ -156,6 +156,7 @@ $script:CanonicalExchangeRows = @{
 }
 $script:syncedGroupIds = @()
 $script:recreatedGroupRemoved = $false
+$script:aliasAlreadyCurrent = $false
 function Load-SingleRow {
   param($Table, $Column, $Value)
   return $null
@@ -167,14 +168,34 @@ function Get-GroupExchangeRowsFromSource {
 function Get-DistributionGroup {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
-  if ($script:recreatedGroupRemoved) { return $null }
-  if ($Identity -eq "reused-group" -or $Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-old'") {
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-old'") {
+    if ($script:recreatedGroupRemoved) { return $null }
     return [pscustomobject]@{
       Identity = "old-group"
       DisplayName = "Reused Group"
-      Alias = "reused-group"
+      Alias = $(if ($script:aliasAlreadyCurrent) { "old-detached-alias" } else { "reused-group" })
       CustomAttribute1 = $ManagedMarker
       CustomAttribute2 = "FCUNO_GROUP:g-old"
+    }
+  }
+  if ($Identity -eq "reused-group") {
+    if ($script:aliasAlreadyCurrent) {
+      return [pscustomobject]@{
+        Identity = "new-group"
+        DisplayName = "Reused Group"
+        Alias = "reused-group"
+        CustomAttribute1 = $ManagedMarker
+        CustomAttribute2 = "FCUNO_GROUP:g-new"
+      }
+    }
+    if (-not $script:recreatedGroupRemoved) {
+      return [pscustomobject]@{
+        Identity = "old-group"
+        DisplayName = "Reused Group"
+        Alias = "reused-group"
+        CustomAttribute1 = $ManagedMarker
+        CustomAttribute2 = "FCUNO_GROUP:g-old"
+      }
     }
   }
   return $null
@@ -200,5 +221,12 @@ $recreatedGroupRow = [pscustomobject]@{
 Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
 Assert-True $script:recreatedGroupRemoved "A tagged obsolete group owner must be removed before transferring its reused alias"
 Assert-Equal "g-new" $script:syncedGroupIds[0] "A recreated current group must be upserted instead of deleting its reused alias"
+
+$script:recreatedGroupRemoved = $false
+$script:aliasAlreadyCurrent = $true
+$script:syncedGroupIds = @()
+Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
+Assert-True $script:recreatedGroupRemoved "A detached obsolete source-key group must be removed even when the shared alias already belongs to the current group"
+Assert-Equal "g-new" $script:syncedGroupIds[0] "The current alias owner must remain synchronized after detached stale-owner cleanup"
 
 Write-Output "Exchange address book runbook tests passed."

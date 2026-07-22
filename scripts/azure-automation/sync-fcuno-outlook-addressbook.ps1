@@ -1347,7 +1347,13 @@ function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
         ($existingOwnerKey -and $existingOwnerKey -eq $currentOwnerKey) -or
         (-not $existingOwnerKey -and (Clean-Text $existingAliasOwner.DisplayName) -eq (Clean-Text $currentAliasOwner.GroupName))
       )
-      if (-not $existingIsCurrentOwner) {
+      $oldSourceKey = Get-GroupSourceKey $Row.entity_id
+      $oldSourceMatches = @()
+      if ($oldSourceKey) {
+        $oldSourceMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $oldSourceKey)'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+        if ($oldSourceMatches.Count -gt 1) { throw "More than one Exchange group is tagged with obsolete source key $oldSourceKey." }
+      }
+      if ($oldSourceMatches.Count -eq 1 -or -not $existingIsCurrentOwner) {
         Remove-ManagedExchangeDistributionGroup `
           $queuedAlias `
           $Stats `
