@@ -747,6 +747,11 @@ function Is-InternalEmail($Email) {
 
 function Is-InternalContact($Contact, $Email) {
   if (Is-InternalEmail $Email) { return $true }
+  foreach ($propertyName in @("IsInternalSource", "HasInternalSource")) {
+    $value = Get-MapValue $Contact $propertyName
+    if ($value -is [bool] -and $value) { return $true }
+    if ($value -is [string] -and $value.Equals("true", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  }
   $sourceBook = Clean-Text (Get-MapValue $Contact "source_book")
   if (-not $sourceBook) { $sourceBook = Clean-Text (Get-MapValue $Contact "SourceBook") }
   return $sourceBook.Equals("FC-INTERNAL", [StringComparison]::OrdinalIgnoreCase)
@@ -778,6 +783,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $allContactRows = @()
   $contactRows = @()
   $contactById = @{}
+  $contactDependencyById = @{}
   $contactByEmail = @{}
   $contactIdsByEmail = @{}
   $invalidContacts = @()
@@ -791,6 +797,27 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       return [DateTimeOffset]::MinValue
     }; Descending = $true }, `
     @{ Expression = { Clean-Text $_.id }; Ascending = $true })
+
+  $internalEmails = @{}
+  foreach ($contact in $orderedContacts) {
+    $email = Normalize-Email $contact.primary_email
+    if (-not (Test-ValidEmail $email)) { continue }
+    $sourceContactId = Clean-Text $contact.id
+    $displayName = Clean-Text $(if ($contact.display_name) { $contact.display_name } else { $email })
+    $aliasSeed = if ($contact.nickname) { $contact.nickname } else { $displayName }
+    $baseAlias = Get-ExchangeAlias $aliasSeed ("contact-" + $sourceContactId)
+    $isInternalSource = Is-InternalContact $contact $email
+    if ($isInternalSource) { $internalEmails[$email] = $true }
+    $contactDependencyById[$sourceContactId] = [pscustomobject]@{
+      SourceBook = Clean-Text $contact.source_book
+      SourceContactId = $sourceContactId
+      DisplayName = $displayName
+      BaseAlias = $baseAlias
+      ExternalEmailAddress = $email
+      IsInternalSource = [bool]$isInternalSource
+      SourceKey = Get-ContactSourceKey $sourceContactId
+    }
+  }
 
   foreach ($contact in $orderedContacts) {
     $email = Normalize-Email $contact.primary_email
@@ -816,12 +843,13 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       continue
     }
 
-    $displayName = Clean-Text $(if ($contact.display_name) { $contact.display_name } else { $email })
-    $aliasSeed = if ($contact.nickname) { $contact.nickname } else { $displayName }
-    $baseAlias = Get-ExchangeAlias $aliasSeed "contact-$($contactRows.Count + 1)"
+    $sourceContactId = Clean-Text $contact.id
+    $dependencyRow = $contactDependencyById[$sourceContactId]
+    $displayName = Clean-Text $dependencyRow.DisplayName
+    $baseAlias = Clean-Text $dependencyRow.BaseAlias
     $row = [pscustomobject]@{
       SourceBook = Clean-Text $contact.source_book
-      SourceContactId = $contact.id
+      SourceContactId = $sourceContactId
       DisplayName = $displayName
       FirstName = Clean-Text $contact.first_name
       LastName = Clean-Text $contact.last_name
@@ -830,22 +858,41 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       ExternalEmailAddress = $email
       Nickname = Clean-Text $contact.nickname
       SourceKey = Get-ContactSourceKey $contact.id
+      IsInternalSource = [bool]$dependencyRow.IsInternalSource
+      HasInternalSource = [bool](Has-MapKey $internalEmails $email)
     }
 
     $allContactRows += $row
-    if (-not (Is-InternalContact $contact $email)) { $contactRows += $row }
+    if (-not (Is-InternalContact $row $email)) { $contactRows += $row }
     $seenEmails[$email] = $row
     $contactByEmail[$email] = $row
     $contactIdsByEmail[$email] = @((Clean-Text $contact.id))
     $contactById[(Clean-Text $contact.id)] = $row
   }
 
+  $internalAliasBySourceId = @{}
+  $internalAliasReservations = @($contactDependencyById.Values |
+    Where-Object { [bool]$_.IsInternalSource } |
+    Sort-Object BaseAlias, SourceContactId)
+  foreach ($reservation in $internalAliasReservations) {
+    $reservedAlias = Get-UniqueAlias `
+      $reservation.BaseAlias `
+      $seenAliases `
+      ("contact:" + (Clean-Text $reservation.SourceContactId))
+    $internalAliasBySourceId[(Clean-Text $reservation.SourceContactId)] = $reservedAlias
+    $reservation | Add-Member -NotePropertyName Alias -NotePropertyValue $reservedAlias -Force
+  }
   $aliasOrderedContactRows = @(
     @($allContactRows | Where-Object { Is-InternalContact $_ $_.ExternalEmailAddress }) +
     @($allContactRows | Where-Object { -not (Is-InternalContact $_ $_.ExternalEmailAddress) })
   )
   foreach ($contactRow in $aliasOrderedContactRows) {
-    $contactRow.Alias = Get-UniqueAlias $contactRow.BaseAlias $seenAliases ("contact:" + (Clean-Text $contactRow.SourceContactId))
+    $sourceContactId = Clean-Text $contactRow.SourceContactId
+    if (Has-MapKey $internalAliasBySourceId $sourceContactId) {
+      $contactRow.Alias = $internalAliasBySourceId[$sourceContactId]
+    } else {
+      $contactRow.Alias = Get-UniqueAlias $contactRow.BaseAlias $seenAliases ("contact:" + $sourceContactId)
+    }
   }
 
   $directoryNameCounts = @{}
@@ -921,6 +968,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     Groups = @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })
     Members = $memberRows
     ContactById = $contactById
+    ContactDependencyById = $contactDependencyById
     ContactByEmail = $contactByEmail
     ContactIdsByEmail = $contactIdsByEmail
     GroupById = $groupById
@@ -1003,7 +1051,9 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
 }
 
 function Get-ExchangeQueueHighWater {
-  $rows = @(Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=queue_sequence,updated_at&order=updated_at.desc,queue_sequence.desc&limit=1")
+  # Capture first: Invoke-RestMethod can emit a top-level JSON array as one non-enumerated Object[].
+  $response = Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=queue_sequence,updated_at&order=updated_at.desc,queue_sequence.desc&limit=1"
+  $rows = @($response)
   if ($rows.Count -le 0) { return "0" }
   return "$(Clean-Text $rows[0].queue_sequence)@$(Clean-Text $rows[0].updated_at)"
 }
@@ -1197,7 +1247,9 @@ function Get-ExchangeQueueBacklogRows {
   while ($true) {
     Renew-ExchangeSyncLockIfDue
     $select = "id,queue_sequence,status,attempts,next_attempt_at,run_id,processing_started_at,claimed_at,error_message,error_history,action,entity_type,entity_id,entity_email,entity_alias,display_name,event_id,actor_id,requested_by,created_at,payload,changed_fields,audit_log_ids,change_set_ids"
-    $rows = @(Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=$select&or=(status.eq.pending,status.eq.processing,status.eq.failed)&order=queue_sequence.asc&offset=$offset&limit=$pageSize")
+    # Assignment followed by @($response) flattens the REST client's non-enumerated JSON-array wrapper exactly once.
+    $response = Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=$select&or=(status.eq.pending,status.eq.processing,status.eq.failed)&order=queue_sequence.asc&offset=$offset&limit=$pageSize"
+    $rows = @($response)
     $allRows += $rows
     if ($rows.Count -lt $pageSize) { break }
     $offset += $pageSize
@@ -1324,7 +1376,8 @@ function Update-ExchangeQueueRow($RowId, [hashtable]$Fields) {
   $Fields["updated_at"] = (Get-Date).ToUniversalTime().ToString("o")
   $encodedId = Encode-QueryValue $RowId
   $encodedRunId = Encode-QueryValue $script:CurrentQueueRunId
-  $updated = @(Invoke-SupabaseRest -Method "PATCH" -Path "outlook_exchange_sync_queue?id=eq.$encodedId&run_id=eq.$encodedRunId&status=eq.processing&select=id" -Body $Fields)
+  $response = Invoke-SupabaseRest -Method "PATCH" -Path "outlook_exchange_sync_queue?id=eq.$encodedId&run_id=eq.$encodedRunId&status=eq.processing&select=id" -Body $Fields
+  $updated = @($response)
   if ($updated.Count -ne 1) {
     throw "Exchange queue row $RowId lost its processing lease before status could be saved."
   }
@@ -2247,13 +2300,20 @@ function Confirm-ExchangeMailContactDeletion($Existing, $Email, $SourceKey) {
   if (-not $deletionVerified) { throw "Could not verify deletion of Exchange contact $email because $verificationFailure." }
 }
 
-function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $SourceContactId = "", $ExpectedDisplayName = "", [bool]$AllowUntaggedExactDelete = $false) {
+function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $SourceContactId = "", $ExpectedDisplayName = "", [bool]$AllowUntaggedExactDelete = $false, $AllowedOwnerSourceKeys = @()) {
   Renew-ExchangeSyncLockIfDue
   $email = Normalize-Email $Email
   $aliasText = Clean-Text $Alias
   $existing = $null
   $sourceKey = Get-ContactSourceKey $SourceContactId
-  if ($sourceKey) {
+  $allowedOwnerKeySet = @{}
+  foreach ($allowedOwnerSourceKey in @($AllowedOwnerSourceKeys)) {
+    $cleanAllowedOwnerSourceKey = Clean-Text $allowedOwnerSourceKey
+    if ($cleanAllowedOwnerSourceKey) { $allowedOwnerKeySet[$cleanAllowedOwnerSourceKey] = $true }
+  }
+  $useAllowedOwnerScope = $allowedOwnerKeySet.Count -gt 0
+  if ($sourceKey) { $allowedOwnerKeySet[$sourceKey] = $true }
+  if ($sourceKey -and -not $useAllowedOwnerScope) {
     $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
     $matches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
     if ($matches.Count -gt 1) { throw "More than one Exchange contact is tagged with source key $sourceKey." }
@@ -2278,7 +2338,14 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
     return
   }
   $existingOwnerKey = Clean-Text $existing.CustomAttribute2
-  if ($sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+  if ($useAllowedOwnerScope -and (
+    -not $existingOwnerKey -or
+    -not (Has-MapKey $allowedOwnerKeySet $existingOwnerKey) -or
+    (Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker
+  )) {
+    throw "Exchange contact $($existing.DisplayName) was not deleted because its managed source owner '$existingOwnerKey' is outside the exact FCUNO duplicate owner set."
+  }
+  if (-not $useAllowedOwnerScope -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
     throw "Exchange contact $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
   }
   $actualName = Clean-Text $existing.DisplayName
@@ -2304,7 +2371,8 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
   Renew-ExchangeSyncLockIfDue
   Remove-MailContact -Identity $deleteIdentity -Confirm:$false -ErrorAction Stop
   Renew-ExchangeSyncLockIfDue
-  Confirm-ExchangeMailContactDeletion $existing $email $sourceKey
+  $verificationSourceKey = if ($existingOwnerKey) { $existingOwnerKey } else { $sourceKey }
+  Confirm-ExchangeMailContactDeletion $existing $email $verificationSourceKey
   Increment-Stat $Stats "removedContacts"
   Increment-Stat $Stats "verifiedQueueRows"
 }
@@ -2800,13 +2868,18 @@ function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$
     return
   }
   if ($desiredContact -and (Is-InternalContact $desiredContact $email)) {
+    $contactForDelete = $desiredContact
+    if ($AllowQueuedHistoricalOwner -and (Get-QueueAuditAuthorized $Row)) {
+      $contactForDelete = Copy-ExchangeContactWithAllowedOwnerSourceKey $desiredContact (Get-ContactSourceKey $Row.entity_id)
+    }
     Remove-ManagedExchangeMailContact `
       $email `
-      (Clean-Text $desiredContact.Alias) `
+      (Clean-Text $contactForDelete.Alias) `
       $Stats `
-      (Clean-Text $desiredContact.SourceContactId) `
-      (Clean-Text $desiredContact.DisplayName) `
-      $false
+      (Clean-Text $contactForDelete.SourceContactId) `
+      (Clean-Text $contactForDelete.DisplayName) `
+      $false `
+      @($contactForDelete.AllowedOwnerSourceKeys)
     return
   }
 
@@ -2833,14 +2906,19 @@ function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
   $currentSourceKey = Get-ContactSourceKey $Row.entity_id
   $beforeBaseAlias = Get-QueueContactBeforeBaseAlias $Row
   $currentDependencyRow = $null
+  $currentCanonicalRow = $null
   if ($sourceContact) {
     $canonicalRows = Get-CanonicalExchangeRows
-    if (Has-MapKey $canonicalRows.ContactById (Clean-Text $Row.entity_id)) {
-      $currentDependencyRow = $canonicalRows.ContactById[(Clean-Text $Row.entity_id)]
+    $sourceContactId = Clean-Text $Row.entity_id
+    if (Has-MapKey $canonicalRows.ContactDependencyById $sourceContactId) {
+      $currentDependencyRow = $canonicalRows.ContactDependencyById[$sourceContactId]
+    }
+    if (Has-MapKey $canonicalRows.ContactById $sourceContactId) {
+      $currentCanonicalRow = $canonicalRows.ContactById[$sourceContactId]
     }
   }
-  $currentIsInternal = $currentDependencyRow -and (Is-InternalContact $currentDependencyRow $currentDependencyRow.ExternalEmailAddress)
-  $currentRow = if ($currentDependencyRow -and -not $currentIsInternal) { $currentDependencyRow } else { $null }
+  $currentIsInternal = $currentCanonicalRow -and (Is-InternalContact $currentCanonicalRow $currentCanonicalRow.ExternalEmailAddress)
+  $currentRow = if ($currentCanonicalRow -and -not $currentIsInternal) { $currentCanonicalRow } else { $null }
   $currentBaseAlias = if ($currentDependencyRow) { Clean-Text $currentDependencyRow.BaseAlias } else { "" }
   $beforeEmailReconciled = $false
 

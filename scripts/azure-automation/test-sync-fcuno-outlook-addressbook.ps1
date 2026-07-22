@@ -121,6 +121,34 @@ Assert-Equal "c-new" $built.ContactByEmail["dup@example.com"].SourceContactId "N
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-old") "A canonical duplicate must record its previous eligible source owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
 
+$mixedInternalExternalContacts = @(
+  [pscustomobject]@{ id = "managed-new"; source_book = "FCUNO"; display_name = "Managed Duplicate"; primary_email = "mixed-owner@lantana.hk"; nickname = "MANAGED DUPLICATE"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" },
+  [pscustomobject]@{ id = "internal-old"; source_book = "FC-INTERNAL"; display_name = "Real Internal Mailbox"; primary_email = "mixed-owner@lantana.hk"; nickname = "REAL INTERNAL ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-21T03:00:00Z" },
+  [pscustomobject]@{ id = "external-alias-collision"; source_book = "FCUNO"; display_name = "External Alias Collision"; primary_email = "alias-collision@example.com"; nickname = "REAL INTERNAL ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" }
+)
+$mixedInternalRows = Build-ExchangeRows $mixedInternalExternalContacts @() @()
+$mixedInternalRowsReversed = Build-ExchangeRows @($mixedInternalExternalContacts[2], $mixedInternalExternalContacts[1], $mixedInternalExternalContacts[0]) @() @()
+Assert-Equal 1 @($mixedInternalRows.Contacts).Count "Any FC-INTERNAL duplicate owner must suppress the shared email from managed mail contacts"
+Assert-Equal "external-alias-collision" $mixedInternalRows.Contacts[0].SourceContactId "Only the unrelated external contact may remain managed"
+Assert-Equal "managed-new" $mixedInternalRows.ContactByEmail["mixed-owner@lantana.hk"].SourceContactId "Newest-row canonical selection must remain deterministic without losing internal provenance"
+Assert-True (Is-InternalContact $mixedInternalRows.ContactByEmail["mixed-owner@lantana.hk"] "mixed-owner@lantana.hk") "The canonical mixed-source email must aggregate FC-INTERNAL provenance"
+Assert-True (Is-InternalContact $mixedInternalRows.ContactById["internal-old"] "mixed-owner@lantana.hk") "Every duplicate source ID must classify the shared email as internal"
+Assert-True ($mixedInternalRows.ContactByEmail["mixed-owner@lantana.hk"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:managed-new") "Mixed-source cleanup must authorize the current external duplicate owner"
+Assert-True ($mixedInternalRows.ContactByEmail["mixed-owner@lantana.hk"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:internal-old") "Mixed-source cleanup must authorize the internal duplicate owner"
+Assert-Equal "real-internal-alias" $mixedInternalRows.ContactDependencyById["internal-old"].Alias "The raw FC-INTERNAL source must reserve its own base alias"
+Assert-True ($mixedInternalRows.Contacts[0].Alias -ne "real-internal-alias") "A managed contact must never take an alias reserved by an older FC-INTERNAL duplicate"
+Assert-Equal `
+  ($mixedInternalRows | ConvertTo-Json -Depth 10 -Compress) `
+  ($mixedInternalRowsReversed | ConvertTo-Json -Depth 10 -Compress) `
+  "Mixed-source duplicate classification and alias reservation must be independent of input order"
+
+$mixedInternalNewerRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "managed-old"; source_book = "FCUNO"; display_name = "Managed Duplicate"; primary_email = "mixed-owner-2@lantana.hk"; nickname = "MANAGED DUPLICATE TWO"; first_name = ""; last_name = ""; updated_at = "2026-07-21T03:00:00Z" },
+  [pscustomobject]@{ id = "internal-new"; source_book = "FC-INTERNAL"; display_name = "Real Internal Mailbox"; primary_email = "mixed-owner-2@lantana.hk"; nickname = "REAL INTERNAL ALIAS TWO"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" }
+) @() @()
+Assert-Equal 0 @($mixedInternalNewerRows.Contacts).Count "A newer FC-INTERNAL duplicate must also suppress the shared email from managed mail contacts"
+Assert-Equal "internal-new" $mixedInternalNewerRows.ContactByEmail["mixed-owner-2@lantana.hk"].SourceContactId "Timestamp ordering may select the internal row without changing suppression"
+
 $oceanRows = Build-ExchangeRows @(
   [pscustomobject]@{ id = "ocean-anderson"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "anderson@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
   [pscustomobject]@{ id = "ocean-bunkers"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "bunkers@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
@@ -197,19 +225,32 @@ $originalUpsertExchangeMailContactForInternal = (Get-Item Function:Upsert-Exchan
 $originalRemoveManagedExchangeMailContactForInternal = (Get-Item Function:Remove-ManagedExchangeMailContact).ScriptBlock
 $script:internalIncrementalUpserts = 0
 $script:internalIncrementalCleanup = 0
+$script:internalCleanupOwnerSets = @()
 Set-Item Function:Upsert-ExchangeMailContact -Value {
   param($Contact, [hashtable]$Stats)
   $script:internalIncrementalUpserts += 1
 }
 Set-Item Function:Remove-ManagedExchangeMailContact -Value {
-  param($Email, $Alias, [hashtable]$Stats, $SourceContactId, $ExpectedDisplayName, [bool]$AllowUntaggedExactDelete)
+  param($Email, $Alias, [hashtable]$Stats, $SourceContactId, $ExpectedDisplayName, [bool]$AllowUntaggedExactDelete, $AllowedOwnerSourceKeys)
   $script:internalIncrementalCleanup += 1
   Assert-Equal "c-internal-alias" $SourceContactId "Internal cleanup must remain scoped to the exact FCUNO source contact"
+  Assert-True (@($AllowedOwnerSourceKeys) -contains "FCUNO_CONTACT:c-internal-alias") "Internal cleanup must carry the projection-bounded owner set"
+  $script:internalCleanupOwnerSets += ,@($AllowedOwnerSourceKeys)
 }
 try {
   Reconcile-ExchangeContactEmail "ciric@lantana.hk" ([pscustomobject]@{ entity_id = "c-internal-alias"; entity_alias = "CIRIC CHEUNG" }) @{} $false $false
   Assert-Equal 0 $script:internalIncrementalUpserts "Incremental CIRIC reconciliation must never create or update a mail contact"
   Assert-Equal 1 $script:internalIncrementalCleanup "Incremental CIRIC reconciliation must remove only a stale managed copy through its exact source key"
+  $auditedHistoricalInternalRow = [pscustomobject]@{
+    entity_id = "c-former-managed-duplicate"
+    entity_alias = "FORMER MANAGED DUPLICATE"
+    audit_log_id = "99999999-8888-4777-8666-555555555555"
+    payload = [pscustomobject]@{ userAuthorized = $true }
+  }
+  Reconcile-ExchangeContactEmail "ciric@lantana.hk" $auditedHistoricalInternalRow @{} $true $true
+  Assert-True (@($script:internalCleanupOwnerSets[1]) -contains "FCUNO_CONTACT:c-former-managed-duplicate") "An audit-authorized before-email internal cleanup must include its exact queued historical owner"
+  Reconcile-ExchangeContactEmail "ciric@lantana.hk" $auditedHistoricalInternalRow @{} $false $false
+  Assert-True (@($script:internalCleanupOwnerSets[2]) -notcontains "FCUNO_CONTACT:c-former-managed-duplicate") "The current-email internal cleanup leg must not inherit the historical audit owner exception"
 } finally {
   Set-Item Function:Upsert-ExchangeMailContact -Value $originalUpsertExchangeMailContactForInternal
   Set-Item Function:Remove-ManagedExchangeMailContact -Value $originalRemoveManagedExchangeMailContactForInternal
@@ -642,13 +683,18 @@ Set-Item Function:Invoke-SupabaseRest -Value {
   param($Method, $Path, $Body = $null)
   $script:testBacklogPage += 1
   if ($script:testBacklogPage -eq 1) {
-    return @(1..1000 | ForEach-Object { [pscustomobject]@{ id = "row-$_" } })
+    $page = @(1..1000 | ForEach-Object { [pscustomobject]@{ id = "row-$_" } })
+    Write-Output -NoEnumerate $page
+    return
   }
-  return @([pscustomobject]@{ id = "row-1001" }, [pscustomobject]@{ id = "row-1002" })
+  $page = @([pscustomobject]@{ id = "row-1001" }, [pscustomobject]@{ id = "row-1002" })
+  Write-Output -NoEnumerate $page
 }
 try {
-  Assert-Equal 1002 (Get-ExchangeQueueBacklogCount) "Queue backlog visibility must paginate beyond the first 1,000 unresolved rows"
-Assert-Equal 2 $script:testBacklogPage "Queue backlog visibility must stop after the final partial page"
+  $nonEnumeratedBacklogRows = @(Get-ExchangeQueueBacklogRows)
+  Assert-Equal 1002 $nonEnumeratedBacklogRows.Count "Queue backlog visibility must flatten a top-level JSON array and paginate beyond the first 1,000 unresolved rows"
+  Assert-Equal "row-1" $nonEnumeratedBacklogRows[0].id "A non-enumerated REST array must produce individual queue rows, not one nested System.Object[]"
+  Assert-Equal 2 $script:testBacklogPage "Queue backlog visibility must stop after the final partial page"
 } finally {
   Set-Item Function:Invoke-SupabaseRest -Value $originalInvokeSupabaseRest
 }
@@ -856,6 +902,16 @@ Assert-True ($incrementalLockDenial.Message -match "rows remain pending") "A loc
 
 $script:removeCalled = $false
 $script:aliasLookupCalled = $false
+$script:allowedDuplicateOwnerPresent = $true
+$allowedDuplicateOwner = [pscustomobject]@{
+  Identity = "allowed-duplicate-owner"
+  Guid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+  DistinguishedName = "CN=Allowed Duplicate Owner,OU=Contacts,DC=example,DC=com"
+  DisplayName = "Allowed Duplicate Owner"
+  ExternalEmailAddress = "allowed-duplicate@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-older-duplicate"
+}
 function Get-MailContact {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
@@ -868,6 +924,19 @@ function Get-MailContact {
       CustomAttribute1 = $ManagedMarker
       CustomAttribute2 = "FCUNO_CONTACT:c-new-owner"
     }
+  }
+  if ($Identity -eq $allowedDuplicateOwner.Guid -or $Identity -eq $allowedDuplicateOwner.DistinguishedName) {
+    if ($script:allowedDuplicateOwnerPresent) { return $allowedDuplicateOwner }
+    return $null
+  }
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-current-duplicate'") { return @() }
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-older-duplicate'") {
+    if ($script:allowedDuplicateOwnerPresent) { return $allowedDuplicateOwner }
+    return @()
+  }
+  if ($Filter -like "ExternalEmailAddress -eq 'allowed-duplicate@example.com'") {
+    if ($script:allowedDuplicateOwnerPresent) { return $allowedDuplicateOwner }
+    return @()
   }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-old'") { return @() }
   if ($Filter -like "ExternalEmailAddress -eq 'dup@example.com'") {
@@ -903,6 +972,9 @@ function Remove-MailContact {
   [CmdletBinding(SupportsShouldProcess)]
   param($Identity)
   $script:removeCalled = $true
+  if ((Clean-Text $Identity) -eq (Clean-Text $allowedDuplicateOwner.Guid)) {
+    $script:allowedDuplicateOwnerPresent = $false
+  }
 }
 $guardStats = @{}
 $guardFailedClosed = $false
@@ -913,6 +985,35 @@ try {
 }
 Assert-True $guardFailedClosed "A duplicate delete must refuse an Exchange object owned by a different source ID"
 Assert-True (-not $script:removeCalled) "Ownership mismatch must not call Remove-MailContact"
+
+$script:removeCalled = $false
+Remove-ManagedExchangeMailContact `
+  "allowed-duplicate@example.com" `
+  "allowed-duplicate-owner" `
+  $guardStats `
+  "c-current-duplicate" `
+  "Current Duplicate" `
+  $false `
+  @("FCUNO_CONTACT:c-current-duplicate", "FCUNO_CONTACT:c-older-duplicate")
+Assert-True $script:removeCalled "Internal suppression must remove a stale managed contact owned by another legitimate duplicate source row"
+Assert-True (-not $script:allowedDuplicateOwnerPresent) "Duplicate-owner cleanup must verify deletion of the exact immutable Exchange object"
+
+$script:removeCalled = $false
+$foreignAllowedOwnerFailedClosed = $false
+try {
+  Remove-ManagedExchangeMailContact `
+    "dup@example.com" `
+    "dup" `
+    $guardStats `
+    "c-old" `
+    "Older" `
+    $false `
+    @("FCUNO_CONTACT:c-old", "FCUNO_CONTACT:c-other-legitimate-duplicate")
+} catch {
+  $foreignAllowedOwnerFailedClosed = $_.Exception.Message -match "outside the exact FCUNO duplicate owner set"
+}
+Assert-True $foreignAllowedOwnerFailedClosed "Projection-bounded duplicate cleanup must still reject an unrelated Exchange owner"
+Assert-True (-not $script:removeCalled) "A foreign owner must never reach Remove-MailContact through the duplicate-owner exception"
 
 $script:removeCalled = $false
 Remove-ManagedExchangeMailContact "stale@example.com" "stale-alias" $guardStats "" "Stale Contact" $true
