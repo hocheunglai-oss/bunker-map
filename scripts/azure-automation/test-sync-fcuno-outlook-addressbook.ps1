@@ -81,6 +81,584 @@ $fieldRow = [pscustomobject]@{
 $fieldChanges = @(Get-QueueFieldChanges $fieldRow)
 Assert-True ($fieldChanges -contains "Email: old@example.com -> new@example.com") "Notice must show the exact old and new email"
 Assert-True ($fieldChanges -contains "First name: Old -> New") "Notice must show each changed Exchange profile field"
+$capitalizationRow = [pscustomobject]@{
+  entity_type = "contact"
+  payload = [pscustomobject]@{
+    beforeContact = [pscustomobject]@{ display_name = "Acme shipping" }
+    afterContact = [pscustomobject]@{ display_name = "ACME SHIPPING" }
+  }
+}
+Assert-True (@(Get-QueueFieldChanges $capitalizationRow) -contains "Display name: Acme shipping -> ACME SHIPPING") "Capitalization-only FCUNO edits must appear in the exact change notice"
+$auditScopedFieldRow = [pscustomobject]@{
+  action = "update_contact"
+  entity_type = "contact"
+  changed_fields = @("primary_email")
+  payload = [pscustomobject]@{
+    beforeContact = [pscustomobject]@{ display_name = "Stale vCard name"; primary_email = "old@example.com" }
+    afterContact = [pscustomobject]@{ display_name = "Current FCUNO name"; primary_email = "new@example.com" }
+  }
+}
+$auditScopedChanges = @(Get-QueueFieldChanges $auditScopedFieldRow)
+Assert-Equal 1 $auditScopedChanges.Count "An update notice must attribute only fields explicitly present in audit changed_fields"
+Assert-Equal "Email: old@example.com -> new@example.com" $auditScopedChanges[0] "A stale before snapshot must not invent an unaudited display-name change"
+$groupIdentityFieldRow = [pscustomobject]@{
+  action = "update_group"
+  entity_type = "group"
+  changed_fields = @("id", "source_uid")
+  payload = [pscustomobject]@{
+    beforeGroup = [pscustomobject]@{ id = "group-old-id"; source_uid = "source-old" }
+    afterGroup = [pscustomobject]@{ id = "group-current-id"; source_uid = "source-current" }
+  }
+}
+$groupIdentityFieldChanges = @(Get-QueueFieldChanges $groupIdentityFieldRow)
+Assert-True ($groupIdentityFieldChanges -contains "FCUNO group ID: group-old-id -> group-current-id") "A queued group primary-key change must show its exact old and new FCUNO IDs"
+Assert-True ($groupIdentityFieldChanges -contains "Source UID: source-old -> source-current") "A queued group source_uid change must show its exact old and new values"
+
+$contactMetadataFieldRow = [pscustomobject]@{
+  action = "update_contact"
+  entity_type = "contact"
+  changed_fields = @("id", "source_card", "vcard", "properties")
+  payload = [pscustomobject]@{
+    beforeContact = [pscustomobject]@{ id = "contact-old-id"; source_card = "card-old"; vcard = "BEGIN:VCARD SECRET-OLD"; properties = '{"private":"old"}' }
+    afterContact = [pscustomobject]@{ id = "contact-current-id"; source_card = "card-current"; vcard = "BEGIN:VCARD SECRET-CURRENT"; properties = '{"private":"current"}' }
+  }
+}
+$contactMetadataFieldChanges = @(Get-QueueFieldChanges $contactMetadataFieldRow)
+Assert-True ($contactMetadataFieldChanges -contains "FCUNO contact ID: contact-old-id -> contact-current-id") "An all-contact UPDATE trigger row must show an exact contact ID change"
+Assert-True ($contactMetadataFieldChanges -contains "Source card: card-old -> card-current") "An all-contact UPDATE trigger row must show an exact source-card change"
+Assert-True ($contactMetadataFieldChanges -contains "vCard metadata: changed (FCUNO metadata / verification-only; raw value omitted)") "A vCard-only queue row must name the exact metadata field without embedding the raw card"
+Assert-True ($contactMetadataFieldChanges -contains "Contact properties metadata: changed (FCUNO metadata / verification-only; raw value omitted)") "A properties-only queue row must name the exact metadata field without embedding raw JSON"
+Assert-True (($contactMetadataFieldChanges -join " ") -notmatch "SECRET-|private") "Large or sensitive FCUNO metadata values must be omitted from the email while their field names remain visible"
+
+$singleSaveRow = [pscustomobject]@{ payload = [pscustomobject]@{ operationHistory = @("UPDATE") } }
+$mergedSaveRow = [pscustomobject]@{ payload = [pscustomobject]@{ operationHistory = @("UPDATE", "UPDATE", "UPDATE") } }
+Assert-Equal 0 (Get-QueueSupersededSaveCount $singleSaveRow) "One queued save must not be counted as superseded"
+Assert-Equal 2 (Get-QueueSupersededSaveCount $mergedSaveRow) "Only earlier saves merged into the final queue value must be counted as superseded"
+$skipAccounting = @{ skippedQueueRows = 0; supersededQueueRows = 0 }
+$supersededSaveCount = Get-QueueSupersededSaveCount $mergedSaveRow
+Increment-Stat $skipAccounting "supersededQueueRows" $supersededSaveCount
+Increment-Stat $skipAccounting "skippedQueueRows" $supersededSaveCount
+Assert-Equal 0 ([Math]::Max(0, [int]$skipAccounting.skippedQueueRows - [int]$skipAccounting.supersededQueueRows)) "Superseded saves must not be reported as actionable skipped changes"
+Increment-Stat $skipAccounting "skippedQueueRows"
+Assert-Equal 1 ([Math]::Max(0, [int]$skipAccounting.skippedQueueRows - [int]$skipAccounting.supersededQueueRows)) "One real skipped row must remain one actionable skipped change"
+
+$firstFingerprint = Get-CanonicalExchangeProjectionFingerprint $built
+$secondFingerprint = Get-CanonicalExchangeProjectionFingerprint $shuffled
+Assert-Equal $firstFingerprint $secondFingerprint "Source certification fingerprint must remain deterministic for the same canonical projection"
+$sourceBookOnlyContacts = @($contacts | ForEach-Object {
+  [pscustomobject]@{
+    id = $_.id
+    source_book = "NON-EXCHANGE-CONTACT-BOOK"
+    display_name = $_.display_name
+    primary_email = $_.primary_email
+    nickname = $_.nickname
+    first_name = $_.first_name
+    last_name = $_.last_name
+    updated_at = $_.updated_at
+  }
+})
+$sourceBookOnlyGroups = @($groups | ForEach-Object {
+  [pscustomobject]@{
+    id = $_.id
+    source_book = "NON-EXCHANGE-GROUP-BOOK"
+    name = $_.name
+    nickname = $_.nickname
+    source_uid = $_.source_uid
+    description = $_.description
+  }
+})
+$sourceBookOnlyFingerprint = Get-CanonicalExchangeProjectionFingerprint (Build-ExchangeRows $sourceBookOnlyContacts $sourceBookOnlyGroups $members)
+Assert-Equal $firstFingerprint $sourceBookOnlyFingerprint "Non-Exchange source_book changes must not alter the durable Exchange certification fingerprint"
+$changedFingerprintRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "c-new"; source_book = "A"; display_name = "Newest Changed"; primary_email = "dup@example.com"; nickname = "DUP"; first_name = "New"; last_name = "Owner"; updated_at = "2026-07-22T02:00:00Z" },
+  $contacts[1],
+  $contacts[2]
+) $groups $members
+$changedFingerprint = Get-CanonicalExchangeProjectionFingerprint $changedFingerprintRows
+Assert-True ($firstFingerprint -cne $changedFingerprint) "An Exchange-relevant FCUNO change must alter the source certification fingerprint"
+$duplicateWinnerChangedRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "c-new"; source_book = "A"; display_name = "Newest"; primary_email = "dup@example.com"; nickname = "DUP"; first_name = "New"; last_name = "Owner"; updated_at = "2026-07-20T02:00:00Z" },
+  [pscustomobject]@{ id = "c-old"; source_book = "A"; display_name = "Older"; primary_email = "dup@example.com"; nickname = "DUP"; first_name = "Old"; last_name = "Owner"; updated_at = "2026-07-23T02:00:00Z" },
+  $contacts[2]
+) $groups $members
+Assert-Equal "c-old" $duplicateWinnerChangedRows.ContactByEmail["dup@example.com"].SourceContactId "The newest duplicate source row must still determine the canonical Exchange owner"
+Assert-True ($firstFingerprint -cne (Get-CanonicalExchangeProjectionFingerprint $duplicateWinnerChangedRows)) "A duplicate-winner change that alters Exchange-visible contact fields must alter the certification fingerprint"
+Assert-Equal 0 @(Get-ExchangeSourceCertificationDrift $firstFingerprint "10@2026-07-22T00:00:00Z" $secondFingerprint "10@2026-07-22T00:00:00Z").Count "An unchanged projection and queue high-water must pass the source fence"
+$projectionDrift = @(Get-ExchangeSourceCertificationDrift $firstFingerprint "10@2026-07-22T00:00:00Z" "different-fingerprint" "10@2026-07-22T00:00:00Z")
+Assert-True (($projectionDrift -join " ") -match "canonical Exchange projection changed") "A changed canonical projection must invalidate full certification"
+$queueDrift = @(Get-ExchangeSourceCertificationDrift $firstFingerprint "10@2026-07-22T00:00:00Z" $firstFingerprint "11@2026-07-22T00:01:00Z")
+Assert-True (($queueDrift -join " ") -match "queue high-water changed") "A changed durable queue high-water must invalidate full certification"
+$parsedQueueFence = ConvertFrom-ExchangeQueueHighWater "42@2026-07-22T07:15:00Z"
+Assert-Equal 42 $parsedQueueFence.Sequence "The full-certification RPC fence must preserve the exact queue sequence"
+Assert-Equal "2026-07-22T07:15:00Z" $parsedQueueFence.UpdatedAt "The full-certification RPC fence must preserve the exact queue timestamp"
+
+$atomicOriginalInvokeSupabaseRest = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$atomicOriginalGetOptionalAutomationSetting = (Get-Item Function:Get-OptionalAutomationSetting).ScriptBlock
+$atomicOriginalSendExchangeSmtpMail = (Get-Item Function:Send-ExchangeSmtpMail).ScriptBlock
+$script:CurrentQueueRunId = "12121212-1212-4212-8212-121212121212"
+$atomicQueueRowId = "34343434-3434-4434-8434-343434343434"
+$supersededQueueRowId = "56565656-5656-4656-8656-565656565656"
+$script:completionRpcCalls = 0
+$script:completionRpcBodies = @()
+$script:certificationRpcCalls = 0
+$script:certificationRpcBodies = @()
+$script:capturedResolvedSubject = ""
+$script:capturedResolvedHtml = ""
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  if ($Path -eq "rpc/complete_verified_outlook_exchange_sync_queue_row") {
+    $script:completionRpcCalls += 1
+    $script:completionRpcBodies += [pscustomobject]@{ row = $Body.p_queue_row_id; run = $Body.p_run_id }
+    if ($script:completionRpcCalls -eq 1) { throw "The HTTP response was lost after the atomic completion committed." }
+    return [pscustomobject]@{
+      completed = $true
+      idempotent = $true
+      reason = "Queue row was already completed and Exchange-verified by this run."
+      completedRow = [pscustomobject]@{
+        id = $atomicQueueRowId
+        eventId = "23232323-2323-4232-8232-232323232323"
+        entityType = "contact"
+        entityId = "contact-atomic"
+        entityKey = "atomic@example.com"
+        entityEmail = "atomic@example.com"
+        entityAlias = "atomic-contact"
+        action = "update_contact"
+        displayName = "Atomic Contact"
+        payload = [pscustomobject]@{}
+        changeSetId = "change-set-current"
+        changeSetIds = @("change-set-current")
+        auditLogId = "audit-current"
+        auditLogIds = @("audit-current")
+        actorId = "SC"
+        requestedBy = "SC Display"
+        changedFields = @("display_name")
+        sourceVersion = 8
+        status = "completed"
+        attempts = 1
+        errorHistory = @()
+        runId = $script:CurrentQueueRunId
+        exchangeVerifiedAt = "2026-07-22T07:20:00Z"
+        completedAt = "2026-07-22T07:20:00Z"
+      }
+      supersededCount = 1
+      supersededRows = @([pscustomobject]@{
+        id = $supersededQueueRowId
+        eventId = "78787878-7878-4787-8787-787878787878"
+        entityType = "contact"
+        entityId = "contact-atomic"
+        entityKey = "atomic@example.com"
+        entityEmail = "atomic@example.com"
+        entityAlias = "atomic-contact"
+        action = "update_contact"
+        displayName = "Atomic Contact"
+        payload = [pscustomobject]@{
+          beforeContact = [pscustomobject]@{ display_name = "Atomic old"; primary_email = "atomic@example.com" }
+          afterContact = [pscustomobject]@{ display_name = "Atomic current"; primary_email = "atomic@example.com" }
+        }
+        changeSetId = "change-set-atomic"
+        changeSetIds = @("change-set-atomic")
+        auditLogId = "audit-atomic"
+        auditLogIds = @("audit-atomic")
+        actorId = "SC"
+        requestedBy = "SC Display"
+        changedFields = @("display_name")
+        sourceVersion = 7
+        status = "skipped"
+        attempts = 3
+        previousErrorMessage = "Old terminal Exchange error"
+        errorMessage = "Old terminal Exchange error`nSuperseded by verified current state."
+        errorHistory = @(
+          [pscustomobject]@{ type = "processing_failed"; message = "Old terminal Exchange error"; attempt = 3; terminal = $true },
+          [pscustomobject]@{ type = "terminal_failure_superseded"; superseding_queue_row_id = $atomicQueueRowId; superseding_run_id = $script:CurrentQueueRunId }
+        )
+        previousRunId = "90909090-9090-4090-8090-909090909090"
+        supersededByQueueRowId = $atomicQueueRowId
+        supersededByRunId = $script:CurrentQueueRunId
+        completedAt = "2026-07-22T07:20:00Z"
+      })
+    }
+  }
+  if ($Path -eq "rpc/certify_full_outlook_exchange_sync_queue") {
+    $script:certificationRpcCalls += 1
+    $script:certificationRpcBodies += [pscustomobject]@{
+      run = $Body.p_run_id
+      sequence = $Body.p_queue_high_water_sequence
+      updatedAt = $Body.p_queue_high_water_updated_at
+      fingerprint = $Body.p_source_fingerprint
+    }
+    if ($script:certificationRpcCalls -eq 1) { throw "The HTTP response was lost after full certification committed." }
+    return [pscustomobject]@{
+      certified = $true
+      idempotent = $true
+      reason = "This full certification run was already committed; returning its durable result."
+      certifiedAt = "2026-07-22T07:21:00Z"
+      sourceFingerprint = "atomic-fingerprint"
+      queueFence = [pscustomobject]@{ expectedSequence = 42; expectedUpdatedAt = "2026-07-22T07:15:00Z"; currentSequence = 42; currentUpdatedAt = "2026-07-22T07:15:00Z" }
+      supersededCount = 1
+      supersededRows = @([pscustomobject]@{
+        id = "67676767-6767-4676-8676-676767676767"
+        eventId = "89898989-8989-4898-8989-898989898989"
+        entityType = "group"
+        entityId = "group-full-certification"
+        entityKey = "full-certification-group"
+        entityEmail = ""
+        entityAlias = "full-certification-group"
+        action = "update_group"
+        displayName = "Full Certification Group"
+        payload = [pscustomobject]@{
+          beforeGroup = [pscustomobject]@{ name = "Old full group"; description = "Old notes" }
+          afterGroup = [pscustomobject]@{ name = "Full Certification Group"; description = "Current notes" }
+        }
+        changeSetId = "change-set-full"
+        changeSetIds = @("change-set-full")
+        auditLogId = "audit-full"
+        auditLogIds = @("audit-full")
+        actorId = "SC"
+        requestedBy = "SC Display"
+        changedFields = @("name", "description")
+        sourceVersion = 4
+        status = "skipped"
+        attempts = 3
+        previousErrorMessage = "Old terminal full-sync error"
+        errorMessage = "Old terminal full-sync error`nSuperseded by full certification."
+        errorHistory = @([pscustomobject]@{ type = "terminal_failure_superseded_by_full_certification"; superseding_full_run_id = $script:CurrentQueueRunId })
+        previousRunId = "91919191-9191-4191-8191-919191919191"
+        supersededByFullRunId = $script:CurrentQueueRunId
+        completedAt = "2026-07-22T07:21:00Z"
+      })
+    }
+  }
+  throw "Unexpected REST path $Path"
+}
+Set-Item Function:Get-OptionalAutomationSetting -Value { param($Name) return $null }
+Set-Item Function:Send-ExchangeSmtpMail -Value {
+  param($From, $To, $Subject, $Html)
+  $script:capturedResolvedSubject = $Subject
+  $script:capturedResolvedHtml = $Html
+}
+try {
+  $completionResult = Complete-VerifiedExchangeQueueRow $atomicQueueRowId
+  Assert-Equal 2 $script:completionRpcCalls "An ambiguous atomic completion response must retry with the idempotent row/run contract"
+  Assert-True ([bool]$completionResult.completed -and [bool]$completionResult.idempotent) "A confirmed idempotent completion replay must count as success"
+  Assert-Equal $script:completionRpcBodies[0].row $script:completionRpcBodies[1].row "Atomic completion retry must reuse the exact same queue row UUID"
+  Assert-Equal $script:completionRpcBodies[0].run $script:completionRpcBodies[1].run "Atomic completion retry must reuse the exact same run UUID"
+
+  $resolvedStats = @{
+    syncMode = "incremental"
+    queuedRows = 1
+    processedQueueRows = 1
+    completedQueueRows = 1
+    failedQueueRows = 0
+    backlogRows = 0
+    retryableBacklogRows = 0
+    terminalBacklogRows = 0
+    activeBacklogRows = 0
+    skippedQueueRows = 0
+    supersededQueueRows = 0
+    resolvedTerminalQueueRows = 0
+    changeDetails = @()
+  }
+  Add-ExchangeResolvedTerminalQueueDetails $resolvedStats $completionResult "incremental"
+  Assert-Equal 1 $resolvedStats.resolvedTerminalQueueRows "Atomic completion must count every terminal queue row it durably superseded"
+  Assert-Equal 1 $resolvedStats.skippedQueueRows "A durably superseded terminal row must be included in non-actionable skipped accounting"
+  $resolvedDetail = @($resolvedStats.changeDetails)[0]
+  Assert-Equal "superseded" $resolvedDetail.status "A superseded terminal queue row must render as resolved, not failed or green-completed"
+  Assert-True ($resolvedDetail.result -match "Old terminal Exchange error") "A resolved terminal detail must preserve its exact previous error"
+  Assert-True ($resolvedDetail.result -match "later Exchange-verified processing of the current FCUNO state") "Resolved wording must describe later verified processing, not assume the superseding row has a higher queue sequence"
+  Assert-True ($resolvedDetail.result -notmatch "newer Exchange-verified") "Resolved wording must not make an invalid queue-sequence ordering claim"
+  Assert-Equal 2 @($resolvedDetail.errorHistory).Count "A resolved terminal detail must preserve the full durable error history returned by the RPC"
+  Assert-Equal "SC Display" $resolvedDetail.requestedBy "A resolved terminal audit row must preserve the requesting user's display name from the atomic RPC"
+  Assert-True (@($resolvedDetail.fieldChanges) -contains "Display name: Atomic old -> Atomic current") "A resolved terminal detail must preserve exact audited before/after fields"
+  Assert-Equal $atomicQueueRowId $resolvedDetail.supersededByQueueRowId "A resolved terminal detail must identify the queue row whose later processing verified the current FCUNO state"
+
+  $resolvedOutcome = Get-IncrementalSyncOutcome $resolvedStats
+  Assert-Equal "completed" $resolvedOutcome.Status "Safely resolved terminal rows must not be reported as actionable skips or failures"
+  Send-ExchangeSyncNotification "completed" $resolvedOutcome.Message $resolvedStats ([pscustomobject]@{
+    requestedBy = "SC"
+    requestedByEmail = "sc@example.com"
+    requestedAt = "2026-07-22T07:22:00Z"
+  })
+  Assert-True ($script:capturedResolvedSubject -match "1 terminal resolved") "The notice subject must state how many terminal failures were resolved"
+  Assert-True ($script:capturedResolvedHtml -match "Resolved") "The notice must visibly label a superseded terminal row as resolved"
+  Assert-True ($script:capturedResolvedHtml -match "Old terminal Exchange error") "The notice must show the exact prior terminal error"
+  Assert-True ($script:capturedResolvedHtml -match "processing_failed") "The notice must show the durable queue error history"
+  Assert-True ($script:capturedResolvedHtml -match $atomicQueueRowId) "The notice must show the superseding verified queue row ID"
+
+  $certificationResult = Commit-FullExchangeQueueCertification "42@2026-07-22T07:15:00Z" "atomic-fingerprint"
+  Assert-Equal 2 $script:certificationRpcCalls "An ambiguous full-certification response must retry against its durable certification receipt"
+  Assert-True ([bool]$certificationResult.certified -and [bool]$certificationResult.idempotent) "A confirmed idempotent full-certification replay must count as success"
+  Assert-Equal $script:certificationRpcBodies[0].run $script:certificationRpcBodies[1].run "Full-certification retry must reuse the exact same run UUID"
+  Assert-Equal $script:certificationRpcBodies[0].sequence $script:certificationRpcBodies[1].sequence "Full-certification retry must reuse the exact same queue fence sequence"
+  Assert-Equal $script:certificationRpcBodies[0].updatedAt $script:certificationRpcBodies[1].updatedAt "Full-certification retry must reuse the exact same queue fence timestamp"
+  Assert-Equal $script:certificationRpcBodies[0].fingerprint $script:certificationRpcBodies[1].fingerprint "Full-certification retry must reuse the exact same source fingerprint"
+  $fullResolvedStats = @{
+    failedQueueRows = 0
+    skippedQueueRows = 0
+    resolvedTerminalQueueRows = 0
+    fullCertificationCommitted = $false
+    fullCertificationIdempotent = $false
+    changeDetails = @()
+  }
+  $certificationCallsBeforeEligibleFinalize = $script:certificationRpcCalls
+  Complete-FullExchangeQueueCertificationIfEligible $fullResolvedStats "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @() | Out-Null
+  Assert-Equal ($certificationCallsBeforeEligibleFinalize + 1) $script:certificationRpcCalls "A zero-failure, zero-drift final projection must invoke durable full certification"
+  Assert-True ([bool]$fullResolvedStats.fullCertificationCommitted) "A confirmed full-certification replay must be recorded as durably committed"
+  Assert-True ([bool]$fullResolvedStats.fullCertificationIdempotent) "A confirmed certification receipt replay must retain its idempotent status"
+  Assert-Equal 1 $fullResolvedStats.resolvedTerminalQueueRows "A successful full certification must count every terminal queue row it superseded"
+  Assert-Equal $script:CurrentQueueRunId @($fullResolvedStats.changeDetails)[0].supersededByFullRunId "A full-certification resolution detail must show the certifying run ID"
+  Assert-True (@($fullResolvedStats.changeDetails)[0].result -match "Old terminal full-sync error") "A full-certification resolution detail must retain the exact previous terminal error"
+
+  $certificationCallsBeforeIneligibleFinalize = $script:certificationRpcCalls
+  Complete-FullExchangeQueueCertificationIfEligible @{ failedQueueRows = 1 } "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @() | Out-Null
+  Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any local full-sync failure must prevent the terminal supersession sweep"
+  Complete-FullExchangeQueueCertificationIfEligible @{ failedQueueRows = 0 } "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @("queue high-water changed") | Out-Null
+  Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any source/high-water drift must prevent the terminal supersession sweep"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $atomicOriginalInvokeSupabaseRest
+  Set-Item Function:Get-OptionalAutomationSetting -Value $atomicOriginalGetOptionalAutomationSetting
+  Set-Item Function:Send-ExchangeSmtpMail -Value $atomicOriginalSendExchangeSmtpMail
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
+
+$originalRenewExchangeSyncLock = (Get-Item Function:Renew-ExchangeSyncLock).ScriptBlock
+$script:testLeaseRenewals = 0
+Set-Item Function:Renew-ExchangeSyncLock -Value {
+  $script:testLeaseRenewals += 1
+}
+try {
+  $script:SyncLockAcquired = $true
+  $script:SyncLockLastRenewedAt = [DateTimeOffset]::UtcNow
+  Renew-ExchangeSyncLockIfDue
+  Assert-Equal 0 $script:testLeaseRenewals "A fresh mutation lease must not be renewed on every operation"
+  $script:SyncLockLastRenewedAt = [DateTimeOffset]::UtcNow.Subtract([TimeSpan]::FromMinutes(6))
+  Renew-ExchangeSyncLockIfDue
+  Assert-Equal 1 $script:testLeaseRenewals "An elapsed mutation lease must renew before more Exchange work"
+  Renew-ExchangeSyncLockIfDue
+  Assert-Equal 1 $script:testLeaseRenewals "A successful elapsed-time renewal must reset the heartbeat interval"
+} finally {
+  Set-Item Function:Renew-ExchangeSyncLock -Value $originalRenewExchangeSyncLock
+  $script:SyncLockAcquired = $false
+  $script:SyncLockLastRenewedAt = [DateTimeOffset]::MinValue
+}
+
+$originalInvokeSupabaseRest = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$script:testBacklogPage = 0
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  $script:testBacklogPage += 1
+  if ($script:testBacklogPage -eq 1) {
+    return @(1..1000 | ForEach-Object { [pscustomobject]@{ id = "row-$_" } })
+  }
+  return @([pscustomobject]@{ id = "row-1001" }, [pscustomobject]@{ id = "row-1002" })
+}
+try {
+  Assert-Equal 1002 (Get-ExchangeQueueBacklogCount) "Queue backlog visibility must paginate beyond the first 1,000 unresolved rows"
+Assert-Equal 2 $script:testBacklogPage "Queue backlog visibility must stop after the final partial page"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $originalInvokeSupabaseRest
+}
+
+$script:CurrentQueueRunId = "99999999-9999-4999-8999-999999999999"
+$fixedFailureTime = [DateTimeOffset]::Parse("2026-07-22T07:00:00Z")
+$attemptTwoRow = [pscustomobject]@{
+  attempts = 2
+  error_history = @([pscustomobject]@{ type = "previous"; message = "Earlier error" })
+}
+$attemptTwoTransition = Get-ExchangeQueueFailureTransition $attemptTwoRow "Temporary Exchange error" $fixedFailureTime
+Assert-True (-not [bool]$attemptTwoTransition.Terminal) "Attempt two must remain retryable"
+Assert-Equal "2026-07-22T07:15:00.0000000+00:00" $attemptTwoTransition.NextAttemptAt "Attempt two must retry after exactly 15 minutes"
+Assert-True ($null -eq $attemptTwoTransition.Fields.completed_at) "A retryable failure must not be marked terminally completed"
+Assert-Equal 2 @($attemptTwoTransition.Fields.error_history).Count "A processing failure must append to prior error history"
+Assert-Equal "processing_failed" @($attemptTwoTransition.Fields.error_history)[1].type "The appended history event must identify an ordinary processing failure"
+Assert-Equal "99999999-9999-4999-8999-999999999999" @($attemptTwoTransition.Fields.error_history)[1].run_id "The failure event must retain the run ID"
+
+$attemptThreeRow = [pscustomobject]@{ attempts = 3; error_history = @() }
+$attemptThreeTransition = Get-ExchangeQueueFailureTransition $attemptThreeRow "Final Exchange error" $fixedFailureTime
+Assert-True ([bool]$attemptThreeTransition.Terminal) "Attempt three must become terminal"
+Assert-True ($null -eq $attemptThreeTransition.NextAttemptAt) "A terminal third failure must not fabricate another retry"
+Assert-Equal "2026-07-22T07:00:00.0000000+00:00" $attemptThreeTransition.Fields.completed_at "A terminal third failure must record completion time"
+Assert-True ($attemptThreeTransition.RetryState -match "retry limit exhausted") "Terminal failure wording must state that the retry limit was exhausted"
+Assert-True ([bool]@($attemptThreeTransition.Fields.error_history)[0].terminal) "The third processing-failure history event must be terminal"
+
+$processingBacklogId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+$terminalBacklogId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"
+$pendingBacklogId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc0"
+$backlogStats = @{
+  changeDetails = @([pscustomobject]@{
+    queueRowId = $processingBacklogId
+    status = "failed"
+    result = "Error: PATCH failed. Retry scheduled for a time that was never persisted."
+  })
+}
+$processingBacklogRow = [pscustomobject]@{
+  id = $processingBacklogId
+  status = "processing"
+  attempts = 2
+  run_id = "22222222-2222-4222-8222-222222222222"
+  claimed_at = "2026-07-22T06:58:00Z"
+  action = "update_contact"
+  entity_type = "contact"
+  entity_id = "processing-contact"
+  entity_email = "processing@example.com"
+  display_name = "Authoritative processing owner"
+  created_at = "2026-07-22T06:00:00Z"
+}
+$terminalBacklogRow = [pscustomobject]@{
+  id = $terminalBacklogId
+  status = "failed"
+  attempts = 3
+  next_attempt_at = $null
+  run_id = "33333333-3333-4333-8333-333333333333"
+  error_message = "Processing lease expired; retry limit exhausted and terminally failed."
+  action = "update_group"
+  entity_type = "group"
+  entity_id = "terminal-group"
+  entity_alias = "terminal-group"
+  display_name = "Terminal stale group"
+  created_at = "2026-07-22T05:00:00Z"
+}
+$pendingBacklogRow = [pscustomobject]@{
+  id = $pendingBacklogId
+  status = "pending"
+  attempts = 0
+  next_attempt_at = $null
+  action = "create_contact"
+  entity_type = "contact"
+  entity_id = "pending-contact"
+  entity_email = "pending@example.com"
+  display_name = "Pending contact"
+  created_at = "2026-07-22T06:30:00Z"
+}
+Add-ExchangeQueueBacklogDetails $backlogStats @($processingBacklogRow, $terminalBacklogRow, $pendingBacklogRow)
+Assert-Equal 3 @($backlogStats.changeDetails).Count "Backlog detail collection must deduplicate by queue row ID"
+$authoritativeProcessingDetail = @($backlogStats.changeDetails | Where-Object { $_.queueRowId -eq $processingBacklogId })[0]
+Assert-Equal "processing" $authoritativeProcessingDetail.status "An authoritative processing backlog row must override an unpersisted failed assumption"
+Assert-Equal "22222222-2222-4222-8222-222222222222" $authoritativeProcessingDetail.runId "Backlog detail must show the authoritative processing owner"
+Assert-True ($authoritativeProcessingDetail.result -notmatch "Retry state: Retry scheduled") "A failed PATCH must never claim that a retry was persisted"
+$terminalBacklogDetail = @($backlogStats.changeDetails | Where-Object { $_.queueRowId -eq $terminalBacklogId })[0]
+Assert-True ([bool]$terminalBacklogDetail.terminal) "A third-attempt stale row must render as terminal"
+Assert-True ($terminalBacklogDetail.retryState -match "retry limit exhausted") "A terminal backlog detail must explain exhausted retries"
+Assert-Equal "" $terminalBacklogDetail.nextRetryAt "A terminal backlog row must not fabricate a next retry time"
+$pendingBacklogDetail = @($backlogStats.changeDetails | Where-Object { $_.queueRowId -eq $pendingBacklogId })[0]
+Assert-Equal 0 $pendingBacklogDetail.attempt "A pending backlog row must preserve its exact zero-attempt count"
+Assert-Equal "" $pendingBacklogDetail.nextRetryAt "A pending backlog row must not fabricate a next retry time"
+Assert-Equal 1 $backlogStats.retryableBacklogRows "One pending row must be classified as retryable"
+Assert-Equal 1 $backlogStats.terminalBacklogRows "One exhausted row must be classified as terminal"
+Assert-Equal 1 $backlogStats.activeBacklogRows "One processing row must be classified as active"
+
+$originalGetOptionalAutomationSetting = (Get-Item Function:Get-OptionalAutomationSetting).ScriptBlock
+$originalSendExchangeSmtpMail = (Get-Item Function:Send-ExchangeSmtpMail).ScriptBlock
+$script:capturedBacklogSubject = ""
+$script:capturedBacklogHtml = ""
+Set-Item Function:Get-OptionalAutomationSetting -Value { param($Name) return $null }
+Set-Item Function:Send-ExchangeSmtpMail -Value {
+  param($From, $To, $Subject, $Html)
+  $script:capturedBacklogSubject = $Subject
+  $script:capturedBacklogHtml = $Html
+}
+try {
+  $emailBacklogDetails = @{
+    syncMode = "incremental"
+    queuedRows = 0
+    processedQueueRows = 0
+    completedQueueRows = 0
+    failedQueueRows = 0
+    backlogRows = 2
+    retryableBacklogRows = 1
+    terminalBacklogRows = 1
+    activeBacklogRows = 0
+    skippedQueueRows = 0
+    supersededQueueRows = 0
+    changeDetails = @($terminalBacklogDetail, $pendingBacklogDetail)
+  }
+  Send-ExchangeSyncNotification "failed" "Two unresolved rows remain." $emailBacklogDetails ([pscustomobject]@{
+    requestedBy = "SC"
+    requestedByEmail = "sc@example.com"
+    requestedAt = "2026-07-22T07:00:00Z"
+  })
+  Assert-True ($script:capturedBacklogHtml -match "Queue change and backlog results") "A backlog notice must use a backlog-specific result title"
+  Assert-True ($script:capturedBacklogHtml -match "Terminal stale group") "A backlog notice must name the terminal item"
+  Assert-True ($script:capturedBacklogHtml -match $terminalBacklogId) "A backlog notice must show the exact queue row ID"
+  Assert-True ($script:capturedBacklogHtml -match "retry limit exhausted") "A backlog notice must explain terminal retry exhaustion"
+  Assert-True ($script:capturedBacklogHtml -match "Not attempted") "A pending zero-attempt row must be labelled as not attempted"
+  Assert-True ($script:capturedBacklogHtml -notmatch "No pending changes") "A backlog notice must never claim there are no pending changes"
+  Assert-True ($script:capturedBacklogHtml -notmatch "Next retry") "Terminal and pending rows without next_attempt_at must not fabricate next-retry metadata"
+
+  $fullNoticeStats = @{
+    syncMode = "full"
+    contacts = 1
+    groups = 0
+    groupMembers = 0
+    failedQueueRows = 0
+    changeDetails = @()
+    createdContacts = 1
+    updatedContacts = 0
+    removedContacts = 0
+    createdGroups = 0
+    updatedGroups = 0
+    removedGroups = 0
+    addedMembers = 0
+    removedMembers = 0
+  }
+  Add-FullSyncMutationDetail `
+    $fullNoticeStats `
+    "Create contact" `
+    "Contact" `
+    "Full Notice Contact" `
+    "full-notice@example.com" `
+    "FCUNO_CONTACT:c-full-notice" `
+    "dddddddd-dddd-4ddd-8ddd-dddddddddddd" `
+    "Create contact completed and the final Exchange contact/profile was verified." `
+    @("Email: (missing) -> full-notice@example.com", "First name: (missing) -> Full")
+  Send-ExchangeSyncNotification "completed" "Full Exchange reconciliation completed." $fullNoticeStats ([pscustomobject]@{
+    requestedBy = "SC"
+    requestedByEmail = "sc@example.com"
+    requestedAt = "2026-07-22T07:10:00Z"
+  })
+  Assert-True ($script:capturedBacklogHtml -match "Full reconciliation results") "A full-run notice must use a full-reconciliation result title"
+  Assert-True ($script:capturedBacklogHtml -match "Create contact") "A full-run notice must show each mutation action"
+  Assert-True ($script:capturedBacklogHtml -match "Email: \(missing\) -&gt; full-notice@example.com") "A full-run notice must show exact before/after fields"
+  Assert-True ($script:capturedBacklogHtml -match "FCUNO_CONTACT:c-full-notice") "A full-run notice must show the stable FCUNO identity"
+  Assert-True ($script:capturedBacklogHtml -match "dddddddd-dddd-4ddd-8ddd-dddddddddddd") "A full-run notice must show the verified Exchange identity"
+  Assert-True ($script:capturedBacklogHtml -notmatch "No Exchange mutations required") "A mutated full run must never use the zero-mutation fallback"
+} finally {
+  Set-Item Function:Get-OptionalAutomationSetting -Value $originalGetOptionalAutomationSetting
+  Set-Item Function:Send-ExchangeSmtpMail -Value $originalSendExchangeSmtpMail
+}
+
+$backlogOutcome = Get-IncrementalSyncOutcome @{
+  queuedRows = 0
+  completedQueueRows = 0
+  failedQueueRows = 0
+  backlogRows = 3
+  skippedQueueRows = 0
+  supersededQueueRows = 0
+}
+Assert-Equal "failed" $backlogOutcome.Status "An unresolved unclaimable backlog must fail an incremental run"
+Assert-True ([bool]$backlogOutcome.AlwaysNotify) "An unresolved backlog must notify even for a scheduled incremental run"
+Assert-True ($backlogOutcome.Message -match "3 unresolved queue change") "The backlog failure must state the exact unresolved count"
+$emptyOutcome = Get-IncrementalSyncOutcome @{
+  queuedRows = 0
+  completedQueueRows = 0
+  failedQueueRows = 0
+  backlogRows = 0
+  skippedQueueRows = 0
+  supersededQueueRows = 0
+}
+Assert-Equal "completed" $emptyOutcome.Status "A true zero-backlog incremental no-op must remain successful"
+Assert-True (-not [bool]$emptyOutcome.AlwaysNotify) "A scheduled zero-backlog no-op must remain silent"
+
+$fullLockMessage = "Full reconciliation was blocked by an active mutation lease."
+$fullLockDetails = New-FullSyncLockFailureDetails $fullLockMessage
+Assert-Equal 1 $fullLockDetails.failedQueueRows "A lock-denied full run must record one explicit certification failure"
+Assert-True ((@($fullLockDetails.changeDetails | ForEach-Object { $_.result }) -join " ") -match "active mutation lease") "A lock-denied full run must preserve an informative failure detail for status and email"
+$fullLockDenial = Get-ExchangeSyncLockDenial "full"
+Assert-True ([bool]$fullLockDenial.Fatal) "A lock-denied full run must fail instead of appearing successfully skipped"
+Assert-True ($fullLockDenial.Message -match "certification was not performed") "A lock-denied full run must explain that no certification occurred"
+$incrementalLockDenial = Get-ExchangeSyncLockDenial "incremental"
+Assert-True (-not [bool]$incrementalLockDenial.Fatal) "A lock-denied incremental run must preserve its non-destructive no-op behavior"
+Assert-True ($incrementalLockDenial.Message -match "rows remain pending") "A lock-denied incremental run must explain that durable work remains queued"
 
 $script:removeCalled = $false
 $script:aliasLookupCalled = $false
@@ -194,6 +772,8 @@ function Get-DistributionGroup {
     if ($script:recreatedGroupRemoved) { return $null }
     return [pscustomobject]@{
       Identity = "old-group"
+      Guid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+      DistinguishedName = "CN=Old Reused Group,OU=Groups,DC=example,DC=com"
       DisplayName = "Reused Group"
       Alias = $(if ($script:aliasAlreadyCurrent) { "old-detached-alias" } else { "reused-group" })
       CustomAttribute1 = $ManagedMarker
@@ -204,6 +784,8 @@ function Get-DistributionGroup {
     if ($script:aliasAlreadyCurrent) {
       return [pscustomobject]@{
         Identity = "new-group"
+        Guid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+        DistinguishedName = "CN=New Reused Group,OU=Groups,DC=example,DC=com"
         DisplayName = "Reused Group"
         Alias = "reused-group"
         CustomAttribute1 = $ManagedMarker
@@ -323,11 +905,18 @@ $script:noOpContactProfile = [pscustomobject]@{
 $script:getMailContactCalls = 0
 $script:setMailContactCalls = 0
 $script:setContactCalls = 0
+$script:setContactError = ""
+$script:setContactFailed = $false
+$script:rereadReplacementContact = $null
 function Get-MailContact {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
   $script:getMailContactCalls += 1
-  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'" -or $Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") {
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'") {
+    if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
+    return $script:noOpMailContact
+  }
+  if ($Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") {
     return $script:noOpMailContact
   }
   return $null
@@ -335,7 +924,7 @@ function Get-MailContact {
 function Get-Contact {
   [CmdletBinding()]
   param($Identity)
-  if ($Identity -eq "unchanged-contact") { return $script:noOpContactProfile }
+  if ($Identity -in @("unchanged-contact", "11111111-1111-1111-1111-111111111111", "CN=Unchanged Contact,OU=Contacts,DC=example,DC=com")) { return $script:noOpContactProfile }
   return $null
 }
 function Set-MailContact {
@@ -347,6 +936,10 @@ function Set-Contact {
   [CmdletBinding()]
   param($Identity, $Name, $DisplayName, $FirstName, $LastName)
   $script:setContactCalls += 1
+  if ($script:setContactError) {
+    $script:setContactFailed = $true
+    throw $script:setContactError
+  }
 }
 function New-MailContact {
   [CmdletBinding()]
@@ -369,6 +962,14 @@ Assert-True (-not (Test-ExchangeMailContactMatches $script:noOpMailContact $desi
 $script:noOpContactProfile.FirstName = "Unchanged"
 Assert-True (Test-ExchangeMailContactMatches $script:noOpMailContact $desiredNoOpContact $script:noOpContactProfile) "Untrusted FirstName and LastName fields on Get-MailContact must not override the authoritative Get-Contact profile"
 Assert-True (-not (Test-ExchangeMailContactMatches $script:noOpMailContact $desiredNoOpContact $null)) "An unresolved authoritative contact profile must not be treated as a no-op"
+$markerOnlyDriftContact = [pscustomobject]@{}
+foreach ($property in $script:noOpMailContact.PSObject.Properties) {
+  $markerOnlyDriftContact | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+}
+$markerOnlyDriftContact.CustomAttribute1 = ""
+$markerOnlyChanges = @(Get-FullContactMutationFieldChanges $markerOnlyDriftContact $script:noOpContactProfile $desiredNoOpContact $false)
+Assert-Equal 1 $markerOnlyChanges.Count "A marker-only full repair must report its exact Exchange correction"
+Assert-Equal "Management marker: (blank) -> $ManagedMarker" $markerOnlyChanges[0] "A marker-only repair notice must identify the management marker before and after"
 
 $ambiguousProfileLookup = New-ExchangeContactProfileLookup @(
   [pscustomobject]@{ Identity = "unchanged-contact"; FirstName = "Unchanged"; LastName = "Contact" },
@@ -452,12 +1053,86 @@ try {
 }
 Assert-True $splitCandidateFailedClosed "A bulk source-key/email split must fail closed without mutating either contact"
 
+$script:getMailContactCalls = 0
+$script:setMailContactCalls = 0
+$script:setContactCalls = 0
+$collisionPeerContactStats = @{}
+Upsert-ExchangeMailContact $desiredNoOpContact $collisionPeerContactStats $true
+Assert-Equal 2 $script:getMailContactCalls "An unchanged alias-collision contact peer may use live ownership reads"
+Assert-Equal 0 $script:setMailContactCalls "An unchanged alias-collision contact peer must not rewrite mail-contact metadata"
+Assert-Equal 0 $script:setContactCalls "An unchanged alias-collision contact peer must not rewrite its authoritative profile"
+Assert-Equal 0 ([int]$collisionPeerContactStats.updatedContacts) "An unchanged alias-collision contact peer must not increment updates"
+
+$script:getMailContactCalls = 0
+$script:setMailContactCalls = 0
+$script:setContactCalls = 0
 $incrementalContactStats = @{}
 Upsert-ExchangeMailContact $desiredNoOpContact $incrementalContactStats
 Assert-Equal 3 $script:getMailContactCalls "Incremental contact processing must check both immutable ownership candidates and verify the result"
 Assert-Equal 1 $script:setMailContactCalls "Incremental contact processing must retain its existing upsert behavior"
 Assert-Equal 1 $script:setContactCalls "Incremental contact processing must retain its existing profile update behavior"
 Assert-Equal 1 $incrementalContactStats.updatedContacts "Incremental contact processing must still report its update"
+
+$script:setContactError = "The server is busy and the request was throttled."
+$script:removeCalled = $false
+$transientProfileFailed = $false
+try {
+  Upsert-ExchangeMailContact $desiredNoOpContact @{}
+} catch {
+  $transientProfileFailed = $_.Exception.Message -match "throttled"
+}
+Assert-True $transientProfileFailed "A transient Set-Contact failure must propagate for durable retry"
+Assert-True (-not $script:removeCalled) "A transient Set-Contact failure must never delete a valid managed contact"
+$script:setContactError = ""
+
+$replacementAfterUpdateError = [pscustomobject]@{
+  Identity = "unchanged-contact"
+  Guid = "99999999-9999-4999-8999-999999999999"
+  ExternalDirectoryObjectId = "replacement-external-contact"
+  DistinguishedName = "CN=Replacement Contact,OU=Contacts,DC=example,DC=com"
+  Name = "Unchanged Contact"
+  DisplayName = "Unchanged Contact"
+  ExternalEmailAddress = "SMTP:unchanged@example.com"
+  Alias = "unchanged-contact"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-unchanged"
+  HiddenFromAddressListsEnabled = $false
+}
+$script:setContactFailed = $false
+$script:rereadReplacementContact = $replacementAfterUpdateError
+$script:setContactError = "Invalid recipient object"
+$script:removeCalled = $false
+$replacementRaceFailedClosed = $false
+try {
+  Upsert-ExchangeMailContact $desiredNoOpContact @{}
+} catch {
+  $replacementRaceFailedClosed = $_.Exception.Message -match "source-key ownership changed"
+}
+Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the same mutable alias/source key now resolves to a different immutable contact"
+Assert-True (-not $script:removeCalled) "A replacement contact must never be deleted after an update/recreate race"
+$script:setContactError = ""
+$script:setContactFailed = $false
+$script:rereadReplacementContact = $null
+
+$identitylessContact = [pscustomobject]@{
+  Identity = "unchanged-contact"
+  Name = "Unchanged Contact"
+  DisplayName = "Unchanged Contact"
+  ExternalEmailAddress = "SMTP:unchanged@example.com"
+  Alias = "unchanged-contact"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-unchanged"
+  HiddenFromAddressListsEnabled = $false
+}
+$contactSetBaseline = $script:setMailContactCalls
+$identitylessContactFailedClosed = $false
+try {
+  Upsert-ExchangeMailContact $desiredNoOpContact @{} $false $identitylessContact $true
+} catch {
+  $identitylessContactFailedClosed = $_.Exception.Message -match "no immutable identity"
+}
+Assert-True $identitylessContactFailedClosed "An existing contact without a strong Exchange identity must fail before profile or marker mutation"
+Assert-Equal $contactSetBaseline $script:setMailContactCalls "An identityless existing contact must not be retagged through its mutable alias"
 
 $desiredNoOpGroup = [pscustomobject]@{
   SourceGroupId = "g-unchanged"
@@ -468,23 +1143,39 @@ $desiredNoOpGroup = [pscustomobject]@{
 }
 $script:noOpDistributionGroup = [pscustomobject]@{
   Identity = "unchanged-group"
+  Guid = "33333333-3333-4333-8333-333333333333"
+  ExternalDirectoryObjectId = "external-unchanged-group"
+  DistinguishedName = "CN=Unchanged Group,OU=Groups,DC=example,DC=com"
   Name = "Unchanged Group"
   DisplayName = "Unchanged Group"
   Alias = "unchanged-group"
-  Notes = "Current description"
   CustomAttribute1 = $ManagedMarker
   CustomAttribute2 = "FCUNO_GROUP:g-unchanged"
   HiddenFromAddressListsEnabled = $false
 }
+$script:noOpGroupProfile = [pscustomobject]@{
+  Identity = "CN=Unchanged Group,OU=Groups,DC=example,DC=com"
+  Guid = "33333333-3333-4333-8333-333333333333"
+  ExternalDirectoryObjectId = "external-unchanged-group"
+  DistinguishedName = "CN=Unchanged Group,OU=Groups,DC=example,DC=com"
+  Notes = "Current description"
+}
 $script:getDistributionGroupCalls = 0
+$script:getGroupCalls = 0
+$script:staleGroupProfileReads = 0
 $script:setDistributionGroupCalls = 0
 $script:setGroupCalls = 0
 $script:newDistributionGroupCalls = 0
 $script:newDistributionGroup = $null
+$script:newGroupProfile = $null
+$script:membershipResolvedGroup = $null
 function Get-DistributionGroup {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
   $script:getDistributionGroupCalls += 1
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-unchanged'" -and $script:membershipResolvedGroup) {
+    return $script:membershipResolvedGroup
+  }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-unchanged'" -or $Identity -eq "unchanged-group") {
     return $script:noOpDistributionGroup
   }
@@ -493,11 +1184,36 @@ function Get-DistributionGroup {
   }
   return $null
 }
+function Get-Group {
+  [CmdletBinding()]
+  param($ResultSize, $Identity)
+  $script:getGroupCalls += 1
+  if (-not $Identity) {
+    return @($script:noOpGroupProfile, $script:newGroupProfile | Where-Object { $null -ne $_ })
+  }
+  if ($Identity -in @("unchanged-group", "33333333-3333-4333-8333-333333333333", "CN=Unchanged Group,OU=Groups,DC=example,DC=com")) {
+    if ($script:staleGroupProfileReads -gt 0) {
+      $script:staleGroupProfileReads -= 1
+      return [pscustomobject]@{
+        Identity = $script:noOpGroupProfile.Identity
+        Guid = $script:noOpGroupProfile.Guid
+        ExternalDirectoryObjectId = $script:noOpGroupProfile.ExternalDirectoryObjectId
+        DistinguishedName = $script:noOpGroupProfile.DistinguishedName
+        Notes = "Eventually consistent old description"
+      }
+    }
+    return $script:noOpGroupProfile
+  }
+  if ($script:newGroupProfile -and $Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) {
+    return $script:newGroupProfile
+  }
+  return $null
+}
 function Set-DistributionGroup {
   [CmdletBinding()]
   param($Identity, $Alias, $Name, $DisplayName, $Notes, $CustomAttribute1, $CustomAttribute2, $HiddenFromAddressListsEnabled)
   $script:setDistributionGroupCalls += 1
-  if ($Identity -eq "new-group") {
+  if ($Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) {
     $script:newDistributionGroup.CustomAttribute1 = $CustomAttribute1
     $script:newDistributionGroup.CustomAttribute2 = $CustomAttribute2
     $script:newDistributionGroup.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
@@ -507,7 +1223,8 @@ function Set-Group {
   [CmdletBinding()]
   param($Identity, $Notes)
   $script:setGroupCalls += 1
-  if ($Identity -eq "new-group") { $script:newDistributionGroup.Notes = $Notes }
+  if ($Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) { $script:newGroupProfile.Notes = $Notes }
+  if ($Identity -in @("unchanged-group", "33333333-3333-4333-8333-333333333333")) { $script:noOpGroupProfile.Notes = $Notes }
 }
 function New-DistributionGroup {
   [CmdletBinding()]
@@ -516,13 +1233,22 @@ function New-DistributionGroup {
     $script:newDistributionGroupCalls += 1
     $script:newDistributionGroup = [pscustomobject]@{
       Identity = "new-group"
+      Guid = "44444444-4444-4444-8444-444444444444"
+      ExternalDirectoryObjectId = "external-new-group"
+      DistinguishedName = "CN=New Group,OU=Groups,DC=example,DC=com"
       Name = $Name
       DisplayName = $Name
       Alias = $Alias
-      Notes = ""
       CustomAttribute1 = ""
       CustomAttribute2 = ""
       HiddenFromAddressListsEnabled = $false
+    }
+    $script:newGroupProfile = [pscustomobject]@{
+      Identity = "CN=New Group,OU=Groups,DC=example,DC=com"
+      Guid = "44444444-4444-4444-8444-444444444444"
+      ExternalDirectoryObjectId = "external-new-group"
+      DistinguishedName = "CN=New Group,OU=Groups,DC=example,DC=com"
+      Notes = ""
     }
     return $script:newDistributionGroup
   }
@@ -530,8 +1256,25 @@ function New-DistributionGroup {
 }
 
 $fullNoOpGroupStats = @{}
-Upsert-ExchangeDistributionGroup $desiredNoOpGroup $fullNoOpGroupStats $true $script:noOpDistributionGroup $true
+$groupProfileLookup = New-ExchangeGroupProfileLookup @($script:noOpGroupProfile)
+$resolvedNoOpGroupProfile = Resolve-ExchangeGroupProfileHint $script:noOpDistributionGroup $groupProfileLookup
+Assert-True ($null -ne $resolvedNoOpGroupProfile) "A bulk group profile must join through immutable Exchange identity"
+$mutableOnlyGroupProfile = [pscustomobject]@{ Identity = "unchanged-group"; Notes = "Current description" }
+Assert-True ($null -eq (Resolve-ExchangeGroupProfileHint $script:noOpDistributionGroup (New-ExchangeGroupProfileLookup @($mutableOnlyGroupProfile)))) "A mutable group Identity value alone must never authorize a Notes-profile join"
+$ambiguousGroupProfileLookup = New-ExchangeGroupProfileLookup @(
+  [pscustomobject]@{ Guid = "33333333-3333-4333-8333-333333333333"; Notes = "Current description" },
+  [pscustomobject]@{ ExternalDirectoryObjectId = "external-unchanged-group"; Notes = "Current description" }
+)
+$ambiguousGroupProfileFailedClosed = $false
+try {
+  Resolve-ExchangeGroupProfileHint $script:noOpDistributionGroup $ambiguousGroupProfileLookup | Out-Null
+} catch {
+  $ambiguousGroupProfileFailedClosed = $_.Exception.Message -match "More than one authoritative Exchange group profile"
+}
+Assert-True $ambiguousGroupProfileFailedClosed "Two distinct strong group-profile matches must fail closed"
+Upsert-ExchangeDistributionGroup $desiredNoOpGroup $fullNoOpGroupStats $true $script:noOpDistributionGroup $true $resolvedNoOpGroupProfile
 Assert-Equal 0 $script:getDistributionGroupCalls "Full reconciliation must use its collision-checked group hint without a per-group read"
+Assert-Equal 0 $script:getGroupCalls "Full reconciliation must use its bulk authoritative group profile without a per-group read"
 Assert-Equal 0 $script:setDistributionGroupCalls "Full reconciliation must not rewrite an unchanged distribution group"
 Assert-Equal 0 $script:setGroupCalls "Full reconciliation must not rewrite unchanged group notes"
 Assert-Equal 1 $fullNoOpGroupStats.verifiedQueueRows "A skipped no-op group must still complete exact verification"
@@ -542,7 +1285,8 @@ $changedDescriptionGroup = [pscustomobject]@{
   Description = "Changed description"
   SourceKey = "FCUNO_GROUP:g-unchanged"
 }
-Assert-True (-not (Test-ExchangeDistributionGroupMatches $script:noOpDistributionGroup $changedDescriptionGroup)) "A changed group description must not be treated as a no-op"
+Assert-True (-not (Test-ExchangeDistributionGroupMatches $script:noOpDistributionGroup $changedDescriptionGroup $script:noOpGroupProfile)) "A changed authoritative group description must not be treated as a no-op"
+Assert-True (-not (Test-ExchangeDistributionGroupMatches $script:noOpDistributionGroup $desiredNoOpGroup $null)) "An unresolved authoritative group profile must fail closed"
 
 $duplicateAliasGroup = [pscustomobject]@{
   Identity = "duplicate-alias-group"
@@ -573,12 +1317,56 @@ try {
 }
 Assert-True $duplicateAliasFailedClosed "A bulk group snapshot must fail closed when an alias resolves to multiple groups"
 
+$foreignSameNameGroup = [pscustomobject]@{
+  Identity = "user-managed-same-name"
+  Guid = "55555555-5555-4555-8555-555555555555"
+  Name = "Unchanged Group"
+  DisplayName = "Unchanged Group"
+  Alias = "different-user-alias"
+  CustomAttribute1 = ""
+  CustomAttribute2 = ""
+}
+$sameNameResolution = Resolve-ExchangeDistributionGroupHint $desiredNoOpGroup (New-ExchangeDistributionGroupLookup @($foreignSameNameGroup))
+Assert-True ($null -eq $sameNameResolution) "An untagged group with the same display name but a different alias must never be adopted or retagged"
+
+$script:getDistributionGroupCalls = 0
+$script:getGroupCalls = 0
+$script:setDistributionGroupCalls = 0
+$script:setGroupCalls = 0
+$collisionPeerGroupStats = @{}
+Upsert-ExchangeDistributionGroup $desiredNoOpGroup $collisionPeerGroupStats $true
+Assert-Equal 1 $script:getDistributionGroupCalls "An unchanged alias-collision group peer may use one live source-owner read"
+Assert-Equal 1 $script:getGroupCalls "An unchanged alias-collision group peer must read authoritative Notes through Get-Group"
+Assert-Equal 0 $script:setDistributionGroupCalls "An unchanged alias-collision group peer must not rewrite distribution metadata"
+Assert-Equal 0 $script:setGroupCalls "An unchanged alias-collision group peer must not rewrite Notes"
+Assert-Equal 0 ([int]$collisionPeerGroupStats.updatedGroups) "An unchanged alias-collision group peer must not increment updates"
+
+$script:getDistributionGroupCalls = 0
+$script:getGroupCalls = 0
+$script:setDistributionGroupCalls = 0
+$script:setGroupCalls = 0
 $incrementalGroupStats = @{}
 Upsert-ExchangeDistributionGroup $desiredNoOpGroup $incrementalGroupStats
 Assert-Equal 2 $script:getDistributionGroupCalls "Incremental group processing must retain its live lookup and verification reads"
+Assert-Equal 1 $script:getGroupCalls "Incremental group verification must read Notes from Get-Group"
 Assert-Equal 1 $script:setDistributionGroupCalls "Incremental group processing must retain its existing upsert behavior"
 Assert-Equal 1 $script:setGroupCalls "Incremental group processing must update Notes through Set-Group"
 Assert-Equal 1 $incrementalGroupStats.updatedGroups "Incremental group processing must still report its update"
+
+$script:getDistributionGroupCalls = 0
+$script:getGroupCalls = 0
+$script:staleGroupProfileReads = 2
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $eventualGroupStats = @{}
+  Upsert-ExchangeDistributionGroup $desiredNoOpGroup $eventualGroupStats
+  Assert-Equal 4 $script:getDistributionGroupCalls "Group verification must retry fresh distribution metadata until eventual consistency settles"
+  Assert-Equal 3 $script:getGroupCalls "Group verification must retry authoritative Get-Group Notes until they settle"
+  Assert-Equal 1 $eventualGroupStats.verifiedQueueRows "Eventually consistent group Notes must be accepted only after an exact fresh verification"
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:staleGroupProfileReads = 0
+}
 
 $newDesiredGroup = [pscustomobject]@{
   SourceGroupId = "g-new"
@@ -590,8 +1378,27 @@ $newDesiredGroup = [pscustomobject]@{
 $newGroupStats = @{}
 Upsert-ExchangeDistributionGroup $newDesiredGroup $newGroupStats
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
-Assert-Equal "New group notes" $script:newDistributionGroup.Notes "A new distribution group must receive Notes through Set-Group"
+Assert-Equal "New group notes" $script:newGroupProfile.Notes "A new distribution group must receive authoritative Notes through Set-Group"
 Assert-Equal 1 $newGroupStats.createdGroups "A new distribution group must be reported as created"
+
+$identitylessGroup = [pscustomobject]@{
+  Identity = "unchanged-group"
+  Name = "Unchanged Group"
+  DisplayName = "Unchanged Group"
+  Alias = "unchanged-group"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_GROUP:g-unchanged"
+  HiddenFromAddressListsEnabled = $false
+}
+$groupSetBaseline = $script:setDistributionGroupCalls
+$identitylessGroupFailedClosed = $false
+try {
+  Upsert-ExchangeDistributionGroup $desiredNoOpGroup @{} $false $identitylessGroup $true
+} catch {
+  $identitylessGroupFailedClosed = $_.Exception.Message -match "no immutable identity"
+}
+Assert-True $identitylessGroupFailedClosed "An existing group without a strong Exchange identity must fail before metadata or Notes mutation"
+Assert-Equal $groupSetBaseline $script:setDistributionGroupCalls "An identityless existing group must not be retagged through its mutable alias"
 
 $finalProjectionRows = @{
   Contacts = @($desiredNoOpContact)
@@ -599,15 +1406,45 @@ $finalProjectionRows = @{
   Members = @()
 }
 $exactFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
-Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) $exactFinalStats
+Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $exactFinalStats
 Assert-Equal 0 $exactFinalStats.failedQueueRows "Fresh final certification must accept exact contact, profile, and group metadata"
 
 $script:noOpContactProfile.FirstName = "Stale First Name"
 $driftedFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
-Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) $driftedFinalStats
+Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $driftedFinalStats
 Assert-True ([int]$driftedFinalStats.failedQueueRows -gt 0) "Fresh final certification must reject a drifted authoritative contact profile"
 Assert-True ((@($driftedFinalStats.changeDetails | ForEach-Object { $_.result }) -join " ") -match "first name") "Fresh final certification must identify the drifted profile field"
 $script:noOpContactProfile.FirstName = "Unchanged"
+
+$script:noOpGroupProfile.Notes = "Stale description"
+$driftedGroupFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
+Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $driftedGroupFinalStats
+Assert-True ([int]$driftedGroupFinalStats.failedQueueRows -gt 0) "Fresh final certification must reject drifted authoritative group Notes"
+Assert-True ((@($driftedGroupFinalStats.changeDetails | ForEach-Object { $_.result }) -join " ") -match "description") "Fresh final certification must identify drifted group description"
+$script:noOpGroupProfile.Notes = "Current description"
+
+$script:removeCalled = $false
+$invalidManagedContact = [pscustomobject]@{
+  Identity = "managed-now-invalid"
+  DisplayName = "Managed now invalid"
+  ExternalEmailAddress = "formerly-valid@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-now-invalid"
+}
+$invalidProtectionRows = @{
+  Contacts = @()
+  InvalidContacts = @([pscustomobject]@{
+    SourceContactId = "c-now-invalid"
+    DisplayName = "Managed now invalid"
+    Email = "NOT AN EMAIL"
+    Reason = "Invalid external email address"
+  })
+}
+$invalidProtectionStats = @{ removedContacts = 0; preservedInvalidContacts = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeContacts @($invalidManagedContact) $invalidProtectionRows $invalidProtectionStats
+Assert-True (-not $script:removeCalled) "A managed Exchange contact whose FCUNO source became invalid must be preserved, never stale-deleted"
+Assert-Equal 1 $invalidProtectionStats.preservedInvalidContacts "A preserved invalid-source contact must be counted for the notice"
+Assert-Equal 0 $invalidProtectionStats.removedContacts "Invalid-source preservation must report zero removals"
 
 $desiredNoOpGroupMembers = @(
   [pscustomobject]@{ MemberEmail = "existing@example.com" },
@@ -619,18 +1456,34 @@ $script:memberState = @{
 }
 $script:attemptedMemberAdds = @()
 $script:removedMemberEmails = @()
+$script:memberReadGroupIdentities = @()
+$script:memberMutationGroupIdentities = @()
 $script:getDistributionGroupMemberCalls = 0
+$script:forceMembershipVerificationFailure = $false
+$script:duplicateUnexpectedMemberSnapshot = $false
 function Get-DistributionGroupMember {
   [CmdletBinding()]
   param($Identity, $ResultSize)
   $script:getDistributionGroupMemberCalls += 1
-  return @($script:memberState.Keys | Sort-Object | ForEach-Object {
+  $script:memberReadGroupIdentities += (Clean-Text $Identity)
+  if ($script:duplicateUnexpectedMemberSnapshot) {
+    return @(
+      [pscustomobject]@{ Identity = "Display Member One"; ExternalEmailAddress = "unexpected@example.com" },
+      [pscustomobject]@{ Identity = "Display Member Two"; ExternalEmailAddress = "unexpected@example.com" }
+    )
+  }
+  $emails = @($script:memberState.Keys | Sort-Object)
+  if ($script:forceMembershipVerificationFailure -and $script:getDistributionGroupMemberCalls -gt 1) {
+    $emails = @($emails | Where-Object { $_ -ne "missing@example.com" })
+  }
+  return @($emails | ForEach-Object {
     [pscustomobject]@{ Identity = $_; ExternalEmailAddress = $_ }
   })
 }
 function Add-DistributionGroupMember {
   [CmdletBinding()]
   param($Identity, $Member)
+  $script:memberMutationGroupIdentities += (Clean-Text $Identity)
   $email = Normalize-Email $Member
   $script:attemptedMemberAdds += $email
   if (Has-MapKey $script:memberState $email) { throw "$email is already a member" }
@@ -639,6 +1492,7 @@ function Add-DistributionGroupMember {
 function Remove-DistributionGroupMember {
   [CmdletBinding(SupportsShouldProcess)]
   param($Identity, $Member)
+  $script:memberMutationGroupIdentities += (Clean-Text $Identity)
   $email = Normalize-Email $Member
   $script:removedMemberEmails += $email
   $script:memberState.Remove($email)
@@ -648,11 +1502,14 @@ $script:memberState = @{
   "existing@example.com" = $true
   "missing@example.com" = $true
 }
+$script:memberReadGroupIdentities = @()
+$script:memberMutationGroupIdentities = @()
 $fullExactMemberStats = @{}
 Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers $fullExactMemberStats $true $script:noOpDistributionGroup $true
 Assert-Equal 1 $script:getDistributionGroupMemberCalls "An exact full-sync membership snapshot must be accepted without a second read"
 Assert-Equal 0 @($script:attemptedMemberAdds).Count "An exact full-sync membership snapshot must not attempt any member add"
 Assert-Equal 0 @($script:removedMemberEmails).Count "An exact full-sync membership snapshot must not attempt any member removal"
+Assert-Equal $script:noOpDistributionGroup.Guid $script:memberReadGroupIdentities[0] "Membership reads must use the freshly resolved immutable group identity, never the mutable alias"
 
 $script:memberState = @{
   "existing@example.com" = $true
@@ -661,6 +1518,8 @@ $script:memberState = @{
 $script:attemptedMemberAdds = @()
 $script:removedMemberEmails = @()
 $script:getDistributionGroupMemberCalls = 0
+$script:memberReadGroupIdentities = @()
+$script:memberMutationGroupIdentities = @()
 $fullMemberStats = @{}
 Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers $fullMemberStats $true $script:noOpDistributionGroup $true
 Assert-Equal 2 $script:getDistributionGroupMemberCalls "A changed full-sync membership must be read initially and verified after mutation"
@@ -668,6 +1527,65 @@ Assert-Equal 1 @($script:attemptedMemberAdds).Count "Full reconciliation must ad
 Assert-Equal "missing@example.com" $script:attemptedMemberAdds[0] "Full reconciliation must not re-add an existing member"
 Assert-Equal 1 $fullMemberStats.addedMembers "Only the missing member must be counted as added"
 Assert-Equal "unexpected@example.com" $script:removedMemberEmails[0] "Unexpected members must still be removed"
+Assert-True (@($script:memberMutationGroupIdentities | Where-Object { $_ -ne $script:noOpDistributionGroup.Guid }).Count -eq 0) "Every membership add/remove must target the immutable group identity"
+
+$raceResolvedGroup = [pscustomobject]@{
+  Identity = "mutable-alias-now-points-elsewhere"
+  Guid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+  DistinguishedName = "CN=Source-Key Resolved Group,OU=Groups,DC=example,DC=com"
+  Name = "Unchanged Group"
+  DisplayName = "Unchanged Group"
+  Alias = "source-key-resolved-group"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_GROUP:g-unchanged"
+  HiddenFromAddressListsEnabled = $false
+}
+$script:membershipResolvedGroup = $raceResolvedGroup
+$script:memberState = @{
+  "existing@example.com" = $true
+  "missing@example.com" = $true
+}
+$script:getDistributionGroupMemberCalls = 0
+$script:memberReadGroupIdentities = @()
+Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers @{} $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
+Assert-Equal $raceResolvedGroup.Guid $script:memberReadGroupIdentities[0] "An alias/source-key race must bind membership reads to the one freshly source-key-resolved immutable group"
+$script:membershipResolvedGroup = $null
+
+$script:duplicateUnexpectedMemberSnapshot = $true
+$script:removedMemberEmails = @()
+$unprovableMemberRemovalFailedClosed = $false
+try {
+  Sync-ExchangeGroupMembers $desiredNoOpGroup @() @{} $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
+} catch {
+  $unprovableMemberRemovalFailedClosed = $_.Exception.Message -match "immutable or unique SMTP identity could not be proven"
+}
+Assert-True $unprovableMemberRemovalFailedClosed "A duplicate unexpected member without a strong identity must fail closed before removal"
+Assert-Equal 0 @($script:removedMemberEmails).Count "An unprovable member identity must never be removed through mutable display Identity"
+$script:duplicateUnexpectedMemberSnapshot = $false
+
+$script:memberState = @{ "existing@example.com" = $true }
+$script:attemptedMemberAdds = @()
+$script:removedMemberEmails = @()
+$script:getDistributionGroupMemberCalls = 0
+$script:forceMembershipVerificationFailure = $true
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $failedFullMemberStats = @{ changeDetails = @() }
+  $failedMembershipVerification = $false
+  try {
+    Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers $failedFullMemberStats $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
+  } catch {
+    $failedMembershipVerification = $_.Exception.Message -match "membership verification failed"
+  }
+  Assert-True $failedMembershipVerification "A full membership mutation must fail when bounded final verification never confirms it"
+  $failedMutationRows = @($failedFullMemberStats.changeDetails | Where-Object { $_.actionLabel -eq "Add group member" })
+  Assert-Equal 1 $failedMutationRows.Count "A successful member cmdlet with failed final verification must retain one partial mutation detail"
+  Assert-Equal "failed" $failedMutationRows[0].status "An unverified membership mutation must never be rendered green/completed"
+  Assert-True (@($failedMutationRows[0].fieldChanges) -contains "Member: (absent) -> missing@example.com") "A failed partial membership detail must preserve the exact member before/after"
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:forceMembershipVerificationFailure = $false
+}
 
 $script:memberState = @{
   "existing@example.com" = $true
@@ -736,5 +1654,175 @@ $script:capturedAuditContact = $null
 Reconcile-ExchangeContactEmail "historical-duplicate@example.com" $auditDeleteRow @{} $true $true
 Assert-True ($script:capturedAuditContact.AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-former-delete-owner") "An audit-authorized before-email delete must allow the queued deleted duplicate owner"
 Assert-True ($auditCanonicalContact.AllowedOwnerSourceKeys -notcontains "FCUNO_CONTACT:c-former-delete-owner") "The delete exception must remain scoped to its cloned before-email reconciliation"
+
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $script:deleteContactMode = "noop"
+  $script:deleteContactRemoved = $false
+  $script:deleteContactRemoveCalls = 0
+  $legacyDeleteContact = [pscustomobject]@{
+    Identity = "legacy-delete-contact"
+    Guid = "66666666-6666-4666-8666-666666666666"
+    DistinguishedName = "CN=Legacy Delete Contact,OU=Contacts,DC=example,DC=com"
+    DisplayName = "Legacy Delete Contact"
+    ExternalEmailAddress = "legacy-delete@example.com"
+    Alias = "legacy-delete-contact"
+    CustomAttribute1 = ""
+    CustomAttribute2 = ""
+  }
+  $replacementDeleteContact = [pscustomobject]@{
+    Identity = "replacement-delete-contact"
+    Guid = "77777777-7777-4777-8777-777777777777"
+    DistinguishedName = "CN=Replacement Delete Contact,OU=Contacts,DC=example,DC=com"
+    DisplayName = "Replacement Delete Contact"
+    ExternalEmailAddress = "legacy-delete@example.com"
+    Alias = "replacement-delete-contact"
+    CustomAttribute1 = $ManagedMarker
+    CustomAttribute2 = "FCUNO_CONTACT:c-replacement"
+  }
+  function Get-MailContact {
+    [CmdletBinding()]
+    param($Filter, $ResultSize, $Identity)
+    if ($script:deleteContactMode -eq "source_lookup_error" -and $Filter -like "CustomAttribute2 -eq '*'") {
+      throw "Exchange contact source lookup was throttled."
+    }
+    if ($script:deleteContactMode -eq "verification_error" -and $script:deleteContactRemoved -and $Identity -in @($legacyDeleteContact.Guid, $legacyDeleteContact.DistinguishedName)) {
+      throw "Exchange contact deletion verification connection was interrupted."
+    }
+    if ($Identity -in @($legacyDeleteContact.Identity, $legacyDeleteContact.Guid, $legacyDeleteContact.DistinguishedName)) {
+      if (-not $script:deleteContactRemoved) { return $legacyDeleteContact }
+      return $null
+    }
+    if ($Filter -like "ExternalEmailAddress -eq 'legacy-delete@example.com'") {
+      if (-not $script:deleteContactRemoved) { return $legacyDeleteContact }
+      if ($script:deleteContactMode -eq "replacement") { return $replacementDeleteContact }
+    }
+    return $null
+  }
+  function Remove-MailContact {
+    [CmdletBinding(SupportsShouldProcess)]
+    param($Identity)
+    $script:deleteContactRemoveCalls += 1
+    if ($script:deleteContactMode -in @("replacement", "verification_error")) { $script:deleteContactRemoved = $true }
+  }
+
+  $script:deleteContactMode = "source_lookup_error"
+  $script:deleteContactRemoved = $false
+  $script:deleteContactRemoveCalls = 0
+  $contactLookupStats = @{}
+  $contactLookupFailedClosed = $false
+  try {
+    Remove-ManagedExchangeMailContact "legacy-delete@example.com" "legacy-delete-contact" $contactLookupStats "lookup-error" "Legacy Delete Contact" $true
+  } catch {
+    $contactLookupFailedClosed = $_.Exception.Message -match "throttled"
+  }
+  Assert-True $contactLookupFailedClosed "A throttled contact source lookup must fail instead of concluding that the contact is absent"
+  Assert-Equal 0 $script:deleteContactRemoveCalls "A failed contact source lookup must never call Remove-MailContact"
+  Assert-Equal 0 ([int]$contactLookupStats.verifiedQueueRows) "A failed contact source lookup must never count verified completion"
+
+  $script:deleteContactMode = "noop"
+  $contactNoOpFailed = $false
+  try {
+    Remove-ManagedExchangeMailContact "legacy-delete@example.com" "legacy-delete-contact" @{} "" "Legacy Delete Contact" $true
+  } catch {
+    $contactNoOpFailed = $_.Exception.Message -match "exact immutable Exchange contact still exists"
+  }
+  Assert-True $contactNoOpFailed "A Remove-MailContact no-op must fail exact immutable deletion verification"
+  Assert-Equal 1 $script:deleteContactRemoveCalls "The contact deletion guard must still attempt the authorized exact removal once"
+
+  $script:deleteContactMode = "replacement"
+  $script:deleteContactRemoved = $false
+  $replacementDeleteStats = @{}
+  Remove-ManagedExchangeMailContact "legacy-delete@example.com" "legacy-delete-contact" $replacementDeleteStats "" "Legacy Delete Contact" $true
+  Assert-Equal 1 $replacementDeleteStats.removedContacts "A demonstrably different same-email contact with a non-empty owner may survive exact legacy deletion"
+
+  $script:deleteContactMode = "verification_error"
+  $script:deleteContactRemoved = $false
+  $script:deleteContactRemoveCalls = 0
+  $contactVerificationStats = @{}
+  $contactVerificationReadFailedClosed = $false
+  try {
+    Remove-ManagedExchangeMailContact "legacy-delete@example.com" "legacy-delete-contact" $contactVerificationStats "" "Legacy Delete Contact" $true
+  } catch {
+    $contactVerificationReadFailedClosed = $_.Exception.Message -match "connection was interrupted"
+  }
+  Assert-True $contactVerificationReadFailedClosed "A transient Get-MailContact failure after Remove-MailContact must fail deletion verification"
+  Assert-Equal 1 $script:deleteContactRemoveCalls "The verification-read regression must exercise a successful Remove-MailContact cmdlet first"
+  Assert-Equal 0 ([int]$contactVerificationStats.removedContacts) "A contact deletion with an unreadable final state must not count as removed"
+  Assert-Equal 0 ([int]$contactVerificationStats.verifiedQueueRows) "A contact deletion with an unreadable final state must not count as verified/completed"
+
+  $script:deleteGroupRemoved = $false
+  $script:deleteGroupRemoveCalls = 0
+  $script:deleteGroupMode = "noop"
+  $legacyDeleteGroup = [pscustomobject]@{
+    Identity = "legacy-delete-group"
+    Guid = "88888888-8888-4888-8888-888888888888"
+    DistinguishedName = "CN=Legacy Delete Group,OU=Groups,DC=example,DC=com"
+    DisplayName = "Legacy Delete Group"
+    Alias = "legacy-delete-group"
+    CustomAttribute1 = ""
+    CustomAttribute2 = ""
+  }
+  function Get-DistributionGroup {
+    [CmdletBinding()]
+    param($Filter, $ResultSize, $Identity)
+    if ($script:deleteGroupMode -eq "alias_lookup_error" -and -not $script:deleteGroupRemoved -and $Identity -eq $legacyDeleteGroup.Alias) {
+      throw "Exchange group alias lookup connection was interrupted."
+    }
+    if ($script:deleteGroupMode -eq "verification_error" -and $script:deleteGroupRemoved -and $Identity -in @($legacyDeleteGroup.Guid, $legacyDeleteGroup.DistinguishedName)) {
+      throw "Exchange group deletion verification was throttled."
+    }
+    if ($Identity -in @($legacyDeleteGroup.Identity, $legacyDeleteGroup.Guid, $legacyDeleteGroup.DistinguishedName, $legacyDeleteGroup.Alias)) {
+      if (-not $script:deleteGroupRemoved) { return $legacyDeleteGroup }
+    }
+    return $null
+  }
+  function Remove-DistributionGroup {
+    [CmdletBinding(SupportsShouldProcess)]
+    param($Identity)
+    $script:deleteGroupRemoveCalls += 1
+    if ($script:deleteGroupMode -eq "verification_error") { $script:deleteGroupRemoved = $true }
+  }
+
+  $script:deleteGroupMode = "alias_lookup_error"
+  $script:deleteGroupRemoveCalls = 0
+  $groupLookupStats = @{}
+  $groupLookupFailedClosed = $false
+  try {
+    Remove-ManagedExchangeDistributionGroup "legacy-delete-group" $groupLookupStats "" "Legacy Delete Group" $true
+  } catch {
+    $groupLookupFailedClosed = $_.Exception.Message -match "connection was interrupted"
+  }
+  Assert-True $groupLookupFailedClosed "A failed group alias lookup must fail instead of concluding that the group is absent"
+  Assert-Equal 0 $script:deleteGroupRemoveCalls "A failed group alias lookup must never call Remove-DistributionGroup"
+  Assert-Equal 0 ([int]$groupLookupStats.verifiedQueueRows) "A failed group alias lookup must never count verified completion"
+
+  $script:deleteGroupMode = "noop"
+  $groupNoOpFailed = $false
+  try {
+    Remove-ManagedExchangeDistributionGroup "legacy-delete-group" @{} "" "Legacy Delete Group" $true
+  } catch {
+    $groupNoOpFailed = $_.Exception.Message -match "exact immutable Exchange group still exists"
+  }
+  Assert-True $groupNoOpFailed "A Remove-DistributionGroup no-op must fail exact immutable deletion verification"
+  Assert-Equal 1 $script:deleteGroupRemoveCalls "The group deletion guard must still attempt the authorized exact removal once"
+
+  $script:deleteGroupMode = "verification_error"
+  $script:deleteGroupRemoved = $false
+  $script:deleteGroupRemoveCalls = 0
+  $groupVerificationStats = @{}
+  $groupVerificationReadFailedClosed = $false
+  try {
+    Remove-ManagedExchangeDistributionGroup "legacy-delete-group" $groupVerificationStats "" "Legacy Delete Group" $true
+  } catch {
+    $groupVerificationReadFailedClosed = $_.Exception.Message -match "throttled"
+  }
+  Assert-True $groupVerificationReadFailedClosed "A transient Get-DistributionGroup failure after Remove-DistributionGroup must fail deletion verification"
+  Assert-Equal 1 $script:deleteGroupRemoveCalls "The group verification-read regression must exercise a successful Remove-DistributionGroup cmdlet first"
+  Assert-Equal 0 ([int]$groupVerificationStats.removedGroups) "A group deletion with an unreadable final state must not count as removed"
+  Assert-Equal 0 ([int]$groupVerificationStats.verifiedQueueRows) "A group deletion with an unreadable final state must not count as verified/completed"
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
 
 Write-Output "Exchange address book runbook tests passed."
