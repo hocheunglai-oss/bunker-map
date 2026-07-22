@@ -402,3 +402,28 @@ test("replays the July 21 FCUNO samples without leaking schedule or offer number
     "tang shan gang ji 1 / 9216858 / inchon 28 jul / vlsfo 240mts / lsmgo 50mts",
   )
 })
+
+test("replays the July 22 FCUNO reports without treating viscosity as quantity", () => {
+  const dmDragon = [
+    "Vessel : MT DM Dragon",
+    "Port : Singapore",
+    "Date : 24 July - 02 August 2026",
+    "Order quantity & grade : VLSFO 380 : 270 mt & LSMGO: 70 mt",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(dmDragon),
+    "dm dragon / singapore 24 jul - 2 aug / vlsfo 270mts / lsmgo 70mts",
+  )
+
+  const stormRider = [
+    "MV. \"MV STORM RIDER\" (IMO 9595357)",
+    "-. BUNKERING PORT : \"PORT KELANG, MALAYSIA\"",
+    "-. EST' DATE : O/A 29 JUL ~ 13 AUG",
+    "-. VLSFO : 250~350 MT",
+    "-. REMARK : VLSFO - 380 Centistoke ISO 8217:2017 (E) RMG 380 with max Sulphur 0.50",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(stormRider),
+    "storm rider / 9595357 / port klang 29 jul - 13 aug / vlsfo 250-350mts",
+  )
+})

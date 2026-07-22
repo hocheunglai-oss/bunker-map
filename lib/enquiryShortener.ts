@@ -427,13 +427,14 @@ function isLabelLine(value: string) {
 }
 
 function isNonRequestProductReference(value: string) {
-  const hasExplicitQuantity = new RegExp(String.raw`\d+(?:[,.]\d+)?\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(value)
+  const normalized = value.replace(/^\s*(?:[-*.]+\s*)+/, "")
+  const hasExplicitQuantity = new RegExp(String.raw`\d+(?:[,.]\d+)?\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(normalized)
   if (hasExplicitQuantity) return false
 
-  return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(value) ||
-    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(value) ||
-    /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(value) ||
-    /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(value)
+  return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(normalized) ||
+    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
+    /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(normalized) ||
+    /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(normalized)
 }
 
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
@@ -479,7 +480,7 @@ function extractBareQuantity(value: string) {
   const quantityText = value
     .replace(/\biso\s*\d{3,5}(?:\s*[-:/]\s*\d{2,4})?\b/gi, " ")
     .replace(/\b(?:rmg|rmk|dma|dmb)\s*[-:]?\s*\d+(?:[,.]\d+)?\b/gi, " ")
-    .replace(/\b\d+(?:[,.]\d+)?\s*cst\b/gi, " ")
+    .replace(/\b\d+(?:[,.]\d+)?\s*(?:cst|centistokes?)\b/gi, " ")
     .replace(/\b(?:sulphur|sulfur|flash\s+point|density)\b[^\n;/]*/gi, " ")
   const ranges = Array.from(quantityText.matchAll(/(?<![\d.,])(\d+(?:[,.]\d+)?)\s*(?:-|~|\/|to)\s*(\d+(?:[,.]\d+)?)(?!\s*%|[\d.,])/gi))
     .filter((match) => isUsableQuantityNumber(match[1]) && isUsableQuantityNumber(match[2]))
@@ -525,7 +526,7 @@ function extractQuantityImmediatelyAfterProduct(value: string) {
   const single = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
   if (!single || !isUsableQuantityNumber(single[1])) return ""
   const remainder = value.slice(single[0].length)
-  if (/^\s*(?:%|cst\b)/i.test(remainder)) return ""
+  if (/^\s*(?:%|cst\b|centistokes?\b)/i.test(remainder)) return ""
   return `${normalizeEnquiryQuantityNumber(single[1])}mts`
 }
 
@@ -575,8 +576,9 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
       extractQuantityImmediatelyBeforeProduct(precedingText) ||
       extractBareRangeImmediatelyBeforeProduct(precedingText)
     const followingQuantity =
+      extractQuantityFromInlineUnit(segmentText) ||
       extractQuantityImmediatelyAfterProduct(segmentText.slice(match.value.length)) ||
-      extractQuantityFromProductSegment(segmentText)
+      extractBareQuantity(segmentText)
     const quantity = quantityBeforeStyle
       ? precedingQuantity || followingQuantity
       : followingQuantity || precedingQuantity

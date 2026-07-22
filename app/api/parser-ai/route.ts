@@ -430,6 +430,7 @@ function buildInstructions(source: ParserAiSource) {
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
     "Normalize quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
+    "Viscosity and specification numbers such as VLSFO 380, RMG 380, 380 CST, 380 Centistoke, and ISO 8217 are not quantities. Prefer the number explicitly paired with MT, MTS, CBM, KL, tons, or Chinese quantity units.",
     "Omit the eta label when ETA is the only event type. Keep event labels only when ETB, ETD, ETCD, ETS, or ETC is also present; preserve eta and etb, and normalize etd, etcd, ets, and etc to etd, e.g. inchon eta 27 jul, etd 29 jul.",
     "When multiple ETA ports are listed, include every port and its own window in one schedule segment joined by 'and'. Copy each port name from the raw enquiry exactly before normalizing its spelling; never substitute a different port.",
     "Classify explicit VLSFO/LSMFO/LSFO/0.5 as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
