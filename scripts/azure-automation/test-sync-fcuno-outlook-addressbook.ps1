@@ -24,6 +24,21 @@ foreach ($email in @(
   Assert-True (-not (Test-ValidEmail $email)) "Invalid email '$email' must be rejected"
 }
 Assert-True (Test-ValidEmail "valid.name+tag@example-domain.com") "A normal external email must be accepted"
+Assert-Equal `
+  "22222222-2222-4222-8222-222222222222" `
+  (Get-ExchangeContactProfileCommandIdentity ([pscustomobject]@{ Guid = "22222222-2222-4222-8222-222222222222"; DistinguishedName = "CN=Profile,DC=example,DC=com"; ExternalEmailAddress = "valid@example.com" })) `
+  "Contact profile commands must prefer the resolved profile GUID"
+Assert-Equal `
+  "CN=Profile,DC=example,DC=com" `
+  (Get-ExchangeContactProfileCommandIdentity ([pscustomobject]@{ DistinguishedName = "CN=Profile,DC=example,DC=com"; ExternalEmailAddress = "valid@example.com" })) `
+  "Contact profile commands may fall back only to the resolved profile distinguished name"
+$unsafeProfileIdentityRejected = $false
+try {
+  Get-ExchangeContactProfileCommandIdentity ([pscustomobject]@{ Identity = "Shared Display Name"; ExternalEmailAddress = "valid@example.com" }) | Out-Null
+} catch {
+  $unsafeProfileIdentityRejected = $_.Exception.Message -match "no supported immutable GUID or distinguished-name identity"
+}
+Assert-True $unsafeProfileIdentityRejected "Contact profile commands must reject email and display-name identities"
 
 $directWebhookPayload = Get-WebhookPayload '{"syncMode":"full","requestedBy":"SC"}'
 Assert-Equal "full" $directWebhookPayload.syncMode "A JSON string from the Azure Test pane must preserve syncMode"
@@ -105,6 +120,140 @@ Assert-Equal 2 @($built.Members).Count "Memberships from every duplicate source 
 Assert-Equal "c-new" $built.ContactByEmail["dup@example.com"].SourceContactId "Newest source row must be the canonical duplicate owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-old") "A canonical duplicate must record its previous eligible source owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
+
+$oceanRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "ocean-anderson"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "anderson@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+  [pscustomobject]@{ id = "ocean-bunkers"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "bunkers@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @() @()
+$oceanRowsReversed = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "ocean-bunkers"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "bunkers@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+  [pscustomobject]@{ id = "ocean-anderson"; source_book = "FCUNO"; display_name = "OCEAN PARTNERS"; primary_email = "anderson@op-energy.co.kr"; nickname = "OCEAN PARTNERS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @() @()
+$oceanAnderson = $oceanRows.ContactByEmail["anderson@op-energy.co.kr"]
+$oceanBunkers = $oceanRows.ContactByEmail["bunkers@op-energy.co.kr"]
+Assert-Equal "OCEAN PARTNERS" $oceanAnderson.DisplayName "Duplicate FCUNO display names must remain visible exactly as entered"
+Assert-Equal "OCEAN PARTNERS" $oceanBunkers.DisplayName "Both OCEAN PARTNERS contacts must retain the shared display name"
+Assert-True ($oceanAnderson.DirectoryName -cne $oceanBunkers.DirectoryName) "Duplicate display names must receive unique Exchange directory names"
+Assert-True ($oceanAnderson.DirectoryName.Length -le 64 -and $oceanBunkers.DirectoryName.Length -le 64) "Exchange directory names must remain within the 64-character limit"
+Assert-True ($oceanAnderson.DirectoryName -match '^OCEAN PARTNERS \[[0-9a-f]{8,32}\]$') "A duplicate directory name must use a stable source-key hash suffix"
+Assert-Equal $oceanAnderson.DirectoryName $oceanRowsReversed.ContactByEmail["anderson@op-energy.co.kr"].DirectoryName "Duplicate directory naming must be independent of input order"
+Assert-Equal $oceanBunkers.DirectoryName $oceanRowsReversed.ContactByEmail["bunkers@op-energy.co.kr"].DirectoryName "Every duplicate directory name must be deterministic"
+
+$differentAliasNamePeers = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "peer-existing"; source_book = "FCUNO"; display_name = "SHARED VISIBLE NAME"; primary_email = "existing@example.com"; nickname = "EXISTING NICKNAME"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+  [pscustomobject]@{ id = "peer-new"; source_book = "FCUNO"; display_name = "SHARED VISIBLE NAME"; primary_email = "new@example.com"; nickname = "DIFFERENT NICKNAME"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @() @()
+$savedDirectoryPeerUpsert = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock
+$script:directoryPeerUpserts = @()
+Set-Item Function:Upsert-ExchangeMailContact -Value {
+  param($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites)
+  $script:directoryPeerUpserts += [pscustomobject]@{ SourceKey = Clean-Text $Contact.SourceKey; SkipNoOpWrites = $SkipNoOpWrites }
+}
+try {
+  $script:CanonicalExchangeRows = $differentAliasNamePeers
+  Sync-ExchangeDirectoryNamePeers "SHARED VISIBLE NAME" @{} "FCUNO_CONTACT:peer-new" $false
+  Assert-Equal 1 $script:directoryPeerUpserts.Count "A new duplicate display name must fan out to an existing peer even when nicknames and aliases differ"
+  Assert-Equal "FCUNO_CONTACT:peer-existing" $script:directoryPeerUpserts[0].SourceKey "Directory-name fan-out must exclude only the queued source contact"
+  Assert-True ([bool]$script:directoryPeerUpserts[0].SkipNoOpWrites) "Dependency peers must use verified no-op suppression"
+
+  $loneDirectorySurvivor = Build-ExchangeRows @(
+    [pscustomobject]@{ id = "peer-existing"; source_book = "FCUNO"; display_name = "SHARED VISIBLE NAME"; primary_email = "existing@example.com"; nickname = "EXISTING NICKNAME"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+  ) @() @()
+  $script:CanonicalExchangeRows = $loneDirectorySurvivor
+  $script:directoryPeerUpserts = @()
+  Sync-ExchangeDirectoryNamePeers "SHARED VISIBLE NAME" @{} "FCUNO_CONTACT:peer-deleted" $true
+  Assert-Equal 1 $script:directoryPeerUpserts.Count "Deleting or internalizing a duplicate must repair the lone survivor's directory name"
+  Assert-Equal "SHARED VISIBLE NAME" $loneDirectorySurvivor.Contacts[0].DirectoryName "A lone survivor must deterministically revert to the unsuffixed directory name"
+
+  $internalAliasCollisionRows = Build-ExchangeRows @(
+    [pscustomobject]@{ id = "internal-alias-owner"; source_book = "FC-INTERNAL"; display_name = "Internal Alias Owner"; primary_email = "z-internal@lantana.hk"; nickname = "RESERVED ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" },
+    [pscustomobject]@{ id = "external-alias-peer"; source_book = "FCUNO"; display_name = "External Alias Peer"; primary_email = "a-external@example.com"; nickname = "RESERVED ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+  ) @() @()
+  $script:CanonicalExchangeRows = $internalAliasCollisionRows
+  $script:directoryPeerUpserts = @()
+  Sync-ExchangeAliasPeers "reserved-alias" @{} $false $true
+  Assert-Equal 1 $script:directoryPeerUpserts.Count "An internal alias owner must still fan out to the one managed external peer"
+  Assert-Equal "reserved-alias" $internalAliasCollisionRows.ContactById["internal-alias-owner"].Alias "FC-INTERNAL must reserve the base alias even when its email sorts after the managed external peer"
+  Assert-True ($internalAliasCollisionRows.Contacts[0].Alias -ne "reserved-alias") "The managed external peer must retain the deterministic collision-safe alias reserved by FC-INTERNAL"
+} finally {
+  Set-Item Function:Upsert-ExchangeMailContact -Value $savedDirectoryPeerUpsert
+  $script:CanonicalExchangeRows = $null
+}
+
+$internalAliasRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "c-internal-alias"; source_book = "FC-INTERNAL"; display_name = "CIRIC CHEUNG"; primary_email = "ciric@lantana.hk"; nickname = ""; first_name = ""; last_name = ""; updated_at = "2026-07-22T02:00:00Z" }
+) @(
+  [pscustomobject]@{ id = "g-internal"; source_book = "FC-INTERNAL"; name = "Internal Group"; nickname = "INTERNAL GROUP"; source_uid = "g-internal"; description = "" }
+) @(
+  [pscustomobject]@{ group_id = "g-internal"; contact_id = "c-internal-alias"; source_book = "FC-INTERNAL" }
+)
+Assert-Equal 0 @($internalAliasRows.Contacts).Count "FC-INTERNAL users must not be duplicated as managed mail contacts when their mailbox uses a non-Cosulich domain"
+Assert-Equal 1 @($internalAliasRows.Members).Count "FC-INTERNAL users must remain available for distribution-group membership resolution"
+Assert-Equal "ciric@lantana.hk" $internalAliasRows.ContactById["c-internal-alias"].ExternalEmailAddress "An FC-INTERNAL mailbox alias must remain addressable by group membership"
+Assert-True (Is-InternalContact $internalAliasRows.ContactById["c-internal-alias"] "ciric@lantana.hk") "Incremental projection rows must preserve FC-INTERNAL classification"
+$script:CanonicalExchangeRows = $internalAliasRows
+Assert-True ($null -eq (Get-ContactExchangeRowFromSource "c-internal-alias")) "Incremental source lookup must never return an FC-INTERNAL row for mail-contact upsert"
+$originalUpsertExchangeMailContactForInternal = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock
+$originalRemoveManagedExchangeMailContactForInternal = (Get-Item Function:Remove-ManagedExchangeMailContact).ScriptBlock
+$script:internalIncrementalUpserts = 0
+$script:internalIncrementalCleanup = 0
+Set-Item Function:Upsert-ExchangeMailContact -Value {
+  param($Contact, [hashtable]$Stats)
+  $script:internalIncrementalUpserts += 1
+}
+Set-Item Function:Remove-ManagedExchangeMailContact -Value {
+  param($Email, $Alias, [hashtable]$Stats, $SourceContactId, $ExpectedDisplayName, [bool]$AllowUntaggedExactDelete)
+  $script:internalIncrementalCleanup += 1
+  Assert-Equal "c-internal-alias" $SourceContactId "Internal cleanup must remain scoped to the exact FCUNO source contact"
+}
+try {
+  Reconcile-ExchangeContactEmail "ciric@lantana.hk" ([pscustomobject]@{ entity_id = "c-internal-alias"; entity_alias = "CIRIC CHEUNG" }) @{} $false $false
+  Assert-Equal 0 $script:internalIncrementalUpserts "Incremental CIRIC reconciliation must never create or update a mail contact"
+  Assert-Equal 1 $script:internalIncrementalCleanup "Incremental CIRIC reconciliation must remove only a stale managed copy through its exact source key"
+} finally {
+  Set-Item Function:Upsert-ExchangeMailContact -Value $originalUpsertExchangeMailContactForInternal
+  Set-Item Function:Remove-ManagedExchangeMailContact -Value $originalRemoveManagedExchangeMailContactForInternal
+  $script:CanonicalExchangeRows = $null
+}
+
+$savedLoadSingleRowForInternalAlias = (Get-Item Function:Load-SingleRow).ScriptBlock
+$savedReconcileEmailForInternalAlias = (Get-Item Function:Reconcile-ExchangeContactEmail).ScriptBlock
+$savedSyncGroupsForInternalAlias = (Get-Item Function:Sync-ExchangeGroupsForEmail).ScriptBlock
+$savedSyncAliasPeersForInternalAlias = (Get-Item Function:Sync-ExchangeAliasPeers).ScriptBlock
+$savedSyncDirectoryPeersForInternalAlias = (Get-Item Function:Sync-ExchangeDirectoryNamePeers).ScriptBlock
+$script:internalAliasFanoutCalls = @()
+Set-Item Function:Load-SingleRow -Value {
+  param($Table, $Column, $Value)
+  return [pscustomobject]@{ id = "internal-alias-owner"; source_book = "FC-INTERNAL"; display_name = "Internal Alias Owner"; primary_email = "z-internal@lantana.hk"; nickname = "RESERVED ALIAS" }
+}
+Set-Item Function:Reconcile-ExchangeContactEmail -Value { param($Email, $Row, [hashtable]$Stats, [bool]$UseQueuedSourceKeyForDelete, [bool]$AllowQueuedHistoricalOwner) }
+Set-Item Function:Sync-ExchangeGroupsForEmail -Value { param($Email, [hashtable]$Stats) }
+Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value { param($DisplayName, [hashtable]$Stats, $ExcludeSourceKey, [bool]$IncludeSinglePeer) }
+Set-Item Function:Sync-ExchangeAliasPeers -Value {
+  param($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites, [bool]$IncludeSinglePeer)
+  $script:internalAliasFanoutCalls += [pscustomobject]@{ BaseAlias = Clean-Text $BaseAlias; IncludeSinglePeer = $IncludeSinglePeer }
+}
+try {
+  $script:CanonicalExchangeRows = $internalAliasCollisionRows
+  Sync-ExchangeContactQueueState ([pscustomobject]@{
+    entity_id = "internal-alias-owner"
+    entity_alias = "old-reserved-alias"
+    entity_email = "z-internal@lantana.hk"
+    payload = [pscustomobject]@{
+      beforeContact = [pscustomobject]@{ nickname = "OLD RESERVED ALIAS"; display_name = "Internal Alias Owner"; primary_email = "z-internal@lantana.hk"; source_book = "FC-INTERNAL" }
+    }
+  }) @{}
+  $currentInternalAliasFanout = @($script:internalAliasFanoutCalls | Where-Object { $_.BaseAlias -eq "reserved-alias" })
+  Assert-Equal 1 $currentInternalAliasFanout.Count "An FC-INTERNAL rename must fan out through its current raw projected base alias"
+  Assert-True ([bool]$currentInternalAliasFanout[0].IncludeSinglePeer) "An internal alias dependency must repair even one managed external peer"
+} finally {
+  Set-Item Function:Load-SingleRow -Value $savedLoadSingleRowForInternalAlias
+  Set-Item Function:Reconcile-ExchangeContactEmail -Value $savedReconcileEmailForInternalAlias
+  Set-Item Function:Sync-ExchangeGroupsForEmail -Value $savedSyncGroupsForInternalAlias
+  Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncAliasPeersForInternalAlias
+  Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncDirectoryPeersForInternalAlias
+  $script:CanonicalExchangeRows = $null
+}
 
 $shuffled = Build-ExchangeRows @($contacts[2], $contacts[1], $contacts[0]) @($groups[1], $groups[0]) @($members[1], $members[0])
 $firstProjection = $built | ConvertTo-Json -Depth 10 -Compress
@@ -916,6 +1065,7 @@ Assert-True $driftedGroupOwnerFailedClosed "A group source-key mismatch must fai
 Assert-True (-not $script:recreatedGroupRemoved) "A drifted-marker ownership mismatch must not call Remove-DistributionGroup"
 
 $desiredNoOpContact = [pscustomobject]@{
+  DirectoryName = "Unchanged Contact"
   DisplayName = "Unchanged Contact"
   ExternalEmailAddress = "unchanged@example.com"
   Alias = "unchanged-contact"
@@ -941,15 +1091,18 @@ $script:noOpMailContact = [pscustomobject]@{
 }
 $script:noOpContactProfile = [pscustomobject]@{
   Identity = "CN=Unchanged Contact,OU=Contacts,DC=example,DC=com"
-  Guid = "22222222-2222-2222-2222-222222222222"
+  Guid = "11111111-1111-1111-1111-111111111111"
   ExternalDirectoryObjectId = "profile-external-unchanged"
   DistinguishedName = "CN=Profile Unchanged Contact,OU=Contacts,DC=example,DC=com"
+  Alias = "unchanged-contact"
   FirstName = "Unchanged"
   LastName = "Contact"
 }
 $script:getMailContactCalls = 0
 $script:setMailContactCalls = 0
 $script:setContactCalls = 0
+$script:lastSetContactIdentity = ""
+$script:lastGetContactFilter = ""
 $script:setContactError = ""
 $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
@@ -968,8 +1121,10 @@ function Get-MailContact {
 }
 function Get-Contact {
   [CmdletBinding()]
-  param($Identity)
-  if ($Identity -in @("unchanged-contact", "11111111-1111-1111-1111-111111111111", "CN=Unchanged Contact,OU=Contacts,DC=example,DC=com")) { return $script:noOpContactProfile }
+  param($Identity, $Filter, $RecipientTypeDetails, $ResultSize)
+  if ($Filter) { $script:lastGetContactFilter = Clean-Text $Filter }
+  if ($Filter -like "Guid -eq '11111111-1111-1111-1111-111111111111'") { return $script:noOpContactProfile }
+  if ($Identity -in @("11111111-1111-1111-1111-111111111111", "CN=Profile Unchanged Contact,OU=Contacts,DC=example,DC=com")) { return $script:noOpContactProfile }
   return $null
 }
 function Set-MailContact {
@@ -981,6 +1136,7 @@ function Set-Contact {
   [CmdletBinding()]
   param($Identity, $Name, $DisplayName, $FirstName, $LastName)
   $script:setContactCalls += 1
+  $script:lastSetContactIdentity = Clean-Text $Identity
   if ($script:setContactError) {
     $script:setContactFailed = $true
     throw $script:setContactError
@@ -1016,9 +1172,16 @@ $markerOnlyChanges = @(Get-FullContactMutationFieldChanges $markerOnlyDriftConta
 Assert-Equal 1 $markerOnlyChanges.Count "A marker-only full repair must report its exact Exchange correction"
 Assert-Equal "Management marker: (blank) -> $ManagedMarker" $markerOnlyChanges[0] "A marker-only repair notice must identify the management marker before and after"
 
+$immutableProfile = [pscustomobject]@{ Identity = "11111111-1111-1111-1111-111111111111"; Guid = "33333333-3333-4333-8333-333333333333"; FirstName = "Unchanged"; LastName = "Contact" }
+$mutableAndImmutableProfileLookup = New-ExchangeContactProfileLookup @(
+  [pscustomobject]@{ Identity = "unchanged-contact"; Guid = "44444444-4444-4444-8444-444444444444"; FirstName = "Wrong"; LastName = "Mutable" },
+  $immutableProfile
+)
+Assert-True ([object]::ReferenceEquals($immutableProfile, (Resolve-ExchangeContactProfileHint $script:noOpMailContact $mutableAndImmutableProfileLookup))) "A plain mutable contact Identity must never compete with an immutable profile join"
+
 $ambiguousProfileLookup = New-ExchangeContactProfileLookup @(
-  [pscustomobject]@{ Identity = "unchanged-contact"; FirstName = "Unchanged"; LastName = "Contact" },
-  [pscustomobject]@{ Identity = "11111111-1111-1111-1111-111111111111"; FirstName = "Unchanged"; LastName = "Contact" }
+  [pscustomobject]@{ Identity = "CN=Unchanged Contact,OU=Contacts,DC=example,DC=com"; Guid = "55555555-5555-4555-8555-555555555555"; FirstName = "Unchanged"; LastName = "Contact" },
+  [pscustomobject]@{ Identity = "CN=Other Profile,OU=Contacts,DC=example,DC=com"; Guid = "11111111-1111-1111-1111-111111111111"; FirstName = "Unchanged"; LastName = "Contact" }
 )
 $ambiguousProfileFailedClosed = $false
 try {
@@ -1026,7 +1189,7 @@ try {
 } catch {
   $ambiguousProfileFailedClosed = $_.Exception.Message -match "More than one Exchange contact profile"
 }
-Assert-True $ambiguousProfileFailedClosed "An ambiguous bulk contact-profile join must fail closed"
+Assert-True $ambiguousProfileFailedClosed "Multiple immutable bulk contact-profile joins must fail closed"
 
 $duplicateMailContact = [pscustomobject]@{
   Identity = "duplicate-contact"
@@ -1116,7 +1279,22 @@ Upsert-ExchangeMailContact $desiredNoOpContact $incrementalContactStats
 Assert-Equal 3 $script:getMailContactCalls "Incremental contact processing must check both immutable ownership candidates and verify the result"
 Assert-Equal 1 $script:setMailContactCalls "Incremental contact processing must retain its existing upsert behavior"
 Assert-Equal 1 $script:setContactCalls "Incremental contact processing must retain its existing profile update behavior"
+Assert-Equal "11111111-1111-1111-1111-111111111111" $script:lastSetContactIdentity "Contact profile updates must target the exact resolved Get-Contact GUID"
+Assert-Equal "Guid -eq '11111111-1111-1111-1111-111111111111'" $script:lastGetContactFilter "Get-Contact discovery must use the documented exact GUID filter, never the unsupported Alias filter"
 Assert-Equal 1 $incrementalContactStats.updatedContacts "Incremental contact processing must still report its update"
+
+$staleProfileHint = [pscustomobject]@{
+  Identity = "CN=Stale Snapshot Profile,OU=Contacts,DC=example,DC=com"
+  Guid = "77777777-7777-4777-8777-777777777777"
+  DistinguishedName = "CN=Stale Snapshot Profile Object,OU=Contacts,DC=example,DC=com"
+  Alias = "unchanged-contact"
+  FirstName = "Stale"
+  LastName = "Snapshot"
+}
+$script:lastSetContactIdentity = ""
+Upsert-ExchangeMailContact $desiredNoOpContact @{} $false $null $false $staleProfileHint
+Assert-Equal "11111111-1111-1111-1111-111111111111" $script:lastSetContactIdentity "A stale bulk profile hint must be discarded and live-correlated before any profile mutation"
+Assert-True ($script:lastSetContactIdentity -cne $staleProfileHint.Guid) "A live mail contact must never be paired with a stale snapshot profile from a different object"
 
 $script:setContactError = "The server is busy and the request was throttled."
 $script:removeCalled = $false
@@ -1178,6 +1356,157 @@ try {
 }
 Assert-True $identitylessContactFailedClosed "An existing contact without a strong Exchange identity must fail before profile or marker mutation"
 Assert-Equal $contactSetBaseline $script:setMailContactCalls "An identityless existing contact must not be retagged through its mutable alias"
+
+$savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
+$savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock
+$savedSetMailContact = (Get-Item Function:Set-MailContact).ScriptBlock
+$savedSetContact = (Get-Item Function:Set-Contact).ScriptBlock
+$savedNewMailContact = (Get-Item Function:New-MailContact).ScriptBlock
+$hadStartSleepFunction = Test-Path Function:Start-Sleep
+$savedStartSleep = if ($hadStartSleepFunction) { (Get-Item Function:Start-Sleep).ScriptBlock } else { $null }
+$desiredOceanCreate = [pscustomobject]@{
+  DirectoryName = $oceanAnderson.DirectoryName
+  DisplayName = "OCEAN PARTNERS"
+  ExternalEmailAddress = "anderson@op-energy.co.kr"
+  Alias = $oceanAnderson.Alias
+  FirstName = ""
+  LastName = ""
+  SourceKey = "FCUNO_CONTACT:ocean-anderson"
+  AllowedOwnerSourceKeys = @("FCUNO_CONTACT:ocean-anderson")
+}
+$script:createdOceanMailContact = [pscustomobject]@{
+  Identity = "ocean-created"
+  Guid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  ExternalDirectoryObjectId = "external-ocean-created"
+  DistinguishedName = "CN=OCEAN PARTNERS Created,OU=Contacts,DC=example,DC=com"
+  Name = $desiredOceanCreate.DirectoryName
+  DisplayName = "OCEAN PARTNERS"
+  ExternalEmailAddress = "SMTP:anderson@op-energy.co.kr"
+  Alias = $desiredOceanCreate.Alias
+  CustomAttribute1 = ""
+  CustomAttribute2 = ""
+  HiddenFromAddressListsEnabled = $false
+}
+$script:createdOceanProfile = [pscustomobject]@{
+  Identity = $script:createdOceanMailContact.DistinguishedName
+  Guid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  DistinguishedName = "CN=OCEAN PARTNERS Profile,OU=Contacts,DC=example,DC=com"
+  Alias = $desiredOceanCreate.Alias
+  FirstName = ""
+  LastName = ""
+}
+$script:createdOceanNewCalled = $false
+$script:createdOceanSourceReads = 0
+$script:createdOceanProfileFilterCalls = 0
+$script:createdOceanSetIdentity = ""
+$script:createdOceanNewName = ""
+$script:createdOceanNewDisplayName = ""
+$script:createdOceanSleepCalls = 0
+$script:createdOceanAmbiguousProfiles = $false
+Set-Item Function:Get-MailContact -Value {
+  [CmdletBinding()]
+  param($Filter, $ResultSize, $Identity)
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:ocean-anderson'" -and $script:createdOceanNewCalled) {
+    $script:createdOceanSourceReads += 1
+    if ($script:createdOceanSourceReads -eq 2) {
+      return [pscustomobject]@{
+        Identity = $script:createdOceanMailContact.Identity
+        Guid = $script:createdOceanMailContact.Guid
+        ExternalDirectoryObjectId = $script:createdOceanMailContact.ExternalDirectoryObjectId
+        DistinguishedName = $script:createdOceanMailContact.DistinguishedName
+        Name = "Eventually consistent old OCEAN name"
+        DisplayName = $script:createdOceanMailContact.DisplayName
+        ExternalEmailAddress = $script:createdOceanMailContact.ExternalEmailAddress
+        Alias = $script:createdOceanMailContact.Alias
+        CustomAttribute1 = $script:createdOceanMailContact.CustomAttribute1
+        CustomAttribute2 = $script:createdOceanMailContact.CustomAttribute2
+        HiddenFromAddressListsEnabled = $script:createdOceanMailContact.HiddenFromAddressListsEnabled
+      }
+    }
+    return $script:createdOceanMailContact
+  }
+  return $null
+}
+Set-Item Function:Get-Contact -Value {
+  [CmdletBinding()]
+  param($Identity, $Filter, $RecipientTypeDetails, $ResultSize)
+  if ($Filter -like "Guid -eq '$($script:createdOceanMailContact.Guid)'") {
+    $script:createdOceanProfileFilterCalls += 1
+    if ($script:createdOceanAmbiguousProfiles) {
+      return @($script:createdOceanProfile, [pscustomobject]@{
+        Identity = $script:createdOceanMailContact.DistinguishedName
+        Guid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        DistinguishedName = "CN=Conflicting OCEAN Profile,OU=Contacts,DC=example,DC=com"
+        Alias = $desiredOceanCreate.Alias
+      })
+    }
+    if ($script:createdOceanProfileFilterCalls -le 2) { return $null }
+    return $script:createdOceanProfile
+  }
+  if ($Identity -eq $script:createdOceanProfile.Guid) { return $script:createdOceanProfile }
+  return $null
+}
+Set-Item Function:Set-MailContact -Value {
+  [CmdletBinding()]
+  param($Identity, $ExternalEmailAddress, $Alias, $CustomAttribute1, $CustomAttribute2, $HiddenFromAddressListsEnabled)
+  $script:createdOceanMailContact.CustomAttribute1 = $CustomAttribute1
+  $script:createdOceanMailContact.CustomAttribute2 = $CustomAttribute2
+  $script:createdOceanMailContact.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
+}
+Set-Item Function:Set-Contact -Value {
+  [CmdletBinding()]
+  param($Identity, $Name, $DisplayName, $FirstName, $LastName)
+  $script:createdOceanSetIdentity = Clean-Text $Identity
+  $script:createdOceanMailContact.Name = Clean-Text $Name
+  $script:createdOceanMailContact.DisplayName = Clean-Text $DisplayName
+}
+Set-Item Function:New-MailContact -Value {
+  [CmdletBinding()]
+  param($Name, $DisplayName, $ExternalEmailAddress, $Alias)
+  $script:createdOceanNewCalled = $true
+  $script:createdOceanNewName = Clean-Text $Name
+  $script:createdOceanNewDisplayName = Clean-Text $DisplayName
+  return $script:createdOceanMailContact
+}
+Set-Item Function:Start-Sleep -Value {
+  param($Seconds)
+  $script:createdOceanSleepCalls += 1
+}
+try {
+  $createdOceanStats = @{}
+  Upsert-ExchangeMailContact $desiredOceanCreate $createdOceanStats
+  Assert-Equal $desiredOceanCreate.DirectoryName $script:createdOceanNewName "New-MailContact must use the unique deterministic directory Name"
+  Assert-Equal "OCEAN PARTNERS" $script:createdOceanNewDisplayName "New-MailContact must retain the exact shared FCUNO display name"
+  Assert-Equal $script:createdOceanProfile.Guid $script:createdOceanSetIdentity "Set-Contact must target the exact resolved profile GUID after creation"
+  Assert-True ($script:createdOceanSetIdentity -cne $desiredOceanCreate.ExternalEmailAddress) "Set-Contact must never use external email as its command identity"
+  Assert-Equal 3 $script:createdOceanSleepCalls "Profile and mail-contact metadata propagation must both use bounded retry waits"
+  Assert-Equal 3 $script:createdOceanSourceReads "Final verification must reread a stale Name until the exact directory name becomes visible"
+  Assert-Equal 1 $createdOceanStats.createdContacts "A fully verified new OCEAN contact must be counted once"
+
+  $script:createdOceanAmbiguousProfiles = $true
+  $ambiguousAliasReadStart = $script:createdOceanProfileFilterCalls
+  $ambiguousAliasSleepStart = $script:createdOceanSleepCalls
+  $ambiguousAliasFailedClosed = $false
+  try {
+    Resolve-ExchangeContactProfileForMailContact $script:createdOceanMailContact "Ambiguous OCEAN contact" 4 | Out-Null
+  } catch {
+    $ambiguousAliasFailedClosed = $_.Exception.Message -match "found 2 Exchange contact profiles"
+  }
+  Assert-True $ambiguousAliasFailedClosed "An alias resolving to multiple contact profiles must fail closed"
+  Assert-Equal 1 ($script:createdOceanProfileFilterCalls - $ambiguousAliasReadStart) "An ambiguous profile alias must fail immediately without repeated reads"
+  Assert-Equal 0 ($script:createdOceanSleepCalls - $ambiguousAliasSleepStart) "An ambiguous profile alias must not wait or retry"
+} finally {
+  Set-Item Function:Get-MailContact -Value $savedGetMailContact
+  Set-Item Function:Get-Contact -Value $savedGetContact
+  Set-Item Function:Set-MailContact -Value $savedSetMailContact
+  Set-Item Function:Set-Contact -Value $savedSetContact
+  Set-Item Function:New-MailContact -Value $savedNewMailContact
+  if ($hadStartSleepFunction) {
+    Set-Item Function:Start-Sleep -Value $savedStartSleep
+  } else {
+    Remove-Item Function:Start-Sleep
+  }
+}
 
 $desiredNoOpGroup = [pscustomobject]@{
   SourceGroupId = "g-unchanged"

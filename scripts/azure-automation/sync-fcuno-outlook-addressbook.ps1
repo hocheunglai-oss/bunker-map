@@ -198,10 +198,27 @@ function Get-RecipientEmail($Recipient) {
   return ""
 }
 
+function Get-ExchangeContactProfileCommandIdentity($Profile) {
+  if (-not $Profile) { throw "The Exchange contact profile is missing." }
+  foreach ($propertyName in @("Guid", "DistinguishedName")) {
+    $value = Clean-Text $Profile.$propertyName
+    if ($value -and $value -ne "00000000-0000-0000-0000-000000000000") { return $value }
+  }
+  throw "The Exchange contact profile has no supported immutable GUID or distinguished-name identity."
+}
+
+function Get-ExchangeContactDirectoryName($Contact) {
+  $directoryName = Clean-Text (Get-MapValue $Contact "DirectoryName")
+  if (-not $directoryName) { $directoryName = Clean-Text (Get-MapValue $Contact "DisplayName") }
+  if (-not $directoryName) { throw "The Exchange contact directory name is missing." }
+  if ($directoryName.Length -gt 64) { throw "The Exchange contact directory name exceeds 64 characters." }
+  return $directoryName
+}
+
 function Set-ExchangeContactProfile($Identity, $Contact) {
   $profile = @{
     Identity = $Identity
-    Name = $Contact.DisplayName
+    Name = Get-ExchangeContactDirectoryName $Contact
     DisplayName = $Contact.DisplayName
     FirstName = $(if (Clean-Text $Contact.FirstName) { Clean-Text $Contact.FirstName } else { $null })
     LastName = $(if (Clean-Text $Contact.LastName) { Clean-Text $Contact.LastName } else { $null })
@@ -230,12 +247,13 @@ function Assert-ExchangeContactProfile($Identity, $Contact, $Label) {
   throw "$Label has the wrong contact profile after verification. Expected FirstName '$expectedFirstName' and LastName '$expectedLastName'; got FirstName '$actualFirstName' and LastName '$actualLastName'."
 }
 
-function Assert-ExchangeRecipientName($Recipient, $ExpectedName, $Label) {
-  $expected = Clean-Text $ExpectedName
+function Assert-ExchangeRecipientName($Recipient, $ExpectedDirectoryName, $ExpectedDisplayName, $Label) {
+  $expectedName = Clean-Text $ExpectedDirectoryName
+  $expectedDisplayName = Clean-Text $ExpectedDisplayName
   $actualDisplayName = Clean-Text $Recipient.DisplayName
   $actualName = Clean-Text $Recipient.Name
-  if ($actualDisplayName -ne $expected -or $actualName -ne $expected) {
-    throw "$Label was updated but Exchange verification did not match. Expected Name/DisplayName '$expected'; got Name '$actualName' and DisplayName '$actualDisplayName'."
+  if ($actualDisplayName -cne $expectedDisplayName -or $actualName -cne $expectedName) {
+    throw "$Label was updated but Exchange verification did not match. Expected Name '$expectedName' and DisplayName '$expectedDisplayName'; got Name '$actualName' and DisplayName '$actualDisplayName'."
   }
 }
 
@@ -245,12 +263,13 @@ function Get-ExchangeMailContactMismatches($Existing, $Contact, $Profile = $null
   if (-not $Contact) { return @("desired contact is missing") }
   $expectedEmail = Normalize-Email $Contact.ExternalEmailAddress
   $expectedAlias = Clean-Text $Contact.Alias
-  $expectedName = Clean-Text $Contact.DisplayName
+  $expectedName = Get-ExchangeContactDirectoryName $Contact
+  $expectedDisplayName = Clean-Text $Contact.DisplayName
   $expectedSourceKey = Clean-Text $Contact.SourceKey
   if ((Normalize-Email (Get-RecipientEmail $Existing)) -ne $expectedEmail) { $mismatches += "external email" }
   if (-not (Clean-Text $Existing.Alias).Equals($expectedAlias, [StringComparison]::OrdinalIgnoreCase)) { $mismatches += "alias" }
   if ((Clean-Text $Existing.Name) -cne $expectedName) { $mismatches += "name" }
-  if ((Clean-Text $Existing.DisplayName) -cne $expectedName) { $mismatches += "display name" }
+  if ((Clean-Text $Existing.DisplayName) -cne $expectedDisplayName) { $mismatches += "display name" }
   if ((Clean-Text $Existing.CustomAttribute1) -cne $ManagedMarker) { $mismatches += "managed marker" }
   if ((Clean-Text $Existing.CustomAttribute2) -cne $expectedSourceKey) { $mismatches += "source key" }
   if ([bool]$Existing.HiddenFromAddressListsEnabled) { $mismatches += "address-list visibility" }
@@ -315,14 +334,33 @@ function Get-ExchangeObjectJoinKeys($ExchangeObject) {
   }
 }
 
+function Get-ExchangeContactProfileImmutableJoinKeys($ExchangeObject) {
+  if (-not $ExchangeObject) { return @() }
+  $seen = @{}
+  foreach ($propertyName in @("Guid", "ExternalDirectoryObjectId", "DistinguishedName")) {
+    $value = Clean-Text $ExchangeObject.$propertyName
+    if (-not $value -or $value -eq "00000000-0000-0000-0000-000000000000") { continue }
+    $key = $value.ToLowerInvariant()
+    if (Has-MapKey $seen $key) { continue }
+    $seen[$key] = $true
+    Write-Output $key
+  }
+
+  $identity = Clean-Text $ExchangeObject.Identity
+  if ($identity -and ((Test-GuidText $identity) -or $identity -match "(?i)^(CN|OU|DC)=")) {
+    $key = $identity.ToLowerInvariant()
+    if (-not (Has-MapKey $seen $key)) { Write-Output $key }
+  }
+}
+
 function New-ExchangeContactProfileLookup($Profiles) {
-  $lookup = @{ ByJoinKey = @{} }
+  $lookup = @{ ByImmutableKey = @{} }
   $profilePosition = 0
   foreach ($profile in @($Profiles)) {
     $entry = [pscustomobject]@{ Position = $profilePosition; Profile = $profile }
     $profilePosition += 1
-    foreach ($joinKey in @(Get-ExchangeObjectJoinKeys $profile)) {
-      Add-ExchangeLookupEntry $lookup.ByJoinKey $joinKey $entry
+    foreach ($joinKey in @(Get-ExchangeContactProfileImmutableJoinKeys $profile)) {
+      Add-ExchangeLookupEntry $lookup.ByImmutableKey $joinKey $entry
     }
   }
   return $lookup
@@ -331,14 +369,14 @@ function New-ExchangeContactProfileLookup($Profiles) {
 function Resolve-ExchangeContactProfileHint($MailContact, $Lookup) {
   if (-not $MailContact -or -not $Lookup) { return $null }
   $matchedEntries = @{}
-  foreach ($joinKey in @(Get-ExchangeObjectJoinKeys $MailContact)) {
-    foreach ($entry in @($Lookup.ByJoinKey[$joinKey])) {
+  foreach ($joinKey in @(Get-ExchangeContactProfileImmutableJoinKeys $MailContact)) {
+    foreach ($entry in @($Lookup.ByImmutableKey[$joinKey])) {
       if ($null -eq $entry) { continue }
       $matchedEntries[[string]$entry.Position] = $entry
     }
   }
   if ($matchedEntries.Count -gt 1) {
-    throw "More than one Exchange contact profile matches mail contact '$($MailContact.Identity)'."
+    throw "More than one Exchange contact profile matches immutable identity for mail contact '$($MailContact.Identity)'."
   }
   if ($matchedEntries.Count -eq 1) {
     return @($matchedEntries.Values)[0].Profile
@@ -376,6 +414,65 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
     if ($value -and $value -ne "00000000-0000-0000-0000-000000000000") { return $value }
   }
   return ""
+}
+
+function Resolve-ExchangeContactProfileForMailContact($MailContact, $Label, [int]$MaxAttempts = 1) {
+  if (-not $MailContact) { throw "$Label has no mail-contact object for profile resolution." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $filterProperty = ""
+  $filterValue = ""
+  foreach ($propertyName in @("Guid", "DistinguishedName")) {
+    $value = Clean-Text $MailContact.$propertyName
+    if ($value -and $value -ne "00000000-0000-0000-0000-000000000000") {
+      $filterProperty = $propertyName
+      $filterValue = $value
+      break
+    }
+  }
+  if (-not $filterValue) { throw "$Label has no supported immutable GUID or distinguished-name identity for profile resolution." }
+  $escapedFilterValue = Escape-ExchangeFilterValue $filterValue
+  $profileFilter = "$filterProperty -eq '$escapedFilterValue'"
+  $lastResult = "no contact profile was visible through immutable $filterProperty '$filterValue'"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    Renew-ExchangeSyncLockIfDue
+    $profiles = @(Get-Contact -Filter $profileFilter -RecipientTypeDetails MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    Renew-ExchangeSyncLockIfDue
+    if ($profiles.Count -gt 1) {
+      throw "$Label profile resolution found $($profiles.Count) Exchange contact profiles for immutable $filterProperty '$filterValue'."
+    }
+    if ($profiles.Count -eq 1) {
+      $profile = Resolve-ExchangeContactProfileHint $MailContact (New-ExchangeContactProfileLookup @($profiles[0]))
+      if ($profile) { return $profile }
+      $lastResult = "the immutable identity returned one profile, but its GUID/distinguished name did not correlate to the mail contact"
+    }
+  }
+  throw "$Label profile resolution failed after $MaxAttempts attempt(s): $lastResult."
+}
+
+function Get-ManagedExchangeMailContactBySourceKey($SourceKey, $Email, $Label, [int]$MaxAttempts = 1) {
+  $sourceKey = Clean-Text $SourceKey
+  $email = Normalize-Email $Email
+  if (-not $sourceKey) { throw "$Label has no FCUNO source key." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
+  $lastResult = "no mail contact with source key $sourceKey"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    Renew-ExchangeSyncLockIfDue
+    $matches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    Renew-ExchangeSyncLockIfDue
+    if ($matches.Count -gt 1) { throw "$Label source key $sourceKey resolved to $($matches.Count) Exchange mail contacts." }
+    if ($matches.Count -eq 1) {
+      $match = $matches[0]
+      $actualEmail = Normalize-Email (Get-RecipientEmail $match)
+      $actualSourceKey = Clean-Text $match.CustomAttribute2
+      $actualMarker = Clean-Text $match.CustomAttribute1
+      if ($actualEmail -eq $email -and $actualSourceKey -eq $sourceKey -and $actualMarker -eq $ManagedMarker) { return $match }
+      $lastResult = "the mail contact is not yet fully marked for source key $sourceKey and email $email"
+    }
+  }
+  throw "$Label could not be resolved exactly after $MaxAttempts attempt(s): $lastResult."
 }
 
 function Test-ExchangeIdentityNotFoundError($ErrorRecord) {
@@ -602,10 +699,57 @@ function Get-UniqueAlias($BaseAlias, [hashtable]$SeenAliases, $StableKey = "") {
   return $alias
 }
 
+function Get-StableExchangeHash($Value) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes((Clean-Text $Value))))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Get-ExchangeDirectoryNameBase($DisplayName) {
+  $baseName = Clean-Text $DisplayName
+  if (-not $baseName) { $baseName = "FCUNO Contact" }
+  if ($baseName.Length -gt 64) { $baseName = $baseName.Substring(0, 64) }
+  return $baseName
+}
+
+function Get-UniqueExchangeDirectoryName($DisplayName, [hashtable]$SeenNames, $StableKey, [bool]$ForceStableSuffix = $false) {
+  $baseName = Get-ExchangeDirectoryNameBase $DisplayName
+  $baseKey = $baseName.ToLowerInvariant()
+  if (-not $ForceStableSuffix -and -not (Has-MapKey $SeenNames $baseKey)) {
+    $SeenNames[$baseKey] = $true
+    return $baseName
+  }
+
+  $stableText = Clean-Text $StableKey
+  if (-not $stableText) { throw "A stable FCUNO source key is required to disambiguate Exchange directory names." }
+  $hash = Get-StableExchangeHash $stableText
+  for ($hashLength = 8; $hashLength -le 32; $hashLength += 4) {
+    $suffix = " [" + $hash.Substring(0, $hashLength) + "]"
+    $maxBaseLength = 64 - $suffix.Length
+    $candidate = $baseName.Substring(0, [Math]::Min($baseName.Length, $maxBaseLength)).TrimEnd() + $suffix
+    $candidateKey = $candidate.ToLowerInvariant()
+    if (-not (Has-MapKey $SeenNames $candidateKey)) {
+      $SeenNames[$candidateKey] = $true
+      return $candidate
+    }
+  }
+  throw "Could not allocate a unique deterministic Exchange directory name for '$baseName'."
+}
+
 function Is-InternalEmail($Email) {
   $internalDomains = @("cosulich.com.hk", "cosulich.com.sg")
   $domain = ((Clean-Text $Email).ToLowerInvariant().Split("@") | Select-Object -Last 1)
   return $internalDomains -contains $domain
+}
+
+function Is-InternalContact($Contact, $Email) {
+  if (Is-InternalEmail $Email) { return $true }
+  $sourceBook = Clean-Text (Get-MapValue $Contact "source_book")
+  if (-not $sourceBook) { $sourceBook = Clean-Text (Get-MapValue $Contact "SourceBook") }
+  return $sourceBook.Equals("FC-INTERNAL", [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Load-AllRows($Table, $OrderColumn) {
@@ -631,6 +775,7 @@ function Load-AllRows($Table, $OrderColumn) {
 function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $seenEmails = @{}
   $seenAliases = @{}
+  $allContactRows = @()
   $contactRows = @()
   $contactById = @{}
   $contactByEmail = @{}
@@ -681,17 +826,41 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       FirstName = Clean-Text $contact.first_name
       LastName = Clean-Text $contact.last_name
       BaseAlias = $baseAlias
-      Alias = Get-UniqueAlias $baseAlias $seenAliases ("contact:" + (Clean-Text $contact.id))
+      Alias = ""
       ExternalEmailAddress = $email
       Nickname = Clean-Text $contact.nickname
       SourceKey = Get-ContactSourceKey $contact.id
     }
 
-    if (-not (Is-InternalEmail $email)) { $contactRows += $row }
+    $allContactRows += $row
+    if (-not (Is-InternalContact $contact $email)) { $contactRows += $row }
     $seenEmails[$email] = $row
     $contactByEmail[$email] = $row
     $contactIdsByEmail[$email] = @((Clean-Text $contact.id))
     $contactById[(Clean-Text $contact.id)] = $row
+  }
+
+  $aliasOrderedContactRows = @(
+    @($allContactRows | Where-Object { Is-InternalContact $_ $_.ExternalEmailAddress }) +
+    @($allContactRows | Where-Object { -not (Is-InternalContact $_ $_.ExternalEmailAddress) })
+  )
+  foreach ($contactRow in $aliasOrderedContactRows) {
+    $contactRow.Alias = Get-UniqueAlias $contactRow.BaseAlias $seenAliases ("contact:" + (Clean-Text $contactRow.SourceContactId))
+  }
+
+  $directoryNameCounts = @{}
+  foreach ($contactRow in @($contactRows)) {
+    $baseName = Get-ExchangeDirectoryNameBase $contactRow.DisplayName
+    $nameKey = $baseName.ToLowerInvariant()
+    if (-not (Has-MapKey $directoryNameCounts $nameKey)) { $directoryNameCounts[$nameKey] = 0 }
+    $directoryNameCounts[$nameKey] = [int]$directoryNameCounts[$nameKey] + 1
+  }
+  $seenDirectoryNames = @{}
+  foreach ($contactRow in @($contactRows)) {
+    $baseName = Get-ExchangeDirectoryNameBase $contactRow.DisplayName
+    $forceStableSuffix = [int]$directoryNameCounts[$baseName.ToLowerInvariant()] -gt 1
+    $directoryName = Get-UniqueExchangeDirectoryName $contactRow.DisplayName $seenDirectoryNames $contactRow.SourceKey $forceStableSuffix
+    $contactRow | Add-Member -NotePropertyName DirectoryName -NotePropertyValue $directoryName -Force
   }
 
   foreach ($email in @($contactByEmail.Keys)) {
@@ -775,6 +944,7 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
     contacts = @($Rows.Contacts | Sort-Object SourceKey | ForEach-Object {
       [ordered]@{
         sourceContactId = Clean-Text $_.SourceContactId
+        directoryName = Clean-Text $_.DirectoryName
         displayName = Clean-Text $_.DisplayName
         firstName = Clean-Text $_.FirstName
         lastName = Clean-Text $_.LastName
@@ -874,7 +1044,7 @@ function Get-ExchangeSourceCertificationDrift($InitialFingerprint, $InitialQueue
   return $reasons
 }
 
-function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false) {
+function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, [bool]$IncludeSinglePeer = $false) {
   $base = Clean-Text $BaseAlias
   if (-not $base) { return }
   $rows = Get-CanonicalExchangeRows
@@ -885,7 +1055,7 @@ function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpW
   foreach ($group in @($rows.Groups | Where-Object { (Clean-Text $_.BaseAlias).Equals($base, [StringComparison]::OrdinalIgnoreCase) })) {
     $peers += [pscustomobject]@{ Kind = "group"; Value = $group }
   }
-  if ($peers.Count -le 1) { return }
+  if ($peers.Count -eq 0 -or ($peers.Count -eq 1 -and -not $IncludeSinglePeer)) { return }
 
   $orderedPeers = @($peers | Sort-Object `
     @{ Expression = { if ((Clean-Text $_.Value.Alias).Equals($base, [StringComparison]::OrdinalIgnoreCase)) { 1 } else { 0 } }; Ascending = $true }, `
@@ -897,6 +1067,25 @@ function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpW
     } else {
       Upsert-ExchangeDistributionGroup $peer.Value $Stats $SkipNoOpWrites
     }
+    Renew-ExchangeSyncLockIfDue
+  }
+}
+
+function Sync-ExchangeDirectoryNamePeers($DisplayName, [hashtable]$Stats, $ExcludeSourceKey = "", [bool]$IncludeSinglePeer = $false) {
+  $displayNameText = Clean-Text $DisplayName
+  if (-not $displayNameText) { return }
+  $directoryBase = Get-ExchangeDirectoryNameBase $displayNameText
+  $rows = Get-CanonicalExchangeRows
+  $allPeers = @($rows.Contacts | Where-Object {
+    (Get-ExchangeDirectoryNameBase $_.DisplayName).Equals($directoryBase, [StringComparison]::OrdinalIgnoreCase)
+  })
+  if ($allPeers.Count -eq 0 -or ($allPeers.Count -eq 1 -and -not $IncludeSinglePeer)) { return }
+
+  $excludedSourceKey = Clean-Text $ExcludeSourceKey
+  foreach ($peer in @($allPeers | Sort-Object SourceKey)) {
+    if ($excludedSourceKey -and (Clean-Text $peer.SourceKey) -eq $excludedSourceKey) { continue }
+    Renew-ExchangeSyncLockIfDue
+    Upsert-ExchangeMailContact $peer $Stats $true
     Renew-ExchangeSyncLockIfDue
   }
 }
@@ -1254,7 +1443,7 @@ function Get-ContactExchangeRowFromSource($SourceContactId) {
   $rows = Get-CanonicalExchangeRows
   if (-not (Has-MapKey $rows.ContactById $sourceId)) { return $null }
   $contact = $rows.ContactById[$sourceId]
-  if ($contact -and -not (Is-InternalEmail $contact.ExternalEmailAddress)) { return $contact }
+  if ($contact -and -not (Is-InternalContact $contact $contact.ExternalEmailAddress)) { return $contact }
   return $null
 }
 
@@ -1815,7 +2004,7 @@ function Publish-FullSyncMutationDetails([hashtable]$Stats, $Details, [bool]$Ver
 function Get-FullContactMutationFieldChanges($Existing, $Profile, $Contact, [bool]$Created) {
   $beforeMissing = $(if ($Created) { "(missing)" } else { "(blank)" })
   $fields = @(
-    [pscustomobject]@{ Label = "Name"; Before = $(if ($Existing) { Clean-Text $Existing.Name } else { $beforeMissing }); After = Clean-Text $Contact.DisplayName },
+    [pscustomobject]@{ Label = "Name"; Before = $(if ($Existing) { Clean-Text $Existing.Name } else { $beforeMissing }); After = Get-ExchangeContactDirectoryName $Contact },
     [pscustomobject]@{ Label = "Display name"; Before = $(if ($Existing) { Clean-Text $Existing.DisplayName } else { $beforeMissing }); After = Clean-Text $Contact.DisplayName },
     [pscustomobject]@{ Label = "Email"; Before = $(if ($Existing) { Normalize-Email (Get-RecipientEmail $Existing) } else { $beforeMissing }); After = Normalize-Email $Contact.ExternalEmailAddress },
     [pscustomobject]@{ Label = "Alias"; Before = $(if ($Existing) { Clean-Text $Existing.Alias } else { $beforeMissing }); After = Clean-Text $Contact.Alias },
@@ -1884,14 +2073,17 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     $existing = Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
   }
 
-  if ($existing -and $SkipNoOpWrites -and -not $ExistingProfileHint) {
-    $profileIdentity = Get-ExchangeStrongCommandIdentity $existing
-    if (-not $profileIdentity) { $profileIdentity = Clean-Text $existing.Identity }
-    if ($profileIdentity) {
-      Renew-ExchangeSyncLockIfDue
-      $ExistingProfileHint = Get-Contact -Identity $profileIdentity -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
-    }
+  if ($existing -and -not (Get-ExchangeStrongCommandIdentity $existing)) {
+    throw "Existing Exchange contact $email has no immutable identity, so the update was blocked without mutation."
+  }
+  if (-not $existing) {
+    $ExistingProfileHint = $null
+  } elseif ($ExistingProfileHint) {
+    $correlatedProfileHint = Resolve-ExchangeContactProfileHint $existing (New-ExchangeContactProfileLookup @($ExistingProfileHint))
+    $ExistingProfileHint = $correlatedProfileHint
+  }
+  if ($existing -and -not $ExistingProfileHint) {
+    $ExistingProfileHint = Resolve-ExchangeContactProfileForMailContact $existing "Exchange contact $email" 1
   }
   $existingBeforeMutation = $existing
   $profileBeforeMutation = $ExistingProfileHint
@@ -1903,11 +2095,12 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     $fullMutationAction = "Update contact"
     $identity = Get-ExchangeStrongCommandIdentity $existing
     if (-not $identity) { throw "Existing Exchange contact $email has no immutable identity, so the update was blocked without mutation." }
+    $profileIdentity = Get-ExchangeContactProfileCommandIdentity $ExistingProfileHint
     try {
       Renew-ExchangeSyncLockIfDue
       Set-MailContact -Identity $identity -ExternalEmailAddress $email -Alias $Contact.Alias -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Renew-ExchangeSyncLockIfDue
-      Set-ExchangeContactProfile $identity $Contact
+      Set-ExchangeContactProfile $profileIdentity $Contact
     } catch {
       $updateError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $updateError)) { throw }
@@ -1930,42 +2123,63 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
         Renew-ExchangeSyncLockIfDue
       }
       Write-Warning ("Existing managed Exchange contact {0} is absent or narrowly confirmed invalid; recreating it. Original error: {1}" -f $email, $updateError)
-      $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
+      $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
       Renew-ExchangeSyncLockIfDue
       $identity = Get-ExchangeStrongCommandIdentity $newContact
       if (-not $identity) { throw "Recreated Exchange contact $email did not return an immutable identity, so profile/marker mutation was blocked." }
       Set-MailContact -Identity $identity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Renew-ExchangeSyncLockIfDue
-      Set-ExchangeContactProfile $identity $Contact
+      $recreatedContact = Get-ManagedExchangeMailContactBySourceKey $sourceKey $email "Recreated Exchange contact $email" 4
+      $recreatedProfile = Resolve-ExchangeContactProfileForMailContact $recreatedContact "Recreated Exchange contact $email" 4
+      Set-ExchangeContactProfile (Get-ExchangeContactProfileCommandIdentity $recreatedProfile) $Contact
       $fullMutationAction = "Recreate contact"
     }
     Increment-Stat $Stats "updatedContacts"
   } else {
     $fullMutationAction = "Create contact"
     Renew-ExchangeSyncLockIfDue
-    $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
+    $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     $contactIdentity = Get-ExchangeStrongCommandIdentity $newContact
     if (-not $contactIdentity) { throw "New Exchange contact $email did not return an immutable identity, so profile/marker mutation was blocked." }
-    Set-ExchangeContactProfile $contactIdentity $Contact
     Set-MailContact -Identity $contactIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
+    $createdContact = Get-ManagedExchangeMailContactBySourceKey $sourceKey $email "New Exchange contact $email" 4
+    $createdProfile = Resolve-ExchangeContactProfileForMailContact $createdContact "New Exchange contact $email" 4
+    Set-ExchangeContactProfile (Get-ExchangeContactProfileCommandIdentity $createdProfile) $Contact
     Increment-Stat $Stats "createdContacts"
   }
 
-  Renew-ExchangeSyncLockIfDue
-  $verifiedMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-  Renew-ExchangeSyncLockIfDue
-  if ($verifiedMatches.Count -ne 1) { throw "Could not verify exactly one Exchange contact $email after upsert; found $($verifiedMatches.Count) objects with source key $sourceKey." }
-  $verified = $verifiedMatches[0]
-  Assert-ExchangeRecipientName $verified $Contact.DisplayName "Exchange contact $email"
-  if ((Normalize-Email (Get-RecipientEmail $verified)) -ne $email) { throw "Exchange contact $email has the wrong external email after verification." }
-  if ((Clean-Text $verified.Alias).ToLowerInvariant() -ne (Clean-Text $Contact.Alias).ToLowerInvariant()) { throw "Exchange contact $email has alias '$($verified.Alias)' instead of '$($Contact.Alias)'." }
-  if ((Clean-Text $verified.CustomAttribute1) -ne $ManagedMarker -or (Clean-Text $verified.CustomAttribute2) -ne $sourceKey) { throw "Exchange contact $email is missing its FCUNO management markers." }
-  if ([bool]$verified.HiddenFromAddressListsEnabled) { throw "Exchange contact $email is still hidden from address lists." }
-  $verifiedProfileIdentity = Get-ExchangeStrongCommandIdentity $verified
-  if (-not $verifiedProfileIdentity) { throw "Exchange contact $email could not be profile-verified because its immutable identity is missing." }
-  Assert-ExchangeContactProfile $verifiedProfileIdentity $Contact "Exchange contact $email"
+  $verified = $null
+  $verifiedProfile = $null
+  $verificationMismatches = @("mail contact is missing")
+  for ($attempt = 1; $attempt -le 4; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    Renew-ExchangeSyncLockIfDue
+    $verifiedMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    Renew-ExchangeSyncLockIfDue
+    if ($verifiedMatches.Count -gt 1) { throw "Exchange contact $email final verification found $($verifiedMatches.Count) objects with source key $sourceKey." }
+    if ($verifiedMatches.Count -eq 0) {
+      $verified = $null
+      $verifiedProfile = $null
+      $verificationMismatches = @("mail contact is missing")
+      continue
+    }
+
+    $verified = $verifiedMatches[0]
+    $verifiedProfile = $null
+    try {
+      $verifiedProfile = Resolve-ExchangeContactProfileForMailContact $verified "Exchange contact $email after upsert" 1
+    } catch {
+      if ($_.Exception.Message -notmatch "profile resolution failed after 1 attempt") { throw }
+    }
+    $verificationMismatches = @(Get-ExchangeMailContactMismatches $verified $Contact $verifiedProfile)
+    if ($verificationMismatches.Count -eq 0) { break }
+  }
+  if (-not $verified -or -not $verifiedProfile -or $verificationMismatches.Count -gt 0) {
+    throw "Exchange contact $email differs after bounded verification for: $($verificationMismatches -join ', ')."
+  }
+  Get-ExchangeContactProfileCommandIdentity $verifiedProfile | Out-Null
   if ($SkipNoOpWrites -and $fullMutationAction) {
     $created = $fullMutationAction -eq "Create contact"
     Add-FullSyncMutationDetail `
@@ -2577,7 +2791,7 @@ function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$
   if (-not $email) { return }
   $rows = Get-CanonicalExchangeRows
   $desiredContact = if (Has-MapKey $rows.ContactByEmail $email) { $rows.ContactByEmail[$email] } else { $null }
-  if ($desiredContact -and -not (Is-InternalEmail $email)) {
+  if ($desiredContact -and -not (Is-InternalContact $desiredContact $email)) {
     $contactForUpsert = $desiredContact
     if ($AllowQueuedHistoricalOwner -and (Get-QueueAuditAuthorized $Row)) {
       $contactForUpsert = Copy-ExchangeContactWithAllowedOwnerSourceKey $desiredContact (Get-ContactSourceKey $Row.entity_id)
@@ -2585,7 +2799,16 @@ function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$
     Upsert-ExchangeMailContact $contactForUpsert $Stats
     return
   }
-  if ($desiredContact -and (Is-InternalEmail $email)) { return }
+  if ($desiredContact -and (Is-InternalContact $desiredContact $email)) {
+    Remove-ManagedExchangeMailContact `
+      $email `
+      (Clean-Text $desiredContact.Alias) `
+      $Stats `
+      (Clean-Text $desiredContact.SourceContactId) `
+      (Clean-Text $desiredContact.DisplayName) `
+      $false
+    return
+  }
 
   $sourceId = if ($UseQueuedSourceKeyForDelete) { Clean-Text $Row.entity_id } else { "" }
   Remove-ManagedExchangeMailContact `
@@ -2605,16 +2828,36 @@ function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
 
   $beforeEmail = Get-QueueContactBeforeEmail $Row
   $currentEmail = if ($sourceContact) { Normalize-Email $sourceContact.primary_email } else { "" }
+  $beforeDisplayName = Get-QueueExpectedContactName $Row
+  $currentDisplayName = if ($sourceContact) { Clean-Text $sourceContact.display_name } else { "" }
+  $currentSourceKey = Get-ContactSourceKey $Row.entity_id
   $beforeBaseAlias = Get-QueueContactBeforeBaseAlias $Row
-  $currentRow = if ($sourceContact) { Get-ContactExchangeRowFromSource $Row.entity_id } else { $null }
-  $currentBaseAlias = if ($currentRow) { Clean-Text $currentRow.BaseAlias } else { "" }
+  $currentDependencyRow = $null
+  if ($sourceContact) {
+    $canonicalRows = Get-CanonicalExchangeRows
+    if (Has-MapKey $canonicalRows.ContactById (Clean-Text $Row.entity_id)) {
+      $currentDependencyRow = $canonicalRows.ContactById[(Clean-Text $Row.entity_id)]
+    }
+  }
+  $currentIsInternal = $currentDependencyRow -and (Is-InternalContact $currentDependencyRow $currentDependencyRow.ExternalEmailAddress)
+  $currentRow = if ($currentDependencyRow -and -not $currentIsInternal) { $currentDependencyRow } else { $null }
+  $currentBaseAlias = if ($currentDependencyRow) { Clean-Text $currentDependencyRow.BaseAlias } else { "" }
   $beforeEmailReconciled = $false
 
   if ($beforeEmail -and $beforeEmail -ne $currentEmail) {
     Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats (-not $sourceContact) (Get-QueueAuditAuthorized $Row)
     $beforeEmailReconciled = $true
   }
-  if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
+  if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats ([bool]$currentIsInternal) ([bool]$currentIsInternal) }
+  if ($currentDisplayName) {
+    Sync-ExchangeDirectoryNamePeers $currentDisplayName $Stats $currentSourceKey $false
+  }
+  if ($beforeDisplayName -and (
+    -not $currentRow -or
+    -not $beforeDisplayName.Equals($currentDisplayName, [StringComparison]::OrdinalIgnoreCase)
+  )) {
+    Sync-ExchangeDirectoryNamePeers $beforeDisplayName $Stats $currentSourceKey $true
+  }
   if ($currentEmail) {
     Reconcile-ExchangeContactEmail $currentEmail $Row $Stats $false $false
   } elseif ($beforeEmail -and -not $beforeEmailReconciled) {
@@ -2625,7 +2868,7 @@ function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
     Sync-ExchangeGroupsForEmail $email $Stats
   }
   if ($beforeBaseAlias -and -not $beforeBaseAlias.Equals($currentBaseAlias, [StringComparison]::OrdinalIgnoreCase)) {
-    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats
+    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats $true $true
   }
 }
 
@@ -2697,7 +2940,7 @@ function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
     (Get-QueueExpectedGroupName $Row) `
     $(if ($sourceGroup) { $false } else { Get-QueueAuditAuthorized $Row })
   if ($beforeBaseAlias -and -not $beforeBaseAlias.Equals($currentBaseAlias, [StringComparison]::OrdinalIgnoreCase)) {
-    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats
+    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats $true $true
   }
 }
 
