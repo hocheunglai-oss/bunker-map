@@ -844,6 +844,31 @@ $projectionDrift = @(Get-ExchangeSourceCertificationDrift $firstFingerprint "10@
 Assert-True (($projectionDrift -join " ") -match "canonical Exchange projection changed") "A changed canonical projection must invalidate full certification"
 $queueDrift = @(Get-ExchangeSourceCertificationDrift $firstFingerprint "10@2026-07-22T00:00:00Z" $firstFingerprint "11@2026-07-22T00:01:00Z")
 Assert-True (($queueDrift -join " ") -match "queue high-water changed") "A changed durable queue high-water must invalidate full certification"
+$queueHighWaterOriginalInvokeSupabaseRest = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$script:queueHighWaterResponse = $null
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  return $script:queueHighWaterResponse
+}
+try {
+  Assert-Equal "0" (Get-ExchangeQueueHighWater) "An empty durable queue must retain its zero high-water fence"
+  $preciseQueueUpdatedAt = [DateTime]::new(2026, 7, 22, 11, 32, 18, [DateTimeKind]::Utc).AddTicks(5895450)
+  $script:queueHighWaterResponse = [pscustomobject]@{
+    queue_sequence = 42
+    updated_at = $preciseQueueUpdatedAt
+  }
+  $preciseQueueHighWater = Get-ExchangeQueueHighWater
+  Assert-Equal "42@2026-07-22T11:32:18.5895450Z" $preciseQueueHighWater "A materialized DateTime queue timestamp must retain its ticks in invariant round-trip ISO form"
+  $preciseParsedQueueFence = ConvertFrom-ExchangeQueueHighWater $preciseQueueHighWater
+  Assert-Equal 42 $preciseParsedQueueFence.Sequence "The precise queue fence must preserve its sequence"
+  Assert-Equal "2026-07-22T11:32:18.5895450Z" $preciseParsedQueueFence.UpdatedAt "The precise queue fence passed to the certification RPC must preserve the exact invariant ISO timestamp"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $queueHighWaterOriginalInvokeSupabaseRest
+  $script:queueHighWaterResponse = $null
+}
+$preciseOffsetQueueTimestamp = [DateTimeOffset]::new(2026, 7, 22, 19, 32, 18, [TimeSpan]::FromHours(8)).AddTicks(5895450)
+Assert-Equal "2026-07-22T19:32:18.5895450+08:00" (ConvertTo-ExchangeQueueTimestampText $preciseOffsetQueueTimestamp) "A materialized DateTimeOffset queue timestamp must retain its ticks and explicit offset"
+Assert-Equal "2026-07-22T19:32:18.5895450+08:00" (ConvertTo-ExchangeQueueTimestampText "2026-07-22T19:32:18.589545+08:00") "An already serialized ISO queue timestamp must retain its fractional ticks and offset in invariant round-trip form"
 $parsedQueueFence = ConvertFrom-ExchangeQueueHighWater "42@2026-07-22T07:15:00Z"
 Assert-Equal 42 $parsedQueueFence.Sequence "The full-certification RPC fence must preserve the exact queue sequence"
 Assert-Equal "2026-07-22T07:15:00Z" $parsedQueueFence.UpdatedAt "The full-certification RPC fence must preserve the exact queue timestamp"

@@ -1349,12 +1349,35 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
   }
 }
 
+function ConvertTo-ExchangeQueueTimestampText($Value) {
+  if ($null -eq $Value) { return "" }
+  $invariantCulture = [Globalization.CultureInfo]::InvariantCulture
+  if ($Value -is [DateTimeOffset]) {
+    return ([DateTimeOffset]$Value).ToString("o", $invariantCulture)
+  }
+  if ($Value -is [DateTime]) {
+    return ([DateTime]$Value).ToString("o", $invariantCulture)
+  }
+
+  $text = Clean-Text $Value
+  if (-not $text) { return "" }
+  [DateTimeOffset]$parsed = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse($text, $invariantCulture, [Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$parsed)) {
+    throw "The Exchange queue high-water timestamp '$text' is invalid."
+  }
+  # Canonicalize serialized timestamps too, so no caller can reintroduce a
+  # locale-formatted value while fractional ticks and the explicit offset survive.
+  return $parsed.ToString("o", $invariantCulture)
+}
+
 function Get-ExchangeQueueHighWater {
   # Capture first: Invoke-RestMethod can emit a top-level JSON array as one non-enumerated Object[].
   $response = Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=queue_sequence,updated_at&order=updated_at.desc,queue_sequence.desc&limit=1"
+  if ($null -eq $response) { return "0" }
   $rows = @($response)
   if ($rows.Count -le 0) { return "0" }
-  return "$(Clean-Text $rows[0].queue_sequence)@$(Clean-Text $rows[0].updated_at)"
+  $updatedAt = ConvertTo-ExchangeQueueTimestampText $rows[0].updated_at
+  return "$(Clean-Text $rows[0].queue_sequence)@$updatedAt"
 }
 
 function ConvertFrom-ExchangeQueueHighWater($Value) {
@@ -1372,7 +1395,7 @@ function ConvertFrom-ExchangeQueueHighWater($Value) {
   }
   if ($updatedAtText) {
     [DateTimeOffset]$parsedUpdatedAt = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse($updatedAtText, [ref]$parsedUpdatedAt)) {
+    if (-not [DateTimeOffset]::TryParse($updatedAtText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$parsedUpdatedAt)) {
       throw "The Exchange queue high-water timestamp '$updatedAtText' is invalid."
     }
   }
