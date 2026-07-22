@@ -150,6 +150,31 @@ function Test-ValidEmail($Value) {
   }
 }
 
+function Get-EmbeddedContactValidEmails($Contact) {
+  $payloads = @()
+  $vcard = Clean-Text (Get-MapValue $Contact "vcard")
+  if ($vcard) { $payloads += $vcard }
+
+  $properties = Get-MapValue $Contact "properties"
+  if ($null -ne $properties) {
+    try {
+      $payloads += ($properties | ConvertTo-Json -Depth 20 -Compress)
+    } catch {
+      $propertiesText = Clean-Text $properties
+      if ($propertiesText) { $payloads += $propertiesText }
+    }
+  }
+
+  $validEmails = @{}
+  foreach ($payload in @($payloads)) {
+    foreach ($match in [regex]::Matches((Clean-Text $payload), "(?i)[a-z0-9.!#$%&'*+/=?^_``{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")) {
+      $email = Normalize-Email $match.Value
+      if (Test-ValidEmail $email) { $validEmails[$email] = $true }
+    }
+  }
+  return @($validEmails.Keys | Sort-Object)
+}
+
 function Escape-ExchangeFilterValue($Value) {
   return (Clean-Text $Value).Replace("'", "''")
 }
@@ -823,7 +848,9 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $contactDependencyById = @{}
   $contactByEmail = @{}
   $contactIdsByEmail = @{}
+  $invalidContactCandidates = @()
   $invalidContacts = @()
+  $skippedInvalidContacts = @()
   $duplicateContacts = @()
 
   $orderedContacts = @($Contacts | Sort-Object `
@@ -859,11 +886,12 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
   foreach ($contact in $orderedContacts) {
     $email = Normalize-Email $contact.primary_email
     if (-not (Test-ValidEmail $email)) {
-      $invalidContacts += [pscustomobject]@{
+      $invalidContactCandidates += [pscustomobject]@{
+        SourceBook = Clean-Text $contact.source_book
         SourceContactId = Clean-Text $contact.id
         DisplayName = Clean-Text $contact.display_name
         Email = $email
-        Reason = "Invalid external email address"
+        EmbeddedValidEmails = @(Get-EmbeddedContactValidEmails $contact)
       }
       continue
     }
@@ -1000,6 +1028,85 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     }
   }
 
+  $rawMemberContactIds = @{}
+  foreach ($member in @($Members)) {
+    $rawContactId = Clean-Text $member.contact_id
+    if ($rawContactId) { $rawMemberContactIds[$rawContactId] = $true }
+  }
+
+  $allGroupsByShadowName = @{}
+  foreach ($groupRow in @($groupRows)) {
+    $sourceBookKey = (Clean-Text $groupRow.SourceBook).ToLowerInvariant()
+    $groupNameKey = (Clean-Text $groupRow.GroupName).ToLowerInvariant()
+    if (-not $sourceBookKey -or -not $groupNameKey) { continue }
+    $shadowKey = "$sourceBookKey`0$groupNameKey"
+    if (-not (Has-MapKey $allGroupsByShadowName $shadowKey)) { $allGroupsByShadowName[$shadowKey] = @() }
+    $allGroupsByShadowName[$shadowKey] = @($allGroupsByShadowName[$shadowKey]) + @($groupRow)
+  }
+
+  $projectedGroupsByShadowName = @{}
+  foreach ($groupRow in @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })) {
+    $sourceBookKey = (Clean-Text $groupRow.SourceBook).ToLowerInvariant()
+    $groupNameKey = (Clean-Text $groupRow.GroupName).ToLowerInvariant()
+    if (-not $sourceBookKey -or -not $groupNameKey) { continue }
+    $shadowKey = "$sourceBookKey`0$groupNameKey"
+    if (-not (Has-MapKey $projectedGroupsByShadowName $shadowKey)) { $projectedGroupsByShadowName[$shadowKey] = @() }
+    $projectedGroupsByShadowName[$shadowKey] = @($projectedGroupsByShadowName[$shadowKey]) + @($groupRow)
+  }
+
+  foreach ($candidate in @($invalidContactCandidates)) {
+    $sourceBookKey = (Clean-Text $candidate.SourceBook).ToLowerInvariant()
+    $displayName = Clean-Text $candidate.DisplayName
+    $invalidEmail = Clean-Text $candidate.Email
+    $shadowKey = "$sourceBookKey`0$($displayName.ToLowerInvariant())"
+    $matchingGroups = if ($sourceBookKey -and $displayName -and (Has-MapKey $projectedGroupsByShadowName $shadowKey)) {
+      @($projectedGroupsByShadowName[$shadowKey] | Sort-Object SourceGroupId)
+    } else {
+      @()
+    }
+    $allMatchingGroups = if ($sourceBookKey -and $displayName -and (Has-MapKey $allGroupsByShadowName $shadowKey)) {
+      @($allGroupsByShadowName[$shadowKey] | Sort-Object SourceGroupId)
+    } else {
+      @()
+    }
+    $sourceId = Clean-Text $candidate.SourceContactId
+    $isExactGroupShadow = (
+      $invalidEmail.Equals($displayName, [StringComparison]::OrdinalIgnoreCase) -and
+      $allMatchingGroups.Count -eq 1 -and
+      $matchingGroups.Count -eq 1 -and
+      (Clean-Text $allMatchingGroups[0].SourceGroupId) -eq (Clean-Text $matchingGroups[0].SourceGroupId) -and
+      -not (Has-MapKey $rawMemberContactIds $sourceId) -and
+      @($candidate.EmbeddedValidEmails).Count -eq 0
+    )
+
+    if ($isExactGroupShadow) {
+      $shadowGroup = $matchingGroups[0]
+      $memberCount = [int]$shadowGroup.MemberCount
+      $skippedInvalidContacts += [pscustomobject]@{
+        SourceBook = Clean-Text $candidate.SourceBook
+        SourceContactId = $sourceId
+        DisplayName = $displayName
+        Email = $invalidEmail
+        SourceKey = Get-ContactSourceKey $sourceId
+        GroupSourceId = Clean-Text $shadowGroup.SourceGroupId
+        GroupName = Clean-Text $shadowGroup.GroupName
+        GroupAlias = Clean-Text $shadowGroup.Alias
+        GroupSourceKey = Clean-Text $shadowGroup.SourceKey
+        ValidMemberCount = $memberCount
+        Reason = "Skipped invalid contact placeholder because the same-book group '$($shadowGroup.GroupName)' and its $memberCount valid projected member(s) are the certified Exchange representation."
+      }
+      continue
+    }
+
+    $invalidContacts += [pscustomobject]@{
+      SourceBook = Clean-Text $candidate.SourceBook
+      SourceContactId = $sourceId
+      DisplayName = $displayName
+      Email = $invalidEmail
+      Reason = "Invalid external email address"
+    }
+  }
+
   return @{
     Contacts = $contactRows
     Groups = @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })
@@ -1010,6 +1117,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     ContactIdsByEmail = $contactIdsByEmail
     GroupById = $groupById
     InvalidContacts = $invalidContacts
+    SkippedInvalidContacts = $skippedInvalidContacts
     DuplicateContacts = $duplicateContacts
   }
 }
@@ -1067,6 +1175,21 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
         sourceContactId = Clean-Text $_.SourceContactId
         displayName = Clean-Text $_.DisplayName
         email = Normalize-Email $_.Email
+        reason = Clean-Text $_.Reason
+      }
+    })
+    skippedInvalidContacts = @($Rows.SkippedInvalidContacts | Sort-Object SourceContactId | ForEach-Object {
+      [ordered]@{
+        sourceBook = Clean-Text $_.SourceBook
+        sourceContactId = Clean-Text $_.SourceContactId
+        displayName = Clean-Text $_.DisplayName
+        email = Clean-Text $_.Email
+        sourceKey = Clean-Text $_.SourceKey
+        groupSourceId = Clean-Text $_.GroupSourceId
+        groupName = Clean-Text $_.GroupName
+        groupAlias = Clean-Text $_.GroupAlias
+        groupSourceKey = Clean-Text $_.GroupSourceKey
+        validMemberCount = [int]$_.ValidMemberCount
         reason = Clean-Text $_.Reason
       }
     })
@@ -2067,6 +2190,58 @@ function Add-FullSyncMutationDetail([hashtable]$Stats, $ActionLabel, $EntityType
     runId = Clean-Text $script:CurrentQueueRunId
     latestError = ""
     fieldChanges = @($FieldChanges | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
+    auditLogIds = @()
+    changeSetIds = @()
+  }
+}
+
+function Add-FullSyncGroupShadowPlaceholderDetail([hashtable]$Stats, $Placeholder, [bool]$Certified) {
+  Increment-Stat $Stats "skippedQueueRows"
+  Increment-Stat $Stats "skippedInvalidContacts"
+  if (-not (Has-MapKey $Stats "changeDetails")) { $Stats["changeDetails"] = @() }
+
+  $sourceContactId = Clean-Text $Placeholder.SourceContactId
+  $sourceKey = Clean-Text $Placeholder.SourceKey
+  if (-not $sourceKey) { $sourceKey = Get-ContactSourceKey $sourceContactId }
+  $groupName = Clean-Text $Placeholder.GroupName
+  $groupSourceKey = Clean-Text $Placeholder.GroupSourceKey
+  $memberCount = [int]$Placeholder.ValidMemberCount
+  $result = if ($Certified) {
+    "No Exchange contact mutation was attempted for this non-syncable placeholder. The exact same-book group '$groupName' and its $memberCount valid projected member(s) were certified as its Exchange representation."
+  } else {
+    "No Exchange contact mutation was attempted for this non-syncable placeholder. The exact same-book group '$groupName' and its $memberCount valid projected member(s) remain its designated Exchange representation, but this run did not complete final certification."
+  }
+  $representationLabel = $(if ($Certified) { "Certified representation" } else { "Designated representation" })
+
+  $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
+    status = "skipped"
+    queueStatus = "skipped"
+    action = "full_sync"
+    actionLabel = "Skip group-shadow placeholder"
+    entityType = "Contact placeholder"
+    displayName = Clean-Text $Placeholder.DisplayName
+    identifier = Clean-Text $Placeholder.Email
+    stableId = $sourceKey
+    exchangeIdentity = ""
+    result = $result
+    queueRowId = ""
+    eventId = ""
+    actorId = ""
+    requestedBy = ""
+    queuedAt = ""
+    attempt = 0
+    retryState = ""
+    retryable = $false
+    terminal = $false
+    nextRetryAt = ""
+    runId = Clean-Text $script:CurrentQueueRunId
+    latestError = ""
+    fieldChanges = @(
+      "Invalid contact source ID: $sourceContactId",
+      "Invalid contact value: $(Clean-Text $Placeholder.Email)",
+      "$representationLabel group: $groupName [$groupSourceKey]",
+      "$representationLabel members: $memberCount valid projected member(s)"
+    )
     auditLogIds = @()
     changeSetIds = @()
   }
@@ -3470,6 +3645,7 @@ function Get-SyncSummaryLabel($Key) {
     "updatedContacts" { return "Contacts updated" }
     "removedContacts" { return "Contacts removed" }
     "preservedInvalidContacts" { return "Invalid-source contacts preserved" }
+    "skippedInvalidContacts" { return "Group-shadow contact placeholders skipped" }
     "createdGroups" { return "Groups created" }
     "updatedGroups" { return "Groups updated" }
     "removedGroups" { return "Groups removed" }
@@ -3662,7 +3838,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 
   $detailsRows = ""
   if ($Details) {
-    foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
+    foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
       $detailValue = Get-DetailValue $Details $key
       if ($null -ne $detailValue) {
         $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;'>$(Escape-Html $detailValue)</td></tr>"
@@ -3866,6 +4042,7 @@ function New-FullSyncLockFailureDetails($Message) {
     updatedContacts = 0
     removedContacts = 0
     preservedInvalidContacts = 0
+    skippedInvalidContacts = 0
     createdGroups = 0
     updatedGroups = 0
     removedGroups = 0
@@ -3892,7 +4069,17 @@ function Get-ExchangeSyncLockDenial($SyncMode) {
 }
 
 function Confirm-FinalExchangeProjection($ExchangeRows, $MailContacts, $ContactProfiles, $DistributionGroups, $GroupProfiles, [hashtable]$Stats) {
-  $mailContactLookup = New-ExchangeMailContactLookup $MailContacts
+  $skippedInvalidContactSourceKeys = @{}
+  foreach ($placeholder in @($ExchangeRows.SkippedInvalidContacts)) {
+    $placeholderSourceKey = Clean-Text $placeholder.SourceKey
+    if (-not $placeholderSourceKey) { $placeholderSourceKey = Get-ContactSourceKey $placeholder.SourceContactId }
+    if ($placeholderSourceKey) { $skippedInvalidContactSourceKeys[$placeholderSourceKey] = $true }
+  }
+  $certificationMailContacts = @($MailContacts | Where-Object {
+    $candidateSourceKey = Clean-Text $_.CustomAttribute2
+    -not ($candidateSourceKey -and (Has-MapKey $skippedInvalidContactSourceKeys $candidateSourceKey))
+  })
+  $mailContactLookup = New-ExchangeMailContactLookup $certificationMailContacts
   $contactProfileLookup = New-ExchangeContactProfileLookup $ContactProfiles
   $distributionGroupLookup = New-ExchangeDistributionGroupLookup $DistributionGroups
   $groupProfileLookup = New-ExchangeGroupProfileLookup $GroupProfiles
@@ -3966,9 +4153,12 @@ function Confirm-FinalExchangeProjection($ExchangeRows, $MailContacts, $ContactP
 
   $managedContacts = @($MailContacts | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
   $managedGroups = @($DistributionGroups | Where-Object { (Clean-Text $_.CustomAttribute1) -eq $ManagedMarker })
+  $certifiableManagedContacts = @()
   foreach ($managedContact in $managedContacts) {
     Renew-ExchangeSyncLockIfDue
     $sourceKey = Clean-Text $managedContact.CustomAttribute2
+    if ($sourceKey -and (Has-MapKey $skippedInvalidContactSourceKeys $sourceKey)) { continue }
+    $certifiableManagedContacts += $managedContact
     if (-not $sourceKey -or -not (Has-MapKey $desiredContactSourceKeys $sourceKey)) {
       Add-FullSyncFailure $Stats "Contact" $managedContact.DisplayName $sourceKey "Final Exchange certification found an unexpected managed contact."
     }
@@ -3981,10 +4171,10 @@ function Confirm-FinalExchangeProjection($ExchangeRows, $MailContacts, $ContactP
     }
   }
 
-  $Stats["verifiedManagedContacts"] = $managedContacts.Count
+  $Stats["verifiedManagedContacts"] = $certifiableManagedContacts.Count
   $Stats["verifiedManagedGroups"] = $managedGroups.Count
-  if ($managedContacts.Count -ne @($ExchangeRows.Contacts).Count) {
-    Add-FullSyncFailure $Stats "Full address book" "Managed contacts" "$($managedContacts.Count) in Exchange / $(@($ExchangeRows.Contacts).Count) in FCUNO" "Final managed-contact count does not match the canonical FCUNO projection."
+  if ($certifiableManagedContacts.Count -ne @($ExchangeRows.Contacts).Count) {
+    Add-FullSyncFailure $Stats "Full address book" "Managed contacts" "$($certifiableManagedContacts.Count) certifiable in Exchange / $(@($ExchangeRows.Contacts).Count) in FCUNO" "Final managed-contact count does not match the canonical FCUNO projection after preserved group-shadow placeholders are excluded."
   }
   if ($managedGroups.Count -ne @($ExchangeRows.Groups).Count) {
     Add-FullSyncFailure $Stats "Full address book" "Managed groups" "$($managedGroups.Count) in Exchange / $(@($ExchangeRows.Groups).Count) in FCUNO" "Final managed-group count does not match the canonical FCUNO projection."
@@ -4033,7 +4223,7 @@ function Remove-StaleManagedExchangeContacts($ManagedContacts, $ExchangeRows, [h
     if ($sourceKey) { $desiredContactSourceKeys[$sourceKey] = $true }
     if ($email) { $desiredContactEmails[$email] = $true }
   }
-  foreach ($invalid in @($ExchangeRows.InvalidContacts)) {
+  foreach ($invalid in @($ExchangeRows.InvalidContacts) + @($ExchangeRows.SkippedInvalidContacts)) {
     $invalidSourceKey = Get-ContactSourceKey $invalid.SourceContactId
     if ($invalidSourceKey) { $protectedInvalidContactSourceKeys[$invalidSourceKey] = $true }
   }
@@ -4094,6 +4284,7 @@ function Invoke-FullExchangeSync {
     updatedContacts = 0
     removedContacts = 0
     preservedInvalidContacts = 0
+    skippedInvalidContacts = 0
     createdGroups = 0
     updatedGroups = 0
     removedGroups = 0
@@ -4261,6 +4452,11 @@ function Invoke-FullExchangeSync {
   }
 
   Complete-FullExchangeQueueCertificationIfEligible $stats $initialQueueHighWater $initialProjectionFingerprint $sourceDrift | Out-Null
+
+  $groupShadowPlaceholdersCertified = [bool]$stats.fullCertificationCommitted
+  foreach ($placeholder in @($exchangeRows.SkippedInvalidContacts)) {
+    Add-FullSyncGroupShadowPlaceholderDetail $stats $placeholder $groupShadowPlaceholdersCertified
+  }
 
   return $stats
 }

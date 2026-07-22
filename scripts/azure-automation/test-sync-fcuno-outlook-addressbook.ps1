@@ -129,6 +129,149 @@ Assert-Equal "fcbs-bunker" $singaporeExternalRows.Contacts[0].SourceContactId "T
 Assert-True (-not (Is-InternalContact $singaporeExternalRows.Contacts[0] "bunker@cosulich.com.sg")) "A cosulich.com.sg domain alone must never classify an FC-GENERAL recipient as internal"
 Assert-True (Is-InternalEmail "internal@cosulich.com.hk") "The tenant's authoritative cosulich.com.hk domain must retain its legacy internal-domain safeguard"
 
+$groupShadowPlaceholder = [pscustomobject]@{
+  id = "shadow-placeholder"
+  source_book = "FC-GENERAL"
+  display_name = "SHADOW GROUP"
+  primary_email = "shadow group"
+  nickname = "SHADOW GROUP"
+  first_name = ""
+  last_name = ""
+  updated_at = "2026-07-22T03:00:00Z"
+  vcard = "BEGIN:VCARD`nFN:SHADOW GROUP`nEMAIL:shadow group`nEND:VCARD"
+  properties = '{"email":"shadow group"}'
+}
+$groupShadowMember = [pscustomobject]@{
+  id = "shadow-member"
+  source_book = "FC-GENERAL"
+  display_name = "SHADOW GROUP-1"
+  primary_email = "shadow.member@example.com"
+  nickname = "SHADOW GROUP-1"
+  first_name = ""
+  last_name = ""
+  updated_at = "2026-07-22T03:00:00Z"
+}
+$groupShadowGroup = [pscustomobject]@{
+  id = "shadow-group"
+  source_book = "FC-GENERAL"
+  name = "SHADOW GROUP"
+  nickname = "SHADOW GROUP"
+  source_uid = "shadow-group-uid"
+  description = ""
+}
+$groupShadowMembership = [pscustomobject]@{ group_id = "shadow-group"; contact_id = "shadow-member"; source_book = "FC-GENERAL" }
+$groupShadowRows = Build-ExchangeRows @($groupShadowPlaceholder, $groupShadowMember) @($groupShadowGroup) @($groupShadowMembership)
+Assert-Equal 0 @($groupShadowRows.InvalidContacts).Count "An exact non-member invalid contact shadowing one populated same-book group must not remain a hard validation failure"
+Assert-Equal 1 @($groupShadowRows.SkippedInvalidContacts).Count "An exact non-member invalid contact shadowing one populated same-book group must be classified separately"
+Assert-Equal "shadow-placeholder" $groupShadowRows.SkippedInvalidContacts[0].SourceContactId "The skipped placeholder must retain its exact FCUNO contact source ID"
+Assert-Equal "FCUNO_GROUP:shadow-group" $groupShadowRows.SkippedInvalidContacts[0].GroupSourceKey "The skipped placeholder must identify the exact certified group source key"
+Assert-Equal 1 $groupShadowRows.SkippedInvalidContacts[0].ValidMemberCount "The skipped placeholder must record the populated group's valid projected member count"
+Assert-True ($groupShadowRows.SkippedInvalidContacts[0].Reason -match "same-book group 'SHADOW GROUP'.*certified Exchange representation") "The skipped placeholder must explain the certified same-book group representation"
+
+$groupShadowSkipStats = @{ failedQueueRows = 0; skippedQueueRows = 0; skippedInvalidContacts = 0; changeDetails = @() }
+Add-FullSyncGroupShadowPlaceholderDetail $groupShadowSkipStats $groupShadowRows.SkippedInvalidContacts[0] $true
+Assert-Equal 0 $groupShadowSkipStats.failedQueueRows "A certified group-shadow placeholder must not count as a full-sync failure"
+Assert-Equal 1 $groupShadowSkipStats.skippedQueueRows "A certified group-shadow placeholder must count as an explicit skipped change"
+Assert-Equal 1 $groupShadowSkipStats.skippedInvalidContacts "A certified group-shadow placeholder must have its own summary counter"
+Assert-Equal "skipped" $groupShadowSkipStats.changeDetails[0].status "The placeholder notice row must carry skipped status"
+Assert-Equal "" $groupShadowSkipStats.changeDetails[0].exchangeIdentity "An FCUNO group source key must never be presented as an immutable Exchange identity"
+Assert-True (@($groupShadowSkipStats.changeDetails[0].fieldChanges) -contains "Invalid contact source ID: shadow-placeholder") "The placeholder notice must state the exact invalid contact source ID"
+Assert-True ($groupShadowSkipStats.changeDetails[0].result -match "same-book group 'SHADOW GROUP'.*certified as its Exchange representation") "The placeholder notice must state why the group and members are the certified representation"
+
+$groupShadowNoGroupRows = Build-ExchangeRows @($groupShadowPlaceholder) @() @()
+Assert-Equal 1 @($groupShadowNoGroupRows.InvalidContacts).Count "An invalid contact without an exact same-book group must remain a hard failure"
+Assert-Equal 0 @($groupShadowNoGroupRows.SkippedInvalidContacts).Count "An invalid contact without a group must never use the placeholder exception"
+
+$groupShadowNameMismatch = [pscustomobject]@{
+  id = "shadow-name-mismatch"
+  source_book = "FC-GENERAL"
+  display_name = "SHADOW GROUP"
+  primary_email = "DIFFERENT INVALID VALUE"
+  nickname = "SHADOW GROUP"
+  first_name = ""
+  last_name = ""
+  updated_at = "2026-07-22T03:00:00Z"
+  vcard = "BEGIN:VCARD`nFN:SHADOW GROUP`nEMAIL:DIFFERENT INVALID VALUE`nEND:VCARD"
+  properties = '{"email":"DIFFERENT INVALID VALUE"}'
+}
+$groupShadowNameMismatchRows = Build-ExchangeRows @($groupShadowNameMismatch, $groupShadowMember) @($groupShadowGroup) @($groupShadowMembership)
+Assert-Equal 1 @($groupShadowNameMismatchRows.InvalidContacts).Count "An invalid primary value that does not equal the display name must remain a hard failure"
+Assert-Equal 0 @($groupShadowNameMismatchRows.SkippedInvalidContacts).Count "A primary/display-name mismatch must never use the placeholder exception"
+
+$groupShadowEmptyGroupRows = Build-ExchangeRows @($groupShadowPlaceholder, $groupShadowMember) @($groupShadowGroup) @()
+Assert-Equal 1 @($groupShadowEmptyGroupRows.InvalidContacts).Count "An invalid contact whose same-name group has no projected members must remain a hard failure"
+Assert-Equal 0 @($groupShadowEmptyGroupRows.SkippedInvalidContacts).Count "An empty group must never certify a placeholder representation"
+
+$groupShadowReferencedRows = Build-ExchangeRows `
+  @($groupShadowPlaceholder, $groupShadowMember) `
+  @($groupShadowGroup) `
+  @(
+    $groupShadowMembership,
+    [pscustomobject]@{ group_id = "shadow-group"; contact_id = "shadow-placeholder"; source_book = "FC-GENERAL" }
+  )
+Assert-Equal 1 @($groupShadowReferencedRows.InvalidContacts).Count "An invalid contact referenced by any raw membership row must remain a hard failure"
+Assert-Equal 0 @($groupShadowReferencedRows.SkippedInvalidContacts).Count "A referenced invalid contact must never use the placeholder exception"
+
+$groupShadowAlternateVcard = [pscustomobject]@{
+  id = "shadow-placeholder"
+  source_book = "FC-GENERAL"
+  display_name = "SHADOW GROUP"
+  primary_email = "shadow group"
+  nickname = "SHADOW GROUP"
+  first_name = ""
+  last_name = ""
+  updated_at = "2026-07-22T03:00:00Z"
+  vcard = "BEGIN:VCARD`nFN:SHADOW GROUP`nEMAIL:shadow group`nEMAIL:alternate.vcard@example.com`nEND:VCARD"
+  properties = '{"email":"shadow group"}'
+}
+$groupShadowAlternateVcardRows = Build-ExchangeRows @($groupShadowAlternateVcard, $groupShadowMember) @($groupShadowGroup) @($groupShadowMembership)
+Assert-Equal 1 @($groupShadowAlternateVcardRows.InvalidContacts).Count "A valid alternate email in vCard must keep the invalid primary row as a hard failure"
+Assert-Equal 0 @($groupShadowAlternateVcardRows.SkippedInvalidContacts).Count "A vCard alternate email must block the placeholder exception"
+
+$groupShadowAlternateProperties = [pscustomobject]@{
+  id = "shadow-placeholder"
+  source_book = "FC-GENERAL"
+  display_name = "SHADOW GROUP"
+  primary_email = "shadow group"
+  nickname = "SHADOW GROUP"
+  first_name = ""
+  last_name = ""
+  updated_at = "2026-07-22T03:00:00Z"
+  vcard = "BEGIN:VCARD`nFN:SHADOW GROUP`nEMAIL:shadow group`nEND:VCARD"
+  properties = [pscustomobject]@{ email = "alternate.properties@example.com" }
+}
+$groupShadowAlternatePropertiesRows = Build-ExchangeRows @($groupShadowAlternateProperties, $groupShadowMember) @($groupShadowGroup) @($groupShadowMembership)
+Assert-Equal 1 @($groupShadowAlternatePropertiesRows.InvalidContacts).Count "A valid alternate email in contact properties must keep the invalid primary row as a hard failure"
+Assert-Equal 0 @($groupShadowAlternatePropertiesRows.SkippedInvalidContacts).Count "A properties alternate email must block the placeholder exception"
+
+$secondGroupShadowGroup = [pscustomobject]@{
+  id = "shadow-group-duplicate"
+  source_book = "FC-GENERAL"
+  name = "SHADOW GROUP"
+  nickname = "SHADOW GROUP"
+  source_uid = "shadow-group-duplicate-uid"
+  description = ""
+}
+$groupShadowPopulatedAndEmptyDuplicateRows = Build-ExchangeRows `
+  @($groupShadowPlaceholder, $groupShadowMember) `
+  @($groupShadowGroup, $secondGroupShadowGroup) `
+  @($groupShadowMembership)
+Assert-Equal 1 @($groupShadowPopulatedAndEmptyDuplicateRows.InvalidContacts).Count "One populated and one empty exact same-book group are still ambiguous and must keep the invalid contact as a hard failure"
+Assert-Equal 0 @($groupShadowPopulatedAndEmptyDuplicateRows.SkippedInvalidContacts).Count "An empty duplicate group must block the placeholder exception even when the other exact group is populated"
+
+$groupShadowAmbiguousRows = Build-ExchangeRows `
+  @($groupShadowPlaceholder, $groupShadowMember) `
+  @($groupShadowGroup, $secondGroupShadowGroup) `
+  @(
+    $groupShadowMembership,
+    [pscustomobject]@{ group_id = "shadow-group-duplicate"; contact_id = "shadow-member"; source_book = "FC-GENERAL" }
+  )
+Assert-Equal 1 @($groupShadowAmbiguousRows.InvalidContacts).Count "Two populated exact same-book groups are ambiguous and must keep the invalid contact as a hard failure"
+Assert-Equal 0 @($groupShadowAmbiguousRows.SkippedInvalidContacts).Count "An ambiguous duplicate group must never use the placeholder exception"
+Assert-True `
+  ((Get-CanonicalExchangeProjectionFingerprint $groupShadowRows) -cne (Get-CanonicalExchangeProjectionFingerprint $groupShadowAlternateVcardRows)) `
+  "The canonical fingerprint must distinguish a skipped group-shadow placeholder from a hard invalid-contact failure"
+
 $mixedInternalExternalContacts = @(
   [pscustomobject]@{ id = "managed-new"; source_book = "FCUNO"; display_name = "Managed Duplicate"; primary_email = "mixed-owner@lantana.hk"; nickname = "MANAGED DUPLICATE"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" },
   [pscustomobject]@{ id = "internal-old"; source_book = "FC-INTERNAL"; display_name = "Real Internal Mailbox"; primary_email = "mixed-owner@lantana.hk"; nickname = "REAL INTERNAL ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-21T03:00:00Z" },
@@ -663,6 +806,39 @@ try {
   Set-Item Function:Send-ExchangeSmtpMail -Value $atomicOriginalSendExchangeSmtpMail
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
+
+$originalCommitFullExchangeQueueCertification = (Get-Item Function:Commit-FullExchangeQueueCertification).ScriptBlock
+$failedCertificationPlaceholderStats = @{
+  failedQueueRows = 0
+  skippedQueueRows = 0
+  skippedInvalidContacts = 0
+  fullCertificationCommitted = $false
+  fullCertificationIdempotent = $false
+  changeDetails = @()
+}
+Set-Item Function:Commit-FullExchangeQueueCertification -Value {
+  param($QueueHighWater, $SourceFingerprint)
+  throw "Simulated durable full-certification RPC failure."
+}
+try {
+  Complete-FullExchangeQueueCertificationIfEligible `
+    $failedCertificationPlaceholderStats `
+    "42@2026-07-22T07:15:00Z" `
+    "failed-certification-fingerprint" `
+    @() | Out-Null
+  Add-FullSyncGroupShadowPlaceholderDetail `
+    $failedCertificationPlaceholderStats `
+    $groupShadowRows.SkippedInvalidContacts[0] `
+    ([bool]$failedCertificationPlaceholderStats.fullCertificationCommitted)
+} finally {
+  Set-Item Function:Commit-FullExchangeQueueCertification -Value $originalCommitFullExchangeQueueCertification
+}
+$failedCertificationPlaceholderDetail = @($failedCertificationPlaceholderStats.changeDetails | Where-Object { $_.actionLabel -eq "Skip group-shadow placeholder" })[0]
+Assert-Equal 1 $failedCertificationPlaceholderStats.failedQueueRows "A durable certification RPC failure must mark the full run failed before placeholder details are emitted"
+Assert-True (-not [bool]$failedCertificationPlaceholderStats.fullCertificationCommitted) "A durable certification RPC failure must leave the certification receipt uncommitted"
+Assert-Equal "skipped" $failedCertificationPlaceholderDetail.status "The placeholder remains an explicit skipped row when durable certification fails"
+Assert-True ($failedCertificationPlaceholderDetail.result -match "did not complete final certification") "The placeholder detail must state that certification did not complete after the RPC failure"
+Assert-True ($failedCertificationPlaceholderDetail.result -notmatch "were certified as") "A failed durable certification RPC must never produce a certified placeholder claim"
 
 $originalRenewExchangeSyncLock = (Get-Item Function:Renew-ExchangeSyncLock).ScriptBlock
 $script:testLeaseRenewals = 0
@@ -1984,6 +2160,36 @@ $exactFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
 Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $exactFinalStats
 Assert-Equal 0 $exactFinalStats.failedQueueRows "Fresh final certification must accept exact contact, profile, and group metadata"
 
+$preservedShadowMailContact = [pscustomobject]@{
+  Identity = "preserved-shadow-placeholder"
+  Guid = "b1111111-1111-4111-8111-111111111111"
+  ExternalDirectoryObjectId = "b2222222-2222-4222-8222-222222222222"
+  DistinguishedName = "CN=Preserved Shadow Placeholder,OU=Contacts,DC=example,DC=com"
+  Name = "Preserved Shadow Placeholder"
+  DisplayName = "Preserved Shadow Placeholder"
+  Alias = "preserved-shadow-placeholder"
+  ExternalEmailAddress = $desiredNoOpContact.ExternalEmailAddress
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:shadow-placeholder"
+  HiddenFromAddressListsEnabled = $false
+}
+$shadowFinalProjectionRows = @{
+  Contacts = @($desiredNoOpContact)
+  Groups = @($desiredNoOpGroup)
+  Members = @()
+  SkippedInvalidContacts = @($groupShadowRows.SkippedInvalidContacts)
+}
+$shadowFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
+Confirm-FinalExchangeProjection `
+  $shadowFinalProjectionRows `
+  @($script:noOpMailContact, $preservedShadowMailContact) `
+  @($script:noOpContactProfile) `
+  @($script:noOpDistributionGroup) `
+  @($script:noOpGroupProfile) `
+  $shadowFinalStats
+Assert-Equal 0 $shadowFinalStats.failedQueueRows "A preserved managed contact for a skipped placeholder source key must not invalidate final certification"
+Assert-Equal 1 $shadowFinalStats.verifiedManagedContacts "Preserved placeholder contacts must be excluded from the certifiable managed-contact count"
+
 $script:noOpContactProfile.FirstName = "Stale First Name"
 $driftedFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
 Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $driftedFinalStats
@@ -2020,6 +2226,25 @@ Remove-StaleManagedExchangeContacts @($invalidManagedContact) $invalidProtection
 Assert-True (-not $script:removeCalled) "A managed Exchange contact whose FCUNO source became invalid must be preserved, never stale-deleted"
 Assert-Equal 1 $invalidProtectionStats.preservedInvalidContacts "A preserved invalid-source contact must be counted for the notice"
 Assert-Equal 0 $invalidProtectionStats.removedContacts "Invalid-source preservation must report zero removals"
+
+$script:removeCalled = $false
+$shadowManagedContact = [pscustomobject]@{
+  Identity = "managed-shadow-placeholder"
+  DisplayName = "Managed shadow placeholder"
+  ExternalEmailAddress = "formerly-valid-shadow@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:shadow-placeholder"
+}
+$shadowProtectionRows = @{
+  Contacts = @()
+  InvalidContacts = @()
+  SkippedInvalidContacts = @($groupShadowRows.SkippedInvalidContacts)
+}
+$shadowProtectionStats = @{ removedContacts = 0; preservedInvalidContacts = 0; failedQueueRows = 0; changeDetails = @() }
+Remove-StaleManagedExchangeContacts @($shadowManagedContact) $shadowProtectionRows $shadowProtectionStats
+Assert-True (-not $script:removeCalled) "A stale managed contact owned by a skipped group-shadow placeholder must be preserved, never deleted"
+Assert-Equal 1 $shadowProtectionStats.preservedInvalidContacts "A preserved group-shadow placeholder contact must be included in the preservation count"
+Assert-Equal 0 $shadowProtectionStats.removedContacts "Group-shadow placeholder preservation must report zero removals"
 
 $desiredNoOpGroupMembers = @(
   [pscustomobject]@{ MemberEmail = "existing@example.com" },
