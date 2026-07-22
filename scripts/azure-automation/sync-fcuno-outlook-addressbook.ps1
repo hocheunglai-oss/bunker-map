@@ -1491,8 +1491,27 @@ function Invoke-IncrementalExchangeSync {
 
 function Get-WebhookPayload($WebhookData) {
   if ($null -eq $WebhookData) { return @{} }
-  $body = $WebhookData.RequestBody
-  if (-not $body) { return @{} }
+
+  $root = $WebhookData
+  if ($root -is [string]) {
+    $text = Clean-Text $root
+    if (-not $text) { return @{} }
+    try {
+      $root = $text | ConvertFrom-Json
+    } catch {
+      return @{}
+    }
+  }
+
+  if (Has-MapKey $root "syncMode") { return $root }
+
+  $body = Get-MapValue $root "RequestBody"
+  if ($null -eq $body) { return @{} }
+  if (-not ($body -is [string])) {
+    if (Has-MapKey $body "syncMode") { return $body }
+    return @{}
+  }
+
   try {
     return $body | ConvertFrom-Json
   } catch {

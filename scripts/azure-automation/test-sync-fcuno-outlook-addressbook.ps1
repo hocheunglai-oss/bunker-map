@@ -25,6 +25,13 @@ foreach ($email in @(
 }
 Assert-True (Test-ValidEmail "valid.name+tag@example-domain.com") "A normal external email must be accepted"
 
+$directWebhookPayload = Get-WebhookPayload '{"syncMode":"full","requestedBy":"SC"}'
+Assert-Equal "full" $directWebhookPayload.syncMode "A JSON string from the Azure Test pane must preserve syncMode"
+$wrappedWebhookPayload = Get-WebhookPayload '{"RequestBody":"{\"syncMode\":\"full\",\"requestedBy\":\"SC\"}"}'
+Assert-Equal "full" $wrappedWebhookPayload.syncMode "A serialized Azure webhook wrapper must preserve syncMode"
+$nativeWebhookPayload = Get-WebhookPayload ([pscustomobject]@{ RequestBody = '{"syncMode":"incremental"}' })
+Assert-Equal "incremental" $nativeWebhookPayload.syncMode "A native Azure webhook object must remain supported"
+
 $originalCulture = [Globalization.CultureInfo]::CurrentCulture
 try {
   [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("tr-TR")
