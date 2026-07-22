@@ -207,6 +207,15 @@ function Get-ExchangeContactProfileCommandIdentity($Profile) {
   throw "The Exchange contact profile has no supported immutable GUID or distinguished-name identity."
 }
 
+function Get-ExchangeGroupProfileCommandIdentity($Profile) {
+  if (-not $Profile) { throw "The Exchange group profile is missing." }
+  foreach ($propertyName in @("Guid", "DistinguishedName")) {
+    $value = Clean-Text $Profile.$propertyName
+    if ($value -and $value -ne "00000000-0000-0000-0000-000000000000") { return $value }
+  }
+  throw "The Exchange group profile has no supported immutable GUID or distinguished-name identity."
+}
+
 function Get-ExchangeContactDirectoryName($Contact) {
   $directoryName = Clean-Text (Get-MapValue $Contact "DirectoryName")
   if (-not $directoryName) { $directoryName = Clean-Text (Get-MapValue $Contact "DisplayName") }
@@ -520,6 +529,31 @@ function Resolve-ExchangeGroupProfileHint($DistributionGroup, $Lookup) {
   return $null
 }
 
+function Resolve-ExchangeGroupProfileForDistributionGroup($DistributionGroup, $Label, [int]$MaxAttempts = 1) {
+  if (-not $DistributionGroup) { throw "$Label has no distribution-group object for profile resolution." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $distributionIdentity = Get-ExchangeStrongCommandIdentity $DistributionGroup
+  if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for profile resolution." }
+  $lastResult = "no authoritative group profile was visible through immutable distribution identity '$distributionIdentity'"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    Renew-ExchangeSyncLockIfDue
+    $profileCandidate = $null
+    try {
+      $profileCandidate = Get-Group -Identity $distributionIdentity -ErrorAction Stop
+    } catch {
+      if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+    }
+    Renew-ExchangeSyncLockIfDue
+    if ($profileCandidate) {
+      $profile = Resolve-ExchangeGroupProfileHint $DistributionGroup (New-ExchangeGroupProfileLookup @($profileCandidate))
+      if ($profile) { return $profile }
+      $lastResult = "the returned group profile did not correlate to the distribution group through immutable identity"
+    }
+  }
+  throw "$Label profile resolution failed after $MaxAttempts attempt(s): $lastResult."
+}
+
 function Test-ExchangeObjectsRepresentSameRecipient($First, $Second) {
   if (-not $First -or -not $Second) { return $false }
   if ([object]::ReferenceEquals($First, $Second)) { return $true }
@@ -740,7 +774,10 @@ function Get-UniqueExchangeDirectoryName($DisplayName, [hashtable]$SeenNames, $S
 }
 
 function Is-InternalEmail($Email) {
-  $internalDomains = @("cosulich.com.hk", "cosulich.com.sg")
+  # cosulich.com.sg is hosted outside this Exchange tenant and FC-GENERAL rows
+  # on that domain must remain managed mail contacts. Explicit FC-INTERNAL
+  # provenance below still suppresses genuine internal recipients on any domain.
+  $internalDomains = @("cosulich.com.hk")
   $domain = ((Clean-Text $Email).ToLowerInvariant().Split("@") | Select-Object -Last 1)
   return $internalDomains -contains $domain
 }
@@ -2415,13 +2452,20 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     }
   }
   Renew-ExchangeSyncLockIfDue
-  if ($existing -and $SkipNoOpWrites -and -not $ExistingProfileHint) {
-    $profileIdentity = Get-ExchangeStrongCommandIdentity $existing
-    if (-not $profileIdentity) { $profileIdentity = Clean-Text $existing.Identity }
-    if ($profileIdentity) {
-      $ExistingProfileHint = Get-Group -Identity $profileIdentity -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
-    }
+  $existingIdentity = if ($existing) { Get-ExchangeStrongCommandIdentity $existing } else { "" }
+  if ($existing -and -not $existingIdentity) {
+    throw "Existing Exchange group $alias has no immutable identity, so the update was blocked without mutation."
+  }
+  if (-not $existing) {
+    $ExistingProfileHint = $null
+  } elseif ($ExistingProfileHint) {
+    $ExistingProfileHint = Resolve-ExchangeGroupProfileHint $existing (New-ExchangeGroupProfileLookup @($ExistingProfileHint))
+  }
+  if ($existing -and -not $ExistingProfileHint) {
+    $ExistingProfileHint = Resolve-ExchangeGroupProfileForDistributionGroup $existing "Exchange group $alias" 1
+  }
+  if ($existing -and -not $ExistingProfileHint) {
+    throw "Existing Exchange group $alias has no authoritative group profile joined through the same immutable identity, so the update was blocked without mutation."
   }
   $existingBeforeMutation = $existing
   $profileBeforeMutation = $ExistingProfileHint
@@ -2431,11 +2475,12 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     return
   } elseif ($existing) {
     $fullMutationAction = "Update group"
-    $groupIdentity = Get-ExchangeStrongCommandIdentity $existing
-    if (-not $groupIdentity) { throw "Existing Exchange group $alias has no immutable identity, so the update was blocked without mutation." }
-    Set-DistributionGroup -Identity $groupIdentity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    $groupProfileIdentity = Get-ExchangeGroupProfileCommandIdentity $ExistingProfileHint
+    # Updating Alias/Name can briefly invalidate Exchange's mutable group lookup. Apply Notes first
+    # through the independently correlated Get-Group identity, then rename the distribution recipient.
+    Set-Group -Identity $groupProfileIdentity -Notes $Group.Description -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
-    Set-Group -Identity $groupIdentity -Notes $Group.Description -ErrorAction Stop
+    Set-DistributionGroup -Identity $existingIdentity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     Increment-Stat $Stats "updatedGroups"
   } else {
@@ -2446,7 +2491,9 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     if (-not $newGroupIdentity) { throw "New Exchange group $alias did not return an immutable identity, so Notes/marker mutation was blocked." }
     Set-DistributionGroup -Identity $newGroupIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
-    Set-Group -Identity $newGroupIdentity -Notes $Group.Description -ErrorAction Stop
+    # Keep the source marker first so a propagation failure is idempotently recoverable by source key.
+    $newGroupProfile = Resolve-ExchangeGroupProfileForDistributionGroup $newGroup "New Exchange group $alias" 4
+    Set-Group -Identity (Get-ExchangeGroupProfileCommandIdentity $newGroupProfile) -Notes $Group.Description -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     Increment-Stat $Stats "createdGroups"
   }
@@ -2466,9 +2513,24 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
       continue
     }
     $verified = $verifiedMatches[0]
-    $verifiedIdentity = $(if (Clean-Text $verified.Guid) { Clean-Text $verified.Guid } else { $verified.Identity })
-    $verifiedProfile = Get-Group -Identity $verifiedIdentity -ErrorAction Stop
+    $verifiedIdentity = Get-ExchangeStrongCommandIdentity $verified
+    if (-not $verifiedIdentity) {
+      $verifiedProfile = $null
+      $verificationMismatches = @("source-key group has no immutable identity")
+      continue
+    }
+    $profileCandidate = $null
+    try {
+      $profileCandidate = Get-Group -Identity $verifiedIdentity -ErrorAction Stop
+    } catch {
+      if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+    }
     Renew-ExchangeSyncLockIfDue
+    $verifiedProfile = if ($profileCandidate) {
+      Resolve-ExchangeGroupProfileHint $verified (New-ExchangeGroupProfileLookup @($profileCandidate))
+    } else {
+      $null
+    }
     $verificationMismatches = @(Get-ExchangeDistributionGroupMismatches $verified $Group $verifiedProfile)
     if ($verificationMismatches.Count -eq 0) { break }
   }
@@ -2641,6 +2703,7 @@ function Get-ExchangeGroupMembershipMismatches($DesiredMembers, $ActualMembers) 
 function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingGroupHint = $null, [bool]$UseExistingGroupHint = $false, $ExistingGroupProfileHint = $null) {
   Renew-ExchangeSyncLockIfDue
   $pendingFullMembershipDetails = @()
+  $membershipMutationErrors = @()
   Upsert-ExchangeDistributionGroup $Group $Stats $SkipNoOpWrites $ExistingGroupHint $UseExistingGroupHint $ExistingGroupProfileHint
   Renew-ExchangeSyncLockIfDue
 
@@ -2678,12 +2741,21 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
     }
   }
 
-  foreach ($email in $desiredMembers.Keys) {
+  foreach ($email in @($desiredMembers.Keys | Sort-Object)) {
     if ($SkipNoOpWrites -and (Has-MapKey $currentMembershipState.EmailCounts $email)) { continue }
+    Renew-ExchangeSyncLockIfDue
+    $addSucceeded = $false
     try {
-      Renew-ExchangeSyncLockIfDue
       Add-DistributionGroupMember -Identity $groupIdentity -Member $email -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
+      $addSucceeded = $true
+    } catch {
+      $addError = Clean-Text $_.Exception.Message
+      if ($addError -notmatch "already a member") {
+        $membershipMutationErrors += "add $email failed: $addError"
+      }
+    }
+    Renew-ExchangeSyncLockIfDue
+    if ($addSucceeded) {
       Increment-Stat $Stats "addedMembers"
       $Stats["addedMemberEmails"] = @($Stats["addedMemberEmails"]) + $email
       if ($SkipNoOpWrites) {
@@ -2700,12 +2772,6 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
           @("Member: (absent) -> $email")
         $pendingFullMembershipDetails += @($detailStats.changeDetails)
       }
-    } catch {
-      if ($_.Exception.Message -notmatch "already a member") {
-        throw ("Could not add {0} to {1}: {2}" -f $email, $Group.GroupName, $_.Exception.Message)
-      }
-    } finally {
-      Renew-ExchangeSyncLockIfDue
     }
   }
 
@@ -2722,28 +2788,38 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
       if (-not $currentIdentity) {
         $emailCount = if (Has-MapKey $currentMembershipState.EmailCounts $currentEmail) { [int]$currentMembershipState.EmailCounts[$currentEmail] } else { 0 }
         if (-not (Test-ValidEmail $currentEmail) -or $emailCount -ne 1) {
-          throw "Could not remove unexpected member $currentEmail from $($Group.GroupName) because its immutable or unique SMTP identity could not be proven from the current membership snapshot."
+          $membershipMutationErrors += "remove $currentEmail blocked: immutable or unique SMTP identity could not be proven from the current membership snapshot"
+          continue
         }
         $currentIdentity = $currentEmail
       }
       Renew-ExchangeSyncLockIfDue
-      Remove-DistributionGroupMember -Identity $groupIdentity -Member $currentIdentity -Confirm:$false -ErrorAction Stop
+      $removeSucceeded = $false
+      try {
+        Remove-DistributionGroupMember -Identity $groupIdentity -Member $currentIdentity -Confirm:$false -ErrorAction Stop
+        $removeSucceeded = $true
+      } catch {
+        $removeError = Clean-Text $_.Exception.Message
+        $membershipMutationErrors += "remove $currentEmail failed: $removeError"
+      }
       Renew-ExchangeSyncLockIfDue
-      Increment-Stat $Stats "removedMembers"
-      $Stats["removedMemberEmails"] = @($Stats["removedMemberEmails"]) + $currentEmail
-      if ($SkipNoOpWrites) {
-        $detailStats = @{ changeDetails = @() }
-        Add-FullSyncMutationDetail `
-          $detailStats `
-          "Remove group member" `
-          "Group membership" `
-          $Group.GroupName `
-          "$($Group.Alias) / $currentEmail" `
-          "$(Clean-Text $Group.SourceKey):$currentEmail" `
-          $groupIdentity `
-          "Removed $currentEmail from the Exchange group; final membership certification follows." `
-          @("Member: $currentEmail -> (absent)")
-        $pendingFullMembershipDetails += @($detailStats.changeDetails)
+      if ($removeSucceeded) {
+        Increment-Stat $Stats "removedMembers"
+        $Stats["removedMemberEmails"] = @($Stats["removedMemberEmails"]) + $currentEmail
+        if ($SkipNoOpWrites) {
+          $detailStats = @{ changeDetails = @() }
+          Add-FullSyncMutationDetail `
+            $detailStats `
+            "Remove group member" `
+            "Group membership" `
+            $Group.GroupName `
+            "$($Group.Alias) / $currentEmail" `
+            "$(Clean-Text $Group.SourceKey):$currentEmail" `
+            $groupIdentity `
+            "Removed $currentEmail from the Exchange group; final membership certification follows." `
+            @("Member: $currentEmail -> (absent)")
+          $pendingFullMembershipDetails += @($detailStats.changeDetails)
+        }
       }
     }
   }
@@ -2775,6 +2851,7 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
   }
   if (-not $membershipVerified) {
     $verificationParts = @()
+    if ($membershipMutationErrors.Count -gt 0) { $verificationParts += "mutation errors: $($membershipMutationErrors -join ' | ')" }
     if ($verificationReadError) { $verificationParts += "verification read failed: $verificationReadError" }
     if ($missingEmails.Count -gt 0) { $verificationParts += "missing after verification retries: $($missingEmails -join ', ')" }
     if ($unexpectedEmails.Count -gt 0) { $verificationParts += "unexpected after verification retries: $($unexpectedEmails -join ', ')" }

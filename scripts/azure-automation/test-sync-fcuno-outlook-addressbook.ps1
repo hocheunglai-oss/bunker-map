@@ -121,6 +121,14 @@ Assert-Equal "c-new" $built.ContactByEmail["dup@example.com"].SourceContactId "N
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-old") "A canonical duplicate must record its previous eligible source owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
 
+$singaporeExternalRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "fcbs-bunker"; source_book = "FC-GENERAL"; display_name = "FCBS"; primary_email = "bunker@cosulich.com.sg"; nickname = "FCBS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" }
+) @() @()
+Assert-Equal 1 @($singaporeExternalRows.Contacts).Count "FC-GENERAL cosulich.com.sg recipients must project as managed mail contacts because that domain is external to this Exchange tenant"
+Assert-Equal "fcbs-bunker" $singaporeExternalRows.Contacts[0].SourceContactId "The Singapore external recipient must retain its FCUNO source identity"
+Assert-True (-not (Is-InternalContact $singaporeExternalRows.Contacts[0] "bunker@cosulich.com.sg")) "A cosulich.com.sg domain alone must never classify an FC-GENERAL recipient as internal"
+Assert-True (Is-InternalEmail "internal@cosulich.com.hk") "The tenant's authoritative cosulich.com.hk domain must retain its legacy internal-domain safeguard"
+
 $mixedInternalExternalContacts = @(
   [pscustomobject]@{ id = "managed-new"; source_book = "FCUNO"; display_name = "Managed Duplicate"; primary_email = "mixed-owner@lantana.hk"; nickname = "MANAGED DUPLICATE"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" },
   [pscustomobject]@{ id = "internal-old"; source_book = "FC-INTERNAL"; display_name = "Real Internal Mailbox"; primary_email = "mixed-owner@lantana.hk"; nickname = "REAL INTERNAL ALIAS"; first_name = ""; last_name = ""; updated_at = "2026-07-21T03:00:00Z" },
@@ -1643,7 +1651,31 @@ $script:setGroupCalls = 0
 $script:newDistributionGroupCalls = 0
 $script:newDistributionGroup = $null
 $script:newGroupProfile = $null
+$script:newGroupProfilePropagationMisses = 0
+$script:newGroupProfileSleepCalls = 0
+$script:newGroupSetIdentity = ""
 $script:membershipResolvedGroup = $null
+$script:collisionRenameOrder = @()
+$script:collisionRenameSetGroupIdentity = ""
+$script:collisionRenameDistributionGroup = [pscustomobject]@{
+  Identity = "g-ocean"
+  Guid = "66666666-6666-4666-8666-666666666666"
+  ExternalDirectoryObjectId = "external-g-ocean-shared"
+  DistinguishedName = "CN=G OCEAN,OU=Groups,DC=example,DC=com"
+  Name = "G OCEAN"
+  DisplayName = "G OCEAN"
+  Alias = "g-ocean"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_GROUP:g-ocean-collision"
+  HiddenFromAddressListsEnabled = $false
+}
+$script:collisionRenameGroupProfile = [pscustomobject]@{
+  Identity = "CN=G OCEAN,OU=Groups,DC=example,DC=com"
+  Guid = "77777777-7777-4777-8777-777777777777"
+  ExternalDirectoryObjectId = "external-g-ocean-shared"
+  DistinguishedName = "CN=G OCEAN,OU=Groups,DC=example,DC=com"
+  Notes = "Current G OCEAN description"
+}
 function Get-DistributionGroup {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
@@ -1656,6 +1688,9 @@ function Get-DistributionGroup {
   }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-new'" -and $script:newDistributionGroup) {
     return $script:newDistributionGroup
+  }
+  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-ocean-collision'") {
+    return $script:collisionRenameDistributionGroup
   }
   return $null
 }
@@ -1679,8 +1714,22 @@ function Get-Group {
     }
     return $script:noOpGroupProfile
   }
-  if ($script:newGroupProfile -and $Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) {
+  if ($script:newGroupProfile -and $Identity -eq "44444444-4444-4444-8444-444444444444") {
+    if ($script:newGroupProfilePropagationMisses -gt 0) {
+      $script:newGroupProfilePropagationMisses -= 1
+      throw "The operation couldn't be performed because object 'new-group' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+    }
     return $script:newGroupProfile
+  }
+  if ($script:newGroupProfile -and $Identity -in @("new-group", "88888888-8888-4888-8888-888888888888")) {
+    return $script:newGroupProfile
+  }
+  if ($Identity -in @(
+    $script:collisionRenameDistributionGroup.Guid,
+    $script:collisionRenameGroupProfile.Guid,
+    $script:collisionRenameGroupProfile.DistinguishedName
+  )) {
+    return $script:collisionRenameGroupProfile
   }
   return $null
 }
@@ -1693,13 +1742,36 @@ function Set-DistributionGroup {
     $script:newDistributionGroup.CustomAttribute2 = $CustomAttribute2
     $script:newDistributionGroup.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
   }
+  if ($Identity -eq $script:collisionRenameDistributionGroup.Guid) {
+    $script:collisionRenameOrder += "distribution recipient"
+    $script:collisionRenameDistributionGroup.Alias = $Alias
+    $script:collisionRenameDistributionGroup.Name = $Name
+    $script:collisionRenameDistributionGroup.DisplayName = $DisplayName
+    $script:collisionRenameDistributionGroup.CustomAttribute1 = $CustomAttribute1
+    $script:collisionRenameDistributionGroup.CustomAttribute2 = $CustomAttribute2
+    $script:collisionRenameDistributionGroup.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
+  }
 }
 function Set-Group {
   [CmdletBinding()]
   param($Identity, $Notes)
   $script:setGroupCalls += 1
-  if ($Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) { $script:newGroupProfile.Notes = $Notes }
+  if ($Identity -in @("44444444-4444-4444-8444-444444444444", "88888888-8888-4888-8888-888888888888")) {
+    $script:newGroupSetIdentity = $Identity
+    if ($Identity -ne "88888888-8888-4888-8888-888888888888") {
+      throw "Set-Group must not use the New-DistributionGroup recipient identity."
+    }
+    $script:newGroupProfile.Notes = $Notes
+  }
   if ($Identity -in @("unchanged-group", "33333333-3333-4333-8333-333333333333")) { $script:noOpGroupProfile.Notes = $Notes }
+  if ($Identity -in @($script:collisionRenameDistributionGroup.Guid, $script:collisionRenameGroupProfile.Guid)) {
+    $script:collisionRenameOrder += "group profile"
+    $script:collisionRenameSetGroupIdentity = $Identity
+    if ($script:collisionRenameDistributionGroup.Alias -eq "g-ocean-bba895" -or $Identity -ne $script:collisionRenameGroupProfile.Guid) {
+      throw "The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+    }
+    $script:collisionRenameGroupProfile.Notes = $Notes
+  }
 }
 function New-DistributionGroup {
   [CmdletBinding()]
@@ -1720,7 +1792,7 @@ function New-DistributionGroup {
     }
     $script:newGroupProfile = [pscustomobject]@{
       Identity = "CN=New Group,OU=Groups,DC=example,DC=com"
-      Guid = "44444444-4444-4444-8444-444444444444"
+      Guid = "88888888-8888-4888-8888-888888888888"
       ExternalDirectoryObjectId = "external-new-group"
       DistinguishedName = "CN=New Group,OU=Groups,DC=example,DC=com"
       Notes = ""
@@ -1753,6 +1825,24 @@ Assert-Equal 0 $script:getGroupCalls "Full reconciliation must use its bulk auth
 Assert-Equal 0 $script:setDistributionGroupCalls "Full reconciliation must not rewrite an unchanged distribution group"
 Assert-Equal 0 $script:setGroupCalls "Full reconciliation must not rewrite unchanged group notes"
 Assert-Equal 1 $fullNoOpGroupStats.verifiedQueueRows "A skipped no-op group must still complete exact verification"
+
+$desiredCollisionRenameGroup = [pscustomobject]@{
+  SourceGroupId = "g-ocean-collision"
+  GroupName = "G OCEAN"
+  BaseAlias = "g-ocean"
+  Alias = "g-ocean-bba895"
+  Description = "Current G OCEAN description"
+  SourceKey = "FCUNO_GROUP:g-ocean-collision"
+}
+$script:collisionRenameOrder = @()
+$script:collisionRenameSetGroupIdentity = ""
+$collisionRenameStats = @{}
+Upsert-ExchangeDistributionGroup $desiredCollisionRenameGroup $collisionRenameStats $true
+Assert-Equal "group profile,distribution recipient" ($script:collisionRenameOrder -join ",") "A stale group whose alias changes after a contact/group collision must update its immutable group profile before renaming the distribution recipient"
+Assert-Equal $script:collisionRenameGroupProfile.Guid $script:collisionRenameSetGroupIdentity "Set-Group must use the correlated Get-Group profile identity, never the distribution-recipient identity"
+Assert-Equal "g-ocean-bba895" $script:collisionRenameDistributionGroup.Alias "The collision-suffixed group alias must be applied in place"
+Assert-Equal 1 $collisionRenameStats.updatedGroups "A collision-suffixed existing group must be counted as updated"
+Assert-Equal 1 $collisionRenameStats.verifiedQueueRows "A collision-suffixed existing group must pass exact post-rename verification"
 
 $changedDescriptionGroup = [pscustomobject]@{
   GroupName = "Unchanged Group"
@@ -1823,7 +1913,7 @@ $script:setGroupCalls = 0
 $incrementalGroupStats = @{}
 Upsert-ExchangeDistributionGroup $desiredNoOpGroup $incrementalGroupStats
 Assert-Equal 2 $script:getDistributionGroupCalls "Incremental group processing must retain its live lookup and verification reads"
-Assert-Equal 1 $script:getGroupCalls "Incremental group verification must read Notes from Get-Group"
+Assert-Equal 2 $script:getGroupCalls "Incremental group processing must resolve the authoritative profile before mutation and verify Notes afterward"
 Assert-Equal 1 $script:setDistributionGroupCalls "Incremental group processing must retain its existing upsert behavior"
 Assert-Equal 1 $script:setGroupCalls "Incremental group processing must update Notes through Set-Group"
 Assert-Equal 1 $incrementalGroupStats.updatedGroups "Incremental group processing must still report its update"
@@ -1835,7 +1925,7 @@ Set-Item Function:Start-Sleep -Value { param($Seconds) }
 try {
   $eventualGroupStats = @{}
   Upsert-ExchangeDistributionGroup $desiredNoOpGroup $eventualGroupStats
-  Assert-Equal 4 $script:getDistributionGroupCalls "Group verification must retry fresh distribution metadata until eventual consistency settles"
+  Assert-Equal 3 $script:getDistributionGroupCalls "Group verification must retry fresh distribution metadata until eventual consistency settles"
   Assert-Equal 3 $script:getGroupCalls "Group verification must retry authoritative Get-Group Notes until they settle"
   Assert-Equal 1 $eventualGroupStats.verifiedQueueRows "Eventually consistent group Notes must be accepted only after an exact fresh verification"
 } finally {
@@ -1851,8 +1941,18 @@ $newDesiredGroup = [pscustomobject]@{
   SourceKey = "FCUNO_GROUP:g-new"
 }
 $newGroupStats = @{}
-Upsert-ExchangeDistributionGroup $newDesiredGroup $newGroupStats
+$script:newGroupProfilePropagationMisses = 2
+$script:newGroupProfileSleepCalls = 0
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:newGroupProfileSleepCalls += 1 }
+try {
+  Upsert-ExchangeDistributionGroup $newDesiredGroup $newGroupStats
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
+Assert-Equal 2 $script:newGroupProfileSleepCalls "New group profile propagation must use bounded retries before profile mutation"
+Assert-Equal $script:newGroupProfile.Guid $script:newGroupSetIdentity "Set-Group must use the independently resolved new-group profile GUID"
+Assert-True ($script:newGroupSetIdentity -ne $script:newDistributionGroup.Guid) "Set-Group must never reuse the New-DistributionGroup recipient GUID"
 Assert-Equal "New group notes" $script:newGroupProfile.Notes "A new distribution group must receive authoritative Notes through Set-Group"
 Assert-Equal 1 $newGroupStats.createdGroups "A new distribution group must be reported as created"
 
@@ -1936,6 +2036,7 @@ $script:memberMutationGroupIdentities = @()
 $script:getDistributionGroupMemberCalls = 0
 $script:forceMembershipVerificationFailure = $false
 $script:duplicateUnexpectedMemberSnapshot = $false
+$script:memberAddFailures = @()
 function Get-DistributionGroupMember {
   [CmdletBinding()]
   param($Identity, $ResultSize)
@@ -1961,6 +2062,7 @@ function Add-DistributionGroupMember {
   $script:memberMutationGroupIdentities += (Clean-Text $Identity)
   $email = Normalize-Email $Member
   $script:attemptedMemberAdds += $email
+  if ($script:memberAddFailures -contains $email) { throw "Recipient '$email' could not be resolved in Exchange." }
   if (Has-MapKey $script:memberState $email) { throw "$email is already a member" }
   $script:memberState[$email] = $true
 }
@@ -2004,6 +2106,42 @@ Assert-Equal 1 $fullMemberStats.addedMembers "Only the missing member must be co
 Assert-Equal "unexpected@example.com" $script:removedMemberEmails[0] "Unexpected members must still be removed"
 Assert-True (@($script:memberMutationGroupIdentities | Where-Object { $_ -ne $script:noOpDistributionGroup.Guid }).Count -eq 0) "Every membership add/remove must target the immutable group identity"
 
+$independentFailureMembers = @(
+  [pscustomobject]@{ MemberEmail = "thuy@cosulich.com.hk" },
+  [pscustomobject]@{ MemberEmail = "bunker@cosulich.com.sg" }
+)
+$script:memberState = @{}
+$script:memberAddFailures = @("bunker@cosulich.com.sg")
+$script:attemptedMemberAdds = @()
+$script:removedMemberEmails = @()
+$script:getDistributionGroupMemberCalls = 0
+$script:memberReadGroupIdentities = @()
+$script:memberMutationGroupIdentities = @()
+$independentFailureStats = @{ changeDetails = @() }
+$independentFailureMessage = ""
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  try {
+    Sync-ExchangeGroupMembers $desiredNoOpGroup $independentFailureMembers $independentFailureStats $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
+  } catch {
+    $independentFailureMessage = Clean-Text $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:memberAddFailures = @()
+}
+Assert-Equal "bunker@cosulich.com.sg,thuy@cosulich.com.hk" ($script:attemptedMemberAdds -join ",") "Missing desired members must be attempted in deterministic email order"
+Assert-True (Has-MapKey $script:memberState "thuy@cosulich.com.hk") "A failed first recipient must not block a later valid member add"
+Assert-Equal 1 $independentFailureStats.addedMembers "Only the independently successful member add must be counted"
+Assert-True (@($script:memberMutationGroupIdentities | Where-Object { $_ -ne $script:noOpDistributionGroup.Guid }).Count -eq 0) "Every independent member attempt must use the immutable group identity"
+Assert-True (@($script:memberReadGroupIdentities | Where-Object { $_ -ne $script:noOpDistributionGroup.Guid }).Count -eq 0) "Initial and bounded final membership reads must use the immutable group identity"
+Assert-True ($independentFailureMessage -match "mutation errors: add bunker@cosulich.com.sg failed: Recipient 'bunker@cosulich.com.sg' could not be resolved in Exchange") "The aggregate must retain the exact per-recipient mutation error"
+Assert-True ($independentFailureMessage -match "missing after verification retries: bunker@cosulich.com.sg") "Final certification must still fail closed for the unresolved desired member"
+$independentPartialRows = @($independentFailureStats.changeDetails | Where-Object { $_.actionLabel -eq "Add group member" })
+Assert-Equal 1 $independentPartialRows.Count "The independently successful member add must retain one partial mutation detail"
+Assert-Equal "failed" $independentPartialRows[0].status "A successful member mutation in an uncertified group must be published as failed/partial"
+Assert-True (@($independentPartialRows[0].fieldChanges) -contains "Member: (absent) -> thuy@cosulich.com.hk") "The partial detail must identify the exact successful member mutation"
+
 $raceResolvedGroup = [pscustomobject]@{
   Identity = "mutable-alias-now-points-elsewhere"
   Guid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -2029,10 +2167,13 @@ $script:membershipResolvedGroup = $null
 $script:duplicateUnexpectedMemberSnapshot = $true
 $script:removedMemberEmails = @()
 $unprovableMemberRemovalFailedClosed = $false
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
 try {
   Sync-ExchangeGroupMembers $desiredNoOpGroup @() @{} $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
 } catch {
   $unprovableMemberRemovalFailedClosed = $_.Exception.Message -match "immutable or unique SMTP identity could not be proven"
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-True $unprovableMemberRemovalFailedClosed "A duplicate unexpected member without a strong identity must fail closed before removal"
 Assert-Equal 0 @($script:removedMemberEmails).Count "An unprovable member identity must never be removed through mutable display Identity"
