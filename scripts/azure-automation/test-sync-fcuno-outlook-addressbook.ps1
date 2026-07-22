@@ -32,6 +32,15 @@ Assert-Equal "full" $wrappedWebhookPayload.syncMode "A serialized Azure webhook 
 $nativeWebhookPayload = Get-WebhookPayload ([pscustomobject]@{ RequestBody = '{"syncMode":"incremental"}' })
 Assert-Equal "incremental" $nativeWebhookPayload.syncMode "A native Azure webhook object must remain supported"
 
+$reservedRunId = "79e87ed2-4e95-4cc0-a0f0-87bf341020d3"
+$reservedWebhookPayload = Get-WebhookPayload `
+  ('{"syncMode":"incremental","reservationId":"' + $reservedRunId + '"}')
+Assert-Equal $reservedRunId (Get-ExchangeQueueRunId $reservedWebhookPayload) "A FCUNO trigger reservation must become the Azure mutation lease identity"
+$generatedRunId = Get-ExchangeQueueRunId ([pscustomobject]@{ reservationId = "not-a-guid" })
+[Guid]$parsedGeneratedRunId = [Guid]::Empty
+Assert-True ([Guid]::TryParse($generatedRunId, [ref]$parsedGeneratedRunId)) "An invalid or absent reservation must safely fall back to a new GUID"
+Assert-True ($generatedRunId -cne $reservedRunId) "A fallback Azure run must not reuse an unrelated reservation identity"
+
 $fallbackRequestedAt = "2026-07-22T08:00:00.0000000Z"
 $explicitRequestedAt = "2026-07-22T07:59:00.0000000Z"
 $explicitInitializedPayload = Initialize-WebhookPayload `

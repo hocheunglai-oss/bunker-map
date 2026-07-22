@@ -2913,6 +2913,15 @@ function Get-WebhookPayload($WebhookData) {
   }
 }
 
+function Get-ExchangeQueueRunId($Payload) {
+  $reservationText = Clean-Text (Get-MapValue $Payload "reservationId")
+  [Guid]$reservationId = [Guid]::Empty
+  if ($reservationText -and [Guid]::TryParse($reservationText, [ref]$reservationId)) {
+    return $reservationId.ToString()
+  }
+  return [Guid]::NewGuid().ToString()
+}
+
 function Initialize-WebhookPayload($WebhookData, $FallbackRequestedAt = $null) {
   $payload = Get-WebhookPayload $WebhookData
   $requestedAt = ConvertTo-UtcTimestamp (Get-MapValue $payload "requestedAt")
@@ -3864,7 +3873,7 @@ $webhookPayload = Initialize-WebhookPayload $WebhookData
 $script:CurrentSyncRequestedAt = Clean-Text (Get-MapValue $webhookPayload "requestedAt")
 $syncMode = (Clean-Text $webhookPayload.syncMode).ToLowerInvariant()
 if (-not $syncMode) { $syncMode = "incremental" }
-$script:CurrentQueueRunId = [Guid]::NewGuid().ToString()
+$script:CurrentQueueRunId = Get-ExchangeQueueRunId $webhookPayload
 $details = $null
 
 try {

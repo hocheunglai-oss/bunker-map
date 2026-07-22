@@ -68,6 +68,12 @@ type ExchangeSyncStatus = {
     message: string
     requestedAt: string | null
     response?: unknown
+    lock?: {
+      active: true
+      syncMode: string
+      heartbeatAt: string
+      expiresAt: string
+    }
   }
 }
 
@@ -544,9 +550,10 @@ export default function OutlookAddressBookPage() {
       return
     }
     if (status !== "queued" && status !== "running") return
+    const hasActiveLease = exchangeSyncStatus?.status.lock?.active === true
     const requestedAt = exchangeSyncStatus?.status.requestedAt || exchangeSyncStartedAt
     const requestedAtMs = requestedAt ? Date.parse(requestedAt) : NaN
-    if (Number.isFinite(requestedAtMs) && Date.now() - requestedAtMs > EXCHANGE_SYNC_TIMEOUT_MS) {
+    if (!hasActiveLease && Number.isFinite(requestedAtMs) && Date.now() - requestedAtMs > EXCHANGE_SYNC_TIMEOUT_MS) {
       setExchangeSyncing(false)
       setExchangeButtonLabel("Sync Exchange")
       setMessage("Exchange sync did not finish within 10 minutes. Check Azure Automation jobs for the exact error, then press Sync Exchange again.")
