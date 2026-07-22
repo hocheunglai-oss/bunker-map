@@ -61,15 +61,6 @@ type ActivityItem = {
   actorName: string | null
   canUndo: boolean
 }
-type ExchangeQueueAction =
-  | "create_contact"
-  | "update_contact"
-  | "delete_contact"
-  | "create_group"
-  | "update_group"
-  | "delete_group"
-  | "update_group_members"
-type ExchangeQueueEntityType = "contact" | "group" | "group_members"
 type ExchangeSyncStatus = {
   webhookConfigured: boolean
   status: {
@@ -306,7 +297,9 @@ function outlookActivitySummary(log: AuditLogRecord, contactNames: Map<string, s
     if (log.changedFields.includes("display_name")) {
       return `Renamed from ${textValue(before, "display_name") || "blank"} to ${textValue(after, "display_name") || "blank"}`
     }
-    if (log.changedFields.includes("primary_email")) return "Updated email"
+    if (log.changedFields.includes("primary_email")) {
+      return `Changed email from ${textValue(before, "primary_email") || "blank"} to ${textValue(after, "primary_email") || "blank"}`
+    }
     if (log.changedFields.includes("source_book")) return "Changed source book"
     return log.changedFields.length ? `Updated ${log.changedFields.join(", ")}` : "Updated contact"
   }
@@ -330,33 +323,6 @@ function outlookActivitySummary(log: AuditLogRecord, contactNames: Map<string, s
   }
 
   return "Updated address book"
-}
-
-function contactExchangeSnapshot(contact: SharedContact) {
-  const email = normalized(contact.primary_email)
-  const displayName = cleanText(contact.display_name || email)
-  return {
-    SourceBook: cleanText(contact.source_book),
-    SourceContactId: contact.id,
-    DisplayName: displayName,
-    FirstName: cleanText(contact.first_name),
-    LastName: cleanText(contact.last_name),
-    Alias: exchangeAlias(cleanText(contact.nickname || displayName || email.split("@")[0]), `contact-${contact.id}`),
-    ExternalEmailAddress: email,
-    Nickname: cleanText(contact.nickname),
-  }
-}
-
-function groupExchangeSnapshot(group: SharedGroup) {
-  const groupName = cleanText(group.name || group.nickname || group.source_uid)
-  return {
-    SourceBook: cleanText(group.source_book),
-    SourceGroupId: group.id,
-    GroupName: groupName,
-    Alias: exchangeAlias(cleanText(group.nickname || groupName), `group-${group.id}`),
-    Description: cleanText(group.description),
-    MemberCount: Number(group.member_count || 0),
-  }
 }
 
 function buildExportRows(contacts: SharedContact[], groups: SharedGroup[], members: GroupMember[]) {
@@ -508,7 +474,7 @@ Write-Host "Done."
 
 export default function OutlookAddressBookPage() {
   const isMobile = useIsMobile()
-  const { loading: authLoading, authenticated, username, displayName } = useSimpleAdminAuth()
+  const { loading: authLoading, authenticated } = useSimpleAdminAuth()
   const [initialBootstrap] = useState(() =>
     readAdminClientCache<OutlookAddressBookBootstrap>(OUTLOOK_ADDRESS_BOOK_CACHE_KEY),
   )
@@ -788,7 +754,7 @@ export default function OutlookAddressBookPage() {
   async function loadRecentActivities() {
     setActivityLoading(true)
     try {
-      const response = await fetch("/api/admin/audit-logs?table=outlookaddressbook&limit=160")
+      const response = await fetch("/api/admin/audit-logs?table=outlookaddressbook&limit=160&details=1")
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message || "Unable to load recent activities.")
       setRecentActivityLogs(((payload.logs || []) as AuditLogRecord[]).slice(0, 80))
@@ -821,33 +787,6 @@ export default function OutlookAddressBookPage() {
       setMessage(error instanceof Error ? error.message : "Unable to undo recent activity.")
     } finally {
       setUndoingActivityId("")
-    }
-  }
-
-  async function enqueueExchangeSyncChange(input: {
-    action: ExchangeQueueAction
-    entityType: ExchangeQueueEntityType
-    entityId?: string | null
-    entityEmail?: string | null
-    entityAlias?: string | null
-    displayName?: string | null
-    payload?: Record<string, unknown>
-  }) {
-    const entityEmail = normalized(input.entityEmail)
-    const entityAlias = normalized(input.entityAlias)
-    const { error } = await supabase.from("outlook_exchange_sync_queue").insert({
-      action: input.action,
-      entity_type: input.entityType,
-      entity_id: input.entityId || null,
-      entity_email: entityEmail || null,
-      entity_alias: entityAlias || null,
-      display_name: cleanText(input.displayName) || null,
-      payload: input.payload || {},
-      requested_by: displayName || username || "Admin",
-    })
-
-    if (error) {
-      setMessage(`Exchange sync queue was not updated: ${error.message}`)
     }
   }
 
@@ -891,16 +830,6 @@ export default function OutlookAddressBookPage() {
         setMessage(error.message)
         throw error
       }
-      const snapshot = contactExchangeSnapshot(contactToSave)
-      await enqueueExchangeSyncChange({
-        action: "update_contact",
-        entityType: "contact",
-        entityId: contactToSave.id,
-        entityEmail: snapshot.ExternalEmailAddress,
-        entityAlias: snapshot.Alias,
-        displayName: snapshot.DisplayName,
-        payload: { contact: snapshot },
-      })
       setSaving("saved")
     }).catch(() => undefined)
   }
@@ -910,7 +839,6 @@ export default function OutlookAddressBookPage() {
     const nextGroup = {
       ...(groupDraftsRef.current[selectedGroup.id] || selectedGroup),
       ...partial,
-      member_count: members.filter((member) => member.group_id === selectedGroup.id).length,
     }
     groupDraftsRef.current[selectedGroup.id] = nextGroup
     setGroups((current) => current.map((group) => (group.id === nextGroup.id ? nextGroup : group)))
@@ -919,21 +847,20 @@ export default function OutlookAddressBookPage() {
     setMessage("")
     void queueEntitySave(groupSaveChainsRef, nextGroup.id, async () => {
       const groupToSave = groupDraftsRef.current[nextGroup.id] || nextGroup
-      const { error } = await supabase.from("shared_addressbook_groups").upsert(groupToSave, { onConflict: "id" })
+      const groupFields = {
+        id: groupToSave.id,
+        source_book: groupToSave.source_book,
+        source_uid: groupToSave.source_uid,
+        name: groupToSave.name,
+        nickname: groupToSave.nickname,
+        description: groupToSave.description,
+      }
+      const { error } = await supabase.from("shared_addressbook_groups").upsert(groupFields, { onConflict: "id" })
       if (error) {
         setSaving("failed")
         setMessage(error.message)
         throw error
       }
-      const snapshot = groupExchangeSnapshot(groupToSave)
-      await enqueueExchangeSyncChange({
-        action: "update_group",
-        entityType: "group",
-        entityId: groupToSave.id,
-        entityAlias: snapshot.Alias,
-        displayName: snapshot.GroupName,
-        payload: { group: snapshot },
-      })
       setSaving("saved")
     }).catch(() => undefined)
   }
@@ -1057,16 +984,6 @@ export default function OutlookAddressBookPage() {
       return
     }
     contactDraftsRef.current[id] = contact
-    const snapshot = contactExchangeSnapshot(contact)
-    await enqueueExchangeSyncChange({
-      action: "create_contact",
-      entityType: "contact",
-      entityId: contact.id,
-      entityEmail: snapshot.ExternalEmailAddress,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.DisplayName,
-      payload: { contact: snapshot },
-    })
     setContacts((current) => [contact, ...current])
     setSelectedSourceBook(SOURCE_ALL)
     setActiveView("contacts")
@@ -1095,15 +1012,6 @@ export default function OutlookAddressBookPage() {
       return
     }
     groupDraftsRef.current[id] = group
-    const snapshot = groupExchangeSnapshot(group)
-    await enqueueExchangeSyncChange({
-      action: "create_group",
-      entityType: "group",
-      entityId: group.id,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.GroupName,
-      payload: { group: snapshot },
-    })
     setGroups((current) => [group, ...current])
     setSelectedSourceBook(SOURCE_ALL)
     setActiveView("groups")
@@ -1116,38 +1024,13 @@ export default function OutlookAddressBookPage() {
     if (!selectedContact) return
     if (!confirm(`Delete contact ${selectedContact.display_name}?`)) return
     const deletedContact = selectedContact
-    const deletedSnapshot = contactExchangeSnapshot(deletedContact)
-    const affectedGroupIds = Array.from(new Set(members.filter((member) => member.contact_id === deletedContact.id).map((member) => member.group_id)))
     markExchangeNeedsSync()
     setSaving("saving")
-    await supabase.from("shared_addressbook_group_members").delete().eq("contact_id", deletedContact.id)
     const { error } = await supabase.from("shared_addressbook_contacts").delete().eq("id", deletedContact.id)
     if (error) {
       setSaving("failed")
       setMessage(error.message)
       return
-    }
-    await enqueueExchangeSyncChange({
-      action: "delete_contact",
-      entityType: "contact",
-      entityId: deletedContact.id,
-      entityEmail: deletedSnapshot.ExternalEmailAddress,
-      entityAlias: deletedSnapshot.Alias,
-      displayName: deletedSnapshot.DisplayName,
-      payload: { contact: deletedSnapshot },
-    })
-    for (const groupId of affectedGroupIds) {
-      const group = groups.find((item) => item.id === groupId)
-      if (!group) continue
-      const snapshot = groupExchangeSnapshot(group)
-      await enqueueExchangeSyncChange({
-        action: "update_group_members",
-        entityType: "group_members",
-        entityId: group.id,
-        entityAlias: snapshot.Alias,
-        displayName: snapshot.GroupName,
-        payload: { group: snapshot, removedContact: deletedSnapshot },
-      })
     }
     setMembers((current) => current.filter((member) => member.contact_id !== deletedContact.id))
     setContacts((current) => current.filter((contact) => contact.id !== deletedContact.id))
@@ -1161,24 +1044,14 @@ export default function OutlookAddressBookPage() {
     if (!selectedGroup) return
     if (!confirm(`Delete group ${selectedGroup.name}?`)) return
     const deletedGroup = selectedGroup
-    const deletedSnapshot = groupExchangeSnapshot(deletedGroup)
     markExchangeNeedsSync()
     setSaving("saving")
-    await supabase.from("shared_addressbook_group_members").delete().eq("group_id", deletedGroup.id)
     const { error } = await supabase.from("shared_addressbook_groups").delete().eq("id", deletedGroup.id)
     if (error) {
       setSaving("failed")
       setMessage(error.message)
       return
     }
-    await enqueueExchangeSyncChange({
-      action: "delete_group",
-      entityType: "group",
-      entityId: deletedGroup.id,
-      entityAlias: deletedSnapshot.Alias,
-      displayName: deletedSnapshot.GroupName,
-      payload: { group: deletedSnapshot },
-    })
     setMembers((current) => current.filter((member) => member.group_id !== deletedGroup.id))
     setGroups((current) => current.filter((group) => group.id !== deletedGroup.id))
     setSelectedSourceBook(SOURCE_ALL)
@@ -1208,15 +1081,6 @@ export default function OutlookAddressBookPage() {
       setMessage(error.message)
       return
     }
-    const snapshot = groupExchangeSnapshot(selectedGroup)
-    await enqueueExchangeSyncChange({
-      action: "update_group_members",
-      entityType: "group_members",
-      entityId: selectedGroup.id,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.GroupName,
-      payload: { group: snapshot, addedContact: contactExchangeSnapshot(contact) },
-    })
     setMembers((current) => (current.some((item) => item.group_id === member.group_id && item.contact_id === member.contact_id) ? current : [...current, member]))
     setSaving("saved")
     void loadRecentActivities()
@@ -1224,7 +1088,6 @@ export default function OutlookAddressBookPage() {
 
   async function removeMember(contactId: string) {
     if (!selectedGroup) return
-    const removedContact = contacts.find((contact) => contact.id === contactId) || null
     markExchangeNeedsSync()
     setSaving("saving")
     const { error } = await supabase.from("shared_addressbook_group_members").delete().eq("group_id", selectedGroup.id).eq("contact_id", contactId)
@@ -1233,18 +1096,6 @@ export default function OutlookAddressBookPage() {
       setMessage(error.message)
       return
     }
-    const snapshot = groupExchangeSnapshot(selectedGroup)
-    await enqueueExchangeSyncChange({
-      action: "update_group_members",
-      entityType: "group_members",
-      entityId: selectedGroup.id,
-      entityAlias: snapshot.Alias,
-      displayName: snapshot.GroupName,
-      payload: {
-        group: snapshot,
-        removedContact: removedContact ? contactExchangeSnapshot(removedContact) : null,
-      },
-    })
     setMembers((current) => current.filter((member) => !(member.group_id === selectedGroup.id && member.contact_id === contactId)))
     setSaving("saved")
     void loadRecentActivities()

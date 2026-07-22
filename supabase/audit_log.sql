@@ -174,6 +174,7 @@ declare
   actor_source text;
   context_payload jsonb;
   undo_of uuid;
+  correlation_id uuid;
 begin
   if tg_table_schema = 'public' and tg_table_name = 'audit_logs' then
     if tg_op = 'DELETE' then
@@ -187,8 +188,13 @@ begin
   after_payload := case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else null end;
 
   if tg_op = 'UPDATE' then
-    changed := public.audit_changed_fields(before_payload, after_payload);
+    changed := array_remove(public.audit_changed_fields(before_payload, after_payload), 'updated_at');
     if coalesce(array_length(changed, 1), 0) = 0 then
+      return new;
+    end if;
+    if tg_table_name = 'shared_addressbook_groups'
+      and changed <@ array['member_count']::text[]
+    then
       return new;
     end if;
   else
@@ -228,6 +234,12 @@ begin
     else 'header'
   end;
 
+  correlation_id := public.audit_uuid_setting('app.audit_correlation_id');
+  if correlation_id is null then
+    correlation_id := gen_random_uuid();
+    perform set_config('app.audit_correlation_id', correlation_id::text, true);
+  end if;
+
   context_payload := coalesce(
     public.audit_json_setting('app.audit_context'),
     '{}'::jsonb
@@ -235,7 +247,8 @@ begin
     jsonb_build_object(
       'pageId', nullif(public.audit_request_header('x-bunker-admin-page-id'), ''),
       'pageLabel', nullif(public.audit_request_header('x-bunker-admin-page-label'), ''),
-      'pagePath', nullif(public.audit_request_header('x-bunker-admin-page-path'), '')
+      'pagePath', nullif(public.audit_request_header('x-bunker-admin-page-path'), ''),
+      'correlationId', correlation_id
     )
   );
   undo_of := public.audit_uuid_setting('app.audit_undo_of_log_id');

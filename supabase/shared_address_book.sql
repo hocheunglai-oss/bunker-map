@@ -62,17 +62,9 @@ create policy "shared_addressbook_group_members_read"
   on public.shared_addressbook_group_members for select
   using (true);
 
-create policy "shared_addressbook_contacts_write"
-  on public.shared_addressbook_contacts for all
-  using (true)
-  with check (true);
+revoke insert, update, delete on public.shared_addressbook_contacts from anon, authenticated;
+revoke insert, update, delete on public.shared_addressbook_groups from anon, authenticated;
+revoke insert, update, delete on public.shared_addressbook_group_members from anon, authenticated;
 
-create policy "shared_addressbook_groups_write"
-  on public.shared_addressbook_groups for all
-  using (true)
-  with check (true);
-
-create policy "shared_addressbook_group_members_write"
-  on public.shared_addressbook_group_members for all
-  using (true)
-  with check (true);
+-- Transactional Exchange outbox and derived member-count triggers are installed
+-- by migration 20260722040617_exchange_sync_transactional_outbox.sql.

@@ -1,11 +1,15 @@
 param(
-  [object]$WebhookData
+  [object]$WebhookData,
+  [switch]$LibraryOnly
 )
 
 $ErrorActionPreference = "Stop"
 $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 $DefaultExchangeOnlineManagementVersion = "3.4.0"
 $script:ExchangeOnlineConnected = $false
+$script:CanonicalExchangeRows = $null
+$script:CurrentQueueRunId = $null
+$script:SyncLockAcquired = $false
 
 function Get-AutomationSetting($Name) {
   $value = Get-AutomationVariable -Name $Name -ErrorAction SilentlyContinue
@@ -70,6 +74,8 @@ function Invoke-SupabaseRest($Method, $Path, $Body = $null) {
     $headers["Content-Type"] = "application/json"
     if ($Method -eq "POST") {
       $headers["Prefer"] = "resolution=merge-duplicates"
+    } elseif ($Method -eq "PATCH") {
+      $headers["Prefer"] = "return=representation"
     }
     return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -Body ($Body | ConvertTo-Json -Depth 20)
   }
@@ -114,9 +120,47 @@ function Assert-ExchangeSettings($AppId, $TenantId, $Organization) {
 }
 
 function Normalize-Email($Value) {
-  $text = (Clean-Text $Value).ToLower()
+  $text = (Clean-Text $Value).ToLowerInvariant()
   $text = $text -replace "^[Ss][Mm][Tt][Pp]:", ""
   return $text
+}
+
+function Test-ValidEmail($Value) {
+  $email = Normalize-Email $Value
+  if (-not $email -or $email.Length -gt 254) { return $false }
+  $parts = @($email.Split("@"))
+  if ($parts.Count -ne 2) { return $false }
+  $localPart = $parts[0]
+  $domainPart = $parts[1]
+  if (-not $localPart -or $localPart.Length -gt 64 -or $localPart.StartsWith(".") -or $localPart.EndsWith(".") -or $localPart.Contains("..")) { return $false }
+  if ($localPart -notmatch "^[a-z0-9!#$%&'*+/=?^_``{|}~.-]+$") { return $false }
+  $labels = @($domainPart.Split("."))
+  if ($labels.Count -lt 2) { return $false }
+  foreach ($label in $labels) {
+    if (-not $label -or $label.Length -gt 63 -or $label -notmatch "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$") { return $false }
+  }
+  try {
+    $parsed = [System.Net.Mail.MailAddress]::new($email)
+    return (Normalize-Email $parsed.Address) -eq $email
+  } catch {
+    return $false
+  }
+}
+
+function Escape-ExchangeFilterValue($Value) {
+  return (Clean-Text $Value).Replace("'", "''")
+}
+
+function Get-ContactSourceKey($SourceContactId) {
+  $sourceId = Clean-Text $SourceContactId
+  if (-not $sourceId) { return "" }
+  return "FCUNO_CONTACT:$sourceId"
+}
+
+function Get-GroupSourceKey($SourceGroupId) {
+  $sourceId = Clean-Text $SourceGroupId
+  if (-not $sourceId) { return "" }
+  return "FCUNO_GROUP:$sourceId"
 }
 
 function Has-MapKey($Map, [string]$Key) {
@@ -156,13 +200,27 @@ function Set-ExchangeContactProfile($Identity, $Contact) {
     Identity = $Identity
     Name = $Contact.DisplayName
     DisplayName = $Contact.DisplayName
+    FirstName = $(if (Clean-Text $Contact.FirstName) { Clean-Text $Contact.FirstName } else { $null })
+    LastName = $(if (Clean-Text $Contact.LastName) { Clean-Text $Contact.LastName } else { $null })
     ErrorAction = "Stop"
   }
-  $firstName = Clean-Text $Contact.FirstName
-  $lastName = Clean-Text $Contact.LastName
-  if ($firstName) { $profile["FirstName"] = $firstName }
-  if ($lastName) { $profile["LastName"] = $lastName }
   Set-Contact @profile
+}
+
+function Assert-ExchangeContactProfile($Identity, $Contact, $Label) {
+  $expectedFirstName = Clean-Text $Contact.FirstName
+  $expectedLastName = Clean-Text $Contact.LastName
+  $actualFirstName = ""
+  $actualLastName = ""
+  for ($attempt = 1; $attempt -le 4; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    $profile = Get-Contact -Identity $Identity -ErrorAction SilentlyContinue
+    if (-not $profile) { continue }
+    $actualFirstName = Clean-Text $profile.FirstName
+    $actualLastName = Clean-Text $profile.LastName
+    if ($actualFirstName -eq $expectedFirstName -and $actualLastName -eq $expectedLastName) { return }
+  }
+  throw "$Label has the wrong contact profile after verification. Expected FirstName '$expectedFirstName' and LastName '$expectedLastName'; got FirstName '$actualFirstName' and LastName '$actualLastName'."
 }
 
 function Assert-ExchangeRecipientName($Recipient, $ExpectedName, $Label) {
@@ -193,7 +251,7 @@ function Get-StatsObject($Details) {
 }
 
 function Get-ExchangeAlias($Value, $Fallback) {
-  $base = (Clean-Text $(if ($Value) { $Value } else { $Fallback })).ToLower()
+  $base = (Clean-Text $(if ($Value) { $Value } else { $Fallback })).ToLowerInvariant()
   $base = $base -replace "&", " and "
   $base = $base -replace "[^a-z0-9._-]+", "-"
   $base = $base -replace "^[.-]+|[.-]+$", ""
@@ -202,8 +260,32 @@ function Get-ExchangeAlias($Value, $Fallback) {
   return $Fallback
 }
 
-function Get-UniqueAlias($BaseAlias, [hashtable]$SeenAliases) {
+function Get-UniqueAlias($BaseAlias, [hashtable]$SeenAliases, $StableKey = "") {
   $alias = $BaseAlias
+  if (-not (Has-MapKey $SeenAliases $alias)) {
+    $SeenAliases[$alias] = $true
+    return $alias
+  }
+
+  $stableText = Clean-Text $StableKey
+  if ($stableText) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($stableText)))).Replace("-", "").ToLowerInvariant()
+    } finally {
+      $sha.Dispose()
+    }
+    for ($hashLength = 6; $hashLength -le 20; $hashLength += 2) {
+      $suffix = "-" + $hash.Substring(0, $hashLength)
+      $maxLength = 64 - $suffix.Length
+      $alias = $BaseAlias.Substring(0, [Math]::Min($BaseAlias.Length, $maxLength)) + $suffix
+      if (-not (Has-MapKey $SeenAliases $alias)) {
+        $SeenAliases[$alias] = $true
+        return $alias
+      }
+    }
+  }
+
   $index = 2
   while ((Has-MapKey $SeenAliases $alias)) {
     $suffix = "-$index"
@@ -217,7 +299,7 @@ function Get-UniqueAlias($BaseAlias, [hashtable]$SeenAliases) {
 
 function Is-InternalEmail($Email) {
   $internalDomains = @("cosulich.com.hk", "cosulich.com.sg")
-  $domain = ((Clean-Text $Email).ToLower().Split("@") | Select-Object -Last 1)
+  $domain = ((Clean-Text $Email).ToLowerInvariant().Split("@") | Select-Object -Last 1)
   return $internalDomains -contains $domain
 }
 
@@ -225,9 +307,11 @@ function Load-AllRows($Table, $OrderColumn) {
   $rows = @()
   $pageSize = 1000
   $from = 0
+  $orderExpression = Clean-Text $OrderColumn
+  if ($orderExpression -notmatch "\.") { $orderExpression = "$orderExpression.asc" }
   while ($true) {
     $to = $from + $pageSize - 1
-    $path = "$Table" + "?select=*&order=$OrderColumn.asc&offset=$from&limit=$pageSize"
+    $path = "$Table" + "?select=*&order=$orderExpression&offset=$from&limit=$pageSize"
     $batch = Invoke-SupabaseRest -Method "GET" -Path $path
     if ($null -eq $batch) { break }
     $rows += @($batch)
@@ -239,45 +323,88 @@ function Load-AllRows($Table, $OrderColumn) {
 
 function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $seenEmails = @{}
-  $seenContactAliases = @{}
+  $seenAliases = @{}
   $contactRows = @()
   $contactById = @{}
+  $contactByEmail = @{}
+  $contactIdsByEmail = @{}
+  $invalidContacts = @()
+  $duplicateContacts = @()
 
-  foreach ($contact in $Contacts) {
-    $email = (Clean-Text $contact.primary_email).ToLower()
-    if (-not $email -or (Has-MapKey $seenEmails $email)) { continue }
+  $orderedContacts = @($Contacts | Sort-Object `
+    @{ Expression = { Normalize-Email $_.primary_email }; Ascending = $true }, `
+    @{ Expression = {
+      $updated = [DateTimeOffset]::MinValue
+      if ([DateTimeOffset]::TryParse((Clean-Text $_.updated_at), [ref]$updated)) { return $updated }
+      return [DateTimeOffset]::MinValue
+    }; Descending = $true }, `
+    @{ Expression = { Clean-Text $_.id }; Ascending = $true })
+
+  foreach ($contact in $orderedContacts) {
+    $email = Normalize-Email $contact.primary_email
+    if (-not (Test-ValidEmail $email)) {
+      $invalidContacts += [pscustomobject]@{
+        SourceContactId = Clean-Text $contact.id
+        DisplayName = Clean-Text $contact.display_name
+        Email = $email
+        Reason = "Invalid external email address"
+      }
+      continue
+    }
+
+    if (Has-MapKey $seenEmails $email) {
+      $canonical = $seenEmails[$email]
+      $contactById[(Clean-Text $contact.id)] = $canonical
+      $contactIdsByEmail[$email] = @($contactIdsByEmail[$email]) + (Clean-Text $contact.id)
+      $duplicateContacts += [pscustomobject]@{
+        SourceContactId = Clean-Text $contact.id
+        CanonicalSourceContactId = Clean-Text $canonical.SourceContactId
+        Email = $email
+      }
+      continue
+    }
 
     $displayName = Clean-Text $(if ($contact.display_name) { $contact.display_name } else { $email })
     $aliasSeed = if ($contact.nickname) { $contact.nickname } else { $displayName }
+    $baseAlias = Get-ExchangeAlias $aliasSeed "contact-$($contactRows.Count + 1)"
     $row = [pscustomobject]@{
       SourceBook = Clean-Text $contact.source_book
       SourceContactId = $contact.id
       DisplayName = $displayName
       FirstName = Clean-Text $contact.first_name
       LastName = Clean-Text $contact.last_name
-      Alias = Get-UniqueAlias (Get-ExchangeAlias $aliasSeed "contact-$($contactRows.Count + 1)") $seenContactAliases
+      BaseAlias = $baseAlias
+      Alias = Get-UniqueAlias $baseAlias $seenAliases ("contact:" + (Clean-Text $contact.id))
       ExternalEmailAddress = $email
       Nickname = Clean-Text $contact.nickname
+      SourceKey = Get-ContactSourceKey $contact.id
     }
 
     if (-not (Is-InternalEmail $email)) { $contactRows += $row }
-    $seenEmails[$email] = $true
-    $contactById[$contact.id] = $row
+    $seenEmails[$email] = $row
+    $contactByEmail[$email] = $row
+    $contactIdsByEmail[$email] = @((Clean-Text $contact.id))
+    $contactById[(Clean-Text $contact.id)] = $row
   }
 
-  $seenGroupAliases = @{}
   $groupRows = @()
-  foreach ($group in $Groups) {
+  $orderedGroups = @($Groups | Sort-Object `
+    @{ Expression = { (Clean-Text $(if ($_.nickname) { $_.nickname } else { $_.name })).ToLowerInvariant() }; Ascending = $true }, `
+    @{ Expression = { Clean-Text $_.id }; Ascending = $true })
+  foreach ($group in $orderedGroups) {
     $name = Clean-Text $(if ($group.name) { $group.name } elseif ($group.nickname) { $group.nickname } else { $group.source_uid })
     if (-not $name) { continue }
     $aliasSeed = if ($group.nickname) { $group.nickname } else { $name }
+    $baseAlias = Get-ExchangeAlias $aliasSeed "group-$($groupRows.Count + 1)"
     $groupRows += [pscustomobject]@{
       SourceBook = Clean-Text $group.source_book
       SourceGroupId = $group.id
       GroupName = $name
-      Alias = Get-UniqueAlias (Get-ExchangeAlias $aliasSeed "group-$($groupRows.Count + 1)") $seenGroupAliases
+      BaseAlias = $baseAlias
+      Alias = Get-UniqueAlias $baseAlias $seenAliases ("group:" + (Clean-Text $group.id))
       Description = Clean-Text $group.description
       MemberCount = 0
+      SourceKey = Get-GroupSourceKey $group.id
     }
   }
 
@@ -286,7 +413,10 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $seenMembers = @{}
   $memberRows = @()
 
-  foreach ($member in $Members) {
+  $orderedMembers = @($Members | Sort-Object `
+    @{ Expression = { Clean-Text $_.group_id }; Ascending = $true }, `
+    @{ Expression = { Clean-Text $_.contact_id }; Ascending = $true })
+  foreach ($member in $orderedMembers) {
     $group = $groupById[$member.group_id]
     $contact = $contactById[$member.contact_id]
     if (-not $group -or -not $contact) { continue }
@@ -299,6 +429,8 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       GroupAlias = $group.Alias
       MemberDisplayName = $contact.DisplayName
       MemberEmail = $contact.ExternalEmailAddress
+      SourceGroupId = Clean-Text $member.group_id
+      SourceContactId = Clean-Text $member.contact_id
     }
   }
 
@@ -306,6 +438,46 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     Contacts = $contactRows
     Groups = @($groupRows | Where-Object { [int]$_.MemberCount -gt 0 })
     Members = $memberRows
+    ContactById = $contactById
+    ContactByEmail = $contactByEmail
+    ContactIdsByEmail = $contactIdsByEmail
+    GroupById = $groupById
+    InvalidContacts = $invalidContacts
+    DuplicateContacts = $duplicateContacts
+  }
+}
+
+function Get-CanonicalExchangeRows {
+  if ($script:CanonicalExchangeRows) { return $script:CanonicalExchangeRows }
+  $contacts = Load-AllRows "shared_addressbook_contacts" "primary_email.asc,updated_at.desc,id.asc"
+  $groups = Load-AllRows "shared_addressbook_groups" "name.asc,id.asc"
+  $members = Load-AllRows "shared_addressbook_group_members" "group_id.asc,contact_id.asc"
+  $script:CanonicalExchangeRows = Build-ExchangeRows $contacts $groups $members
+  return $script:CanonicalExchangeRows
+}
+
+function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats) {
+  $base = Clean-Text $BaseAlias
+  if (-not $base) { return }
+  $rows = Get-CanonicalExchangeRows
+  $peers = @()
+  foreach ($contact in @($rows.Contacts | Where-Object { (Clean-Text $_.BaseAlias).Equals($base, [StringComparison]::OrdinalIgnoreCase) })) {
+    $peers += [pscustomobject]@{ Kind = "contact"; Value = $contact }
+  }
+  foreach ($group in @($rows.Groups | Where-Object { (Clean-Text $_.BaseAlias).Equals($base, [StringComparison]::OrdinalIgnoreCase) })) {
+    $peers += [pscustomobject]@{ Kind = "group"; Value = $group }
+  }
+  if ($peers.Count -le 1) { return }
+
+  $orderedPeers = @($peers | Sort-Object `
+    @{ Expression = { if ((Clean-Text $_.Value.Alias).Equals($base, [StringComparison]::OrdinalIgnoreCase)) { 1 } else { 0 } }; Ascending = $true }, `
+    @{ Expression = { Clean-Text $_.Value.SourceKey }; Ascending = $true })
+  foreach ($peer in $orderedPeers) {
+    if ($peer.Kind -eq "contact") {
+      Upsert-ExchangeMailContact $peer.Value $Stats
+    } else {
+      Upsert-ExchangeDistributionGroup $peer.Value $Stats
+    }
   }
 }
 
@@ -352,76 +524,84 @@ function Load-RowsByColumn($Table, $Column, $Value, $OrderColumn = "updated_at")
   return @($rows)
 }
 
-function Get-PendingExchangeQueueRows {
-  $rows = Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=*&status=eq.pending&order=created_at.asc&limit=200"
+function Claim-ExchangeQueueRows($Limit = 200) {
+  if (-not $script:CurrentQueueRunId) {
+    $script:CurrentQueueRunId = [Guid]::NewGuid().ToString()
+  }
+  $rows = Invoke-SupabaseRest -Method "POST" -Path "rpc/claim_outlook_exchange_sync_queue" -Body @{
+    p_run_id = $script:CurrentQueueRunId
+    p_limit = [int]$Limit
+  }
   return @($rows)
 }
 
+function Acquire-ExchangeSyncLock($SyncMode) {
+  if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
+  $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/acquire_outlook_exchange_sync_lock" -Body @{
+    p_run_id = $script:CurrentQueueRunId
+    p_sync_mode = Clean-Text $SyncMode
+    p_lease_minutes = 30
+  }
+  return [bool]$result
+}
+
+function Renew-ExchangeSyncLock {
+  if (-not $script:CurrentQueueRunId) { throw "Cannot renew the Exchange sync lock without a run ID." }
+  $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/renew_outlook_exchange_sync_lock" -Body @{
+    p_run_id = $script:CurrentQueueRunId
+    p_lease_minutes = 30
+  }
+  if (-not [bool]$result) { throw "The Exchange sync job lost its global mutation lease." }
+}
+
+function Release-ExchangeSyncLock {
+  if (-not $script:CurrentQueueRunId -or -not $script:SyncLockAcquired) { return }
+  try {
+    Invoke-SupabaseRest -Method "POST" -Path "rpc/release_outlook_exchange_sync_lock" -Body @{
+      p_run_id = $script:CurrentQueueRunId
+    } | Out-Null
+  } finally {
+    $script:SyncLockAcquired = $false
+  }
+}
+
+function Get-ExchangeQueueBacklogCount {
+  $rows = Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=id&or=(status.eq.pending,status.eq.processing,status.eq.failed)&limit=1000"
+  return @($rows).Count
+}
+
 function Update-ExchangeQueueRow($RowId, [hashtable]$Fields) {
+  if (-not $script:CurrentQueueRunId) { throw "Exchange queue row cannot be updated without an active run ID." }
   $Fields["updated_at"] = (Get-Date).ToUniversalTime().ToString("o")
   $encodedId = Encode-QueryValue $RowId
-  Invoke-SupabaseRest -Method "PATCH" -Path "outlook_exchange_sync_queue?id=eq.$encodedId" -Body $Fields | Out-Null
-}
-
-function Get-QueueRowKey($Row) {
-  $entityType = Clean-Text $Row.entity_type
-  $entityId = Clean-Text $Row.entity_id
-  if ($entityId) { return "$entityType`:$entityId" }
-  $email = Normalize-Email $Row.entity_email
-  if ($email) { return "$entityType`:email`:$email" }
-  $alias = Clean-Text $Row.entity_alias
-  if ($alias) { return "$entityType`:alias`:$alias" }
-  return "row`:$($Row.id)"
-}
-
-function Select-EffectiveQueueRows($Rows) {
-  $latestByKey = @{}
-  foreach ($row in $Rows) {
-    $latestByKey[(Get-QueueRowKey $row)] = $row
-  }
-  return @($latestByKey.Values | Sort-Object created_at)
-}
-
-function Mark-SupersededQueueRows($AllRows, $EffectiveRows, [hashtable]$Stats) {
-  $effectiveIds = @{}
-  foreach ($row in $EffectiveRows) {
-    $effectiveIds[(Clean-Text $row.id)] = $true
-  }
-  foreach ($row in $AllRows) {
-    $rowId = Clean-Text $row.id
-    if ($rowId -and -not (Has-MapKey $effectiveIds $rowId)) {
-      $skipReason = "Skipped because a newer pending change exists for the same entity."
-      Update-ExchangeQueueRow $rowId @{
-        status = "skipped"
-        error_message = $skipReason
-        completed_at = (Get-Date).ToUniversalTime().ToString("o")
-      }
-      Increment-Stat $Stats "skippedQueueRows"
-      Increment-Stat $Stats "supersededQueueRows"
-    }
+  $encodedRunId = Encode-QueryValue $script:CurrentQueueRunId
+  $updated = @(Invoke-SupabaseRest -Method "PATCH" -Path "outlook_exchange_sync_queue?id=eq.$encodedId&run_id=eq.$encodedRunId&status=eq.processing&select=id" -Body $Fields)
+  if ($updated.Count -ne 1) {
+    throw "Exchange queue row $RowId lost its processing lease before status could be saved."
   }
 }
 
-function Get-ContactExchangeRowFromSource($Contact) {
-  if (-not $Contact) { return $null }
-  $rows = Build-ExchangeRows @($Contact) @() @()
-  $contacts = @($rows.Contacts)
-  if ($contacts.Count -gt 0) { return $contacts[0] }
+function Get-ContactExchangeRowFromSource($SourceContactId) {
+  $sourceId = Clean-Text $SourceContactId
+  if (-not $sourceId) { return $null }
+  $rows = Get-CanonicalExchangeRows
+  if (-not (Has-MapKey $rows.ContactById $sourceId)) { return $null }
+  $contact = $rows.ContactById[$sourceId]
+  if ($contact -and -not (Is-InternalEmail $contact.ExternalEmailAddress)) { return $contact }
   return $null
 }
 
 function Get-GroupExchangeRowsFromSource($GroupId) {
-  $group = Load-SingleRow "shared_addressbook_groups" "id" $GroupId
-  if (-not $group) { return $null }
-
-  $members = Load-RowsByColumn "shared_addressbook_group_members" "group_id" $GroupId "updated_at"
-  $contacts = @()
-  foreach ($member in $members) {
-    $contact = Load-SingleRow "shared_addressbook_contacts" "id" $member.contact_id
-    if ($contact) { $contacts += $contact }
+  $sourceId = Clean-Text $GroupId
+  if (-not $sourceId) { return $null }
+  $rows = Get-CanonicalExchangeRows
+  if (-not (Has-MapKey $rows.GroupById $sourceId)) { return $null }
+  $group = $rows.GroupById[$sourceId]
+  $members = @($rows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq $sourceId })
+  return @{
+    Groups = $(if ([int]$group.MemberCount -gt 0) { @($group) } else { @() })
+    Members = $members
   }
-
-  return Build-ExchangeRows $contacts @($group) $members
 }
 
 function Get-QueuePayloadValue($Row, $ObjectName, $PropertyName) {
@@ -508,10 +688,71 @@ function Get-QueueIdentifier($Row) {
   return Clean-Text $Row.entity_id
 }
 
+function Get-PayloadProperty($Object, $PropertyName) {
+  if (-not $Object) { return "" }
+  $property = $Object.PSObject.Properties[$PropertyName]
+  if (-not $property) { return "" }
+  return Clean-Text $property.Value
+}
+
+function Get-QueueFieldChanges($Row) {
+  if (-not $Row -or -not $Row.payload) { return @() }
+  $before = $null
+  $after = $null
+  $labels = @{}
+  switch (Clean-Text $Row.entity_type) {
+    "contact" {
+      $before = $Row.payload.beforeContact
+      $after = $Row.payload.afterContact
+      $labels = [ordered]@{
+        display_name = "Display name"
+        primary_email = "Email"
+        nickname = "Nickname / alias seed"
+        first_name = "First name"
+        last_name = "Last name"
+        source_book = "Source book"
+      }
+    }
+    "group" {
+      $before = $Row.payload.beforeGroup
+      $after = $Row.payload.afterGroup
+      $labels = [ordered]@{
+        name = "Group name"
+        nickname = "Nickname / alias seed"
+        description = "Description"
+        source_book = "Source book"
+      }
+    }
+    "group_members" {
+      $before = $Row.payload.beforeMember
+      $after = $Row.payload.afterMember
+      $contactName = Get-PayloadProperty $Row.payload.contact "display_name"
+      $contactEmail = Normalize-Email (Get-PayloadProperty $Row.payload.contact "primary_email")
+      $contactId = Get-PayloadProperty $(if ($after) { $after } else { $before }) "contact_id"
+      $memberLabel = Clean-Text $(if ($contactName) { $contactName } else { $contactId })
+      if ($contactEmail) { $memberLabel += " <$contactEmail>" }
+      if (-not $before -and $after) { return @("Member: Added $memberLabel") }
+      if ($before -and -not $after) { return @("Member: Removed $memberLabel") }
+      $labels = [ordered]@{ contact_id = "Member contact ID"; group_id = "Group ID" }
+    }
+  }
+
+  $changes = @()
+  foreach ($field in $labels.Keys) {
+    $oldValue = Get-PayloadProperty $before $field
+    $newValue = Get-PayloadProperty $after $field
+    if ($oldValue -eq $newValue) { continue }
+    $oldLabel = if ($oldValue) { $oldValue } else { "(blank)" }
+    $newLabel = if ($newValue) { $newValue } else { "(blank)" }
+    $changes += "$($labels[$field]): $oldLabel -> $newLabel"
+  }
+  return $changes
+}
+
 function Add-SyncChangeDetail([hashtable]$Stats, $Row, $Status, $Result) {
   if (-not (Has-MapKey $Stats "changeDetails")) { $Stats["changeDetails"] = @() }
   $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
-    status = (Clean-Text $Status).ToLower()
+    status = (Clean-Text $Status).ToLowerInvariant()
     action = Clean-Text $Row.action
     actionLabel = Get-QueueActionLabel $Row.action
     entityType = Get-QueueEntityLabel $Row.entity_type
@@ -519,9 +760,14 @@ function Add-SyncChangeDetail([hashtable]$Stats, $Row, $Status, $Result) {
     identifier = Get-QueueIdentifier $Row
     result = Clean-Text $Result
     queueRowId = Clean-Text $Row.id
+    eventId = Clean-Text $Row.event_id
+    actorId = Clean-Text $Row.actor_id
     requestedBy = Clean-Text $Row.requested_by
     queuedAt = Format-HongKongTime $Row.created_at
-    attempt = ([int]$Row.attempts + 1)
+    attempt = [Math]::Max(1, [int]$Row.attempts)
+    fieldChanges = @(Get-QueueFieldChanges $Row)
+    auditLogIds = @($Row.audit_log_ids | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
+    changeSetIds = @($Row.change_set_ids | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
   }
 }
 
@@ -637,7 +883,7 @@ function Get-QueueResultMessage($Row, [hashtable]$Before, [hashtable]$After) {
       $groupResult = ""
       if ($parts.Count -gt 0) {
         $groupText = $parts -join ", "
-        $groupResult = $groupText.Substring(0, 1).ToUpper() + $groupText.Substring(1) + "."
+        $groupResult = $groupText.Substring(0, 1).ToUpperInvariant() + $groupText.Substring(1) + "."
       }
       if (-not $groupResult -and $verified -gt 0) { return "The source group was missing or had no eligible members, and the Exchange group was already absent; verified that no deletion was required." }
       if ($memberChanges) { return "$groupResult $memberChanges." }
@@ -688,53 +934,77 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats) {
   }
 
   $email = Normalize-Email $Contact.ExternalEmailAddress
-  if (-not $email) {
-    Increment-Stat $Stats "skippedQueueRows"
-    return
+  if (-not (Test-ValidEmail $email)) { throw "Invalid Exchange email address '$email' for $($Contact.DisplayName)." }
+  $sourceKey = Clean-Text $Contact.SourceKey
+  $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
+  $escapedEmail = Escape-ExchangeFilterValue $email
+  $sourceMatches = @()
+  if ($sourceKey) {
+    $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($sourceMatches.Count -gt 1) { throw "More than one Exchange contact is tagged with source key $sourceKey." }
+  }
+  $existing = if ($sourceMatches.Count -eq 1) { $sourceMatches[0] } else { $null }
+  if (-not $existing) {
+    $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($emailMatches.Count -gt 1) { throw "More than one Exchange contact uses $email." }
+    if ($emailMatches.Count -eq 1) { $existing = $emailMatches[0] }
   }
 
-  $existing = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
   if ($existing) {
     $identity = $existing.Identity
-    $profileUpdated = $false
     try {
+      Set-MailContact -Identity $identity -ExternalEmailAddress $email -Alias $Contact.Alias -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Set-ExchangeContactProfile $identity $Contact
-      $profileUpdated = $true
     } catch {
       if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker) {
         Write-Warning ("Existing Exchange contact {0} could not be updated by identity {1}; recreating it. Original error: {2}" -f $email, $identity, $_.Exception.Message)
         Remove-MailContact -Identity $identity -Confirm:$false -ErrorAction SilentlyContinue
         $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
         $identity = $newContact.Identity
+        if (-not $identity) { $identity = $email }
+        Set-MailContact -Identity $identity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+        Set-ExchangeContactProfile $identity $Contact
       } else {
         throw
       }
     }
-    if (-not $identity) { $identity = $email }
-    if (-not $profileUpdated) { Set-ExchangeContactProfile $identity $Contact }
-    Set-MailContact -Identity $identity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "updatedContacts"
   } else {
     $newContact = New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
     $contactIdentity = $newContact.Identity
     if (-not $contactIdentity) { $contactIdentity = $email }
     Set-ExchangeContactProfile $contactIdentity $Contact
-    Set-MailContact -Identity $contactIdentity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-MailContact -Identity $contactIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "createdContacts"
   }
 
-  $verified = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
+  $verified = Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ErrorAction SilentlyContinue
   if (-not $verified) { throw "Could not verify Exchange contact $email after upsert." }
   Assert-ExchangeRecipientName $verified $Contact.DisplayName "Exchange contact $email"
+  if ((Normalize-Email (Get-RecipientEmail $verified)) -ne $email) { throw "Exchange contact $email has the wrong external email after verification." }
+  if ((Clean-Text $verified.Alias).ToLowerInvariant() -ne (Clean-Text $Contact.Alias).ToLowerInvariant()) { throw "Exchange contact $email has alias '$($verified.Alias)' instead of '$($Contact.Alias)'." }
+  if ((Clean-Text $verified.CustomAttribute1) -ne $ManagedMarker -or (Clean-Text $verified.CustomAttribute2) -ne $sourceKey) { throw "Exchange contact $email is missing its FCUNO management markers." }
+  if ([bool]$verified.HiddenFromAddressListsEnabled) { throw "Exchange contact $email is still hidden from address lists." }
+  Assert-ExchangeContactProfile $verified.Identity $Contact "Exchange contact $email"
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
-function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats) {
+function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $SourceContactId = "", $ExpectedDisplayName = "", [bool]$AllowUntaggedExactDelete = $false) {
   $email = Normalize-Email $Email
   $aliasText = Clean-Text $Alias
   $existing = $null
+  $sourceKey = Get-ContactSourceKey $SourceContactId
+  if ($sourceKey) {
+    $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
+    $matches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($matches.Count -gt 1) { throw "More than one Exchange contact is tagged with source key $sourceKey." }
+    if ($matches.Count -eq 1) { $existing = $matches[0] }
+  }
   if ($email) {
-    $existing = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
+    $escapedEmail = Escape-ExchangeFilterValue $email
+    $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($emailMatches.Count -gt 1) { throw "More than one Exchange contact uses $email." }
+    if (-not $existing -and $emailMatches.Count -eq 1) { $existing = $emailMatches[0] }
   }
   if (-not $existing -and $aliasText) {
     $existing = Get-MailContact -Identity $aliasText -ErrorAction SilentlyContinue
@@ -743,16 +1013,32 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats) {
     Increment-Stat $Stats "verifiedQueueRows"
     return
   }
+  $existingOwnerKey = Clean-Text $existing.CustomAttribute2
+  if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+    throw "Exchange contact $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
+  }
   if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker) {
-    throw "Exchange contact $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker."
+    $actualName = Clean-Text $existing.DisplayName
+    $expectedName = Clean-Text $ExpectedDisplayName
+    $actualEmail = Normalize-Email (Get-RecipientEmail $existing)
+    $exactMatch = $AllowUntaggedExactDelete -and $email -and $actualEmail -eq $email -and $expectedName -and $actualName -eq $expectedName
+    if (-not $exactMatch) {
+      throw "Exchange contact $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker and the queue does not authorize an exact legacy deletion."
+    }
   }
 
   Remove-MailContact -Identity $existing.Identity -Confirm:$false -ErrorAction Stop
-  $verified = $null
-  if ($email) {
-    $verified = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
+  $verifiedBySource = $null
+  if ($sourceKey) {
+    $verifiedBySource = Get-MailContact -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ErrorAction SilentlyContinue
   }
-  if ($verified) { throw "Could not verify deletion of Exchange contact $email." }
+  $verifiedByEmail = $null
+  if ($email) {
+    $verifiedByEmail = Get-MailContact -Filter "ExternalEmailAddress -eq '$(Escape-ExchangeFilterValue $email)'" -ErrorAction SilentlyContinue
+  }
+  if ($verifiedBySource) { throw "Could not verify deletion of Exchange contact source key $sourceKey." }
+  if ($verifiedByEmail -and (Clean-Text $verifiedByEmail.CustomAttribute2) -eq $sourceKey) { throw "Could not verify deletion of Exchange contact $email." }
+  if ($verifiedByEmail -and -not $sourceKey) { throw "Could not verify deletion of Exchange contact $email." }
   Increment-Stat $Stats "removedContacts"
   Increment-Stat $Stats "verifiedQueueRows"
 }
@@ -764,40 +1050,97 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats) {
     return
   }
 
-  $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
+  $sourceKey = Clean-Text $Group.SourceKey
+  $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
+  $sourceMatches = @()
+  if ($sourceKey) {
+    $sourceMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($sourceMatches.Count -gt 1) { throw "More than one Exchange group is tagged with source key $sourceKey." }
+  }
+  $existing = if ($sourceMatches.Count -eq 1) { $sourceMatches[0] } else { $null }
+  if (-not $existing) {
+    $existing = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
+    if ($existing) {
+      $existingOwnerKey = Clean-Text $existing.CustomAttribute2
+      if ($existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+        throw "Exchange alias $alias belongs to source key $existingOwnerKey, not $sourceKey."
+      }
+      if ((Clean-Text $existing.DisplayName) -ne (Clean-Text $Group.GroupName)) {
+        throw "Exchange alias $alias belongs to group '$($existing.DisplayName)', not '$($Group.GroupName)'."
+      }
+    }
+  }
+  if (-not $existing) {
+    $escapedDisplayName = Escape-ExchangeFilterValue $Group.GroupName
+    $nameMatches = @(Get-DistributionGroup -Filter "DisplayName -eq '$escapedDisplayName'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($nameMatches.Count -gt 1) { throw "More than one Exchange group is named '$($Group.GroupName)', so legacy ownership could not be determined safely." }
+    if ($nameMatches.Count -eq 1) {
+      $candidateOwnerKey = Clean-Text $nameMatches[0].CustomAttribute2
+      if ($candidateOwnerKey -and $candidateOwnerKey -ne $sourceKey) {
+        throw "Exchange group '$($Group.GroupName)' is owned by source key $candidateOwnerKey, not $sourceKey."
+      }
+      $existing = $nameMatches[0]
+    }
+  }
   if ($existing) {
-    Set-DistributionGroup -Identity $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-DistributionGroup -Identity $existing.Identity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -Notes $Group.Description -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "updatedGroups"
   } else {
     New-DistributionGroup -Name $Group.GroupName -Alias $alias -ErrorAction Stop | Out-Null
-    Set-DistributionGroup -Identity $alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-DistributionGroup -Identity $alias -Notes $Group.Description -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Increment-Stat $Stats "createdGroups"
   }
 
-  $verified = Get-DistributionGroup -Identity $alias -ErrorAction SilentlyContinue
+  $verified = Get-DistributionGroup -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ErrorAction SilentlyContinue
   if (-not $verified) { throw "Could not verify Exchange group $alias after upsert." }
   Assert-ExchangeRecipientName $verified $Group.GroupName "Exchange group $alias"
+  if ((Clean-Text $verified.Alias).ToLowerInvariant() -ne $alias.ToLowerInvariant()) { throw "Exchange group $($Group.GroupName) has alias '$($verified.Alias)' instead of '$alias'." }
+  if ((Clean-Text $verified.Notes) -ne (Clean-Text $Group.Description)) { throw "Exchange group $($Group.GroupName) has a different description after verification." }
+  if ((Clean-Text $verified.CustomAttribute1) -ne $ManagedMarker -or (Clean-Text $verified.CustomAttribute2) -ne $sourceKey) { throw "Exchange group $($Group.GroupName) is missing its FCUNO management markers." }
+  if ([bool]$verified.HiddenFromAddressListsEnabled) { throw "Exchange group $($Group.GroupName) is still hidden from address lists." }
   Increment-Stat $Stats "verifiedQueueRows"
 }
 
-function Remove-ManagedExchangeDistributionGroup($Alias, [hashtable]$Stats) {
+function Remove-ManagedExchangeDistributionGroup($Alias, [hashtable]$Stats, $SourceGroupId = "", $ExpectedDisplayName = "", [bool]$AllowUntaggedExactDelete = $false) {
   $aliasText = Clean-Text $Alias
-  if (-not $aliasText) {
+  $sourceKey = Get-GroupSourceKey $SourceGroupId
+  if (-not $aliasText -and -not $sourceKey) {
     Increment-Stat $Stats "skippedQueueRows"
     return
   }
 
-  $existing = Get-DistributionGroup -Identity $aliasText -ErrorAction SilentlyContinue
+  $existing = $null
+  if ($sourceKey) {
+    $matches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    if ($matches.Count -gt 1) { throw "More than one Exchange group is tagged with source key $sourceKey." }
+    if ($matches.Count -eq 1) { $existing = $matches[0] }
+  }
+  if (-not $existing -and $aliasText) {
+    $existing = Get-DistributionGroup -Identity $aliasText -ErrorAction SilentlyContinue
+  }
   if (-not $existing) {
     Increment-Stat $Stats "verifiedQueueRows"
     return
   }
+  $existingOwnerKey = Clean-Text $existing.CustomAttribute2
+  if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
+    throw "Exchange group $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
+  }
   if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker) {
-    throw "Exchange group $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker."
+    $exactMatch = $AllowUntaggedExactDelete -and $aliasText -and (Clean-Text $existing.Alias).ToLowerInvariant() -eq $aliasText.ToLowerInvariant() -and (Clean-Text $ExpectedDisplayName) -and (Clean-Text $existing.DisplayName) -eq (Clean-Text $ExpectedDisplayName)
+    if (-not $exactMatch) {
+      throw "Exchange group $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker and the queue does not authorize an exact legacy deletion."
+    }
   }
 
   Remove-DistributionGroup -Identity $existing.Identity -Confirm:$false -ErrorAction Stop
-  $verified = Get-DistributionGroup -Identity $aliasText -ErrorAction SilentlyContinue
+  $verified = if ($sourceKey) {
+    Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ErrorAction SilentlyContinue
+  } elseif ($aliasText) {
+    Get-DistributionGroup -Identity $aliasText -ErrorAction SilentlyContinue
+  } else {
+    $null
+  }
   if ($verified) { throw "Could not verify deletion of Exchange group $aliasText." }
   Increment-Stat $Stats "removedGroups"
   Increment-Stat $Stats "verifiedQueueRows"
@@ -860,55 +1203,183 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats) {
   }
 }
 
-function Sync-ExchangeGroupState($GroupId, $FallbackAlias, [hashtable]$Stats) {
+function Sync-ExchangeGroupState($GroupId, $FallbackAlias, [hashtable]$Stats, $FallbackDisplayName = "", [bool]$AllowUntaggedExactDelete = $false) {
   $exchangeRows = Get-GroupExchangeRowsFromSource $GroupId
   if (-not $exchangeRows) {
-    Remove-ManagedExchangeDistributionGroup $FallbackAlias $Stats
+    Remove-ManagedExchangeDistributionGroup $FallbackAlias $Stats $GroupId $FallbackDisplayName $AllowUntaggedExactDelete
     return
   }
 
   $groups = @($exchangeRows.Groups)
   if ($groups.Count -le 0) {
-    Remove-ManagedExchangeDistributionGroup $FallbackAlias $Stats
+    Remove-ManagedExchangeDistributionGroup $FallbackAlias $Stats $GroupId $FallbackDisplayName $AllowUntaggedExactDelete
     return
   }
 
   $group = $groups[0]
-  $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.GroupAlias).ToLower() -eq (Clean-Text $group.Alias).ToLower() })
+  $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.GroupAlias).ToLowerInvariant() -eq (Clean-Text $group.Alias).ToLowerInvariant() })
   Sync-ExchangeGroupMembers $group $members $Stats
+}
+
+function Sync-ExchangeGroupsForEmail($Email, [hashtable]$Stats) {
+  $email = Normalize-Email $Email
+  if (-not $email) { return }
+  $rows = Get-CanonicalExchangeRows
+  $groupIds = @($rows.Members |
+    Where-Object { (Normalize-Email $_.MemberEmail) -eq $email } |
+    Select-Object -ExpandProperty SourceGroupId -Unique)
+  foreach ($groupId in $groupIds) {
+    Sync-ExchangeGroupState $groupId "" $Stats
+  }
+}
+
+function Get-QueueAuditAuthorized($Row) {
+  if (-not (Get-QueueBoolean $Row "userAuthorized")) { return $false }
+  if (Test-GuidText $Row.audit_log_id) { return $true }
+  return @($Row.audit_log_ids).Count -gt 0
+}
+
+function Get-QueueContactBeforeEmail($Row) {
+  $email = Get-QueuePayloadValue $Row "beforeContact" "primary_email"
+  if (-not $email) { $email = Get-QueuePayloadValue $Row "contact" "ExternalEmailAddress" }
+  if (-not $email) { $email = Clean-Text $Row.entity_email }
+  return Normalize-Email $email
+}
+
+function Get-QueueContactBeforeBaseAlias($Row) {
+  $seed = Get-QueuePayloadValue $Row "beforeContact" "nickname"
+  if (-not $seed) { $seed = Get-QueuePayloadValue $Row "beforeContact" "display_name" }
+  if (-not $seed) { return Clean-Text $Row.entity_alias }
+  return Get-ExchangeAlias $seed ("contact-" + (Clean-Text $Row.entity_id))
+}
+
+function Reconcile-ExchangeContactEmail($Email, $Row, [hashtable]$Stats, [bool]$UseQueuedSourceKeyForDelete) {
+  $email = Normalize-Email $Email
+  if (-not $email) { return }
+  $rows = Get-CanonicalExchangeRows
+  $desiredContact = if (Has-MapKey $rows.ContactByEmail $email) { $rows.ContactByEmail[$email] } else { $null }
+  if ($desiredContact -and -not (Is-InternalEmail $email)) {
+    Upsert-ExchangeMailContact $desiredContact $Stats
+    return
+  }
+  if ($desiredContact -and (Is-InternalEmail $email)) { return }
+
+  $sourceId = if ($UseQueuedSourceKeyForDelete) { Clean-Text $Row.entity_id } else { "" }
+  Remove-ManagedExchangeMailContact `
+    $email `
+    (Clean-Text $Row.entity_alias) `
+    $Stats `
+    $sourceId `
+    (Get-QueueExpectedContactName $Row) `
+    (Get-QueueAuditAuthorized $Row)
+}
+
+function Sync-ExchangeContactQueueState($Row, [hashtable]$Stats) {
+  $sourceContact = Load-SingleRow "shared_addressbook_contacts" "id" $Row.entity_id
+  if ($sourceContact -and -not (Test-ValidEmail $sourceContact.primary_email)) {
+    throw "FCUNO contact $($sourceContact.display_name) has invalid email '$($sourceContact.primary_email)'. Correct the email before syncing."
+  }
+
+  $beforeEmail = Get-QueueContactBeforeEmail $Row
+  $currentEmail = if ($sourceContact) { Normalize-Email $sourceContact.primary_email } else { "" }
+  $beforeBaseAlias = Get-QueueContactBeforeBaseAlias $Row
+  $currentRow = if ($sourceContact) { Get-ContactExchangeRowFromSource $Row.entity_id } else { $null }
+  $currentBaseAlias = if ($currentRow) { Clean-Text $currentRow.BaseAlias } else { "" }
+  $beforeEmailReconciled = $false
+
+  if ($beforeEmail -and $beforeEmail -ne $currentEmail) {
+    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats (-not $sourceContact)
+    $beforeEmailReconciled = $true
+  }
+  if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
+  if ($currentEmail) {
+    Reconcile-ExchangeContactEmail $currentEmail $Row $Stats $false
+  } elseif ($beforeEmail -and -not $beforeEmailReconciled) {
+    Reconcile-ExchangeContactEmail $beforeEmail $Row $Stats $true
+  }
+
+  foreach ($email in @($beforeEmail, $currentEmail) | Where-Object { $_ } | Select-Object -Unique) {
+    Sync-ExchangeGroupsForEmail $email $Stats
+  }
+  if ($beforeBaseAlias -and -not $beforeBaseAlias.Equals($currentBaseAlias, [StringComparison]::OrdinalIgnoreCase)) {
+    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats
+  }
+}
+
+function Get-QueueGroupBeforeBaseAlias($Row) {
+  $seed = Get-QueuePayloadValue $Row "beforeGroup" "nickname"
+  if (-not $seed) { $seed = Get-QueuePayloadValue $Row "beforeGroup" "name" }
+  if (-not $seed) { return Clean-Text $Row.entity_alias }
+  return Get-ExchangeAlias $seed ("group-" + (Clean-Text $Row.entity_id))
+}
+
+function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
+  $sourceGroup = Load-SingleRow "shared_addressbook_groups" "id" $Row.entity_id
+  $beforeBaseAlias = Get-QueueGroupBeforeBaseAlias $Row
+  $currentRows = if ($sourceGroup) { Get-GroupExchangeRowsFromSource $Row.entity_id } else { $null }
+  $currentGroup = if ($currentRows -and @($currentRows.Groups).Count -gt 0) { @($currentRows.Groups)[0] } else { $null }
+  $currentBaseAlias = if ($currentGroup) { Clean-Text $currentGroup.BaseAlias } else { "" }
+
+  if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
+  Sync-ExchangeGroupState `
+    $Row.entity_id `
+    $Row.entity_alias `
+    $Stats `
+    (Get-QueueExpectedGroupName $Row) `
+    $(if ($sourceGroup) { $false } else { Get-QueueAuditAuthorized $Row })
+  if ($beforeBaseAlias -and -not $beforeBaseAlias.Equals($currentBaseAlias, [StringComparison]::OrdinalIgnoreCase)) {
+    Sync-ExchangeAliasPeers $beforeBaseAlias $Stats
+  }
+}
+
+function Get-QueueBoolean($Row, $PropertyName) {
+  if (-not $Row -or -not $Row.payload) { return $false }
+  $property = $Row.payload.PSObject.Properties[$PropertyName]
+  if (-not $property) { return $false }
+  if ($property.Value -is [bool]) { return $property.Value }
+  if ($property.Value -is [string]) {
+    return (Clean-Text $property.Value).Equals("true", [StringComparison]::OrdinalIgnoreCase)
+  }
+  return $false
+}
+
+function Get-QueueExpectedContactName($Row) {
+  $name = Get-QueuePayloadValue $Row "beforeContact" "display_name"
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "contact" "DisplayName" }
+  if (-not $name) { $name = Clean-Text $Row.display_name }
+  return $name
+}
+
+function Get-QueueExpectedGroupName($Row) {
+  $name = Get-QueuePayloadValue $Row "beforeGroup" "name"
+  if (-not $name) { $name = Get-QueuePayloadValue $Row "group" "GroupName" }
+  if (-not $name) { $name = Clean-Text $Row.display_name }
+  return $name
 }
 
 function Process-ExchangeQueueRow($Row, [hashtable]$Stats) {
   $action = Clean-Text $Row.action
   switch ($action) {
     "create_contact" {
-      $contact = Load-SingleRow "shared_addressbook_contacts" "id" $Row.entity_id
-      Upsert-ExchangeMailContact (Get-ContactExchangeRowFromSource $contact) $Stats
+      Sync-ExchangeContactQueueState $Row $Stats
     }
     "update_contact" {
-      $contact = Load-SingleRow "shared_addressbook_contacts" "id" $Row.entity_id
-      Upsert-ExchangeMailContact (Get-ContactExchangeRowFromSource $contact) $Stats
+      Sync-ExchangeContactQueueState $Row $Stats
     }
     "delete_contact" {
-      $email = Clean-Text $Row.entity_email
-      if (-not $email) { $email = Get-QueuePayloadValue $Row "contact" "ExternalEmailAddress" }
-      $alias = Clean-Text $Row.entity_alias
-      if (-not $alias) { $alias = Get-QueuePayloadValue $Row "contact" "Alias" }
-      Remove-ManagedExchangeMailContact $email $alias $Stats
+      Sync-ExchangeContactQueueState $Row $Stats
     }
     "create_group" {
-      Sync-ExchangeGroupState $Row.entity_id $Row.entity_alias $Stats
+      Sync-ExchangeGroupQueueState $Row $Stats
     }
     "update_group" {
-      Sync-ExchangeGroupState $Row.entity_id $Row.entity_alias $Stats
+      Sync-ExchangeGroupQueueState $Row $Stats
     }
     "update_group_members" {
-      Sync-ExchangeGroupState $Row.entity_id $Row.entity_alias $Stats
+      Sync-ExchangeGroupQueueState $Row $Stats
     }
     "delete_group" {
-      $alias = Clean-Text $Row.entity_alias
-      if (-not $alias) { $alias = Get-QueuePayloadValue $Row "group" "Alias" }
-      Remove-ManagedExchangeDistributionGroup $alias $Stats
+      Sync-ExchangeGroupQueueState $Row $Stats
     }
     default {
       throw "Unknown Exchange queue action: $action"
@@ -940,27 +1411,21 @@ function Invoke-IncrementalExchangeSync {
     removedMembers = 0
   }
 
-  $pendingRows = Get-PendingExchangeQueueRows
-  $stats["queuedRows"] = @($pendingRows).Count
-  if (@($pendingRows).Count -le 0) {
-    return $stats
-  }
+  if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
+  while ($true) {
+    Renew-ExchangeSyncLock
+    $batchRows = Claim-ExchangeQueueRows 200
+    if (@($batchRows).Count -le 0) { break }
+    Increment-Stat $stats "queuedRows" @($batchRows).Count
+    $script:CanonicalExchangeRows = $null
 
-  $effectiveRows = Select-EffectiveQueueRows $pendingRows
-  Mark-SupersededQueueRows $pendingRows $effectiveRows $stats
-
-  foreach ($row in $effectiveRows) {
+  foreach ($row in $batchRows) {
     $rowId = Clean-Text $row.id
     if (-not $rowId) { continue }
     $beforeCounters = $null
     try {
-      Update-ExchangeQueueRow $rowId @{
-        status = "processing"
-        attempts = ([int]$row.attempts + 1)
-        processing_started_at = (Get-Date).ToUniversalTime().ToString("o")
-        error_message = $null
-      }
       Increment-Stat $stats "processedQueueRows"
+      if ([int]$stats.processedQueueRows % 50 -eq 0) { Renew-ExchangeSyncLock }
       Write-Host ("Processing Exchange queue row {0}: {1} {2}" -f $rowId, (Clean-Text $row.action), (Clean-Text $row.display_name))
       $beforeCounters = Get-QueueCounterSnapshot $stats
       Process-ExchangeQueueRow $row $stats
@@ -1002,6 +1467,7 @@ function Invoke-IncrementalExchangeSync {
         Update-ExchangeQueueRow $rowId @{
           status = "failed"
           error_message = $rowError
+          next_attempt_at = (Get-Date).ToUniversalTime().AddMinutes(15).ToString("o")
         }
       } catch {
         $statusError = Clean-Text $_.Exception.Message
@@ -1013,6 +1479,12 @@ function Invoke-IncrementalExchangeSync {
       Write-Warning ("Exchange queue row {0} failed: {1}" -f $rowId, $rowError)
     }
   }
+  }
+
+  $runId = Encode-QueryValue $script:CurrentQueueRunId
+  $supersededRows = @(Invoke-SupabaseRest -Method "GET" -Path "outlook_exchange_sync_queue?select=id&run_id=eq.$runId&status=eq.skipped&limit=1000")
+  $stats["supersededQueueRows"] = $supersededRows.Count
+  $stats["skippedQueueRows"] = [int]$stats["skippedQueueRows"] + $supersededRows.Count
 
   return $stats
 }
@@ -1073,8 +1545,8 @@ function Get-NoticeEmailFrom {
 
 function Get-NoticeEmailAddress($Value) {
   $text = Clean-Text $Value
-  if ($text -match '<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>') { return $Matches[1].ToLower() }
-  if ($text -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $text.ToLower() }
+  if ($text -match '<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>') { return $Matches[1].ToLowerInvariant() }
+  if ($text -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $text.ToLowerInvariant() }
   return ""
 }
 
@@ -1183,16 +1655,11 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   $statusColor = "#166534"
   $statusBackground = "#dcfce7"
   $statusBorder = "#86efac"
-  if ($Status -ne "completed") {
+  if ($Status -ne "completed" -or $failedRows -gt 0) {
     $statusText = "Failed"
     $statusColor = "#991b1b"
     $statusBackground = "#fee2e2"
     $statusBorder = "#fca5a5"
-  } elseif ($failedRows -gt 0) {
-    $statusText = "Completed with errors"
-    $statusColor = "#9a3412"
-    $statusBackground = "#ffedd5"
-    $statusBorder = "#fdba74"
   } elseif ($actionableSkippedRows -gt 0) {
     $statusText = "Completed with skipped changes"
     $statusColor = "#854d0e"
@@ -1207,7 +1674,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   foreach ($change in @($changeDetails)) {
     if ($null -eq $change -or $changeIndex -ge $maxChangeRows) { continue }
 
-    $changeStatus = (Clean-Text (Get-DetailValue $change "status")).ToLower()
+    $changeStatus = (Clean-Text (Get-DetailValue $change "status")).ToLowerInvariant()
     $changeStatusText = "Completed"
     $changeStatusColor = "#166534"
     $changeStatusBackground = "#dcfce7"
@@ -1233,6 +1700,10 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
     $result = Clean-Text (Get-DetailValue $change "result")
     if (-not $result) { $result = "No result detail was recorded." }
     $queueRowId = Clean-Text (Get-DetailValue $change "queueRowId")
+    $eventId = Clean-Text (Get-DetailValue $change "eventId")
+    $auditLogIds = @(Get-DetailValue $change "auditLogIds" | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
+    $changeSetIds = @(Get-DetailValue $change "changeSetIds" | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
+    $actorId = Clean-Text (Get-DetailValue $change "actorId")
     $rowRequestedBy = Clean-Text (Get-DetailValue $change "requestedBy")
     $rowQueuedAt = Clean-Text (Get-DetailValue $change "queuedAt")
     $rowAttempt = [int](Get-DetailValue $change "attempt")
@@ -1241,10 +1712,20 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
     if ($identifier) {
       $identifierHtml = "<div style='margin-top:3px;color:#475569;font-size:12px;'>$(Escape-Html $identifier)</div>"
     }
+    $fieldChangesHtml = ""
+    $fieldChanges = @(Get-DetailValue $change "fieldChanges")
+    if ($fieldChanges.Count -gt 0) {
+      $fieldItems = @($fieldChanges | ForEach-Object { "<li style='margin:2px 0;'>$(Escape-Html $_)</li>" }) -join ""
+      $fieldChangesHtml = "<div style='margin-top:7px;color:#334155;font-size:11px;font-weight:800;'>Exact FCUNO change</div><ul style='margin:3px 0 0 17px;padding:0;color:#475569;font-size:11px;'>$fieldItems</ul>"
+    }
     $queueMetadata = @()
     if ($rowRequestedBy) { $queueMetadata += "Requested by $(Escape-Html $rowRequestedBy)" }
+    if ($actorId -and $actorId -ne $rowRequestedBy) { $queueMetadata += "Actor $(Escape-Html $actorId)" }
     if ($rowQueuedAt) { $queueMetadata += "Queued $(Escape-Html $rowQueuedAt)" }
     if ($rowAttempt -gt 0) { $queueMetadata += "Attempt $(Escape-Html $rowAttempt)" }
+    if ($eventId) { $queueMetadata += "Event $(Escape-Html $eventId)" }
+    if ($auditLogIds.Count -gt 0) { $queueMetadata += "Audit log$(if ($auditLogIds.Count -gt 1) { 's' } else { '' }) $(Escape-Html (($auditLogIds | Select-Object -First 5) -join ', '))" }
+    if ($changeSetIds.Count -gt 0) { $queueMetadata += "Change set$(if ($changeSetIds.Count -gt 1) { 's' } else { '' }) $(Escape-Html (($changeSetIds | Select-Object -First 5) -join ', '))" }
     if ($queueRowId) { $queueMetadata += "Queue row $(Escape-Html $queueRowId)" }
     $queueRowHtml = ""
     if ($queueMetadata.Count -gt 0) {
@@ -1255,7 +1736,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 <tr style="background:$rowBackground;">
   <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;white-space:nowrap;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:$changeStatusBackground;color:$changeStatusColor;font-size:11px;font-weight:800;">$(Escape-Html $changeStatusText)</span></td>
   <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $actionLabel)</td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><div style="font-weight:700;">$(Escape-Html $displayName)</div><div style="margin-top:2px;color:#64748b;font-size:11px;">$(Escape-Html $entityType)</div>$identifierHtml</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><div style="font-weight:700;">$(Escape-Html $displayName)</div><div style="margin-top:2px;color:#64748b;font-size:11px;">$(Escape-Html $entityType)</div>$identifierHtml$fieldChangesHtml</td>
   <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">$(Escape-Html $result)$queueRowHtml</td>
 </tr>
 "@
@@ -1311,7 +1792,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 
   $followUpHtml = ""
   if ($failedRows -gt 0) {
-    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fdba74;border-radius:10px;background:#fff7ed;color:#9a3412;'><strong>Action required:</strong> Failed changes are not retried automatically. Review each error below, correct the cause, then requeue the change.</div>"
+    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fdba74;border-radius:10px;background:#fff7ed;color:#9a3412;'><strong>Action required:</strong> Review each error below. Transient failures remain retryable for the next sync; validation or collision errors require correction in FCUNO or Exchange.</div>"
   } elseif ($actionableSkippedRows -gt 0) {
     $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fde047;border-radius:10px;background:#fefce8;color:#854d0e;'><strong>Note:</strong> Skipped changes made no Exchange update. Each skipped reason is shown below.</div>"
   } elseif ($supersededRows -gt 0) {
@@ -1369,9 +1850,171 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   }
 }
 
+function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Identifier, $Result) {
+  Increment-Stat $Stats "failedQueueRows"
+  $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
+    status = "failed"
+    action = "full_sync"
+    actionLabel = "Full reconciliation"
+    entityType = Clean-Text $EntityType
+    displayName = Clean-Text $DisplayName
+    identifier = Clean-Text $Identifier
+    result = Clean-Text $Result
+    queueRowId = ""
+    eventId = ""
+    actorId = ""
+    requestedBy = ""
+    queuedAt = ""
+    attempt = 1
+    fieldChanges = @()
+  }
+}
+
+function Invoke-FullExchangeSync {
+  $stats = @{
+    syncMode = "full"
+    contacts = 0
+    groups = 0
+    groupMembers = 0
+    failedQueueRows = 0
+    skippedQueueRows = 0
+    verifiedQueueRows = 0
+    changeDetails = @()
+    addedMemberEmails = @()
+    removedMemberEmails = @()
+    createdContacts = 0
+    updatedContacts = 0
+    removedContacts = 0
+    createdGroups = 0
+    updatedGroups = 0
+    removedGroups = 0
+    addedMembers = 0
+    removedMembers = 0
+  }
+
+  $script:CanonicalExchangeRows = $null
+  $exchangeRows = Get-CanonicalExchangeRows
+  $stats["contacts"] = @($exchangeRows.Contacts).Count
+  $stats["groups"] = @($exchangeRows.Groups).Count
+  $stats["groupMembers"] = @($exchangeRows.Members).Count
+
+  foreach ($invalid in @($exchangeRows.InvalidContacts)) {
+    Add-FullSyncFailure $stats "Contact" $invalid.DisplayName $invalid.Email "FCUNO validation failed: $($invalid.Reason). No Exchange mutation was attempted for this row."
+  }
+
+  $aliasCounts = @{}
+  foreach ($recipient in @($exchangeRows.Contacts) + @($exchangeRows.Groups)) {
+    $baseAlias = (Clean-Text $recipient.BaseAlias).ToLowerInvariant()
+    if (-not $baseAlias) { continue }
+    if (-not (Has-MapKey $aliasCounts $baseAlias)) { $aliasCounts[$baseAlias] = 0 }
+    $aliasCounts[$baseAlias] = [int]$aliasCounts[$baseAlias] + 1
+  }
+  foreach ($baseAlias in @($aliasCounts.Keys | Where-Object { [int]$aliasCounts[$_] -gt 1 } | Sort-Object)) {
+    try {
+      Sync-ExchangeAliasPeers $baseAlias $stats
+    } catch {
+      Add-FullSyncFailure $stats "Alias collision" $baseAlias $baseAlias $_.Exception.Message
+    }
+  }
+
+  $contactIndex = 0
+  foreach ($contact in @($exchangeRows.Contacts)) {
+    $contactIndex += 1
+    try {
+      if ($contactIndex % 50 -eq 0) { Renew-ExchangeSyncLock }
+      Upsert-ExchangeMailContact $contact $stats
+      if ($contactIndex % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactIndex, @($exchangeRows.Contacts).Count) }
+    } catch {
+      Add-FullSyncFailure $stats "Contact" $contact.DisplayName $contact.ExternalEmailAddress $_.Exception.Message
+      Write-Warning ("Full reconciliation failed for contact {0}: {1}" -f $contact.DisplayName, $_.Exception.Message)
+    }
+  }
+
+  $groupIndex = 0
+  foreach ($group in @($exchangeRows.Groups)) {
+    $groupIndex += 1
+    try {
+      if ($groupIndex % 20 -eq 0) { Renew-ExchangeSyncLock }
+      $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq (Clean-Text $group.SourceGroupId) })
+      Sync-ExchangeGroupMembers $group $members $stats
+    } catch {
+      Add-FullSyncFailure $stats "Group" $group.GroupName $group.Alias $_.Exception.Message
+      Write-Warning ("Full reconciliation failed for group {0}: {1}" -f $group.GroupName, $_.Exception.Message)
+    }
+  }
+
+  $desiredContactSourceKeys = @{}
+  $desiredContactEmails = @{}
+  foreach ($contact in @($exchangeRows.Contacts)) {
+    $desiredContactSourceKeys[(Clean-Text $contact.SourceKey)] = $true
+    $desiredContactEmails[(Normalize-Email $contact.ExternalEmailAddress)] = $true
+  }
+  $managedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  foreach ($managedContact in $managedContacts) {
+    $sourceKey = Clean-Text $managedContact.CustomAttribute2
+    $email = Get-RecipientEmail $managedContact
+    $isDesired = ($sourceKey -and (Has-MapKey $desiredContactSourceKeys $sourceKey)) -or ($email -and (Has-MapKey $desiredContactEmails $email))
+    if ($isDesired) { continue }
+    try {
+      Remove-MailContact -Identity $managedContact.Identity -Confirm:$false -ErrorAction Stop
+      $verified = Get-MailContact -Identity $managedContact.Identity -ErrorAction SilentlyContinue
+      if ($verified) { throw "Exchange still returns the removed managed contact." }
+      Increment-Stat $stats "removedContacts"
+    } catch {
+      Add-FullSyncFailure $stats "Contact" $managedContact.DisplayName $email ("Could not remove stale managed contact: " + $_.Exception.Message)
+    }
+  }
+
+  $desiredGroupSourceKeys = @{}
+  $desiredGroupAliases = @{}
+  foreach ($group in @($exchangeRows.Groups)) {
+    $desiredGroupSourceKeys[(Clean-Text $group.SourceKey)] = $true
+    $desiredGroupAliases[(Clean-Text $group.Alias).ToLowerInvariant()] = $true
+  }
+  $managedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  foreach ($managedGroup in $managedGroups) {
+    $sourceKey = Clean-Text $managedGroup.CustomAttribute2
+    $alias = (Clean-Text $managedGroup.Alias).ToLowerInvariant()
+    $isDesired = ($sourceKey -and (Has-MapKey $desiredGroupSourceKeys $sourceKey)) -or ($alias -and (Has-MapKey $desiredGroupAliases $alias))
+    if ($isDesired) { continue }
+    try {
+      Remove-DistributionGroup -Identity $managedGroup.Identity -Confirm:$false -ErrorAction Stop
+      $verified = Get-DistributionGroup -Identity $managedGroup.Identity -ErrorAction SilentlyContinue
+      if ($verified) { throw "Exchange still returns the removed managed group." }
+      Increment-Stat $stats "removedGroups"
+    } catch {
+      Add-FullSyncFailure $stats "Group" $managedGroup.DisplayName $alias ("Could not remove stale managed group: " + $_.Exception.Message)
+    }
+  }
+
+  $finalManagedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $finalManagedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $stats["verifiedManagedContacts"] = $finalManagedContacts.Count
+  $stats["verifiedManagedGroups"] = $finalManagedGroups.Count
+  if ($finalManagedContacts.Count -ne @($exchangeRows.Contacts).Count) {
+    Add-FullSyncFailure $stats "Full address book" "Managed contacts" "$($finalManagedContacts.Count) in Exchange / $(@($exchangeRows.Contacts).Count) in FCUNO" "Final managed-contact count does not match the canonical FCUNO projection."
+  }
+  if ($finalManagedGroups.Count -ne @($exchangeRows.Groups).Count) {
+    Add-FullSyncFailure $stats "Full address book" "Managed groups" "$($finalManagedGroups.Count) in Exchange / $(@($exchangeRows.Groups).Count) in FCUNO" "Final managed-group count does not match the canonical FCUNO projection."
+  }
+
+  return $stats
+}
+
+if ($LibraryOnly) { return }
+
 $webhookPayload = Get-WebhookPayload $WebhookData
+$syncMode = (Clean-Text $webhookPayload.syncMode).ToLowerInvariant()
+if (-not $syncMode) { $syncMode = "incremental" }
+$script:CurrentQueueRunId = [Guid]::NewGuid().ToString()
+$details = $null
 
 try {
+  if (-not (Acquire-ExchangeSyncLock $syncMode)) {
+    Write-Output "Exchange address book sync did not start because another full or incremental sync currently holds the mutation lease. Durable queue rows remain pending for the next run."
+    return
+  }
+  $script:SyncLockAcquired = $true
   Save-SyncStatus "running" "Exchange sync is running."
 
   Import-ExchangeOnlineManagementModule
@@ -1389,8 +2032,6 @@ try {
   Connect-ExchangeOnline -AppId $appId -CertificateFilePath $pfxPath -CertificatePassword $securePassword -Organization $organization -ShowBanner:$false -ErrorAction Stop
   $script:ExchangeOnlineConnected = $true
 
-  $syncMode = (Clean-Text $webhookPayload.syncMode).ToLower()
-  if (-not $syncMode) { $syncMode = "incremental" }
   if ($syncMode -ne "full") {
     $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
     Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
@@ -1400,22 +2041,17 @@ try {
     $supersededRows = [int]$details.supersededQueueRows
     $actionableSkippedRows = [Math]::Max(0, $skippedRows - $supersededRows)
     if ($failedRows -gt 0) {
-      $status = if ($completedRows -gt 0) { "completed" } else { "failed" }
-      $message = if ($status -eq "completed") {
-        "Exchange incremental sync completed with $failedRows failed change(s)."
-      } else {
-        "Exchange incremental sync failed for $failedRows change(s)."
-      }
-      Save-SyncStatus $status $message $details
-      Send-ExchangeSyncNotification $status $message $details $webhookPayload
+      $message = "Exchange incremental sync failed for $failedRows change(s); $completedRows other change(s) completed and were verified."
+      Save-SyncStatus "failed" $message $details
+      Send-ExchangeSyncNotification "failed" $message $details $webhookPayload
     } elseif ([int]$details.queuedRows -le 0) {
       $message = "Exchange incremental sync completed. No pending changes were queued."
       Save-SyncStatus "completed" $message $details
-      Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
+      if ($WebhookData) { Send-ExchangeSyncNotification "completed" $message $details $webhookPayload }
     } elseif ($actionableSkippedRows -gt 0) {
-      $message = "Exchange incremental sync completed with $actionableSkippedRows skipped change(s)."
-      Save-SyncStatus "completed" $message $details
-      Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
+      $message = "Exchange incremental sync failed because $actionableSkippedRows requested change(s) were skipped."
+      Save-SyncStatus "failed" $message $details
+      Send-ExchangeSyncNotification "failed" $message $details $webhookPayload
     } else {
       $message = "Exchange incremental sync completed."
       Save-SyncStatus "completed" $message $details
@@ -1424,148 +2060,18 @@ try {
     return
   }
 
-  $contacts = Load-AllRows "shared_addressbook_contacts" "display_name"
-  $groups = Load-AllRows "shared_addressbook_groups" "name"
-  $members = Load-AllRows "shared_addressbook_group_members" "source_book"
-  $exchangeRows = Build-ExchangeRows $contacts $groups $members
-
-  $desiredContactEmails = @{}
-  foreach ($contact in $exchangeRows.Contacts) {
-    $desiredContactEmails[(Normalize-Email $contact.ExternalEmailAddress)] = $true
+  $details = Get-StatsObject (Invoke-FullExchangeSync)
+  Write-Output ("Exchange full sync summary: {0}" -f ($details | ConvertTo-Json -Depth 8 -Compress))
+  if ([int]$details.failedQueueRows -gt 0) {
+    $message = "Exchange full reconciliation failed with $([int]$details.failedQueueRows) validation or verification error(s)."
+    Save-SyncStatus "failed" $message $details
+    Send-ExchangeSyncNotification "failed" $message $details $webhookPayload
+  } else {
+    $message = "Exchange full reconciliation completed and verified."
+    Save-SyncStatus "completed" $message $details
+    Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
   }
-
-  $desiredGroupAliases = @{}
-  $desiredMembersByGroup = @{}
-  foreach ($group in $exchangeRows.Groups) {
-    $alias = (Clean-Text $group.Alias).ToLower()
-    $desiredGroupAliases[$alias] = $true
-    $desiredMembersByGroup[$alias] = @{}
-  }
-  foreach ($member in $exchangeRows.Members) {
-    $alias = (Clean-Text $member.GroupAlias).ToLower()
-    if (-not (Has-MapKey $desiredMembersByGroup $alias)) {
-      $desiredMembersByGroup[$alias] = @{}
-    }
-    $desiredMembersByGroup[$alias][(Normalize-Email $member.MemberEmail)] = $true
-  }
-
-  $createdContacts = 0
-  $updatedContacts = 0
-  foreach ($contact in $exchangeRows.Contacts) {
-    $existing = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
-    if ($existing) {
-      Set-ExchangeContactProfile $existing.Identity $contact
-      Set-MailContact -Identity $existing.Identity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
-      $verifiedContact = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
-      if ($verifiedContact) { Assert-ExchangeRecipientName $verifiedContact $contact.DisplayName "Exchange contact $($contact.ExternalEmailAddress)" }
-      $updatedContacts += 1
-    } else {
-      $newContact = New-MailContact -Name $contact.DisplayName -DisplayName $contact.DisplayName -ExternalEmailAddress $contact.ExternalEmailAddress -Alias $contact.Alias -ErrorAction Stop
-      $contactIdentity = $newContact.Identity
-      if (-not $contactIdentity) { $contactIdentity = $contact.ExternalEmailAddress }
-      Set-ExchangeContactProfile $contactIdentity $contact
-      Set-MailContact -Identity $contactIdentity -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
-      $verifiedContact = Get-MailContact -Filter "ExternalEmailAddress -eq '$($contact.ExternalEmailAddress)'" -ErrorAction SilentlyContinue
-      if (-not $verifiedContact) { throw "Could not verify Exchange contact $($contact.ExternalEmailAddress) after creation." }
-      Assert-ExchangeRecipientName $verifiedContact $contact.DisplayName "Exchange contact $($contact.ExternalEmailAddress)"
-      $createdContacts += 1
-    }
-  }
-
-  $createdGroups = 0
-  $updatedGroups = 0
-  foreach ($group in $exchangeRows.Groups) {
-    $existing = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
-    if ($existing) {
-      Set-DistributionGroup -Identity $group.Alias -Name $group.GroupName -DisplayName $group.GroupName -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
-      $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
-      if ($verifiedGroup) { Assert-ExchangeRecipientName $verifiedGroup $group.GroupName "Exchange group $($group.Alias)" }
-      $updatedGroups += 1
-    } else {
-      New-DistributionGroup -Name $group.GroupName -Alias $group.Alias | Out-Null
-      Set-DistributionGroup -Identity $group.Alias -CustomAttribute1 $ManagedMarker -HiddenFromAddressListsEnabled $false -ErrorAction Stop
-      $verifiedGroup = Get-DistributionGroup -Identity $group.Alias -ErrorAction SilentlyContinue
-      if (-not $verifiedGroup) { throw "Could not verify Exchange group $($group.Alias) after creation." }
-      Assert-ExchangeRecipientName $verifiedGroup $group.GroupName "Exchange group $($group.Alias)"
-      $createdGroups += 1
-    }
-  }
-
-  $addedMembers = 0
-  foreach ($member in $exchangeRows.Members) {
-    try {
-      Add-DistributionGroupMember -Identity $member.GroupAlias -Member $member.MemberEmail -ErrorAction Stop
-      $addedMembers += 1
-    } catch {
-      if ($_.Exception.Message -notmatch "already a member") {
-        Write-Warning ("Could not add {0} to {1}: {2}" -f $member.MemberEmail, $member.GroupName, $_.Exception.Message)
-      }
-    }
-  }
-
-  $removedMembers = 0
-  foreach ($group in $exchangeRows.Groups) {
-    $groupAlias = (Clean-Text $group.Alias).ToLower()
-    $desiredMembers = $desiredMembersByGroup[$groupAlias]
-    if (-not $desiredMembers) { $desiredMembers = @{} }
-    $currentMembers = @(Get-DistributionGroupMember -Identity $group.Alias -ResultSize Unlimited -ErrorAction SilentlyContinue)
-    foreach ($currentMember in $currentMembers) {
-      $currentEmail = Get-RecipientEmail $currentMember
-      if ($currentEmail -and -not (Has-MapKey $desiredMembers $currentEmail)) {
-        try {
-          Remove-DistributionGroupMember -Identity $group.Alias -Member $currentMember.Identity -Confirm:$false -ErrorAction Stop
-          $removedMembers += 1
-        } catch {
-          Write-Warning ("Could not remove {0} from {1}: {2}" -f $currentEmail, $group.GroupName, $_.Exception.Message)
-        }
-      }
-    }
-  }
-
-  $removedGroups = 0
-  $managedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
-  foreach ($managedGroup in $managedGroups) {
-    $alias = (Clean-Text $managedGroup.Alias).ToLower()
-    if ($alias -and -not (Has-MapKey $desiredGroupAliases $alias)) {
-      try {
-        Remove-DistributionGroup -Identity $managedGroup.Identity -Confirm:$false -ErrorAction Stop
-        $removedGroups += 1
-      } catch {
-        Write-Warning ("Could not remove group {0}: {1}" -f $managedGroup.DisplayName, $_.Exception.Message)
-      }
-    }
-  }
-
-  $removedContacts = 0
-  $managedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction SilentlyContinue)
-  foreach ($managedContact in $managedContacts) {
-    $email = Get-RecipientEmail $managedContact
-    if ($email -and -not (Has-MapKey $desiredContactEmails $email)) {
-      try {
-        Remove-MailContact -Identity $managedContact.Identity -Confirm:$false -ErrorAction Stop
-        $removedContacts += 1
-      } catch {
-        Write-Warning ("Could not remove contact {0}: {1}" -f $managedContact.DisplayName, $_.Exception.Message)
-      }
-    }
-  }
-
-  $details = @{
-    contacts = $exchangeRows.Contacts.Count
-    groups = $exchangeRows.Groups.Count
-    groupMembers = $exchangeRows.Members.Count
-    createdContacts = $createdContacts
-    updatedContacts = $updatedContacts
-    createdGroups = $createdGroups
-    updatedGroups = $updatedGroups
-    addedMembers = $addedMembers
-    removedMembers = $removedMembers
-    removedGroups = $removedGroups
-    removedContacts = $removedContacts
-  }
-  Write-Output ("Exchange full sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
-  Save-SyncStatus "completed" "Exchange sync completed." $details
-  Send-ExchangeSyncNotification "completed" "Exchange sync completed." $details $webhookPayload
+  return
 } catch {
   $syncError = $_
   try {
@@ -1573,10 +2079,11 @@ try {
   } catch {
     Write-Warning ("Could not save Exchange sync failure status: {0}" -f $_.Exception.Message)
   }
-  Send-ExchangeSyncNotification "failed" $syncError.Exception.Message $null $webhookPayload
+  Send-ExchangeSyncNotification "failed" $syncError.Exception.Message $details $webhookPayload
   throw
 } finally {
   if ($script:ExchangeOnlineConnected -and (Get-Module -Name ExchangeOnlineManagement)) {
     Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
   }
+  Release-ExchangeSyncLock
 }

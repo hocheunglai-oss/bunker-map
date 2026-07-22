@@ -28,6 +28,17 @@ const PAGE_TABLES: Record<string, Set<string>> = {
   ]),
 }
 
+const PAGE_AUDIT_CONTEXT: Record<string, { label: string; path: string }> = {
+  pricesetter: { label: "PRICE SETTER", path: "/admin/pricesetter" },
+  "hongkong-price-history": { label: "HONG KONG PRICE HISTORY", path: "/admin/hongkongpricehistory" },
+  "taiwan-price-history": { label: "TAIWAN PRICE HISTORY", path: "/admin/taiwanpricehistory" },
+  "taiwan-remarks": { label: "TAIWAN REMARKS", path: "/admin/taiwanremarks" },
+  ccinfo: { label: "CCINFO", path: "/admin/ccinfo" },
+  phonebook: { label: "PHONEBOOK", path: "/admin/phonebook" },
+  "outlook-addressbook": { label: "OUTLOOK ADDRESS BOOK", path: "/admin/outlookaddressbook" },
+  "email-templates": { label: "OUTLOOK TEMPLATES", path: "/admin/outlooktemplates" },
+}
+
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Database action failed."
   const status =
@@ -102,7 +113,7 @@ async function proxyRequest(request: Request) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 })
     }
 
-    await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
+    const session = await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
 
     const headers = new Headers()
     ;[
@@ -112,16 +123,24 @@ async function proxyRequest(request: Request) {
       "content-type",
       "prefer",
       "range",
-      "x-bunker-admin-display-name",
-      "x-bunker-admin-page-id",
-      "x-bunker-admin-page-label",
-      "x-bunker-admin-page-path",
-      "x-bunker-admin-role",
-      "x-bunker-admin-user",
     ].forEach((name) => {
       const value = request.headers.get(name)
       if (value) headers.set(name, value)
     })
+
+    if (!isRead) {
+      if (!session.username) throw new Error("Unauthorized")
+      const pageContext = PAGE_AUDIT_CONTEXT[pageId]
+      headers.set("x-bunker-admin-user", session.username)
+      headers.set(
+        "x-bunker-admin-display-name",
+        session.displayName || session.username,
+      )
+      if (session.role) headers.set("x-bunker-admin-role", session.role)
+      headers.set("x-bunker-admin-page-id", pageId)
+      headers.set("x-bunker-admin-page-label", pageContext?.label || pageId)
+      headers.set("x-bunker-admin-page-path", pageContext?.path || `/admin/${pageId}`)
+    }
 
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!serviceKey) {
