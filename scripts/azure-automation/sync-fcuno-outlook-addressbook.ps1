@@ -12,6 +12,7 @@ $script:CurrentQueueRunId = $null
 $script:SyncLockAcquired = $false
 $script:SyncLockLastRenewedAt = [DateTimeOffset]::MinValue
 $script:SyncLockRenewInterval = [TimeSpan]::FromMinutes(5)
+$script:CurrentSyncRequestedAt = $null
 
 function Get-AutomationSetting($Name) {
   $value = Get-AutomationVariable -Name $Name -ErrorAction SilentlyContinue
@@ -520,6 +521,24 @@ function Format-HongKongTime($Value) {
   return (Get-Date).ToUniversalTime().AddHours(8).ToString("yyyy-MM-dd HH:mm:ss 'HKT'")
 }
 
+function ConvertTo-UtcTimestamp($Value) {
+  if ($null -eq $Value) { return "" }
+  try {
+    $date = if ($Value -is [DateTimeOffset]) {
+      [DateTimeOffset]$Value
+    } elseif ($Value -is [DateTime]) {
+      [DateTimeOffset]::new([DateTime]$Value)
+    } else {
+      $parsed = [DateTimeOffset]::MinValue
+      if (-not [DateTimeOffset]::TryParse((Clean-Text $Value), [ref]$parsed)) { return "" }
+      $parsed
+    }
+    return $date.ToUniversalTime().UtcDateTime.ToString("o")
+  } catch {
+    return ""
+  }
+}
+
 function Format-OptionalHongKongTime($Value) {
   $date = [DateTimeOffset]::MinValue
   $text = Clean-Text $Value
@@ -883,15 +902,18 @@ function Sync-ExchangeAliasPeers($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpW
 }
 
 function Save-SyncStatus($Status, $Message, $Details = $null) {
+  $now = (Get-Date).ToUniversalTime().ToString("o")
+  $requestedAt = ConvertTo-UtcTimestamp $script:CurrentSyncRequestedAt
+  if (-not $requestedAt) { $requestedAt = $now }
   $payload = @{
     key = "outlook-addressbook-exchange-sync"
     payload = @{
       status = $Status
       message = $Message
-      requestedAt = (Get-Date).ToUniversalTime().ToString("o")
+      requestedAt = $requestedAt
       response = $Details
     }
-    updated_at = (Get-Date).ToUniversalTime().ToString("o")
+    updated_at = $now
   }
   Invoke-SupabaseRest -Method "POST" -Path "office_calendar_store?on_conflict=key" -Body $payload | Out-Null
 }
@@ -2891,6 +2913,24 @@ function Get-WebhookPayload($WebhookData) {
   }
 }
 
+function Initialize-WebhookPayload($WebhookData, $FallbackRequestedAt = $null) {
+  $payload = Get-WebhookPayload $WebhookData
+  $requestedAt = ConvertTo-UtcTimestamp (Get-MapValue $payload "requestedAt")
+  if (-not $requestedAt) {
+    $requestedAt = ConvertTo-UtcTimestamp $FallbackRequestedAt
+    if (-not $requestedAt) {
+      $requestedAt = (Get-Date).ToUniversalTime().ToString("o")
+    }
+  }
+
+  if ($payload -is [System.Collections.IDictionary]) {
+    $payload["requestedAt"] = $requestedAt
+  } else {
+    $payload | Add-Member -NotePropertyName "requestedAt" -NotePropertyValue $requestedAt -Force
+  }
+  return $payload
+}
+
 function Escape-Html($Value) {
   if ($null -eq $Value) { return "" }
   return [System.Net.WebUtility]::HtmlEncode([string]$Value)
@@ -3820,7 +3860,8 @@ function Invoke-FullExchangeSync {
 
 if ($LibraryOnly) { return }
 
-$webhookPayload = Get-WebhookPayload $WebhookData
+$webhookPayload = Initialize-WebhookPayload $WebhookData
+$script:CurrentSyncRequestedAt = Clean-Text (Get-MapValue $webhookPayload "requestedAt")
 $syncMode = (Clean-Text $webhookPayload.syncMode).ToLowerInvariant()
 if (-not $syncMode) { $syncMode = "incremental" }
 $script:CurrentQueueRunId = [Guid]::NewGuid().ToString()

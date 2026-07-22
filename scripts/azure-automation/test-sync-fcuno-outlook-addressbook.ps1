@@ -32,6 +32,42 @@ Assert-Equal "full" $wrappedWebhookPayload.syncMode "A serialized Azure webhook 
 $nativeWebhookPayload = Get-WebhookPayload ([pscustomobject]@{ RequestBody = '{"syncMode":"incremental"}' })
 Assert-Equal "incremental" $nativeWebhookPayload.syncMode "A native Azure webhook object must remain supported"
 
+$fallbackRequestedAt = "2026-07-22T08:00:00.0000000Z"
+$explicitRequestedAt = "2026-07-22T07:59:00.0000000Z"
+$explicitInitializedPayload = Initialize-WebhookPayload `
+  ('{"syncMode":"full","requestedAt":"' + $explicitRequestedAt + '"}') `
+  $fallbackRequestedAt
+Assert-Equal $explicitRequestedAt $explicitInitializedPayload.requestedAt "An explicit request timestamp must be preserved"
+$scheduledInitializedPayload = Initialize-WebhookPayload `
+  '{"RequestBody":"{\"syncMode\":\"full\",\"requestedBy\":\"Azure Automation daily full schedule\"}"}' `
+  $fallbackRequestedAt
+Assert-Equal "full" $scheduledInitializedPayload.syncMode "A wrapped scheduled payload must preserve full mode"
+Assert-Equal $fallbackRequestedAt $scheduledInitializedPayload.requestedAt "A scheduled payload must receive its job-start timestamp exactly once"
+$nullInitializedPayload = Initialize-WebhookPayload $null $fallbackRequestedAt
+Assert-Equal $fallbackRequestedAt $nullInitializedPayload.requestedAt "A null payload must receive a job-start timestamp"
+Assert-True (-not (Has-MapKey $nullInitializedPayload "syncMode")) "A null payload must continue to default to incremental mode at the entry point"
+
+$originalInvokeSupabaseRestForStatus = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$script:capturedStatusBodies = [System.Collections.ArrayList]::new()
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  [void]$script:capturedStatusBodies.Add($Body)
+  return @()
+}
+try {
+  $script:CurrentSyncRequestedAt = $fallbackRequestedAt
+  Save-SyncStatus "running" "First status write."
+  Save-SyncStatus "completed" "Second status write."
+  Assert-Equal 2 $script:capturedStatusBodies.Count "Both status writes must be captured"
+  Assert-Equal $fallbackRequestedAt $script:capturedStatusBodies[0].payload.requestedAt "The first status write must retain the job-start timestamp"
+  Assert-Equal $fallbackRequestedAt $script:capturedStatusBodies[1].payload.requestedAt "Later status writes must retain the same job-start timestamp"
+  Assert-True ([bool](Clean-Text $script:capturedStatusBodies[0].updated_at)) "The first status write must still record its own update timestamp"
+  Assert-True ([bool](Clean-Text $script:capturedStatusBodies[1].updated_at)) "The second status write must still record its own update timestamp"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $originalInvokeSupabaseRestForStatus
+  $script:CurrentSyncRequestedAt = $null
+}
+
 $originalCulture = [Globalization.CultureInfo]::CurrentCulture
 try {
   [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("tr-TR")
