@@ -81,9 +81,20 @@ Assert-True ($fieldChanges -contains "Email: old@example.com -> new@example.com"
 Assert-True ($fieldChanges -contains "First name: Old -> New") "Notice must show each changed Exchange profile field"
 
 $script:removeCalled = $false
+$script:aliasLookupCalled = $false
 function Get-MailContact {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
+  if ($Identity -eq "stale-alias") {
+    $script:aliasLookupCalled = $true
+    return [pscustomobject]@{
+      Identity = "new-owner"
+      DisplayName = "New Owner"
+      ExternalEmailAddress = "new.owner@example.com"
+      CustomAttribute1 = $ManagedMarker
+      CustomAttribute2 = "FCUNO_CONTACT:c-new-owner"
+    }
+  }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-old'") { return @() }
   if ($Filter -like "ExternalEmailAddress -eq 'dup@example.com'") {
     return [pscustomobject]@{
@@ -92,6 +103,15 @@ function Get-MailContact {
       ExternalEmailAddress = "dup@example.com"
       CustomAttribute1 = $ManagedMarker
       CustomAttribute2 = "FCUNO_CONTACT:c-new"
+    }
+  }
+  if ($Filter -like "ExternalEmailAddress -eq 'wrongname@example.com'") {
+    return [pscustomobject]@{
+      Identity = "wrong-name"
+      DisplayName = "Different Contact"
+      ExternalEmailAddress = "wrongname@example.com"
+      CustomAttribute1 = $ManagedMarker
+      CustomAttribute2 = "FCUNO_CONTACT:different-owner"
     }
   }
   return $null
@@ -110,5 +130,49 @@ try {
 }
 Assert-True $guardFailedClosed "A duplicate delete must refuse an Exchange object owned by a different source ID"
 Assert-True (-not $script:removeCalled) "Ownership mismatch must not call Remove-MailContact"
+
+$script:removeCalled = $false
+Remove-ManagedExchangeMailContact "stale@example.com" "stale-alias" $guardStats "" "Stale Contact" $true
+Assert-True (-not $script:aliasLookupCalled) "An email cleanup must never fall back to an alias owned by another contact"
+Assert-True (-not $script:removeCalled) "An absent stale email must be treated as already reconciled"
+
+$script:removeCalled = $false
+$wrongNameFailedClosed = $false
+try {
+  Remove-ManagedExchangeMailContact "wrongname@example.com" "" $guardStats "" "Expected Contact" $true
+} catch {
+  $wrongNameFailedClosed = $_.Exception.Message -match "exact email and display name"
+}
+Assert-True $wrongNameFailedClosed "An audit cleanup without a source key must match both email and display name"
+Assert-True (-not $script:removeCalled) "An exact-identity mismatch must not call Remove-MailContact"
+
+$script:CanonicalExchangeRows = @{
+  Groups = @([pscustomobject]@{
+    SourceGroupId = "g-new"
+    Alias = "reused-group"
+  })
+}
+$script:syncedGroupIds = @()
+function Load-SingleRow {
+  param($Table, $Column, $Value)
+  return $null
+}
+function Get-GroupExchangeRowsFromSource {
+  param($GroupId)
+  return $null
+}
+function Sync-ExchangeGroupState {
+  param($GroupId, $FallbackAlias, [hashtable]$Stats, $FallbackDisplayName = "", [bool]$AllowUntaggedExactDelete = $false)
+  $script:syncedGroupIds += (Clean-Text $GroupId)
+}
+$recreatedGroupRow = [pscustomobject]@{
+  entity_id = "g-old"
+  entity_alias = "reused-group"
+  payload = [pscustomobject]@{
+    beforeGroup = [pscustomobject]@{ name = "Reused Group"; nickname = "Reused Group" }
+  }
+}
+Sync-ExchangeGroupQueueState $recreatedGroupRow @{}
+Assert-Equal "g-new" $script:syncedGroupIds[0] "A recreated current group must be upserted instead of deleting its reused alias"
 
 Write-Output "Exchange address book runbook tests passed."

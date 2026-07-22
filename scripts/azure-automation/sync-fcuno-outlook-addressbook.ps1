@@ -1006,7 +1006,7 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
     if ($emailMatches.Count -gt 1) { throw "More than one Exchange contact uses $email." }
     if (-not $existing -and $emailMatches.Count -eq 1) { $existing = $emailMatches[0] }
   }
-  if (-not $existing -and $aliasText) {
+  if (-not $existing -and -not $email -and $aliasText) {
     $existing = Get-MailContact -Identity $aliasText -ErrorAction SilentlyContinue
   }
   if (-not $existing) {
@@ -1017,10 +1017,15 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
   if ((Clean-Text $existing.CustomAttribute1) -eq $ManagedMarker -and $sourceKey -and $existingOwnerKey -and $existingOwnerKey -ne $sourceKey) {
     throw "Exchange contact $($existing.DisplayName) is owned by source key $existingOwnerKey, not $sourceKey, so it was not deleted."
   }
-  if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker) {
-    $actualName = Clean-Text $existing.DisplayName
-    $expectedName = Clean-Text $ExpectedDisplayName
-    $actualEmail = Normalize-Email (Get-RecipientEmail $existing)
+  $actualName = Clean-Text $existing.DisplayName
+  $expectedName = Clean-Text $ExpectedDisplayName
+  $actualEmail = Normalize-Email (Get-RecipientEmail $existing)
+  if (-not $sourceKey) {
+    $exactMatch = $AllowUntaggedExactDelete -and $email -and $actualEmail -eq $email -and $expectedName -and $actualName -eq $expectedName
+    if (-not $exactMatch) {
+      throw "Exchange contact $($existing.DisplayName) was not deleted because the queue does not authorize that exact email and display name."
+    }
+  } elseif ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker) {
     $exactMatch = $AllowUntaggedExactDelete -and $email -and $actualEmail -eq $email -and $expectedName -and $actualName -eq $expectedName
     if (-not $exactMatch) {
       throw "Exchange contact $($existing.DisplayName) was not deleted because it is not tagged with $ManagedMarker and the queue does not authorize an exact legacy deletion."
@@ -1313,12 +1318,32 @@ function Get-QueueGroupBeforeBaseAlias($Row) {
   return Get-ExchangeAlias $seed ("group-" + (Clean-Text $Row.entity_id))
 }
 
+function Get-CanonicalExchangeGroupByAlias($Alias) {
+  $aliasText = Clean-Text $Alias
+  if (-not $aliasText) { return $null }
+  $matches = @((Get-CanonicalExchangeRows).Groups | Where-Object {
+    (Clean-Text $_.Alias).Equals($aliasText, [StringComparison]::OrdinalIgnoreCase)
+  })
+  if ($matches.Count -gt 1) { throw "More than one canonical FCUNO group uses Exchange alias $aliasText." }
+  if ($matches.Count -eq 1) { return $matches[0] }
+  return $null
+}
+
 function Sync-ExchangeGroupQueueState($Row, [hashtable]$Stats) {
   $sourceGroup = Load-SingleRow "shared_addressbook_groups" "id" $Row.entity_id
   $beforeBaseAlias = Get-QueueGroupBeforeBaseAlias $Row
   $currentRows = if ($sourceGroup) { Get-GroupExchangeRowsFromSource $Row.entity_id } else { $null }
   $currentGroup = if ($currentRows -and @($currentRows.Groups).Count -gt 0) { @($currentRows.Groups)[0] } else { $null }
   $currentBaseAlias = if ($currentGroup) { Clean-Text $currentGroup.BaseAlias } else { "" }
+
+  if (-not $sourceGroup) {
+    $queuedAlias = Clean-Text $Row.entity_alias
+    $currentAliasOwner = Get-CanonicalExchangeGroupByAlias $queuedAlias
+    if ($currentAliasOwner -and (Clean-Text $currentAliasOwner.SourceGroupId) -ne (Clean-Text $Row.entity_id)) {
+      Sync-ExchangeGroupState $currentAliasOwner.SourceGroupId "" $Stats
+      return
+    }
+  }
 
   if ($currentBaseAlias) { Sync-ExchangeAliasPeers $currentBaseAlias $Stats }
   Sync-ExchangeGroupState `
