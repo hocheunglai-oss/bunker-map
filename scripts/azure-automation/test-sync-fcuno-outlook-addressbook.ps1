@@ -1828,7 +1828,14 @@ $script:newDistributionGroupCalls = 0
 $script:newDistributionGroup = $null
 $script:newGroupProfile = $null
 $script:newGroupProfilePropagationMisses = 0
+$script:newGroupMetadataWriteMisses = 0
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:newGroupMetadataHardFailure = $false
+$script:newGroupProfileWriteMisses = 0
+$script:newGroupProfileSetAttempts = 0
 $script:newGroupProfileSleepCalls = 0
+$script:newGroupProfileSleepSeconds = @()
 $script:newGroupSetIdentity = ""
 $script:membershipResolvedGroup = $null
 $script:collisionRenameOrder = @()
@@ -1862,7 +1869,14 @@ function Get-DistributionGroup {
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-unchanged'" -or $Identity -eq "unchanged-group") {
     return $script:noOpDistributionGroup
   }
-  if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-new'" -and $script:newDistributionGroup) {
+  if (
+    $Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-new'" -and
+    $script:newDistributionGroup -and
+    $script:newDistributionGroup.CustomAttribute2 -eq "FCUNO_GROUP:g-new"
+  ) {
+    return $script:newDistributionGroup
+  }
+  if ($script:newDistributionGroup -and $Identity -eq $script:newDistributionGroup.Alias) {
     return $script:newDistributionGroup
   }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-ocean-collision'") {
@@ -1913,10 +1927,22 @@ function Set-DistributionGroup {
   [CmdletBinding()]
   param($Identity, $Alias, $Name, $DisplayName, $Notes, $CustomAttribute1, $CustomAttribute2, $HiddenFromAddressListsEnabled)
   $script:setDistributionGroupCalls += 1
-  if ($Identity -in @("new-group", "44444444-4444-4444-8444-444444444444")) {
+  if ($script:newDistributionGroup -and $Identity -in @($script:newDistributionGroup.Identity, $script:newDistributionGroup.Guid)) {
+    $script:newGroupMetadataSetAttempts += 1
+    $script:newGroupMetadataSetIdentities += $Identity
+    if ($script:newGroupMetadataHardFailure) {
+      throw "Exchange authorization denied the distribution-group metadata write."
+    }
+    if ($script:newGroupMetadataWriteMisses -gt 0) {
+      $script:newGroupMetadataWriteMisses -= 1
+      throw "The operation couldn't be performed because object 'new-group' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+    }
     $script:newDistributionGroup.CustomAttribute1 = $CustomAttribute1
     $script:newDistributionGroup.CustomAttribute2 = $CustomAttribute2
     $script:newDistributionGroup.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
+    if (Clean-Text $Alias) { $script:newDistributionGroup.Alias = $Alias }
+    if (Clean-Text $Name) { $script:newDistributionGroup.Name = $Name }
+    if (Clean-Text $DisplayName) { $script:newDistributionGroup.DisplayName = $DisplayName }
   }
   if ($Identity -eq $script:collisionRenameDistributionGroup.Guid) {
     $script:collisionRenameOrder += "distribution recipient"
@@ -1936,6 +1962,11 @@ function Set-Group {
     $script:newGroupSetIdentity = $Identity
     if ($Identity -ne "88888888-8888-4888-8888-888888888888") {
       throw "Set-Group must not use the New-DistributionGroup recipient identity."
+    }
+    $script:newGroupProfileSetAttempts += 1
+    if ($script:newGroupProfileWriteMisses -gt 0) {
+      $script:newGroupProfileWriteMisses -= 1
+      throw "The operation couldn't be performed because object 'new-group' couldn't be found on 'TPXPR04A01DC003.APCPR04A001.prod.outlook.com'."
     }
     $script:newGroupProfile.Notes = $Notes
   }
@@ -2096,13 +2127,16 @@ Assert-Equal 1 $incrementalGroupStats.updatedGroups "Incremental group processin
 
 $script:getDistributionGroupCalls = 0
 $script:getGroupCalls = 0
-$script:staleGroupProfileReads = 2
-Set-Item Function:Start-Sleep -Value { param($Seconds) }
+$script:staleGroupProfileReads = 6
+$script:eventualGroupSleepSeconds = @()
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:eventualGroupSleepSeconds += $Seconds }
 try {
   $eventualGroupStats = @{}
   Upsert-ExchangeDistributionGroup $desiredNoOpGroup $eventualGroupStats
-  Assert-Equal 3 $script:getDistributionGroupCalls "Group verification must retry fresh distribution metadata until eventual consistency settles"
-  Assert-Equal 3 $script:getGroupCalls "Group verification must retry authoritative Get-Group Notes until they settle"
+  Assert-Equal 7 $script:getDistributionGroupCalls "Final group verification must outlast five lagging Exchange DC reads before metadata settles"
+  Assert-Equal 7 $script:getGroupCalls "Final group verification must outlast five lagging authoritative Notes reads"
+  Assert-Equal 5 $script:eventualGroupSleepSeconds.Count "Final verification must keep retrying beyond the previous four-attempt window"
+  Assert-Equal $ExchangeGroupPropagationDelaySeconds (@($script:eventualGroupSleepSeconds | Sort-Object -Unique) -join ",") "Final verification retries must use the shared Exchange propagation delay"
   Assert-Equal 1 $eventualGroupStats.verifiedQueueRows "Eventually consistent group Notes must be accepted only after an exact fresh verification"
 } finally {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
@@ -2117,20 +2151,109 @@ $newDesiredGroup = [pscustomobject]@{
   SourceKey = "FCUNO_GROUP:g-new"
 }
 $newGroupStats = @{}
-$script:newGroupProfilePropagationMisses = 2
+$script:getGroupCalls = 0
+$script:newGroupMetadataWriteMisses = 2
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupProfilePropagationMisses = 1
+$script:newGroupProfileWriteMisses = 2
+$script:newGroupProfileSetAttempts = 0
 $script:newGroupProfileSleepCalls = 0
-Set-Item Function:Start-Sleep -Value { param($Seconds) $script:newGroupProfileSleepCalls += 1 }
+$script:newGroupProfileSleepSeconds = @()
+Set-Item Function:Start-Sleep -Value {
+  param($Seconds)
+  $script:newGroupProfileSleepCalls += 1
+  $script:newGroupProfileSleepSeconds += $Seconds
+}
 try {
   Upsert-ExchangeDistributionGroup $newDesiredGroup $newGroupStats
 } finally {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
-Assert-Equal 2 $script:newGroupProfileSleepCalls "New group profile propagation must use bounded retries before profile mutation"
+Assert-Equal 3 $script:newGroupMetadataSetAttempts "A newly created group marker write must retry transient cross-DC not-found responses"
+Assert-Equal 3 $script:newGroupProfileSetAttempts "A newly created group Notes write must retry transient cross-DC not-found responses"
+Assert-Equal 5 $script:getGroupCalls "Transient Notes-write misses must force four immutable profile resolutions before the final exact verification read"
+Assert-Equal 5 $script:newGroupProfileSleepCalls "New group marker, profile, and Notes propagation must use bounded retry waits"
+Assert-Equal $ExchangeGroupPropagationDelaySeconds (@($script:newGroupProfileSleepSeconds | Sort-Object -Unique) -join ",") "All new-group retries must use the shared Exchange propagation delay"
 Assert-Equal $script:newGroupProfile.Guid $script:newGroupSetIdentity "Set-Group must use the independently resolved new-group profile GUID"
 Assert-True ($script:newGroupSetIdentity -ne $script:newDistributionGroup.Guid) "Set-Group must never reuse the New-DistributionGroup recipient GUID"
 Assert-Equal "New group notes" $script:newGroupProfile.Notes "A new distribution group must receive authoritative Notes through Set-Group"
 Assert-Equal 1 $newGroupStats.createdGroups "A new distribution group must be reported as created"
+
+Assert-True ($ExchangeGroupPropagationMaxAttempts -ge 8) "Exchange group propagation must retain at least eight bounded attempts"
+Assert-True (($ExchangeGroupPropagationMaxAttempts - 1) * $ExchangeGroupPropagationDelaySeconds -ge 30) "Exchange group propagation must retain at least a 30-second retry window"
+
+$script:newGroupMetadataHardFailure = $true
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:nonTransientGroupSleepCalls = 0
+$nonTransientGroupFailure = ""
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:nonTransientGroupSleepCalls += 1 }
+try {
+  try {
+    Set-NewExchangeDistributionGroupMetadataWithRetry $script:newDistributionGroup $newDesiredGroup.SourceKey "Non-transient new group"
+  } catch {
+    $nonTransientGroupFailure = $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:newGroupMetadataHardFailure = $false
+}
+Assert-True ($nonTransientGroupFailure -match "authorization denied") "A non-not-found Exchange write error must be returned unchanged"
+Assert-Equal 1 $script:newGroupMetadataSetAttempts "A non-not-found metadata error must fail immediately"
+Assert-Equal 0 $script:nonTransientGroupSleepCalls "A non-not-found metadata error must not enter the propagation retry loop"
+
+# Prove that exhausting the bounded metadata window leaves one recoverable bare group, and that
+# the next run adopts it by the exact alias instead of issuing a duplicate New-DistributionGroup.
+$script:newDistributionGroupCalls = 0
+$script:newDistributionGroup = $null
+$script:newGroupProfile = $null
+$script:newGroupMetadataWriteMisses = $ExchangeGroupPropagationMaxAttempts
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:newGroupProfilePropagationMisses = 0
+$script:newGroupProfileWriteMisses = 0
+$script:exhaustedGroupSleepSeconds = @()
+$exhaustedGroupFailure = ""
+$exhaustedGroupStats = @{}
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:exhaustedGroupSleepSeconds += $Seconds }
+try {
+  try {
+    Upsert-ExchangeDistributionGroup $newDesiredGroup $exhaustedGroupStats
+  } catch {
+    $exhaustedGroupFailure = $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
+Assert-True ($exhaustedGroupFailure -match "metadata propagation failed after $ExchangeGroupPropagationMaxAttempts attempt") "A fully exhausted propagation window must report the bounded attempt count"
+Assert-Equal 1 $script:newDistributionGroupCalls "A failed first run must create exactly one bare Exchange group"
+Assert-Equal $ExchangeGroupPropagationMaxAttempts $script:newGroupMetadataSetAttempts "A transient metadata miss must consume the complete shared propagation budget before failing"
+Assert-Equal ($ExchangeGroupPropagationMaxAttempts - 1) $script:exhaustedGroupSleepSeconds.Count "A bounded propagation failure must wait only between attempts"
+Assert-Equal $ExchangeGroupPropagationDelaySeconds (@($script:exhaustedGroupSleepSeconds | Sort-Object -Unique) -join ",") "An exhausted metadata retry must use the shared propagation delay"
+Assert-Equal 1 @($script:newGroupMetadataSetIdentities | Sort-Object -Unique).Count "Every metadata retry must target one immutable Exchange identity"
+Assert-Equal $script:newDistributionGroup.Guid (@($script:newGroupMetadataSetIdentities | Sort-Object -Unique)[0]) "Every metadata retry must use the New-DistributionGroup GUID, never its alias"
+Assert-Equal "" $script:newDistributionGroup.CustomAttribute2 "A failed marker write must leave the bare group unclaimed for exact alias recovery"
+Assert-Equal 0 ([int]$exhaustedGroupStats.createdGroups) "A group must not be counted as created when its metadata write never verified"
+
+$script:newGroupMetadataWriteMisses = 0
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:newGroupProfilePropagationMisses = 0
+$script:newGroupProfileWriteMisses = 0
+$script:newGroupProfileSetAttempts = 0
+$recoveredGroupStats = @{}
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  Upsert-ExchangeDistributionGroup $newDesiredGroup $recoveredGroupStats
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
+Assert-Equal 1 $script:newDistributionGroupCalls "The next run must recover the exact alias and must not create a second Exchange group"
+Assert-Equal 1 $recoveredGroupStats.updatedGroups "The recovered bare group must be completed as an in-place update"
+Assert-Equal 1 $recoveredGroupStats.verifiedQueueRows "The recovered bare group must pass exact metadata and Notes verification"
+Assert-Equal $newDesiredGroup.SourceKey $script:newDistributionGroup.CustomAttribute2 "Alias recovery must attach the exact FCUNO group source key"
+Assert-Equal $newDesiredGroup.Description $script:newGroupProfile.Notes "Alias recovery must complete the authoritative group Notes"
 
 $identitylessGroup = [pscustomobject]@{
   Identity = "unchanged-group"

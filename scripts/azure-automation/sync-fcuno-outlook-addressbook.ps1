@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 $DefaultExchangeOnlineManagementVersion = "3.4.0"
+$ExchangeGroupPropagationMaxAttempts = 9
+$ExchangeGroupPropagationDelaySeconds = 5
 $script:ExchangeOnlineConnected = $false
 $script:CanonicalExchangeRows = $null
 $script:CurrentQueueRunId = $null
@@ -554,20 +556,21 @@ function Resolve-ExchangeGroupProfileHint($DistributionGroup, $Lookup) {
   return $null
 }
 
-function Resolve-ExchangeGroupProfileForDistributionGroup($DistributionGroup, $Label, [int]$MaxAttempts = 1) {
+function Resolve-ExchangeGroupProfileForDistributionGroup($DistributionGroup, $Label, [int]$MaxAttempts = 1, [int]$RetryDelaySeconds = 2) {
   if (-not $DistributionGroup) { throw "$Label has no distribution-group object for profile resolution." }
   if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
   $distributionIdentity = Get-ExchangeStrongCommandIdentity $DistributionGroup
   if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for profile resolution." }
   $lastResult = "no authoritative group profile was visible through immutable distribution identity '$distributionIdentity'"
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
-    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+    if ($attempt -gt 1 -and $RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
     Renew-ExchangeSyncLockIfDue
     $profileCandidate = $null
     try {
       $profileCandidate = Get-Group -Identity $distributionIdentity -ErrorAction Stop
     } catch {
       if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+      $lastResult = Clean-Text $_.Exception.Message
     }
     Renew-ExchangeSyncLockIfDue
     if ($profileCandidate) {
@@ -577,6 +580,94 @@ function Resolve-ExchangeGroupProfileForDistributionGroup($DistributionGroup, $L
     }
   }
   throw "$Label profile resolution failed after $MaxAttempts attempt(s): $lastResult."
+}
+
+function Set-NewExchangeDistributionGroupMetadataWithRetry(
+  $DistributionGroup,
+  $SourceKey,
+  $Label,
+  [int]$MaxAttempts = $ExchangeGroupPropagationMaxAttempts,
+  [int]$RetryDelaySeconds = $ExchangeGroupPropagationDelaySeconds
+) {
+  if (-not $DistributionGroup) { throw "$Label has no newly created distribution-group object for metadata mutation." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $distributionIdentity = Get-ExchangeStrongCommandIdentity $DistributionGroup
+  if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for metadata mutation." }
+  $lastResult = "the newly created group was not yet writable through immutable identity '$distributionIdentity'"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1 -and $RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+    Renew-ExchangeSyncLockIfDue
+    try {
+      Set-DistributionGroup -Identity $distributionIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $SourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Renew-ExchangeSyncLockIfDue
+      return
+    } catch {
+      if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+      $lastResult = Clean-Text $_.Exception.Message
+      Renew-ExchangeSyncLockIfDue
+    }
+  }
+  throw "$Label metadata propagation failed after $MaxAttempts attempt(s). Last Exchange result: $lastResult"
+}
+
+function Set-ExchangeGroupNotesWithRetry(
+  $DistributionGroup,
+  $Description,
+  $Label,
+  $InitialProfile = $null,
+  [int]$MaxAttempts = $ExchangeGroupPropagationMaxAttempts,
+  [int]$RetryDelaySeconds = $ExchangeGroupPropagationDelaySeconds
+) {
+  if (-not $DistributionGroup) { throw "$Label has no distribution-group object for Notes mutation." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $distributionIdentity = Get-ExchangeStrongCommandIdentity $DistributionGroup
+  if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for Notes mutation." }
+
+  $profile = $null
+  if ($InitialProfile) {
+    $profile = Resolve-ExchangeGroupProfileHint $DistributionGroup (New-ExchangeGroupProfileLookup @($InitialProfile))
+    if (-not $profile) {
+      throw "$Label initial authoritative group profile did not correlate through immutable identity."
+    }
+  }
+
+  $lastResult = "no authoritative group profile was visible through immutable distribution identity '$distributionIdentity'"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1 -and $RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+    if (-not $profile) {
+      Renew-ExchangeSyncLockIfDue
+      $profileCandidate = $null
+      try {
+        $profileCandidate = Get-Group -Identity $distributionIdentity -ErrorAction Stop
+      } catch {
+        if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+        $lastResult = Clean-Text $_.Exception.Message
+      }
+      Renew-ExchangeSyncLockIfDue
+      if (-not $profileCandidate) { continue }
+      $profile = Resolve-ExchangeGroupProfileHint $DistributionGroup (New-ExchangeGroupProfileLookup @($profileCandidate))
+      if (-not $profile) {
+        $lastResult = "the returned group profile did not correlate to the distribution group through immutable identity"
+        continue
+      }
+    }
+
+    $profileIdentity = Get-ExchangeGroupProfileCommandIdentity $profile
+    Renew-ExchangeSyncLockIfDue
+    try {
+      Set-Group -Identity $profileIdentity -Notes $Description -ErrorAction Stop
+      Renew-ExchangeSyncLockIfDue
+      return $profile
+    } catch {
+      if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+      $lastResult = Clean-Text $_.Exception.Message
+      # A successful read can be followed by a write on a different Exchange DC. Re-resolve
+      # the authoritative profile before the next retry instead of trusting the stale object.
+      $profile = $null
+      Renew-ExchangeSyncLockIfDue
+    }
+  }
+  throw "$Label Notes propagation failed after $MaxAttempts attempt(s). Last Exchange result: $lastResult"
 }
 
 function Test-ExchangeObjectsRepresentSameRecipient($First, $Second) {
@@ -2637,7 +2728,11 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     $ExistingProfileHint = Resolve-ExchangeGroupProfileHint $existing (New-ExchangeGroupProfileLookup @($ExistingProfileHint))
   }
   if ($existing -and -not $ExistingProfileHint) {
-    $ExistingProfileHint = Resolve-ExchangeGroupProfileForDistributionGroup $existing "Exchange group $alias" 1
+    $ExistingProfileHint = Resolve-ExchangeGroupProfileForDistributionGroup `
+      $existing `
+      "Exchange group $alias" `
+      $ExchangeGroupPropagationMaxAttempts `
+      $ExchangeGroupPropagationDelaySeconds
   }
   if ($existing -and -not $ExistingProfileHint) {
     throw "Existing Exchange group $alias has no authoritative group profile joined through the same immutable identity, so the update was blocked without mutation."
@@ -2650,11 +2745,9 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     return
   } elseif ($existing) {
     $fullMutationAction = "Update group"
-    $groupProfileIdentity = Get-ExchangeGroupProfileCommandIdentity $ExistingProfileHint
     # Updating Alias/Name can briefly invalidate Exchange's mutable group lookup. Apply Notes first
     # through the independently correlated Get-Group identity, then rename the distribution recipient.
-    Set-Group -Identity $groupProfileIdentity -Notes $Group.Description -ErrorAction Stop
-    Renew-ExchangeSyncLockIfDue
+    Set-ExchangeGroupNotesWithRetry $existing $Group.Description "Exchange group $alias" $ExistingProfileHint | Out-Null
     Set-DistributionGroup -Identity $existingIdentity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     Increment-Stat $Stats "updatedGroups"
@@ -2664,20 +2757,19 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     Renew-ExchangeSyncLockIfDue
     $newGroupIdentity = Get-ExchangeStrongCommandIdentity $newGroup
     if (-not $newGroupIdentity) { throw "New Exchange group $alias did not return an immutable identity, so Notes/marker mutation was blocked." }
-    Set-DistributionGroup -Identity $newGroupIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
-    Renew-ExchangeSyncLockIfDue
     # Keep the source marker first so a propagation failure is idempotently recoverable by source key.
-    $newGroupProfile = Resolve-ExchangeGroupProfileForDistributionGroup $newGroup "New Exchange group $alias" 4
-    Set-Group -Identity (Get-ExchangeGroupProfileCommandIdentity $newGroupProfile) -Notes $Group.Description -ErrorAction Stop
-    Renew-ExchangeSyncLockIfDue
+    # Both writes need their own bounded retry because Exchange can route consecutive commands to
+    # different domain controllers while the newly created recipient is still propagating.
+    Set-NewExchangeDistributionGroupMetadataWithRetry $newGroup $sourceKey "New Exchange group $alias"
+    Set-ExchangeGroupNotesWithRetry $newGroup $Group.Description "New Exchange group $alias" | Out-Null
     Increment-Stat $Stats "createdGroups"
   }
 
   $verified = $null
   $verifiedProfile = $null
   $verificationMismatches = @("distribution group is missing")
-  for ($attempt = 1; $attempt -le 4; $attempt += 1) {
-    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+  for ($attempt = 1; $attempt -le $ExchangeGroupPropagationMaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds $ExchangeGroupPropagationDelaySeconds }
     Renew-ExchangeSyncLockIfDue
     $verifiedMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
     Renew-ExchangeSyncLockIfDue
