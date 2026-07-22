@@ -2191,7 +2191,7 @@ $nonTransientGroupFailure = ""
 Set-Item Function:Start-Sleep -Value { param($Seconds) $script:nonTransientGroupSleepCalls += 1 }
 try {
   try {
-    Set-NewExchangeDistributionGroupMetadataWithRetry $script:newDistributionGroup $newDesiredGroup.SourceKey "Non-transient new group"
+    Set-ExchangeDistributionGroupMetadataWithRetry $script:newDistributionGroup $newDesiredGroup "Non-transient new group"
   } catch {
     $nonTransientGroupFailure = $_.Exception.Message
   }
@@ -2236,20 +2236,80 @@ Assert-Equal $script:newDistributionGroup.Guid (@($script:newGroupMetadataSetIde
 Assert-Equal "" $script:newDistributionGroup.CustomAttribute2 "A failed marker write must leave the bare group unclaimed for exact alias recovery"
 Assert-Equal 0 ([int]$exhaustedGroupStats.createdGroups) "A group must not be counted as created when its metadata write never verified"
 
-$script:newGroupMetadataWriteMisses = 0
+# The next run must enter the existing/alias-recovery branch. A non-not-found write error must
+# fail immediately there as well, without sleeping or attempting a duplicate group creation.
+$script:newGroupMetadataHardFailure = $true
 $script:newGroupMetadataSetAttempts = 0
 $script:newGroupMetadataSetIdentities = @()
 $script:newGroupProfilePropagationMisses = 0
 $script:newGroupProfileWriteMisses = 0
 $script:newGroupProfileSetAttempts = 0
+$script:aliasRecoveryHardFailureSleepCalls = 0
+$aliasRecoveryHardFailure = ""
+$aliasRecoveryHardFailureStats = @{}
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:aliasRecoveryHardFailureSleepCalls += 1 }
+try {
+  try {
+    Upsert-ExchangeDistributionGroup $newDesiredGroup $aliasRecoveryHardFailureStats
+  } catch {
+    $aliasRecoveryHardFailure = $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:newGroupMetadataHardFailure = $false
+}
+Assert-True ($aliasRecoveryHardFailure -match "authorization denied") "Alias recovery must return a non-not-found metadata error unchanged"
+Assert-Equal 1 $script:newGroupMetadataSetAttempts "Alias recovery must fail immediately on a non-not-found metadata error"
+Assert-Equal 0 $script:aliasRecoveryHardFailureSleepCalls "Alias recovery must not sleep after a non-not-found metadata error"
+Assert-Equal 1 $script:newDistributionGroupCalls "A hard failure while recovering an exact alias must not create a duplicate group"
+Assert-Equal 0 ([int]$aliasRecoveryHardFailureStats.updatedGroups) "A failed alias recovery must not be counted as updated"
+Assert-Equal $script:newDistributionGroup.Guid $script:newGroupMetadataSetIdentities[0] "Alias recovery must target the existing group's immutable GUID"
+
+# Transient not-found responses in that same existing branch must consume the complete shared
+# retry budget before failure and must keep targeting only the immutable recovered recipient.
+$script:newGroupMetadataWriteMisses = $ExchangeGroupPropagationMaxAttempts
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:aliasRecoveryExhaustedSleepSeconds = @()
+$aliasRecoveryExhaustedFailure = ""
+$aliasRecoveryExhaustedStats = @{}
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:aliasRecoveryExhaustedSleepSeconds += $Seconds }
+try {
+  try {
+    Upsert-ExchangeDistributionGroup $newDesiredGroup $aliasRecoveryExhaustedStats
+  } catch {
+    $aliasRecoveryExhaustedFailure = $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
+Assert-True ($aliasRecoveryExhaustedFailure -match "metadata propagation failed after $ExchangeGroupPropagationMaxAttempts attempt") "Alias recovery must report exhaustion of the shared metadata retry budget"
+Assert-Equal $ExchangeGroupPropagationMaxAttempts $script:newGroupMetadataSetAttempts "Alias recovery must use every shared propagation attempt for transient not-found writes"
+Assert-Equal ($ExchangeGroupPropagationMaxAttempts - 1) $script:aliasRecoveryExhaustedSleepSeconds.Count "Alias recovery must wait only between transient metadata attempts"
+Assert-Equal $ExchangeGroupPropagationDelaySeconds (@($script:aliasRecoveryExhaustedSleepSeconds | Sort-Object -Unique) -join ",") "Alias recovery must use the shared propagation delay"
+Assert-Equal 1 @($script:newGroupMetadataSetIdentities | Sort-Object -Unique).Count "Every exhausted alias-recovery retry must target one immutable Exchange identity"
+Assert-Equal $script:newDistributionGroup.Guid (@($script:newGroupMetadataSetIdentities | Sort-Object -Unique)[0]) "Every exhausted alias-recovery retry must use the existing Exchange GUID"
+Assert-Equal 1 $script:newDistributionGroupCalls "An exhausted exact-alias recovery must not create a duplicate group"
+Assert-Equal 0 ([int]$aliasRecoveryExhaustedStats.updatedGroups) "An exhausted alias recovery must not be counted as updated"
+
+# A later alias-recovery run must tolerate transient cross-DC misses and complete in place.
+$script:newGroupMetadataWriteMisses = 2
+$script:newGroupMetadataSetAttempts = 0
+$script:newGroupMetadataSetIdentities = @()
+$script:aliasRecoverySuccessSleepSeconds = @()
 $recoveredGroupStats = @{}
-Set-Item Function:Start-Sleep -Value { param($Seconds) }
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:aliasRecoverySuccessSleepSeconds += $Seconds }
 try {
   Upsert-ExchangeDistributionGroup $newDesiredGroup $recoveredGroupStats
 } finally {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-Equal 1 $script:newDistributionGroupCalls "The next run must recover the exact alias and must not create a second Exchange group"
+Assert-Equal 3 $script:newGroupMetadataSetAttempts "Alias recovery must retry transient metadata not-found responses until success"
+Assert-Equal 2 $script:aliasRecoverySuccessSleepSeconds.Count "A successful alias recovery must wait only between its transient write attempts"
+Assert-Equal $ExchangeGroupPropagationDelaySeconds (@($script:aliasRecoverySuccessSleepSeconds | Sort-Object -Unique) -join ",") "Successful alias recovery must use the shared propagation delay"
+Assert-Equal 1 @($script:newGroupMetadataSetIdentities | Sort-Object -Unique).Count "Successful alias-recovery retries must keep one immutable target"
+Assert-Equal $script:newDistributionGroup.Guid (@($script:newGroupMetadataSetIdentities | Sort-Object -Unique)[0]) "Successful alias recovery must use the existing Exchange GUID, never its alias"
 Assert-Equal 1 $recoveredGroupStats.updatedGroups "The recovered bare group must be completed as an in-place update"
 Assert-Equal 1 $recoveredGroupStats.verifiedQueueRows "The recovered bare group must pass exact metadata and Notes verification"
 Assert-Equal $newDesiredGroup.SourceKey $script:newDistributionGroup.CustomAttribute2 "Alias recovery must attach the exact FCUNO group source key"

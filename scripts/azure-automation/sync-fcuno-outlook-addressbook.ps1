@@ -582,23 +582,38 @@ function Resolve-ExchangeGroupProfileForDistributionGroup($DistributionGroup, $L
   throw "$Label profile resolution failed after $MaxAttempts attempt(s): $lastResult."
 }
 
-function Set-NewExchangeDistributionGroupMetadataWithRetry(
+function Set-ExchangeDistributionGroupMetadataWithRetry(
   $DistributionGroup,
-  $SourceKey,
+  $Group,
   $Label,
   [int]$MaxAttempts = $ExchangeGroupPropagationMaxAttempts,
   [int]$RetryDelaySeconds = $ExchangeGroupPropagationDelaySeconds
 ) {
-  if (-not $DistributionGroup) { throw "$Label has no newly created distribution-group object for metadata mutation." }
+  if (-not $DistributionGroup) { throw "$Label has no distribution-group object for metadata mutation." }
+  if (-not $Group) { throw "$Label has no desired FCUNO group metadata for mutation." }
   if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
   $distributionIdentity = Get-ExchangeStrongCommandIdentity $DistributionGroup
   if (-not $distributionIdentity) { throw "$Label has no immutable distribution-group identity for metadata mutation." }
-  $lastResult = "the newly created group was not yet writable through immutable identity '$distributionIdentity'"
+  $alias = Clean-Text $Group.Alias
+  $groupName = Clean-Text $Group.GroupName
+  $sourceKey = Clean-Text $Group.SourceKey
+  if (-not $alias -or -not $groupName -or -not $sourceKey) {
+    throw "$Label is missing the desired alias, group name, or source key for metadata mutation."
+  }
+  $lastResult = "the group was not yet writable through immutable identity '$distributionIdentity'"
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     if ($attempt -gt 1 -and $RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
     Renew-ExchangeSyncLockIfDue
     try {
-      Set-DistributionGroup -Identity $distributionIdentity -CustomAttribute1 $ManagedMarker -CustomAttribute2 $SourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-DistributionGroup `
+        -Identity $distributionIdentity `
+        -Alias $alias `
+        -Name $groupName `
+        -DisplayName $groupName `
+        -CustomAttribute1 $ManagedMarker `
+        -CustomAttribute2 $sourceKey `
+        -HiddenFromAddressListsEnabled $false `
+        -ErrorAction Stop
       Renew-ExchangeSyncLockIfDue
       return
     } catch {
@@ -2748,7 +2763,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     # Updating Alias/Name can briefly invalidate Exchange's mutable group lookup. Apply Notes first
     # through the independently correlated Get-Group identity, then rename the distribution recipient.
     Set-ExchangeGroupNotesWithRetry $existing $Group.Description "Exchange group $alias" $ExistingProfileHint | Out-Null
-    Set-DistributionGroup -Identity $existingIdentity -Alias $alias -Name $Group.GroupName -DisplayName $Group.GroupName -CustomAttribute1 $ManagedMarker -CustomAttribute2 $sourceKey -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+    Set-ExchangeDistributionGroupMetadataWithRetry $existing $Group "Exchange group $alias"
     Renew-ExchangeSyncLockIfDue
     Increment-Stat $Stats "updatedGroups"
   } else {
@@ -2760,7 +2775,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     # Keep the source marker first so a propagation failure is idempotently recoverable by source key.
     # Both writes need their own bounded retry because Exchange can route consecutive commands to
     # different domain controllers while the newly created recipient is still propagating.
-    Set-NewExchangeDistributionGroupMetadataWithRetry $newGroup $sourceKey "New Exchange group $alias"
+    Set-ExchangeDistributionGroupMetadataWithRetry $newGroup $Group "New Exchange group $alias"
     Set-ExchangeGroupNotesWithRetry $newGroup $Group.Description "New Exchange group $alias" | Out-Null
     Increment-Stat $Stats "createdGroups"
   }
