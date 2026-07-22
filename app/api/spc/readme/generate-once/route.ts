@@ -87,6 +87,7 @@ export async function POST(request: Request) {
           "Pause naturally at full stops and slightly longer between paragraphs.",
           "Do not use dramatic, promotional, theatrical, or conversational voice changes.",
           "Pronounce the sentence beginning Repeat this process with exceptional clarity. Say Repeat as ree-PEAT, with a clean initial R and a complete second syllable.",
+          "Pronounce enquiry as en-KWY-ree and enquiries as en-KWY-reez, with three clean syllables. Never make either word sound like anchor ease or increase.",
           "Keep the recording dry and studio-clean. Avoid clicks, crackle, clipped consonants, swallowed syllables, pitch jumps, mouth noise, and sudden changes in microphone distance.",
           "Pronounce A-I, S-P-C, and I-M-O as individual letters, and pronounce WhatsApp normally.",
         ].join(" "),
