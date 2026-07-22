@@ -24,6 +24,27 @@ foreach ($email in @(
   Assert-True (-not (Test-ValidEmail $email)) "Invalid email '$email' must be rejected"
 }
 Assert-True (Test-ValidEmail "valid.name+tag@example-domain.com") "A normal external email must be accepted"
+$liveTransportNotFoundError = $null
+try {
+  throw "||The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+} catch {
+  $liveTransportNotFoundError = $_
+}
+Assert-True (Test-ExchangeIdentityNotFoundError $liveTransportNotFoundError) "The exact live Exchange transport-prefixed object-not-found response must be classified as retryable"
+$repeatedTransportNotFoundError = $null
+try {
+  throw "||||The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+} catch {
+  $repeatedTransportNotFoundError = $_
+}
+Assert-True (-not (Test-ExchangeIdentityNotFoundError $repeatedTransportNotFoundError)) "Only the exact observed leading Exchange transport separator pair may be normalized"
+$embeddedTransportNotFoundError = $null
+try {
+  throw "Exchange request failed: ||The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+} catch {
+  $embeddedTransportNotFoundError = $_
+}
+Assert-True (-not (Test-ExchangeIdentityNotFoundError $embeddedTransportNotFoundError)) "An embedded Exchange transport separator must not turn an unrelated outer error into a retryable not-found response"
 Assert-Equal `
   "22222222-2222-4222-8222-222222222222" `
   (Get-ExchangeContactProfileCommandIdentity ([pscustomobject]@{ Guid = "22222222-2222-4222-8222-222222222222"; DistinguishedName = "CN=Profile,DC=example,DC=com"; ExternalEmailAddress = "valid@example.com" })) `
@@ -1832,6 +1853,8 @@ $script:newGroupMetadataWriteMisses = 0
 $script:newGroupMetadataSetAttempts = 0
 $script:newGroupMetadataSetIdentities = @()
 $script:newGroupMetadataHardFailure = $false
+$script:newGroupMetadataHardFailureMessage = "||Exchange authorization denied the distribution-group metadata write."
+$script:newGroupMetadataNotFoundMessage = "||The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
 $script:newGroupProfileWriteMisses = 0
 $script:newGroupProfileSetAttempts = 0
 $script:newGroupProfileSleepCalls = 0
@@ -1931,11 +1954,11 @@ function Set-DistributionGroup {
     $script:newGroupMetadataSetAttempts += 1
     $script:newGroupMetadataSetIdentities += $Identity
     if ($script:newGroupMetadataHardFailure) {
-      throw "Exchange authorization denied the distribution-group metadata write."
+      throw $script:newGroupMetadataHardFailureMessage
     }
     if ($script:newGroupMetadataWriteMisses -gt 0) {
       $script:newGroupMetadataWriteMisses -= 1
-      throw "The operation couldn't be performed because object 'new-group' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
+      throw $script:newGroupMetadataNotFoundMessage
     }
     $script:newDistributionGroup.CustomAttribute1 = $CustomAttribute1
     $script:newDistributionGroup.CustomAttribute2 = $CustomAttribute2
@@ -2170,7 +2193,7 @@ try {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
-Assert-Equal 3 $script:newGroupMetadataSetAttempts "A newly created group marker write must retry transient cross-DC not-found responses"
+Assert-Equal 3 $script:newGroupMetadataSetAttempts "A newly created group marker write must retry the exact live transport-prefixed cross-DC not-found response"
 Assert-Equal 3 $script:newGroupProfileSetAttempts "A newly created group Notes write must retry transient cross-DC not-found responses"
 Assert-Equal 5 $script:getGroupCalls "Transient Notes-write misses must force four immutable profile resolutions before the final exact verification read"
 Assert-Equal 5 $script:newGroupProfileSleepCalls "New group marker, profile, and Notes propagation must use bounded retry waits"
@@ -2202,6 +2225,27 @@ try {
 Assert-True ($nonTransientGroupFailure -match "authorization denied") "A non-not-found Exchange write error must be returned unchanged"
 Assert-Equal 1 $script:newGroupMetadataSetAttempts "A non-not-found metadata error must fail immediately"
 Assert-Equal 0 $script:nonTransientGroupSleepCalls "A non-not-found metadata error must not enter the propagation retry loop"
+
+$script:newGroupMetadataHardFailure = $true
+$script:newGroupMetadataHardFailureMessage = "||Exchange request failed because the remote transport session was interrupted."
+$script:newGroupMetadataSetAttempts = 0
+$script:unrelatedGroupSleepCalls = 0
+$unrelatedGroupFailure = ""
+Set-Item Function:Start-Sleep -Value { param($Seconds) $script:unrelatedGroupSleepCalls += 1 }
+try {
+  try {
+    Set-ExchangeDistributionGroupMetadataWithRetry $script:newDistributionGroup $newDesiredGroup "Unrelated new group failure"
+  } catch {
+    $unrelatedGroupFailure = $_.Exception.Message
+  }
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:newGroupMetadataHardFailure = $false
+  $script:newGroupMetadataHardFailureMessage = "||Exchange authorization denied the distribution-group metadata write."
+}
+Assert-True ($unrelatedGroupFailure -match "transport session was interrupted") "A transport-prefixed unrelated Exchange write error must be returned unchanged"
+Assert-Equal 1 $script:newGroupMetadataSetAttempts "A transport-prefixed unrelated metadata error must fail immediately"
+Assert-Equal 0 $script:unrelatedGroupSleepCalls "A transport-prefixed unrelated metadata error must not enter the propagation retry loop"
 
 # Prove that exhausting the bounded metadata window leaves one recoverable bare group, and that
 # the next run adopts it by the exact alias instead of issuing a duplicate New-DistributionGroup.

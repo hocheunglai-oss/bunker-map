@@ -522,6 +522,10 @@ function Test-ExchangeIdentityNotFoundError($ErrorRecord) {
     return $true
   }
   $message = Clean-Text $ErrorRecord.Exception.Message
+  # Exchange Online can prefix a remote cmdlet error with one literal transport
+  # separator pair. Strip only that exact leading token so an unrelated
+  # message containing the not-found text later in its body cannot be retried.
+  $message = $message -replace "^\|\|\s*", ""
   return $message -match "(?i)^The operation couldn't be performed because object '.+' couldn't be found(?: on '.+')?\.?$"
 }
 
