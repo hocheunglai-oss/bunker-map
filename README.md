@@ -59,6 +59,8 @@ FCUNO's Supabase shared-address-book tables are authoritative. Microsoft Exchang
 
 Every source change is linked through Audit Log, the durable Exchange queue, canonical snapshots, full certifications, and the append-only SHA-256 truth ledger. A full run is trusted only when its source fence is stable, the queue is settled, the Exchange contact/group/membership projection matches exactly, and the resulting certification has projection evidence. Successful notices and verified Drive backups preserve independent hashes outside the production database.
 
+Live Azure configuration was verified on 2026-07-23 in Automation Account `fcuno-exchange-sync`: runbook `Sync-FCUno-OutlookAddressBook`; schedules `FCUNO-Exchange-Incremental-Hourly` and `FCUNO-Exchange-Full-Daily-0410`; webhook `FC Uno Exchange Sync`, enabled through 2035-05-29. An on-demand **full** certification must be started in Azure with `WebhookData.syncMode = "full"`; FCUNO's **Sync Exchange** button starts an incremental run only. Recheck Azure before relying on this dated operational record.
+
 ## Deployment
 
 This project can be deployed on Vercel. Pushing to the connected GitHub repository will trigger a new deployment.
