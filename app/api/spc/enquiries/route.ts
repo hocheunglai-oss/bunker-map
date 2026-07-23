@@ -67,6 +67,12 @@ function latestEnquiryCursor(enquiries: Array<{ id: string; updatedAt: string }>
   }, fallback)
 }
 
+function parseIsoTimestamp(value: string) {
+  return ISO_CURSOR_TIMESTAMP_PATTERN.test(value) && !Number.isNaN(Date.parse(value))
+    ? value
+    : null
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
@@ -75,6 +81,15 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")?.trim() || undefined
     const limit = Number(searchParams.get("limit") || 250)
     const bootstrap = searchParams.get("bootstrap") === "1"
+    const createdAfterValue = searchParams.get("createdAfter")?.trim() || ""
+    const parsedCreatedAfter = createdAfterValue ? parseIsoTimestamp(createdAfterValue) : null
+    if (createdAfterValue && !parsedCreatedAfter) {
+      return NextResponse.json(
+        { message: "createdAfter must be a valid ISO timestamp." },
+        { status: 400, headers: { "Cache-Control": "private, no-store" } },
+      )
+    }
+    const createdAfter = parsedCreatedAfter || undefined
     const updatedAfterValue = searchParams.get("updatedAfter")?.trim() || ""
     const updatedAfterCursor = parseUpdatedAfterCursor(updatedAfterValue)
     const updatedAfter = updatedAfterCursor?.timestamp
@@ -84,13 +99,16 @@ export async function GET(request: Request) {
     const enquiries = await listSpcEnquiries(session, {
       status,
       limit,
+      createdAfter,
       updatedAfter,
       updatedAfterId: updatedAfterCursor?.id,
     })
     // Read the compact snapshot after the change page so inserts cannot be skipped by cursor advancement.
     const [supplierTraders, activeIds] = await Promise.all([
       supplierTradersPromise,
-      updatedAfter ? listSpcEnquiryIds(session, { status, limit }) : Promise.resolve(undefined),
+      updatedAfter
+        ? listSpcEnquiryIds(session, { status, limit, createdAfter })
+        : Promise.resolve(undefined),
     ])
     const cursor = latestEnquiryCursor(enquiries, updatedAfterValue)
     return timedJson(
@@ -108,7 +126,12 @@ export async function GET(request: Request) {
           "Cache-Control": "private, no-store",
         },
       },
-      { bootstrap, incremental: Boolean(updatedAfter), returned: enquiries.length },
+      {
+        bootstrap,
+        incremental: Boolean(updatedAfter),
+        sharedFeed: Boolean(createdAfter),
+        returned: enquiries.length,
+      },
     )
   } catch (error) {
     return errorResponse(error, "Failed to load SPC enquiries.")

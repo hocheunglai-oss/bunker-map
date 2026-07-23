@@ -3,6 +3,8 @@
   const BOARD_ID = "fcuno-wa-spc-board"
   const BOARD_OWNER_ATTRIBUTE = "data-fcuno-whatsapp-board-owner"
   const BOARD_OWNER = "spc"
+  const SHARED_FEED_POLICY_VERSION = 1
+  const SHARED_FEED_STARTED_AT = "2026-07-23T09:20:00.000Z"
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
@@ -34,9 +36,10 @@
     templateEnabled: true,
     templateEditing: false,
     templateText: DEFAULT_TEMPLATE_TEXT,
-    feedStartedAt: "",
-    lastSeenEnquiryAt: "",
-    lastNotifiedEnquiryAt: "",
+    feedPolicyVersion: SHARED_FEED_POLICY_VERSION,
+    feedStartedAt: SHARED_FEED_STARTED_AT,
+    lastSeenEnquiryAt: SHARED_FEED_STARTED_AT,
+    lastNotifiedEnquiryAt: SHARED_FEED_STARTED_AT,
     pendingSend: null,
     contactMenuId: "",
     loadingEnquiries: false,
@@ -340,6 +343,7 @@
       hiddenEnquiryIds: state.hiddenEnquiryIds,
       templateEnabled: state.templateEnabled,
       templateText: state.templateText,
+      feedPolicyVersion: state.feedPolicyVersion,
       feedStartedAt: state.feedStartedAt,
       lastSeenEnquiryAt: state.lastSeenEnquiryAt,
       lastNotifiedEnquiryAt: state.lastNotifiedEnquiryAt,
@@ -363,11 +367,17 @@
 
   function sanitizeSavedState(value) {
     const source = value && typeof value === "object" ? value : {}
+    const usesSharedFeedPolicy = Number(source.feedPolicyVersion) === SHARED_FEED_POLICY_VERSION
     return {
       collapsed: Boolean(source.collapsed),
-      feedStartedAt: cleanText(source.feedStartedAt),
-      lastSeenEnquiryAt: cleanText(source.lastSeenEnquiryAt),
-      lastNotifiedEnquiryAt: cleanText(source.lastNotifiedEnquiryAt),
+      feedPolicyVersion: SHARED_FEED_POLICY_VERSION,
+      feedStartedAt: SHARED_FEED_STARTED_AT,
+      lastSeenEnquiryAt: usesSharedFeedPolicy
+        ? cleanText(source.lastSeenEnquiryAt) || SHARED_FEED_STARTED_AT
+        : SHARED_FEED_STARTED_AT,
+      lastNotifiedEnquiryAt: usesSharedFeedPolicy
+        ? cleanText(source.lastNotifiedEnquiryAt) || SHARED_FEED_STARTED_AT
+        : SHARED_FEED_STARTED_AT,
       templateEnabled: typeof source.templateEnabled === "boolean" ? source.templateEnabled : true,
       templateText: cleanTemplateText(source.templateText) || DEFAULT_TEMPLATE_TEXT,
       pendingSend: sanitizePendingSend(source.pendingSend),
@@ -412,6 +422,7 @@
     state.hiddenEnquiryIds = saved.hiddenEnquiryIds
     state.templateEnabled = saved.templateEnabled
     state.templateText = saved.templateText
+    state.feedPolicyVersion = saved.feedPolicyVersion
     state.feedStartedAt = saved.feedStartedAt
     state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt
     state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt
@@ -837,7 +848,8 @@
         const status = enquiryStatusKey(enquiry)
         const body = enquiryBodyText(enquiry)
         const createdAt = enquiryCreatedAt(enquiry)
-        return `${id}|${status}|${createdAt}|${body}`
+        const updatedAt = cleanText(enquiry.updatedAt || enquiry.updated_at)
+        return `${id}|${status}|${createdAt}|${updatedAt}|${body}`
       })
       .join("\n")
   }
@@ -918,11 +930,8 @@
 
   function initializeFeedBaseline() {
     if (state.feedStartedAt) return false
-    const latestExisting = state.enquiries.reduce((latest, enquiry) => {
-      const createdAt = enquiryCreatedAt(enquiry)
-      return createdAt > latest ? createdAt : latest
-    }, "")
-    state.feedStartedAt = latestExisting || new Date().toISOString()
+    state.feedPolicyVersion = SHARED_FEED_POLICY_VERSION
+    state.feedStartedAt = SHARED_FEED_STARTED_AT
     state.lastSeenEnquiryAt = state.feedStartedAt
     state.lastNotifiedEnquiryAt = state.feedStartedAt
     state.selectedEnquiries = {}
@@ -937,9 +946,6 @@
       if (!enquiry || state.hiddenEnquiryIds[id] || !isSendableEnquiry(enquiry)) {
         delete state.selectedEnquiries[id]
       }
-    })
-    Object.keys(state.hiddenEnquiryIds).forEach((id) => {
-      if (!enquiryById.has(id)) delete state.hiddenEnquiryIds[id]
     })
   }
 

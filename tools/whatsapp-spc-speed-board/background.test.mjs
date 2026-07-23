@@ -3,6 +3,8 @@ import fs from "node:fs"
 import vm from "node:vm"
 
 const code = fs.readFileSync(new URL("./background.js", import.meta.url), "utf8")
+const sharedFeedUrl =
+  "https://spc.fcuno.com/api/spc/enquiries?limit=250&createdAfter=2026-07-23T09%3A20%3A00.000Z"
 const listeners = []
 const fetchedUrls = []
 const fetchedOptions = []
@@ -138,9 +140,12 @@ assert.equal(initialEnquiries[0].status, "sent")
 assert.equal(refreshedEnquiries[0].status, "quoted")
 assert.deepEqual(Array.from(nextTraderEnquiries, (item) => item.id), ["full-b"])
 assert.equal(fetchedUrls.length, 4)
+assert.ok(fetchedUrls[0].startsWith(sharedFeedUrl))
+assert.ok(fetchedUrls[1].startsWith(`${sharedFeedUrl}&updatedAfter=`))
 assert.match(fetchedUrls[1], /updatedAfter=2026-07-05T00%3A00%3A00\.123456Z%7C00000000-0000-4000-8000-000000000001/)
+assert.ok(fetchedUrls[2].startsWith(`${sharedFeedUrl}&updatedAfter=`))
 assert.match(fetchedUrls[2], /updatedAfter=2026-07-05T00%3A01%3A00\.654321Z%7C00000000-0000-4000-8000-000000000001/)
-assert.equal(fetchedUrls[3], "https://spc.fcuno.com/api/spc/enquiries?limit=160")
+assert.equal(fetchedUrls[3], sharedFeedUrl)
 
 enquiryResponses.push({
   contacts: [

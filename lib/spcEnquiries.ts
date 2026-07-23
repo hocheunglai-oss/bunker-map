@@ -42,6 +42,7 @@ export type SaveSpcEnquiryInput = {
 export type SpcEnquiryListOptions = {
   status?: string
   limit?: number
+  createdAfter?: string
   updatedAfter?: string
   updatedAfterId?: string
 }
@@ -138,6 +139,7 @@ export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryL
   const context = createSpcAuditContext(session, undefined, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
   const limit = Math.min(Math.max(Number(options.limit || 250), 1), 250)
+  // This is a shared trading feed. Do not scope rows to session.username.
   let query = supabase
     .from("spc_enquiries")
     .select("*")
@@ -149,6 +151,9 @@ export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryL
 
   if (options.status) {
     query = query.eq("status", options.status)
+  }
+  if (options.createdAfter) {
+    query = query.gt("created_at", options.createdAfter)
   }
 
   if (options.updatedAfter) {
@@ -177,6 +182,7 @@ export async function listSpcEnquiryIds(session: SpcSession, options: SpcEnquiry
     .limit(limit)
 
   if (options.status) query = query.eq("status", options.status)
+  if (options.createdAfter) query = query.gt("created_at", options.createdAfter)
 
   const { data, error } = await query
   if (error) throw error

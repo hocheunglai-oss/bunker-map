@@ -1,9 +1,11 @@
-const SPC_ENQUIRIES_URL = "https://spc.fcuno.com/api/spc/enquiries?limit=160"
+const SPC_SHARED_FEED_STARTED_AT = "2026-07-23T09:20:00.000Z"
+const SPC_ENQUIRIES_URL =
+  `https://spc.fcuno.com/api/spc/enquiries?limit=250&createdAfter=${encodeURIComponent(SPC_SHARED_FEED_STARTED_AT)}`
 const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
 const BRENT_API_URL = "https://spc.fcuno.com/api/market/brent"
 const CRUDE_CACHE_TTL_MS = 30000
 const MAX_CRUDE_AGE_MS = 60 * 60 * 1000
-const SPC_ENQUIRY_LIMIT = 160
+const SPC_ENQUIRY_LIMIT = 250
 const NETWORK_TIMEOUT_MS = 8000
 
 let crudeCache = { at: 0, payload: null }

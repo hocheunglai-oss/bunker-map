@@ -9,6 +9,10 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Loads recent SPC enquiries from `https://spc.fcuno.com/api/spc/enquiries`.
 - Keeps the same two-second refresh while WhatsApp is visible, transfers only changed enquiries after the first load, and resumes immediately when the tab becomes visible.
 - Shows standard enquiry text, who sent it, new-enquiry badges, and STEM/LOST/POSTPONED/CANCELLED labels.
+- Every authenticated SPC extension user receives the same shared enquiry feed
+  and outcome updates, regardless of which SPC user created the enquiry.
+- Remove and Clear All are intentionally local to the current Chrome profile.
+  They never delete or hide the enquiry for another trader.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user click an enquiry row to select it with a blue highlight, then click it again to cancel selection.
 - Shows the Send command and effective selection inside the fixed button, including whether the opening template will be included.
@@ -42,5 +46,7 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
   least 15 minutes, and the numeric quote is hidden whenever validation fails.
 - If the enquiry panel says to log in, open `https://spc.fcuno.com`, log in, then return to WhatsApp Web.
 - The board data is stored locally in Chrome extension storage under `fcuno-wa-spc-board-v1`.
+- Locally removed enquiry IDs remain hidden only for that Chrome profile, even
+  when another trader changes the shared enquiry status.
 - The extension uses Chrome's debugger permission only to dispatch the WhatsApp send action from the background worker when DOM events are ignored.
 - Background refreshes update only changed data and preserve active template editing and dragging. The enquiry cache is reset automatically when the SPC login changes.

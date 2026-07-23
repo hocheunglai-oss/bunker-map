@@ -10,6 +10,7 @@ const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
+const sharedFeedStartedAt = "2026-07-23T09:20:00.000Z"
 const crudeWatch = {
   price: 97.57,
   change: 3.5,
@@ -83,6 +84,7 @@ const html = `<!doctype html>
       window.nativeInsertCount = 0;
       window.nativeEnterShouldSend = false;
       window.promptResponse = null;
+      window.enquiryOverrides = {};
       window.prompt = () => window.promptResponse;
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
       const searchParams = new URLSearchParams(window.location.search);
@@ -114,7 +116,8 @@ const html = `<!doctype html>
                 {
                   id: "enq-1",
                   formattedText: ${JSON.stringify(enquiry)},
-                  createdAt: "2026-07-01T08:00:00Z",
+                  createdAt: "2026-07-23T09:21:00Z",
+                  updatedAt: "2026-07-23T09:21:00Z",
                   status: "sent",
                   createdByUsername: "barry@cosulich.com.sg",
                   createdByDisplayName: "OL"
@@ -122,21 +125,24 @@ const html = `<!doctype html>
                 {
                   id: "enq-2",
                   formattedText: ${JSON.stringify(enquiry2)},
-                  createdAt: "2026-07-01T08:05:00Z",
+                  createdAt: "2026-07-23T09:22:00Z",
+                  updatedAt: "2026-07-23T09:22:00Z",
                   status: "sent",
                   createdByUsername: "otto@cosulich.com.hk",
-                  createdByDisplayName: "OL"
+                  createdByDisplayName: "OTTO LAI"
                 },
                 {
                   id: "enq-3",
                   formattedText: ${JSON.stringify(enquiry3)},
-                  createdAt: "2026-07-01T08:10:00Z",
+                  createdAt: "2026-07-23T09:23:00Z",
+                  updatedAt: "2026-07-23T09:23:00Z",
                   status: "sent",
                   createdByUsername: "barry@cosulich.com.sg",
-                  createdByDisplayName: "OL"
+                  createdByDisplayName: "BARRY KHOO"
                 }
               ];
               if (window.extraEnquiry) enquiries.push(window.extraEnquiry);
+              enquiries.forEach((item) => Object.assign(item, window.enquiryOverrides[item.id] || {}));
               callback({
                 ok: true,
                 enquiries,
@@ -266,7 +272,8 @@ async function main() {
         window.extraEnquiry = {
           id: "enq-4",
           formattedText: "new background enquiry",
-          createdAt: "2026-07-01T08:15:00Z",
+          createdAt: "2026-07-23T09:24:00Z",
+          updatedAt: "2026-07-23T09:24:00Z",
           status: "sent",
           createdByDisplayName: "OL"
         }
@@ -538,27 +545,136 @@ async function main() {
       await firstRunPage.waitForFunction(() => Boolean(window.__FCUNO_WA_SPC_TEST_API__?.state.feedStartedAt))
       const firstRunResult = await firstRunPage.evaluate(() => ({
         baseline: window.__FCUNO_WA_SPC_TEST_API__.state.feedStartedAt,
+        policyVersion: window.__FCUNO_WA_SPC_TEST_API__.state.feedPolicyVersion,
         visibleCount: window.__FCUNO_WA_SPC_TEST_API__.visibleEnquiries().length,
         renderedRows: document.querySelectorAll(".fcuno-wa-spc-enquiry").length,
         savedBaseline: window.storageData["fcuno-wa-spc-board-v1"]?.feedStartedAt || "",
+        savedPolicyVersion: window.storageData["fcuno-wa-spc-board-v1"]?.feedPolicyVersion || 0,
       }))
-      assert.equal(firstRunResult.baseline, "2026-07-01T08:10:00Z")
-      assert.equal(firstRunResult.visibleCount, 0)
-      assert.equal(firstRunResult.renderedRows, 0)
-      assert.equal(firstRunResult.savedBaseline, "2026-07-01T08:10:00Z")
+      assert.equal(firstRunResult.baseline, sharedFeedStartedAt)
+      assert.equal(firstRunResult.policyVersion, 1)
+      assert.equal(firstRunResult.visibleCount, 3)
+      assert.equal(firstRunResult.renderedRows, 3)
+      assert.equal(firstRunResult.savedBaseline, sharedFeedStartedAt)
+      assert.equal(firstRunResult.savedPolicyVersion, 1)
 
       await firstRunPage.evaluate(() => {
         window.extraEnquiry = {
           id: "enq-new",
           formattedText: "new enquiry after installation",
-          createdAt: "2026-07-01T08:15:00Z",
+          createdAt: "2026-07-23T09:25:00Z",
+          updatedAt: "2026-07-23T09:25:00Z",
           status: "sent",
           createdByDisplayName: "OL"
         }
         window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
       })
       await firstRunPage.waitForSelector("#fcuno-wa-spc-board [data-id='enq-new']")
-      assert.equal(await firstRunPage.locator(".fcuno-wa-spc-enquiry").count(), 1)
+      assert.equal(await firstRunPage.locator(".fcuno-wa-spc-enquiry").count(), 4)
+
+      await firstRunPage.click(
+        "#fcuno-wa-spc-board [data-action='hide-enquiry'][data-id='enq-1']",
+        { force: true },
+      )
+      await firstRunPage.waitForFunction(
+        () => !document.querySelector("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']"),
+      )
+      const firstTraderHide = await firstRunPage.evaluate(() => ({
+        hiddenInState: Boolean(window.__FCUNO_WA_SPC_TEST_API__.state.hiddenEnquiryIds["enq-1"]),
+        hiddenInStorage: Boolean(
+          window.storageData["fcuno-wa-spc-board-v1"]?.hiddenEnquiryIds?.["enq-1"],
+        ),
+      }))
+      assert.deepEqual(firstTraderHide, { hiddenInState: true, hiddenInStorage: true })
+
+      const secondTraderPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      await secondTraderPage.goto(`${url}?firstRun=1`, { waitUntil: "domcontentloaded" })
+      await secondTraderPage.waitForSelector(
+        "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+      )
+      const secondTraderInitial = await secondTraderPage.evaluate(() => ({
+        enquiryIds: Array.from(
+          document.querySelectorAll("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry"),
+          (row) => row.getAttribute("data-id"),
+        ),
+        senders: Array.from(
+          document.querySelectorAll("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry-sender"),
+          (sender) => sender.textContent,
+        ),
+        locallyHidden: Boolean(
+          window.storageData["fcuno-wa-spc-board-v1"]?.hiddenEnquiryIds?.["enq-1"],
+        ),
+      }))
+      assert.deepEqual(secondTraderInitial.enquiryIds.sort(), ["enq-1", "enq-2", "enq-3"])
+      assert.deepEqual(secondTraderInitial.senders.sort(), ["BARRY KHOO", "OL", "OTTO LAI"])
+      assert.equal(secondTraderInitial.locallyHidden, false)
+
+      const outcomeCases = [
+        {
+          label: "STEM",
+          update: {
+            status: "quoted",
+            meta: {},
+            updatedAt: "2026-07-23T09:26:00Z",
+          },
+        },
+        {
+          label: "LOST",
+          update: {
+            status: "cancelled",
+            meta: {},
+            updatedAt: "2026-07-23T09:27:00Z",
+          },
+        },
+        {
+          label: "POST",
+          update: {
+            status: "sent",
+            meta: { postponedAt: "2026-07-23T09:28:00Z" },
+            updatedAt: "2026-07-23T09:28:00Z",
+          },
+        },
+        {
+          label: "CANX",
+          update: {
+            status: "sent",
+            meta: { cancelledAt: "2026-07-23T09:29:00Z" },
+            updatedAt: "2026-07-23T09:29:00Z",
+          },
+        },
+      ]
+      for (const outcomeCase of outcomeCases) {
+        await Promise.all([
+          firstRunPage.evaluate((update) => {
+            window.enquiryOverrides["enq-1"] = update
+            window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+          }, outcomeCase.update),
+          secondTraderPage.evaluate((update) => {
+            window.enquiryOverrides["enq-1"] = update
+            window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+          }, outcomeCase.update),
+        ])
+        await secondTraderPage.waitForFunction(
+          (label) =>
+            document.querySelector(
+              "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-status",
+            )?.textContent === label,
+          outcomeCase.label,
+        )
+        assert.equal(
+          await firstRunPage.locator(
+            "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+          ).count(),
+          0,
+        )
+      }
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-status",
+        ).textContent(),
+        "CANX",
+      )
+      await secondTraderPage.close()
       await firstRunPage.close()
 
       const invalidStartPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
