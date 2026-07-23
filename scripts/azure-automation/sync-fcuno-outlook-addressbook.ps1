@@ -8,7 +8,7 @@ $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 $DefaultExchangeOnlineManagementVersion = "3.4.0"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.2"
 $script:ExchangeOnlineConnected = $false
 $script:CanonicalExchangeRows = $null
 $script:CurrentQueueRunId = $null
@@ -1838,8 +1838,12 @@ function Test-NativeNonnegativeInt64($Value) {
 }
 
 function Test-ExchangeQueueFenceTimestampMatch($Actual, $Expected) {
-  $actualText = Clean-Text $Actual
-  $expectedText = Clean-Text $Expected
+  try {
+    $actualText = ConvertTo-ExchangeQueueTimestampText $Actual
+    $expectedText = ConvertTo-ExchangeQueueTimestampText $Expected
+  } catch {
+    return $false
+  }
   if (-not $expectedText) { return -not $actualText }
   if (-not $actualText) { return $false }
 

@@ -873,6 +873,9 @@ try {
 $preciseOffsetQueueTimestamp = [DateTimeOffset]::new(2026, 7, 22, 19, 32, 18, [TimeSpan]::FromHours(8)).AddTicks(5895450)
 Assert-Equal "2026-07-22T19:32:18.5895450+08:00" (ConvertTo-ExchangeQueueTimestampText $preciseOffsetQueueTimestamp) "A materialized DateTimeOffset queue timestamp must retain its ticks and explicit offset"
 Assert-Equal "2026-07-22T19:32:18.5895450+08:00" (ConvertTo-ExchangeQueueTimestampText "2026-07-22T19:32:18.589545+08:00") "An already serialized ISO queue timestamp must retain its fractional ticks and offset in invariant round-trip form"
+Assert-True (Test-ExchangeQueueFenceTimestampMatch $preciseQueueUpdatedAt "2026-07-22T11:32:18.589545+00:00") "A materialized DateTime certification receipt must match the exact submitted queue timestamp without locale formatting loss"
+Assert-True (Test-ExchangeQueueFenceTimestampMatch $preciseOffsetQueueTimestamp "2026-07-22T11:32:18.589545Z") "A materialized DateTimeOffset certification receipt must compare by exact UTC ticks across equivalent offsets"
+Assert-True (-not (Test-ExchangeQueueFenceTimestampMatch $preciseQueueUpdatedAt "2026-07-22T11:32:18.589546Z")) "A certification receipt timestamp that differs by one microsecond must still fail the queue fence"
 $parsedQueueFence = ConvertFrom-ExchangeQueueHighWater "42@2026-07-22T07:15:00Z"
 Assert-Equal 42 $parsedQueueFence.Sequence "The full-certification RPC fence must preserve the exact queue sequence"
 Assert-Equal "2026-07-22T07:15:00Z" $parsedQueueFence.UpdatedAt "The full-certification RPC fence must preserve the exact queue timestamp"

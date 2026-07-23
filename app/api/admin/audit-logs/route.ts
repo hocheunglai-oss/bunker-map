@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
+  canUndoAuditLogRecord,
   getAuditLogRecord,
   isUserAuditRecord,
   listAuditLogs,
@@ -243,7 +244,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Missing audit log id." }, { status: 400 })
     }
 
-    const undoLogId = await undoAuditLog(payload.id, session)
+    const target = await getAuditLogRecord(payload.id)
+    if (
+      !target ||
+      !isUserAuditRecord(target) ||
+      !matchesAuditScope(target, "www")
+    ) {
+      return NextResponse.json(
+        { message: "Audit log not found." },
+        { status: 404 }
+      )
+    }
+    if (!canUndoAuditLogRecord(target)) {
+      return NextResponse.json(
+        { message: "This audit record cannot be undone." },
+        { status: 400 }
+      )
+    }
+
+    const undoLogId = await undoAuditLog(target.id, session)
 
     return NextResponse.json({
       success: true,

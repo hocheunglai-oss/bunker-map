@@ -9,6 +9,7 @@ if (!backupPath) {
 }
 
 const MINIMUM_V2_MIGRATION_HEAD = "20260723080326"
+const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 
 const TABLE_SECTIONS = [
@@ -66,7 +67,12 @@ const TABLE_SECTIONS = [
   { key: "spcFixtures", table: "spc_fixtures", primaryKey: ["id"] },
   { key: "spcSuppliers", table: "spc_suppliers", primaryKey: ["key"] },
   { key: "parserReports", table: "parser_reports", primaryKey: ["id"] },
-  { key: "openAiUsageEvents", table: "openai_usage_events", primaryKey: ["id"] },
+  {
+    key: "openAiUsageEvents",
+    table: "openai_usage_events",
+    primaryKey: ["id"],
+    introducedAt: OPENAI_USAGE_MIGRATION_HEAD,
+  },
   {
     key: "spcPresentationChunks",
     table: "spc_presentation_chunks",
@@ -97,35 +103,53 @@ const EXTERNAL_SECTIONS = [
   { key: "googleCalendarEvents", primaryKey: ["id"] },
 ]
 
-const SECTION_SPECS = [
-  ...TABLE_SECTIONS,
-  ...TRUTH_SECTIONS,
-  ...EXTERNAL_SECTIONS,
-]
-const REQUIRED_SECTIONS = SECTION_SPECS.map((section) => section.key)
 const OPTIONAL_DATA_SECTIONS = ["googleCalendarMetadata"]
-const EXPECTED_DATA_SECTIONS = [...REQUIRED_SECTIONS, ...OPTIONAL_DATA_SECTIONS]
 const TRUTH_MANAGED_TABLES = TRUTH_SECTIONS.map((section) => section.table)
 const EXPLICITLY_EPHEMERAL_TABLES = [
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
 ]
-const EXPECTED_REGISTERED_TABLES = [
-  ...TABLE_SECTIONS.map((section) => section.table),
-  ...TRUTH_MANAGED_TABLES,
-  ...EXPLICITLY_EPHEMERAL_TABLES,
-].sort()
-const REQUIRED_LIVE_TABLES = [
-  ...TABLE_SECTIONS
-    .filter((section) => !section.optionalTable)
-    .map((section) => section.table),
-  ...TRUTH_MANAGED_TABLES,
-  ...EXPLICITLY_EPHEMERAL_TABLES,
-].sort()
 const EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",
   "spc_users.password_hash",
 ]
+
+function getBackupContract(migrationHead) {
+  const tableSections = TABLE_SECTIONS.filter(
+    (section) =>
+      !section.introducedAt || migrationHead >= section.introducedAt
+  )
+  const sectionSpecs = [
+    ...tableSections,
+    ...TRUTH_SECTIONS,
+    ...EXTERNAL_SECTIONS,
+  ]
+  const requiredSections = sectionSpecs.map((section) => section.key)
+  const expectedDataSections = [
+    ...requiredSections,
+    ...OPTIONAL_DATA_SECTIONS,
+  ]
+  const expectedRegisteredTables = [
+    ...tableSections.map((section) => section.table),
+    ...TRUTH_MANAGED_TABLES,
+    ...EXPLICITLY_EPHEMERAL_TABLES,
+  ].sort()
+  const requiredLiveTables = [
+    ...tableSections
+      .filter((section) => !section.optionalTable)
+      .map((section) => section.table),
+    ...TRUTH_MANAGED_TABLES,
+    ...EXPLICITLY_EPHEMERAL_TABLES,
+  ].sort()
+
+  return {
+    sectionSpecs,
+    requiredSections,
+    expectedDataSections,
+    expectedRegisteredTables,
+    requiredLiveTables,
+  }
+}
 
 const TOP_LEVEL_KEYS = [
   "schemaVersion",
@@ -313,6 +337,7 @@ function exactObjectCounts(actual, expected) {
 }
 
 function validateDatabaseInventory(backup, errors) {
+  const contract = getBackupContract(String(backup.migrationHead || ""))
   const inventory = backup.databaseInventory
   if (!isPlainObject(inventory)) {
     addError(errors, "databaseInventory: missing or not an object")
@@ -346,7 +371,9 @@ function validateDatabaseInventory(backup, errors) {
   }
   if (!registeredTables) {
     addError(errors, "databaseInventory.registeredTables: expected sorted unique table names")
-  } else if (!sameStrings(registeredTables, EXPECTED_REGISTERED_TABLES)) {
+  } else if (
+    !sameStrings(registeredTables, contract.expectedRegisteredTables)
+  ) {
     addError(errors, "databaseInventory.registeredTables: does not match the v2 table contract")
   }
   if (!ephemeralTables) {
@@ -373,11 +400,11 @@ function validateDatabaseInventory(backup, errors) {
   }
 
   if (liveTables) {
-    const missingRequired = REQUIRED_LIVE_TABLES.filter(
+    const missingRequired = contract.requiredLiveTables.filter(
       (table) => !liveTables.includes(table)
     )
     const unregistered = liveTables.filter(
-      (table) => !EXPECTED_REGISTERED_TABLES.includes(table)
+      (table) => !contract.expectedRegisteredTables.includes(table)
     )
     if (missingRequired.length) {
       addError(
@@ -665,35 +692,42 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
 }
 
 function validateSections(backup, errors, warnings) {
+  const contract = getBackupContract(String(backup.migrationHead || ""))
   const data = isPlainObject(backup?.data) ? backup.data : {}
   const counts = isPlainObject(backup?.counts) ? backup.counts : {}
   const dataKeys = Object.keys(data).sort()
   const countKeys = Object.keys(counts).sort()
   const expectedDataKeys = [
-    ...REQUIRED_SECTIONS,
+    ...contract.requiredSections,
     ...OPTIONAL_DATA_SECTIONS.filter((key) => key in data),
   ].sort()
 
   if (!sameStrings(dataKeys, expectedDataKeys)) {
-    const missing = REQUIRED_SECTIONS.filter((key) => !dataKeys.includes(key))
+    const missing = contract.requiredSections.filter(
+      (key) => !dataKeys.includes(key)
+    )
     const unexpected = dataKeys.filter(
-      (key) => !EXPECTED_DATA_SECTIONS.includes(key)
+      (key) => !contract.expectedDataSections.includes(key)
     )
     if (missing.length) addError(errors, `data: missing sections ${missing.join(", ")}`)
     if (unexpected.length) {
       addError(errors, `data: unexpected sections ${unexpected.join(", ")}`)
     }
   }
-  if (!sameStrings(countKeys, REQUIRED_SECTIONS)) {
-    const missing = REQUIRED_SECTIONS.filter((key) => !countKeys.includes(key))
-    const unexpected = countKeys.filter((key) => !REQUIRED_SECTIONS.includes(key))
+  if (!sameStrings(countKeys, contract.requiredSections)) {
+    const missing = contract.requiredSections.filter(
+      (key) => !countKeys.includes(key)
+    )
+    const unexpected = countKeys.filter(
+      (key) => !contract.requiredSections.includes(key)
+    )
     if (missing.length) addError(errors, `counts: missing sections ${missing.join(", ")}`)
     if (unexpected.length) {
       addError(errors, `counts: unexpected sections ${unexpected.join(", ")}`)
     }
   }
 
-  for (const section of SECTION_SPECS) {
+  for (const section of contract.sectionSpecs) {
     const { key } = section
     if (!Array.isArray(data[key])) {
       addError(errors, `${key}: section missing or not an array`)
@@ -1628,6 +1662,7 @@ try {
 const errors = []
 const warnings = []
 const safeBackup = isPlainObject(backup) ? backup : {}
+const backupContract = getBackupContract(String(safeBackup.migrationHead || ""))
 function runValidationStep(label, callback, fallback) {
   try {
     return callback()
@@ -1695,9 +1730,9 @@ console.log(
 )
 console.log(`File SHA-256: ${hashes.fileSha256 || sha256(rawFile)}`)
 console.log(`Artifact SHA-256: ${hashes.artifactSha256 || "-"}`)
-console.log(`Sections checked: ${REQUIRED_SECTIONS.length}`)
+console.log(`Sections checked: ${backupContract.requiredSections.length}`)
 console.log(
-  `Total required records checked: ${REQUIRED_SECTIONS.reduce(
+  `Total required records checked: ${backupContract.requiredSections.reduce(
     (sum, key) => sum + rows(safeBackup.data || {}, key).length,
     0
   )}`

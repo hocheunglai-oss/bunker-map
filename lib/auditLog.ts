@@ -144,6 +144,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_role_defaults: "spc-user-management",
   spc_suppliers: "spc-suppliers",
   spc_presentation_chunks: "spc-readme",
+  openai_usage_events: "openai-usage",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -188,6 +189,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
   parser_reports: "parser report",
+  openai_usage_events: "OpenAI usage event",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -276,7 +278,10 @@ const SPC_TABLE_NAMES = new Set([
   "spc_suppliers",
 ])
 
-const NON_UNDOABLE_TABLES = new Set(["spc_suppliers"])
+const NON_UNDOABLE_TABLES = new Set([
+  "openai_usage_events",
+  "spc_suppliers",
+])
 
 function isSpcAuditRecord(record: AuditLogRecord) {
   const actorId = record.actorId?.trim().toLowerCase() || ""

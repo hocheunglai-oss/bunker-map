@@ -42,6 +42,7 @@ const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723080326"
+const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
@@ -83,7 +84,11 @@ const BACKUP_TABLE_SECTIONS = [
   { key: "spcFixtures", table: "spc_fixtures" },
   { key: "spcSuppliers", table: "spc_suppliers" },
   { key: "parserReports", table: "parser_reports" },
-  { key: "openAiUsageEvents", table: "openai_usage_events" },
+  {
+    key: "openAiUsageEvents",
+    table: "openai_usage_events",
+    introducedAt: OPENAI_USAGE_MIGRATION_HEAD,
+  },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks" },
 ] as const
 
@@ -106,15 +111,6 @@ const BACKUP_EXTERNAL_SECTION_KEYS = [
   "googleContacts",
   "googleCalendarEvents",
 ] as const
-const BACKUP_REQUIRED_SECTION_KEYS = [
-  ...BACKUP_TABLE_SECTIONS.map(({ key }) => key),
-  ...BACKUP_TRUTH_SECTIONS.map(({ key }) => key),
-  ...BACKUP_EXTERNAL_SECTION_KEYS,
-].sort()
-const BACKUP_REQUIRED_DATA_KEYS = [
-  ...BACKUP_REQUIRED_SECTION_KEYS,
-  "googleCalendarMetadata",
-].sort()
 const BACKUP_EPHEMERAL_TABLES = [
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
@@ -135,6 +131,42 @@ const BACKUP_EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",
   "spc_users.password_hash",
 ].sort()
+
+function getBackupArtifactContract(migrationHead: string) {
+  const tableSections = BACKUP_TABLE_SECTIONS.filter(
+    (section) =>
+      !("introducedAt" in section) ||
+      migrationHead >= section.introducedAt
+  )
+  const requiredSectionKeys = [
+    ...tableSections.map(({ key }) => key),
+    ...BACKUP_TRUTH_SECTIONS.map(({ key }) => key),
+    ...BACKUP_EXTERNAL_SECTION_KEYS,
+  ].sort()
+  const requiredDataKeys = [
+    ...requiredSectionKeys,
+    "googleCalendarMetadata",
+  ].sort()
+  const registeredTables = [
+    ...tableSections.map(({ table }) => table),
+    ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
+    ...BACKUP_EPHEMERAL_TABLES,
+  ].sort()
+  const requiredLiveTables = [
+    ...tableSections
+      .filter((section) => !("optional" in section && section.optional))
+      .map(({ table }) => table),
+    ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
+    ...BACKUP_EPHEMERAL_TABLES,
+  ].sort()
+
+  return {
+    requiredSectionKeys,
+    requiredDataKeys,
+    registeredTables,
+    requiredLiveTables,
+  }
+}
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -557,6 +589,7 @@ function verifyBackupArtifact(
   ) {
     throw new Error("Latest backup predates the required v2 migration contract.")
   }
+  const backupContract = getBackupArtifactContract(migrationHead)
   if (
     backup.deploymentCommit !== null &&
     !/^[0-9a-f]{7,64}$/i.test(String(backup.deploymentCommit || ""))
@@ -606,14 +639,16 @@ function verifyBackupArtifact(
     "Backup excluded credential fields"
   )
   if (
-    !sameStringSet(registeredTables, BACKUP_REGISTERED_TABLES) ||
+    !sameStringSet(registeredTables, backupContract.registeredTables) ||
     !sameStringSet(ephemeralTables, BACKUP_EPHEMERAL_TABLES) ||
     !sameStringSet(
       excludedCredentialFields,
       BACKUP_EXCLUDED_CREDENTIAL_FIELDS
     ) ||
-    BACKUP_REQUIRED_LIVE_TABLES.some((table) => !liveTables.includes(table)) ||
-    liveTables.some((table) => !BACKUP_REGISTERED_TABLES.includes(table))
+    backupContract.requiredLiveTables.some(
+      (table) => !liveTables.includes(table)
+    ) ||
+    liveTables.some((table) => !backupContract.registeredTables.includes(table))
   ) {
     throw new Error("Latest backup database inventory is incomplete.")
   }
@@ -669,8 +704,8 @@ function verifyBackupArtifact(
   const countKeys = Object.keys(counts).sort()
   const sectionKeys = Object.keys(sections).sort()
   if (
-    !sameStringSet(dataKeys, BACKUP_REQUIRED_DATA_KEYS) ||
-    !sameStringSet(countKeys, BACKUP_REQUIRED_SECTION_KEYS) ||
+    !sameStringSet(dataKeys, backupContract.requiredDataKeys) ||
+    !sameStringSet(countKeys, backupContract.requiredSectionKeys) ||
     JSON.stringify(dataKeys) !== JSON.stringify(sectionKeys)
   ) {
     throw new Error("Latest backup section manifest does not match its data sections.")
