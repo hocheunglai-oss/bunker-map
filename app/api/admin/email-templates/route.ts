@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   deleteEmailTemplate,
   EmailTemplate,
+  EmailTemplateConflictError,
   loadEmailTemplate,
   loadTemplateIndex,
   loadTemplateLibrary,
@@ -17,6 +18,9 @@ type SavePayload = {
   id?: string
   template?: EmailTemplate
   templates?: EmailTemplate[]
+  expectedRevision?: number | null
+  expectedUpdatedAt?: string | null
+  expectedLibraryRevision?: string | null
 }
 
 export async function GET(request: Request) {
@@ -102,23 +106,45 @@ export async function POST(request: Request) {
       "email-templates"
     )
 
-    const { action, id, template, templates } = (await request.json()) as SavePayload & {
+    const {
+      action,
+      id,
+      template,
+      templates,
+      expectedRevision,
+      expectedUpdatedAt,
+      expectedLibraryRevision,
+    } = (await request.json()) as SavePayload & {
       action?: string
     }
     const now = new Date().toISOString()
 
     if (action === "save") {
-      const library = await loadTemplateLibrary()
-      const nextTemplates = Array.isArray(templates) ? templates : []
-      const nextLibrary = {
-        ...library,
-        templates: nextTemplates,
-        lastUpdatedAt: now,
+      if (!Array.isArray(templates)) {
+        return NextResponse.json({ message: "Missing template library." }, { status: 400 })
       }
 
-      await saveTemplateLibrary(nextLibrary, auditContext)
+      if (!expectedLibraryRevision) {
+        return NextResponse.json(
+          {
+            code: "EMAIL_TEMPLATE_CONFLICT",
+            message: "The Outlook template library version is missing. Reload Outlook Templates before replacing the library.",
+          },
+          { status: 409 }
+        )
+      }
 
-      return NextResponse.json(nextLibrary)
+      const nextTemplates = Array.isArray(templates) ? templates : []
+      const nextLibrary = {
+        templates: nextTemplates,
+        lastImportedAt: null,
+        lastUpdatedAt: now,
+        revision: expectedLibraryRevision,
+      }
+
+      const savedLibrary = await saveTemplateLibrary(nextLibrary, auditContext)
+
+      return NextResponse.json(savedLibrary)
     }
 
     if (action === "save-template") {
@@ -126,7 +152,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Missing template." }, { status: 400 })
       }
 
-      const savedTemplate = await saveEmailTemplate(template, auditContext)
+      const savedTemplate = await saveEmailTemplate(
+        template,
+        auditContext,
+        {
+          expectedRevision,
+          expectedUpdatedAt,
+        }
+      )
       return NextResponse.json({
         template: savedTemplate,
         lastUpdatedAt: savedTemplate.updatedAt || now,
@@ -138,7 +171,25 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Missing template id." }, { status: 400 })
       }
 
-      await deleteEmailTemplate(id, auditContext)
+      if (expectedRevision == null && !expectedUpdatedAt) {
+        return NextResponse.json(
+          {
+            code: "EMAIL_TEMPLATE_CONFLICT",
+            message:
+              "The template version is missing. Reload Outlook Templates before deleting it.",
+          },
+          { status: 409 },
+        )
+      }
+
+      await deleteEmailTemplate(
+        id,
+        auditContext,
+        {
+          expectedRevision,
+          expectedUpdatedAt,
+        }
+      )
       return NextResponse.json({ id, lastUpdatedAt: now })
     }
 
@@ -152,6 +203,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message: "Unsupported action." }, { status: 400 })
   } catch (error) {
+    if (error instanceof EmailTemplateConflictError) {
+      return NextResponse.json(
+        {
+          code: error.code,
+          message: error.message,
+        },
+        { status: 409 }
+      )
+    }
+
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
         { message: error.message },

@@ -202,8 +202,15 @@ function AdminPageIcon({ page }: { page: AdminPageDefinition }) {
 export function AdminNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { loading, authenticated, displayName, permissions, role, pages } =
-    useSimpleAdminAuth()
+  const {
+    loading,
+    authenticated,
+    resetRequired,
+    displayName,
+    permissions,
+    role,
+    pages,
+  } = useSimpleAdminAuth()
   const [query, setQuery] = useState("")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -302,7 +309,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     )
   }, [pages, permissions, query, role])
 
-  if (loading || !authenticated) {
+  if (loading || !authenticated || resetRequired) {
     return <>{children}</>
   }
 

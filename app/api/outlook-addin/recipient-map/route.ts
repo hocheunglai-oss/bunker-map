@@ -1,46 +1,62 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
+import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-type SharedContact = {
-  id: string
-  source_book: string | null
-  source_card: string | null
-  display_name: string | null
-  nickname: string | null
-  primary_email: string | null
+const RECIPIENT_MAP_TTL_SECONDS = 120
+const DEFAULT_CERTIFICATION_MAX_AGE_SECONDS = 36 * 60 * 60
+const MAX_CERTIFICATION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+const CLOCK_SKEW_MS = 5 * 60 * 1000
+
+type TruthVerification = {
+  valid?: unknown
+  integrityValid?: unknown
+  ledgerValid?: unknown
+  snapshotsValid?: unknown
+  referencesValid?: unknown
+  operationallyConsistent?: unknown
+  latestCertificationRunId?: unknown
+  latestCertificationAt?: unknown
+  latestSourceFingerprint?: unknown
+  latestCertificationHasProjectionEvidence?: unknown
+  latestProjectionSnapshotSha256?: unknown
+  queue?: {
+    pending?: unknown
+    processing?: unknown
+    failed?: unknown
+    terminalFailed?: unknown
+  }
 }
 
-type SharedGroup = {
-  id: string
-  source_book: string | null
-  source_uid: string | null
-  name: string | null
-  nickname: string | null
-  member_count: number | null
+type ProjectionContact = {
+  sourceContactId?: unknown
+  directoryName?: unknown
+  displayName?: unknown
+  externalEmailAddress?: unknown
 }
 
-type SharedGroupMember = {
-  group_id: string | null
-  contact_id: string | null
-  source_book: string | null
+type ProjectionGroup = {
+  sourceGroupId?: unknown
+  directoryName?: unknown
+  groupName?: unknown
+  alias?: unknown
+  smtpAddress?: unknown
+  memberCount?: unknown
 }
 
-type RecipientAddress = {
+type CertifiedProjection = {
+  contacts?: ProjectionContact[]
+  groups?: ProjectionGroup[]
+}
+
+type CertifiedRecipientMapEntry = {
+  kind: "contact" | "group"
+  sourceId: string
   displayName: string
   emailAddress: string
 }
-
-type RecipientMapEntry = {
-  displayName: string
-  emailAddress?: string
-  members?: RecipientAddress[]
-  kind: "contact" | "group"
-}
-
-const DEFAULT_GROUP_SMTP_DOMAIN = "cosulich1.onmicrosoft.com"
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -51,220 +67,238 @@ function requireEnv(name: string) {
 function getSupabaseClient() {
   return createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { autoRefreshToken: false, persistSession: false } },
   )
 }
 
-async function loadAll<T>(supabase: any, table: string, orderColumn: string) {
-  const rows: T[] = []
-  const pageSize = 1000
-  let from = 0
-
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .order(orderColumn, { ascending: true })
-      .range(from, from + pageSize - 1)
-
-    if (error) throw error
-    rows.push(...((data || []) as T[]))
-    if (!data || data.length < pageSize) break
-    from += pageSize
-  }
-
-  return rows
-}
-
 function cleanText(value: unknown) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .trim()
+  return String(value || "").replace(/\s+/g, " ").trim()
 }
 
-function normaliseRecipientKey(value: unknown) {
-  return cleanText(value)
-    .replace(/^"+|"+$/g, "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9@._-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
+function cleanEmail(value: unknown) {
+  const email = cleanText(value).toLowerCase()
+  return /^[^@\s]+@[^@\s]+$/.test(email) ? email : ""
 }
 
-function exchangeAlias(value: string, fallback: string) {
-  const base = cleanText(value || fallback)
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[.-]+|[.-]+$/g, "")
-    .slice(0, 58)
-
-  return base || fallback
-}
-
-function uniqueAlias(baseAlias: string, seenAliases: Set<string>) {
-  let alias = baseAlias
-  let index = 2
-  while (seenAliases.has(alias)) {
-    const suffix = `-${index}`
-    alias = `${baseAlias.slice(0, 64 - suffix.length)}${suffix}`
-    index += 1
+function privateHeaders() {
+  return {
+    "Cache-Control": "private, no-store, max-age=0",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
   }
-  seenAliases.add(alias)
-  return alias
 }
 
-function outlookGroupSmtpDomain() {
-  return cleanText(process.env.OUTLOOK_ADDIN_GROUP_DOMAIN || process.env.EXCHANGE_ADDRESSBOOK_DOMAIN || DEFAULT_GROUP_SMTP_DOMAIN)
-    .toLowerCase()
+function certificationMaxAgeSeconds() {
+  const configured = Number(process.env.OUTLOOK_ADDIN_CERTIFICATION_MAX_AGE_SECONDS)
+  if (!Number.isFinite(configured)) return DEFAULT_CERTIFICATION_MAX_AGE_SECONDS
+  return Math.max(
+    RECIPIENT_MAP_TTL_SECONDS,
+    Math.min(Math.floor(configured), MAX_CERTIFICATION_MAX_AGE_SECONDS),
+  )
 }
 
-function groupSmtpAddress(alias: string, domain: string) {
-  return `${alias}@${domain}`.toLowerCase()
-}
-
-function addLookup(lookup: Record<string, RecipientMapEntry>, value: unknown, resolvedRecipient: RecipientMapEntry) {
-  const key = normaliseRecipientKey(value)
-  if (!key || (!resolvedRecipient.emailAddress && !resolvedRecipient.members?.length)) return
-  if (!lookup[key]) lookup[key] = resolvedRecipient
-}
-
-function buildGroupMemberIndex(contacts: SharedContact[], members: SharedGroupMember[]) {
-  const contactsById = new Map<string, RecipientAddress>()
-  contacts.forEach((contact) => {
-    const email = cleanText(contact.primary_email).toLowerCase()
-    if (!contact.id || !email) return
-    contactsById.set(contact.id, {
-      displayName: cleanText(contact.display_name || contact.nickname || email),
-      emailAddress: email,
-    })
-  })
-
-  const membersByGroupId = new Map<string, RecipientAddress[]>()
-  const seenByGroupId = new Map<string, Set<string>>()
-  members.forEach((member) => {
-    const groupId = cleanText(member.group_id)
-    const contactId = cleanText(member.contact_id)
-    const contact = contactsById.get(contactId)
-    if (!groupId || !contact) return
-    const emailKey = contact.emailAddress.toLowerCase()
-    if (!seenByGroupId.has(groupId)) seenByGroupId.set(groupId, new Set<string>())
-    const seen = seenByGroupId.get(groupId)
-    if (!seen || seen.has(emailKey)) return
-    seen.add(emailKey)
-    const groupMembers = membersByGroupId.get(groupId) || []
-    groupMembers.push(contact)
-    membersByGroupId.set(groupId, groupMembers)
-  })
-
-  return membersByGroupId
-}
-
-function addGroupLookups(
-  lookup: Record<string, RecipientMapEntry>,
-  groups: SharedGroup[],
-  membersByGroupId: Map<string, RecipientAddress[]>
+function isCertifiedTruthHealthy(
+  value: TruthVerification,
+  nowMs = Date.now(),
+  maxAgeSeconds = DEFAULT_CERTIFICATION_MAX_AGE_SECONDS,
 ) {
-  const seenAliases = new Set<string>()
-  const smtpDomain = outlookGroupSmtpDomain()
-
-  groups
-    .filter((group) => Number(group.member_count || 0) > 0)
-    .forEach((group, index) => {
-      const name = cleanText(group.name || group.nickname || group.source_uid)
-      if (!name) return
-      const aliasSeed = cleanText(group.nickname || name)
-      const alias = uniqueAlias(exchangeAlias(aliasSeed, `group-${index + 1}`), seenAliases)
-      const emailAddress = groupSmtpAddress(alias, smtpDomain)
-      const groupMembers = membersByGroupId.get(group.id) || []
-      const resolvedRecipient = {
-        displayName: name,
-        emailAddress,
-        members: groupMembers,
-        kind: "group" as const,
-      }
-      addLookup(lookup, name, resolvedRecipient)
-      addLookup(lookup, group.nickname, resolvedRecipient)
-      addLookup(lookup, group.source_uid, resolvedRecipient)
-      addLookup(lookup, alias, resolvedRecipient)
-      addLookup(lookup, emailAddress, resolvedRecipient)
-    })
+  const queue = value.queue || {}
+  const certifiedAtMs = Date.parse(cleanText(value.latestCertificationAt))
+  const certificationAgeMs = nowMs - certifiedAtMs
+  return (
+    value.valid === true &&
+    value.integrityValid === true &&
+    value.ledgerValid === true &&
+    value.snapshotsValid === true &&
+    value.referencesValid === true &&
+    value.operationallyConsistent === true &&
+    value.latestCertificationHasProjectionEvidence === true &&
+    cleanText(value.latestCertificationRunId) !== "" &&
+    /^[0-9a-f]{64}$/.test(cleanText(value.latestSourceFingerprint).toLowerCase()) &&
+    cleanText(value.latestProjectionSnapshotSha256).toLowerCase() ===
+      cleanText(value.latestSourceFingerprint).toLowerCase() &&
+    Number(queue.pending || 0) === 0 &&
+    Number(queue.processing || 0) === 0 &&
+    Number(queue.failed || 0) === 0 &&
+    Number(queue.terminalFailed || 0) === 0 &&
+    Number.isFinite(certifiedAtMs) &&
+    certificationAgeMs >= -CLOCK_SKEW_MS &&
+    certificationAgeMs <= maxAgeSeconds * 1000
+  )
 }
 
-function addContactLookups(lookup: Record<string, RecipientMapEntry>, contacts: SharedContact[]) {
-  const seenEmails = new Set<string>()
+function buildCertifiedRecipientMap(projection: CertifiedProjection) {
+  const recipientsBySourceKey: Record<string, CertifiedRecipientMapEntry> = {}
+  let contactCount = 0
+  let groupCount = 0
 
-  contacts.forEach((contact) => {
-    const email = cleanText(contact.primary_email).toLowerCase()
-    if (!email || seenEmails.has(email)) return
-    seenEmails.add(email)
-    const resolvedRecipient = {
-      displayName: cleanText(contact.display_name || contact.nickname || email),
-      emailAddress: email,
-      kind: "contact" as const,
+  for (const contact of projection.contacts || []) {
+    const sourceId = cleanText(contact.sourceContactId)
+    const emailAddress = cleanEmail(contact.externalEmailAddress)
+    if (!sourceId || !emailAddress) {
+      throw new Error("Certified projection contains an unusable contact.")
+    }
+    const sourceKey = `contact:${sourceId}`
+    if (recipientsBySourceKey[sourceKey]) {
+      throw new Error("Certified projection contains a duplicate contact identity.")
+    }
+    recipientsBySourceKey[sourceKey] = {
+      kind: "contact",
+      sourceId,
+      displayName: cleanText(contact.displayName || contact.directoryName || emailAddress),
+      emailAddress,
+    }
+    contactCount += 1
+  }
+
+  for (const group of projection.groups || []) {
+    const sourceId = cleanText(group.sourceGroupId)
+    const alias = cleanText(group.alias).toLowerCase()
+    const rawEmailAddress = cleanText(group.smtpAddress)
+    const emailAddress = cleanEmail(rawEmailAddress)
+    const memberCount = Number(group.memberCount || 0)
+    if (
+      !sourceId ||
+      !alias ||
+      !emailAddress ||
+      rawEmailAddress !== emailAddress ||
+      emailAddress.slice(0, emailAddress.lastIndexOf("@")) !== alias ||
+      !Number.isSafeInteger(memberCount) ||
+      memberCount <= 0 ||
+      !/^[a-z0-9._-]{1,64}$/.test(alias)
+    ) {
+      throw new Error(
+        "Certified projection does not contain an exact usable group SMTP address.",
+      )
+    }
+    const sourceKey = `group:${sourceId}`
+    if (recipientsBySourceKey[sourceKey]) {
+      throw new Error("Certified projection contains a duplicate group identity.")
+    }
+    recipientsBySourceKey[sourceKey] = {
+      kind: "group",
+      sourceId,
+      displayName: cleanText(group.groupName || group.directoryName || alias),
+      emailAddress,
+    }
+    groupCount += 1
+  }
+
+  return {
+    recipientsBySourceKey,
+    counts: {
+      contacts: contactCount,
+      groups: groupCount,
+      mappedSourceIds: contactCount + groupCount,
+    },
+  }
+}
+
+function authError(error: unknown) {
+  if (!(error instanceof Error)) return null
+  if (error.message === "Unauthorized") {
+    return NextResponse.json(
+      { code: "SIGN_IN_REQUIRED", message: "Sign in to FC Uno to use Outlook Templates." },
+      { status: 401, headers: privateHeaders() },
+    )
+  }
+  if (error.message === "Forbidden") {
+    return NextResponse.json(
+      { code: "OUTLOOK_TEMPLATES_FORBIDDEN", message: "Outlook Templates view permission is required." },
+      { status: 403, headers: privateHeaders() },
+    )
+  }
+  return null
+}
+
+export async function GET(request: Request) {
+  try {
+    await requireAdminPagePermissionForRequest(
+      request,
+      "email-templates",
+      "view",
+    )
+    const supabase = getSupabaseClient()
+    const now = new Date()
+    const maxAgeSeconds = certificationMaxAgeSeconds()
+    const { data: verificationData, error: verificationError } = await supabase.rpc(
+      "verify_outlook_exchange_truth_ledger",
+    )
+    if (verificationError) throw verificationError
+
+    const verification = (verificationData || {}) as TruthVerification
+    if (!isCertifiedTruthHealthy(verification, now.getTime(), maxAgeSeconds)) {
+      return NextResponse.json(
+        {
+          code: "RECIPIENT_TRUTH_UNAVAILABLE",
+          message: "The certified FCUNO-to-Exchange address book is not current and settled.",
+        },
+        { status: 503, headers: privateHeaders() },
+      )
     }
 
-    addLookup(lookup, contact.display_name, resolvedRecipient)
-    addLookup(lookup, contact.nickname, resolvedRecipient)
-    addLookup(lookup, contact.source_card, resolvedRecipient)
-    addLookup(lookup, email, resolvedRecipient)
-  })
-}
+    const certificationRunId = cleanText(verification.latestCertificationRunId)
+    const certifiedAt = new Date(cleanText(verification.latestCertificationAt)).toISOString()
+    const sourceFingerprint = cleanText(verification.latestSourceFingerprint).toLowerCase()
+    const { data: snapshot, error: snapshotError } = await supabase
+      .from("outlook_exchange_truth_snapshots")
+      .select("snapshot_sha256,snapshot_kind,schema_version,canonical_json,created_at")
+      .eq("snapshot_kind", "fcuno_exchange_projection")
+      .eq("snapshot_sha256", sourceFingerprint)
+      .maybeSingle()
 
-export async function GET() {
-  try {
-    const supabase = getSupabaseClient()
-    const [contacts, groups, members] = await Promise.all([
-      loadAll<SharedContact>(supabase, "shared_addressbook_contacts", "display_name"),
-      loadAll<SharedGroup>(supabase, "shared_addressbook_groups", "name"),
-      loadAll<SharedGroupMember>(supabase, "shared_addressbook_group_members", "source_book"),
-    ])
+    if (snapshotError) throw snapshotError
+    if (
+      !snapshot ||
+      snapshot.snapshot_sha256 !== sourceFingerprint ||
+      snapshot.snapshot_kind !== "fcuno_exchange_projection"
+    ) {
+      return NextResponse.json(
+        {
+          code: "RECIPIENT_PROJECTION_MISSING",
+          message: "The certified Exchange projection is unavailable.",
+        },
+        { status: 503, headers: privateHeaders() },
+      )
+    }
 
-    const recipientMap: Record<string, RecipientMapEntry> = {}
-    const membersByGroupId = buildGroupMemberIndex(contacts, members)
-    addGroupLookups(recipientMap, groups, membersByGroupId)
-    addContactLookups(recipientMap, contacts)
+    const projection = (
+      typeof snapshot.canonical_json === "string"
+        ? JSON.parse(snapshot.canonical_json)
+        : snapshot.canonical_json
+    ) as CertifiedProjection
+    const map = buildCertifiedRecipientMap(projection)
+    const expiresAt = new Date(now.getTime() + RECIPIENT_MAP_TTL_SECONDS * 1000)
 
     return NextResponse.json(
       {
-        recipientMap,
-        counts: {
-          contacts: contacts.length,
-          groups: groups.length,
-          groupMembers: members.length,
-          expandedGroups: groups.filter((group) => (membersByGroupId.get(group.id) || []).length > 0).length,
-          mappedKeys: Object.keys(recipientMap).length,
+        schema: "fcuno.outlook-certified-recipient-map/v2",
+        generatedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        ttlSeconds: RECIPIENT_MAP_TTL_SECONDS,
+        certification: {
+          runId: certificationRunId,
+          certifiedAt,
+          sourceFingerprint,
+          projectionSnapshotSha256: snapshot.snapshot_sha256,
+          projectionCreatedAt: snapshot.created_at,
+          maxAgeSeconds,
         },
+        ...map,
       },
-      {
-        headers: {
-          "Cache-Control": "private, max-age=300, stale-while-revalidate=1800",
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { headers: privateHeaders() },
     )
   } catch (error) {
+    const response = authError(error)
+    if (response) return response
+
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to load Outlook recipient map." },
       {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+        code: "RECIPIENT_MAP_FAILED",
+        message: "The certified Outlook recipient map is temporarily unavailable.",
+      },
+      { status: 503, headers: privateHeaders() },
     )
   }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Max-Age": "86400",
-    },
-  })
 }

@@ -26,7 +26,17 @@ export async function POST(request: Request) {
     )
   }
 
-  await setAdminSession(user)
+  try {
+    await setAdminSession(user)
+  } catch {
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Unable to create a secure admin session. Please try again.",
+      },
+      { status: 503 },
+    )
+  }
 
   return NextResponse.json({
     success: true,
@@ -34,6 +44,7 @@ export async function POST(request: Request) {
       username: user.username,
       displayName: user.displayName || user.username,
       role: user.role || null,
+      resetRequired: user.passwordResetRequired,
       permissions: user.permissions,
       pages: user.pages,
     },

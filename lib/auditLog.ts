@@ -30,6 +30,11 @@ export type AuditLogRecord = {
 
 export type AuditLogScope = "www" | "spc" | "all"
 
+export type OutlookInsertionAuditOutcome =
+  | "inserted"
+  | "failed-restored"
+  | "failed-preserved"
+
 export type PresentedAuditLogRecord = AuditLogRecord & {
   displayOperation: AuditOperation
   pageId: string
@@ -136,6 +141,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   shared_addressbook_groups: "outlook-addressbook",
   shared_addressbook_group_members: "outlook-addressbook",
   email_templates: "email-templates",
+  outlook_template_insertion_attempts: "email-templates",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
   spc_users: "spc-user-management",
@@ -181,6 +187,7 @@ const ENTITY_NAMES: Record<string, string> = {
   shared_addressbook_group_members: "group member",
   office_calendar_store: "calendar",
   email_templates: "email template",
+  outlook_template_insertion_attempts: "Outlook template insertion attempt",
   admin_users: "user",
   admin_role_defaults: "role defaults",
   spc_users: "SPC user",
@@ -279,7 +286,9 @@ const SPC_TABLE_NAMES = new Set([
 ])
 
 const NON_UNDOABLE_TABLES = new Set([
+  "admin_users",
   "openai_usage_events",
+  "outlook_template_insertion_attempts",
   "spc_suppliers",
 ])
 
@@ -565,8 +574,232 @@ function formatValue(field: string, value: unknown) {
   return "updated details"
 }
 
-function getRecordLabel(record: AuditLogRecord, portNames: Map<string, string>) {
+type OutlookInsertionAuditCorrelation = {
+  events: AuditLogRecord[]
+  reservation: AuditLogRecord | null
+  terminal: AuditLogRecord | null
+}
+
+function getOutlookInsertionOperationId(record: AuditLogRecord) {
+  if (record.tableName !== "outlook_template_insertion_attempts") return ""
+  return String(
+    record.recordPk.operationId ||
+      record.afterRow?.operationId ||
+      "",
+  ).trim().toLowerCase()
+}
+
+function getOutlookInsertionPhase(record: AuditLogRecord) {
+  const phase = String(
+    record.recordPk.phase ||
+      record.afterRow?.phase ||
+      "",
+  ).trim().toLowerCase()
+  return phase === "reserved" || phase === "terminal" ? phase : null
+}
+
+function getOutlookInsertionOutcome(
+  record: AuditLogRecord | null,
+): OutlookInsertionAuditOutcome | null {
+  const outcome = String(record?.afterRow?.outcome || "").trim().toLowerCase()
+  if (
+    outcome === "inserted" ||
+    outcome === "failed-restored" ||
+    outcome === "failed-preserved"
+  ) {
+    return outcome
+  }
+  return null
+}
+
+function buildOutlookInsertionCorrelations(records: AuditLogRecord[]) {
+  const correlations = new Map<string, OutlookInsertionAuditCorrelation>()
+  for (const record of records) {
+    const operationId = getOutlookInsertionOperationId(record)
+    if (!operationId) continue
+    const current = correlations.get(operationId) || {
+      events: [],
+      reservation: null,
+      terminal: null,
+    }
+    const existingIndex = current.events.findIndex(
+      (event) => event.id === record.id,
+    )
+    if (existingIndex >= 0) current.events[existingIndex] = record
+    else current.events.push(record)
+    const phase = getOutlookInsertionPhase(record)
+    if (phase === "reserved") current.reservation = record
+    if (phase === "terminal") current.terminal = record
+    correlations.set(operationId, current)
+  }
+  return correlations
+}
+
+export function getOutlookInsertionAuditRecordLabel(
+  record: AuditLogRecord,
+  relatedEvents: AuditLogRecord[] = [],
+) {
+  const operationId = getOutlookInsertionOperationId(record)
+  const correlation = buildOutlookInsertionCorrelations([
+    record,
+    ...relatedEvents,
+  ]).get(operationId)
+  const templateTitle = String(
+    correlation?.reservation?.afterRow?.templateTitle ||
+      record.afterRow?.templateTitle ||
+      "",
+  ).trim()
+  if (templateTitle) return templateTitle
+
+  return String(
+    record.afterRow?.templateId ||
+      record.recordPk.templateId ||
+      "Outlook template insertion",
+  )
+}
+
+async function loadOutlookInsertionRelatedEvents(
+  records: AuditLogRecord[],
+) {
+  const operationIds = Array.from(
+    new Set(records.map(getOutlookInsertionOperationId).filter(Boolean)),
+  )
+  if (operationIds.length === 0) return [] as AuditLogRecord[]
+
+  const supabase = getSupabaseAuditClient()
+  const batches = Array.from(
+    { length: Math.ceil(operationIds.length / 100) },
+    (_, index) => operationIds.slice(index * 100, (index + 1) * 100),
+  )
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("audit_logs")
+        .select(AUDIT_SELECT)
+        .eq("table_schema", "app")
+        .eq("table_name", "outlook_template_insertion_attempts")
+        .eq("operation", "INSERT")
+        .in("record_pk->>operationId", batch),
+    ),
+  )
+
+  const failed = results.find((result) => result.error)
+  if (failed?.error) throw failed.error
+  return results.flatMap((result) =>
+    ((result.data || []) as unknown as AuditLogRow[]).map(mapAuditLog),
+  )
+}
+
+function outlookInsertionOutcomeSummary(
+  outcome: OutlookInsertionAuditOutcome,
+  recordLabel: string,
+) {
+  if (outcome === "inserted") {
+    return `Inserted Outlook template "${recordLabel}" into the draft.`
+  }
+  if (outcome === "failed-restored") {
+    return `Outlook insertion failed for template "${recordLabel}"; the original draft was restored.`
+  }
+  return `Outlook insertion failed for template "${recordLabel}"; newer draft edits were preserved.`
+}
+
+export function getOutlookInsertionAuditPresentation(
+  record: AuditLogRecord,
+  recordLabel: string,
+  relatedEvents: AuditLogRecord[] = [],
+) {
+  const operationId = getOutlookInsertionOperationId(record)
+  const correlations = buildOutlookInsertionCorrelations([
+    record,
+    ...relatedEvents,
+  ])
+  const correlation = correlations.get(operationId) || {
+    events: [record],
+    reservation: null,
+    terminal: null,
+  }
+  const currentRecord =
+    correlation.events.find((event) => event.id === record.id) || record
+  const phase = getOutlookInsertionPhase(currentRecord)
+  const outcome = getOutlookInsertionOutcome(correlation.terminal)
+  const row = currentRecord.afterRow || {}
+  const details: string[] = []
+
+  if (!phase) {
+    details.push(
+      `Recorded a legacy server-verified Outlook draft insertion attempt for template "${recordLabel}".`,
+    )
+  } else if (phase === "reserved") {
+    if (outcome) {
+      details.push(`Status: completed as ${outcome}.`)
+      details.push(outlookInsertionOutcomeSummary(outcome, recordLabel))
+      if (correlation.terminal) {
+        details.push(`Terminal audit event: ${correlation.terminal.id}.`)
+      }
+    } else {
+      details.push(
+        "Status: incomplete. The durable reservation has no terminal insertion outcome.",
+      )
+    }
+  } else if (outcome) {
+    details.push(`Status: ${outcome}.`)
+    details.push(outlookInsertionOutcomeSummary(outcome, recordLabel))
+    if (correlation.reservation) {
+      details.push(
+        `Reservation audit event: ${correlation.reservation.id}, recorded ${formatAuditDate(correlation.reservation.occurredAt)}.`,
+      )
+    }
+  } else {
+    details.push(
+      "Status: invalid terminal event. No recognized insertion outcome was recorded.",
+    )
+  }
+
+  if (row.templateRevision || currentRecord.recordPk.templateRevision) {
+    details.push(
+      `Template revision: ${formatValue(
+        "revision",
+        row.templateRevision || currentRecord.recordPk.templateRevision,
+      )}.`,
+    )
+  }
+  if (row.certificationRunId) {
+    details.push(`Exchange certification run: ${String(row.certificationRunId)}.`)
+  }
+  if (row.sourceFingerprint) {
+    details.push(`Certified projection SHA-256: ${String(row.sourceFingerprint)}.`)
+  }
+  if (operationId) {
+    details.push(`Idempotent operation ID: ${operationId}.`)
+  }
+
+  const summary =
+    phase === "reserved"
+      ? outcome
+        ? `Reserved Outlook insertion for template "${recordLabel}"; completed as ${outcome}.`
+        : `Reserved Outlook insertion for template "${recordLabel}"; terminal status is missing (incomplete).`
+      : phase === "terminal" && outcome
+        ? outlookInsertionOutcomeSummary(outcome, recordLabel)
+        : phase === "terminal"
+          ? `Outlook insertion for template "${recordLabel}" has an invalid terminal status.`
+          : `Recorded a legacy Outlook draft insertion attempt for template "${recordLabel}".`
+
+  return { summary, details }
+}
+
+function getRecordLabel(
+  record: AuditLogRecord,
+  portNames: Map<string, string>,
+  insertionCorrelation?: OutlookInsertionAuditCorrelation,
+) {
   const row = record.afterRow || record.beforeRow || {}
+  if (record.tableName === "outlook_template_insertion_attempts") {
+    return getOutlookInsertionAuditRecordLabel(
+      record,
+      insertionCorrelation?.events,
+    )
+  }
+
   if (record.tableName === "office_calendar_store") {
     const labels: Record<string, string> = {
       "event-calendar": "event calendar",
@@ -672,10 +905,18 @@ function getPriceSettingSummary(
 function buildSummary(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
-  recordLabel: string
+  recordLabel: string,
+  insertionCorrelation?: OutlookInsertionAuditCorrelation,
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  if (record.tableName === "outlook_template_insertion_attempts") {
+    return getOutlookInsertionAuditPresentation(
+      record,
+      recordLabel,
+      insertionCorrelation?.events,
+    ).summary
+  }
   const publicationSummary = getReportPublicationSummary(record)
   if (publicationSummary) return publicationSummary
   if (record.tableName === "price_history" && record.operation === "INSERT") {
@@ -699,13 +940,22 @@ function buildSummary(
 function buildDetails(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
-  recordLabel: string
+  recordLabel: string,
+  insertionCorrelation?: OutlookInsertionAuditCorrelation,
 ) {
   const subject = subjectFor(record, recordLabel)
   const details: string[] = []
 
   if (record.undoOfLogId) {
     details.push(`This change restored the previous version of ${subject}.`)
+  }
+
+  if (record.tableName === "outlook_template_insertion_attempts") {
+    return getOutlookInsertionAuditPresentation(
+      record,
+      recordLabel,
+      insertionCorrelation?.events,
+    ).details
   }
 
   const publicationSummary = getReportPublicationSummary(record)
@@ -801,12 +1051,26 @@ export async function presentAuditLogs(
   records: AuditLogRecord[],
   pages: AuditPageDefinition[]
 ) {
-  const portNames = await getPortNames(records)
+  const [portNames, insertionEvents] = await Promise.all([
+    getPortNames(records),
+    loadOutlookInsertionRelatedEvents(records),
+  ])
+  const insertionCorrelations = buildOutlookInsertionCorrelations([
+    ...records,
+    ...insertionEvents,
+  ])
 
   return records.map<PresentedAuditLogRecord>((record) => {
     const page = getAuditPage(record, pages, portNames)
     const displayOperation = getDisplayOperation(record)
-    const recordLabel = getRecordLabel(record, portNames)
+    const insertionCorrelation = insertionCorrelations.get(
+      getOutlookInsertionOperationId(record),
+    )
+    const recordLabel = getRecordLabel(
+      record,
+      portNames,
+      insertionCorrelation,
+    )
 
     return {
       ...record,
@@ -814,8 +1078,18 @@ export async function presentAuditLogs(
       pageId: page.id,
       pageLabel: page.label,
       recordLabel,
-      summary: buildSummary(record, displayOperation, recordLabel),
-      details: buildDetails(record, displayOperation, recordLabel),
+      summary: buildSummary(
+        record,
+        displayOperation,
+        recordLabel,
+        insertionCorrelation,
+      ),
+      details: buildDetails(
+        record,
+        displayOperation,
+        recordLabel,
+        insertionCorrelation,
+      ),
       undoable: canUndoAuditLogRecord(record),
     }
   })
@@ -867,7 +1141,9 @@ export async function listAuditLogs(options: {
   let query = supabase
     .from("audit_logs")
     .select(options.includeRows === false ? AUDIT_INDEX_SELECT : AUDIT_SELECT)
-    .eq("table_schema", "public")
+    .or(
+      "table_schema.eq.public,and(table_schema.eq.app,table_name.eq.outlook_template_insertion_attempts)"
+    )
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
     .limit(limit)

@@ -10,7 +10,13 @@ if (!backupPath) {
 
 const MINIMUM_V2_MIGRATION_HEAD = "20260723080326"
 const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
+const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
+const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
+const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
+  "fcuno.outlook-template-recipient-resolution/v1"
+const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
+  "fcuno.outlook-template-recipient-truth/v2"
 
 const TABLE_SECTIONS = [
   { key: "admins", table: "admins", primaryKey: ["id"] },
@@ -106,6 +112,7 @@ const EXTERNAL_SECTIONS = [
 const OPTIONAL_DATA_SECTIONS = ["googleCalendarMetadata"]
 const TRUTH_MANAGED_TABLES = TRUTH_SECTIONS.map((section) => section.table)
 const EXPLICITLY_EPHEMERAL_TABLES = [
+  "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
 ]
@@ -296,6 +303,597 @@ function sameStrings(left, right) {
 
 function isValidTimestamp(value) {
   return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value))
+}
+
+function sameTimestamp(left, right) {
+  return (
+    isValidTimestamp(left) &&
+    isValidTimestamp(right) &&
+    Date.parse(left) === Date.parse(right)
+  )
+}
+
+function cleanRecipientText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function splitOutlookRecipientText(value) {
+  const text = String(value || "").replace(/\r?\n/g, " ")
+  const parts = []
+  let current = ""
+  let inQuote = false
+  let angleDepth = 0
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text.charAt(index)
+    if (char === "\"" && text.charAt(index - 1) !== "\\") inQuote = !inQuote
+    if (!inQuote && char === "<") angleDepth += 1
+    if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1
+    if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
+      if (current.trim()) parts.push(current.trim())
+      current = ""
+      continue
+    }
+    current += char
+  }
+
+  if (current.trim()) parts.push(current.trim())
+  return parts
+}
+
+function parseOutlookRecipientLiteral(literal) {
+  const trimmed = cleanRecipientText(literal)
+  const angleMatch = trimmed.match(/^(.*?)\s*<([^<>]+)>\s*$/)
+  if (!angleMatch) {
+    return {
+      displayName: trimmed.includes("@") ? "" : trimmed.replace(/^"+|"+$/g, ""),
+      sourceValue: trimmed.replace(/^"+|"+$/g, ""),
+    }
+  }
+  return {
+    displayName: cleanRecipientText(angleMatch[1]).replace(/^"+|"+$/g, ""),
+    sourceValue: cleanRecipientText(angleMatch[2]).replace(/^"+|"+$/g, ""),
+  }
+}
+
+function hasExactKeySet(value, expected) {
+  return (
+    isPlainObject(value) &&
+    JSON.stringify(Object.keys(value).sort()) ===
+      JSON.stringify([...expected].sort())
+  )
+}
+
+function validateProjectionForTemplateRecipients(projection, data, errors) {
+  if (!isPlainObject(projection)) {
+    addError(errors, "Outlook template truth: latest Exchange projection is not an object")
+    return {
+      contactsById: new Map(),
+      groupsById: new Map(),
+      contactSourceIds: new Set(),
+      groupSourceIds: new Set(),
+    }
+  }
+
+  const projectionContacts = Array.isArray(projection.contacts)
+    ? projection.contacts
+    : []
+  const projectionGroups = Array.isArray(projection.groups)
+    ? projection.groups
+    : []
+  if (!Array.isArray(projection.contacts) || !Array.isArray(projection.groups)) {
+    addError(
+      errors,
+      "Outlook template truth: latest Exchange projection has no contact/group arrays"
+    )
+  }
+
+  const sharedContactsById = new Map(
+    rows(data, "sharedAddressbookContacts")
+      .filter(isPlainObject)
+      .map((row) => [cleanRecipientText(row.id), row])
+      .filter(([id]) => id)
+  )
+  const sharedGroupsById = new Map(
+    rows(data, "sharedAddressbookGroups")
+      .filter(isPlainObject)
+      .map((row) => [cleanRecipientText(row.id), row])
+      .filter(([id]) => id)
+  )
+  const contactsById = new Map()
+  const groupsById = new Map()
+  const contactSourceIds = new Set()
+  const groupSourceIds = new Set()
+  const emailPattern = /^[^@\s]+@[^@\s]+$/
+  const aliasPattern = /^[a-z0-9._-]{1,64}$/
+
+  for (const [index, value] of projectionContacts.entries()) {
+    const label = `latest Exchange projection contact ${index}`
+    if (!isPlainObject(value)) {
+      addError(errors, `${label}: expected an object`)
+      continue
+    }
+    const sourceId = cleanRecipientText(value.sourceContactId)
+    const rawAddress = cleanRecipientText(value.externalEmailAddress)
+    const address = rawAddress.toLowerCase()
+    if (!sourceId || contactSourceIds.has(sourceId)) {
+      addError(errors, `${label}: missing or duplicate sourceContactId`)
+      continue
+    }
+    contactSourceIds.add(sourceId)
+    if (!emailPattern.test(address) || rawAddress !== address) {
+      addError(errors, `${label}: unusable source identity or canonical email address`)
+      continue
+    }
+    const shared = sharedContactsById.get(sourceId)
+    if (!shared) {
+      addError(errors, `${label}: source contact ${sourceId} is absent from the export`)
+    } else {
+      const sharedAddress = cleanRecipientText(shared.primary_email).toLowerCase()
+      if (sharedAddress !== address) {
+        addError(
+          errors,
+          `${label}: projected email does not match shared contact ${sourceId}`
+        )
+      }
+    }
+    contactsById.set(sourceId, {
+      address,
+      displayName: cleanRecipientText(
+        value.displayName ||
+          value.directoryName ||
+          shared?.display_name ||
+          shared?.nickname ||
+          address
+      ),
+    })
+  }
+
+  for (const [index, value] of projectionGroups.entries()) {
+    const label = `latest Exchange projection group ${index}`
+    if (!isPlainObject(value)) {
+      addError(errors, `${label}: expected an object`)
+      continue
+    }
+    const sourceId = cleanRecipientText(value.sourceGroupId)
+    const rawAlias = cleanRecipientText(value.alias)
+    const alias = rawAlias.toLowerCase()
+    const rawAddress = cleanRecipientText(value.smtpAddress)
+    const address = rawAddress.toLowerCase()
+    const memberCount = Number(value.memberCount)
+    if (!sourceId || groupSourceIds.has(sourceId)) {
+      addError(errors, `${label}: missing or duplicate sourceGroupId`)
+      continue
+    }
+    groupSourceIds.add(sourceId)
+    if (
+      rawAlias !== alias ||
+      !aliasPattern.test(alias) ||
+      rawAddress !== address ||
+      !emailPattern.test(address) ||
+      address.slice(0, address.lastIndexOf("@")) !== alias ||
+      !Number.isSafeInteger(memberCount) ||
+      memberCount < 0
+    ) {
+      addError(
+        errors,
+        `${label}: unusable source identity, exact SMTP address, alias, or member count`
+      )
+      continue
+    }
+    const shared = sharedGroupsById.get(sourceId)
+    if (!shared) {
+      addError(errors, `${label}: source group ${sourceId} is absent from the export`)
+    } else if (
+      Number(shared.member_count) !== memberCount ||
+      cleanRecipientText(shared.name) !== cleanRecipientText(value.groupName)
+    ) {
+      addError(
+        errors,
+        `${label}: projected identity does not match shared group ${sourceId}`
+      )
+    }
+    if (memberCount > 0) {
+      groupsById.set(sourceId, {
+        alias,
+        address,
+        displayName: cleanRecipientText(
+          value.groupName ||
+            value.directoryName ||
+            shared?.name ||
+            shared?.nickname ||
+            alias
+        ),
+      })
+    }
+  }
+
+  return { contactsById, groupsById, contactSourceIds, groupSourceIds }
+}
+
+function validateTemplateRecipientVerifier(
+  verification,
+  checkpoint,
+  aggregate,
+  label,
+  errors
+) {
+  if (!isPlainObject(verification)) {
+    addError(errors, `${label}: missing or not an object`)
+    return null
+  }
+  const templates = verification.templates
+  const queue = verification.queue
+  const expectedTemplateCounts = {
+    total: aggregate.total,
+    unresolved: 0,
+    stale: 0,
+    invalidShape: 0,
+    withMissingRecipients: aggregate.missing,
+    withAmbiguousRecipients: aggregate.ambiguous,
+    sendable: aggregate.sendable,
+  }
+  if (
+    verification.schema !== OUTLOOK_TEMPLATE_TRUTH_SCHEMA ||
+    verification.valid !== true ||
+    verification.sourceTruthValid !== true ||
+    verification.allTemplatesSendable !== aggregate.allTemplatesSendable
+  ) {
+    addError(errors, `${label}: verifier did not report valid recipient truth`)
+  }
+  if (
+    verification.certificationRunId !== checkpoint?.latestCertificationRunId ||
+    verification.certifiedAt !== checkpoint?.latestCertificationAt ||
+    verification.sourceFingerprint !== checkpoint?.latestSourceFingerprint
+  ) {
+    addError(errors, `${label}: certification anchor does not match its checkpoint`)
+  }
+  if (!exactObjectCounts(templates, expectedTemplateCounts)) {
+    addError(errors, `${label}.templates: does not match exported email templates`)
+  }
+  if (
+    !isPlainObject(queue) ||
+    !["pending", "processing", "failed", "terminalFailed"].every(
+      (key) => Number.isSafeInteger(queue[key]) && queue[key] === 0
+    )
+  ) {
+    addError(errors, `${label}.queue: Exchange queue is not settled`)
+  }
+
+  return {
+    certificationRunId: String(checkpoint?.latestCertificationRunId || ""),
+    certifiedAt: String(checkpoint?.latestCertificationAt || ""),
+    sourceFingerprint: String(checkpoint?.latestSourceFingerprint || ""),
+    total: aggregate.total,
+    sendable: aggregate.sendable,
+    missing: aggregate.missing,
+    ambiguous: aggregate.ambiguous,
+    unresolved: 0,
+    stale: 0,
+    invalidShape: 0,
+    allTemplatesSendable: aggregate.allTemplatesSendable,
+  }
+}
+
+function validateExportedTemplateRecipientTruth(
+  backup,
+  truth,
+  certificationState,
+  snapshotsByHash,
+  errors
+) {
+  const data = isPlainObject(backup.data) ? backup.data : {}
+  const latestCertification = certificationState.latestCertification
+  if (!latestCertification) {
+    addError(errors, "Outlook template truth: latest Exchange certification is missing")
+    return
+  }
+  const sourceFingerprint = String(latestCertification.source_fingerprint || "")
+  const projectionSnapshot = snapshotsByHash.get(sourceFingerprint)
+  if (
+    !projectionSnapshot ||
+    projectionSnapshot.snapshot_kind !== "fcuno_exchange_projection"
+  ) {
+    addError(
+      errors,
+      "Outlook template truth: latest certification has no exported projection snapshot"
+    )
+    return
+  }
+  const projection = parseJsonText(
+    projectionSnapshot.canonical_json,
+    "Outlook template truth projection",
+    errors
+  )
+  const projectionState = validateProjectionForTemplateRecipients(
+    projection,
+    data,
+    errors
+  )
+  const checkpointBefore = truth.checkpointBeforeExport
+  const checkpointAfter = truth.checkpointAfterExport
+  const currentRunId = String(checkpointAfter?.latestCertificationRunId || "")
+  const currentCertifiedAt = String(checkpointAfter?.latestCertificationAt || "")
+  const currentFingerprint = String(checkpointAfter?.latestSourceFingerprint || "")
+  const aggregate = {
+    total: 0,
+    sendable: 0,
+    missing: 0,
+    ambiguous: 0,
+    allTemplatesSendable: true,
+  }
+  const emailPattern = /^[^@\s]+@[^@\s]+$/
+  const resolutionKeys = [
+    "schema",
+    "certificationRunId",
+    "certifiedAt",
+    "sourceFingerprint",
+    "resolvedAt",
+    "refs",
+    "counts",
+  ]
+  const refKeys = [
+    "field",
+    "position",
+    "literal",
+    "displayName",
+    "sourceValue",
+    "kind",
+    "sourceId",
+    "resolvedAddress",
+    "status",
+  ]
+  const fieldColumns = {
+    to: "to_recipients",
+    cc: "cc_recipients",
+    bcc: "bcc_recipients",
+  }
+  for (const [templateIndex, value] of rows(data, "emailTemplates").entries()) {
+    const template = isPlainObject(value) ? value : {}
+    const templateId = cleanRecipientText(template.id) || String(templateIndex)
+    const label = `emailTemplates[${templateId}].recipient_resolution`
+    const resolution = template.recipient_resolution
+    aggregate.total += 1
+    let templateMissing = false
+    let templateAmbiguous = false
+
+    if (!isPlainObject(resolution)) {
+      addError(errors, `${label}: missing or not an object`)
+      continue
+    }
+    const allowedResolutionKeys =
+      Object.hasOwn(resolution, "reconciliationRequired")
+        ? [...resolutionKeys, "reconciliationRequired"]
+        : resolutionKeys
+    if (!hasExactKeySet(resolution, allowedResolutionKeys)) {
+      addError(errors, `${label}: unexpected or missing fields`)
+    }
+    if (
+      Object.hasOwn(resolution, "reconciliationRequired") &&
+      resolution.reconciliationRequired !== false
+    ) {
+      addError(errors, `${label}: reconciliationRequired must be absent or false`)
+    }
+    if (
+      resolution.schema !== OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA ||
+      resolution.certificationRunId !== currentRunId ||
+      String(resolution.sourceFingerprint || "").toLowerCase() !==
+        currentFingerprint
+    ) {
+      addError(errors, `${label}: schema or current certification anchor mismatch`)
+    }
+    if (!sameTimestamp(resolution.certifiedAt, currentCertifiedAt)) {
+      addError(errors, `${label}.certifiedAt: not the current certification time`)
+    }
+    if (!isValidTimestamp(resolution.resolvedAt)) {
+      addError(errors, `${label}.resolvedAt: invalid timestamp`)
+    }
+
+    const refs = resolution.refs
+    const recordedCounts = resolution.counts
+    if (
+      !hasExactKeySet(refs, ["to", "cc", "bcc"]) ||
+      !hasExactKeySet(recordedCounts, [
+        "total",
+        "resolved",
+        "external",
+        "ambiguous",
+        "missing",
+      ])
+    ) {
+      addError(errors, `${label}: refs or counts shape is invalid`)
+      continue
+    }
+
+    const actualCounts = {
+      total: 0,
+      resolved: 0,
+      external: 0,
+      ambiguous: 0,
+      missing: 0,
+    }
+    for (const [field, column] of Object.entries(fieldColumns)) {
+      const literals = splitOutlookRecipientText(String(template[column] || ""))
+      const fieldRefs = refs[field]
+      if (!Array.isArray(fieldRefs)) {
+        addError(errors, `${label}.refs.${field}: expected an array`)
+        continue
+      }
+      if (fieldRefs.length !== literals.length) {
+        addError(
+          errors,
+          `${label}.refs.${field}: ${fieldRefs.length} refs do not match ${literals.length} raw recipients`
+        )
+      }
+
+      for (const [position, valueRef] of fieldRefs.entries()) {
+        const refLabel = `${label}.refs.${field}[${position}]`
+        if (!hasExactKeySet(valueRef, refKeys)) {
+          addError(errors, `${refLabel}: unexpected or missing fields`)
+          continue
+        }
+        const ref = valueRef
+        const literal = literals[position]
+        const parsed = parseOutlookRecipientLiteral(literal || "")
+        if (
+          ref.field !== field ||
+          ref.position !== position ||
+          ref.literal !== literal ||
+          ref.sourceValue !== parsed.sourceValue ||
+          typeof ref.displayName !== "string"
+        ) {
+          addError(errors, `${refLabel}: field, position, literal, or sourceValue mismatch`)
+        }
+        if (
+          !["resolved", "external", "ambiguous", "missing"].includes(ref.status)
+        ) {
+          addError(errors, `${refLabel}.status: unsupported value`)
+          continue
+        }
+        actualCounts.total += 1
+        actualCounts[ref.status] += 1
+        if (ref.status === "missing") templateMissing = true
+        if (ref.status === "ambiguous") templateAmbiguous = true
+
+        if (ref.status === "resolved") {
+          if (
+            !["contact", "group"].includes(ref.kind) ||
+            typeof ref.sourceId !== "string" ||
+            !ref.sourceId.trim() ||
+            typeof ref.resolvedAddress !== "string" ||
+            !emailPattern.test(ref.resolvedAddress) ||
+            ref.resolvedAddress !== ref.resolvedAddress.toLowerCase()
+          ) {
+            addError(errors, `${refLabel}: resolved identity/address shape is invalid`)
+            continue
+          }
+          const candidate =
+            ref.kind === "contact"
+              ? projectionState.contactsById.get(ref.sourceId)
+              : projectionState.groupsById.get(ref.sourceId)
+          if (!candidate) {
+            addError(
+              errors,
+              `${refLabel}: ${ref.kind} ${ref.sourceId} is absent from the latest projection`
+            )
+            continue
+          }
+          if (ref.kind === "contact") {
+            if (ref.resolvedAddress !== candidate.address) {
+              addError(errors, `${refLabel}: contact address is not projection-exact`)
+            }
+          } else {
+            if (ref.resolvedAddress !== candidate.address) {
+              addError(errors, `${refLabel}: group address is not projection-exact`)
+            }
+          }
+          if (
+            ref.displayName !== parsed.displayName &&
+            ref.displayName !== candidate.displayName
+          ) {
+            addError(errors, `${refLabel}: display name is not literal- or projection-derived`)
+          }
+        } else if (ref.status === "external") {
+          if (
+            ref.kind !== "external" ||
+            ref.sourceId !== null ||
+            !emailPattern.test(parsed.sourceValue) ||
+            ref.resolvedAddress !== parsed.sourceValue.toLowerCase() ||
+            ref.displayName !== parsed.displayName
+          ) {
+            addError(errors, `${refLabel}: external recipient evidence is inconsistent`)
+          }
+        } else if (ref.status === "ambiguous") {
+          const explicitAddress = parsed.sourceValue.includes("@")
+          if (
+            ref.kind !== "unresolved" ||
+            ref.sourceId !== null ||
+            ref.displayName !== parsed.displayName ||
+            ref.resolvedAddress !==
+              (explicitAddress ? parsed.sourceValue.toLowerCase() : null) ||
+            (explicitAddress && !emailPattern.test(parsed.sourceValue))
+          ) {
+            addError(errors, `${refLabel}: ambiguous recipient evidence is inconsistent`)
+          }
+        } else {
+          const unresolvedMissing =
+            ref.kind === "unresolved" &&
+            ref.sourceId === null &&
+            !parsed.sourceValue.includes("@") &&
+            ref.displayName === parsed.displayName
+          const retainedSourceId =
+            typeof ref.sourceId === "string" &&
+            ref.sourceId === ref.sourceId.trim() &&
+            ref.sourceId.length > 0
+              ? ref.sourceId
+              : ""
+          const retainedMissing =
+            backup.migrationHead >=
+              OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD &&
+            ["contact", "group"].includes(ref.kind) &&
+            Boolean(retainedSourceId) &&
+            !(ref.kind === "contact"
+              ? projectionState.contactSourceIds.has(retainedSourceId)
+              : projectionState.groupSourceIds.has(retainedSourceId))
+          if (
+            ref.resolvedAddress !== null ||
+            (!unresolvedMissing && !retainedMissing)
+          ) {
+            addError(errors, `${refLabel}: missing recipient evidence is inconsistent`)
+          }
+        }
+      }
+    }
+
+    if (
+      actualCounts.total > 10000 ||
+      !Object.values(recordedCounts).every(
+        (count) => Number.isSafeInteger(count) && count >= 0 && count <= 10000
+      ) ||
+      !exactObjectCounts(recordedCounts, actualCounts)
+    ) {
+      addError(errors, `${label}.counts: does not match its recipient refs`)
+    }
+    if (templateMissing) aggregate.missing += 1
+    if (templateAmbiguous) aggregate.ambiguous += 1
+    if (!templateMissing && !templateAmbiguous) aggregate.sendable += 1
+  }
+
+  aggregate.allTemplatesSendable =
+    aggregate.missing === 0 && aggregate.ambiguous === 0
+
+  const normalizedBefore = validateTemplateRecipientVerifier(
+    truth.templateRecipientVerificationBeforeExport,
+    checkpointBefore,
+    aggregate,
+    "integrity.truth.templateRecipientVerificationBeforeExport",
+    errors
+  )
+  const normalizedAfter = validateTemplateRecipientVerifier(
+    truth.templateRecipientVerificationAfterExport,
+    checkpointAfter,
+    aggregate,
+    "integrity.truth.templateRecipientVerificationAfterExport",
+    errors
+  )
+  if (
+    normalizedBefore &&
+    normalizedAfter &&
+    JSON.stringify(normalizedBefore) !== JSON.stringify(normalizedAfter)
+  ) {
+    addError(errors, "integrity.truth: Outlook template recipient truth changed during export")
+  }
+  if (
+    !normalizedAfter ||
+    !exactObjectCounts(truth.templateRecipientTruth, normalizedAfter)
+  ) {
+    addError(
+      errors,
+      "integrity.truth.templateRecipientTruth: does not match exported templates and verifier"
+    )
+  }
 }
 
 function canonicalPostgresTimestamp(value) {
@@ -767,6 +1365,31 @@ function validateSections(backup, errors, warnings) {
     )
     if (exposed.length) {
       addError(errors, `${key}: password_hash must be excluded from backup artifacts`)
+    }
+  }
+  for (const [index, row] of rows(data, "auditLogs").entries()) {
+    if (!isPlainObject(row) || !["admin_users", "spc_users"].includes(row.table_name)) {
+      continue
+    }
+    for (const snapshotKey of ["before_row", "after_row"]) {
+      if (
+        isPlainObject(row[snapshotKey]) &&
+        Object.hasOwn(row[snapshotKey], "password_hash")
+      ) {
+        addError(
+          errors,
+          `auditLogs[${index}].${snapshotKey}: password_hash must be redacted`
+        )
+      }
+    }
+    if (
+      Array.isArray(row.changed_fields) &&
+      row.changed_fields.includes("password_hash")
+    ) {
+      addError(
+        errors,
+        `auditLogs[${index}].changed_fields: password_hash must be redacted`
+      )
     }
   }
 
@@ -1464,12 +2087,23 @@ function validateTruthManifest(backup, ledgerState, certificationState, snapshot
   if (truth.schema !== "fcuno-exchange-backup-checkpoint/v1") {
     addError(errors, `integrity.truth.schema: unsupported value ${JSON.stringify(truth.schema)}`)
   }
+  const requiresTemplateRecipientTruth =
+    typeof backup.migrationHead === "string" &&
+    /^\d{14}$/.test(backup.migrationHead) &&
+    backup.migrationHead >= OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD
   const expectedTruthKeys = [
     "schema",
     "verificationBeforeExport",
     "checkpointBeforeExport",
     "checkpointAfterExport",
     "verificationAfterExport",
+    ...(requiresTemplateRecipientTruth
+      ? [
+          "templateRecipientVerificationBeforeExport",
+          "templateRecipientVerificationAfterExport",
+          "templateRecipientTruth",
+        ]
+      : []),
     "exportedLedger",
     "exportedSnapshots",
   ]
@@ -1645,6 +2279,16 @@ function validateTruthManifest(backup, ledgerState, certificationState, snapshot
     addError(
       errors,
       `integrity.truth.verificationBeforeExport.queue: backup was not quiescent (pending=${queue?.pending ?? "missing"}, processing=${queue?.processing ?? "missing"}, failed=${queue?.failed ?? "missing"}, terminalFailed=${queue?.terminalFailed ?? "missing"})`
+    )
+  }
+
+  if (requiresTemplateRecipientTruth) {
+    validateExportedTemplateRecipientTruth(
+      backup,
+      truth,
+      certificationState,
+      snapshotsByHash,
+      errors
     )
   }
 }

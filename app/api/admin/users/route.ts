@@ -34,6 +34,8 @@ function errorResponse(error: unknown, fallback: string) {
       : message === "Forbidden"
         ? 403
         : message.includes("required") ||
+            message.includes("Password") ||
+            message.includes("password") ||
             message.includes("valid permission group") ||
             message.includes("cannot be deleted") ||
             message.includes("Move all users")

@@ -412,9 +412,12 @@ function AdminOilWidget() {
 }
 
 export default function AdminPage() {
-  const { loading, authenticated, displayName } = useSimpleAdminAuth()
+  const { loading, authenticated, resetRequired, displayName } =
+    useSimpleAdminAuth()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
   const [dashboardData, setDashboardData] = useState<AdminDashboardData | null>(null)
@@ -427,7 +430,7 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    if (!authenticated) return
+    if (!authenticated || resetRequired) return
 
     let cancelled = false
 
@@ -455,7 +458,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true
     }
-  }, [authenticated])
+  }, [authenticated, resetRequired])
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -485,6 +488,7 @@ export default function AdminPage() {
           username: data.user.username,
           displayName: data.user.displayName || data.user.username,
           role: data.user.role || null,
+          resetRequired: data.user.resetRequired === true,
           permissions: data.user.permissions || {},
           pages: data.user.pages || [],
         }),
@@ -494,10 +498,152 @@ export default function AdminPage() {
     window.location.reload()
   }
 
+  async function handlePasswordReset(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setMessage("")
+
+    try {
+      const response = await fetch("/api/admin/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          password: newPassword,
+          confirmPassword,
+        }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        setMessage(data.message || "Password reset failed.")
+        return
+      }
+
+      window.localStorage.removeItem("bunker_admin_actor")
+      window.location.reload()
+    } catch {
+      setMessage("Password reset is temporarily unavailable. Please try again.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleResetLogout() {
+    setSubmitting(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/admin/logout", { method: "POST" })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setMessage(data.message || "Unable to sign out.")
+        return
+      }
+
+      window.localStorage.removeItem("bunker_admin_actor")
+      window.location.reload()
+    } catch {
+      setMessage("Unable to sign out. Please try again.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="fc-admin-login-page">
         <div className="fc-admin-loading">Loading...</div>
+      </div>
+    )
+  }
+
+  if (authenticated && resetRequired) {
+    return (
+      <div className="fc-admin-login-page">
+        <section
+          className="fc-admin-login-panel"
+          aria-label="Change password"
+        >
+          <Link href="/" className="fc-admin-logo-link">
+            <Image
+              src="/uno-logo.png"
+              alt="UNO"
+              className="fc-admin-login-logo"
+              width={636}
+              height={636}
+              priority
+            />
+          </Link>
+
+          <div className="fc-admin-login-form">
+            <div>
+              <h1 style={{ margin: "0 0 8px", fontSize: "20px" }}>
+                Change your password
+              </h1>
+              <p
+                style={{
+                  margin: 0,
+                  color: "var(--fc-admin-muted)",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                }}
+              >
+                Your account is protected, but you must choose a new password
+                before continuing. Use at least 12 characters.
+              </p>
+            </div>
+
+            <form onSubmit={handlePasswordReset} className="fc-admin-login-form">
+              <label className="fc-admin-auth-field">
+                <span>New password</span>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="fc-admin-auth-input"
+                  minLength={12}
+                  required
+                />
+              </label>
+
+              <label className="fc-admin-auth-field">
+                <span>Confirm new password</span>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="fc-admin-auth-input"
+                  minLength={12}
+                  required
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="fc-admin-auth-button fc-admin-auth-button-primary"
+              >
+                {submitting ? "Changing password..." : "Change password"}
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void handleResetLogout()}
+                className="fc-admin-auth-button"
+              >
+                Use another account
+              </button>
+
+              {message ? (
+                <p className="fc-admin-auth-message">{message}</p>
+              ) : null}
+            </form>
+          </div>
+        </section>
       </div>
     )
   }

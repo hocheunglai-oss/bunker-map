@@ -13,6 +13,7 @@ import { normaliseAdminPageDefinitions } from "@/lib/adminPageRegistry"
 type AuthState = {
   loading: boolean
   authenticated: boolean
+  resetRequired: boolean
   username: string | null
   displayName: string | null
   role: string | null
@@ -22,6 +23,7 @@ type AuthState = {
 
 type AdminSessionPayload = {
   authenticated?: boolean
+  resetRequired?: boolean
   username?: string | null
   displayName?: string | null
   role?: string | null
@@ -71,6 +73,7 @@ function readCachedAdminActor(): AdminSessionPayload | null {
 function useSimpleAdminAuthState(): AuthState {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
+  const [resetRequired, setResetRequired] = useState(false)
   const [username, setUsername] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [role, setRole] = useState<string | null>(null)
@@ -84,6 +87,8 @@ function useSimpleAdminAuthState(): AuthState {
 
     function applySession(data: AdminSessionPayload) {
       const isAuthenticated = Boolean(data.authenticated)
+      const requiresPasswordReset =
+        isAuthenticated && data.resetRequired === true
       const nextUsername = typeof data.username === "string" ? data.username : null
       const nextDisplayName =
         typeof data.displayName === "string" ? data.displayName : nextUsername
@@ -96,6 +101,7 @@ function useSimpleAdminAuthState(): AuthState {
       )
 
       setAuthenticated(isAuthenticated)
+      setResetRequired(requiresPasswordReset)
       setUsername(isAuthenticated ? nextUsername : null)
       setDisplayName(isAuthenticated ? nextDisplayName : null)
       setRole(isAuthenticated ? nextRole : null)
@@ -110,6 +116,7 @@ function useSimpleAdminAuthState(): AuthState {
             username: nextUsername,
             displayName: nextDisplayName || nextUsername,
             role: nextRole,
+            resetRequired: requiresPasswordReset,
             permissions: nextPermissions,
             pages: nextPages,
           })
@@ -124,8 +131,8 @@ function useSimpleAdminAuthState(): AuthState {
         const data = await loadAdminSession()
         applySession(data)
       } catch {
-        if (cachedActor) return
         setAuthenticated(false)
+        setResetRequired(false)
         setUsername(null)
         setDisplayName(null)
         setRole(null)
@@ -143,7 +150,16 @@ function useSimpleAdminAuthState(): AuthState {
     void checkSession()
   }, [])
 
-  return { loading, authenticated, username, displayName, role, permissions, pages }
+  return {
+    loading,
+    authenticated,
+    resetRequired,
+    username,
+    displayName,
+    role,
+    permissions,
+    pages,
+  }
 }
 
 export function SimpleAdminAuthProvider({ children }: { children: ReactNode }) {

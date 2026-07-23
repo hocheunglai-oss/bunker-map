@@ -154,19 +154,34 @@ function setViewOnlyControls(root: ParentNode, viewOnly: boolean) {
 export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { loading, authenticated, permissions, role, pages } = useSimpleAdminAuth()
+  const {
+    loading,
+    authenticated,
+    resetRequired,
+    permissions,
+    role,
+    pages,
+  } = useSimpleAdminAuth()
   const page = getAdminPageByPathFromPages(pathname, pages)
   const [guardedRequestKey, setGuardedRequestKey] = useState("")
   const requestGuardKey =
-    page && authenticated && !isAdminRole(role)
+    page && authenticated && !resetRequired && !isAdminRole(role)
       ? `${page.id}:${permissions[page.id] || "none"}`
       : ""
   const viewOnly =
-    Boolean(page && authenticated && !isAdminRole(role)) &&
+    Boolean(page && authenticated && !resetRequired && !isAdminRole(role)) &&
     !canAccessAdminPage(permissions, page?.id || "", "edit")
 
   useEffect(() => {
-    if (loading || !authenticated || !page || isAdminRole(role)) return
+    if (
+      loading ||
+      !authenticated ||
+      resetRequired ||
+      !page ||
+      isAdminRole(role)
+    ) {
+      return
+    }
 
     const originalFetch = window.fetch.bind(window)
     const canEdit = canAccessAdminPage(permissions, page.id, "edit")
@@ -213,7 +228,15 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
         window.fetch = originalFetch
       }
     }
-  }, [authenticated, loading, page, permissions, requestGuardKey, role])
+  }, [
+    authenticated,
+    loading,
+    page,
+    permissions,
+    requestGuardKey,
+    resetRequired,
+    role,
+  ])
 
   useEffect(() => {
     if (!page || loading || !viewOnly) return
@@ -258,15 +281,21 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
   }
 
   const hasAccess =
-    authenticated && (isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"))
+    authenticated &&
+    !resetRequired &&
+    (isAdminRole(role) || canAccessAdminPage(permissions, page.id, "view"))
 
   if (!hasAccess) {
     return (
       <div style={pageStyle}>
         <div style={panelStyle}>
-          <h1 style={{ margin: "0 0 8px", fontSize: "20px" }}>Access Denied</h1>
+          <h1 style={{ margin: "0 0 8px", fontSize: "20px" }}>
+            {resetRequired ? "Password Change Required" : "Access Denied"}
+          </h1>
           <p style={{ margin: "0 0 18px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
-            Your account does not have access to this admin page.
+            {resetRequired
+              ? "Change your password before opening admin pages."
+              : "Your account does not have access to this admin page."}
           </p>
           <button type="button" onClick={() => router.push("/admin")} className="fc-admin-nav-button" style={buttonStyle}>
             Go To Admin

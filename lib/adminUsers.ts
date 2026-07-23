@@ -23,6 +23,8 @@ type AdminUserRow = {
   display_name: string | null
   role: string
   password_hash: string
+  is_active: boolean
+  password_reset_required: boolean
   permissions: Record<string, unknown> | null
   created_at: string
   updated_at: string
@@ -52,6 +54,8 @@ export type ManagedAdminUser = {
   username: string
   displayName: string
   role: string
+  isActive: boolean
+  passwordResetRequired: boolean
   permissions: AdminPagePermissionMap
   createdAt: string
   updatedAt: string
@@ -68,9 +72,12 @@ export type ManagedAdminRoleDefault = {
 }
 
 export type AuthenticatedAdminUser = {
+  id: string
   username: string
   displayName: string
   role: string
+  passwordResetRequired: boolean
+  credentialUpdatedAt: string
   permissions: AdminPagePermissionMap
   source: "database"
 }
@@ -519,6 +526,8 @@ function mapAdminUser(
     username: row.username,
     displayName: row.display_name || row.username,
     role,
+    isActive: row.is_active !== false,
+    passwordResetRequired: row.password_reset_required === true,
     permissions,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -542,6 +551,58 @@ async function verifyPassword(password: string, passwordHash: string) {
   return timingSafeEqual(stored, key)
 }
 
+export function getAdminPasswordValidationError(password: string) {
+  if (password.length < 12) {
+    return "Password must be at least 12 characters."
+  }
+  if (password.length > 256) {
+    return "Password must be no more than 256 characters."
+  }
+  return null
+}
+
+function mapAuthenticatedAdminUser(
+  row: AdminUserRow,
+  roleDefaults: ManagedAdminRoleDefault[],
+  pages: AdminPageDefinition[] = [],
+): AuthenticatedAdminUser {
+  const user = mapAdminUser(row, roleDefaults, pages)
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    passwordResetRequired: user.passwordResetRequired,
+    credentialUpdatedAt: row.updated_at,
+    permissions: user.permissions,
+    source: "database",
+  }
+}
+
+export async function validateDatabaseAdminUserStrict(
+  username: string,
+  password: string,
+  pages?: AdminPageDefinition[]
+) {
+  const supabase = getServiceClient()
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select("*")
+    .eq("username", normaliseUsername(username))
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  const row = data as AdminUserRow
+  const passwordMatches = await verifyPassword(password, row.password_hash)
+  if (!passwordMatches) return null
+
+  const roleDefaults = await listManagedAdminRoleDefaults(pages)
+  return mapAuthenticatedAdminUser(row, roleDefaults, pages)
+}
+
 export async function validateDatabaseAdminUser(
   username: string,
   password: string,
@@ -550,28 +611,7 @@ export async function validateDatabaseAdminUser(
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
 
   try {
-    const supabase = getServiceClient()
-    const { data, error } = await supabase
-      .from("admin_users")
-      .select("*")
-      .eq("username", normaliseUsername(username))
-      .maybeSingle()
-
-    if (error || !data) return null
-
-    const row = data as AdminUserRow
-    const passwordMatches = await verifyPassword(password, row.password_hash)
-    if (!passwordMatches) return null
-
-    const roleDefaults = await listManagedAdminRoleDefaults(pages)
-    const user = mapAdminUser(row, roleDefaults, pages)
-    return {
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role,
-      permissions: user.permissions,
-      source: "database" as const,
-    }
+    return await validateDatabaseAdminUserStrict(username, password, pages)
   } catch {
     return null
   }
@@ -589,22 +629,105 @@ export async function getDatabaseAdminUserByUsername(
       .from("admin_users")
       .select("*")
       .eq("username", normaliseUsername(username))
+      .eq("is_active", true)
       .maybeSingle()
 
     if (error || !data) return null
 
     const roleDefaults = await listManagedAdminRoleDefaults(pages)
-    const user = mapAdminUser(data as AdminUserRow, roleDefaults, pages)
-    return {
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role,
-      permissions: user.permissions,
-      source: "database" as const,
-    }
+    return mapAuthenticatedAdminUser(
+      data as AdminUserRow,
+      roleDefaults,
+      pages,
+    )
   } catch {
     return null
   }
+}
+
+export async function getDatabaseAdminUserById(
+  id: string,
+  pages?: AdminPageDefinition[],
+) {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
+
+  try {
+    const supabase = getServiceClient()
+    const { data, error } = await supabase
+      .from("admin_users")
+      .select("*")
+      .eq("id", id)
+      .eq("is_active", true)
+      .maybeSingle()
+
+    if (error || !data) return null
+
+    const roleDefaults = await listManagedAdminRoleDefaults(pages)
+    return mapAuthenticatedAdminUser(
+      data as AdminUserRow,
+      roleDefaults,
+      pages,
+    )
+  } catch {
+    return null
+  }
+}
+
+export async function getDatabaseAdminUserByIdStrict(
+  id: string,
+  pages?: AdminPageDefinition[],
+) {
+  const supabase = getServiceClient()
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select("*")
+    .eq("id", id)
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  const roleDefaults = await listManagedAdminRoleDefaults(pages)
+  return mapAuthenticatedAdminUser(
+    data as AdminUserRow,
+    roleDefaults,
+    pages,
+  )
+}
+
+export async function completeDatabaseAdminPasswordReset(input: {
+  adminUserId: string
+  sessionId: string
+  newPassword: string
+}) {
+  const validationError = getAdminPasswordValidationError(input.newPassword)
+  if (validationError) throw new Error(validationError)
+
+  const supabase = getServiceClient()
+  const { data: currentUser, error: currentUserError } = await supabase
+    .from("admin_users")
+    .select("password_hash,password_reset_required")
+    .eq("id", input.adminUserId)
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (currentUserError) throw currentUserError
+  if (!currentUser || currentUser.password_reset_required !== true) {
+    throw new Error("Password reset is not required for this account.")
+  }
+  if (await verifyPassword(input.newPassword, String(currentUser.password_hash))) {
+    throw new Error("Choose a password that is different from your current password.")
+  }
+
+  const passwordHash = await hashPassword(input.newPassword)
+  const { data, error } = await supabase.rpc("complete_admin_password_reset", {
+    p_session_id: input.sessionId,
+    p_new_password_hash: passwordHash,
+  })
+
+  if (error) throw error
+  if (data !== true) throw new Error("Password reset could not be completed.")
 }
 
 export async function loadManagedAdminRoleDefaults(
@@ -781,10 +904,35 @@ export async function saveManagedAdminUser(
       updated_at: new Date().toISOString(),
     }
 
-    if (input.password?.trim()) {
-      payload.password_hash = await hashPassword(input.password)
+    const passwordInput = input.password?.trim() || ""
+    let passwordHash: string | null = null
+    if (passwordInput) {
+      const validationError = getAdminPasswordValidationError(passwordInput)
+      if (validationError) throw new Error(validationError)
+      passwordHash = await hashPassword(passwordInput)
+      payload.password_hash = passwordHash
+      payload.password_reset_required = true
     } else if (!input.id) {
       throw new Error("Password is required for a new user.")
+    }
+
+    if (passwordHash && input.id) {
+      const { data, error } = await supabase
+        .rpc("update_admin_user_with_password_and_revoke_sessions", {
+          p_admin_user_id: input.id,
+          p_username: payload.username,
+          p_display_name: payload.display_name,
+          p_role: payload.role,
+          p_permissions: payload.permissions,
+          p_new_password_hash: passwordHash,
+        })
+        .select("*")
+        .single()
+
+      if (error) throw error
+      if (!data) throw new Error("Admin user password update returned no record.")
+
+      return mapAdminUser(data as AdminUserRow, roleDefaults, pages)
     }
 
     const query = input.id

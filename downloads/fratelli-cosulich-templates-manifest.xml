@@ -4,13 +4,13 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.7.0</Version>
+  <Version>1.0.9.0</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
-  <IconUrl DefaultValue="https://fcuno.com/outlook-template-icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://fcuno.com/outlook-template-icon-80.png"/>
+  <IconUrl DefaultValue="https://fcuno.com/outlook-template-icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://fcuno.com/outlook-template-icon-128.png"/>
   <SupportUrl DefaultValue="https://fcuno.com/admin/outlooktemplates"/>
   <AppDomains>
     <AppDomain>https://fcuno.com</AppDomain>
@@ -20,19 +20,19 @@
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.3"/>
+      <Set Name="Mailbox" MinVersion="1.4"/>
     </Sets>
   </Requirements>
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-06-11-group-smtp-v1"/>
+        <SourceLocation DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-07-23-dialog-auth-v1"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-06-11-group-smtp-v1"/>
+        <SourceLocation DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-07-23-dialog-auth-v1"/>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -44,7 +44,7 @@
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Requirements>
-      <bt:Sets DefaultMinVersion="1.3">
+      <bt:Sets DefaultMinVersion="1.4">
         <bt:Set Name="Mailbox"/>
       </bt:Sets>
     </Requirements>
@@ -65,6 +65,7 @@
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -87,6 +88,7 @@
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -103,11 +105,12 @@
       <bt:Images>
         <bt:Image id="Icon.16" DefaultValue="https://fcuno.com/outlook-template-icon-16.png"/>
         <bt:Image id="Icon.32" DefaultValue="https://fcuno.com/outlook-template-icon-32.png"/>
+        <bt:Image id="Icon.64" DefaultValue="https://fcuno.com/outlook-template-icon-64.png"/>
         <bt:Image id="Icon.80" DefaultValue="https://fcuno.com/outlook-template-icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://fcuno.com/api/outlook-addin/commands?v=2026-06-11-group-smtp-v1"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-06-11-group-smtp-v1"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://fcuno.com/api/outlook-addin/commands?v=2026-07-23-dialog-auth-v1"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-07-23-dialog-auth-v1"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>
@@ -142,6 +145,7 @@
                     <Icon>
                       <bt:Image size="16" resid="Icon.16"/>
                       <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="64" resid="Icon.64"/>
                       <bt:Image size="80" resid="Icon.80"/>
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
@@ -165,6 +169,7 @@
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -182,11 +187,12 @@
         <bt:Images>
           <bt:Image id="Icon.16" DefaultValue="https://fcuno.com/outlook-template-icon-16.png"/>
           <bt:Image id="Icon.32" DefaultValue="https://fcuno.com/outlook-template-icon-32.png"/>
+          <bt:Image id="Icon.64" DefaultValue="https://fcuno.com/outlook-template-icon-64.png"/>
           <bt:Image id="Icon.80" DefaultValue="https://fcuno.com/outlook-template-icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://fcuno.com/api/outlook-addin/commands?v=2026-06-11-group-smtp-v1"/>
-          <bt:Url id="Taskpane.Url" DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-06-11-group-smtp-v1"/>
+          <bt:Url id="Commands.Url" DefaultValue="https://fcuno.com/api/outlook-addin/commands?v=2026-07-23-dialog-auth-v1"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="https://fcuno.com/api/outlook-addin/taskpane?v=2026-07-23-dialog-auth-v1"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Shared Templates"/>

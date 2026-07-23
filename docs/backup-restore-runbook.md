@@ -97,6 +97,12 @@ Contacts and Google Calendar. `admin_users.password_hash` and
 `databaseInventory.excludedCredentialFields`. Inspect `databaseInventory`,
 `counts`, and `integrity.sections` rather than relying only on this prose.
 
+`email_templates` is the sole restorable Outlook-template source. The former
+`office_calendar_store` template payload is retained only under an explicitly
+archived key and must never be promoted merely because the canonical table is
+empty. `admin_sessions` is explicitly ephemeral: it is not exported or
+restored, so every recovery invalidates active admin sessions by design.
+
 A trusted artifact has zero `warnings`. Google export failures, an unregistered
 live table, an inconsistent Exchange queue, or failed truth verification abort
 the backup instead of producing a partially trusted file.
@@ -247,6 +253,23 @@ sequence values are restored, so the existing ledger rows and their order
 remain exact. Do not pre-apply repository migrations on top of a full dump and
 do not use a service-role REST client for this path.
 
+For a populated recovery database whose applied migration head predates
+`20260723121704_enforce_outlook_template_recipient_truth.sql`, migration replay
+is a mandatory two-stage operation:
+
+1. Apply repository migrations only through
+   `20260723120455_outlook_template_recipient_truth.sql`.
+2. Point the reconciliation command only at the isolated recovery project and
+   run `npm run outlook-templates:reconcile`.
+3. Require every `email_templates.recipient_resolution` value to be certified
+   and non-empty, then continue with `20260723120726` and later migrations.
+
+If the migration runner cannot pause at that boundary, stop and prepare a
+reviewed owner-level recipient-resolution baseline before replaying
+`20260723121704`. Never edit an already-applied migration or insert placeholder
+recipient evidence to make a populated replay pass. An empty database may
+replay the full chain normally.
+
 If the v2 Drive JSON is the only surviving data source, stop and arrange a
 reviewed owner-level recovery importer. The artifact contains enough evidence
 to validate and salvage rows, but the repository deliberately has no automated
@@ -265,17 +288,35 @@ Before allowing application or automation traffic:
    account allowed to execute it. Require `integrityValid=true`,
    `referencesValid=true`, `operationallyConsistent=true`, and no first invalid
    ledger sequence, snapshot, or reference.
-2. Match recovered table counts to the validated artifact or managed-backup
+2. Point the reconciliation command only at the isolated recovery project, then
+   run:
+
+   ```bash
+   npm run outlook-templates:reconcile
+   ```
+
+   After it completes, run
+   `public.verify_outlook_template_recipient_truth()` and require schema
+   `fcuno.outlook-template-recipient-truth/v2`, `valid=true`,
+   `sourceTruthValid=true`, and zero `unresolved`, `stale`, and `invalidShape`
+   templates. Its certification run ID, certified timestamp, source
+   fingerprint, and queue counts must match
+   `public.verify_outlook_exchange_truth_ledger()`. Missing or ambiguous
+   recipients may keep `allTemplatesSendable=false`; review those exact
+   literals and keep the affected templates blocked rather than guessing a
+   recipient.
+
+3. Match recovered table counts to the validated artifact or managed-backup
    evidence for the selected recovery point.
-3. Match the recovered ledger head or the applicable earlier ledger entry to
+4. Match the recovered ledger head or the applicable earlier ledger entry to
    the preserved email and Drive anchors.
-4. Confirm the latest certification's raw source snapshot, projection evidence,
+5. Confirm the latest certification's raw source snapshot, projection evidence,
    source fingerprint, and run ID pair correctly.
-5. Confirm no unexpected `pending`, `processing`, or `failed` queue rows.
+6. Confirm no unexpected `pending`, `processing`, or `failed` queue rows.
    Expected pending work must be understood before resuming the worker.
-6. Verify CCINFO `drive_file_id` references against Google Drive and recover
+7. Verify CCINFO `drive_file_id` references against Google Drive and recover
    missing bytes from the independent Google Cloud Storage copy.
-7. Exercise read-only application workflows and Audit Log/User Management in
+8. Exercise read-only application workflows and Audit Log/User Management in
    the isolated environment.
 
 ### 4. Rebuild Exchange from FCUNO
@@ -293,9 +334,13 @@ Before allowing application or automation traffic:
 5. Preserve the resulting email notice and compare its ledger/snapshot hashes
    with the recovered database.
 
-Only after all checks pass should the user approve a production cutover or a
-managed production restore. Resume FCUNO writes first, then the incremental
-worker, and monitor the queue and next daily Drive artifact.
+Only after both truth verifiers and all remaining checks pass should the user
+approve a production cutover or a managed production restore. The template
+reconciliation and v2 verifier are a hard gate: do not enable production
+template writes, resume FCUNO writes, or restart the Exchange worker while any
+placeholder, stale, or malformed recipient evidence remains. Resume FCUNO
+writes first, then the incremental worker, and monitor the queue and next daily
+Drive artifact.
 
 ## Periodic rehearsal
 

@@ -1,105 +1,129 @@
 import { NextResponse } from "next/server"
-import { loadEmailTemplate, loadTemplateIndex, loadTemplateLibrary } from "@/lib/emailTemplates"
+import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
+import { loadEmailTemplate, loadTemplateIndex } from "@/lib/emailTemplates"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-function sortByFolderAndTitle<T extends { folder?: string; title?: string }>(templates: T[]) {
-  return templates.sort((a, b) => {
-    const folderCompare = (a.folder || "").localeCompare(b.folder || "")
-    if (folderCompare !== 0) return folderCompare
-    return (a.title || "").localeCompare(b.title || "")
-  })
+const RESPONSE_TTL_SECONDS = 120
+
+function privateHeaders() {
+  return {
+    "Cache-Control": "private, no-store, max-age=0",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  }
+}
+
+function authError(error: unknown) {
+  if (!(error instanceof Error)) return null
+  if (error.message === "Unauthorized") {
+    return NextResponse.json(
+      { code: "SIGN_IN_REQUIRED", message: "Sign in to FC Uno to use Outlook Templates." },
+      { status: 401, headers: privateHeaders() },
+    )
+  }
+  if (error.message === "Forbidden") {
+    return NextResponse.json(
+      { code: "OUTLOOK_TEMPLATES_FORBIDDEN", message: "Outlook Templates view permission is required." },
+      { status: 403, headers: privateHeaders() },
+    )
+  }
+  return null
+}
+
+function responseMetadata() {
+  const generatedAt = new Date()
+  return {
+    generatedAt: generatedAt.toISOString(),
+    expiresAt: new Date(generatedAt.getTime() + RESPONSE_TTL_SECONDS * 1000).toISOString(),
+    ttlSeconds: RESPONSE_TTL_SECONDS,
+  }
+}
+
+function taskpaneTemplate(template: Awaited<ReturnType<typeof loadEmailTemplate>>) {
+  if (!template) return null
+  return {
+    id: template.id,
+    title: template.title,
+    subject: template.subject,
+    folder: template.folder,
+    to: template.to,
+    cc: template.cc,
+    bcc: template.bcc,
+    bodyHtml: template.bodyHtml,
+    bodyText: template.bodyText,
+    isActive: template.isActive,
+    updatedAt: template.updatedAt,
+    revision: template.revision,
+    recipientResolution: template.recipientResolution,
+  }
 }
 
 export async function GET(request: Request) {
   try {
+    await requireAdminPagePermissionForRequest(
+      request,
+      "email-templates",
+      "view",
+    )
     const { searchParams } = new URL(request.url)
     const id = searchParams.get("id")
-    const mode = searchParams.get("mode") || searchParams.get("view")
+    const metadata = responseMetadata()
 
     if (id) {
       const template = await loadEmailTemplate(id)
       if (!template || template.isActive === false) {
         return NextResponse.json(
-          { message: "Template not found." },
-          {
-            status: 404,
-            headers: {
-              "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
-              "Access-Control-Allow-Origin": "*",
-            },
-          }
+          { code: "TEMPLATE_NOT_FOUND", message: "Template not found." },
+          { status: 404, headers: privateHeaders() },
         )
       }
 
       return NextResponse.json(
-        { template },
         {
-          headers: {
-            "Cache-Control": "private, max-age=120, stale-while-revalidate=600",
-            "Access-Control-Allow-Origin": "*",
-          },
-        }
-      )
-    }
-
-    if (mode === "index" || mode === "compact") {
-      const library = await loadTemplateIndex()
-      const templates = sortByFolderAndTitle(library.templates.filter((template) => template.isActive !== false))
-
-      return NextResponse.json(
-        {
-          templates,
-          lastImportedAt: library.lastImportedAt,
-          lastUpdatedAt: library.lastUpdatedAt,
+          schema: "fcuno.outlook-template-detail/v2",
+          ...metadata,
+          template: taskpaneTemplate(template),
         },
-        {
-          headers: {
-            "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
-            "Access-Control-Allow-Origin": "*",
-          },
-        }
+        { headers: privateHeaders() },
       )
     }
 
-    const library = await loadTemplateLibrary()
-    const templates = sortByFolderAndTitle(library.templates.filter((template) => template.isActive !== false))
+    const library = await loadTemplateIndex()
+    const templates = library.templates
+      .filter((template) => template.isActive !== false)
+      .sort((left, right) => (
+        left.folder.localeCompare(right.folder) || left.title.localeCompare(right.title)
+      ))
+      .map((template) => ({
+        id: template.id,
+        title: template.title,
+        subject: template.subject,
+        folder: template.folder,
+        to: template.to,
+        cc: template.cc,
+        bcc: template.bcc,
+        updatedAt: template.updatedAt,
+        revision: template.revision,
+      }))
 
     return NextResponse.json(
       {
+        schema: "fcuno.outlook-template-index/v2",
+        ...metadata,
+        revision: library.revision,
         templates,
-        lastImportedAt: library.lastImportedAt,
-        lastUpdatedAt: library.lastUpdatedAt,
       },
-      {
-        headers: {
-          "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { headers: privateHeaders() },
     )
   } catch (error) {
+    const response = authError(error)
+    if (response) return response
+
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to load templates." },
-      {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { code: "TEMPLATE_READ_FAILED", message: "Outlook Templates are temporarily unavailable." },
+      { status: 503, headers: privateHeaders() },
     )
   }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Max-Age": "86400",
-    },
-  })
 }

@@ -159,6 +159,7 @@ const TRUTH_MANAGED_TABLES = new Set([
 const EXPLICITLY_EPHEMERAL_TABLES = new Set([
   "outlook_exchange_sync_lock",
   "bunker_map_backup_lock",
+  "admin_sessions",
 ])
 
 function requireEnv(name: string) {
@@ -179,6 +180,36 @@ function getErrorMessage(error: unknown) {
     return String((error as { message?: unknown }).message || "Request failed.")
   }
   return String(error || "Request failed.")
+}
+
+function redactPasswordHashSnapshot(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value
+  const sanitized = { ...(value as Record<string, unknown>) }
+  delete sanitized.password_hash
+  return sanitized
+}
+
+function sanitizeBackupTableRow(
+  config: TableConfig,
+  row: Record<string, unknown>
+) {
+  const sanitized = { ...row }
+  for (const column of config.omitColumns || []) delete sanitized[column]
+
+  if (
+    config.table === "audit_logs" &&
+    ["admin_users", "spc_users"].includes(String(sanitized.table_name || ""))
+  ) {
+    sanitized.before_row = redactPasswordHashSnapshot(sanitized.before_row)
+    sanitized.after_row = redactPasswordHashSnapshot(sanitized.after_row)
+    if (Array.isArray(sanitized.changed_fields)) {
+      sanitized.changed_fields = sanitized.changed_fields.filter(
+        (field) => field !== "password_hash"
+      )
+    }
+  }
+
+  return sanitized
 }
 
 function getSupabaseClient() {
@@ -454,12 +485,9 @@ async function streamTableRows(
     const { data, error } = await query
     if (error) throw error
 
-    const batch = (data || []).map((row) => {
-      if (!config.omitColumns?.length) return row
-      const sanitized = { ...row } as Record<string, unknown>
-      for (const column of config.omitColumns) delete sanitized[column]
-      return sanitized
-    })
+    const batch = (data || []).map((row) =>
+      sanitizeBackupTableRow(config, row as Record<string, unknown>)
+    )
     await appendRows(batch)
     if (batch.length < BACKUP_EXPORT_PAGE_SIZE) break
   }
@@ -543,7 +571,10 @@ async function getBackupInventory(
 
 async function callTruthRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
-  functionName: "verify_outlook_exchange_truth_ledger" | "get_outlook_exchange_truth_checkpoint"
+  functionName:
+    | "verify_outlook_exchange_truth_ledger"
+    | "get_outlook_exchange_truth_checkpoint"
+    | "verify_outlook_template_recipient_truth"
 ) {
   const { data, error } = await supabase.rpc(functionName)
   if (error) throw error
@@ -674,6 +705,107 @@ function validateTruthCheckpoint(
       checkpoint.snapshots,
       `${label}.snapshots`
     ),
+    certificationRunId: String(
+      checkpoint.latestCertificationRunId || ""
+    ),
+    certifiedAt: String(checkpoint.latestCertificationAt || ""),
+    sourceFingerprint: requiredSha256(
+      checkpoint.latestSourceFingerprint,
+      `${label}.latestSourceFingerprint`
+    ),
+  }
+}
+
+function validateTemplateRecipientTruth(
+  verification: Record<string, unknown>,
+  checkpoint: ReturnType<typeof validateTruthCheckpoint>,
+  label: string
+) {
+  const templates = asRecord(verification.templates, `${label}.templates`)
+  const queue = asRecord(verification.queue, `${label}.queue`)
+  const total = requiredNonNegativeInteger(
+    templates.total,
+    `${label}.templates.total`
+  )
+  const sendable = requiredNonNegativeInteger(
+    templates.sendable,
+    `${label}.templates.sendable`
+  )
+  const missing = requiredNonNegativeInteger(
+    templates.withMissingRecipients,
+    `${label}.templates.withMissingRecipients`
+  )
+  const ambiguous = requiredNonNegativeInteger(
+    templates.withAmbiguousRecipients,
+    `${label}.templates.withAmbiguousRecipients`
+  )
+  const unresolved = requiredNonNegativeInteger(
+    templates.unresolved,
+    `${label}.templates.unresolved`
+  )
+  const stale = requiredNonNegativeInteger(
+    templates.stale,
+    `${label}.templates.stale`
+  )
+  const invalidShape = requiredNonNegativeInteger(
+    templates.invalidShape,
+    `${label}.templates.invalidShape`
+  )
+  const allTemplatesSendable = verification.allTemplatesSendable === true
+
+  if (
+    verification.schema !== "fcuno.outlook-template-recipient-truth/v2" ||
+    verification.valid !== true ||
+    unresolved !== 0 ||
+    stale !== 0 ||
+    invalidShape !== 0 ||
+    sendable > total ||
+    missing > total ||
+    ambiguous > total ||
+    sendable + missing + ambiguous < total ||
+    allTemplatesSendable !==
+      (sendable === total && missing === 0 && ambiguous === 0) ||
+    String(verification.certificationRunId || "") !==
+      checkpoint.certificationRunId ||
+    String(verification.certifiedAt || "") !== checkpoint.certifiedAt ||
+    String(verification.sourceFingerprint || "") !==
+      checkpoint.sourceFingerprint ||
+    Number(queue.pending ?? -1) !== 0 ||
+    Number(queue.processing ?? -1) !== 0 ||
+    Number(queue.failed ?? -1) !== 0 ||
+    Number(queue.terminalFailed ?? -1) !== 0
+  ) {
+    throw new Error(
+      `${label} is not aligned with the latest settled Exchange projection.`
+    )
+  }
+
+  return {
+    certificationRunId: checkpoint.certificationRunId,
+    certifiedAt: checkpoint.certifiedAt,
+    sourceFingerprint: checkpoint.sourceFingerprint,
+    total,
+    sendable,
+    missing,
+    ambiguous,
+    unresolved,
+    stale,
+    invalidShape,
+    allTemplatesSendable,
+  }
+}
+
+function assertSameTemplateRecipientTruth(
+  before: ReturnType<typeof validateTemplateRecipientTruth>,
+  after: ReturnType<typeof validateTemplateRecipientTruth>
+) {
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    throw new Error(
+      `Outlook template recipient truth changed during backup: ${JSON.stringify({
+        before,
+        after,
+      })}`
+    )
   }
 }
 
@@ -716,17 +848,19 @@ async function buildBackupFile(
 
   let verificationBeforeExport: Record<string, unknown>
   let checkpointBeforeExport: Record<string, unknown>
+  let templateRecipientVerificationBeforeExport: Record<string, unknown>
   let databaseEpochBefore: number
   try {
     databaseEpochBefore = await getBackupExportEpoch(supabase)
-    verificationBeforeExport = await callTruthRpc(
-      supabase,
-      "verify_outlook_exchange_truth_ledger"
-    )
-    checkpointBeforeExport = await callTruthRpc(
-      supabase,
-      "get_outlook_exchange_truth_checkpoint"
-    )
+    ;[
+      verificationBeforeExport,
+      checkpointBeforeExport,
+      templateRecipientVerificationBeforeExport,
+    ] = await Promise.all([
+      callTruthRpc(supabase, "verify_outlook_exchange_truth_ledger"),
+      callTruthRpc(supabase, "get_outlook_exchange_truth_checkpoint"),
+      callTruthRpc(supabase, "verify_outlook_template_recipient_truth"),
+    ])
   } catch (error) {
     throw new Error(
       `Backup failed while capturing the Exchange truth checkpoint: ${getErrorMessage(error)}`
@@ -745,6 +879,11 @@ async function buildBackupFile(
     verifiedBefore,
     checkpointBefore,
     "Exchange truth verifier and checkpoint"
+  )
+  const templateRecipientTruthBefore = validateTemplateRecipientTruth(
+    templateRecipientVerificationBeforeExport,
+    checkpointBefore,
+    "Outlook template recipient truth before export"
   )
 
   const generatedAt = new Date().toISOString()
@@ -1053,15 +1192,17 @@ async function buildBackupFile(
 
     let checkpointAfterExport: Record<string, unknown>
     let verificationAfterExport: Record<string, unknown>
+    let templateRecipientVerificationAfterExport: Record<string, unknown>
     try {
-      checkpointAfterExport = await callTruthRpc(
-        supabase,
-        "get_outlook_exchange_truth_checkpoint"
-      )
-      verificationAfterExport = await callTruthRpc(
-        supabase,
-        "verify_outlook_exchange_truth_ledger"
-      )
+      [
+        checkpointAfterExport,
+        verificationAfterExport,
+        templateRecipientVerificationAfterExport,
+      ] = await Promise.all([
+        callTruthRpc(supabase, "get_outlook_exchange_truth_checkpoint"),
+        callTruthRpc(supabase, "verify_outlook_exchange_truth_ledger"),
+        callTruthRpc(supabase, "verify_outlook_template_recipient_truth"),
+      ])
     } catch (error) {
       throw new Error(
         `Backup failed while rechecking the Exchange truth checkpoint: ${getErrorMessage(error)}`
@@ -1075,6 +1216,11 @@ async function buildBackupFile(
     const verifiedAfter = validateTruthVerification(
       verificationAfterExport,
       "Exchange truth verification after export"
+    )
+    const templateRecipientTruthAfter = validateTemplateRecipientTruth(
+      templateRecipientVerificationAfterExport,
+      checkpointAfter,
+      "Outlook template recipient truth after export"
     )
     const inventoryAfter = await getBackupInventory(supabase)
     if (
@@ -1102,6 +1248,10 @@ async function buildBackupFile(
       checkpointBefore,
       verifiedAfter,
       "Exchange truth verification"
+    )
+    assertSameTemplateRecipientTruth(
+      templateRecipientTruthBefore,
+      templateRecipientTruthAfter
     )
 
     await writeDataChunk(writer, "}")
@@ -1133,6 +1283,9 @@ async function buildBackupFile(
         checkpointBeforeExport,
         checkpointAfterExport,
         verificationAfterExport,
+        templateRecipientVerificationBeforeExport,
+        templateRecipientVerificationAfterExport,
+        templateRecipientTruth: templateRecipientTruthAfter,
         exportedLedger: {
           entries: counts.outlookExchangeTruthLedger,
           headSequence: checkpointBefore.headSequence,

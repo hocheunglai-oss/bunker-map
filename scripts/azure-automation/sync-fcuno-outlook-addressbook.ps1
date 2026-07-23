@@ -6,10 +6,12 @@ param(
 $ErrorActionPreference = "Stop"
 $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 $DefaultExchangeOnlineManagementVersion = "3.4.0"
+$CanonicalExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.2"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.3"
 $script:ExchangeOnlineConnected = $false
+$script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
 $script:CurrentQueueRunId = $null
 $script:SyncLockAcquired = $false
@@ -152,6 +154,46 @@ function Test-ValidEmail($Value) {
   } catch {
     return $false
   }
+}
+
+function Get-NormalizedExchangeAddressBookDomain($Value) {
+  $domain = (Clean-Text $Value).TrimStart("@").ToLowerInvariant()
+  if (
+    -not $domain -or
+    $domain.Length -gt 253 -or
+    -not (Test-ValidEmail "fcuno-addressbook@$domain")
+  ) {
+    throw "Automation variable EXCHANGE_ADDRESSBOOK_DOMAIN must be the exact canonical SMTP domain $CanonicalExchangeAddressBookDomain."
+  }
+  if ($domain -cne $CanonicalExchangeAddressBookDomain) {
+    throw "Automation variable EXCHANGE_ADDRESSBOOK_DOMAIN must exactly match $CanonicalExchangeAddressBookDomain."
+  }
+  return $domain
+}
+
+function Get-RequiredExchangeAddressBookDomain {
+  $domain = Clean-Text $script:ExchangeAddressBookDomain
+  if (-not $domain) {
+    throw "EXCHANGE_ADDRESSBOOK_DOMAIN is not loaded. The Exchange group SMTP address cannot be projected or certified."
+  }
+  return Get-NormalizedExchangeAddressBookDomain $domain
+}
+
+function Get-ExpectedExchangeGroupSmtpAddress($Group) {
+  if (-not $Group) { throw "The desired Exchange group is missing." }
+  $alias = (Clean-Text (Get-MapValue $Group "Alias")).ToLowerInvariant()
+  if (-not $alias -or $alias -notmatch "^[a-z0-9._-]{1,64}$") {
+    throw "The desired Exchange group has no valid alias for its certified SMTP address."
+  }
+  $expected = Normalize-Email "$alias@$(Get-RequiredExchangeAddressBookDomain)"
+  if (-not (Test-ValidEmail $expected)) {
+    throw "The desired Exchange group alias and required address-book domain do not form a valid SMTP address."
+  }
+  $projected = Normalize-Email (Get-MapValue $Group "SmtpAddress")
+  if ($projected -and $projected -cne $expected) {
+    throw "The desired Exchange group SMTP address '$projected' does not match its certified alias/domain address '$expected'."
+  }
+  return $expected
 }
 
 function Get-EmbeddedContactValidEmails($Contact) {
@@ -341,7 +383,9 @@ function Get-ExchangeDistributionGroupMismatches($Existing, $Group, $Profile = $
   $expectedName = Get-ExchangeGroupDirectoryName $Group
   $expectedDisplayName = Clean-Text $Group.GroupName
   $expectedSourceKey = Clean-Text $Group.SourceKey
+  $expectedSmtpAddress = Get-ExpectedExchangeGroupSmtpAddress $Group
   if (-not (Clean-Text $Existing.Alias).Equals($expectedAlias, [StringComparison]::OrdinalIgnoreCase)) { $mismatches += "alias" }
+  if ((Normalize-Email $Existing.PrimarySmtpAddress) -cne $expectedSmtpAddress) { $mismatches += "primary SMTP address" }
   if ((Clean-Text $Existing.Name) -cne $expectedName) { $mismatches += "name" }
   if ((Clean-Text $Existing.DisplayName) -cne $expectedDisplayName) { $mismatches += "display name" }
   if (-not $Profile) {
@@ -614,6 +658,7 @@ function Set-ExchangeDistributionGroupMetadataWithRetry(
   $groupName = Clean-Text $Group.GroupName
   $directoryName = Get-ExchangeGroupDirectoryName $Group
   $sourceKey = Clean-Text $Group.SourceKey
+  $smtpAddress = Get-ExpectedExchangeGroupSmtpAddress $Group
   if (-not $alias -or -not $groupName -or -not $sourceKey) {
     throw "$Label is missing the desired alias, group name, or source key for metadata mutation."
   }
@@ -625,6 +670,7 @@ function Set-ExchangeDistributionGroupMetadataWithRetry(
       Set-DistributionGroup `
         -Identity $distributionIdentity `
         -Alias $alias `
+        -PrimarySmtpAddress $smtpAddress `
         -Name $directoryName `
         -DisplayName $groupName `
         -CustomAttribute1 $ManagedMarker `
@@ -1119,6 +1165,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
       GroupName = $name
       BaseAlias = $baseAlias
       Alias = Get-UniqueAlias $baseAlias $seenAliases ("group:" + (Clean-Text $group.id))
+      SmtpAddress = ""
       Description = Clean-Text $group.description
       MemberCount = 0
       SourceKey = Get-GroupSourceKey $group.id
@@ -1167,6 +1214,7 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
     $forceStableSuffix = [int]$groupDirectoryNameCounts[$baseName.ToLowerInvariant()] -gt 1
     $directoryName = Get-UniqueExchangeDirectoryName $groupRow.GroupName $seenDirectoryNames $groupRow.SourceKey $forceStableSuffix
     $groupRow | Add-Member -NotePropertyName DirectoryName -NotePropertyValue $directoryName -Force
+    $groupRow.SmtpAddress = Get-ExpectedExchangeGroupSmtpAddress $groupRow
   }
 
   $rawMemberContactIds = @{}
@@ -1297,6 +1345,7 @@ function Get-CanonicalExchangeProjectionPayload($Rows) {
         groupName = Clean-Text $_.GroupName
         baseAlias = Clean-Text $_.BaseAlias
         alias = Clean-Text $_.Alias
+        smtpAddress = Normalize-Email $_.SmtpAddress
         description = Clean-Text $_.Description
         memberCount = [int]$_.MemberCount
         sourceKey = Clean-Text $_.SourceKey
@@ -2766,6 +2815,7 @@ function Get-FullGroupMutationFieldChanges($Existing, $Profile, $Group, [bool]$C
     [pscustomobject]@{ Label = "Name"; Before = $(if ($Existing) { Clean-Text $Existing.Name } else { $beforeMissing }); After = Get-ExchangeGroupDirectoryName $Group },
     [pscustomobject]@{ Label = "Group name"; Before = $(if ($Existing) { Clean-Text $Existing.DisplayName } else { $beforeMissing }); After = Clean-Text $Group.GroupName },
     [pscustomobject]@{ Label = "Alias"; Before = $(if ($Existing) { Clean-Text $Existing.Alias } else { $beforeMissing }); After = Clean-Text $Group.Alias },
+    [pscustomobject]@{ Label = "Primary SMTP address"; Before = $(if ($Existing) { Normalize-Email $Existing.PrimarySmtpAddress } else { $beforeMissing }); After = Get-ExpectedExchangeGroupSmtpAddress $Group },
     [pscustomobject]@{ Label = "Description"; Before = $(if ($Profile) { Clean-Text $Profile.Notes } elseif ($Created) { $beforeMissing } else { "(unresolved)" }); After = Clean-Text $Group.Description },
     [pscustomobject]@{ Label = "Management marker"; Before = $(if ($Existing) { Clean-Text $Existing.CustomAttribute1 } else { $beforeMissing }); After = $ManagedMarker },
     [pscustomobject]@{ Label = "FCUNO source key"; Before = $(if ($Existing) { Clean-Text $Existing.CustomAttribute2 } else { $beforeMissing }); After = Clean-Text $Group.SourceKey },
@@ -3138,6 +3188,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
       -Name (Get-ExchangeGroupDirectoryName $Group) `
       -DisplayName $Group.GroupName `
       -Alias $alias `
+      -PrimarySmtpAddress (Get-ExpectedExchangeGroupSmtpAddress $Group) `
       -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
     $newGroupIdentity = Get-ExchangeStrongCommandIdentity $newGroup
@@ -5404,6 +5455,8 @@ try {
   $tenantId = Get-AutomationSetting "EXCHANGE_TENANT_ID"
   $organization = Get-AutomationSetting "EXCHANGE_ORGANIZATION"
   Assert-ExchangeSettings $appId $tenantId $organization
+  $script:ExchangeAddressBookDomain = Get-NormalizedExchangeAddressBookDomain `
+    (Get-AutomationSetting "EXCHANGE_ADDRESSBOOK_DOMAIN")
   $pfxBase64 = Get-AutomationSetting "EXCHANGE_CERT_PFX_BASE64"
   $pfxPassword = Get-AutomationSetting "EXCHANGE_CERT_PASSWORD"
   $pfxPath = Join-Path $env:TEMP "fcuno-exchange-sync.pfx"

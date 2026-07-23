@@ -2,6 +2,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "sync-fcuno-outlook-addressbook.ps1") -LibraryOnly
+$script:ExchangeAddressBookDomain = Get-NormalizedExchangeAddressBookDomain "COSULICH1.ONMICROSOFT.COM"
 
 function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw "FAILED: $Message" }
@@ -24,6 +25,21 @@ foreach ($email in @(
   Assert-True (-not (Test-ValidEmail $email)) "Invalid email '$email' must be rejected"
 }
 Assert-True (Test-ValidEmail "valid.name+tag@example-domain.com") "A normal external email must be accepted"
+Assert-Equal "cosulich1.onmicrosoft.com" (Get-RequiredExchangeAddressBookDomain) "The required Exchange address-book domain must be canonical lower-case truth"
+$invalidAddressBookDomainRejected = $false
+try {
+  Get-NormalizedExchangeAddressBookDomain "not a domain" | Out-Null
+} catch {
+  $invalidAddressBookDomainRejected = $_.Exception.Message -match "EXCHANGE_ADDRESSBOOK_DOMAIN"
+}
+Assert-True $invalidAddressBookDomainRejected "An invalid Exchange address-book domain must fail closed"
+$wrongValidAddressBookDomainRejected = $false
+try {
+  Get-NormalizedExchangeAddressBookDomain "another-tenant.onmicrosoft.com" | Out-Null
+} catch {
+  $wrongValidAddressBookDomainRejected = $_.Exception.Message -match "cosulich1\.onmicrosoft\.com"
+}
+Assert-True $wrongValidAddressBookDomainRejected "A syntactically valid but non-canonical Exchange address-book domain must fail closed"
 $liveTransportNotFoundError = $null
 try {
   throw "||The operation couldn't be performed because object 'g-ocean-bba895' couldn't be found on 'TPXPR04A01DC002.APCPR04A001.prod.outlook.com'."
@@ -138,6 +154,8 @@ $members = @(
 $built = Build-ExchangeRows $contacts $groups $members
 Assert-Equal 2 @($built.Contacts).Count "Duplicate emails must produce one external recipient per unique email"
 Assert-Equal 2 @($built.Members).Count "Memberships from every duplicate source ID must be preserved"
+Assert-Equal "group-one@cosulich1.onmicrosoft.com" $built.GroupById["g-1"].SmtpAddress "Every projected group must carry its exact normalized Exchange SMTP address"
+Assert-True ((Get-CanonicalExchangeProjectionJson $built) -match '"smtpAddress":"group-one@cosulich1.onmicrosoft.com"') "The exact group SMTP address must be part of the canonical projection and fingerprint"
 Assert-Equal "c-new" $built.ContactByEmail["dup@example.com"].SourceContactId "Newest source row must be the canonical duplicate owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-old") "A canonical duplicate must record its previous eligible source owner"
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
@@ -405,6 +423,7 @@ $gOceanExactRecipient = [pscustomobject]@{
   Name = $gOceanCollisionGroup.DirectoryName
   DisplayName = $gOceanCollisionGroup.GroupName
   Alias = $gOceanCollisionGroup.Alias
+  PrimarySmtpAddress = $gOceanCollisionGroup.SmtpAddress
   CustomAttribute1 = $ManagedMarker
   CustomAttribute2 = $gOceanCollisionGroup.SourceKey
   HiddenFromAddressListsEnabled = $false
@@ -415,6 +434,7 @@ $gOceanWrongNameRecipient = [pscustomobject]@{
   Name = $gOceanCollisionGroup.GroupName
   DisplayName = $gOceanCollisionGroup.GroupName
   Alias = $gOceanCollisionGroup.Alias
+  PrimarySmtpAddress = $gOceanCollisionGroup.SmtpAddress
   CustomAttribute1 = $ManagedMarker
   CustomAttribute2 = $gOceanCollisionGroup.SourceKey
   HiddenFromAddressListsEnabled = $false
@@ -422,9 +442,21 @@ $gOceanWrongNameRecipient = [pscustomobject]@{
 $gOceanWrongNameMismatches = @(Get-ExchangeDistributionGroupMismatches $gOceanWrongNameRecipient $gOceanCollisionGroup $gOceanExactProfile)
 Assert-True ($gOceanWrongNameMismatches -contains "name") "Group verification must reject the colliding visible name when the collision-safe directory Name is required"
 Assert-True ($gOceanWrongNameMismatches -notcontains "display name") "A correct visible group DisplayName must remain independent of the collision-safe directory Name"
+$gOceanWrongSmtpRecipient = [pscustomobject]@{
+  Name = $gOceanCollisionGroup.DirectoryName
+  DisplayName = $gOceanCollisionGroup.GroupName
+  Alias = $gOceanCollisionGroup.Alias
+  PrimarySmtpAddress = "$($gOceanCollisionGroup.Alias)@wrong.example"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = $gOceanCollisionGroup.SourceKey
+  HiddenFromAddressListsEnabled = $false
+}
+$gOceanWrongSmtpMismatches = @(Get-ExchangeDistributionGroupMismatches $gOceanWrongSmtpRecipient $gOceanCollisionGroup $gOceanExactProfile)
+Assert-True ($gOceanWrongSmtpMismatches -contains "primary SMTP address") "Group verification must reject an Exchange PrimarySmtpAddress that differs from the certified projection"
 $gOceanCreateChanges = @(Get-FullGroupMutationFieldChanges $null $null $gOceanCollisionGroup $true)
 Assert-True ($gOceanCreateChanges -contains "Name: (missing) -> $($gOceanCollisionGroup.DirectoryName)") "The sync notice must report the exact collision-safe group directory Name"
 Assert-True ($gOceanCreateChanges -contains "Group name: (missing) -> G OCEAN") "The sync notice must separately preserve the exact visible group name"
+Assert-True ($gOceanCreateChanges -contains "Primary SMTP address: (missing) -> $($gOceanCollisionGroup.SmtpAddress)") "The sync notice must report the exact certified group SMTP address"
 
 $contactGroupCollisionFingerprint = Get-CanonicalExchangeProjectionFingerprint $contactGroupCollisionRows
 $contactGroupCollisionFingerprintVariant = Build-ExchangeRows $contactGroupCollisionContacts $contactGroupCollisionGroups $contactGroupCollisionMembers
@@ -802,9 +834,20 @@ $firstFingerprint = Get-CanonicalExchangeProjectionFingerprint $built
 $secondFingerprint = Get-CanonicalExchangeProjectionFingerprint $shuffled
 Assert-Equal $firstFingerprint $secondFingerprint "Source certification fingerprint must remain deterministic for the same canonical projection"
 Assert-Equal `
-  "8f24552f2b9d7c3fabe4f3596457e459ae2357b2bb132050f81077cf6d0b0553" `
+  "f5847eff319cad03ba72c507f19322697070f58408e7e549b843b7373db5b6fb" `
   $firstFingerprint `
   "The exact canonical projection serializer and SHA-256 contract must remain byte-for-byte stable"
+$script:ExchangeAddressBookDomain = "alternate.onmicrosoft.com"
+$wrongRuntimeDomainRejected = $false
+try {
+  Get-CanonicalExchangeProjectionFingerprint `
+    (Build-ExchangeRows $contacts $groups $members) | Out-Null
+} catch {
+  $wrongRuntimeDomainRejected = $_.Exception.Message -match "cosulich1\.onmicrosoft\.com"
+} finally {
+  $script:ExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
+}
+Assert-True $wrongRuntimeDomainRejected "Changing the runtime Exchange group domain must fail before any projection can be certified"
 $sourceBookOnlyContacts = @($contacts | ForEach-Object {
   [pscustomobject]@{
     id = $_.id
@@ -2561,6 +2604,7 @@ $desiredNoOpGroup = [pscustomobject]@{
   DirectoryName = "Unchanged Group"
   GroupName = "Unchanged Group"
   Alias = "unchanged-group"
+  SmtpAddress = "unchanged-group@cosulich1.onmicrosoft.com"
   Description = "Current description"
   SourceKey = "FCUNO_GROUP:g-unchanged"
 }
@@ -2572,6 +2616,7 @@ $script:noOpDistributionGroup = [pscustomobject]@{
   Name = "Unchanged Group"
   DisplayName = "Unchanged Group"
   Alias = "unchanged-group"
+  PrimarySmtpAddress = "unchanged-group@cosulich1.onmicrosoft.com"
   CustomAttribute1 = $ManagedMarker
   CustomAttribute2 = "FCUNO_GROUP:g-unchanged"
   HiddenFromAddressListsEnabled = $false
@@ -2616,6 +2661,7 @@ $script:collisionRenameDistributionGroup = [pscustomobject]@{
   Name = "G OCEAN"
   DisplayName = "G OCEAN"
   Alias = "g-ocean"
+  PrimarySmtpAddress = "g-ocean@cosulich1.onmicrosoft.com"
   CustomAttribute1 = $ManagedMarker
   CustomAttribute2 = "FCUNO_GROUP:g-ocean-collision"
   HiddenFromAddressListsEnabled = $false
@@ -2693,7 +2739,7 @@ function Get-Group {
 }
 function Set-DistributionGroup {
   [CmdletBinding()]
-  param($Identity, $Alias, $Name, $DisplayName, $Notes, $CustomAttribute1, $CustomAttribute2, $HiddenFromAddressListsEnabled)
+  param($Identity, $Alias, $PrimarySmtpAddress, $Name, $DisplayName, $Notes, $CustomAttribute1, $CustomAttribute2, $HiddenFromAddressListsEnabled)
   $script:setDistributionGroupCalls += 1
   if ($script:newDistributionGroup -and $Identity -in @($script:newDistributionGroup.Identity, $script:newDistributionGroup.Guid)) {
     $script:newGroupMetadataSetAttempts += 1
@@ -2709,12 +2755,14 @@ function Set-DistributionGroup {
     $script:newDistributionGroup.CustomAttribute2 = $CustomAttribute2
     $script:newDistributionGroup.HiddenFromAddressListsEnabled = [bool]$HiddenFromAddressListsEnabled
     if (Clean-Text $Alias) { $script:newDistributionGroup.Alias = $Alias }
+    if (Clean-Text $PrimarySmtpAddress) { $script:newDistributionGroup.PrimarySmtpAddress = $PrimarySmtpAddress }
     if (Clean-Text $Name) { $script:newDistributionGroup.Name = $Name }
     if (Clean-Text $DisplayName) { $script:newDistributionGroup.DisplayName = $DisplayName }
   }
   if ($Identity -eq $script:collisionRenameDistributionGroup.Guid) {
     $script:collisionRenameOrder += "distribution recipient"
     $script:collisionRenameDistributionGroup.Alias = $Alias
+    $script:collisionRenameDistributionGroup.PrimarySmtpAddress = $PrimarySmtpAddress
     $script:collisionRenameDistributionGroup.Name = $Name
     $script:collisionRenameDistributionGroup.DisplayName = $DisplayName
     $script:collisionRenameDistributionGroup.CustomAttribute1 = $CustomAttribute1
@@ -2750,7 +2798,7 @@ function Set-Group {
 }
 function New-DistributionGroup {
   [CmdletBinding()]
-  param($Name, $DisplayName, $Alias)
+  param($Name, $DisplayName, $Alias, $PrimarySmtpAddress)
   if ($Alias -eq "new-group") {
     $script:newDistributionGroupCalls += 1
     $script:newDistributionGroupInitialName = $Name
@@ -2763,6 +2811,7 @@ function New-DistributionGroup {
       Name = $Name
       DisplayName = $DisplayName
       Alias = $Alias
+      PrimarySmtpAddress = $PrimarySmtpAddress
       CustomAttribute1 = ""
       CustomAttribute2 = ""
       HiddenFromAddressListsEnabled = $false
@@ -2809,6 +2858,7 @@ $desiredCollisionRenameGroup = [pscustomobject]@{
   GroupName = "G OCEAN"
   BaseAlias = "g-ocean"
   Alias = "g-ocean-bba895"
+  SmtpAddress = "g-ocean-bba895@cosulich1.onmicrosoft.com"
   Description = "Current G OCEAN description"
   SourceKey = "FCUNO_GROUP:g-ocean-collision"
 }
@@ -2819,6 +2869,7 @@ Upsert-ExchangeDistributionGroup $desiredCollisionRenameGroup $collisionRenameSt
 Assert-Equal "group profile,distribution recipient" ($script:collisionRenameOrder -join ",") "A stale group whose alias changes after a contact/group collision must update its immutable group profile before renaming the distribution recipient"
 Assert-Equal $script:collisionRenameGroupProfile.Guid $script:collisionRenameSetGroupIdentity "Set-Group must use the correlated Get-Group profile identity, never the distribution-recipient identity"
 Assert-Equal "g-ocean-bba895" $script:collisionRenameDistributionGroup.Alias "The collision-suffixed group alias must be applied in place"
+Assert-Equal $desiredCollisionRenameGroup.SmtpAddress $script:collisionRenameDistributionGroup.PrimarySmtpAddress "An updated group must receive the exact certified PrimarySmtpAddress"
 Assert-Equal $desiredCollisionRenameGroup.DirectoryName $script:collisionRenameDistributionGroup.Name "A contact/group collision must update the group to its distinct directory Name"
 Assert-Equal $desiredCollisionRenameGroup.GroupName $script:collisionRenameDistributionGroup.DisplayName "A collision-safe directory rename must preserve the exact visible group DisplayName"
 Assert-Equal 1 $collisionRenameStats.updatedGroups "A collision-suffixed existing group must be counted as updated"
@@ -2921,6 +2972,7 @@ $newDesiredGroup = [pscustomobject]@{
   DirectoryName = "New Group [collision-safe]"
   GroupName = "New Group"
   Alias = "new-group"
+  SmtpAddress = "new-group@cosulich1.onmicrosoft.com"
   Description = "New group notes"
   SourceKey = "FCUNO_GROUP:g-new"
 }
@@ -2946,6 +2998,7 @@ try {
 Assert-Equal 1 $script:newDistributionGroupCalls "A missing distribution group must still be created"
 Assert-Equal $newDesiredGroup.DirectoryName $script:newDistributionGroupInitialName "New-DistributionGroup must use the collision-safe directory Name from the canonical projection"
 Assert-Equal $newDesiredGroup.GroupName $script:newDistributionGroupInitialDisplayName "New-DistributionGroup must preserve the exact visible FCUNO group name as DisplayName"
+Assert-Equal $newDesiredGroup.SmtpAddress $script:newDistributionGroup.PrimarySmtpAddress "New-DistributionGroup must set the exact certified PrimarySmtpAddress"
 Assert-Equal 3 $script:newGroupMetadataSetAttempts "A newly created group marker write must retry the exact live transport-prefixed cross-DC not-found response"
 Assert-Equal 3 $script:newGroupProfileSetAttempts "A newly created group Notes write must retry transient cross-DC not-found responses"
 Assert-Equal 5 $script:getGroupCalls "Transient Notes-write misses must force four immutable profile resolutions before the final exact verification read"
@@ -3139,6 +3192,12 @@ $finalProjectionRows = @{
 $exactFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
 Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $exactFinalStats
 Assert-Equal 0 $exactFinalStats.failedQueueRows "Fresh final certification must accept exact contact, profile, and group metadata"
+$script:noOpDistributionGroup.PrimarySmtpAddress = "unchanged-group@wrong.example"
+$driftedGroupSmtpFinalStats = @{ failedQueueRows = 0; changeDetails = @() }
+Confirm-FinalExchangeProjection $finalProjectionRows @($script:noOpMailContact) @($script:noOpContactProfile) @($script:noOpDistributionGroup) @($script:noOpGroupProfile) $driftedGroupSmtpFinalStats
+Assert-True ([int]$driftedGroupSmtpFinalStats.failedQueueRows -gt 0) "Fresh final certification must reject a drifted Exchange group PrimarySmtpAddress"
+Assert-True ((@($driftedGroupSmtpFinalStats.changeDetails | ForEach-Object { $_.result }) -join " ") -match "primary SMTP address") "Fresh final certification must identify the drifted group PrimarySmtpAddress"
+$script:noOpDistributionGroup.PrimarySmtpAddress = $desiredNoOpGroup.SmtpAddress
 
 $preservedShadowMailContact = [pscustomobject]@{
   Identity = "preserved-shadow-placeholder"

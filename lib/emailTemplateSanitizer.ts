@@ -1,3 +1,5 @@
+import sanitizeHtml from "sanitize-html"
+
 export type SanitizableEmailTemplate = {
   subject?: string
   to?: string
@@ -9,6 +11,306 @@ export type SanitizableEmailTemplate = {
 
 const MIME_HEADER_RE =
   /^(content-type|content-transfer-encoding|content-disposition|mime-version|x-[a-z0-9-]+|charset|boundary)\b/i
+
+const SAFE_HTML_TAGS = [
+  "a",
+  "b",
+  "blockquote",
+  "br",
+  "caption",
+  "center",
+  "code",
+  "col",
+  "colgroup",
+  "div",
+  "em",
+  "font",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "i",
+  "img",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "s",
+  "span",
+  "strike",
+  "strong",
+  "sub",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "u",
+  "ul",
+]
+
+const NON_TEXT_HTML_TAGS = [
+  "audio",
+  "button",
+  "canvas",
+  "embed",
+  "form",
+  "head",
+  "iframe",
+  "math",
+  "noembed",
+  "noframes",
+  "noscript",
+  "object",
+  "option",
+  "script",
+  "select",
+  "style",
+  "svg",
+  "template",
+  "textarea",
+  "title",
+  "video",
+  "xmp",
+]
+
+const CSS_DANGEROUS_VALUE_RE =
+  /(?:url\s*\(|expression\s*\(|@import|javascript\s*:|vbscript\s*:|data\s*:|behavior\s*:|-moz-binding|[<>])/i
+const CSS_SAFE_TOKEN_SOURCE = String.raw`[a-z0-9#(),.%'"\s_-]{1,256}`
+const CSS_LENGTH_SOURCE =
+  String.raw`(?:0|auto|-?(?:\d{1,4}(?:\.\d{1,3})?|\.\d{1,3})(?:px|pt|pc|em|rem|ex|ch|%|in|cm|mm)?)`
+const CSS_LENGTH_LIST_SOURCE = String.raw`${CSS_LENGTH_SOURCE}(?:\s+${CSS_LENGTH_SOURCE}){0,3}`
+const CSS_COLOR_SOURCE =
+  String.raw`(?:transparent|currentcolor|#[0-9a-f]{3,8}|[a-z]{1,24}|rgba?\(\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))`
+
+function safeCssPattern(source: string) {
+  return new RegExp(
+    String.raw`^(?![\s\S]*${CSS_DANGEROUS_VALUE_RE.source})${source}$`,
+    "i"
+  )
+}
+
+const CSS_LENGTH_RE = safeCssPattern(CSS_LENGTH_SOURCE)
+const CSS_LENGTH_LIST_RE = safeCssPattern(CSS_LENGTH_LIST_SOURCE)
+const CSS_COLOR_RE = safeCssPattern(CSS_COLOR_SOURCE)
+const CSS_BORDER_RE = safeCssPattern(CSS_SAFE_TOKEN_SOURCE)
+const CSS_FONT_FAMILY_RE = safeCssPattern(String.raw`[a-z0-9'"\s,_-]{1,160}`)
+const CSS_FONT_SIZE_RE = safeCssPattern(
+  String.raw`(?:${CSS_LENGTH_SOURCE}|xx-small|x-small|small|medium|large|x-large|xx-large|smaller|larger)`
+)
+const CSS_LINE_HEIGHT_RE = safeCssPattern(
+  String.raw`(?:normal|${CSS_LENGTH_SOURCE}|(?:\d{1,3}(?:\.\d{1,3})?|\.\d{1,3}))`
+)
+
+function cleanUri(value: string) {
+  return decodeBasicHtmlEntities(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim()
+}
+
+function uriScheme(value: string) {
+  const compact = value.replace(/\s+/g, "")
+  return compact.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() || ""
+}
+
+function isSafeLinkHref(value: string) {
+  const href = cleanUri(value)
+  if (!href || href.startsWith("//")) return false
+
+  const scheme = uriScheme(href)
+  return !scheme || ["http", "https", "mailto", "tel"].includes(scheme)
+}
+
+function isSafeImageSource(value: string) {
+  const src = cleanUri(value)
+  if (!src || src.startsWith("//")) return false
+
+  const scheme = uriScheme(src)
+  if (!scheme) return true
+  if (scheme === "http" || scheme === "https") return true
+  if (scheme === "cid") return /^cid:[^<>'"\s]+$/i.test(src)
+  if (scheme === "data") {
+    return /^data:image\/(?:png|gif|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i.test(src)
+  }
+  return false
+}
+
+function sanitizeHtmlAllowlist(value: string) {
+  return sanitizeHtml(value, {
+    allowedTags: SAFE_HTML_TAGS,
+    allowedAttributes: {
+      "*": ["style", "title", "dir", "lang"],
+      a: ["href", "rel", "target", "title"],
+      blockquote: ["cite", "style"],
+      col: ["align", "span", "style", "width"],
+      font: ["color", "face", "size", "style"],
+      img: ["alt", "height", "src", "style", "title", "width"],
+      li: ["style", "type", "value"],
+      ol: ["start", "style", "type"],
+      table: [
+        "align",
+        "bgcolor",
+        "border",
+        "cellpadding",
+        "cellspacing",
+        "data-fc-safe-template-table",
+        "height",
+        "role",
+        "style",
+        "width",
+      ],
+      td: [
+        "align",
+        "bgcolor",
+        "colspan",
+        "headers",
+        "height",
+        "rowspan",
+        "style",
+        "valign",
+        "width",
+      ],
+      th: [
+        "align",
+        "bgcolor",
+        "colspan",
+        "headers",
+        "height",
+        "rowspan",
+        "scope",
+        "style",
+        "valign",
+        "width",
+      ],
+      tr: ["align", "bgcolor", "height", "style", "valign"],
+      ul: ["style", "type"],
+    },
+    allowedStyles: {
+      "*": {
+        "background": [CSS_COLOR_RE],
+        "background-color": [CSS_COLOR_RE],
+        "border": [CSS_BORDER_RE],
+        "border-bottom": [CSS_BORDER_RE],
+        "border-color": [CSS_COLOR_RE],
+        "border-left": [CSS_BORDER_RE],
+        "border-right": [CSS_BORDER_RE],
+        "border-style": [safeCssPattern(String.raw`(?:none|hidden|dotted|dashed|solid|double)(?:\s+(?:none|hidden|dotted|dashed|solid|double)){0,3}`)],
+        "border-top": [CSS_BORDER_RE],
+        "border-width": [CSS_LENGTH_LIST_RE],
+        "color": [CSS_COLOR_RE],
+        "direction": [safeCssPattern(String.raw`(?:ltr|rtl)`)],
+        "font-family": [CSS_FONT_FAMILY_RE],
+        "font-size": [CSS_FONT_SIZE_RE],
+        "font-style": [safeCssPattern(String.raw`(?:normal|italic|oblique)`)],
+        "font-weight": [safeCssPattern(String.raw`(?:normal|bold|bolder|lighter|[1-9]00)`)],
+        "height": [CSS_LENGTH_RE],
+        "letter-spacing": [CSS_LENGTH_RE],
+        "line-height": [CSS_LINE_HEIGHT_RE],
+        "list-style-position": [safeCssPattern(String.raw`(?:inside|outside)`)],
+        "list-style-type": [safeCssPattern(String.raw`[a-z-]{1,32}`)],
+        "margin": [CSS_LENGTH_LIST_RE],
+        "margin-bottom": [CSS_LENGTH_RE],
+        "margin-left": [CSS_LENGTH_RE],
+        "margin-right": [CSS_LENGTH_RE],
+        "margin-top": [CSS_LENGTH_RE],
+        "max-height": [CSS_LENGTH_RE],
+        "max-width": [CSS_LENGTH_RE],
+        "min-height": [CSS_LENGTH_RE],
+        "min-width": [CSS_LENGTH_RE],
+        "mso-bidi-font-family": [CSS_FONT_FAMILY_RE],
+        "mso-fareast-font-family": [CSS_FONT_FAMILY_RE],
+        "mso-fareast-language": [safeCssPattern(String.raw`[a-z0-9-]{1,24}`)],
+        "mso-line-height-rule": [safeCssPattern(String.raw`(?:exactly|at-least)`)],
+        "mso-padding-alt": [CSS_LENGTH_LIST_RE],
+        "mso-para-margin": [CSS_LENGTH_LIST_RE],
+        "mso-para-margin-bottom": [CSS_LENGTH_RE],
+        "mso-para-margin-left": [CSS_LENGTH_RE],
+        "mso-para-margin-right": [CSS_LENGTH_RE],
+        "mso-para-margin-top": [CSS_LENGTH_RE],
+        "mso-table-lspace": [CSS_LENGTH_RE],
+        "mso-table-rspace": [CSS_LENGTH_RE],
+        "mso-text-raise": [CSS_LENGTH_RE],
+        "padding": [CSS_LENGTH_LIST_RE],
+        "padding-bottom": [CSS_LENGTH_RE],
+        "padding-left": [CSS_LENGTH_RE],
+        "padding-right": [CSS_LENGTH_RE],
+        "padding-top": [CSS_LENGTH_RE],
+        "table-layout": [safeCssPattern(String.raw`(?:auto|fixed)`)],
+        "text-align": [safeCssPattern(String.raw`(?:left|right|center|justify|start|end)`)],
+        "text-decoration": [safeCssPattern(String.raw`(?:none|underline|overline|line-through)(?:\s+(?:underline|overline|line-through)){0,2}`)],
+        "text-indent": [CSS_LENGTH_RE],
+        "text-transform": [safeCssPattern(String.raw`(?:none|capitalize|uppercase|lowercase)`)],
+        "vertical-align": [
+          safeCssPattern(
+            String.raw`(?:baseline|sub|super|text-top|text-bottom|middle|top|bottom|${CSS_LENGTH_SOURCE})`
+          ),
+        ],
+        "white-space": [safeCssPattern(String.raw`(?:normal|nowrap|pre|pre-wrap|pre-line|break-spaces)`)],
+        "width": [CSS_LENGTH_RE],
+        "word-break": [safeCssPattern(String.raw`(?:normal|break-all|keep-all|break-word)`)],
+        "word-spacing": [CSS_LENGTH_RE],
+        "overflow-wrap": [safeCssPattern(String.raw`(?:normal|break-word|anywhere)`)],
+        "border-collapse": [safeCssPattern(String.raw`(?:collapse|separate)`)],
+        "border-spacing": [safeCssPattern(String.raw`${CSS_LENGTH_SOURCE}(?:\s+${CSS_LENGTH_SOURCE})?`)],
+        "empty-cells": [safeCssPattern(String.raw`(?:show|hide)`)],
+      },
+    },
+    allowedSchemes: ["http", "https", "mailto", "tel"],
+    allowedSchemesByTag: {
+      img: ["http", "https", "cid", "data"],
+    },
+    allowedSchemesAppliedToAttributes: ["href", "src", "cite"],
+    allowProtocolRelative: false,
+    disallowedTagsMode: "discard",
+    enforceHtmlBoundary: false,
+    nestingLimit: 50,
+    nonTextTags: NON_TEXT_HTML_TAGS,
+    transformTags: {
+      a: (tagName, attribs) => {
+        const href = isSafeLinkHref(attribs.href || "") ? cleanUri(attribs.href) : ""
+        const target = attribs.target === "_blank" || attribs.target === "_self"
+          ? attribs.target
+          : ""
+        const rel = target === "_blank" ? "noopener noreferrer" : ""
+        const nextAttribs = { ...attribs }
+        delete nextAttribs.href
+        delete nextAttribs.rel
+        delete nextAttribs.target
+
+        return {
+          tagName,
+          attribs: {
+            ...nextAttribs,
+            ...(href ? { href } : {}),
+            ...(target ? { target } : {}),
+            ...(rel ? { rel } : {}),
+          },
+        }
+      },
+      img: (tagName, attribs) => {
+        const src = isSafeImageSource(attribs.src || "") ? cleanUri(attribs.src) : ""
+        const nextAttribs = { ...attribs }
+        delete nextAttribs.src
+        return {
+          tagName,
+          attribs: {
+            ...nextAttribs,
+            ...(src ? { src } : {}),
+          },
+        }
+      },
+    },
+    exclusiveFilter: (frame) => {
+      if (frame.tag === "a" && !frame.attribs.href) return "excludeTag"
+      if (frame.tag === "img" && !frame.attribs.src) return true
+      return false
+    },
+  })
+}
 
 function decodeQuotedPrintable(value: string) {
   if (!/(=\r?\n|=[0-9a-fA-F]{2})/.test(value)) return value
@@ -353,9 +655,14 @@ export function sanitizeTemplateBodyHtml(value: string) {
       : ""
   }
 
-  if (!converted) return "<p></p>"
-  if (/<[a-z][\s\S]*>/i.test(converted)) return converted
-  return escapeHtml(converted).replace(/\n/g, "<br>")
+  const sanitized = sanitizeHtmlAllowlist(converted)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  if (!sanitized) return "<p></p>"
+  if (/<[a-z][\s\S]*>/i.test(sanitized)) return sanitized
+  return sanitized.replace(/\n/g, "<br>")
 }
 
 export function sanitizeTemplateText(value: string) {

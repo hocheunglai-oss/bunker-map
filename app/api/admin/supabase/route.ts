@@ -21,10 +21,6 @@ const PAGE_TABLES: Record<string, Set<string>> = {
     "shared_addressbook_group_members",
     "shared_addressbook_groups",
   ]),
-  "email-templates": new Set([
-    "shared_addressbook_contacts",
-    "shared_addressbook_groups",
-  ]),
 }
 
 const PAGE_AUDIT_CONTEXT: Record<string, { label: string; path: string }> = {

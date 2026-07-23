@@ -33,7 +33,10 @@ const PAGE_TABLES: Record<string, string[]> = {
     "shared_addressbook_groups",
     "shared_addressbook_group_members",
   ],
-  "email-templates": ["email_templates"],
+  "email-templates": [
+    "email_templates",
+    "outlook_template_insertion_attempts",
+  ],
   "user-management": ["admin_users", "admin_role_defaults"],
   "event-calendar": ["office_calendar_store"],
   "task-calendar": ["office_calendar_store"],

@@ -7,11 +7,14 @@ function xmlEscape(value) {
     .replace(/'/g, "&apos;")
 }
 
+export const OUTLOOK_ADDIN_VERSION = "1.0.9.0"
+export const OUTLOOK_ADDIN_ASSET_VERSION = "2026-07-23-dialog-auth-v1"
+export const OUTLOOK_ADDIN_ICON_SIZES = Object.freeze([16, 32, 64, 80, 128])
+
 export function buildOutlookManifest(rawBaseUrl) {
   const baseUrl = xmlEscape(String(rawBaseUrl || "https://fcuno.com").replace(/\/$/, ""))
-  const assetVersion = "2026-06-11-group-smtp-v1"
-  const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${assetVersion}`
-  const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${assetVersion}`
+  const taskpaneUrl = `${baseUrl}/api/outlook-addin/taskpane?v=${OUTLOOK_ADDIN_ASSET_VERSION}`
+  const commandsUrl = `${baseUrl}/api/outlook-addin/commands?v=${OUTLOOK_ADDIN_ASSET_VERSION}`
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
@@ -19,13 +22,13 @@ export function buildOutlookManifest(rawBaseUrl) {
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>6f6b5bde-1a6b-4c82-8300-1d2d728c7c61</Id>
-  <Version>1.0.7.0</Version>
+  <Version>${OUTLOOK_ADDIN_VERSION}</Version>
   <ProviderName>Fratelli Cosulich</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Fratelli Cosulich Templates"/>
   <Description DefaultValue="Insert shared company email templates from the central template library."/>
-  <IconUrl DefaultValue="${baseUrl}/outlook-template-icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
+  <IconUrl DefaultValue="${baseUrl}/outlook-template-icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="${baseUrl}/outlook-template-icon-128.png"/>
   <SupportUrl DefaultValue="${baseUrl}/admin/outlooktemplates"/>
   <AppDomains>
     <AppDomain>${baseUrl}</AppDomain>
@@ -35,7 +38,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.3"/>
+      <Set Name="Mailbox" MinVersion="1.4"/>
     </Sets>
   </Requirements>
   <FormSettings>
@@ -59,7 +62,7 @@ export function buildOutlookManifest(rawBaseUrl) {
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Requirements>
-      <bt:Sets DefaultMinVersion="1.3">
+      <bt:Sets DefaultMinVersion="1.4">
         <bt:Set Name="Mailbox"/>
       </bt:Sets>
     </Requirements>
@@ -80,6 +83,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -102,6 +106,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -118,6 +123,7 @@ export function buildOutlookManifest(rawBaseUrl) {
       <bt:Images>
         <bt:Image id="Icon.16" DefaultValue="${baseUrl}/outlook-template-icon-16.png"/>
         <bt:Image id="Icon.32" DefaultValue="${baseUrl}/outlook-template-icon-32.png"/>
+        <bt:Image id="Icon.64" DefaultValue="${baseUrl}/outlook-template-icon-64.png"/>
         <bt:Image id="Icon.80" DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
       </bt:Images>
       <bt:Urls>
@@ -157,6 +163,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                     <Icon>
                       <bt:Image size="16" resid="Icon.16"/>
                       <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="64" resid="Icon.64"/>
                       <bt:Image size="80" resid="Icon.80"/>
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
@@ -180,6 +187,7 @@ export function buildOutlookManifest(rawBaseUrl) {
                   <Icon>
                     <bt:Image size="16" resid="Icon.16"/>
                     <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="64" resid="Icon.64"/>
                     <bt:Image size="80" resid="Icon.80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
@@ -197,6 +205,7 @@ export function buildOutlookManifest(rawBaseUrl) {
         <bt:Images>
           <bt:Image id="Icon.16" DefaultValue="${baseUrl}/outlook-template-icon-16.png"/>
           <bt:Image id="Icon.32" DefaultValue="${baseUrl}/outlook-template-icon-32.png"/>
+          <bt:Image id="Icon.64" DefaultValue="${baseUrl}/outlook-template-icon-64.png"/>
           <bt:Image id="Icon.80" DefaultValue="${baseUrl}/outlook-template-icon-80.png"/>
         </bt:Images>
         <bt:Urls>

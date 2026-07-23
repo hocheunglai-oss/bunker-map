@@ -45,6 +45,12 @@ const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723080326"
 const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
+const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
+const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
+const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
+  "fcuno.outlook-template-recipient-resolution/v1"
+const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
+  "fcuno.outlook-template-recipient-truth/v2"
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
@@ -114,6 +120,7 @@ const BACKUP_EXTERNAL_SECTION_KEYS = [
   "googleCalendarEvents",
 ] as const
 const BACKUP_EPHEMERAL_TABLES = [
+  "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
 ].sort()
@@ -370,6 +377,644 @@ function requireExactKeys(
 ) {
   if (JSON.stringify(Object.keys(value)) !== JSON.stringify(expected)) {
     throw new Error(`${label} has unexpected fields or field order.`)
+  }
+}
+
+function hasExactKeySet(value: unknown, expected: readonly string[]) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    JSON.stringify(Object.keys(value as Record<string, unknown>).sort()) ===
+      JSON.stringify([...expected].sort())
+  )
+}
+
+function exactRecordValues(
+  value: unknown,
+  expected: Record<string, string | number | boolean>
+) {
+  if (!hasExactKeySet(value, Object.keys(expected))) return false
+  const record = value as Record<string, unknown>
+  return Object.entries(expected).every(([key, expectedValue]) =>
+    record[key] === expectedValue
+  )
+}
+
+function sameTimestamp(left: unknown, right: unknown) {
+  return (
+    typeof left === "string" &&
+    typeof right === "string" &&
+    left.length > 0 &&
+    right.length > 0 &&
+    !Number.isNaN(Date.parse(left)) &&
+    !Number.isNaN(Date.parse(right)) &&
+    Date.parse(left) === Date.parse(right)
+  )
+}
+
+function cleanBackupRecipientText(value: unknown) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function splitBackupOutlookRecipientText(value: unknown) {
+  const text = String(value || "").replace(/\r?\n/g, " ")
+  const parts: string[] = []
+  let current = ""
+  let inQuote = false
+  let angleDepth = 0
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text.charAt(index)
+    if (char === "\"" && text.charAt(index - 1) !== "\\") inQuote = !inQuote
+    if (!inQuote && char === "<") angleDepth += 1
+    if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1
+    if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
+      if (current.trim()) parts.push(current.trim())
+      current = ""
+      continue
+    }
+    current += char
+  }
+
+  if (current.trim()) parts.push(current.trim())
+  return parts
+}
+
+function parseBackupOutlookRecipientLiteral(literal: string) {
+  const trimmed = cleanBackupRecipientText(literal)
+  const angleMatch = trimmed.match(/^(.*?)\s*<([^<>]+)>\s*$/)
+  if (!angleMatch) {
+    return {
+      displayName: trimmed.includes("@") ? "" : trimmed.replace(/^"+|"+$/g, ""),
+      sourceValue: trimmed.replace(/^"+|"+$/g, ""),
+    }
+  }
+  return {
+    displayName: cleanBackupRecipientText(angleMatch[1]).replace(
+      /^"+|"+$/g,
+      ""
+    ),
+    sourceValue: cleanBackupRecipientText(angleMatch[2]).replace(
+      /^"+|"+$/g,
+      ""
+    ),
+  }
+}
+
+type BackupTemplateRecipientAggregate = {
+  total: number
+  sendable: number
+  missing: number
+  ambiguous: number
+  allTemplatesSendable: boolean
+}
+
+type BackupProjectionRecipientState = {
+  contactsById: Map<
+    string,
+    {
+      address: string
+      displayName: string
+    }
+  >
+  groupsById: Map<
+    string,
+    {
+      alias: string
+      address: string
+      displayName: string
+    }
+  >
+  contactSourceIds: Set<string>
+  groupSourceIds: Set<string>
+}
+
+function buildBackupProjectionRecipientState(
+  projection: Record<string, unknown>,
+  data: Record<string, unknown>
+): BackupProjectionRecipientState {
+  const projectionContacts = requireArray(
+    projection.contacts,
+    "Backup latest Exchange projection contacts"
+  )
+  const projectionGroups = requireArray(
+    projection.groups,
+    "Backup latest Exchange projection groups"
+  )
+  const sharedContactsById = new Map<string, Record<string, unknown>>()
+  for (const [index, value] of requireArray(
+    data.sharedAddressbookContacts,
+    "Backup shared address-book contacts"
+  ).entries()) {
+    const row = asRecord(value, `Backup shared address-book contact ${index}`)
+    const id = cleanBackupRecipientText(row.id)
+    if (!id || sharedContactsById.has(id)) {
+      throw new Error("Latest backup contains an invalid shared contact identity.")
+    }
+    sharedContactsById.set(id, row)
+  }
+  const sharedGroupsById = new Map<string, Record<string, unknown>>()
+  for (const [index, value] of requireArray(
+    data.sharedAddressbookGroups,
+    "Backup shared address-book groups"
+  ).entries()) {
+    const row = asRecord(value, `Backup shared address-book group ${index}`)
+    const id = cleanBackupRecipientText(row.id)
+    if (!id || sharedGroupsById.has(id)) {
+      throw new Error("Latest backup contains an invalid shared group identity.")
+    }
+    sharedGroupsById.set(id, row)
+  }
+
+  const contactsById: BackupProjectionRecipientState["contactsById"] =
+    new Map()
+  const groupsById: BackupProjectionRecipientState["groupsById"] = new Map()
+  const contactSourceIds = new Set<string>()
+  const groupSourceIds = new Set<string>()
+  const emailPattern = /^[^@\s]+@[^@\s]+$/
+  const aliasPattern = /^[a-z0-9._-]{1,64}$/
+
+  for (const [index, value] of projectionContacts.entries()) {
+    const contact = asRecord(
+      value,
+      `Backup latest Exchange projection contact ${index}`
+    )
+    const sourceId = cleanBackupRecipientText(contact.sourceContactId)
+    const rawAddress = cleanBackupRecipientText(contact.externalEmailAddress)
+    const address = rawAddress.toLowerCase()
+    if (!sourceId || contactSourceIds.has(sourceId)) {
+      throw new Error(
+        "Latest backup Exchange projection contains a missing or duplicate contact identity."
+      )
+    }
+    contactSourceIds.add(sourceId)
+    if (
+      !emailPattern.test(address) ||
+      rawAddress !== address
+    ) {
+      throw new Error(
+        "Latest backup Exchange projection contains an unusable contact identity."
+      )
+    }
+    const shared = sharedContactsById.get(sourceId)
+    if (
+      !shared ||
+      cleanBackupRecipientText(shared.primary_email).toLowerCase() !== address
+    ) {
+      throw new Error(
+        `Latest backup projected contact ${sourceId} does not match its source row.`
+      )
+    }
+    contactsById.set(sourceId, {
+      address,
+      displayName: cleanBackupRecipientText(
+        contact.displayName ||
+          contact.directoryName ||
+          shared.display_name ||
+          shared.nickname ||
+          address
+      ),
+    })
+  }
+
+  for (const [index, value] of projectionGroups.entries()) {
+    const group = asRecord(
+      value,
+      `Backup latest Exchange projection group ${index}`
+    )
+    const sourceId = cleanBackupRecipientText(group.sourceGroupId)
+    const rawAlias = cleanBackupRecipientText(group.alias)
+    const alias = rawAlias.toLowerCase()
+    const rawAddress = cleanBackupRecipientText(group.smtpAddress)
+    const address = rawAddress.toLowerCase()
+    const memberCount = Number(group.memberCount)
+    if (!sourceId || groupSourceIds.has(sourceId)) {
+      throw new Error(
+        "Latest backup Exchange projection contains a missing or duplicate group identity."
+      )
+    }
+    groupSourceIds.add(sourceId)
+    if (
+      rawAlias !== alias ||
+      !aliasPattern.test(alias) ||
+      rawAddress !== address ||
+      !emailPattern.test(address) ||
+      address.slice(0, address.lastIndexOf("@")) !== alias ||
+      !Number.isSafeInteger(memberCount) ||
+      memberCount < 0
+    ) {
+      throw new Error(
+        "Latest backup Exchange projection contains an unusable group identity."
+      )
+    }
+    const shared = sharedGroupsById.get(sourceId)
+    if (
+      !shared ||
+      Number(shared.member_count) !== memberCount ||
+      cleanBackupRecipientText(shared.name) !==
+        cleanBackupRecipientText(group.groupName)
+    ) {
+      throw new Error(
+        `Latest backup projected group ${sourceId} does not match its source row.`
+      )
+    }
+    if (memberCount > 0) {
+      groupsById.set(sourceId, {
+        alias,
+        address,
+        displayName: cleanBackupRecipientText(
+          group.groupName ||
+            group.directoryName ||
+            shared.name ||
+            shared.nickname ||
+            alias
+        ),
+      })
+    }
+  }
+
+  return { contactsById, groupsById, contactSourceIds, groupSourceIds }
+}
+
+function verifyBackupTemplateRecipientVerifier(
+  value: unknown,
+  checkpoint: Record<string, unknown>,
+  aggregate: BackupTemplateRecipientAggregate,
+  label: string
+) {
+  const verification = asRecord(value, label)
+  const expectedTemplateCounts = {
+    total: aggregate.total,
+    unresolved: 0,
+    stale: 0,
+    invalidShape: 0,
+    withMissingRecipients: aggregate.missing,
+    withAmbiguousRecipients: aggregate.ambiguous,
+    sendable: aggregate.sendable,
+  }
+  if (
+    verification.schema !== OUTLOOK_TEMPLATE_TRUTH_SCHEMA ||
+    verification.valid !== true ||
+    verification.sourceTruthValid !== true ||
+    verification.allTemplatesSendable !== aggregate.allTemplatesSendable ||
+    verification.certificationRunId !== checkpoint.latestCertificationRunId ||
+    verification.certifiedAt !== checkpoint.latestCertificationAt ||
+    verification.sourceFingerprint !== checkpoint.latestSourceFingerprint ||
+    !exactRecordValues(verification.templates, expectedTemplateCounts)
+  ) {
+    throw new Error(`${label} does not match the exported Outlook templates.`)
+  }
+  const queue = asRecord(verification.queue, `${label} Exchange queue`)
+  if (
+    !["pending", "processing", "failed", "terminalFailed"].every(
+      (key) => Number.isSafeInteger(queue[key]) && queue[key] === 0
+    )
+  ) {
+    throw new Error(`${label} was not captured against a settled Exchange queue.`)
+  }
+
+  return {
+    certificationRunId: String(checkpoint.latestCertificationRunId || ""),
+    certifiedAt: String(checkpoint.latestCertificationAt || ""),
+    sourceFingerprint: String(checkpoint.latestSourceFingerprint || ""),
+    total: aggregate.total,
+    sendable: aggregate.sendable,
+    missing: aggregate.missing,
+    ambiguous: aggregate.ambiguous,
+    unresolved: 0,
+    stale: 0,
+    invalidShape: 0,
+    allTemplatesSendable: aggregate.allTemplatesSendable,
+  }
+}
+
+function verifyBackupTemplateRecipientTruth(
+  data: Record<string, unknown>,
+  truth: Record<string, unknown>,
+  latestCertification: Record<string, unknown>,
+  latestProjectionSnapshot: Record<string, unknown>,
+  checkpointBefore: Record<string, unknown>,
+  checkpointAfter: Record<string, unknown>,
+  migrationHead: string
+) {
+  const projection = asRecord(
+    JSON.parse(String(latestProjectionSnapshot.canonical_json || "")),
+    "Backup latest Exchange projection"
+  )
+  const projectionState = buildBackupProjectionRecipientState(projection, data)
+  const currentRunId = String(checkpointAfter.latestCertificationRunId || "")
+  const currentCertifiedAt = String(
+    checkpointAfter.latestCertificationAt || ""
+  )
+  const currentFingerprint = String(
+    checkpointAfter.latestSourceFingerprint || ""
+  )
+  if (
+    currentRunId !== String(latestCertification.run_id || "") ||
+    currentFingerprint !== String(latestCertification.source_fingerprint || "") ||
+    !sameTimestamp(currentCertifiedAt, latestCertification.certified_at)
+  ) {
+    throw new Error(
+      "Latest backup Outlook template truth is not anchored to its exported certification."
+    )
+  }
+
+  const aggregate: BackupTemplateRecipientAggregate = {
+    total: 0,
+    sendable: 0,
+    missing: 0,
+    ambiguous: 0,
+    allTemplatesSendable: true,
+  }
+  const resolutionKeys = [
+    "schema",
+    "certificationRunId",
+    "certifiedAt",
+    "sourceFingerprint",
+    "resolvedAt",
+    "refs",
+    "counts",
+  ]
+  const refKeys = [
+    "field",
+    "position",
+    "literal",
+    "displayName",
+    "sourceValue",
+    "kind",
+    "sourceId",
+    "resolvedAddress",
+    "status",
+  ]
+  const fieldColumns = {
+    to: "to_recipients",
+    cc: "cc_recipients",
+    bcc: "bcc_recipients",
+  } as const
+  const emailPattern = /^[^@\s]+@[^@\s]+$/
+  const templates = requireArray(
+    data.emailTemplates,
+    "Backup Outlook email templates"
+  )
+
+  for (const [templateIndex, value] of templates.entries()) {
+    const template = asRecord(value, `Backup Outlook template ${templateIndex}`)
+    const templateId =
+      cleanBackupRecipientText(template.id) || String(templateIndex)
+    const label = `Backup Outlook template ${templateId} recipient evidence`
+    const resolution = asRecord(template.recipient_resolution, label)
+    aggregate.total += 1
+    let templateMissing = false
+    let templateAmbiguous = false
+
+    const allowedResolutionKeys = Object.prototype.hasOwnProperty.call(
+      resolution,
+      "reconciliationRequired"
+    )
+      ? [...resolutionKeys, "reconciliationRequired"]
+      : resolutionKeys
+    if (
+      !hasExactKeySet(resolution, allowedResolutionKeys) ||
+      (Object.prototype.hasOwnProperty.call(
+        resolution,
+        "reconciliationRequired"
+      ) &&
+        resolution.reconciliationRequired !== false) ||
+      resolution.schema !== OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA ||
+      resolution.certificationRunId !== currentRunId ||
+      String(resolution.sourceFingerprint || "").toLowerCase() !==
+        currentFingerprint ||
+      !sameTimestamp(resolution.certifiedAt, currentCertifiedAt)
+    ) {
+      throw new Error(`${label} does not use the current certification anchor.`)
+    }
+    const resolvedAt = String(resolution.resolvedAt || "")
+    if (!resolvedAt || Number.isNaN(Date.parse(resolvedAt))) {
+      throw new Error(`${label} has an invalid resolution timestamp.`)
+    }
+
+    const refs = asRecord(resolution.refs, `${label} refs`)
+    const recordedCounts = asRecord(resolution.counts, `${label} counts`)
+    if (
+      !hasExactKeySet(refs, ["to", "cc", "bcc"]) ||
+      !hasExactKeySet(recordedCounts, [
+        "total",
+        "resolved",
+        "external",
+        "ambiguous",
+        "missing",
+      ])
+    ) {
+      throw new Error(`${label} has an invalid refs/counts shape.`)
+    }
+    const actualCounts: Record<
+      "total" | "resolved" | "external" | "ambiguous" | "missing",
+      number
+    > = {
+      total: 0,
+      resolved: 0,
+      external: 0,
+      ambiguous: 0,
+      missing: 0,
+    }
+
+    for (const [field, column] of Object.entries(fieldColumns) as Array<
+      ["to" | "cc" | "bcc", "to_recipients" | "cc_recipients" | "bcc_recipients"]
+    >) {
+      const literals = splitBackupOutlookRecipientText(template[column])
+      const fieldRefs = requireArray(refs[field], `${label} ${field} refs`)
+      if (fieldRefs.length !== literals.length) {
+        throw new Error(`${label} ${field} refs do not match the raw recipients.`)
+      }
+
+      for (const [position, valueRef] of fieldRefs.entries()) {
+        const ref = asRecord(
+          valueRef,
+          `${label} ${field} recipient ${position}`
+        )
+        const refLabel = `${label} ${field} recipient ${position}`
+        const literal = literals[position]
+        const parsed = parseBackupOutlookRecipientLiteral(literal)
+        if (
+          !hasExactKeySet(ref, refKeys) ||
+          ref.field !== field ||
+          ref.position !== position ||
+          ref.literal !== literal ||
+          ref.sourceValue !== parsed.sourceValue ||
+          typeof ref.displayName !== "string"
+        ) {
+          throw new Error(`${refLabel} does not match its raw literal.`)
+        }
+        const status = String(ref.status || "") as
+          | "resolved"
+          | "external"
+          | "ambiguous"
+          | "missing"
+        if (
+          !["resolved", "external", "ambiguous", "missing"].includes(status)
+        ) {
+          throw new Error(`${refLabel} has an unsupported status.`)
+        }
+        actualCounts.total += 1
+        actualCounts[status] += 1
+        if (status === "missing") templateMissing = true
+        if (status === "ambiguous") templateAmbiguous = true
+
+        if (status === "resolved") {
+          const kind = String(ref.kind || "")
+          const sourceId =
+            typeof ref.sourceId === "string" ? ref.sourceId.trim() : ""
+          const resolvedAddress =
+            typeof ref.resolvedAddress === "string"
+              ? ref.resolvedAddress
+              : ""
+          if (
+            !["contact", "group"].includes(kind) ||
+            !sourceId ||
+            ref.sourceId !== sourceId ||
+            !emailPattern.test(resolvedAddress) ||
+            resolvedAddress !== resolvedAddress.toLowerCase()
+          ) {
+            throw new Error(`${refLabel} has an invalid resolved identity.`)
+          }
+          const candidate =
+            kind === "contact"
+              ? projectionState.contactsById.get(sourceId)
+              : projectionState.groupsById.get(sourceId)
+          if (!candidate) {
+            throw new Error(
+              `${refLabel} source identity is absent from the latest projection.`
+            )
+          }
+          if (kind === "contact") {
+            if (
+              !("address" in candidate) ||
+              resolvedAddress !== candidate.address
+            ) {
+              throw new Error(
+                `${refLabel} contact address is not projection-exact.`
+              )
+            }
+          } else {
+            if (
+              !("alias" in candidate) ||
+              !("address" in candidate) ||
+              resolvedAddress !== candidate.address
+            ) {
+              throw new Error(
+                `${refLabel} group address is not projection-exact.`
+              )
+            }
+          }
+          if (
+            ref.displayName !== parsed.displayName &&
+            ref.displayName !== candidate.displayName
+          ) {
+            throw new Error(
+              `${refLabel} display name is not literal- or projection-derived.`
+            )
+          }
+        } else if (status === "external") {
+          if (
+            ref.kind !== "external" ||
+            ref.sourceId !== null ||
+            !emailPattern.test(parsed.sourceValue) ||
+            ref.resolvedAddress !== parsed.sourceValue.toLowerCase() ||
+            ref.displayName !== parsed.displayName
+          ) {
+            throw new Error(`${refLabel} external evidence is inconsistent.`)
+          }
+        } else if (status === "ambiguous") {
+          const explicitAddress = parsed.sourceValue.includes("@")
+          if (
+            ref.kind !== "unresolved" ||
+            ref.sourceId !== null ||
+            ref.displayName !== parsed.displayName ||
+            ref.resolvedAddress !==
+              (explicitAddress ? parsed.sourceValue.toLowerCase() : null) ||
+            (explicitAddress && !emailPattern.test(parsed.sourceValue))
+          ) {
+            throw new Error(`${refLabel} ambiguous evidence is inconsistent.`)
+          }
+        } else {
+          const unresolvedMissing =
+            ref.kind === "unresolved" &&
+            ref.sourceId === null &&
+            !parsed.sourceValue.includes("@") &&
+            ref.displayName === parsed.displayName
+          const retainedSourceId =
+            typeof ref.sourceId === "string" &&
+            ref.sourceId === ref.sourceId.trim() &&
+            ref.sourceId.length > 0
+              ? ref.sourceId
+              : ""
+          const retainedMissing =
+            migrationHead >=
+              OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD &&
+            ["contact", "group"].includes(String(ref.kind || "")) &&
+            Boolean(retainedSourceId) &&
+            !(ref.kind === "contact"
+              ? projectionState.contactSourceIds.has(retainedSourceId)
+              : projectionState.groupSourceIds.has(retainedSourceId))
+          if (
+            ref.resolvedAddress !== null ||
+            (!unresolvedMissing && !retainedMissing)
+          ) {
+            throw new Error(`${refLabel} missing evidence is inconsistent.`)
+          }
+        }
+      }
+    }
+
+    const expectedCounts = {
+      total: actualCounts.total,
+      resolved: actualCounts.resolved,
+      external: actualCounts.external,
+      ambiguous: actualCounts.ambiguous,
+      missing: actualCounts.missing,
+    }
+    if (
+      actualCounts.total > 10000 ||
+      !Object.values(recordedCounts).every(
+        (count) =>
+          Number.isSafeInteger(count) &&
+          Number(count) >= 0 &&
+          Number(count) <= 10000
+      ) ||
+      !exactRecordValues(recordedCounts, expectedCounts)
+    ) {
+      throw new Error(`${label} counts do not match its recipient refs.`)
+    }
+    if (templateMissing) aggregate.missing += 1
+    if (templateAmbiguous) aggregate.ambiguous += 1
+    if (!templateMissing && !templateAmbiguous) aggregate.sendable += 1
+  }
+
+  aggregate.allTemplatesSendable =
+    aggregate.missing === 0 && aggregate.ambiguous === 0
+
+  const normalizedBefore = verifyBackupTemplateRecipientVerifier(
+    truth.templateRecipientVerificationBeforeExport,
+    checkpointBefore,
+    aggregate,
+    "Backup Outlook template verifier before export"
+  )
+  const normalizedAfter = verifyBackupTemplateRecipientVerifier(
+    truth.templateRecipientVerificationAfterExport,
+    checkpointAfter,
+    aggregate,
+    "Backup Outlook template verifier after export"
+  )
+  if (
+    JSON.stringify(normalizedBefore) !== JSON.stringify(normalizedAfter) ||
+    !exactRecordValues(truth.templateRecipientTruth, normalizedAfter)
+  ) {
+    throw new Error(
+      "Latest backup Outlook template recipient truth changed during export."
+    )
   }
 }
 
@@ -1095,8 +1740,37 @@ function verifyBackupArtifact(
       }
     }
   }
+  for (const [index, row] of requireArray(
+    data.auditLogs,
+    "Backup audit logs"
+  ).entries()) {
+    const record = asRecord(row, `Backup audit log row ${index}`)
+    if (!["admin_users", "spc_users"].includes(String(record.table_name || ""))) {
+      continue
+    }
+    for (const snapshotKey of ["before_row", "after_row"] as const) {
+      if (!record[snapshotKey]) continue
+      const snapshot = asRecord(
+        record[snapshotKey],
+        `Backup audit log row ${index}.${snapshotKey}`
+      )
+      if (Object.prototype.hasOwnProperty.call(snapshot, "password_hash")) {
+        throw new Error(
+          `Latest backup exposes auditLogs.${snapshotKey}.password_hash.`
+        )
+      }
+    }
+    if (
+      Array.isArray(record.changed_fields) &&
+      record.changed_fields.includes("password_hash")
+    ) {
+      throw new Error("Latest backup exposes auditLogs.changed_fields.password_hash.")
+    }
+  }
 
   const truth = asRecord(integrity.truth, "Backup truth checkpoint")
+  const requiresTemplateRecipientTruth =
+    migrationHead >= OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD
   requireExactKeys(
     truth,
     [
@@ -1105,6 +1779,13 @@ function verifyBackupArtifact(
       "checkpointBeforeExport",
       "checkpointAfterExport",
       "verificationAfterExport",
+      ...(requiresTemplateRecipientTruth
+        ? [
+            "templateRecipientVerificationBeforeExport",
+            "templateRecipientVerificationAfterExport",
+            "templateRecipientTruth",
+          ]
+        : []),
       "exportedLedger",
       "exportedSnapshots",
     ],
@@ -1431,6 +2112,29 @@ function verifyBackupArtifact(
     ) {
       throw new Error("Latest backup Exchange certification checkpoint is inconsistent.")
     }
+  }
+  if (requiresTemplateRecipientTruth) {
+    const latestProjectionSnapshot = snapshotsByHash.get(
+      latestSourceFingerprint
+    )
+    if (
+      !latestProjectionSnapshot ||
+      latestProjectionSnapshot.snapshot_kind !== "fcuno_exchange_projection" ||
+      latestProjectionSnapshot.schema_version !== 1
+    ) {
+      throw new Error(
+        "Latest backup Outlook template truth has no exact Exchange projection snapshot."
+      )
+    }
+    verifyBackupTemplateRecipientTruth(
+      data,
+      truth,
+      latestCertification,
+      latestProjectionSnapshot,
+      checkpointBefore,
+      checkpointAfter,
+      migrationHead
+    )
   }
 
   const uploadedFileSha256 = sha256(bytes)
@@ -2159,6 +2863,48 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
   }
 }
 
+async function checkOutlookTemplateRecipientTruth(): Promise<HealthCheckResult> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.rpc(
+    "verify_outlook_template_recipient_truth"
+  )
+  if (error) throw error
+
+  const verification = asRecord(
+    data,
+    "Outlook template recipient verification"
+  )
+  const templates = asRecord(
+    verification.templates,
+    "Outlook template recipient counts"
+  )
+  const valid = verification.valid === true
+  const missing = getNumber(templates.withMissingRecipients)
+  const ambiguous = getNumber(templates.withAmbiguousRecipients)
+  const blocked = missing + ambiguous
+
+  return {
+    status: valid ? (blocked > 0 ? "warning" : "ok") : "error",
+    message: !valid
+      ? "Outlook templates are not aligned with the latest certified Exchange projection"
+      : blocked > 0
+        ? "Outlook template truth is current, with templates blocked by unresolved recipients"
+        : "Outlook templates use the latest certified Exchange recipient projection",
+    details: {
+      certificationRunId: String(verification.certificationRunId || ""),
+      certifiedAt: String(verification.certifiedAt || ""),
+      sourceFingerprint: String(verification.sourceFingerprint || ""),
+      totalTemplates: getNumber(templates.total),
+      sendableTemplates: getNumber(templates.sendable),
+      unresolvedTemplates: getNumber(templates.unresolved),
+      staleTemplates: getNumber(templates.stale),
+      invalidShapeTemplates: getNumber(templates.invalidShape),
+      templatesWithMissingRecipients: missing,
+      templatesWithAmbiguousRecipients: ambiguous,
+    },
+  }
+}
+
 async function checkExchangeConfig(): Promise<HealthCheckResult> {
   const names = [
     "EXCHANGE_SYNC_WEBHOOK_URL",
@@ -2222,6 +2968,11 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth),
+    runCheck(
+      "outlook-template-recipient-truth",
+      "Outlook Template Recipient Truth",
+      checkOutlookTemplateRecipientTruth
+    ),
     runCheck("exchange", "Exchange Sync", checkExchangeConfig),
     runCheck("email-notice", "Notice Email", checkEmailNoticeConfig),
     runCheck("cron", "Vercel Cron", checkCronConfig),
