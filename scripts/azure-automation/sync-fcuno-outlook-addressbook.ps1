@@ -8,6 +8,7 @@ $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
 $DefaultExchangeOnlineManagementVersion = "3.4.0"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.1"
 $script:ExchangeOnlineConnected = $false
 $script:CanonicalExchangeRows = $null
 $script:CurrentQueueRunId = $null
@@ -15,6 +16,7 @@ $script:SyncLockAcquired = $false
 $script:SyncLockLastRenewedAt = [DateTimeOffset]::MinValue
 $script:SyncLockRenewInterval = [TimeSpan]::FromMinutes(5)
 $script:CurrentSyncRequestedAt = $null
+$script:CurrentSyncMode = ""
 
 function Get-AutomationSetting($Name) {
   $value = Get-AutomationVariable -Name $Name -ErrorAction SilentlyContinue
@@ -195,9 +197,10 @@ function Get-GroupSourceKey($SourceGroupId) {
 
 function Has-MapKey($Map, [string]$Key) {
   if (-not $Map -or -not $Key) { return $false }
-  if ($Map -is [hashtable] -or $Map -is [System.Collections.IDictionary]) {
+  if ($Map -is [hashtable]) {
     return $Map.ContainsKey($Key)
   }
+  if ($Map -is [System.Collections.IDictionary]) { return $Map.Contains($Key) }
   $property = $Map.PSObject.Properties[$Key]
   return $null -ne $property
 }
@@ -1269,9 +1272,9 @@ function Get-CanonicalExchangeRows {
   return $script:CanonicalExchangeRows
 }
 
-function Get-CanonicalExchangeProjectionFingerprint($Rows) {
-  if (-not $Rows) { return "" }
-  $projection = [ordered]@{
+function Get-CanonicalExchangeProjectionPayload($Rows) {
+  if (-not $Rows) { return $null }
+  return [ordered]@{
     contacts = @($Rows.Contacts | Sort-Object SourceKey | ForEach-Object {
       [ordered]@{
         sourceContactId = Clean-Text $_.SourceContactId
@@ -1340,13 +1343,40 @@ function Get-CanonicalExchangeProjectionFingerprint($Rows) {
       }
     })
   }
-  $json = $projection | ConvertTo-Json -Depth 8 -Compress
+}
+
+function Get-CanonicalExchangeProjectionJson($Rows) {
+  $projection = Get-CanonicalExchangeProjectionPayload $Rows
+  if (-not $projection) { return "" }
+  return ($projection | ConvertTo-Json -Depth 8 -Compress)
+}
+
+function Get-CanonicalExchangeProjectionCounts($Rows) {
+  if (-not $Rows) { return $null }
+  return [ordered]@{
+    contacts = @($Rows.Contacts).Count
+    groups = @($Rows.Groups).Count
+    members = @($Rows.Members).Count
+    invalidContacts = @($Rows.InvalidContacts).Count
+    skippedInvalidContacts = @($Rows.SkippedInvalidContacts).Count
+    duplicateContacts = @($Rows.DuplicateContacts).Count
+  }
+}
+
+function Get-Sha256Hex($Value) {
+  $text = [string]$Value
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try {
-    return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json)))).Replace("-", "").ToLowerInvariant()
+    return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace("-", "").ToLowerInvariant()
   } finally {
     $sha.Dispose()
   }
+}
+
+function Get-CanonicalExchangeProjectionFingerprint($Rows) {
+  $json = Get-CanonicalExchangeProjectionJson $Rows
+  if (-not $json) { return "" }
+  return Get-Sha256Hex $json
 }
 
 function ConvertTo-ExchangeQueueTimestampText($Value) {
@@ -1493,6 +1523,8 @@ function Save-SyncStatus($Status, $Message, $Details = $null) {
     payload = @{
       status = $Status
       message = $Message
+      runId = Clean-Text $script:CurrentQueueRunId
+      syncMode = Clean-Text $script:CurrentSyncMode
       requestedAt = $requestedAt
       response = $Details
     }
@@ -1548,8 +1580,11 @@ function Acquire-ExchangeSyncLock($SyncMode) {
     p_sync_mode = Clean-Text $SyncMode
     p_lease_minutes = 30
   }
-  if ([bool]$result) { $script:SyncLockLastRenewedAt = [DateTimeOffset]::UtcNow }
-  return [bool]$result
+  if ($result -isnot [bool]) {
+    throw "The Exchange sync lock acquisition RPC returned malformed confirmation instead of a native boolean."
+  }
+  if ($result) { $script:SyncLockLastRenewedAt = [DateTimeOffset]::UtcNow }
+  return $result
 }
 
 function Renew-ExchangeSyncLock {
@@ -1558,7 +1593,10 @@ function Renew-ExchangeSyncLock {
     p_run_id = $script:CurrentQueueRunId
     p_lease_minutes = 30
   }
-  if (-not [bool]$result) { throw "The Exchange sync job lost its global mutation lease." }
+  if ($result -isnot [bool]) {
+    throw "The Exchange sync lock renewal RPC returned malformed confirmation instead of a native boolean."
+  }
+  if (-not $result) { throw "The Exchange sync job lost its global mutation lease." }
   $script:SyncLockLastRenewedAt = [DateTimeOffset]::UtcNow
 }
 
@@ -1779,7 +1817,131 @@ function Get-ExchangeAtomicRpcContractError($Result, $SuccessProperty, $Required
   return ""
 }
 
-function Invoke-ExchangeAtomicRpcWithRetry($Path, [hashtable]$Body, $SuccessProperty, $RequiredSuccessObjectProperty, $OperationLabel) {
+function Test-NativeNonnegativeInt64($Value) {
+  if ($null -eq $Value) { return $false }
+  $isNativeInteger =
+    $Value -is [sbyte] -or
+    $Value -is [byte] -or
+    $Value -is [int16] -or
+    $Value -is [uint16] -or
+    $Value -is [int32] -or
+    $Value -is [uint32] -or
+    $Value -is [int64] -or
+    $Value -is [uint64]
+  if (-not $isNativeInteger) { return $false }
+  try {
+    $numericValue = [decimal]$Value
+    return $numericValue -ge 0 -and $numericValue -le [long]::MaxValue
+  } catch {
+    return $false
+  }
+}
+
+function Test-ExchangeQueueFenceTimestampMatch($Actual, $Expected) {
+  $actualText = Clean-Text $Actual
+  $expectedText = Clean-Text $Expected
+  if (-not $expectedText) { return -not $actualText }
+  if (-not $actualText) { return $false }
+
+  [DateTimeOffset]$actualTimestamp = [DateTimeOffset]::MinValue
+  [DateTimeOffset]$expectedTimestamp = [DateTimeOffset]::MinValue
+  if (
+    -not [DateTimeOffset]::TryParse(
+      $actualText,
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AllowWhiteSpaces,
+      [ref]$actualTimestamp
+    ) -or
+    -not [DateTimeOffset]::TryParse(
+      $expectedText,
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AllowWhiteSpaces,
+      [ref]$expectedTimestamp
+    )
+  ) {
+    return $false
+  }
+  return $actualTimestamp.ToUniversalTime().Ticks -eq $expectedTimestamp.ToUniversalTime().Ticks
+}
+
+function Get-VerifiedExchangeQueueCompletionContractError($Result, $ExpectedRowId, $ExpectedRunId) {
+  if (-not [bool](Get-MapValue $Result "completed")) { return "" }
+  $completedRow = Get-MapValue $Result "completedRow"
+  $actualRowId = Clean-Text (Get-MapValue $completedRow "id")
+  $actualRunId = Clean-Text (Get-MapValue $completedRow "runId")
+  if (-not $actualRowId.Equals((Clean-Text $ExpectedRowId), [StringComparison]::OrdinalIgnoreCase)) {
+    return "the completed-row receipt does not match the requested queue row"
+  }
+  if (-not $actualRunId.Equals((Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase)) {
+    return "the completed-row receipt does not match the active run"
+  }
+  return ""
+}
+
+function Get-FullExchangeTruthCertificationContractError(
+  $Result,
+  $ExpectedRunId,
+  $ExpectedFingerprint,
+  $ExpectedQueueSequence,
+  $ExpectedQueueUpdatedAt
+) {
+  if (-not [bool](Get-MapValue $Result "certified")) { return "" }
+  $actualRunId = Clean-Text (Get-MapValue $Result "runId")
+  if (-not $actualRunId.Equals((Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase)) {
+    return "the certification receipt does not match the active run"
+  }
+  if ((Get-MapValue $Result "evidenceRecorded") -isnot [bool] -or -not [bool](Get-MapValue $Result "evidenceRecorded")) {
+    return "the successful result did not confirm durable projection evidence"
+  }
+  [long]$ledgerSequence = 0
+  if (-not [long]::TryParse((Clean-Text (Get-MapValue $Result "truthLedgerSequence")), [ref]$ledgerSequence) -or $ledgerSequence -le 0) {
+    return "the truth-ledger receipt sequence is missing or invalid"
+  }
+  foreach ($hashField in @("truthLedgerHash", "sourceSnapshotHash", "rawSourceSnapshotHash")) {
+    $hashValue = Clean-Text (Get-MapValue $Result $hashField)
+    if ($hashValue -cnotmatch "^[0-9a-f]{64}$") {
+      return "the successful result has an invalid lowercase SHA-256 value in '$hashField'"
+    }
+  }
+  $fingerprint = Clean-Text $ExpectedFingerprint
+  if ((Clean-Text (Get-MapValue $Result "sourceFingerprint")) -cne $fingerprint) {
+    return "the returned source fingerprint does not match the submitted projection"
+  }
+  if ((Clean-Text (Get-MapValue $Result "sourceSnapshotHash")) -cne $fingerprint) {
+    return "the returned projection snapshot hash does not match the submitted projection"
+  }
+  if ((Clean-Text (Get-MapValue $Result "workerVersion")) -cne $ExchangeTruthWorkerVersion) {
+    return "the returned worker version does not match '$ExchangeTruthWorkerVersion'"
+  }
+  $queueFence = Get-MapValue $Result "queueFence"
+  foreach ($fieldName in @("expectedSequence", "currentSequence")) {
+    $fieldValue = Get-MapValue $queueFence $fieldName
+    if (-not (Test-NativeNonnegativeInt64 $fieldValue)) {
+      return "the certification queue fence has a missing or invalid native integer '$fieldName'"
+    }
+    if ([long]$fieldValue -ne [long]$ExpectedQueueSequence) {
+      return "the certification queue fence '$fieldName' does not match the submitted sequence"
+    }
+  }
+  foreach ($fieldName in @("expectedUpdatedAt", "currentUpdatedAt")) {
+    if (-not (Has-MapKey $queueFence $fieldName)) {
+      return "the certification queue fence is missing '$fieldName'"
+    }
+    if (-not (Test-ExchangeQueueFenceTimestampMatch (Get-MapValue $queueFence $fieldName) $ExpectedQueueUpdatedAt)) {
+      return "the certification queue fence '$fieldName' does not match the submitted timestamp"
+    }
+  }
+  return ""
+}
+
+function Invoke-ExchangeAtomicRpcWithRetry(
+  $Path,
+  [hashtable]$Body,
+  $SuccessProperty,
+  $RequiredSuccessObjectProperty,
+  $OperationLabel,
+  $AdditionalContractValidator = $null
+) {
   $lastAmbiguousError = ""
   for ($attempt = 1; $attempt -le 3; $attempt += 1) {
     try {
@@ -1787,6 +1949,9 @@ function Invoke-ExchangeAtomicRpcWithRetry($Path, [hashtable]$Body, $SuccessProp
       $result = Invoke-SupabaseRest -Method "POST" -Path $Path -Body $Body
       Renew-ExchangeSyncLockIfDue
       $contractError = Get-ExchangeAtomicRpcContractError $result $SuccessProperty $RequiredSuccessObjectProperty
+      if (-not $contractError -and $AdditionalContractValidator) {
+        $contractError = Clean-Text (& $AdditionalContractValidator $result)
+      }
       if ($contractError) {
         throw "$OperationLabel returned malformed confirmation: $contractError."
       }
@@ -1808,30 +1973,149 @@ function Complete-VerifiedExchangeQueueRow($RowId) {
   $rowIdText = Clean-Text $RowId
   if (-not (Test-GuidText $rowIdText)) { throw "A valid queue row UUID is required for atomic verified completion." }
   if (-not (Test-GuidText $script:CurrentQueueRunId)) { throw "A valid active run UUID is required for atomic verified completion." }
+  $activeRunId = Clean-Text $script:CurrentQueueRunId
+  $completionContractValidator = {
+    param($response)
+    return Get-VerifiedExchangeQueueCompletionContractError $response $rowIdText $activeRunId
+  }.GetNewClosure()
   return Invoke-ExchangeAtomicRpcWithRetry `
     "rpc/complete_verified_outlook_exchange_sync_queue_row" `
     @{ p_queue_row_id = $rowIdText; p_run_id = $script:CurrentQueueRunId } `
     "completed" `
     "completedRow" `
-    "Atomic Exchange queue completion"
+    "Atomic Exchange queue completion" `
+    $completionContractValidator
 }
 
-function Commit-FullExchangeQueueCertification($QueueHighWater, $SourceFingerprint) {
+function Commit-FullExchangeQueueCertification(
+  $QueueHighWater,
+  $SourceFingerprint,
+  $ProjectionCanonicalJson = $null,
+  $ProjectionCounts = $null,
+  $VerificationSummary = $null
+) {
   if (-not (Test-GuidText $script:CurrentQueueRunId)) { throw "A valid active run UUID is required for full Exchange queue certification." }
   $fingerprint = Clean-Text $SourceFingerprint
   if (-not $fingerprint) { throw "The source fingerprint is required for full Exchange queue certification." }
   $fence = ConvertFrom-ExchangeQueueHighWater $QueueHighWater
-  return Invoke-ExchangeAtomicRpcWithRetry `
-    "rpc/certify_full_outlook_exchange_sync_queue" `
+  $projectionJson = [string]$ProjectionCanonicalJson
+  if (-not $projectionJson) { throw "The canonical FCUNO Exchange projection is required for durable truth evidence." }
+  if ((Get-Sha256Hex $projectionJson) -cne $fingerprint) {
+    throw "The canonical FCUNO Exchange projection does not match its source fingerprint."
+  }
+  $activeRunId = Clean-Text $script:CurrentQueueRunId
+  $truthContractValidator = {
+    param($response)
+    return Get-FullExchangeTruthCertificationContractError `
+      $response `
+      $activeRunId `
+      $fingerprint `
+      $fence.Sequence `
+      $fence.UpdatedAt
+  }.GetNewClosure()
+  $result = Invoke-ExchangeAtomicRpcWithRetry `
+    "rpc/certify_full_outlook_exchange_truth" `
     @{
       p_run_id = $script:CurrentQueueRunId
       p_queue_high_water_sequence = [long]$fence.Sequence
       p_queue_high_water_updated_at = $fence.UpdatedAt
       p_source_fingerprint = $fingerprint
+      p_projection_canonical_json = $projectionJson
+      p_projection_counts = $(if ($ProjectionCounts) { $ProjectionCounts } else { @{} })
+      p_verification_summary = $(if ($VerificationSummary) { $VerificationSummary } else { @{} })
+      p_worker_version = $ExchangeTruthWorkerVersion
     } `
     "certified" `
     "queueFence" `
-    "Atomic full Exchange queue certification"
+    "Atomic full Exchange queue certification" `
+    $truthContractValidator
+  return $result
+}
+
+function Add-ExchangeTruthLedgerEvidence(
+  [hashtable]$Stats,
+  [bool]$RequireCurrentFullCertification = $false,
+  $ExpectedProjectionHash = ""
+) {
+  if (-not $Stats) { throw "Sync statistics are required before the Exchange truth ledger can be verified." }
+  $verification = Invoke-SupabaseRest -Method "GET" -Path "rpc/get_outlook_exchange_truth_checkpoint"
+  $checkpointValid = Get-MapValue $verification "checkpointValid"
+  if (-not $verification -or $checkpointValid -isnot [bool] -or -not $checkpointValid) {
+    throw "The latest FCUNO Exchange truth-ledger checkpoint failed its hash, link, timestamp, or referenced-snapshot verification."
+  }
+
+  $headSequence = Clean-Text (Get-MapValue $verification "headSequence")
+  $headSha256 = Clean-Text (Get-MapValue $verification "headSha256")
+  [long]$parsedHeadSequence = 0
+  if (-not [long]::TryParse($headSequence, [ref]$parsedHeadSequence) -or $parsedHeadSequence -le 0 -or $headSha256 -cnotmatch "^[0-9a-f]{64}$") {
+    throw "The FCUNO Exchange truth-ledger checkpoint has no valid externally anchorable sequence and lowercase SHA-256 head."
+  }
+
+  $queueCheckpoint = Get-MapValue $verification "queue"
+  $queueCounts = @{}
+  foreach ($queueField in @("pending", "processing", "failed", "terminalFailed")) {
+    if (-not (Has-MapKey $queueCheckpoint $queueField)) {
+      throw "The FCUNO Exchange truth-ledger checkpoint is missing the '$queueField' queue count."
+    }
+    $queueCount = Get-MapValue $queueCheckpoint $queueField
+    if (-not (Test-NativeNonnegativeInt64 $queueCount)) {
+      throw "The FCUNO Exchange truth-ledger checkpoint has a non-native or invalid '$queueField' queue count."
+    }
+    $queueCounts[$queueField] = [long]$queueCount
+  }
+  if ([long]$queueCounts["terminalFailed"] -gt [long]$queueCounts["failed"]) {
+    throw "The FCUNO Exchange truth-ledger checkpoint has more terminal failed queue rows than total failed queue rows."
+  }
+  $Stats["truthCheckpointPendingQueueRows"] = [long]$queueCounts["pending"]
+  $Stats["truthCheckpointProcessingQueueRows"] = [long]$queueCounts["processing"]
+  $Stats["truthCheckpointFailedQueueRows"] = [long]$queueCounts["failed"]
+  $Stats["truthCheckpointTerminalFailedQueueRows"] = [long]$queueCounts["terminalFailed"]
+
+  if ($RequireCurrentFullCertification) {
+    $certifiedRunId = Clean-Text (Get-MapValue $verification "latestCertificationRunId")
+    if ($certifiedRunId -cne (Clean-Text $script:CurrentQueueRunId)) {
+      throw "The latest durable full certification belongs to run '$certifiedRunId', not the active run '$script:CurrentQueueRunId'."
+    }
+    $hasProjectionEvidence = Get-MapValue $verification "latestCertificationHasProjectionEvidence"
+    if ($hasProjectionEvidence -isnot [bool] -or -not $hasProjectionEvidence) {
+      throw "The latest durable full certification is missing its canonical Exchange projection evidence."
+    }
+    $expectedProjection = Clean-Text $ExpectedProjectionHash
+    $latestProjectionSnapshot = Clean-Text (Get-MapValue $verification "latestProjectionSnapshotSha256")
+    if (
+      -not $expectedProjection `
+      -or $latestProjectionSnapshot -cne $expectedProjection `
+      -or (Clean-Text (Get-MapValue $verification "latestSourceFingerprint")) -cne $expectedProjection
+    ) {
+      throw "The latest durable full certification is not linked to the exact canonical projection verified by the active run."
+    }
+    $unsettledQueueRows =
+      [long]$queueCounts["pending"] +
+      [long]$queueCounts["processing"] +
+      [long]$queueCounts["failed"]
+    if ($unsettledQueueRows -gt 0) {
+      throw "The active full certification is no longer current because $unsettledQueueRows unresolved Exchange queue row(s) exist at the notice checkpoint."
+    }
+    $Stats["currentProjectionCertified"] = $true
+  }
+
+  $Stats["truthLedgerCheckpointVerified"] = $true
+  $Stats["truthLedgerHeadSequence"] = $headSequence
+  $Stats["truthLedgerHeadHash"] = $headSha256
+  $Stats["truthLedgerHeadPreviousHash"] = Clean-Text (Get-MapValue $verification "headPreviousSha256")
+  $Stats["truthLedgerHeadEventType"] = Clean-Text (Get-MapValue $verification "headEventType")
+  $Stats["truthLedgerHeadRunId"] = Clean-Text (Get-MapValue $verification "headRunId")
+  $Stats["truthLedgerEntries"] = Clean-Text (Get-MapValue $verification "ledgerEntries")
+  $Stats["truthSnapshots"] = Clean-Text (Get-MapValue $verification "snapshots")
+  $Stats["latestCertificationRunId"] = Clean-Text (Get-MapValue $verification "latestCertificationRunId")
+  $Stats["latestCertificationAt"] = Clean-Text (Get-MapValue $verification "latestCertificationAt")
+  $Stats["latestSourceFingerprint"] = Clean-Text (Get-MapValue $verification "latestSourceFingerprint")
+  $latestEvidenceFlag = Get-MapValue $verification "latestCertificationHasProjectionEvidence"
+  $Stats["latestCertificationHasProjectionEvidence"] = (
+    $latestEvidenceFlag -is [bool] -and $latestEvidenceFlag
+  )
+  $Stats["latestProjectionSnapshotHash"] = Clean-Text (Get-MapValue $verification "latestProjectionSnapshotSha256")
+  return $verification
 }
 
 function Get-ContactExchangeRowFromSource($SourceContactId) {
@@ -2053,7 +2337,7 @@ function Add-SyncChangeDetail([hashtable]$Stats, $Row, $Status, $Result, $QueueS
     eventId = Clean-Text $Row.event_id
     actorId = Clean-Text $Row.actor_id
     requestedBy = Clean-Text $Row.requested_by
-    queuedAt = Format-HongKongTime $Row.created_at
+    queuedAt = Format-OptionalHongKongTime $Row.created_at
     attempt = [Math]::Max(0, [int]$Row.attempts)
     retryState = $(if ($RetryState) { Clean-Text $RetryState.Label } else { "" })
     retryable = $(if ($RetryState) { [bool]$RetryState.Retryable } else { $false })
@@ -3542,7 +3826,9 @@ function Process-ExchangeQueueRow($Row, [hashtable]$Stats) {
 }
 
 function Invoke-IncrementalExchangeSync {
+  if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
   $stats = @{
+    runId = Clean-Text $script:CurrentQueueRunId
     syncMode = "incremental"
     queuedRows = 0
     processedQueueRows = 0
@@ -3567,7 +3853,6 @@ function Invoke-IncrementalExchangeSync {
     removedMembers = 0
   }
 
-  if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
   while ($true) {
     Renew-ExchangeSyncLockIfDue -Force
     $batchRows = Claim-ExchangeQueueRows 200
@@ -3796,8 +4081,7 @@ function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
   $password = Get-OptionalAutomationSetting "EXCHANGE_SMTP_PASSWORD"
 
   if (-not $password) {
-    Write-Warning "Exchange sync notification email was not sent because EXCHANGE_SMTP_PASSWORD is not configured in Azure Automation variables."
-    return
+    throw "Exchange sync notification email was not sent because EXCHANGE_SMTP_PASSWORD is not configured in Azure Automation variables."
   }
 
   $message = [System.Net.Mail.MailMessage]::new()
@@ -3807,7 +4091,7 @@ function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
       $recipientText = Clean-Text $recipient
       if ($recipientText) { [void]$message.To.Add($recipientText) }
     }
-    if ($message.To.Count -le 0) { return }
+    if ($message.To.Count -le 0) { throw "Exchange sync notification email has no valid recipient." }
 
     $message.Subject = $Subject
     $message.Body = $Html
@@ -3830,10 +4114,12 @@ function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
   } finally {
     $message.Dispose()
   }
+  return $true
 }
 
 function Get-SyncSummaryLabel($Key) {
   switch ($Key) {
+    "runId" { return "Run ID" }
     "syncMode" { return "Sync mode" }
     "queuedRows" { return "Claimed this run" }
     "processedQueueRows" { return "Processed changes" }
@@ -3850,9 +4136,40 @@ function Get-SyncSummaryLabel($Key) {
     "fullCertificationCommitted" { return "Durable full certification" }
     "fullCertificationIdempotent" { return "Certification replay confirmed" }
     "fullCertificationAt" { return "Certified at" }
+    "truthEvidenceRecorded" { return "Canonical evidence recorded" }
+    "truthEvidenceLedgerSequence" { return "Projection evidence ledger sequence" }
+    "truthEvidenceLedgerHash" { return "Projection evidence ledger SHA-256" }
+    "truthLedgerCheckpointVerified" { return "Latest ledger checkpoint verified" }
+    "truthLedgerHeadSequence" { return "Ledger checkpoint sequence" }
+    "truthLedgerHeadHash" { return "Ledger checkpoint SHA-256" }
+    "truthLedgerHeadPreviousHash" { return "Ledger checkpoint previous SHA-256" }
+    "truthLedgerHeadEventType" { return "Ledger checkpoint event" }
+    "truthLedgerHeadRunId" { return "Ledger checkpoint run ID" }
+    "truthLedgerEntries" { return "Truth ledger entries" }
+    "truthSnapshots" { return "Canonical snapshots" }
+    "truthCheckpointPendingQueueRows" { return "Queue pending at checkpoint" }
+    "truthCheckpointProcessingQueueRows" { return "Queue processing at checkpoint" }
+    "truthCheckpointFailedQueueRows" { return "Queue failed at checkpoint" }
+    "truthCheckpointTerminalFailedQueueRows" { return "Queue terminal failures at checkpoint" }
+    "currentProjectionCertified" { return "Current FCUNO-to-Exchange projection certified" }
+    "sourceSnapshotHash" { return "Certified FCUNO-to-Exchange projection SHA-256" }
+    "rawSourceSnapshotHash" { return "Current raw FCUNO snapshot SHA-256" }
+    "truthWorkerVersion" { return "Worker version" }
+    "latestCertificationRunId" { return "Latest certified run ID" }
+    "latestCertificationAt" { return "Latest certification at" }
+    "latestSourceFingerprint" { return "Latest full-certified projection SHA-256" }
+    "latestCertificationHasProjectionEvidence" { return "Latest certification has projection evidence" }
+    "latestProjectionSnapshotHash" { return "Latest projection snapshot SHA-256" }
+    "notificationDeliveryStatus" { return "Email notice delivery" }
+    "notificationDeliveryAttempted" { return "Email delivery attempted" }
+    "notificationDelivered" { return "Email delivered" }
+    "notificationRecipientCount" { return "Email recipient count" }
+    "notificationDeliveredAt" { return "Email delivered at" }
+    "notificationError" { return "Email delivery error" }
     "contacts" { return "Contacts processed" }
     "groups" { return "Groups processed" }
     "groupMembers" { return "Group members processed" }
+    "invalidContacts" { return "Invalid source contacts" }
     "createdContacts" { return "Contacts created" }
     "updatedContacts" { return "Contacts updated" }
     "removedContacts" { return "Contacts removed" }
@@ -3870,7 +4187,16 @@ function Get-SyncSummaryLabel($Key) {
 function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayload) {
   $Details = Get-StatsObject $Details
   $recipients = Get-NotificationRecipients $WebhookPayload
-  if (-not $recipients -or @($recipients).Count -le 0) { return }
+  if (-not $recipients -or @($recipients).Count -le 0) {
+    return [pscustomobject]@{
+      Status = "no_recipients"
+      Attempted = $false
+      Delivered = $false
+      RecipientCount = 0
+      DeliveredAt = ""
+      Error = "No Exchange sync notification recipients were configured or supplied by the requester."
+    }
+  }
 
   $from = Get-NoticeEmailFrom
 
@@ -4050,15 +4376,46 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 
   $detailsRows = ""
   if ($Details) {
-    foreach ($key in @("syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "contacts", "groups", "groupMembers", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers")) {
+    foreach ($key in @("runId", "syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "truthEvidenceRecorded", "truthEvidenceLedgerSequence", "truthEvidenceLedgerHash", "sourceSnapshotHash", "rawSourceSnapshotHash", "truthWorkerVersion", "truthLedgerCheckpointVerified", "truthLedgerHeadSequence", "truthLedgerHeadHash", "truthLedgerHeadPreviousHash", "truthLedgerHeadEventType", "truthLedgerHeadRunId", "truthLedgerEntries", "truthSnapshots", "truthCheckpointPendingQueueRows", "truthCheckpointProcessingQueueRows", "truthCheckpointFailedQueueRows", "truthCheckpointTerminalFailedQueueRows", "currentProjectionCertified", "latestCertificationRunId", "latestCertificationAt", "latestSourceFingerprint", "latestCertificationHasProjectionEvidence", "latestProjectionSnapshotHash", "contacts", "groups", "groupMembers", "invalidContacts", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers", "notificationDeliveryStatus", "notificationDeliveryAttempted", "notificationDelivered", "notificationRecipientCount", "notificationDeliveredAt", "notificationError")) {
       $detailValue = Get-DetailValue $Details $key
       if ($null -ne $detailValue) {
-        $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;'>$(Escape-Html $detailValue)</td></tr>"
+        $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;word-break:break-all;'>$(Escape-Html $detailValue)</td></tr>"
       }
     }
   }
   if (-not $detailsRows) {
     $detailsRows = "<tr><td style='padding:4px 0;color:#475569;'>No count details available.</td></tr>"
+  }
+
+  $truthAnchorHtml = ""
+  if ([bool](Get-DetailValue $Details "truthLedgerCheckpointVerified")) {
+    $truthLedgerSequence = Clean-Text (Get-DetailValue $Details "truthLedgerHeadSequence")
+    $truthLedgerHash = Clean-Text (Get-DetailValue $Details "truthLedgerHeadHash")
+    $projectionHash = Clean-Text (Get-DetailValue $Details "sourceSnapshotHash")
+    $projectionLine = ""
+    if ($projectionHash) {
+      $projectionLine = "<div style='margin-top:4px;word-break:break-all;'><strong>Certified FCUNO-to-Exchange projection:</strong> <code>$(Escape-Html $projectionHash)</code></div>"
+    }
+    $anchorBorder = "#bfdbfe"
+    $anchorBackground = "#eff6ff"
+    $anchorColor = "#1e40af"
+    $anchorTitle = "Immutable audit checkpoint recorded."
+    $anchorMeaning = "This proves the latest ledger checkpoint is internally linked and hash-valid; it does not mean every queued change succeeded."
+    if ([bool](Get-DetailValue $Details "currentProjectionCertified")) {
+      $anchorBorder = "#86efac"
+      $anchorBackground = "#f0fdf4"
+      $anchorColor = "#14532d"
+      $anchorTitle = "Current source-of-truth projection certified."
+      $anchorMeaning = "FCUNO is authoritative, and this full run verified Exchange against the exact canonical projection identified below."
+    }
+    $truthAnchorHtml = @"
+<div style="margin:16px 0 0;padding:12px 14px;border:1px solid $anchorBorder;border-radius:10px;background:$anchorBackground;color:$anchorColor;font-size:11px;">
+  <strong>$(Escape-Html $anchorTitle)</strong> $(Escape-Html $anchorMeaning)
+  <div style="margin-top:6px;"><strong>Ledger checkpoint:</strong> sequence $(Escape-Html $truthLedgerSequence)</div>
+  <div style="margin-top:4px;word-break:break-all;"><strong>Checkpoint SHA-256:</strong> <code>$(Escape-Html $truthLedgerHash)</code></div>
+  $projectionLine
+</div>
+"@
   }
 
   $metricsHtml = ""
@@ -4106,6 +4463,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
         <tr><td style="padding:2px 12px 2px 0;font-weight:700;">Requested at</td><td style="padding:2px 0;">$(Escape-Html $startedAt)</td></tr>
       </table>
       $metricsHtml
+      $truthAnchorHtml
       $followUpHtml
 
       <h3 style="margin:22px 0 8px;font-size:16px;">$(Escape-Html $changeResultsTitle)</h3>
@@ -4138,10 +4496,117 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
       if ($resolvedTerminalRows -gt 0) { $subject += ", $resolvedTerminalRows terminal resolved" }
       if ($backlogRows -gt 0) { $subject += ", $backlogRows backlog ($retryableBacklogRows retryable, $terminalBacklogRows terminal, $activeBacklogRows processing)" }
     }
-    Send-ExchangeSmtpMail $from @($recipients) $subject $html
+    Send-ExchangeSmtpMail $from @($recipients) $subject $html | Out-Null
+    return [pscustomobject]@{
+      Status = "delivered"
+      Attempted = $true
+      Delivered = $true
+      RecipientCount = @($recipients).Count
+      DeliveredAt = (Get-Date).ToUniversalTime().ToString("o")
+      Error = ""
+    }
   } catch {
-    Write-Warning ("Exchange sync notification email failed: {0}" -f $_.Exception.Message)
+    $deliveryError = Clean-Text $_.Exception.Message
+    Write-Warning ("Exchange sync notification email failed: {0}" -f $deliveryError)
+    return [pscustomobject]@{
+      Status = "failed"
+      Attempted = $true
+      Delivered = $false
+      RecipientCount = @($recipients).Count
+      DeliveredAt = ""
+      Error = $deliveryError
+    }
   }
+}
+
+function New-ExchangeNotificationDeliveryResult(
+  [string]$Status,
+  [bool]$Attempted,
+  [bool]$Delivered,
+  [int]$RecipientCount = 0,
+  [string]$DeliveredAt = "",
+  [string]$Error = ""
+) {
+  return [pscustomobject]@{
+    Status = Clean-Text $Status
+    Attempted = $Attempted
+    Delivered = $Delivered
+    RecipientCount = [Math]::Max(0, $RecipientCount)
+    DeliveredAt = Clean-Text $DeliveredAt
+    Error = Clean-Text $Error
+  }
+}
+
+function Invoke-ExchangeSyncNotificationSafely($Status, $Message, $Details, $WebhookPayload) {
+  try {
+    $delivery = Send-ExchangeSyncNotification $Status $Message $Details $WebhookPayload
+    if (-not $delivery) {
+      throw "Exchange sync notification returned no delivery receipt."
+    }
+    return $delivery
+  } catch {
+    $deliveryError = Clean-Text $_.Exception.Message
+    Write-Warning ("Exchange sync notification could not be prepared or sent: {0}" -f $deliveryError)
+    return New-ExchangeNotificationDeliveryResult `
+      "failed" `
+      $false `
+      $false `
+      0 `
+      "" `
+      $deliveryError
+  }
+}
+
+function Set-ExchangeNotificationDeliveryStats([hashtable]$Details, $Delivery) {
+  if (-not $Details) { throw "Sync details are required to record the Exchange notification outcome." }
+  if (-not $Delivery) { throw "An Exchange notification delivery receipt is required." }
+
+  $deliveryStatus = (Clean-Text (Get-DetailValue $Delivery "Status")).ToLowerInvariant()
+  if ($deliveryStatus -notin @("delivered", "failed", "no_recipients", "not_required")) {
+    throw "The Exchange notification delivery receipt has an unsupported status '$deliveryStatus'."
+  }
+  $attempted = Get-DetailValue $Delivery "Attempted"
+  $delivered = Get-DetailValue $Delivery "Delivered"
+  if ($attempted -isnot [bool] -or $delivered -isnot [bool]) {
+    throw "The Exchange notification delivery receipt must contain native boolean Attempted and Delivered flags."
+  }
+  if ($deliveryStatus -eq "delivered" -and (-not $attempted -or -not $delivered)) {
+    throw "A delivered Exchange notification receipt must confirm both attempted and delivered."
+  }
+  if ($deliveryStatus -ne "delivered" -and $delivered) {
+    throw "Only a delivered Exchange notification receipt may set Delivered to true."
+  }
+
+  $recipientCountValue = Get-DetailValue $Delivery "RecipientCount"
+  if (-not (Test-NativeNonnegativeInt64 $recipientCountValue)) {
+    throw "The Exchange notification delivery receipt has an invalid native recipient count."
+  }
+
+  $Details["notificationDeliveryStatus"] = $deliveryStatus
+  $Details["notificationDeliveryAttempted"] = [bool]$attempted
+  $Details["notificationDelivered"] = [bool]$delivered
+  $Details["notificationRecipientCount"] = [long]$recipientCountValue
+  $Details["notificationDeliveredAt"] = Clean-Text (Get-DetailValue $Delivery "DeliveredAt")
+  $Details["notificationError"] = Clean-Text (Get-DetailValue $Delivery "Error")
+}
+
+function Save-SyncStatusAfterNotification($Status, $Message, [hashtable]$Details) {
+  $lastError = ""
+  for ($saveAttempt = 1; $saveAttempt -le 3; $saveAttempt += 1) {
+    try {
+      Save-SyncStatus $Status $Message $Details
+      return $true
+    } catch {
+      $lastError = Clean-Text $_.Exception.Message
+      if ($saveAttempt -lt 3) {
+        Start-Sleep -Seconds ([Math]::Pow(2, $saveAttempt))
+      }
+    }
+  }
+  Write-Warning (
+    "Exchange sync outcome remained '$Status', but its notification delivery receipt could not be persisted after 3 attempts: $lastError"
+  )
+  return $false
 }
 
 function Get-IncrementalSyncOutcome($Details) {
@@ -4197,6 +4662,123 @@ function Get-IncrementalSyncOutcome($Details) {
   }
 }
 
+function Set-IncrementalBacklogFromTruthCheckpoint([hashtable]$Stats) {
+  $checkpointCounts = @{}
+  foreach ($mapping in @(
+    [pscustomobject]@{ Source = "truthCheckpointPendingQueueRows"; Target = "pending" },
+    [pscustomobject]@{ Source = "truthCheckpointProcessingQueueRows"; Target = "processing" },
+    [pscustomobject]@{ Source = "truthCheckpointFailedQueueRows"; Target = "failed" },
+    [pscustomobject]@{ Source = "truthCheckpointTerminalFailedQueueRows"; Target = "terminalFailed" }
+  )) {
+    $value = Get-MapValue $Stats $mapping.Source
+    if (-not (Test-NativeNonnegativeInt64 $value)) {
+      throw "The final incremental outcome is missing a trusted native '$($mapping.Target)' checkpoint count."
+    }
+    $checkpointCounts[$mapping.Target] = [long]$value
+  }
+
+  if ([long]$checkpointCounts["terminalFailed"] -gt [long]$checkpointCounts["failed"]) {
+    throw "The final incremental outcome cannot classify an inconsistent Exchange queue checkpoint."
+  }
+  $backlogCount =
+    [decimal]$checkpointCounts["pending"] +
+    [decimal]$checkpointCounts["processing"] +
+    [decimal]$checkpointCounts["failed"]
+  $retryableCount =
+    [decimal]$checkpointCounts["pending"] +
+    ([decimal]$checkpointCounts["failed"] - [decimal]$checkpointCounts["terminalFailed"])
+  if ($backlogCount -gt [long]::MaxValue -or $retryableCount -gt [long]::MaxValue) {
+    throw "The final incremental queue checkpoint exceeds the supported outcome counter range."
+  }
+
+  $Stats["backlogRows"] = [long]$backlogCount
+  $Stats["retryableBacklogRows"] = [long]$retryableCount
+  $Stats["terminalBacklogRows"] = [long]$checkpointCounts["terminalFailed"]
+  $Stats["activeBacklogRows"] = [long]$checkpointCounts["processing"]
+}
+
+function Get-IncrementalSyncOutcomeSignature($Outcome) {
+  if (-not $Outcome) { return "" }
+  return "$(Clean-Text $Outcome.Status)|$(Clean-Text $Outcome.Message)|$([bool]$Outcome.AlwaysNotify)"
+}
+
+function Complete-IncrementalSyncOutcomeWithCheckpoint([hashtable]$Details) {
+  $activeRunId = Clean-Text $script:CurrentQueueRunId
+  if (-not $activeRunId) {
+    throw "The incremental outcome cannot be finalized without an active run ID."
+  }
+  for ($finalizationAttempt = 1; $finalizationAttempt -le 3; $finalizationAttempt += 1) {
+    Add-ExchangeTruthLedgerEvidence $Details $false | Out-Null
+    Set-IncrementalBacklogFromTruthCheckpoint $Details
+    if ([long]$Details.backlogRows -gt 0) {
+      $latestBacklogRows = @(Get-ExchangeQueueBacklogRows)
+      Add-ExchangeQueueBacklogDetails $Details $latestBacklogRows
+      # The atomic checkpoint remains authoritative for counts. The row query is
+      # only used to refresh exact item/audit/error details for the notice.
+      Set-IncrementalBacklogFromTruthCheckpoint $Details
+    }
+
+    [long]$preStatusCheckpointSequence = 0
+    if (
+      -not [long]::TryParse(
+        (Clean-Text (Get-MapValue $Details "truthLedgerHeadSequence")),
+        [ref]$preStatusCheckpointSequence
+      ) -or
+      $preStatusCheckpointSequence -le 0
+    ) {
+      throw "The pre-status incremental truth checkpoint has no valid ledger sequence."
+    }
+    $preStatusCheckpointHash = Clean-Text (Get-MapValue $Details "truthLedgerHeadHash")
+    if ($preStatusCheckpointHash -cnotmatch "^[0-9a-f]{64}$") {
+      throw "The pre-status incremental truth checkpoint has no valid lowercase SHA-256 head."
+    }
+
+    $candidateOutcome = Get-IncrementalSyncOutcome $Details
+    Save-SyncStatus $candidateOutcome.Status $candidateOutcome.Message $Details
+
+    Add-ExchangeTruthLedgerEvidence $Details $false | Out-Null
+    Set-IncrementalBacklogFromTruthCheckpoint $Details
+    $postStatusOutcome = Get-IncrementalSyncOutcome $Details
+    [long]$postStatusCheckpointSequence = 0
+    if (
+      -not [long]::TryParse(
+        (Clean-Text (Get-MapValue $Details "truthLedgerHeadSequence")),
+        [ref]$postStatusCheckpointSequence
+      ) -or
+      $postStatusCheckpointSequence -le 0
+    ) {
+      throw "The post-status incremental truth checkpoint has no valid ledger sequence."
+    }
+
+    $statusEventDirectlyExtendsThePreStatusCheckpoint =
+      $postStatusCheckpointSequence -gt $preStatusCheckpointSequence -and
+      (Clean-Text (Get-MapValue $Details "truthLedgerHeadPreviousHash")) -ceq
+        $preStatusCheckpointHash -and
+      (Clean-Text (Get-MapValue $Details "truthLedgerHeadEventType")) -ceq
+        "run_status" -and
+      (Clean-Text (Get-MapValue $Details "truthLedgerHeadRunId")).Equals(
+        $activeRunId,
+        [StringComparison]::OrdinalIgnoreCase
+      )
+    $outcomeStayedStable =
+      (Get-IncrementalSyncOutcomeSignature $candidateOutcome) -ceq
+      (Get-IncrementalSyncOutcomeSignature $postStatusOutcome)
+    if ($statusEventDirectlyExtendsThePreStatusCheckpoint -and $outcomeStayedStable) {
+      $message = Clean-Text $postStatusOutcome.Message
+      if ((Clean-Text $postStatusOutcome.Status) -eq "completed") {
+        $message += " Queue state was clear as of verified truth-ledger checkpoint sequence $postStatusCheckpointSequence."
+      }
+      return [pscustomobject]@{
+        Status = Clean-Text $postStatusOutcome.Status
+        Message = $message
+        AlwaysNotify = [bool]$postStatusOutcome.AlwaysNotify
+      }
+    }
+  }
+
+  throw "The incremental queue changed repeatedly while final status was being checkpointed; no stable success outcome was published."
+}
+
 function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Identifier, $Result) {
   Increment-Stat $Stats "failedQueueRows"
   $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
@@ -4217,13 +4799,43 @@ function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Iden
   }
 }
 
-function Complete-FullExchangeQueueCertificationIfEligible([hashtable]$Stats, $InitialQueueHighWater, $InitialProjectionFingerprint, $SourceDrift) {
+function Complete-FullExchangeQueueCertificationIfEligible(
+  [hashtable]$Stats,
+  $InitialQueueHighWater,
+  $InitialProjectionFingerprint,
+  $InitialProjectionCanonicalJson,
+  $InitialProjectionCounts,
+  $SourceDrift
+) {
   if ([int]$Stats.failedQueueRows -gt 0 -or @($SourceDrift).Count -gt 0) { return $null }
   try {
-    $certificationResult = Commit-FullExchangeQueueCertification $InitialQueueHighWater $InitialProjectionFingerprint
+    if (-not $InitialProjectionCounts) { throw "Exact canonical FCUNO projection counts are required for durable truth evidence." }
+    $verificationSummary = [ordered]@{
+      status = "match"
+      mismatchCount = 0
+      verifiedManagedContacts = [int]$Stats.verifiedManagedContacts
+      verifiedManagedGroups = [int]$Stats.verifiedManagedGroups
+      verifiedMembershipGroups = [int]$Stats.groups
+      verifiedMemberships = [int]$Stats.groupMembers
+      sourceFenceStable = $true
+      queueFence = Clean-Text $InitialQueueHighWater
+      sourceFingerprint = Clean-Text $InitialProjectionFingerprint
+    }
+    $certificationResult = Commit-FullExchangeQueueCertification `
+      $InitialQueueHighWater `
+      $InitialProjectionFingerprint `
+      $InitialProjectionCanonicalJson `
+      $InitialProjectionCounts `
+      $verificationSummary
     $Stats["fullCertificationCommitted"] = $true
     $Stats["fullCertificationIdempotent"] = [bool](Get-MapValue $certificationResult "idempotent")
     $Stats["fullCertificationAt"] = Clean-Text (Get-MapValue $certificationResult "certifiedAt")
+    $Stats["truthEvidenceRecorded"] = [bool](Get-MapValue $certificationResult "evidenceRecorded")
+    $Stats["truthEvidenceLedgerSequence"] = Clean-Text (Get-MapValue $certificationResult "truthLedgerSequence")
+    $Stats["truthEvidenceLedgerHash"] = Clean-Text (Get-MapValue $certificationResult "truthLedgerHash")
+    $Stats["sourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "sourceSnapshotHash")
+    $Stats["rawSourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "rawSourceSnapshotHash")
+    $Stats["truthWorkerVersion"] = Clean-Text (Get-MapValue $certificationResult "workerVersion")
     Add-ExchangeResolvedTerminalQueueDetails $Stats $certificationResult "full"
     return $certificationResult
   } catch {
@@ -4239,6 +4851,7 @@ function Complete-FullExchangeQueueCertificationIfEligible([hashtable]$Stats, $I
 
 function New-FullSyncLockFailureDetails($Message) {
   $stats = @{
+    runId = Clean-Text $script:CurrentQueueRunId
     syncMode = "full"
     contacts = 0
     groups = 0
@@ -4569,10 +5182,12 @@ function Sync-ExchangeGroupDirectoryNamePrerequisites($ExchangeRows, [hashtable]
 
 function Invoke-FullExchangeSync {
   $stats = @{
+    runId = Clean-Text $script:CurrentQueueRunId
     syncMode = "full"
     contacts = 0
     groups = 0
     groupMembers = 0
+    invalidContacts = 0
     failedQueueRows = 0
     skippedQueueRows = 0
     resolvedTerminalQueueRows = 0
@@ -4598,10 +5213,13 @@ function Invoke-FullExchangeSync {
   $initialQueueHighWater = Get-ExchangeQueueHighWater
   $script:CanonicalExchangeRows = $null
   $exchangeRows = Get-CanonicalExchangeRows
-  $initialProjectionFingerprint = Get-CanonicalExchangeProjectionFingerprint $exchangeRows
+  $initialProjectionCanonicalJson = Get-CanonicalExchangeProjectionJson $exchangeRows
+  $initialProjectionFingerprint = Get-Sha256Hex $initialProjectionCanonicalJson
+  $initialProjectionCounts = Get-CanonicalExchangeProjectionCounts $exchangeRows
   $stats["contacts"] = @($exchangeRows.Contacts).Count
   $stats["groups"] = @($exchangeRows.Groups).Count
   $stats["groupMembers"] = @($exchangeRows.Members).Count
+  $stats["invalidContacts"] = @($exchangeRows.InvalidContacts).Count
 
   foreach ($invalid in @($exchangeRows.InvalidContacts)) {
     $invalidSourceKey = Get-ContactSourceKey $invalid.SourceContactId
@@ -4713,7 +5331,8 @@ function Invoke-FullExchangeSync {
   Renew-ExchangeSyncLockIfDue -Force
   $script:CanonicalExchangeRows = $null
   $latestExchangeRows = Get-CanonicalExchangeRows
-  $latestProjectionFingerprint = Get-CanonicalExchangeProjectionFingerprint $latestExchangeRows
+  $latestProjectionCanonicalJson = Get-CanonicalExchangeProjectionJson $latestExchangeRows
+  $latestProjectionFingerprint = Get-Sha256Hex $latestProjectionCanonicalJson
   $latestQueueHighWater = Get-ExchangeQueueHighWater
   $sourceDrift = @(Get-ExchangeSourceCertificationDrift $initialProjectionFingerprint $initialQueueHighWater $latestProjectionFingerprint $latestQueueHighWater)
   if ($sourceDrift.Count -gt 0) {
@@ -4725,7 +5344,13 @@ function Invoke-FullExchangeSync {
       ("Final certification was not accepted because " + ($sourceDrift -join " and ") + ". Durable queue changes remain available for the next incremental run; rerun full reconciliation after FCUNO editing has stopped.")
   }
 
-  Complete-FullExchangeQueueCertificationIfEligible $stats $initialQueueHighWater $initialProjectionFingerprint $sourceDrift | Out-Null
+  Complete-FullExchangeQueueCertificationIfEligible `
+    $stats `
+    $initialQueueHighWater `
+    $initialProjectionFingerprint `
+    $initialProjectionCanonicalJson `
+    $initialProjectionCounts `
+    $sourceDrift | Out-Null
 
   $groupShadowPlaceholdersCertified = [bool]$stats.fullCertificationCommitted
   foreach ($placeholder in @($exchangeRows.SkippedInvalidContacts)) {
@@ -4741,8 +5366,20 @@ $webhookPayload = Initialize-WebhookPayload $WebhookData
 $script:CurrentSyncRequestedAt = Clean-Text (Get-MapValue $webhookPayload "requestedAt")
 $syncMode = (Clean-Text $webhookPayload.syncMode).ToLowerInvariant()
 if (-not $syncMode) { $syncMode = "incremental" }
+$script:CurrentSyncMode = $syncMode
 $script:CurrentQueueRunId = Get-ExchangeQueueRunId $webhookPayload
-$details = $null
+$details = @{
+  runId = Clean-Text $script:CurrentQueueRunId
+  syncMode = $syncMode
+  changeDetails = @()
+}
+if ($syncMode -ne "full") {
+  $details["queuedRows"] = 0
+  $details["processedQueueRows"] = 0
+  $details["completedQueueRows"] = 0
+  $details["failedQueueRows"] = 0
+  $details["skippedQueueRows"] = 0
+}
 
 try {
   if (-not (Acquire-ExchangeSyncLock $syncMode)) {
@@ -4775,26 +5412,48 @@ try {
 
   if ($syncMode -ne "full") {
     $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
-    Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Compress))
-    $outcome = Get-IncrementalSyncOutcome $details
-    Save-SyncStatus $outcome.Status $outcome.Message $details
+    $outcome = Complete-IncrementalSyncOutcomeWithCheckpoint $details
     if ([bool]$outcome.AlwaysNotify -or $WebhookData) {
-      Send-ExchangeSyncNotification $outcome.Status $outcome.Message $details $webhookPayload
+      $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
+        $outcome.Status `
+        $outcome.Message `
+        $details `
+        $webhookPayload
+    } else {
+      $notificationDelivery = New-ExchangeNotificationDeliveryResult `
+        "not_required" `
+        $false `
+        $false `
+        0 `
+        "" `
+        ""
     }
+    Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
+    Save-SyncStatusAfterNotification $outcome.Status $outcome.Message $details | Out-Null
+    Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Depth 8 -Compress))
     return
   }
 
   $details = Get-StatsObject (Invoke-FullExchangeSync)
-  Write-Output ("Exchange full sync summary: {0}" -f ($details | ConvertTo-Json -Depth 8 -Compress))
   if ([int]$details.failedQueueRows -gt 0) {
     $message = "Exchange full reconciliation failed with $([int]$details.failedQueueRows) validation or verification error(s)."
     Save-SyncStatus "failed" $message $details
-    Send-ExchangeSyncNotification "failed" $message $details $webhookPayload
+    Add-ExchangeTruthLedgerEvidence $details $false | Out-Null
+    $notificationDelivery = Invoke-ExchangeSyncNotificationSafely "failed" $message $details $webhookPayload
+    Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
+    Save-SyncStatusAfterNotification "failed" $message $details | Out-Null
   } else {
     $message = "Exchange full reconciliation completed and verified."
     Save-SyncStatus "completed" $message $details
-    Send-ExchangeSyncNotification "completed" $message $details $webhookPayload
+    Add-ExchangeTruthLedgerEvidence `
+      $details `
+      $true `
+      (Get-DetailValue $details "sourceSnapshotHash") | Out-Null
+    $notificationDelivery = Invoke-ExchangeSyncNotificationSafely "completed" $message $details $webhookPayload
+    Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
+    Save-SyncStatusAfterNotification "completed" $message $details | Out-Null
   }
+  Write-Output ("Exchange full sync summary: {0}" -f ($details | ConvertTo-Json -Depth 8 -Compress))
   return
 } catch {
   $syncError = $_
@@ -4803,7 +5462,25 @@ try {
   } catch {
     Write-Warning ("Could not save Exchange sync failure status: {0}" -f $_.Exception.Message)
   }
-  Send-ExchangeSyncNotification "failed" $syncError.Exception.Message $details $webhookPayload
+  if ($details -is [hashtable]) {
+    try {
+      Add-ExchangeTruthLedgerEvidence $details $false | Out-Null
+      if ($syncMode -ne "full") {
+        Set-IncrementalBacklogFromTruthCheckpoint $details
+      }
+    } catch {
+      Write-Warning ("Could not attach a verified FCUNO Exchange truth-ledger checkpoint to the failure notice: {0}" -f $_.Exception.Message)
+    }
+  }
+  $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
+    "failed" `
+    $syncError.Exception.Message `
+    $details `
+    $webhookPayload
+  if ($details -is [hashtable]) {
+    Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
+    Save-SyncStatusAfterNotification "failed" $syncError.Exception.Message $details | Out-Null
+  }
   throw
 } finally {
   if ($script:ExchangeOnlineConnected -and (Get-Module -Name ExchangeOnlineManagement)) {

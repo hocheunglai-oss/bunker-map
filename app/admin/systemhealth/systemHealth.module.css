@@ -103,27 +103,46 @@
   opacity: 0.55;
 }
 
-.successMessage {
+.successMessage,
+.warningMessage {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 11px 14px;
-  border-bottom: 1px solid #b7dfc4;
-  background: #e9f8ee;
-  color: #146b2f;
   font-size: 11px;
   font-weight: 800;
 }
 
-.successMessage span {
+.successMessage {
+  border-bottom: 1px solid #b7dfc4;
+  background: #e9f8ee;
+  color: #146b2f;
+}
+
+.warningMessage {
+  border-bottom: 1px solid #ead28a;
+  background: #fff6dd;
+  color: #765400;
+}
+
+.successMessage span,
+.warningMessage span {
   overflow-wrap: anywhere;
 }
 
-.successMessage a {
+.successMessage a,
+.warningMessage a {
   margin-left: auto;
-  color: #146b2f;
   font-weight: 900;
   white-space: nowrap;
+}
+
+.successMessage a {
+  color: #146b2f;
+}
+
+.warningMessage a {
+  color: #765400;
 }
 
 .errorMessage {
@@ -259,12 +278,14 @@
   }
 
   .headerActions,
-  .successMessage {
+  .successMessage,
+  .warningMessage {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .successMessage a {
+  .successMessage a,
+  .warningMessage a {
     margin-left: 0;
   }
 

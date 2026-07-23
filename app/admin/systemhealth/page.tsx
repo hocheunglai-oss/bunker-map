@@ -35,7 +35,12 @@ type BackupResponse = {
   success?: boolean
   file?: { name?: string; webViewLink?: string }
   counts?: Record<string, number>
-  warnings?: Array<{ message: string }>
+  warnings?: Array<{
+    key?: string
+    table?: string
+    source?: string
+    message: string
+  }>
   pruned?: number
   message?: string
 }
@@ -107,6 +112,7 @@ export default function SystemHealthPage() {
 
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "system-health", "view")
   const checks = useMemo(() => health?.checks || [], [health])
+  const backupWarnings = backupResult?.warnings || []
 
   const loadHealth = useCallback(async (forceRefresh = false) => {
     if (!authenticated || !canView) return
@@ -191,13 +197,30 @@ export default function SystemHealthPage() {
 
           {message ? <div className={styles.errorMessage}>{message.toUpperCase()}</div> : null}
           {backupResult?.success ? (
-            <div className={styles.successMessage}>
-              <strong>BACKUP COMPLETE</strong>
+            <div
+              className={
+                backupWarnings.length
+                  ? styles.warningMessage
+                  : styles.successMessage
+              }
+              role={backupWarnings.length ? "alert" : "status"}
+              aria-live="polite"
+            >
+              <strong>
+                {backupWarnings.length
+                  ? "BACKUP COMPLETED WITH WARNINGS"
+                  : "BACKUP COMPLETE"}
+              </strong>
               <span>{backupResult.file?.name || "BACKUP FILE CREATED"}</span>
               <span>
                 GOOGLE CONTACTS: {backupResult.counts?.googleContacts ?? 0} · GOOGLE CALENDAR EVENTS:{" "}
-                {backupResult.counts?.googleCalendarEvents ?? 0} · OLDER FILES REMOVED: {backupResult.pruned ?? 0}
+                {backupResult.counts?.googleCalendarEvents ?? 0} · OLDER FILES MOVED TO TRASH: {backupResult.pruned ?? 0}
               </span>
+              {backupWarnings.map((warning, index) => (
+                <span key={`${warning.key || warning.source || "warning"}-${index}`}>
+                  WARNING {index + 1}: {warning.message.toUpperCase()}
+                </span>
+              ))}
               {backupResult.file?.webViewLink ? (
                 <a href={backupResult.file.webViewLink} target="_blank" rel="noreferrer">
                   OPEN BACKUP

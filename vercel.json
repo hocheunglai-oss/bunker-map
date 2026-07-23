@@ -12,7 +12,7 @@
     },
     {
       "path": "/api/backups/bunker-map-drive",
-      "schedule": "0 19 * * 6"
+      "schedule": "0 19 * * *"
     },
     {
       "path": "/api/admin/system-health/notify",

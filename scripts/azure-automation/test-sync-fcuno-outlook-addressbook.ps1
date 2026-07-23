@@ -801,6 +801,10 @@ Assert-Equal 1 ([Math]::Max(0, [int]$skipAccounting.skippedQueueRows - [int]$ski
 $firstFingerprint = Get-CanonicalExchangeProjectionFingerprint $built
 $secondFingerprint = Get-CanonicalExchangeProjectionFingerprint $shuffled
 Assert-Equal $firstFingerprint $secondFingerprint "Source certification fingerprint must remain deterministic for the same canonical projection"
+Assert-Equal `
+  "8f24552f2b9d7c3fabe4f3596457e459ae2357b2bb132050f81077cf6d0b0553" `
+  $firstFingerprint `
+  "The exact canonical projection serializer and SHA-256 contract must remain byte-for-byte stable"
 $sourceBookOnlyContacts = @($contacts | ForEach-Object {
   [pscustomobject]@{
     id = $_.id
@@ -885,6 +889,20 @@ $script:certificationRpcCalls = 0
 $script:certificationRpcBodies = @()
 $script:capturedResolvedSubject = ""
 $script:capturedResolvedHtml = ""
+$atomicProjectionCanonicalJson = Get-CanonicalExchangeProjectionJson $built
+$atomicProjectionFingerprint = Get-Sha256Hex $atomicProjectionCanonicalJson
+$atomicProjectionCounts = Get-CanonicalExchangeProjectionCounts $built
+$atomicVerificationSummary = [ordered]@{
+  status = "match"
+  mismatchCount = 0
+  verifiedManagedContacts = 2
+  verifiedManagedGroups = 2
+  verifiedMembershipGroups = 2
+  verifiedMemberships = 2
+  sourceFenceStable = $true
+  queueFence = "42@2026-07-22T07:15:00Z"
+  sourceFingerprint = $atomicProjectionFingerprint
+}
 Set-Item Function:Start-Sleep -Value { param($Seconds) }
 Set-Item Function:Invoke-SupabaseRest -Value {
   param($Method, $Path, $Body = $null)
@@ -960,21 +978,32 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       })
     }
   }
-  if ($Path -eq "rpc/certify_full_outlook_exchange_sync_queue") {
+  if ($Path -eq "rpc/certify_full_outlook_exchange_truth") {
     $script:certificationRpcCalls += 1
     $script:certificationRpcBodies += [pscustomobject]@{
       run = $Body.p_run_id
       sequence = $Body.p_queue_high_water_sequence
       updatedAt = $Body.p_queue_high_water_updated_at
       fingerprint = $Body.p_source_fingerprint
+      projectionCanonicalJson = $Body.p_projection_canonical_json
+      projectionCounts = $Body.p_projection_counts
+      verificationSummary = $Body.p_verification_summary
+      workerVersion = $Body.p_worker_version
     }
     if ($script:certificationRpcCalls -eq 1) { throw "The HTTP response was lost after full certification committed." }
     return [pscustomobject]@{
       certified = $true
       idempotent = $true
       reason = "This full certification run was already committed; returning its durable result."
+      runId = $script:CurrentQueueRunId
       certifiedAt = "2026-07-22T07:21:00Z"
-      sourceFingerprint = "atomic-fingerprint"
+      sourceFingerprint = $atomicProjectionFingerprint
+      evidenceRecorded = $true
+      truthLedgerSequence = 123
+      truthLedgerHash = ("a" * 64)
+      sourceSnapshotHash = $atomicProjectionFingerprint
+      rawSourceSnapshotHash = ("b" * 64)
+      workerVersion = $ExchangeTruthWorkerVersion
       queueFence = [pscustomobject]@{ expectedSequence = 42; expectedUpdatedAt = "2026-07-22T07:15:00Z"; currentSequence = 42; currentUpdatedAt = "2026-07-22T07:15:00Z" }
       supersededCount = 1
       supersededRows = @([pscustomobject]@{
@@ -1024,6 +1053,16 @@ try {
   Assert-True ([bool]$completionResult.completed -and [bool]$completionResult.idempotent) "A confirmed idempotent completion replay must count as success"
   Assert-Equal $script:completionRpcBodies[0].row $script:completionRpcBodies[1].row "Atomic completion retry must reuse the exact same queue row UUID"
   Assert-Equal $script:completionRpcBodies[0].run $script:completionRpcBodies[1].run "Atomic completion retry must reuse the exact same run UUID"
+  $completionResult.completedRow.id = "45454545-4545-4454-8454-454545454545"
+  Assert-True `
+    ((Get-VerifiedExchangeQueueCompletionContractError $completionResult $atomicQueueRowId $script:CurrentQueueRunId) -match "requested queue row") `
+    "Atomic completion must reject a durable receipt for a different queue row"
+  $completionResult.completedRow.id = $atomicQueueRowId
+  $completionResult.completedRow.runId = "46464646-4646-4464-8464-464646464646"
+  Assert-True `
+    ((Get-VerifiedExchangeQueueCompletionContractError $completionResult $atomicQueueRowId $script:CurrentQueueRunId) -match "active run") `
+    "Atomic completion must reject a durable receipt for a different run"
+  $completionResult.completedRow.runId = $script:CurrentQueueRunId
 
   $resolvedStats = @{
     syncMode = "incremental"
@@ -1052,48 +1091,111 @@ try {
   Assert-Equal "SC Display" $resolvedDetail.requestedBy "A resolved terminal audit row must preserve the requesting user's display name from the atomic RPC"
   Assert-True (@($resolvedDetail.fieldChanges) -contains "Display name: Atomic old -> Atomic current") "A resolved terminal detail must preserve exact audited before/after fields"
   Assert-Equal $atomicQueueRowId $resolvedDetail.supersededByQueueRowId "A resolved terminal detail must identify the queue row whose later processing verified the current FCUNO state"
+  Assert-Equal "" $resolvedDetail.queuedAt "A superseded receipt without an original createdAt value must never fabricate the current time as its queued time"
 
   $resolvedOutcome = Get-IncrementalSyncOutcome $resolvedStats
   Assert-Equal "completed" $resolvedOutcome.Status "Safely resolved terminal rows must not be reported as actionable skips or failures"
-  Send-ExchangeSyncNotification "completed" $resolvedOutcome.Message $resolvedStats ([pscustomobject]@{
+  $resolvedNotificationDelivery = Send-ExchangeSyncNotification "completed" $resolvedOutcome.Message $resolvedStats ([pscustomobject]@{
     requestedBy = "SC"
     requestedByEmail = "sc@example.com"
     requestedAt = "2026-07-22T07:22:00Z"
   })
+  Assert-Equal "delivered" $resolvedNotificationDelivery.Status "A resolved-terminal notice must return an explicit successful delivery receipt"
   Assert-True ($script:capturedResolvedSubject -match "1 terminal resolved") "The notice subject must state how many terminal failures were resolved"
   Assert-True ($script:capturedResolvedHtml -match "Resolved") "The notice must visibly label a superseded terminal row as resolved"
   Assert-True ($script:capturedResolvedHtml -match "Old terminal Exchange error") "The notice must show the exact prior terminal error"
   Assert-True ($script:capturedResolvedHtml -match "processing_failed") "The notice must show the durable queue error history"
   Assert-True ($script:capturedResolvedHtml -match $atomicQueueRowId) "The notice must show the superseding verified queue row ID"
 
-  $certificationResult = Commit-FullExchangeQueueCertification "42@2026-07-22T07:15:00Z" "atomic-fingerprint"
+  $certificationResult = Commit-FullExchangeQueueCertification `
+    "42@2026-07-22T07:15:00Z" `
+    $atomicProjectionFingerprint `
+    $atomicProjectionCanonicalJson `
+    $atomicProjectionCounts `
+    $atomicVerificationSummary
   Assert-Equal 2 $script:certificationRpcCalls "An ambiguous full-certification response must retry against its durable certification receipt"
   Assert-True ([bool]$certificationResult.certified -and [bool]$certificationResult.idempotent) "A confirmed idempotent full-certification replay must count as success"
+  Assert-True ([bool]$certificationResult.evidenceRecorded) "A successful full certification must confirm canonical projection evidence"
   Assert-Equal $script:certificationRpcBodies[0].run $script:certificationRpcBodies[1].run "Full-certification retry must reuse the exact same run UUID"
   Assert-Equal $script:certificationRpcBodies[0].sequence $script:certificationRpcBodies[1].sequence "Full-certification retry must reuse the exact same queue fence sequence"
   Assert-Equal $script:certificationRpcBodies[0].updatedAt $script:certificationRpcBodies[1].updatedAt "Full-certification retry must reuse the exact same queue fence timestamp"
   Assert-Equal $script:certificationRpcBodies[0].fingerprint $script:certificationRpcBodies[1].fingerprint "Full-certification retry must reuse the exact same source fingerprint"
+  Assert-Equal $atomicProjectionCanonicalJson $script:certificationRpcBodies[0].projectionCanonicalJson "Full certification must submit the exact canonical JSON whose bytes produced the fingerprint"
+  Assert-Equal $atomicProjectionFingerprint (Get-Sha256Hex $script:certificationRpcBodies[0].projectionCanonicalJson) "The submitted canonical projection must hash to the submitted fingerprint"
+  foreach ($countName in @("contacts", "groups", "members", "invalidContacts", "skippedInvalidContacts", "duplicateContacts")) {
+    Assert-True ($script:certificationRpcBodies[0].projectionCounts.Contains($countName)) "Full certification must submit the '$countName' canonical projection count"
+    Assert-Equal `
+      $atomicProjectionCounts[$countName] `
+      $script:certificationRpcBodies[0].projectionCounts[$countName] `
+      "Full certification must submit the exact '$countName' canonical projection count"
+  }
+  Assert-Equal $atomicProjectionFingerprint $script:certificationRpcBodies[0].verificationSummary.sourceFingerprint "The verification summary must link to the exact submitted projection fingerprint"
+  Assert-True ([bool]$script:certificationRpcBodies[0].verificationSummary.sourceFenceStable) "The verification summary must confirm that the source fence remained stable"
+  Assert-Equal $ExchangeTruthWorkerVersion $script:certificationRpcBodies[0].workerVersion "Full certification must identify the exact truth-evidence worker contract"
+  $certificationResult.runId = "47474747-4747-4474-8474-474747474747"
+  Assert-True `
+    ((Get-FullExchangeTruthCertificationContractError $certificationResult $script:CurrentQueueRunId $atomicProjectionFingerprint 42 "2026-07-22T07:15:00Z") -match "active run") `
+    "Full certification must reject a durable receipt for a different run"
+  $certificationResult.runId = $script:CurrentQueueRunId
+  $certificationResult.queueFence.currentSequence = 43
+  Assert-True `
+    ((Get-FullExchangeTruthCertificationContractError $certificationResult $script:CurrentQueueRunId $atomicProjectionFingerprint 42 "2026-07-22T07:15:00Z") -match "submitted sequence") `
+    "Full certification must reject a durable receipt whose current queue sequence differs from the submitted fence"
+  $certificationResult.queueFence.currentSequence = 42
+  $certificationResult.queueFence.currentUpdatedAt = "2026-07-22T07:15:01Z"
+  Assert-True `
+    ((Get-FullExchangeTruthCertificationContractError $certificationResult $script:CurrentQueueRunId $atomicProjectionFingerprint 42 "2026-07-22T07:15:00Z") -match "submitted timestamp") `
+    "Full certification must reject a durable receipt whose current queue timestamp differs from the submitted fence"
+  $certificationResult.queueFence.currentUpdatedAt = "2026-07-22T07:15:00Z"
   $fullResolvedStats = @{
     failedQueueRows = 0
     skippedQueueRows = 0
     resolvedTerminalQueueRows = 0
+    verifiedManagedContacts = 2
+    verifiedManagedGroups = 2
+    groups = 2
+    groupMembers = 2
     fullCertificationCommitted = $false
     fullCertificationIdempotent = $false
     changeDetails = @()
   }
   $certificationCallsBeforeEligibleFinalize = $script:certificationRpcCalls
-  Complete-FullExchangeQueueCertificationIfEligible $fullResolvedStats "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @() | Out-Null
+  Complete-FullExchangeQueueCertificationIfEligible `
+    $fullResolvedStats `
+    "42@2026-07-22T07:15:00Z" `
+    $atomicProjectionFingerprint `
+    $atomicProjectionCanonicalJson `
+    $atomicProjectionCounts `
+    @() | Out-Null
   Assert-Equal ($certificationCallsBeforeEligibleFinalize + 1) $script:certificationRpcCalls "A zero-failure, zero-drift final projection must invoke durable full certification"
   Assert-True ([bool]$fullResolvedStats.fullCertificationCommitted) "A confirmed full-certification replay must be recorded as durably committed"
   Assert-True ([bool]$fullResolvedStats.fullCertificationIdempotent) "A confirmed certification receipt replay must retain its idempotent status"
+  Assert-True ([bool]$fullResolvedStats.truthEvidenceRecorded) "An eligible full run must retain the durable projection-evidence confirmation"
+  Assert-Equal 123 $fullResolvedStats.truthEvidenceLedgerSequence "An eligible full run must retain the projection-evidence ledger receipt sequence"
+  Assert-Equal ("a" * 64) $fullResolvedStats.truthEvidenceLedgerHash "An eligible full run must retain the projection-evidence ledger receipt hash"
+  Assert-Equal $atomicProjectionFingerprint $fullResolvedStats.sourceSnapshotHash "An eligible full run must retain the exact canonical projection snapshot hash"
+  Assert-Equal ("b" * 64) $fullResolvedStats.rawSourceSnapshotHash "An eligible full run must retain the raw FCUNO source snapshot hash"
+  Assert-Equal $ExchangeTruthWorkerVersion $fullResolvedStats.truthWorkerVersion "An eligible full run must retain the evidence worker version"
   Assert-Equal 1 $fullResolvedStats.resolvedTerminalQueueRows "A successful full certification must count every terminal queue row it superseded"
   Assert-Equal $script:CurrentQueueRunId @($fullResolvedStats.changeDetails)[0].supersededByFullRunId "A full-certification resolution detail must show the certifying run ID"
   Assert-True (@($fullResolvedStats.changeDetails)[0].result -match "Old terminal full-sync error") "A full-certification resolution detail must retain the exact previous terminal error"
 
   $certificationCallsBeforeIneligibleFinalize = $script:certificationRpcCalls
-  Complete-FullExchangeQueueCertificationIfEligible @{ failedQueueRows = 1 } "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @() | Out-Null
+  Complete-FullExchangeQueueCertificationIfEligible `
+    @{ failedQueueRows = 1 } `
+    "42@2026-07-22T07:15:00Z" `
+    $atomicProjectionFingerprint `
+    $atomicProjectionCanonicalJson `
+    $atomicProjectionCounts `
+    @() | Out-Null
   Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any local full-sync failure must prevent the terminal supersession sweep"
-  Complete-FullExchangeQueueCertificationIfEligible @{ failedQueueRows = 0 } "42@2026-07-22T07:15:00Z" "atomic-fingerprint" @("queue high-water changed") | Out-Null
+  Complete-FullExchangeQueueCertificationIfEligible `
+    @{ failedQueueRows = 0 } `
+    "42@2026-07-22T07:15:00Z" `
+    $atomicProjectionFingerprint `
+    $atomicProjectionCanonicalJson `
+    $atomicProjectionCounts `
+    @("queue high-water changed") | Out-Null
   Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any source/high-water drift must prevent the terminal supersession sweep"
 } finally {
   Set-Item Function:Invoke-SupabaseRest -Value $atomicOriginalInvokeSupabaseRest
@@ -1112,14 +1214,16 @@ $failedCertificationPlaceholderStats = @{
   changeDetails = @()
 }
 Set-Item Function:Commit-FullExchangeQueueCertification -Value {
-  param($QueueHighWater, $SourceFingerprint)
+  param($QueueHighWater, $SourceFingerprint, $ProjectionCanonicalJson, $ProjectionCounts, $VerificationSummary)
   throw "Simulated durable full-certification RPC failure."
 }
 try {
   Complete-FullExchangeQueueCertificationIfEligible `
     $failedCertificationPlaceholderStats `
     "42@2026-07-22T07:15:00Z" `
-    "failed-certification-fingerprint" `
+    $atomicProjectionFingerprint `
+    $atomicProjectionCanonicalJson `
+    $atomicProjectionCounts `
     @() | Out-Null
   Add-FullSyncGroupShadowPlaceholderDetail `
     $failedCertificationPlaceholderStats `
@@ -1134,6 +1238,254 @@ Assert-True (-not [bool]$failedCertificationPlaceholderStats.fullCertificationCo
 Assert-Equal "skipped" $failedCertificationPlaceholderDetail.status "The placeholder remains an explicit skipped row when durable certification fails"
 Assert-True ($failedCertificationPlaceholderDetail.result -match "did not complete final certification") "The placeholder detail must state that certification did not complete after the RPC failure"
 Assert-True ($failedCertificationPlaceholderDetail.result -notmatch "were certified as") "A failed durable certification RPC must never produce a certified placeholder claim"
+
+$truthCheckpointOriginalInvokeSupabaseRest = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$script:truthCheckpointResponse = $null
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  if ($Method -ne "GET" -or $Path -ne "rpc/get_outlook_exchange_truth_checkpoint") {
+    throw "Unexpected truth-checkpoint request $Method $Path"
+  }
+  return $script:truthCheckpointResponse
+}
+try {
+  $script:truthCheckpointResponse = [pscustomobject]@{
+    checkpointValid = $false
+    headSequence = 124
+    headSha256 = ("c" * 64)
+  }
+  $nativeFalseCheckpointRejected = $false
+  try {
+    Add-ExchangeTruthLedgerEvidence @{} $false | Out-Null
+  } catch {
+    $nativeFalseCheckpointRejected = $_.Exception.Message -match "failed its hash, link, timestamp, or referenced-snapshot verification"
+  }
+  Assert-True $nativeFalseCheckpointRejected "A native boolean false checkpoint result must be rejected instead of becoming truthy through coercion"
+
+  $script:truthCheckpointResponse = [pscustomobject]@{
+    checkpointValid = $true
+    headSequence = 125
+    headSha256 = ("c" * 64)
+    ledgerEntries = 125
+    snapshots = 8
+    latestCertificationRunId = $script:CurrentQueueRunId
+    latestCertificationAt = "2026-07-22T07:21:00Z"
+    latestSourceFingerprint = $atomicProjectionFingerprint
+    latestCertificationHasProjectionEvidence = $true
+    latestProjectionSnapshotSha256 = $atomicProjectionFingerprint
+  }
+  $missingQueueCheckpointRejected = $false
+  try {
+    Add-ExchangeTruthLedgerEvidence @{} $true $atomicProjectionFingerprint | Out-Null
+  } catch {
+    $missingQueueCheckpointRejected = $_.Exception.Message -match "missing the 'pending' queue count"
+  }
+  Assert-True $missingQueueCheckpointRejected "A current full certification must reject a checkpoint that omits its authoritative queue counts"
+  $script:truthCheckpointResponse | Add-Member -NotePropertyName queue -NotePropertyValue ([pscustomobject]@{
+    pending = 0
+    processing = 0
+    failed = 0
+    terminalFailed = 0
+  })
+  $script:truthCheckpointResponse.queue.pending = "0"
+  $stringQueueCountRejected = $false
+  try {
+    Add-ExchangeTruthLedgerEvidence @{} $false | Out-Null
+  } catch {
+    $stringQueueCountRejected = $_.Exception.Message -match "non-native or invalid 'pending' queue count"
+  }
+  Assert-True $stringQueueCountRejected "A string queue count must not be coerced into a trusted truth-checkpoint number"
+  $script:truthCheckpointResponse.queue.pending = 0
+  $script:truthCheckpointResponse.queue.terminalFailed = 1
+  $inconsistentQueueCountsRejected = $false
+  try {
+    Add-ExchangeTruthLedgerEvidence @{} $false | Out-Null
+  } catch {
+    $inconsistentQueueCountsRejected = $_.Exception.Message -match "more terminal failed queue rows"
+  }
+  Assert-True $inconsistentQueueCountsRejected "A truth checkpoint must reject internally inconsistent failed and terminal-failed queue counts"
+  $script:truthCheckpointResponse.queue.terminalFailed = 0
+  $truthCheckpointStats = @{
+    truthEvidenceLedgerSequence = 123
+    truthEvidenceLedgerHash = ("a" * 64)
+    sourceSnapshotHash = $atomicProjectionFingerprint
+  }
+  Add-ExchangeTruthLedgerEvidence $truthCheckpointStats $true $atomicProjectionFingerprint | Out-Null
+  Assert-True ([bool]$truthCheckpointStats.truthLedgerCheckpointVerified) "A hash-valid checkpoint must be marked verified"
+  Assert-True ([bool]$truthCheckpointStats.currentProjectionCertified) "A full-run checkpoint must certify the current projection only when the run ID, evidence flag, and snapshot hash all match"
+  Assert-Equal 125 $truthCheckpointStats.truthLedgerHeadSequence "Checkpoint evidence must retain the latest ledger head sequence"
+  Assert-Equal ("c" * 64) $truthCheckpointStats.truthLedgerHeadHash "Checkpoint evidence must retain the latest ledger head hash"
+  Assert-Equal 123 $truthCheckpointStats.truthEvidenceLedgerSequence "Refreshing the ledger checkpoint must not overwrite the full-certification receipt sequence"
+  Assert-Equal ("a" * 64) $truthCheckpointStats.truthEvidenceLedgerHash "Refreshing the ledger checkpoint must not overwrite the full-certification receipt hash"
+  Assert-Equal $atomicProjectionFingerprint $truthCheckpointStats.latestProjectionSnapshotHash "The checkpoint must expose the exact canonical projection linked to the current full certification"
+  Assert-Equal 0 $truthCheckpointStats.truthCheckpointPendingQueueRows "The verified checkpoint must copy its native pending count into final outcome evidence"
+  Assert-Equal 0 $truthCheckpointStats.truthCheckpointProcessingQueueRows "The verified checkpoint must copy its native processing count into final outcome evidence"
+  Assert-Equal 0 $truthCheckpointStats.truthCheckpointFailedQueueRows "The verified checkpoint must copy its native failed count into final outcome evidence"
+  Assert-Equal 0 $truthCheckpointStats.truthCheckpointTerminalFailedQueueRows "The verified checkpoint must copy its native terminal-failed count into final outcome evidence"
+
+  $script:truthCheckpointResponse.latestProjectionSnapshotSha256 = ("d" * 64)
+  $wrongProjectionLinkRejected = $false
+  try {
+    Add-ExchangeTruthLedgerEvidence @{} $true $atomicProjectionFingerprint | Out-Null
+  } catch {
+    $wrongProjectionLinkRejected = $_.Exception.Message -match "not linked to the exact canonical projection"
+  }
+  Assert-True $wrongProjectionLinkRejected "A current full certification must be rejected when its ledger evidence points to a different projection snapshot"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $truthCheckpointOriginalInvokeSupabaseRest
+  $script:truthCheckpointResponse = $null
+}
+
+$checkpointClassificationStats = @{
+  truthCheckpointPendingQueueRows = [long]2
+  truthCheckpointProcessingQueueRows = [long]1
+  truthCheckpointFailedQueueRows = [long]3
+  truthCheckpointTerminalFailedQueueRows = [long]1
+}
+Set-IncrementalBacklogFromTruthCheckpoint $checkpointClassificationStats
+Assert-Equal 6 $checkpointClassificationStats.backlogRows "Final incremental backlog must come from the atomic checkpoint, not an earlier non-atomic row query"
+Assert-Equal 4 $checkpointClassificationStats.retryableBacklogRows "Pending plus non-terminal failed checkpoint rows must be classified as retryable"
+Assert-Equal 1 $checkpointClassificationStats.terminalBacklogRows "The checkpoint terminal-failed count must remain explicit"
+Assert-Equal 1 $checkpointClassificationStats.activeBacklogRows "The checkpoint processing count must remain explicit"
+
+$finalizationOriginalAddTruthLedgerEvidence = (Get-Item Function:Add-ExchangeTruthLedgerEvidence).ScriptBlock
+$finalizationOriginalSaveSyncStatus = (Get-Item Function:Save-SyncStatus).ScriptBlock
+$finalizationOriginalGetBacklogRows = (Get-Item Function:Get-ExchangeQueueBacklogRows).ScriptBlock
+$finalizationOriginalRunId = $script:CurrentQueueRunId
+$script:CurrentQueueRunId = "77777777-7777-4777-8777-777777777777"
+$script:finalizationCheckpoints = @()
+$script:finalizationCheckpointCalls = 0
+$script:finalizationStatusWrites = [System.Collections.ArrayList]::new()
+$script:finalizationBacklogRows = @()
+Set-Item Function:Add-ExchangeTruthLedgerEvidence -Value {
+  param(
+    [hashtable]$Stats,
+    [bool]$RequireCurrentFullCertification = $false,
+    $ExpectedProjectionHash = ""
+  )
+  if ($script:finalizationCheckpointCalls -ge @($script:finalizationCheckpoints).Count) {
+    throw "Unexpected finalization checkpoint call."
+  }
+  $checkpoint = @($script:finalizationCheckpoints)[$script:finalizationCheckpointCalls]
+  $script:finalizationCheckpointCalls += 1
+  $Stats["truthLedgerCheckpointVerified"] = $true
+  $Stats["truthLedgerHeadSequence"] = [long]$checkpoint.Sequence
+  $Stats["truthLedgerHeadHash"] = $checkpoint.Hash
+  $Stats["truthLedgerHeadPreviousHash"] = $checkpoint.PreviousHash
+  $Stats["truthLedgerHeadEventType"] = $checkpoint.EventType
+  $Stats["truthLedgerHeadRunId"] = $checkpoint.RunId
+  $Stats["truthCheckpointPendingQueueRows"] = [long]$checkpoint.Pending
+  $Stats["truthCheckpointProcessingQueueRows"] = [long]$checkpoint.Processing
+  $Stats["truthCheckpointFailedQueueRows"] = [long]$checkpoint.Failed
+  $Stats["truthCheckpointTerminalFailedQueueRows"] = [long]$checkpoint.TerminalFailed
+  return $checkpoint
+}
+Set-Item Function:Save-SyncStatus -Value {
+  param($Status, $Message, $Details = $null)
+  [void]$script:finalizationStatusWrites.Add([pscustomobject]@{
+    Status = $Status
+    Message = $Message
+  })
+}
+Set-Item Function:Get-ExchangeQueueBacklogRows -Value {
+  return @($script:finalizationBacklogRows)
+}
+try {
+  $script:finalizationCheckpoints = @(
+    [pscustomobject]@{ Sequence = 300; Hash = ("1" * 64); PreviousHash = ("0" * 64); EventType = "queue_updated"; RunId = ""; Pending = 0; Processing = 0; Failed = 0; TerminalFailed = 0 },
+    [pscustomobject]@{ Sequence = 305; Hash = ("2" * 64); PreviousHash = ("1" * 64); EventType = "run_status"; RunId = $script:CurrentQueueRunId; Pending = 0; Processing = 0; Failed = 0; TerminalFailed = 0 }
+  )
+  $script:finalizationCheckpointCalls = 0
+  $script:finalizationStatusWrites.Clear()
+  $stableFinalizationStats = @{
+    syncMode = "incremental"
+    queuedRows = 0
+    completedQueueRows = 0
+    failedQueueRows = 0
+    skippedQueueRows = 0
+    supersededQueueRows = 0
+    resolvedTerminalQueueRows = 0
+    changeDetails = @()
+  }
+  $stableFinalizationOutcome = Complete-IncrementalSyncOutcomeWithCheckpoint $stableFinalizationStats
+  Assert-Equal "completed" $stableFinalizationOutcome.Status "A zero-backlog incremental run may complete only after a stable checkpoint pair"
+  Assert-True ($stableFinalizationOutcome.Message -match "checkpoint sequence 305") "A successful incremental result must state the exact queue checkpoint through which it is valid"
+  Assert-Equal 1 $script:finalizationStatusWrites.Count "A stable checkpoint pair must require only one intermediate status ledger write"
+  Assert-True ([long]$stableFinalizationStats.truthLedgerHeadSequence -gt 301) "A direct cryptographic ledger link must remain valid even when an aborted transaction left harmless sequence gaps"
+
+  $script:finalizationCheckpoints = @(
+    [pscustomobject]@{ Sequence = 400; Hash = ("3" * 64); PreviousHash = ("2" * 64); EventType = "queue_updated"; RunId = ""; Pending = 0; Processing = 0; Failed = 0; TerminalFailed = 0 },
+    [pscustomobject]@{ Sequence = 405; Hash = ("5" * 64); PreviousHash = ("4" * 64); EventType = "run_status"; RunId = $script:CurrentQueueRunId; Pending = 1; Processing = 0; Failed = 0; TerminalFailed = 0 },
+    [pscustomobject]@{ Sequence = 405; Hash = ("5" * 64); PreviousHash = ("4" * 64); EventType = "run_status"; RunId = $script:CurrentQueueRunId; Pending = 1; Processing = 0; Failed = 0; TerminalFailed = 0 },
+    [pscustomobject]@{ Sequence = 410; Hash = ("6" * 64); PreviousHash = ("5" * 64); EventType = "run_status"; RunId = $script:CurrentQueueRunId; Pending = 1; Processing = 0; Failed = 0; TerminalFailed = 0 }
+  )
+  $script:finalizationBacklogRows = @([pscustomobject]@{
+    id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    status = "pending"
+    attempts = 0
+    action = "update_contact"
+    entity_type = "contact"
+    entity_id = "intervening-contact"
+    entity_email = "intervening@example.com"
+    display_name = "Intervening contact"
+    created_at = "2026-07-22T08:00:00Z"
+  })
+  $script:finalizationCheckpointCalls = 0
+  $script:finalizationStatusWrites.Clear()
+  $racingFinalizationStats = @{
+    syncMode = "incremental"
+    queuedRows = 0
+    completedQueueRows = 0
+    failedQueueRows = 0
+    skippedQueueRows = 0
+    supersededQueueRows = 0
+    resolvedTerminalQueueRows = 0
+    changeDetails = @()
+  }
+  $racingFinalizationOutcome = Complete-IncrementalSyncOutcomeWithCheckpoint $racingFinalizationStats
+  Assert-Equal "failed" $racingFinalizationOutcome.Status "A queue row inserted between outcome and checkpoint must prevent a false green no-op"
+  Assert-Equal 1 $racingFinalizationStats.backlogRows "The retried final outcome must retain the authoritative intervening pending row"
+  Assert-True ($racingFinalizationOutcome.Message -match "1 unresolved queue change") "The retried outcome must explain the exact remaining backlog"
+  Assert-Equal 2 $script:finalizationStatusWrites.Count "An intervening truth event must force a new checkpointed status attempt"
+  Assert-Equal 410 $racingFinalizationStats.truthLedgerHeadSequence "The final details must expose the stable post-status checkpoint, not the stale pre-race checkpoint"
+} finally {
+  Set-Item Function:Add-ExchangeTruthLedgerEvidence -Value $finalizationOriginalAddTruthLedgerEvidence
+  Set-Item Function:Save-SyncStatus -Value $finalizationOriginalSaveSyncStatus
+  Set-Item Function:Get-ExchangeQueueBacklogRows -Value $finalizationOriginalGetBacklogRows
+  $script:CurrentQueueRunId = $finalizationOriginalRunId
+  $script:finalizationCheckpoints = @()
+  $script:finalizationBacklogRows = @()
+}
+
+$lockContractOriginalInvokeSupabaseRest = (Get-Item Function:Invoke-SupabaseRest).ScriptBlock
+$script:lockContractResponse = $false
+Set-Item Function:Invoke-SupabaseRest -Value {
+  param($Method, $Path, $Body = $null)
+  return $script:lockContractResponse
+}
+try {
+  Assert-True (-not (Acquire-ExchangeSyncLock "incremental")) "A native false lock-acquisition result must remain false"
+  $script:lockContractResponse = "false"
+  $stringAcquireRejected = $false
+  try {
+    Acquire-ExchangeSyncLock "incremental" | Out-Null
+  } catch {
+    $stringAcquireRejected = $_.Exception.Message -match "native boolean"
+  }
+  Assert-True $stringAcquireRejected "A string 'false' lock-acquisition result must be rejected instead of coercing to true"
+
+  $stringRenewRejected = $false
+  try {
+    Renew-ExchangeSyncLock
+  } catch {
+    $stringRenewRejected = $_.Exception.Message -match "native boolean"
+  }
+  Assert-True $stringRenewRejected "A string 'false' lock-renewal result must be rejected instead of preserving an unconfirmed lease"
+} finally {
+  Set-Item Function:Invoke-SupabaseRest -Value $lockContractOriginalInvokeSupabaseRest
+  $script:lockContractResponse = $null
+  $script:SyncLockLastRenewedAt = [DateTimeOffset]::MinValue
+}
 
 $originalRenewExchangeSyncLock = (Get-Item Function:Renew-ExchangeSyncLock).ScriptBlock
 $script:testLeaseRenewals = 0
@@ -1289,13 +1641,22 @@ try {
     activeBacklogRows = 0
     skippedQueueRows = 0
     supersededQueueRows = 0
+    truthLedgerCheckpointVerified = $true
+    truthLedgerHeadSequence = 201
+    truthLedgerHeadHash = ("e" * 64)
+    currentProjectionCertified = $false
     changeDetails = @($terminalBacklogDetail, $pendingBacklogDetail)
   }
-  Send-ExchangeSyncNotification "failed" "Two unresolved rows remain." $emailBacklogDetails ([pscustomobject]@{
+  $backlogNotificationDelivery = Send-ExchangeSyncNotification "failed" "Two unresolved rows remain." $emailBacklogDetails ([pscustomobject]@{
     requestedBy = "SC"
     requestedByEmail = "sc@example.com"
     requestedAt = "2026-07-22T07:00:00Z"
   })
+  Assert-Equal "delivered" $backlogNotificationDelivery.Status "A successful SMTP call must return an explicit delivered receipt"
+  Assert-True ([bool]$backlogNotificationDelivery.Attempted) "A successful SMTP receipt must state that delivery was attempted"
+  Assert-True ([bool]$backlogNotificationDelivery.Delivered) "A successful SMTP receipt must state that delivery completed"
+  Assert-Equal 1 $backlogNotificationDelivery.RecipientCount "A successful SMTP receipt must retain the exact recipient count"
+  Assert-True ([bool](Clean-Text $backlogNotificationDelivery.DeliveredAt)) "A successful SMTP receipt must retain its UTC delivery timestamp"
   Assert-True ($script:capturedBacklogHtml -match "Queue change and backlog results") "A backlog notice must use a backlog-specific result title"
   Assert-True ($script:capturedBacklogHtml -match "Terminal stale group") "A backlog notice must name the terminal item"
   Assert-True ($script:capturedBacklogHtml -match $terminalBacklogId) "A backlog notice must show the exact queue row ID"
@@ -1303,6 +1664,9 @@ try {
   Assert-True ($script:capturedBacklogHtml -match "Not attempted") "A pending zero-attempt row must be labelled as not attempted"
   Assert-True ($script:capturedBacklogHtml -notmatch "No pending changes") "A backlog notice must never claim there are no pending changes"
   Assert-True ($script:capturedBacklogHtml -notmatch "Next retry") "Terminal and pending rows without next_attempt_at must not fabricate next-retry metadata"
+  Assert-True ($script:capturedBacklogHtml -match "Immutable audit checkpoint recorded") "A failed incremental notice may anchor its audit receipt without claiming that Exchange is fully certified"
+  Assert-True ($script:capturedBacklogHtml -match "does not mean every queued change succeeded") "A generic failed incremental checkpoint must explicitly separate ledger integrity from sync success"
+  Assert-True ($script:capturedBacklogHtml -notmatch "Current source-of-truth projection certified") "A failed incremental notice must never use full-certification wording"
 
   $fullNoticeStats = @{
     syncMode = "full"
@@ -1319,6 +1683,26 @@ try {
     removedGroups = 0
     addedMembers = 0
     removedMembers = 0
+    fullCertificationCommitted = $true
+    fullCertificationIdempotent = $false
+    fullCertificationAt = "2026-07-22T07:21:00Z"
+    truthEvidenceRecorded = $true
+    truthEvidenceLedgerSequence = 200
+    truthEvidenceLedgerHash = ("f" * 64)
+    sourceSnapshotHash = $atomicProjectionFingerprint
+    rawSourceSnapshotHash = ("b" * 64)
+    truthWorkerVersion = $ExchangeTruthWorkerVersion
+    truthLedgerCheckpointVerified = $true
+    truthLedgerHeadSequence = 202
+    truthLedgerHeadHash = ("c" * 64)
+    truthLedgerEntries = 202
+    truthSnapshots = 8
+    currentProjectionCertified = $true
+    latestCertificationRunId = $script:CurrentQueueRunId
+    latestCertificationAt = "2026-07-22T07:21:00Z"
+    latestSourceFingerprint = $atomicProjectionFingerprint
+    latestCertificationHasProjectionEvidence = $true
+    latestProjectionSnapshotHash = $atomicProjectionFingerprint
   }
   Add-FullSyncMutationDetail `
     $fullNoticeStats `
@@ -1330,20 +1714,91 @@ try {
     "dddddddd-dddd-4ddd-8ddd-dddddddddddd" `
     "Create contact completed and the final Exchange contact/profile was verified." `
     @("Email: (missing) -> full-notice@example.com", "First name: (missing) -> Full")
-  Send-ExchangeSyncNotification "completed" "Full Exchange reconciliation completed." $fullNoticeStats ([pscustomobject]@{
+  $fullNotificationDelivery = Send-ExchangeSyncNotification "completed" "Full Exchange reconciliation completed." $fullNoticeStats ([pscustomobject]@{
     requestedBy = "SC"
     requestedByEmail = "sc@example.com"
     requestedAt = "2026-07-22T07:10:00Z"
   })
+  Assert-Equal "delivered" $fullNotificationDelivery.Status "A successful full-sync notice must return an explicit delivered receipt"
   Assert-True ($script:capturedBacklogHtml -match "Full reconciliation results") "A full-run notice must use a full-reconciliation result title"
   Assert-True ($script:capturedBacklogHtml -match "Create contact") "A full-run notice must show each mutation action"
   Assert-True ($script:capturedBacklogHtml -match "Email: \(missing\) -&gt; full-notice@example.com") "A full-run notice must show exact before/after fields"
   Assert-True ($script:capturedBacklogHtml -match "FCUNO_CONTACT:c-full-notice") "A full-run notice must show the stable FCUNO identity"
   Assert-True ($script:capturedBacklogHtml -match "dddddddd-dddd-4ddd-8ddd-dddddddddddd") "A full-run notice must show the verified Exchange identity"
   Assert-True ($script:capturedBacklogHtml -notmatch "No Exchange mutations required") "A mutated full run must never use the zero-mutation fallback"
+  Assert-True ($script:capturedBacklogHtml -match "Current source-of-truth projection certified") "A fully certified run notice must clearly state that the current FCUNO-to-Exchange projection was certified"
+  Assert-True ($script:capturedBacklogHtml -match "FCUNO is authoritative") "A fully certified run notice must identify FCUNO as the authority"
+  Assert-True ($script:capturedBacklogHtml -notmatch "does not mean every queued change succeeded") "A fully certified run must not use the generic checkpoint-only qualification"
+  Assert-True ($script:capturedBacklogHtml -match "Projection evidence ledger sequence") "The notice summary must label the full-certification receipt sequence separately"
+  Assert-True ($script:capturedBacklogHtml -match "Ledger checkpoint sequence") "The notice summary must label the later ledger-head checkpoint separately"
+  Assert-True ($script:capturedBacklogHtml -match ("f" * 64)) "The notice summary must retain the projection-evidence receipt hash"
+  Assert-True ($script:capturedBacklogHtml -match ("c" * 64)) "The notice summary must retain the latest checkpoint head hash"
+  Assert-True ($script:capturedBacklogHtml -match $atomicProjectionFingerprint) "The fully certified notice must display the exact canonical FCUNO-to-Exchange projection hash"
+
+  Set-Item Function:Send-ExchangeSmtpMail -Value {
+    param($From, $To, $Subject, $Html)
+    throw "Simulated SMTP transport failure."
+  }
+  $failedNotificationDelivery = Send-ExchangeSyncNotification "failed" "SMTP test." $emailBacklogDetails ([pscustomobject]@{
+    requestedBy = "SC"
+    requestedByEmail = "sc@example.com"
+    requestedAt = "2026-07-22T07:00:00Z"
+  })
+  Assert-Equal "failed" $failedNotificationDelivery.Status "An SMTP exception must return an explicit failed delivery receipt"
+  Assert-True ([bool]$failedNotificationDelivery.Attempted) "An SMTP transport exception occurs after a delivery attempt begins"
+  Assert-True (-not [bool]$failedNotificationDelivery.Delivered) "An SMTP transport exception must never be recorded as delivered"
+  Assert-True ($failedNotificationDelivery.Error -match "Simulated SMTP transport failure") "The failed delivery receipt must retain the exact SMTP error"
 } finally {
   Set-Item Function:Get-OptionalAutomationSetting -Value $originalGetOptionalAutomationSetting
   Set-Item Function:Send-ExchangeSmtpMail -Value $originalSendExchangeSmtpMail
+}
+
+$notificationOutcomeStats = @{}
+$notRequiredNotificationDelivery = New-ExchangeNotificationDeliveryResult `
+  "not_required" `
+  $false `
+  $false `
+  0 `
+  "" `
+  ""
+Set-ExchangeNotificationDeliveryStats $notificationOutcomeStats $notRequiredNotificationDelivery
+Assert-Equal "not_required" $notificationOutcomeStats.notificationDeliveryStatus "A deliberately silent scheduled no-op must persist an explicit not-required notice outcome"
+Assert-True (-not [bool]$notificationOutcomeStats.notificationDeliveryAttempted) "A not-required notice outcome must not claim an SMTP attempt"
+Assert-True (-not [bool]$notificationOutcomeStats.notificationDelivered) "A not-required notice outcome must not claim delivery"
+Assert-Equal 0 $notificationOutcomeStats.notificationRecipientCount "A not-required notice outcome must persist a zero recipient count"
+
+$notificationWrapperOriginalSend = (Get-Item Function:Send-ExchangeSyncNotification).ScriptBlock
+Set-Item Function:Send-ExchangeSyncNotification -Value {
+  param($Status, $Message, $Details, $WebhookPayload)
+  throw "Simulated notification configuration lookup failure."
+}
+try {
+  $preSendFailureDelivery = Invoke-ExchangeSyncNotificationSafely "completed" "Verified." @{} ([pscustomobject]@{})
+  Assert-Equal "failed" $preSendFailureDelivery.Status "A pre-SMTP notification exception must still return a durable failed delivery receipt"
+  Assert-True (-not [bool]$preSendFailureDelivery.Attempted) "A notification preparation failure must not claim an SMTP delivery attempt"
+  Assert-True ($preSendFailureDelivery.Error -match "configuration lookup failure") "A notification preparation failure must retain its exact error"
+} finally {
+  Set-Item Function:Send-ExchangeSyncNotification -Value $notificationWrapperOriginalSend
+}
+
+$notificationSaveOriginalSaveSyncStatus = (Get-Item Function:Save-SyncStatus).ScriptBlock
+$script:notificationReceiptSaveAttempts = 0
+$script:notificationReceiptSavedStatuses = [System.Collections.ArrayList]::new()
+Set-Item Function:Save-SyncStatus -Value {
+  param($Status, $Message, $Details = $null)
+  $script:notificationReceiptSaveAttempts += 1
+  [void]$script:notificationReceiptSavedStatuses.Add($Status)
+  throw "Simulated final notification-receipt persistence failure."
+}
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $notificationReceiptPersisted = Save-SyncStatusAfterNotification "completed" "Exchange reconciliation remains verified." $notificationOutcomeStats
+  Assert-True (-not [bool]$notificationReceiptPersisted) "A failed notification-receipt status write must be reported separately from the Exchange reconciliation outcome"
+  Assert-Equal 3 $script:notificationReceiptSaveAttempts "Notification-receipt status persistence must use exactly three bounded attempts"
+  Assert-True (@($script:notificationReceiptSavedStatuses | Where-Object { $_ -ne "completed" }).Count -eq 0) "Notification-receipt persistence retries must never convert a correct Exchange outcome into failed"
+} finally {
+  Set-Item Function:Save-SyncStatus -Value $notificationSaveOriginalSaveSyncStatus
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 
 $backlogOutcome = Get-IncrementalSyncOutcome @{

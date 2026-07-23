@@ -30,10 +30,10 @@ select ok(
   )
   and has_function_privilege(
     'service_role',
-    'public.certify_full_outlook_exchange_sync_queue(uuid,bigint,timestamptz,text)',
+    'public.certify_full_outlook_exchange_truth(uuid,bigint,timestamptz,text,text,jsonb,jsonb,text)',
     'EXECUTE'
   ),
-  'service_role can execute both completion RPCs'
+  'service_role can execute queue completion and evidence-backed certification RPCs'
 );
 
 select ok(
@@ -48,6 +48,11 @@ select ok(
     'EXECUTE'
   )
   and not has_function_privilege(
+    'service_role',
+    'public.certify_full_outlook_exchange_sync_queue(uuid,bigint,timestamptz,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
     'anon',
     'public.certify_full_outlook_exchange_sync_queue(uuid,bigint,timestamptz,text)',
     'EXECUTE'
@@ -56,8 +61,18 @@ select ok(
     'authenticated',
     'public.certify_full_outlook_exchange_sync_queue(uuid,bigint,timestamptz,text)',
     'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.certify_full_outlook_exchange_truth(uuid,bigint,timestamptz,text,text,jsonb,jsonb,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.certify_full_outlook_exchange_truth(uuid,bigint,timestamptz,text,text,jsonb,jsonb,text)',
+    'EXECUTE'
   ),
-  'client roles cannot execute either completion RPC'
+  'legacy and client callers cannot bypass evidence-backed certification'
 );
 
 delete from public.outlook_exchange_sync_queue;
