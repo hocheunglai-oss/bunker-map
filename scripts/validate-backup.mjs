@@ -8,7 +8,7 @@ if (!backupPath) {
   process.exit(2)
 }
 
-const MINIMUM_V2_MIGRATION_HEAD = "20260723025428"
+const MINIMUM_V2_MIGRATION_HEAD = "20260723080326"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 
 const TABLE_SECTIONS = [

@@ -53,6 +53,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 - Google Drive verified database artifacts
 - System Health live inventory, Exchange truth, and backup-chain verification
 
+## Exchange Address Book Reliability
+
+FCUNO's Supabase shared-address-book tables are authoritative. Microsoft Exchange is a rebuildable projection and must never be used to overwrite FCUNO. The Azure Automation runbook processes incremental work from the FCUNO webhook and an hourly `:31` HKT schedule, then performs a full exact-match reconciliation daily at `04:10` HKT and on demand.
+
+Every source change is linked through Audit Log, the durable Exchange queue, canonical snapshots, full certifications, and the append-only SHA-256 truth ledger. A full run is trusted only when its source fence is stable, the queue is settled, the Exchange contact/group/membership projection matches exactly, and the resulting certification has projection evidence. Successful notices and verified Drive backups preserve independent hashes outside the production database.
+
 ## Deployment
 
 This project can be deployed on Vercel. Pushing to the connected GitHub repository will trigger a new deployment.

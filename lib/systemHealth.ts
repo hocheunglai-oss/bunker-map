@@ -41,7 +41,7 @@ const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
-const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723025428"
+const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723080326"
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80

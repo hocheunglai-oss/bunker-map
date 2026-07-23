@@ -194,8 +194,27 @@ select ok(
   'worker cannot rewrite or delete durable audit evidence directly'
 );
 
-delete from public.outlook_exchange_sync_queue;
-delete from public.outlook_exchange_sync_certifications;
+create temporary table truth_queue_fence (
+  high_water_sequence bigint not null,
+  high_water_updated_at timestamptz
+) on commit drop;
+
+insert into truth_queue_fence (
+  high_water_sequence,
+  high_water_updated_at
+)
+select
+  coalesce(queue.queue_sequence, 0),
+  queue.updated_at
+from (values (true)) as seed(ready)
+left join lateral (
+  select
+    current_queue.queue_sequence,
+    current_queue.updated_at
+  from public.outlook_exchange_sync_queue as current_queue
+  order by current_queue.updated_at desc, current_queue.queue_sequence desc
+  limit 1
+) as queue on seed.ready;
 
 create temporary table truth_certification_result (
   value jsonb not null
@@ -204,8 +223,8 @@ create temporary table truth_certification_result (
 insert into truth_certification_result(value)
 select public.certify_full_outlook_exchange_truth(
   'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-  0,
-  null,
+  (select high_water_sequence from truth_queue_fence),
+  (select high_water_updated_at from truth_queue_fence),
   public.outlook_exchange_truth_sha256(
     '{"contacts":[],"groups":[],"members":[],"invalidContacts":[],"skippedInvalidContacts":[],"duplicateContacts":[]}'
   ),
@@ -226,7 +245,10 @@ select public.certify_full_outlook_exchange_truth(
     'verifiedMembershipGroups', 0,
     'verifiedMemberships', 0,
     'sourceFenceStable', true,
-    'queueFence', '0',
+    'queueFence', (
+      select high_water_sequence::text
+      from truth_queue_fence
+    ),
     'sourceFingerprint', public.outlook_exchange_truth_sha256(
       '{"contacts":[],"groups":[],"members":[],"invalidContacts":[],"skippedInvalidContacts":[],"duplicateContacts":[]}'
     )
@@ -247,10 +269,20 @@ select ok(
   and value ->> 'runId' = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
   and value ->> 'sourceSnapshotHash' = value ->> 'sourceFingerprint'
   and value ->> 'rawSourceSnapshotHash' ~ '^[0-9a-f]{64}$'
-  and (value #>> '{queueFence,expectedSequence}')::bigint = 0
-  and (value #>> '{queueFence,currentSequence}')::bigint = 0
-  and (value #>> '{queueFence,expectedUpdatedAt}') is null
-  and (value #>> '{queueFence,currentUpdatedAt}') is null,
+  and (value #>> '{queueFence,expectedSequence}')::bigint
+    = (select high_water_sequence from truth_queue_fence)
+  and (value #>> '{queueFence,currentSequence}')::bigint
+    = (select high_water_sequence from truth_queue_fence)
+  and (value #>> '{queueFence,expectedUpdatedAt}')::timestamptz
+    is not distinct from (
+      select high_water_updated_at
+      from truth_queue_fence
+    )
+  and (value #>> '{queueFence,currentUpdatedAt}')::timestamptz
+    is not distinct from (
+      select high_water_updated_at
+      from truth_queue_fence
+    ),
   'certification returns a run- and fence-bound externally anchorable receipt'
 )
 from truth_certification_result;
