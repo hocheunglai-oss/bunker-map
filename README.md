@@ -47,8 +47,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 - Next.js 16
 - React 19
 - TypeScript
-- Supabase
+- Supabase PostgreSQL 17
 - Leaflet / React Leaflet
+- Azure Automation / Exchange Online
+- Google Drive verified database artifacts
+- System Health live inventory, Exchange truth, and backup-chain verification
 
 ## Deployment
 
@@ -56,9 +59,11 @@ This project can be deployed on Vercel. Pushing to the connected GitHub reposito
 
 ## Hosted Backups
 
-Vercel runs `/api/backups/bunker-map-drive` weekly at `0 19 * * 6` UTC, which is Sunday 03:00 in Hong Kong. The route uploads a database, Google Contacts, and Google Calendar JSON backup to Google Drive and keeps the latest 2 files. Administrators can also use `BACK UP NOW` from System Health.
+Vercel runs `/api/backups/bunker-map-drive` daily at `0 19 * * *` UTC, which is 03:00 in Hong Kong. The route creates a verified backup-format-v2 artifact containing the complete registered Supabase table inventory, Google Contacts, Google Calendar, and the Exchange truth ledger, canonical snapshots, and certifications. Administrators can also use `BACK UP NOW` from System Health.
 
-The backup covers Supabase app data and CCINFO file metadata. Uploaded CCINFO file contents are handled by the Google Cloud Drive file backup job once deployed. See [docs/backup-restore-runbook.md](docs/backup-restore-runbook.md) and [docs/google-cloud-drive-file-backup.md](docs/google-cloud-drive-file-backup.md).
+Each artifact records per-section hashes, an exact-file SHA-256, the deployed commit and migration head, and the immediately preceding verified Drive artifact. Verified files less than 35 days old are retained; older verified files are moved to Drive trash. System Health independently downloads and verifies the latest artifact, its immediate predecessor, live database inventory, and Exchange evidence.
+
+This artifact chain complements, but does not replace, an owner-level Supabase managed backup/PITR or `pg_dump` restore. JSON-over-REST restore is deliberately refused because it cannot reproduce database objects, immutable ledger ordering, or sequence state exactly. Uploaded CCINFO file contents are handled separately by the Google Cloud Drive file backup job. See [docs/backup-restore-runbook.md](docs/backup-restore-runbook.md) and [docs/google-cloud-drive-file-backup.md](docs/google-cloud-drive-file-backup.md).
 
 Required production environment variables:
 

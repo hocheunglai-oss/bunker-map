@@ -191,6 +191,23 @@
   margin: 0;
 }
 
+.inventoryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 14px;
+}
+
+.inventoryList code {
+  padding: 5px 7px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 5px;
+  background: var(--fc-admin-panel-soft-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
 .secretGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -232,7 +249,8 @@
 }
 
 .configured,
-.missing {
+.missing,
+.unverified {
   flex: 0 0 auto;
   padding: 4px 7px;
   border-radius: 999px;
@@ -250,6 +268,12 @@
   border: 1px solid #ead28a;
   background: #fff6dd;
   color: #765400;
+}
+
+.unverified {
+  border: 1px solid #b7c8df;
+  background: #eef5ff;
+  color: #24527a;
 }
 
 .securityNotice {

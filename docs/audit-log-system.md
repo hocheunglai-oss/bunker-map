@@ -51,6 +51,8 @@ The SQL currently attaches triggers to the main app tables:
 
 Each record stores the actor, table, operation, primary key snapshot, changed fields, before row, after row, and undo status.
 
+Shared-address-book audit rows are part of the authoritative FCUNO-to-Exchange evidence chain. After the Exchange truth-ledger migration, those rows cannot be rewritten or deleted except for the dedicated undo metadata fields. The mutable Exchange delivery queue records work state; canonical snapshots, certifications, and the append-only SHA-256 truth ledger record durable system evidence.
+
 ## Undo
 
-Admins can use `/admin/auditlog` to inspect changes and undo a single row change. Undo itself creates another audit record and marks the original record as undone.
+Admins can use `/admin/auditlog` to inspect changes and undo a single row change. Undo never erases history: it writes a new authoritative source change, creates the corresponding Exchange queue and truth-ledger evidence, and marks the original audit record through its dedicated undo metadata.
