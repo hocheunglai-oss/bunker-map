@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto"
-import { Readable } from "node:stream"
+import { createReadStream, createWriteStream } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { once } from "node:events"
+import { PassThrough } from "node:stream"
+import { finished } from "node:stream/promises"
 import { createClient } from "@supabase/supabase-js"
 import type { drive_v3 } from "googleapis"
 import { NextResponse } from "next/server"
@@ -16,10 +22,14 @@ const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const BACKUP_SCHEMA_VERSION = 2
 const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
+const BACKUP_STREAM_VERIFICATION_SCHEMA =
+  "bunker-map-backup-stream-verification/v1"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
+const BACKUP_EXPORT_PAGE_SIZE = 500
+const MAX_TEMP_BACKUP_BYTES = 400 * 1024 * 1024
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 
@@ -48,6 +58,52 @@ type TableConfig = {
   order?: OrderConfig[]
   optional?: boolean
   omitColumns?: string[]
+}
+
+type BackupSectionManifest = Record<
+  string,
+  {
+    rowCount: number
+    sha256: string
+  }
+>
+
+type BackupDataWriter = {
+  stream: ReturnType<typeof createWriteStream>
+  byteLength: number
+}
+
+type BackupFinalWriter = {
+  stream: PassThrough
+  artifactHasher: ReturnType<typeof createHash>
+  fileHasher: ReturnType<typeof createHash>
+  fileByteLength: number
+}
+
+type PreparedBackupData = {
+  dataPath: string
+  artifactPrefix: Record<string, unknown>
+  counts: Record<string, number>
+  sections: BackupSectionManifest
+  truth: Record<string, unknown>
+  truthHeadSequence: number
+  truthHeadSha256: string
+  databaseEpoch: number
+  migrationHead: string
+  inventorySha256: string
+  catalogSha256: string
+  liveTableCount: number
+  sectionCount: number
+  totalRecordCount: number
+  latestCertificationRunId: string
+  latestProjectionSnapshotSha256: string
+  generatedAt: string
+}
+
+type StreamedBackupFile = {
+  artifactSha256: string
+  uploadedFileSha256: string
+  fileByteLength: number
 }
 
 const TABLES: TableConfig[] = [
@@ -207,13 +263,14 @@ async function getGoogleOAuthClient(refreshToken: string) {
   return auth
 }
 
-async function fetchGoogleContacts() {
+async function streamGoogleContacts(
+  appendRows: (rows: unknown[]) => Promise<void>
+) {
   const { google } = await loadGoogleApis()
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
   if (!refreshToken) throw new Error("GOOGLE_OAUTH_REFRESH_TOKEN is not configured.")
 
   const people = google.people({ version: "v1", auth: await getGoogleOAuthClient(refreshToken) })
-  const contacts: unknown[] = []
   let pageToken: string | undefined
 
   do {
@@ -238,14 +295,14 @@ async function fetchGoogleContacts() {
         "urls",
       ].join(","),
     })
-    contacts.push(...(response.data.connections || []))
+    await appendRows(response.data.connections || [])
     pageToken = response.data.nextPageToken || undefined
   } while (pageToken)
-
-  return contacts
 }
 
-async function fetchGoogleCalendarEvents() {
+async function streamGoogleCalendarEvents(
+  appendRows: (rows: unknown[]) => Promise<void>
+) {
   const { google } = await loadGoogleApis()
   const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN
   if (!refreshToken) throw new Error("GOOGLE_CALENDAR_REFRESH_TOKEN is not configured.")
@@ -255,7 +312,6 @@ async function fetchGoogleCalendarEvents() {
     process.env.GOOGLE_MEETING_CALENDAR_ID ||
     process.env.GOOGLE_CALENDAR_ID ||
     "fcb.bunker@gmail.com"
-  const events: unknown[] = []
   let pageToken: string | undefined
 
   do {
@@ -266,11 +322,11 @@ async function fetchGoogleCalendarEvents() {
       showDeleted: true,
       singleEvents: false,
     })
-    events.push(...(response.data.items || []))
+    await appendRows(response.data.items || [])
     pageToken = response.data.nextPageToken || undefined
   } while (pageToken)
 
-  return { calendarId, events }
+  return calendarId
 }
 
 async function ensureDriveFolder(
@@ -306,16 +362,91 @@ async function ensureDriveFolder(
   return created.data.id
 }
 
-async function fetchAllRows(
-  supabase: ReturnType<typeof getSupabaseClient>,
-  config: TableConfig
+async function writeDataChunk(
+  writer: BackupDataWriter,
+  value: string | Buffer
 ) {
-  const rows: unknown[] = []
-  const pageSize = 1000
-  let from = 0
+  const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8")
+  writer.byteLength += chunk.byteLength
+  if (writer.byteLength > MAX_TEMP_BACKUP_BYTES) {
+    throw new Error(
+      `Backup data exceeds the ${MAX_TEMP_BACKUP_BYTES}-byte bounded temporary-storage limit.`
+    )
+  }
+  if (!writer.stream.write(chunk)) {
+    await once(writer.stream, "drain")
+  }
+}
 
-  while (true) {
-    let query = supabase.from(config.table).select("*").range(from, from + pageSize - 1)
+async function writeFinalChunk(
+  writer: BackupFinalWriter,
+  value: string | Buffer,
+  includeInArtifact = true
+) {
+  const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8")
+  writer.fileHasher.update(chunk)
+  if (includeInArtifact) writer.artifactHasher.update(chunk)
+  writer.fileByteLength += chunk.byteLength
+  if (!writer.stream.write(chunk)) {
+    await once(writer.stream, "drain")
+  }
+}
+
+async function writeBackupSection(
+  writer: BackupDataWriter,
+  key: string,
+  isFirstSection: boolean,
+  producer: (
+    appendRows: (rows: unknown[]) => Promise<void>
+  ) => Promise<void>,
+  sections: BackupSectionManifest,
+  counts: Record<string, number>,
+  includeInCounts = true
+) {
+  await writeDataChunk(
+    writer,
+    `${isFirstSection ? "" : ","}${JSON.stringify(key)}:[`
+  )
+  const sectionHasher = createHash("sha256")
+  sectionHasher.update("[")
+  let rowCount = 0
+
+  const appendRows = async (rows: unknown[]) => {
+    if (!rows.length) return
+    const serializedRows = rows.map((row) => {
+      const serialized = JSON.stringify(row)
+      if (serialized === undefined) {
+        throw new Error(`Backup section ${key} contains an unserializable row.`)
+      }
+      return serialized
+    })
+    const chunk = `${rowCount ? "," : ""}${serializedRows.join(",")}`
+    await writeDataChunk(writer, chunk)
+    sectionHasher.update(chunk)
+    rowCount += rows.length
+  }
+
+  await producer(appendRows)
+  await writeDataChunk(writer, "]")
+  sectionHasher.update("]")
+  sections[key] = {
+    rowCount,
+    sha256: sectionHasher.digest("hex"),
+  }
+  if (includeInCounts) counts[key] = rowCount
+  return rowCount
+}
+
+async function streamTableRows(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  config: TableConfig,
+  appendRows: (rows: unknown[]) => Promise<void>
+) {
+  for (let from = 0; ; from += BACKUP_EXPORT_PAGE_SIZE) {
+    let query = supabase
+      .from(config.table)
+      .select("*")
+      .range(from, from + BACKUP_EXPORT_PAGE_SIZE - 1)
     for (const item of config.order || []) {
       query = query.order(item.column, { ascending: item.ascending })
     }
@@ -329,12 +460,9 @@ async function fetchAllRows(
       for (const column of config.omitColumns) delete sanitized[column]
       return sanitized
     })
-    rows.push(...batch)
-    if (batch.length < pageSize) break
-    from += pageSize
+    await appendRows(batch)
+    if (batch.length < BACKUP_EXPORT_PAGE_SIZE) break
   }
-
-  return rows
 }
 
 async function getBackupInventory(
@@ -357,8 +485,27 @@ async function getBackupInventory(
   ) {
     throw new Error("Backup database inventory did not return a valid public table list.")
   }
+  if (
+    !Array.isArray(inventory.unfencedTables) ||
+    inventory.unfencedTables.some(
+      (table) => typeof table !== "string" || !table
+    ) ||
+    inventory.unfencedTables.length > 0
+  ) {
+    throw new Error(
+      `Backup database inventory has mutation-unfenced tables: ${
+        Array.isArray(inventory.unfencedTables)
+          ? inventory.unfencedTables.join(", ") || "none"
+          : "inventory contract missing"
+      }.`
+    )
+  }
 
   const liveTables = new Set(inventory.tables as string[])
+  const catalogSha256 = requiredSha256(
+    inventory.catalogSha256,
+    "Backup database catalog SHA-256"
+  )
   const registeredTables = new Set([
     ...TABLES.map((config) => config.table),
     ...TRUTH_MANAGED_TABLES,
@@ -387,6 +534,7 @@ async function getBackupInventory(
 
   return {
     migrationHead,
+    catalogSha256,
     liveTables,
     registeredTables: [...registeredTables].sort(),
     explicitlyEphemeralTables: [...EXPLICITLY_EPHEMERAL_TABLES].sort(),
@@ -400,6 +548,25 @@ async function callTruthRpc(
   const { data, error } = await supabase.rpc(functionName)
   if (error) throw error
   return asRecord(data, functionName)
+}
+
+async function getBackupExportEpoch(
+  supabase: ReturnType<typeof getSupabaseClient>
+) {
+  const { data, error } = await supabase.rpc(
+    "get_bunker_map_backup_export_fence"
+  )
+  if (error) throw error
+  const fence = asRecord(data, "Backup export fence")
+  if (
+    fence.schema !== "bunker-map.backup-export-fence/v1" ||
+    fence.ready !== true
+  ) {
+    throw new Error(
+      "A tracked database write transaction is active; backup export will retry from a clean fence."
+    )
+  }
+  return requiredNonNegativeInteger(fence.epoch, "Backup export epoch")
 }
 
 function validateTruthVerification(
@@ -537,83 +704,21 @@ function assertSameTruthHead(
   }
 }
 
-async function fetchBoundedTruthLedger(
+async function buildBackupFile(
   supabase: ReturnType<typeof getSupabaseClient>,
-  headSequence: number
-) {
-  const rows: Array<Record<string, unknown>> = []
-  const pageSize = 1000
-  let lastSequence = 0
-
-  while (lastSequence < headSequence) {
-    const { data, error } = await supabase
-      .from("outlook_exchange_truth_ledger")
-      .select("*")
-      .gt("ledger_sequence", lastSequence)
-      .lte("ledger_sequence", headSequence)
-      .order("ledger_sequence", { ascending: true })
-      .limit(pageSize)
-
-    if (error) throw error
-    const batch = (data || []) as Array<Record<string, unknown>>
-    if (!batch.length) break
-
-    for (const row of batch) {
-      const sequence = requiredPositiveInteger(
-        row.ledger_sequence,
-        "outlook_exchange_truth_ledger.ledger_sequence"
-      )
-      if (sequence <= lastSequence || sequence > headSequence) {
-        throw new Error("Truth-ledger export order or upper bound was violated.")
-      }
-      lastSequence = sequence
-      rows.push(row)
-    }
-
-    if (batch.length < pageSize) break
-  }
-
-  return rows
-}
-
-async function fetchBoundedTruthSnapshots(
-  supabase: ReturnType<typeof getSupabaseClient>,
-  referencedSnapshotHashes: Set<string>
-) {
-  const allRows = (await fetchAllRows(supabase, {
-    key: "outlookExchangeTruthSnapshots",
-    table: "outlook_exchange_truth_snapshots",
-    order: [{ column: "snapshot_sha256", ascending: true }],
-  })) as Array<Record<string, unknown>>
-
-  return allRows.filter((row) =>
-    referencedSnapshotHashes.has(String(row.snapshot_sha256 || ""))
-  )
-}
-
-async function fetchBoundedTruthCertifications(
-  supabase: ReturnType<typeof getSupabaseClient>
-) {
-  return (await fetchAllRows(supabase, {
-    key: "outlookExchangeSyncCertifications",
-    table: "outlook_exchange_sync_certifications",
-    order: [{ column: "run_id", ascending: true }],
-  })) as Array<Record<string, unknown>>
-}
-
-async function buildBackupPayload(
-  supabase: ReturnType<typeof getSupabaseClient>,
+  filePath: string,
   previousVerifiedBackup: PreviousVerifiedBackup | null,
   provenance: BackupProvenance,
   inventory: Awaited<ReturnType<typeof getBackupInventory>>
-) {
+): Promise<PreparedBackupData> {
   const counts: Record<string, number> = {}
-  const data: Record<string, unknown[]> = {}
-  const warnings: Array<{ key: string; table?: string; source?: string; message: string }> = []
+  const sections: BackupSectionManifest = {}
 
   let verificationBeforeExport: Record<string, unknown>
   let checkpointBeforeExport: Record<string, unknown>
+  let databaseEpochBefore: number
   try {
+    databaseEpochBefore = await getBackupExportEpoch(supabase)
     verificationBeforeExport = await callTruthRpc(
       supabase,
       "verify_outlook_exchange_truth_ledger"
@@ -642,160 +747,11 @@ async function buildBackupPayload(
     "Exchange truth verifier and checkpoint"
   )
 
-  for (const tableConfig of TABLES) {
-    if (tableConfig.optional && !inventory.liveTables.has(tableConfig.table)) {
-      counts[tableConfig.key] = 0
-      data[tableConfig.key] = []
-      continue
-    }
-
-    let rows: unknown[]
-    try {
-      rows = await fetchAllRows(supabase, tableConfig)
-    } catch (error) {
-      throw new Error(`Backup failed while reading ${tableConfig.table}: ${getErrorMessage(error)}`)
-    }
-    counts[tableConfig.key] = rows.length
-    data[tableConfig.key] = rows
-  }
-
-  let truthLedger: Array<Record<string, unknown>>
-  let truthSnapshots: Array<Record<string, unknown>>
-  let truthCertifications: Array<Record<string, unknown>>
-  try {
-    truthLedger = await fetchBoundedTruthLedger(
-      supabase,
-      checkpointBefore.headSequence
-    )
-    if (truthLedger.length !== checkpointBefore.ledgerEntries) {
-      throw new Error(
-        `Expected ${checkpointBefore.ledgerEntries} ledger rows at the checkpoint, received ${truthLedger.length}.`
-      )
-    }
-
-    const ledgerHead = truthLedger.at(-1)
-    if (
-      requiredPositiveInteger(
-        ledgerHead?.ledger_sequence,
-        "Exported truth-ledger head sequence"
-      ) !== checkpointBefore.headSequence ||
-      requiredSha256(
-        ledgerHead?.entry_sha256,
-        "Exported truth-ledger head SHA-256"
-      ) !== checkpointBefore.headSha256
-    ) {
-      throw new Error("Exported truth-ledger head does not match the checkpoint.")
-    }
-
-    const referencedSnapshotHashes = new Set(
-      truthLedger
-        .map((row) => String(row.snapshot_sha256 || ""))
-        .filter(Boolean)
-    )
-    const certificationRunIds = new Set(
-      truthLedger
-        .filter((row) =>
-          row.event_type === "full_certification" ||
-          row.event_type === "legacy_full_certification"
-        )
-        .map((row) => String(row.run_id || ""))
-        .filter(Boolean)
-    )
-
-    ;[truthSnapshots, truthCertifications] = await Promise.all([
-      fetchBoundedTruthSnapshots(supabase, referencedSnapshotHashes),
-      fetchBoundedTruthCertifications(supabase),
-    ])
-
-    if (truthSnapshots.length !== checkpointBefore.snapshots) {
-      throw new Error(
-        `Expected ${checkpointBefore.snapshots} truth snapshots at the checkpoint, received ${truthSnapshots.length}.`
-      )
-    }
-    if (
-      truthCertifications.length !== certificationRunIds.size ||
-      truthCertifications.some(
-        (row) => !certificationRunIds.has(String(row.run_id || ""))
-      )
-    ) {
-      throw new Error(
-        `Expected ${certificationRunIds.size} Exchange certification rows at the checkpoint, received ${truthCertifications.length}.`
-      )
-    }
-  } catch (error) {
-    throw new Error(
-      `Backup failed while exporting the bounded Exchange truth evidence: ${getErrorMessage(error)}`
-    )
-  }
-
-  counts.outlookExchangeSyncCertifications = truthCertifications.length
-  data.outlookExchangeSyncCertifications = truthCertifications
-  counts.outlookExchangeTruthSnapshots = truthSnapshots.length
-  data.outlookExchangeTruthSnapshots = truthSnapshots
-  counts.outlookExchangeTruthLedger = truthLedger.length
-  data.outlookExchangeTruthLedger = truthLedger
-
-  try {
-    const contacts = await fetchGoogleContacts()
-    counts.googleContacts = contacts.length
-    data.googleContacts = contacts
-  } catch (error) {
-    throw new Error(
-      `Backup failed while reading Google Contacts: ${getErrorMessage(error)}`
-    )
-  }
-
-  try {
-    const { calendarId, events } = await fetchGoogleCalendarEvents()
-    counts.googleCalendarEvents = events.length
-    data.googleCalendarEvents = events
-    data.googleCalendarMetadata = [{ calendarId }]
-  } catch (error) {
-    throw new Error(
-      `Backup failed while reading Google Calendar: ${getErrorMessage(error)}`
-    )
-  }
-
-  let checkpointAfterExport: Record<string, unknown>
-  let verificationAfterExport: Record<string, unknown>
-  try {
-    checkpointAfterExport = await callTruthRpc(
-      supabase,
-      "get_outlook_exchange_truth_checkpoint"
-    )
-    verificationAfterExport = await callTruthRpc(
-      supabase,
-      "verify_outlook_exchange_truth_ledger"
-    )
-  } catch (error) {
-    throw new Error(
-      `Backup failed while rechecking the Exchange truth checkpoint: ${getErrorMessage(error)}`
-    )
-  }
-
-  const checkpointAfter = validateTruthCheckpoint(
-    checkpointAfterExport,
-    "Exchange truth checkpoint after export"
-  )
-  const verifiedAfter = validateTruthVerification(
-    verificationAfterExport,
-    "Exchange truth verification after export"
-  )
-  assertSameTruthHead(
-    checkpointBefore,
-    checkpointAfter,
-    "Exchange truth checkpoint"
-  )
-  assertSameTruthHead(
-    checkpointBefore,
-    verifiedAfter,
-    "Exchange truth verification"
-  )
-
-  const artifact = {
+  const generatedAt = new Date().toISOString()
+  const artifactPrefix = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     backupRunId: provenance.backupRunId,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     project: "bunker-map",
     source: provenance.source,
     requestedBy: provenance.requestedBy,
@@ -812,31 +768,364 @@ async function buildBackupPayload(
         "spc_users.password_hash",
       ],
     },
-    counts,
-    data,
-    warnings,
+  }
+  const writer: BackupDataWriter = {
+    stream: createWriteStream(filePath, { flags: "wx", mode: 0o600 }),
+    byteLength: 0,
   }
 
-  const sections = Object.fromEntries(
-    Object.keys(data)
-      .sort()
-      .map((key) => [
-        key,
-        {
-          rowCount: Array.isArray(data[key]) ? data[key].length : 0,
-          sha256: sha256(JSON.stringify(data[key])),
-        },
-      ])
-  )
+  try {
+    await writeDataChunk(writer, "{")
+    let isFirstSection = true
 
-  return {
-    ...artifact,
-    integrity: {
-      schema: BACKUP_INTEGRITY_SCHEMA,
-      algorithm: "sha256",
-      serialization: "JSON.stringify/v1",
-      artifactHashScope: "top-level-without-integrity/v1",
-      artifactSha256: sha256(JSON.stringify(artifact)),
+    for (const tableConfig of TABLES) {
+      try {
+        await writeBackupSection(
+          writer,
+          tableConfig.key,
+          isFirstSection,
+          async (appendRows) => {
+            if (
+              tableConfig.optional &&
+              !inventory.liveTables.has(tableConfig.table)
+            ) {
+              return
+            }
+            await streamTableRows(supabase, tableConfig, appendRows)
+          },
+          sections,
+          counts
+        )
+      } catch (error) {
+        throw new Error(
+          `Backup failed while reading ${tableConfig.table}: ${getErrorMessage(error)}`
+        )
+      }
+      isFirstSection = false
+    }
+
+    const referencedSnapshotHashes = new Set<string>()
+    const certificationRunIds = new Set<string>()
+    try {
+      let scannedLedgerCount = 0
+      let scannedLedgerHeadSequence = 0
+      let scannedLedgerHeadSha256 = ""
+      while (scannedLedgerHeadSequence < checkpointBefore.headSequence) {
+        const { data, error } = await supabase
+          .from("outlook_exchange_truth_ledger")
+          .select("*")
+          .gt("ledger_sequence", scannedLedgerHeadSequence)
+          .lte("ledger_sequence", checkpointBefore.headSequence)
+          .order("ledger_sequence", { ascending: true })
+          .limit(BACKUP_EXPORT_PAGE_SIZE)
+        if (error) throw error
+
+        const batch = (data || []) as Array<Record<string, unknown>>
+        if (!batch.length) break
+        for (const row of batch) {
+          const sequence = requiredPositiveInteger(
+            row.ledger_sequence,
+            "outlook_exchange_truth_ledger.ledger_sequence"
+          )
+          if (
+            sequence <= scannedLedgerHeadSequence ||
+            sequence > checkpointBefore.headSequence
+          ) {
+            throw new Error(
+              "Truth-ledger scan order or upper bound was violated."
+            )
+          }
+          scannedLedgerHeadSequence = sequence
+          scannedLedgerHeadSha256 = requiredSha256(
+            row.entry_sha256,
+            "outlook_exchange_truth_ledger.entry_sha256"
+          )
+          const snapshotSha256 = String(row.snapshot_sha256 || "")
+          if (snapshotSha256) {
+            referencedSnapshotHashes.add(
+              requiredSha256(
+                snapshotSha256,
+                "outlook_exchange_truth_ledger.snapshot_sha256"
+              )
+            )
+          }
+          if (
+            row.event_type === "full_certification" ||
+            row.event_type === "legacy_full_certification"
+          ) {
+            const runId = String(row.run_id || "")
+            if (runId) certificationRunIds.add(runId)
+          }
+        }
+        scannedLedgerCount += batch.length
+        if (batch.length < BACKUP_EXPORT_PAGE_SIZE) break
+      }
+      if (
+        scannedLedgerCount !== checkpointBefore.ledgerEntries ||
+        scannedLedgerHeadSequence !== checkpointBefore.headSequence ||
+        scannedLedgerHeadSha256 !== checkpointBefore.headSha256
+      ) {
+        throw new Error(
+          `Scanned truth-ledger head does not match the checkpoint: expected ${checkpointBefore.ledgerEntries} row(s) at ${checkpointBefore.headSequence}/${checkpointBefore.headSha256}; received ${scannedLedgerCount} row(s) at ${scannedLedgerHeadSequence}/${scannedLedgerHeadSha256 || "none"}.`
+        )
+      }
+
+      let unexpectedCertification = ""
+      const certificationCount = await writeBackupSection(
+        writer,
+        "outlookExchangeSyncCertifications",
+        isFirstSection,
+        async (appendRows) => {
+          await streamTableRows(
+            supabase,
+            {
+              key: "outlookExchangeSyncCertifications",
+              table: "outlook_exchange_sync_certifications",
+              order: [{ column: "run_id", ascending: true }],
+            },
+            async (rows) => {
+              for (const row of rows as Array<Record<string, unknown>>) {
+                const runId = String(row.run_id || "")
+                if (!certificationRunIds.has(runId)) {
+                  unexpectedCertification = runId || "missing-run-id"
+                }
+              }
+              await appendRows(rows)
+            }
+          )
+        },
+        sections,
+        counts
+      )
+      isFirstSection = false
+      if (
+        certificationCount !== certificationRunIds.size ||
+        unexpectedCertification
+      ) {
+        throw new Error(
+          `Expected ${certificationRunIds.size} Exchange certification row(s), received ${certificationCount}; unexpected=${unexpectedCertification || "none"}.`
+        )
+      }
+
+      const seenSnapshotHashes = new Set<string>()
+      const snapshotCount = await writeBackupSection(
+        writer,
+        "outlookExchangeTruthSnapshots",
+        isFirstSection,
+        async (appendRows) => {
+          await streamTableRows(
+            supabase,
+            {
+              key: "outlookExchangeTruthSnapshots",
+              table: "outlook_exchange_truth_snapshots",
+              order: [{ column: "snapshot_sha256", ascending: true }],
+            },
+            async (rows) => {
+              const referenced = (
+                rows as Array<Record<string, unknown>>
+              ).filter((row) => {
+                const hash = String(row.snapshot_sha256 || "")
+                if (!referencedSnapshotHashes.has(hash)) return false
+                seenSnapshotHashes.add(hash)
+                return true
+              })
+              await appendRows(referenced)
+            }
+          )
+        },
+        sections,
+        counts
+      )
+      isFirstSection = false
+      if (
+        snapshotCount !== checkpointBefore.snapshots ||
+        seenSnapshotHashes.size !== referencedSnapshotHashes.size
+      ) {
+        throw new Error(
+          `Expected ${checkpointBefore.snapshots} referenced truth snapshot(s), received ${snapshotCount}.`
+        )
+      }
+
+      let exportedLedgerHeadSequence = 0
+      let exportedLedgerHeadSha256 = ""
+      const exportedLedgerCount = await writeBackupSection(
+        writer,
+        "outlookExchangeTruthLedger",
+        isFirstSection,
+        async (appendRows) => {
+          while (exportedLedgerHeadSequence < checkpointBefore.headSequence) {
+            const { data, error } = await supabase
+              .from("outlook_exchange_truth_ledger")
+              .select("*")
+              .gt("ledger_sequence", exportedLedgerHeadSequence)
+              .lte("ledger_sequence", checkpointBefore.headSequence)
+              .order("ledger_sequence", { ascending: true })
+              .limit(BACKUP_EXPORT_PAGE_SIZE)
+            if (error) throw error
+
+            const batch = (data || []) as Array<Record<string, unknown>>
+            if (!batch.length) break
+            for (const row of batch) {
+              const sequence = requiredPositiveInteger(
+                row.ledger_sequence,
+                "outlook_exchange_truth_ledger.ledger_sequence"
+              )
+              if (
+                sequence <= exportedLedgerHeadSequence ||
+                sequence > checkpointBefore.headSequence
+              ) {
+                throw new Error(
+                  "Truth-ledger export order or upper bound was violated."
+                )
+              }
+              exportedLedgerHeadSequence = sequence
+              exportedLedgerHeadSha256 = requiredSha256(
+                row.entry_sha256,
+                "outlook_exchange_truth_ledger.entry_sha256"
+              )
+            }
+            await appendRows(batch)
+            if (batch.length < BACKUP_EXPORT_PAGE_SIZE) break
+          }
+        },
+        sections,
+        counts
+      )
+      isFirstSection = false
+      if (
+        exportedLedgerCount !== checkpointBefore.ledgerEntries ||
+        exportedLedgerHeadSequence !== checkpointBefore.headSequence ||
+        exportedLedgerHeadSha256 !== checkpointBefore.headSha256
+      ) {
+        throw new Error(
+          `Exported truth-ledger head does not match the checkpoint: expected ${checkpointBefore.ledgerEntries} row(s) at ${checkpointBefore.headSequence}/${checkpointBefore.headSha256}; received ${exportedLedgerCount} row(s) at ${exportedLedgerHeadSequence}/${exportedLedgerHeadSha256 || "none"}.`
+        )
+      }
+    } catch (error) {
+      throw new Error(
+        `Backup failed while exporting the bounded Exchange truth evidence: ${getErrorMessage(error)}`
+      )
+    }
+
+    try {
+      await writeBackupSection(
+        writer,
+        "googleContacts",
+        isFirstSection,
+        (appendRows) => streamGoogleContacts(appendRows),
+        sections,
+        counts
+      )
+      isFirstSection = false
+    } catch (error) {
+      throw new Error(
+        `Backup failed while reading Google Contacts: ${getErrorMessage(error)}`
+      )
+    }
+
+    let calendarId = ""
+    try {
+      await writeBackupSection(
+        writer,
+        "googleCalendarEvents",
+        isFirstSection,
+        async (appendRows) => {
+          calendarId = await streamGoogleCalendarEvents(appendRows)
+        },
+        sections,
+        counts
+      )
+      isFirstSection = false
+      await writeBackupSection(
+        writer,
+        "googleCalendarMetadata",
+        isFirstSection,
+        (appendRows) => appendRows([{ calendarId }]),
+        sections,
+        counts,
+        false
+      )
+    } catch (error) {
+      throw new Error(
+        `Backup failed while reading Google Calendar: ${getErrorMessage(error)}`
+      )
+    }
+
+    let checkpointAfterExport: Record<string, unknown>
+    let verificationAfterExport: Record<string, unknown>
+    try {
+      checkpointAfterExport = await callTruthRpc(
+        supabase,
+        "get_outlook_exchange_truth_checkpoint"
+      )
+      verificationAfterExport = await callTruthRpc(
+        supabase,
+        "verify_outlook_exchange_truth_ledger"
+      )
+    } catch (error) {
+      throw new Error(
+        `Backup failed while rechecking the Exchange truth checkpoint: ${getErrorMessage(error)}`
+      )
+    }
+
+    const checkpointAfter = validateTruthCheckpoint(
+      checkpointAfterExport,
+      "Exchange truth checkpoint after export"
+    )
+    const verifiedAfter = validateTruthVerification(
+      verificationAfterExport,
+      "Exchange truth verification after export"
+    )
+    const inventoryAfter = await getBackupInventory(supabase)
+    if (
+      inventoryAfter.migrationHead !== inventory.migrationHead ||
+      inventoryAfter.catalogSha256 !== inventory.catalogSha256 ||
+      JSON.stringify([...inventoryAfter.liveTables].sort()) !==
+        JSON.stringify([...inventory.liveTables].sort())
+    ) {
+      throw new Error(
+        "Backup database schema or table inventory changed during export. Retry from the latest migration."
+      )
+    }
+    const databaseEpochAfter = await getBackupExportEpoch(supabase)
+    if (databaseEpochAfter !== databaseEpochBefore) {
+      throw new Error(
+        `Backup source changed during export: database epoch ${databaseEpochBefore} became ${databaseEpochAfter}. Retry from a fresh checkpoint.`
+      )
+    }
+    assertSameTruthHead(
+      checkpointBefore,
+      checkpointAfter,
+      "Exchange truth checkpoint"
+    )
+    assertSameTruthHead(
+      checkpointBefore,
+      verifiedAfter,
+      "Exchange truth verification"
+    )
+
+    await writeDataChunk(writer, "}")
+    writer.stream.end()
+    await finished(writer.stream)
+
+    const latestCertificationRunId = String(
+      checkpointAfterExport.latestCertificationRunId || ""
+    )
+    const latestProjectionSnapshotSha256 = requiredSha256(
+      checkpointAfterExport.latestProjectionSnapshotSha256,
+      "Latest projection snapshot SHA-256"
+    )
+    if (!latestCertificationRunId) {
+      throw new Error("Latest Exchange certification run ID is missing.")
+    }
+    const inventorySha256 = sha256(
+      JSON.stringify([...inventory.liveTables].sort())
+    )
+
+    return {
+      dataPath: filePath,
+      artifactPrefix,
+      counts,
       sections,
       truth: {
         schema: TRUTH_CHECKPOINT_SCHEMA,
@@ -845,42 +1134,146 @@ async function buildBackupPayload(
         checkpointAfterExport,
         verificationAfterExport,
         exportedLedger: {
-          entries: truthLedger.length,
+          entries: counts.outlookExchangeTruthLedger,
           headSequence: checkpointBefore.headSequence,
           headSha256: checkpointBefore.headSha256,
         },
         exportedSnapshots: {
-          count: truthSnapshots.length,
+          count: counts.outlookExchangeTruthSnapshots,
         },
       },
-    },
+      truthHeadSequence: checkpointBefore.headSequence,
+      truthHeadSha256: checkpointBefore.headSha256,
+      databaseEpoch: databaseEpochBefore,
+      migrationHead: inventory.migrationHead,
+      inventorySha256,
+      catalogSha256: inventory.catalogSha256,
+      liveTableCount: inventory.liveTables.size,
+      sectionCount: Object.keys(sections).length,
+      totalRecordCount: Object.values(counts).reduce(
+        (total, count) => total + count,
+        0
+      ),
+      latestCertificationRunId,
+      latestProjectionSnapshotSha256,
+      generatedAt,
+    }
+  } catch (error) {
+    writer.stream.destroy()
+    try {
+      await finished(writer.stream)
+    } catch {
+      // The original export error is more useful than the stream teardown error.
+    }
+    throw error
   }
 }
 
-async function uploadBackupFile(
+async function streamPreparedBackupToDrive(
   drive: drive_v3.Drive,
   folderId: string,
   fileName: string,
-  content: string
+  prepared: PreparedBackupData
 ) {
-  const response = await drive.files.create({
+  const body = new PassThrough()
+  const writer: BackupFinalWriter = {
+    stream: body,
+    artifactHasher: createHash("sha256"),
+    fileHasher: createHash("sha256"),
+    fileByteLength: 0,
+  }
+
+  const uploadPromise = drive.files.create({
     requestBody: {
       name: fileName,
       parents: [folderId],
+      appProperties: {
+        backupSchema: BACKUP_FILE_SCHEMA,
+        verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
+        verificationStatus: "uploading",
+        backupRunId: String(prepared.artifactPrefix.backupRunId || ""),
+      },
     },
     media: {
       mimeType: "application/json",
-      body: Readable.from([content]),
+      body,
     },
     fields: "id,name,webViewLink,createdTime,mimeType,appProperties",
     supportsAllDrives: true,
   })
 
-  if (!response.data.id) throw new Error("Drive upload did not return a file id.")
-  return response.data
+  const writePromise = (async (): Promise<StreamedBackupFile> => {
+    try {
+      const serializedPrefix = JSON.stringify(prepared.artifactPrefix)
+      if (!serializedPrefix.endsWith("}")) {
+        throw new Error("Backup artifact prefix did not serialize as an object.")
+      }
+      await writeFinalChunk(
+        writer,
+        `${serializedPrefix.slice(0, -1)},"counts":${JSON.stringify(prepared.counts)},"data":`
+      )
+      for await (const chunk of createReadStream(prepared.dataPath)) {
+        await writeFinalChunk(writer, chunk)
+      }
+      await writeFinalChunk(writer, ',"warnings":[]')
+
+      // The artifact hash covers the exact compact top-level object before the
+      // integrity member is added. The virtual brace is hashed but not uploaded.
+      writer.artifactHasher.update("}")
+      const artifactSha256 = writer.artifactHasher.digest("hex")
+      const sortedSections = Object.fromEntries(
+        Object.keys(prepared.sections)
+          .sort()
+          .map((key) => [key, prepared.sections[key]])
+      )
+      const integrity = {
+        schema: BACKUP_INTEGRITY_SCHEMA,
+        algorithm: "sha256",
+        serialization: "JSON.stringify/v1",
+        artifactHashScope: "top-level-without-integrity/v1",
+        artifactSha256,
+        sections: sortedSections,
+        truth: prepared.truth,
+      }
+      await writeFinalChunk(
+        writer,
+        `,"integrity":${JSON.stringify(integrity)}}`,
+        false
+      )
+      body.end()
+      await finished(body)
+
+      return {
+        artifactSha256,
+        uploadedFileSha256: writer.fileHasher.digest("hex"),
+        fileByteLength: writer.fileByteLength,
+      }
+    } catch (error) {
+      body.destroy(
+        error instanceof Error ? error : new Error(getErrorMessage(error))
+      )
+      throw error
+    }
+  })()
+
+  try {
+    const [response, streamed] = await Promise.all([uploadPromise, writePromise])
+    if (!response.data.id) {
+      throw new Error("Drive upload did not return a file id.")
+    }
+    return {
+      file: response.data,
+      streamed,
+    }
+  } catch (error) {
+    body.destroy(
+      error instanceof Error ? error : new Error(getErrorMessage(error))
+    )
+    throw error
+  }
 }
 
-async function downloadDriveFileBytes(
+async function inspectDriveFileBytes(
   drive: drive_v3.Drive,
   fileId: string
 ) {
@@ -894,126 +1287,192 @@ async function downloadDriveFileBytes(
       responseType: "stream",
     }
   )
-  const chunks: Buffer[] = []
-  for await (const chunk of response.data as AsyncIterable<Buffer | string>) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  const hasher = createHash("sha256")
+  let fileByteLength = 0
+  for await (const value of response.data as AsyncIterable<Buffer | string>) {
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+    hasher.update(chunk)
+    fileByteLength += chunk.byteLength
   }
-  return Buffer.concat(chunks)
+  return {
+    uploadedFileSha256: hasher.digest("hex"),
+    fileByteLength,
+  }
 }
 
-function validateStoredBackupBytes(
-  bytes: Buffer,
-  file: drive_v3.Schema$File
-) {
-  let backup: Record<string, unknown>
-  try {
-    backup = asRecord(
-      JSON.parse(bytes.toString("utf8")),
-      "Stored backup artifact"
-    )
-  } catch (error) {
-    throw new Error(
-      `Stored backup JSON is invalid: ${getErrorMessage(error)}`
-    )
-  }
-
-  const integrity = asRecord(backup.integrity, "Stored backup integrity manifest")
-  const truth = asRecord(integrity.truth, "Stored backup truth checkpoint")
-  const verificationAfter = asRecord(
-    truth.verificationAfterExport,
-    "Stored backup truth verification"
+function validateStreamReceiptProperties(file: drive_v3.Schema$File) {
+  const properties = file.appProperties || {}
+  const artifactSha256 = requiredSha256(
+    properties.artifactSha256,
+    "Verified backup artifact SHA-256"
   )
-  const checkpointAfter = asRecord(
-    truth.checkpointAfterExport,
-    "Stored backup final checkpoint"
+  const uploadedFileSha256 = requiredSha256(
+    properties.uploadedFileSha256,
+    "Verified backup uploaded-file SHA-256"
   )
-  const exportedLedger = asRecord(
-    truth.exportedLedger,
-    "Stored backup exported ledger"
+  const fileByteLength = requiredPositiveInteger(
+    properties.fileByteLength,
+    "Verified backup file byte length"
   )
-  const backupData = asRecord(backup.data, "Stored backup data")
-  const sections = asRecord(integrity.sections, "Stored backup sections")
-  const artifact = { ...backup }
-  delete artifact.integrity
-  const artifactSha256 = sha256(JSON.stringify(artifact))
-  const uploadedFileSha256 = sha256(bytes)
+  requiredPositiveInteger(
+    properties.truthHeadSequence,
+    "Verified backup truth head sequence"
+  )
+  requiredSha256(
+    properties.truthHeadSha256,
+    "Verified backup truth head SHA-256"
+  )
 
   if (
-    backup.schemaVersion !== BACKUP_SCHEMA_VERSION ||
-    backup.project !== "bunker-map" ||
-    !/^\d{14}$/.test(String(backup.migrationHead || "")) ||
-    !Array.isArray(backup.warnings) ||
-    backup.warnings.length !== 0 ||
-    integrity.schema !== BACKUP_INTEGRITY_SCHEMA ||
-    integrity.artifactSha256 !== artifactSha256 ||
-    truth.schema !== TRUTH_CHECKPOINT_SCHEMA ||
-    verificationAfter.integrityValid !== true ||
-    verificationAfter.referencesValid !== true ||
-    verificationAfter.operationallyConsistent !== true ||
-    checkpointAfter.checkpointValid !== true ||
-    checkpointAfter.latestCertificationHasProjectionEvidence !== true ||
-    file.appProperties?.backupSchema !== BACKUP_FILE_SCHEMA ||
-    file.appProperties?.verificationStatus !== "complete" ||
-    file.appProperties?.artifactSha256 !== artifactSha256 ||
-    file.appProperties?.uploadedFileSha256 !== uploadedFileSha256 ||
-    file.appProperties?.fileByteLength !== String(bytes.byteLength) ||
-    file.appProperties?.truthHeadSequence !==
-      String(exportedLedger.headSequence || "") ||
-    file.appProperties?.truthHeadSha256 !==
-      String(exportedLedger.headSha256 || "")
+    properties.backupSchema !== BACKUP_FILE_SCHEMA ||
+    properties.verificationStatus !== "complete"
   ) {
     throw new Error(
-      `Stored backup ${file.name || file.id || "unknown"} failed its verified predecessor contract.`
+      `Stored backup ${file.name || file.id || "unknown"} is not marked as a complete verified-v2 artifact.`
     )
   }
 
-  const dataKeys = Object.keys(backupData).sort()
-  const sectionKeys = Object.keys(sections).sort()
-  if (JSON.stringify(dataKeys) !== JSON.stringify(sectionKeys)) {
-    throw new Error("Stored backup sections do not match its data.")
+  if (
+    properties.verificationContract &&
+    properties.verificationContract !== BACKUP_STREAM_VERIFICATION_SCHEMA
+  ) {
+    throw new Error(
+      `Stored backup ${file.name || file.id || "unknown"} has an unsupported verification contract.`
+    )
   }
-  for (const key of dataKeys) {
-    const rows = backupData[key]
-    const section = asRecord(sections[key], `Stored backup section ${key}`)
-    if (
-      !Array.isArray(rows) ||
-      section.rowCount !== rows.length ||
-      section.sha256 !== sha256(JSON.stringify(rows))
-    ) {
-      throw new Error(`Stored backup section ${key} failed verification.`)
+
+  if (properties.verificationContract === BACKUP_STREAM_VERIFICATION_SCHEMA) {
+    const requiredProperties = [
+      "migrationHead",
+      "databaseEpoch",
+      "inventorySha256",
+      "catalogSha256",
+      "liveTableCount",
+      "sectionCount",
+      "totalRecordCount",
+      "backupRunId",
+      "generatedAt",
+      "deploymentCommit",
+      "source",
+      "latestCertificationRunId",
+      "latestProjectionSnapshotSha256",
+      "previousFileId",
+      "previousFileName",
+      "previousCreatedTime",
+      "previousArtifactSha256",
+      "previousUploadedFileSha256",
+    ]
+    for (const property of requiredProperties) {
+      if (!properties[property]) {
+        throw new Error(
+          `Stored backup ${file.name || file.id || "unknown"} is missing receipt property ${property}.`
+        )
+      }
     }
+    if (
+      !/^\d{14}$/.test(properties.migrationHead || "") ||
+      !/^[0-9a-f]{64}$/.test(properties.inventorySha256 || "") ||
+      !/^[0-9a-f]{64}$/.test(properties.catalogSha256 || "") ||
+      !/^[0-9a-f]{64}$/.test(
+        properties.latestProjectionSnapshotSha256 || ""
+      )
+    ) {
+      throw new Error(
+        `Stored backup ${file.name || file.id || "unknown"} has invalid receipt metadata.`
+      )
+    }
+    requiredPositiveInteger(
+      properties.liveTableCount,
+      "Verified backup live table count"
+    )
+    requiredNonNegativeInteger(
+      properties.databaseEpoch,
+      "Verified backup database epoch"
+    )
+    requiredPositiveInteger(
+      properties.sectionCount,
+      "Verified backup section count"
+    )
+    requiredNonNegativeInteger(
+      properties.totalRecordCount,
+      "Verified backup total record count"
+    )
   }
 
   return {
     artifactSha256,
     uploadedFileSha256,
+    fileByteLength,
+  }
+}
+
+async function verifyStoredBackupReceipt(
+  drive: drive_v3.Drive,
+  file: drive_v3.Schema$File
+) {
+  if (!file.id) throw new Error("Verified backup is missing its Drive file id.")
+  const receipt = validateStreamReceiptProperties(file)
+  const downloaded = await inspectDriveFileBytes(drive, file.id)
+  if (
+    downloaded.uploadedFileSha256 !== receipt.uploadedFileSha256 ||
+    downloaded.fileByteLength !== receipt.fileByteLength
+  ) {
+    throw new Error(
+      `Stored backup ${file.name || file.id} no longer matches its verified byte receipt.`
+    )
+  }
+  return {
+    artifactSha256: receipt.artifactSha256,
+    uploadedFileSha256: receipt.uploadedFileSha256,
   }
 }
 
 async function markBackupVerified(
   drive: drive_v3.Drive,
   fileId: string,
-  metadata: {
-    artifactSha256: string
-    uploadedFileSha256: string
-    fileByteLength: number
-    truthHeadSequence: number
-    truthHeadSha256: string
-  }
+  prepared: PreparedBackupData,
+  streamed: StreamedBackupFile,
+  previousVerifiedBackup: PreviousVerifiedBackup | null
 ) {
+  const deploymentCommit = String(
+    prepared.artifactPrefix.deploymentCommit || "none"
+  )
   const response = await drive.files.update({
     fileId,
     requestBody: {
       description:
-        "Verified complete FCUNO backup. Exact uploaded bytes were downloaded and SHA-256 checked before retention pruning.",
+        "Verified complete FCUNO backup. Data was exported page-by-page, exact uploaded bytes were stream-downloaded and SHA-256 checked, and the immutable Exchange truth checkpoint was certified before retention pruning.",
       appProperties: {
         backupSchema: BACKUP_FILE_SCHEMA,
+        verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
         verificationStatus: "complete",
-        artifactSha256: metadata.artifactSha256,
-        uploadedFileSha256: metadata.uploadedFileSha256,
-        fileByteLength: String(metadata.fileByteLength),
-        truthHeadSequence: String(metadata.truthHeadSequence),
-        truthHeadSha256: metadata.truthHeadSha256,
+        artifactSha256: streamed.artifactSha256,
+        uploadedFileSha256: streamed.uploadedFileSha256,
+        fileByteLength: String(streamed.fileByteLength),
+        truthHeadSequence: String(prepared.truthHeadSequence),
+        truthHeadSha256: prepared.truthHeadSha256,
+        migrationHead: prepared.migrationHead,
+        databaseEpoch: String(prepared.databaseEpoch),
+        inventorySha256: prepared.inventorySha256,
+        catalogSha256: prepared.catalogSha256,
+        liveTableCount: String(prepared.liveTableCount),
+        sectionCount: String(prepared.sectionCount),
+        totalRecordCount: String(prepared.totalRecordCount),
+        backupRunId: String(prepared.artifactPrefix.backupRunId || ""),
+        generatedAt: prepared.generatedAt,
+        deploymentCommit,
+        source: String(prepared.artifactPrefix.source || ""),
+        latestCertificationRunId: prepared.latestCertificationRunId,
+        latestProjectionSnapshotSha256:
+          prepared.latestProjectionSnapshotSha256,
+        previousFileId: previousVerifiedBackup?.fileId || "none",
+        previousFileName: previousVerifiedBackup?.name || "none",
+        previousCreatedTime:
+          previousVerifiedBackup?.createdTime || "none",
+        previousArtifactSha256:
+          previousVerifiedBackup?.artifactSha256 || "none",
+        previousUploadedFileSha256:
+          previousVerifiedBackup?.uploadedFileSha256 || "none",
       },
     },
     fields: "id,name,webViewLink,createdTime,mimeType,appProperties",
@@ -1089,7 +1548,9 @@ async function pruneOldDriveBackups(
     sharedDriveId
   )
   const retentionCutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000
-  const stale = verifiedBackups.filter((file) => {
+  // The newest artifact and its immediate predecessor are the minimum
+  // independently verifiable chain. Keep both even after a long backup outage.
+  const stale = verifiedBackups.slice(2).filter((file) => {
     const createdAt = new Date(String(file.createdTime || "")).getTime()
     return Number.isFinite(createdAt) && createdAt < retentionCutoff
   })
@@ -1138,21 +1599,74 @@ async function releaseBackupLock(
   }
 }
 
+async function trashBackupFile(
+  drive: drive_v3.Drive,
+  fileId: string
+) {
+  await drive.files.update({
+    fileId,
+    requestBody: { trashed: true },
+    supportsAllDrives: true,
+  })
+}
+
 async function createBackup(provenance: BackupProvenance) {
   const supabase = getSupabaseClient()
   let lockAcquired = false
+  let tempDirectory: string | null = null
+  let drive: drive_v3.Drive | null = null
+  let uploadedFileId: string | null = null
+  let uploadVerified = false
   try {
     await acquireBackupLock(supabase, provenance.backupRunId)
     lockAcquired = true
 
-    const { drive, rootFolderId, sharedDriveId } = await getDriveClient()
-    const backupRootId = await ensureDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
-    const dailyFolderId = await ensureDriveFolder(drive, backupRootId, DAILY_FOLDER_NAME, sharedDriveId)
-    const [candidates, verifiedBackups, inventory] = await Promise.all([
+    const driveContext = await getDriveClient()
+    drive = driveContext.drive
+    const { rootFolderId, sharedDriveId } = driveContext
+    const backupRootId = await ensureDriveFolder(
+      drive,
+      rootFolderId,
+      BACKUP_FOLDER_NAME,
+      sharedDriveId
+    )
+    const dailyFolderId = await ensureDriveFolder(
+      drive,
+      backupRootId,
+      DAILY_FOLDER_NAME,
+      sharedDriveId
+    )
+    const [initialCandidates, inventory] = await Promise.all([
       listDriveBackupCandidates(drive, dailyFolderId, sharedDriveId),
-      listVerifiedDriveBackups(drive, dailyFolderId, sharedDriveId),
       getBackupInventory(supabase),
     ])
+
+    const orphanedUploads = initialCandidates.filter(
+      (file) =>
+        file.id &&
+        file.appProperties?.backupSchema === BACKUP_FILE_SCHEMA &&
+        file.appProperties?.verificationContract ===
+          BACKUP_STREAM_VERIFICATION_SCHEMA &&
+        file.appProperties?.verificationStatus === "uploading"
+    )
+    for (const orphan of orphanedUploads) {
+      await trashBackupFile(drive, orphan.id!)
+    }
+    const orphanedIds = new Set(orphanedUploads.map((file) => file.id))
+    const candidates = initialCandidates.filter(
+      (file) => !orphanedIds.has(file.id)
+    )
+    const verifiedBackups = candidates.filter(
+      (file) =>
+        file.appProperties?.backupSchema === BACKUP_FILE_SCHEMA &&
+        file.appProperties?.verificationStatus === "complete" &&
+        /^[0-9a-f]{64}$/.test(
+          file.appProperties?.artifactSha256 || ""
+        ) &&
+        /^[0-9a-f]{64}$/.test(
+          file.appProperties?.uploadedFileSha256 || ""
+        )
+    )
     const previousFile = verifiedBackups[0]
     if (candidates.length > 0 && !previousFile) {
       throw new Error(
@@ -1160,10 +1674,11 @@ async function createBackup(provenance: BackupProvenance) {
       )
     }
 
-    let previousHashes: ReturnType<typeof validateStoredBackupBytes> | null = null
+    let previousHashes: Awaited<
+      ReturnType<typeof verifyStoredBackupReceipt>
+    > | null = null
     if (previousFile?.id) {
-      const previousBytes = await downloadDriveFileBytes(drive, previousFile.id)
-      previousHashes = validateStoredBackupBytes(previousBytes, previousFile)
+      previousHashes = await verifyStoredBackupReceipt(drive, previousFile)
     }
     const previousVerifiedBackup: PreviousVerifiedBackup | null =
       previousFile?.id && previousHashes
@@ -1176,103 +1691,95 @@ async function createBackup(provenance: BackupProvenance) {
           }
         : null
 
-    const payload = await buildBackupPayload(
+    tempDirectory = await mkdtemp(
+      join(tmpdir(), "bunker-map-backup-")
+    )
+    const dataPath = join(tempDirectory, "data.json")
+    const prepared = await buildBackupFile(
       supabase,
+      dataPath,
       previousVerifiedBackup,
       provenance,
       inventory
     )
-    const content = JSON.stringify(payload, null, 2)
-    const contentBytes = Buffer.from(content, "utf8")
-    const uploadedFileSha256 = sha256(contentBytes)
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const stamp = prepared.generatedAt.replace(/[:.]/g, "-")
     const fileName = `bunker-map-backup-${stamp}.json`
-    const generatedIntegrity = asRecord(
-      payload.integrity,
-      "Generated backup integrity manifest"
-    )
-    const generatedTruth = asRecord(
-      generatedIntegrity.truth,
-      "Generated backup truth checkpoint"
-    )
-    const generatedLedger = asRecord(
-      generatedTruth.exportedLedger,
-      "Generated backup exported ledger"
-    )
-    validateStoredBackupBytes(contentBytes, {
-      name: fileName,
-      mimeType: "application/json",
-      appProperties: {
-        backupSchema: BACKUP_FILE_SCHEMA,
-        verificationStatus: "complete",
-        artifactSha256: String(generatedIntegrity.artifactSha256 || ""),
-        uploadedFileSha256,
-        fileByteLength: String(contentBytes.byteLength),
-        truthHeadSequence: String(generatedLedger.headSequence || ""),
-        truthHeadSha256: String(generatedLedger.headSha256 || ""),
-      },
-    })
+    const { file: uploaded, streamed } =
+      await streamPreparedBackupToDrive(
+        drive,
+        dailyFolderId,
+        fileName,
+        prepared
+      )
+    if (!uploaded.id) {
+      throw new Error("Drive upload did not return a file id.")
+    }
+    uploadedFileId = uploaded.id
 
-    const uploaded = await uploadBackupFile(drive, dailyFolderId, fileName, content)
-    if (!uploaded.id) throw new Error("Drive upload did not return a file id.")
-
-    const downloadedBytes = await downloadDriveFileBytes(drive, uploaded.id)
-    const downloadedFileSha256 = sha256(downloadedBytes)
+    const downloaded = await inspectDriveFileBytes(drive, uploaded.id)
     if (
-      !downloadedBytes.equals(contentBytes) ||
-      downloadedFileSha256 !== uploadedFileSha256
+      downloaded.uploadedFileSha256 !== streamed.uploadedFileSha256 ||
+      downloaded.fileByteLength !== streamed.fileByteLength
     ) {
       throw new Error(
-        `Drive verification failed for ${fileName}: uploaded bytes do not match the generated artifact.`
+        `Drive verification failed for ${fileName}: streamed upload and downloaded byte receipts do not match.`
       )
     }
 
-    const integrity = asRecord(payload.integrity, "Backup integrity manifest")
-    const truth = asRecord(integrity.truth, "Backup truth checkpoint")
-    const exportedLedger = asRecord(
-      truth.exportedLedger,
-      "Backup exported truth ledger"
+    const verifiedFile = await markBackupVerified(
+      drive,
+      uploaded.id,
+      prepared,
+      streamed,
+      previousVerifiedBackup
     )
-    const verifiedFile = await markBackupVerified(drive, uploaded.id, {
-      artifactSha256: requiredSha256(
-        integrity.artifactSha256,
-        "Backup artifact SHA-256"
-      ),
-      uploadedFileSha256,
-      fileByteLength: contentBytes.byteLength,
-      truthHeadSequence: requiredPositiveInteger(
-        exportedLedger.headSequence,
-        "Backup truth head sequence"
-      ),
-      truthHeadSha256: requiredSha256(
-        exportedLedger.headSha256,
-        "Backup truth head SHA-256"
-      ),
-    })
+    uploadVerified = true
 
     const pruned = await pruneOldDriveBackups(drive, dailyFolderId, sharedDriveId)
 
     return NextResponse.json({
       success: true,
       file: verifiedFile,
-      counts: payload.counts,
-      warnings: payload.warnings,
+      counts: prepared.counts,
+      warnings: [],
       integrity: {
-        schema: integrity.schema,
-        artifactSha256: integrity.artifactSha256,
-        uploadedFileSha256,
-        fileByteLength: contentBytes.byteLength,
+        schema: BACKUP_INTEGRITY_SCHEMA,
+        verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
+        artifactSha256: streamed.artifactSha256,
+        uploadedFileSha256: streamed.uploadedFileSha256,
+        fileByteLength: streamed.fileByteLength,
         verificationStatus: "complete",
         retentionDays: RETENTION_DAYS,
       },
+      recoveredOrphanedUploads: orphanedUploads.length,
       pruned,
     })
   } catch (error) {
+    if (drive && uploadedFileId && !uploadVerified) {
+      try {
+        await trashBackupFile(drive, uploadedFileId)
+      } catch (cleanupError) {
+        console.error(
+          "Failed to trash an unverified backup upload:",
+          getErrorMessage(cleanupError)
+        )
+      }
+    }
     return NextResponse.json(
       { message: getErrorMessage(error) },
       { status: 500 }
     )
   } finally {
+    if (tempDirectory) {
+      try {
+        await rm(tempDirectory, { recursive: true, force: true })
+      } catch (error) {
+        console.error(
+          "Failed to remove the bounded backup workspace:",
+          getErrorMessage(error)
+        )
+      }
+    }
     if (lockAcquired) {
       try {
         await releaseBackupLock(supabase, provenance.backupRunId)

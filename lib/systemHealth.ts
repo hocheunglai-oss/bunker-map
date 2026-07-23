@@ -39,6 +39,8 @@ const DRIVE_FILE_BACKUP_WARNING_AGE_HOURS = 8 * 24
 const EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS = 36
 const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
+const BACKUP_STREAM_VERIFICATION_SCHEMA =
+  "bunker-map-backup-stream-verification/v1"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723080326"
@@ -131,6 +133,34 @@ const BACKUP_EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",
   "spc_users.password_hash",
 ].sort()
+const BACKUP_STREAM_REQUIRED_PROPERTIES = [
+  "backupSchema",
+  "verificationContract",
+  "verificationStatus",
+  "artifactSha256",
+  "uploadedFileSha256",
+  "fileByteLength",
+  "truthHeadSequence",
+  "truthHeadSha256",
+  "migrationHead",
+  "databaseEpoch",
+  "inventorySha256",
+  "catalogSha256",
+  "liveTableCount",
+  "sectionCount",
+  "totalRecordCount",
+  "backupRunId",
+  "generatedAt",
+  "deploymentCommit",
+  "source",
+  "latestCertificationRunId",
+  "latestProjectionSnapshotSha256",
+  "previousFileId",
+  "previousFileName",
+  "previousCreatedTime",
+  "previousArtifactSha256",
+  "previousUploadedFileSha256",
+] as const
 
 function getBackupArtifactContract(migrationHead: string) {
   const tableSections = BACKUP_TABLE_SECTIONS.filter(
@@ -377,18 +407,30 @@ async function getCurrentBackupInventory() {
     inventory.tables,
     "Live backup database tables"
   )
+  const unfencedTables = requireSortedUniqueStrings(
+    inventory.unfencedTables,
+    "Live mutation-unfenced backup tables"
+  )
+  const catalogSha256 = requireSha256(
+    inventory.catalogSha256,
+    "Live backup database catalog SHA-256"
+  )
   const missingRequired = BACKUP_REQUIRED_LIVE_TABLES.filter(
     (table) => !liveTables.includes(table)
   )
   const unregistered = liveTables.filter(
     (table) => !BACKUP_REGISTERED_TABLES.includes(table)
   )
-  if (missingRequired.length || unregistered.length) {
+  if (
+    missingRequired.length ||
+    unregistered.length ||
+    unfencedTables.length
+  ) {
     throw new Error(
-      `Live database is outside the backup table contract: missing=${missingRequired.join(",") || "none"}; unregistered=${unregistered.join(",") || "none"}.`
+      `Live database is outside the backup table contract: missing=${missingRequired.join(",") || "none"}; unregistered=${unregistered.join(",") || "none"}; unfenced=${unfencedTables.join(",") || "none"}.`
     )
   }
-  return { migrationHead, liveTables }
+  return { migrationHead, liveTables, catalogSha256 }
 }
 
 async function listActiveDriveFileIds(
@@ -506,6 +548,301 @@ async function readDriveJsonFile(drive: drive_v3.Drive, fileId: string) {
   return {
     bytes,
     value: JSON.parse(bytes.toString("utf8")) as Record<string, unknown>,
+  }
+}
+
+async function readDriveFileDigest(
+  drive: drive_v3.Drive,
+  fileId: string
+) {
+  const response = await drive.files.get(
+    {
+      fileId,
+      alt: "media",
+      supportsAllDrives: true,
+    },
+    {
+      responseType: "stream",
+    }
+  )
+  const hasher = createHash("sha256")
+  let fileByteLength = 0
+  for await (const chunk of response.data as AsyncIterable<Uint8Array | string>) {
+    hasher.update(chunk)
+    fileByteLength +=
+      typeof chunk === "string"
+        ? Buffer.byteLength(chunk, "utf8")
+        : chunk.byteLength
+    if (!Number.isSafeInteger(fileByteLength)) {
+      throw new Error("Drive backup byte length exceeds the safe integer range.")
+    }
+  }
+  return {
+    uploadedFileSha256: hasher.digest("hex"),
+    fileByteLength,
+  }
+}
+
+function requireStreamBackupProperties(
+  file: drive_v3.Schema$File,
+  label: string
+) {
+  const properties = file.appProperties
+  if (!properties) {
+    throw new Error(`${label} has no Drive verification metadata.`)
+  }
+  for (const key of BACKUP_STREAM_REQUIRED_PROPERTIES) {
+    if (
+      !Object.prototype.hasOwnProperty.call(properties, key) ||
+      typeof properties[key] !== "string" ||
+      !properties[key]
+    ) {
+      throw new Error(`${label} is missing Drive verification property ${key}.`)
+    }
+  }
+  return properties
+}
+
+function requireCanonicalAppPropertyInteger(
+  value: string,
+  label: string,
+  { positive = false }: { positive?: boolean } = {}
+) {
+  if (!/^(0|[1-9]\d*)$/.test(value)) {
+    throw new Error(`${label} is not a canonical non-negative integer.`)
+  }
+  const parsed = Number(value)
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < 0 ||
+    (positive && parsed < 1)
+  ) {
+    throw new Error(
+      positive
+        ? `${label} must be a positive safe integer.`
+        : `${label} is not a non-negative safe integer.`
+    )
+  }
+  return parsed
+}
+
+function requireTimestamp(value: string, label: string) {
+  if (!value || Number.isNaN(Date.parse(value))) {
+    throw new Error(`${label} is not a valid timestamp.`)
+  }
+  return value
+}
+
+function requireUuidV4(value: string, label: string) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    )
+  ) {
+    throw new Error(`${label} is not a version-4 UUID.`)
+  }
+  return value
+}
+
+function parseStreamedBackupPredecessor(
+  properties: Record<string, string>,
+  generatedAt: string,
+  label: string
+) {
+  const values = [
+    properties.previousFileId,
+    properties.previousFileName,
+    properties.previousCreatedTime,
+    properties.previousArtifactSha256,
+    properties.previousUploadedFileSha256,
+  ]
+  if (values.every((value) => value === "none")) return null
+  if (values.some((value) => value === "none")) {
+    throw new Error(`${label} has an incomplete previous-backup chain anchor.`)
+  }
+
+  const fileId = properties.previousFileId
+  const name = properties.previousFileName
+  const createdTime = requireTimestamp(
+    properties.previousCreatedTime,
+    `${label} previous-backup creation time`
+  )
+  const artifactSha256 = requireSha256(
+    properties.previousArtifactSha256,
+    `${label} previous-backup artifact SHA-256`
+  )
+  const uploadedFileSha256 = requireSha256(
+    properties.previousUploadedFileSha256,
+    `${label} previous-backup uploaded-file SHA-256`
+  )
+  if (
+    !fileId ||
+    !BACKUP_FILE_NAME_PATTERN.test(name) ||
+    Date.parse(createdTime) >= Date.parse(generatedAt)
+  ) {
+    throw new Error(`${label} has an invalid previous-backup chain anchor.`)
+  }
+
+  return {
+    fileId,
+    name,
+    createdTime,
+    artifactSha256,
+    uploadedFileSha256,
+  }
+}
+
+async function verifyStreamedBackupFile(
+  drive: drive_v3.Drive,
+  file: drive_v3.Schema$File,
+  label: string
+) {
+  if (!file.id) throw new Error(`${label} is missing its Drive file id.`)
+  const properties = requireStreamBackupProperties(file, label)
+  if (
+    properties.backupSchema !== BACKUP_FILE_SCHEMA ||
+    properties.verificationContract !== BACKUP_STREAM_VERIFICATION_SCHEMA ||
+    properties.verificationStatus !== "complete"
+  ) {
+    throw new Error(`${label} does not use the required streaming verification contract.`)
+  }
+
+  const artifactSha256 = requireSha256(
+    properties.artifactSha256,
+    `${label} artifact SHA-256`
+  )
+  const uploadedFileSha256 = requireSha256(
+    properties.uploadedFileSha256,
+    `${label} uploaded-file SHA-256`
+  )
+  const fileByteLength = requireCanonicalAppPropertyInteger(
+    properties.fileByteLength,
+    `${label} file byte length`,
+    { positive: true }
+  )
+  const truthHeadSequence = requireCanonicalAppPropertyInteger(
+    properties.truthHeadSequence,
+    `${label} truth-head sequence`,
+    { positive: true }
+  )
+  const truthHeadSha256 = requireSha256(
+    properties.truthHeadSha256,
+    `${label} truth-head SHA-256`
+  )
+  const migrationHead = properties.migrationHead
+  if (
+    !/^\d{14}$/.test(migrationHead) ||
+    migrationHead < MINIMUM_BACKUP_MIGRATION_HEAD
+  ) {
+    throw new Error(`${label} predates the required v2 migration contract.`)
+  }
+  const databaseEpoch = requireCanonicalAppPropertyInteger(
+    properties.databaseEpoch,
+    `${label} database export epoch`
+  )
+  const inventorySha256 = requireSha256(
+    properties.inventorySha256,
+    `${label} database-inventory SHA-256`
+  )
+  const catalogSha256 = requireSha256(
+    properties.catalogSha256,
+    `${label} database-catalog SHA-256`
+  )
+  const liveTableCount = requireCanonicalAppPropertyInteger(
+    properties.liveTableCount,
+    `${label} live-table count`,
+    { positive: true }
+  )
+  const sectionCount = requireCanonicalAppPropertyInteger(
+    properties.sectionCount,
+    `${label} section count`,
+    { positive: true }
+  )
+  const totalRecordCount = requireCanonicalAppPropertyInteger(
+    properties.totalRecordCount,
+    `${label} total-record count`
+  )
+  const backupRunId = requireUuidV4(
+    properties.backupRunId,
+    `${label} backup run ID`
+  )
+  const generatedAt = requireTimestamp(
+    properties.generatedAt,
+    `${label} generated timestamp`
+  )
+  const deploymentCommit =
+    properties.deploymentCommit === "none"
+      ? ""
+      : properties.deploymentCommit
+  if (
+    deploymentCommit &&
+    !/^[0-9a-f]{7,64}$/i.test(deploymentCommit)
+  ) {
+    throw new Error(`${label} has invalid deployment provenance.`)
+  }
+  const source = properties.source
+  if (!["vercel-cron", "admin-manual"].includes(source)) {
+    throw new Error(`${label} has invalid source provenance.`)
+  }
+  const latestCertificationRunId = requireUuidV4(
+    properties.latestCertificationRunId,
+    `${label} latest Exchange certification run ID`
+  )
+  const latestProjectionSnapshotSha256 = requireSha256(
+    properties.latestProjectionSnapshotSha256,
+    `${label} latest Exchange projection snapshot SHA-256`
+  )
+
+  const backupContract = getBackupArtifactContract(migrationHead)
+  if (
+    sectionCount !== backupContract.requiredDataKeys.length ||
+    liveTableCount < backupContract.requiredLiveTables.length ||
+    liveTableCount > backupContract.registeredTables.length
+  ) {
+    throw new Error(`${label} metadata does not match the backup inventory contract.`)
+  }
+
+  const previousVerifiedBackup = parseStreamedBackupPredecessor(
+    properties,
+    generatedAt,
+    label
+  )
+  const downloaded = await readDriveFileDigest(drive, file.id)
+  if (
+    downloaded.uploadedFileSha256 !== uploadedFileSha256 ||
+    downloaded.fileByteLength !== fileByteLength
+  ) {
+    throw new Error(`${label} bytes do not match its Drive verification metadata.`)
+  }
+
+  return {
+    artifactSha256,
+    uploadedFileSha256,
+    fileByteLength,
+    truthHeadSequence: String(truthHeadSequence),
+    truthHeadSha256,
+    sectionCount,
+    migrationHead,
+    databaseEpoch,
+    deploymentCommit,
+    backupRunId,
+    generatedAt,
+    source,
+    requestedBy:
+      source === "vercel-cron"
+        ? "Vercel Cron"
+        : "Authenticated administrator",
+    warningCount: 0,
+    liveTableCount,
+    liveTables: [] as string[],
+    latestCertificationRunId,
+    latestProjectionSnapshotSha256,
+    previousVerifiedBackup,
+    previousBackupAnchored: previousVerifiedBackup !== null,
+    verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
+    inventorySha256,
+    catalogSha256,
+    totalRecordCount,
   }
 }
 
@@ -1216,75 +1553,180 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
     throw new Error("Latest verified daily backup is missing its Drive file id.")
   }
 
-  let verified: ReturnType<typeof verifyBackupArtifact>
+  let verified:
+    | ReturnType<typeof verifyBackupArtifact>
+    | Awaited<ReturnType<typeof verifyStreamedBackupFile>>
   try {
-    const downloaded = await readDriveJsonFile(drive, latest.id)
-    verified = verifyBackupArtifact(
-      downloaded.value,
-      downloaded.bytes,
-      latest.appProperties
-    )
+    const verificationContract =
+      latest.appProperties?.verificationContract || ""
     if (
-      Date.parse(verified.generatedAt) >
-      Date.parse(String(latest.createdTime || ""))
+      verificationContract &&
+      verificationContract !== BACKUP_STREAM_VERIFICATION_SCHEMA
     ) {
-      throw new Error("Latest backup was generated after its Drive creation time.")
+      throw new Error(
+        `Latest backup uses unsupported verification contract ${verificationContract}.`
+      )
     }
 
-    const expectedPredecessor = verifiedCandidates[1] || null
-    const predecessorAnchor = verified.previousVerifiedBackup
-    if (!predecessorAnchor) {
-      if (expectedPredecessor) {
-        throw new Error(
-          "Latest backup is missing its immediate verified predecessor anchor."
-        )
-      }
-    } else {
+    if (verificationContract === BACKUP_STREAM_VERIFICATION_SCHEMA) {
+      const streamVerified = await verifyStreamedBackupFile(
+        drive,
+        latest,
+        "Latest backup"
+      )
       if (
-        !expectedPredecessor?.id ||
-        expectedPredecessor.id !== String(predecessorAnchor.fileId || "")
+        Date.parse(streamVerified.generatedAt) >
+        Date.parse(String(latest.createdTime || ""))
       ) {
-        throw new Error(
-          "Latest backup does not anchor the immediate preceding verified file."
-        )
-      }
-      if (
-        expectedPredecessor.name !== predecessorAnchor.name ||
-        (expectedPredecessor.createdTime || null) !==
-          (predecessorAnchor.createdTime || null) ||
-        expectedPredecessor.appProperties?.artifactSha256 !==
-          predecessorAnchor.artifactSha256 ||
-        expectedPredecessor.appProperties?.uploadedFileSha256 !==
-          predecessorAnchor.uploadedFileSha256
-      ) {
-        throw new Error(
-          "Latest backup predecessor anchor does not match Drive metadata."
-        )
+        throw new Error("Latest backup was generated after its Drive creation time.")
       }
 
-      const predecessorDownload = await readDriveJsonFile(
-        drive,
-        expectedPredecessor.id
-      )
-      const predecessorVerified = verifyBackupArtifact(
-        predecessorDownload.value,
-        predecessorDownload.bytes,
-        expectedPredecessor.appProperties
+      const expectedPredecessor = verifiedCandidates[1] || null
+      const predecessorAnchor = streamVerified.previousVerifiedBackup
+      if (!predecessorAnchor) {
+        if (expectedPredecessor) {
+          throw new Error(
+            "Latest backup is missing its immediate verified predecessor anchor."
+          )
+        }
+      } else {
+        if (
+          !expectedPredecessor?.id ||
+          expectedPredecessor.id !== predecessorAnchor.fileId
+        ) {
+          throw new Error(
+            "Latest backup does not anchor the immediate preceding verified file."
+          )
+        }
+        if (
+          expectedPredecessor.name !== predecessorAnchor.name ||
+          (expectedPredecessor.createdTime || null) !==
+            predecessorAnchor.createdTime ||
+          expectedPredecessor.appProperties?.artifactSha256 !==
+            predecessorAnchor.artifactSha256 ||
+          expectedPredecessor.appProperties?.uploadedFileSha256 !==
+            predecessorAnchor.uploadedFileSha256
+        ) {
+          throw new Error(
+            "Latest backup predecessor anchor does not match Drive metadata."
+          )
+        }
+        const predecessorContract =
+          expectedPredecessor.appProperties?.verificationContract || ""
+        if (
+          predecessorContract &&
+          predecessorContract !== BACKUP_STREAM_VERIFICATION_SCHEMA
+        ) {
+          throw new Error(
+            `Latest backup predecessor uses unsupported verification contract ${predecessorContract}.`
+          )
+        }
+        let predecessorVerified:
+          | Awaited<ReturnType<typeof verifyStreamedBackupFile>>
+          | ReturnType<typeof verifyBackupArtifact>
+        if (predecessorContract === BACKUP_STREAM_VERIFICATION_SCHEMA) {
+          predecessorVerified = await verifyStreamedBackupFile(
+            drive,
+            expectedPredecessor,
+            "Latest backup predecessor"
+          )
+        } else {
+          const predecessorDownload = await readDriveJsonFile(
+            drive,
+            expectedPredecessor.id
+          )
+          predecessorVerified = verifyBackupArtifact(
+            predecessorDownload.value,
+            predecessorDownload.bytes,
+            expectedPredecessor.appProperties
+          )
+        }
+        if (
+          predecessorVerified.artifactSha256 !==
+            predecessorAnchor.artifactSha256 ||
+          predecessorVerified.uploadedFileSha256 !==
+            predecessorAnchor.uploadedFileSha256 ||
+          Date.parse(predecessorVerified.generatedAt) >
+            Date.parse(String(expectedPredecessor.createdTime || "")) ||
+          Date.parse(predecessorVerified.generatedAt) >=
+            Date.parse(streamVerified.generatedAt)
+        ) {
+          throw new Error(
+            "Latest backup predecessor bytes do not match the chain anchor."
+          )
+        }
+      }
+      verified = streamVerified
+    } else {
+      const downloaded = await readDriveJsonFile(drive, latest.id)
+      const legacyVerified = verifyBackupArtifact(
+        downloaded.value,
+        downloaded.bytes,
+        latest.appProperties
       )
       if (
-        predecessorVerified.artifactSha256 !==
-          predecessorAnchor.artifactSha256 ||
-        predecessorVerified.uploadedFileSha256 !==
-          predecessorAnchor.uploadedFileSha256 ||
-        Date.parse(predecessorVerified.generatedAt) >
-          Date.parse(String(expectedPredecessor.createdTime || "")) ||
-        Date.parse(predecessorVerified.generatedAt) >=
-          Date.parse(verified.generatedAt)
+        Date.parse(legacyVerified.generatedAt) >
+        Date.parse(String(latest.createdTime || ""))
       ) {
-        throw new Error(
-          "Latest backup predecessor bytes do not match the chain anchor."
-        )
+        throw new Error("Latest backup was generated after its Drive creation time.")
       }
+
+      const expectedPredecessor = verifiedCandidates[1] || null
+      const predecessorAnchor = legacyVerified.previousVerifiedBackup
+      if (!predecessorAnchor) {
+        if (expectedPredecessor) {
+          throw new Error(
+            "Latest backup is missing its immediate verified predecessor anchor."
+          )
+        }
+      } else {
+        if (
+          !expectedPredecessor?.id ||
+          expectedPredecessor.id !== String(predecessorAnchor.fileId || "")
+        ) {
+          throw new Error(
+            "Latest backup does not anchor the immediate preceding verified file."
+          )
+        }
+        if (
+          expectedPredecessor.name !== predecessorAnchor.name ||
+          (expectedPredecessor.createdTime || null) !==
+            (predecessorAnchor.createdTime || null) ||
+          expectedPredecessor.appProperties?.artifactSha256 !==
+            predecessorAnchor.artifactSha256 ||
+          expectedPredecessor.appProperties?.uploadedFileSha256 !==
+            predecessorAnchor.uploadedFileSha256
+        ) {
+          throw new Error(
+            "Latest backup predecessor anchor does not match Drive metadata."
+          )
+        }
+
+        const predecessorDownload = await readDriveJsonFile(
+          drive,
+          expectedPredecessor.id
+        )
+        const predecessorVerified = verifyBackupArtifact(
+          predecessorDownload.value,
+          predecessorDownload.bytes,
+          expectedPredecessor.appProperties
+        )
+        if (
+          predecessorVerified.artifactSha256 !==
+            predecessorAnchor.artifactSha256 ||
+          predecessorVerified.uploadedFileSha256 !==
+            predecessorAnchor.uploadedFileSha256 ||
+          Date.parse(predecessorVerified.generatedAt) >
+            Date.parse(String(expectedPredecessor.createdTime || "")) ||
+          Date.parse(predecessorVerified.generatedAt) >=
+            Date.parse(legacyVerified.generatedAt)
+        ) {
+          throw new Error(
+            "Latest backup predecessor bytes do not match the chain anchor."
+          )
+        }
+      }
+      verified = legacyVerified
     }
   } catch (error) {
     return {
@@ -1325,9 +1767,18 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
       },
     }
   }
+  const currentInventorySha256 = sha256(
+    JSON.stringify([...currentInventory.liveTables].sort())
+  )
   const databaseInventoryCurrent =
     verified.migrationHead === currentInventory.migrationHead &&
-    sameStringSet(verified.liveTables, currentInventory.liveTables)
+    ("verificationContract" in verified
+      ? verified.verificationContract ===
+          BACKUP_STREAM_VERIFICATION_SCHEMA &&
+        verified.inventorySha256 === currentInventorySha256 &&
+        verified.catalogSha256 === currentInventory.catalogSha256 &&
+        verified.liveTableCount === currentInventory.liveTables.length
+      : sameStringSet(verified.liveTables, currentInventory.liveTables))
   const stale = ageHours > DAILY_BACKUP_WARNING_AGE_HOURS
   const provenanceIncomplete = !verified.deploymentCommit
   return {
@@ -1359,6 +1810,10 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
       truthHeadSha256: verified.truthHeadSha256,
       sectionCount: verified.sectionCount,
       migrationHead: verified.migrationHead,
+      databaseEpoch:
+        "databaseEpoch" in verified ? verified.databaseEpoch : null,
+      catalogSha256:
+        "catalogSha256" in verified ? verified.catalogSha256 : null,
       liveMigrationHead: currentInventory.migrationHead,
       databaseInventoryCurrent,
       deploymentCommit: verified.deploymentCommit,
