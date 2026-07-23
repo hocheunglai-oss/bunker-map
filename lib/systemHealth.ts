@@ -83,6 +83,7 @@ const BACKUP_TABLE_SECTIONS = [
   { key: "spcFixtures", table: "spc_fixtures" },
   { key: "spcSuppliers", table: "spc_suppliers" },
   { key: "parserReports", table: "parser_reports" },
+  { key: "openAiUsageEvents", table: "openai_usage_events" },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks" },
 ] as const
 

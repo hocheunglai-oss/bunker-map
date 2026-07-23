@@ -66,6 +66,7 @@ const TABLE_SECTIONS = [
   { key: "spcFixtures", table: "spc_fixtures", primaryKey: ["id"] },
   { key: "spcSuppliers", table: "spc_suppliers", primaryKey: ["key"] },
   { key: "parserReports", table: "parser_reports", primaryKey: ["id"] },
+  { key: "openAiUsageEvents", table: "openai_usage_events", primaryKey: ["id"] },
   {
     key: "spcPresentationChunks",
     table: "spc_presentation_chunks",

@@ -41,6 +41,7 @@ const PAGE_TABLES: Record<string, string[]> = {
   "hongkong-price-history": ["ports", "price_history", "remarks"],
   "taiwan-price-history": ["ports", "price_history", "remarks"],
   "taiwan-remarks": ["remarks"],
+  "openai-usage": ["openai_usage_events"],
 }
 
 const PAGE_ALIASES: Record<string, string> = {
