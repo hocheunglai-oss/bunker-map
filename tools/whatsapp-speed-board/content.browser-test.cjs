@@ -8,10 +8,16 @@ const extensionSource = fs.readFileSync(path.join(__dirname, "content.js"), "utf
 const enquiry = "lake dream / 9172442 / 7 - 8 jul / vlsfo 440mts"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
 const crudeWatch = {
-  price: 73.14,
-  change: 0.28,
-  changePercent: 0.38,
-  points: [72.9, 73.0, 72.96, 73.08, 73.14],
+  price: 97.57,
+  change: 3.5,
+  changePercent: 3.72,
+  points: [95.17, 96.03, 97.61, 97.94, 97.57],
+  contract: "Sep26",
+  updatedAt: "2026-07-23T08:51:00.000Z",
+  source: "ICE",
+  sourceName: "Intercontinental Exchange",
+  delayedMinutes: 15,
+  verified: true,
 }
 
 const html = `<!doctype html>
@@ -160,12 +166,25 @@ async function main() {
       const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
       await page.waitForSelector("#fcuno-wa-board [data-id='enq-1']")
+      await page.waitForFunction(() => document.querySelector(".fcuno-wa-crude strong")?.textContent === "97.57")
       const loaded = await page.evaluate(() => ({
         selected: document.querySelector("[data-action='toggle-enquiry'][data-id='enq-1']")?.checked,
         contact: document.querySelector(".fcuno-wa-row strong")?.textContent,
+        crudePrice: document.querySelector(".fcuno-wa-crude strong")?.textContent || "",
+        crudeChange: document.querySelector(".fcuno-wa-crude span")?.textContent || "",
+        crudeTitle: document.querySelector(".fcuno-wa-crude")?.getAttribute("title") || "",
+        crudePath: document.querySelector(".fcuno-wa-crude path")?.getAttribute("d") || "",
       }))
       assert.equal(loaded.selected, true)
       assert.equal(loaded.contact, "Supplier Group")
+      assert.equal(loaded.crudePrice, "97.57")
+      assert.equal(loaded.crudeChange, "+3.50 +3.72%")
+      assert.match(
+        loaded.crudeTitle,
+        /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
+      )
+      assert.match(loaded.crudePath, /^M/)
+      assert.match(loaded.crudePath, /L/)
 
       await page.click("#fcuno-wa-board [data-action='contact-menu'][data-id='supplier-1']", { force: true })
       const contactMenuLabels = await page.locator(".fcuno-wa-contact-menu button").allTextContents()
@@ -281,7 +300,10 @@ async function main() {
 }
 
 main()
-  .then(() => console.log("FCUNO WhatsApp browser send test passed"))
+  .then(() => {
+    console.log("FCUNO WhatsApp browser send test passed")
+    process.exit(0)
+  })
   .catch((error) => {
     console.error(error)
     process.exit(1)

@@ -878,7 +878,9 @@
     const sent = sendRuntimeMessage({ type: "load-crude-watch" }, (response, runtimeError) => {
       if (runtimeError || !response || !response.ok || !response.crude) {
         state.crudeError = response?.message || runtimeError || ""
-        if (!state.crude) render()
+        state.crude = null
+        lastCrudeFingerprint = ""
+        updateCrudeWatch()
         return
       }
 
@@ -888,6 +890,8 @@
         change: crude.change,
         changePercent: crude.changePercent,
         points: crude.points,
+        contract: crude.contract,
+        updatedAt: crude.updatedAt,
       })
       state.crude = crude
       state.crudeError = ""
@@ -1568,6 +1572,15 @@
     const crude = state.crude || {}
     const change = Number(crude.change)
     const changeClass = Number.isFinite(change) && change > 0 ? "is-up" : change < 0 ? "is-down" : ""
+    const updatedAt = new Date(String(crude.updatedAt || ""))
+    const sourceLabel = [
+      "ICE Brent crude futures",
+      crude.contract,
+      Number.isFinite(Number(crude.delayedMinutes))
+        ? `delayed at least ${Number(crude.delayedMinutes)} minutes`
+        : "",
+      Number.isNaN(updatedAt.getTime()) ? "" : `quote ${updatedAt.toLocaleString()}`,
+    ].filter(Boolean).join(" · ")
     const changeText =
       Number.isFinite(Number(crude.changePercent))
         ? `${formatSigned(crude.change)} ${formatSigned(crude.changePercent)}%`
@@ -1576,7 +1589,7 @@
           : "Loading"
 
     return `
-      <div class="fcuno-wa-spc-crude" aria-label="Live Brent crude">
+      <div class="fcuno-wa-spc-crude" aria-label="${escapeHtml(sourceLabel || "Verified ICE Brent unavailable")}" title="${escapeHtml(sourceLabel || state.crudeError || "Verified ICE Brent unavailable")}">
         <svg viewBox="0 0 170 28" focusable="false" aria-hidden="true">
           <path d="${escapeHtml(crudeSparklinePath(crude.points))}" />
         </svg>

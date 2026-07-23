@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FCUNO SPC WhatsApp Board",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "SPC Supplier/Buyer board plus sent enquiry sender for WhatsApp Web.",
   "permissions": ["storage", "notifications", "debugger"],
   "background": {
@@ -23,7 +23,6 @@
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
-    "https://spc.fcuno.com/*",
-    "https://query1.finance.yahoo.com/*"
+    "https://spc.fcuno.com/*"
   ]
 }

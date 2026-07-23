@@ -40,3 +40,8 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 
 This extension does not use SPC enquiries or SPC outcome buttons. It uses Chrome's debugger permission only to make WhatsApp Web text insertion and send clicks more reliable when normal DOM events are ignored.
 Crude and unread updates patch only their own indicators, so background refreshes do not interrupt template editing or dragging.
+
+The Brent indicator uses FCUNO's validated `/api/market/brent` service, backed by
+the official ICE front-month Brent futures feed. ICE data is delayed by at least
+15 minutes. The board hides the numeric quote when the contract, timestamp, price
+range, or ICE chart agreement checks fail.

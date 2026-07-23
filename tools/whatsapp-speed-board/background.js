@@ -1,5 +1,6 @@
-const BRENT_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?range=5d&interval=15m"
-const CRUDE_CACHE_TTL_MS = 15000
+const BRENT_API_URL = "https://fcuno.com/api/market/brent"
+const CRUDE_CACHE_TTL_MS = 30000
+const MAX_CRUDE_AGE_MS = 60 * 60 * 1000
 const NETWORK_TIMEOUT_MS = 8000
 const STORAGE_KEY = "fcuno-wa-speed-board-v1"
 const ENQUIRY_STORAGE_KEY = "fcuno-wa-speed-board-enquiries-v1"
@@ -215,37 +216,41 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function parseCrudeChart(data) {
-  const result = data?.chart?.result?.[0]
-  if (!result) throw new Error("Crude quote unavailable.")
+function parseCrudePayload(data, now = Date.now()) {
+  const crude = data?.crude
+  if (!crude || crude.source !== "ICE" || crude.verified !== true) {
+    throw new Error("Verified ICE Brent quote unavailable.")
+  }
 
-  const meta = result.meta || {}
-  const closes = Array.isArray(result.indicators?.quote?.[0]?.close)
-    ? result.indicators.quote[0].close.map(finiteNumber).filter((value) => value != null)
+  const price = finiteNumber(crude.price)
+  const change = finiteNumber(crude.change)
+  const changePercent = finiteNumber(crude.changePercent)
+  const updatedAt = Date.parse(String(crude.updatedAt || ""))
+  const points = Array.isArray(crude.points)
+    ? crude.points.map(finiteNumber).filter((value) => value != null)
     : []
-  const price =
-    finiteNumber(meta.regularMarketPrice) ||
-    closes.slice().reverse().find((value) => value != null) ||
-    null
-  const previousClose =
-    finiteNumber(meta.previousClose) ||
-    finiteNumber(meta.chartPreviousClose) ||
-    closes.find((value) => value != null) ||
-    null
 
-  if (price == null || previousClose == null) throw new Error("Crude quote unavailable.")
-
-  const change = price - previousClose
-  const changePercent = previousClose ? (change / previousClose) * 100 : 0
-  const points = closes.slice(-48)
+  if (
+    price == null ||
+    change == null ||
+    changePercent == null ||
+    price < 20 ||
+    price > 250 ||
+    points.length < 2 ||
+    !Number.isFinite(updatedAt) ||
+    now - updatedAt > MAX_CRUDE_AGE_MS ||
+    updatedAt - now > 5 * 60 * 1000 ||
+    !/^[A-Z][a-z]{2}\d{2}$/.test(String(crude.contract || ""))
+  ) {
+    throw new Error("Verified ICE Brent quote failed validation.")
+  }
 
   return {
-    symbol: "Brent",
+    ...crude,
     price,
     change,
     changePercent,
     points,
-    updatedAt: new Date().toISOString(),
   }
 }
 
@@ -253,14 +258,14 @@ async function fetchCrudeWatch() {
   const now = Date.now()
   if (crudeCache.payload && now - crudeCache.at < CRUDE_CACHE_TTL_MS) return crudeCache.payload
 
-  const response = await fetchWithTimeout(BRENT_CHART_URL, {
+  const response = await fetchWithTimeout(BRENT_API_URL, {
     cache: "no-store",
     headers: { Accept: "application/json" },
   })
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data?.chart?.error?.description || `Crude quote failed: ${response.status}`)
+  if (!response.ok) throw new Error(data?.message || `Crude quote failed: ${response.status}`)
 
-  const payload = parseCrudeChart(data)
+  const payload = parseCrudePayload(data)
   crudeCache = { at: now, payload }
   return payload
 }

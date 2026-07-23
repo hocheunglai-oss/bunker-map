@@ -11,10 +11,16 @@ const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
 const crudeWatch = {
-  price: 73.14,
-  change: -0.28,
-  changePercent: -0.38,
-  points: [73.42, 73.35, 73.38, 73.28, 73.31, 73.12, 73.19, 73.14],
+  price: 97.57,
+  change: 3.5,
+  changePercent: 3.72,
+  points: [95.17, 96.03, 97.61, 97.94, 97.57],
+  contract: "Sep26",
+  updatedAt: "2026-07-23T08:51:00.000Z",
+  source: "ICE",
+  sourceName: "Intercontinental Exchange",
+  delayedMinutes: 15,
+  verified: true,
 }
 
 const html = `<!doctype html>
@@ -223,18 +229,23 @@ async function main() {
       const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
       await page.waitForSelector("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']")
-      await page.waitForFunction(() => document.querySelector(".fcuno-wa-spc-crude strong")?.textContent === "73.14")
+      await page.waitForFunction(() => document.querySelector(".fcuno-wa-spc-crude strong")?.textContent === "97.57")
 
       const crudeResult = await page.evaluate(() => ({
         price: document.querySelector(".fcuno-wa-spc-crude strong")?.textContent || "",
         change: document.querySelector(".fcuno-wa-spc-crude span")?.textContent || "",
         path: document.querySelector(".fcuno-wa-spc-crude path")?.getAttribute("d") || "",
+        title: document.querySelector(".fcuno-wa-spc-crude")?.getAttribute("title") || "",
       }))
 
-      assert.equal(crudeResult.price, "73.14")
-      assert.equal(crudeResult.change, "-0.28 -0.38%")
+      assert.equal(crudeResult.price, "97.57")
+      assert.equal(crudeResult.change, "+3.50 +3.72%")
       assert.match(crudeResult.path, /^M/)
       assert.match(crudeResult.path, /L/)
+      assert.match(
+        crudeResult.title,
+        /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
+      )
 
       const stableRefresh = await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
@@ -607,7 +618,10 @@ async function main() {
 }
 
 main()
-  .then(() => console.log("SPC WhatsApp browser send test passed"))
+  .then(() => {
+    console.log("SPC WhatsApp browser send test passed")
+    process.exit(0)
+  })
   .catch((error) => {
     console.error(error)
     process.exit(1)

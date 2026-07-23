@@ -54,33 +54,42 @@ const context = {
 vm.createContext(context)
 vm.runInContext(code, context)
 
-const crude = context.parseCrudeChart({
-  chart: {
-    result: [
-      {
-        meta: {
-          regularMarketPrice: 72.26,
-          previousClose: 71.8,
-          chartPreviousClose: 73.15,
-        },
-        indicators: {
-          quote: [
-            {
-              close: [73.28, 73.29, null, 73.19, undefined, "", 70.84, 70.75],
-            },
-          ],
-        },
-      },
-    ],
+const crudeNow = Date.parse("2026-07-23T08:50:00.000Z")
+const crudePayload = {
+  crude: {
+    symbol: "Brent",
+    contract: "Sep26",
+    price: 98.02,
+    change: 3.95,
+    changePercent: 4.199,
+    points: [95.17, 96.03, null, 97.61, undefined, "", 97.94, 98.09],
+    updatedAt: "2026-07-23T08:40:00.000Z",
+    source: "ICE",
+    sourceName: "Intercontinental Exchange",
+    delayedMinutes: 15,
+    verified: true,
   },
-})
+}
+const crude = context.parseCrudePayload(crudePayload, crudeNow)
 
 assert.equal(listeners.length, 1)
-assert.equal(crude.price, 72.26)
-assert.equal(crude.change.toFixed(2), "0.46")
-assert.equal(crude.changePercent.toFixed(2), "0.64")
-assert.deepEqual(crude.points, [73.28, 73.29, 73.19, 70.84, 70.75])
+assert.equal(crude.price, 98.02)
+assert.equal(crude.change.toFixed(2), "3.95")
+assert.equal(crude.changePercent.toFixed(2), "4.20")
+assert.deepEqual(crude.points, [95.17, 96.03, 97.61, 97.94, 98.09])
 assert.equal(crude.points.includes(0), false)
+assert.throws(
+  () => context.parseCrudePayload({ crude: { ...crudePayload.crude, source: "Yahoo" } }, crudeNow),
+  /unavailable/,
+)
+assert.throws(
+  () =>
+    context.parseCrudePayload(
+      { crude: { ...crudePayload.crude, updatedAt: "2026-07-23T06:00:00.000Z" } },
+      crudeNow,
+    ),
+  /failed validation/,
+)
 
 const debuggerOrder = []
 let releaseDebugger

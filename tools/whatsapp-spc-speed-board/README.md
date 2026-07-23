@@ -37,6 +37,9 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 ## Notes
 
 - This is intentionally separate from `tools/whatsapp-speed-board`, so the current personal version can stay unchanged.
+- The Brent indicator uses SPC's validated `/api/market/brent` service, backed by
+  the official ICE front-month Brent futures feed. ICE data is delayed by at
+  least 15 minutes, and the numeric quote is hidden whenever validation fails.
 - If the enquiry panel says to log in, open `https://spc.fcuno.com`, log in, then return to WhatsApp Web.
 - The board data is stored locally in Chrome extension storage under `fcuno-wa-spc-board-v1`.
 - The extension uses Chrome's debugger permission only to dispatch the WhatsApp send action from the background worker when DOM events are ignored.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FCUNO WhatsApp Speed Board",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Local Supplier and Buyer contact board plus enquiry worksheet sender for WhatsApp Web trading workflow.",
   "permissions": ["storage", "notifications", "debugger"],
   "background": {
@@ -32,7 +32,6 @@
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://fcuno.com/*",
-    "https://www.fcuno.com/*",
-    "https://query1.finance.yahoo.com/*"
+    "https://www.fcuno.com/*"
   ]
 }
