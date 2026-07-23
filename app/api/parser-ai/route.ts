@@ -18,6 +18,7 @@ import {
   parseSpcEnquiryText,
 } from "@/lib/spcEnquiryText"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { recordOpenAiUsage } from "@/lib/openAiUsage"
 
 export const maxDuration = 60
 
@@ -570,11 +571,17 @@ function correctedOutputWithImo(
   )
 }
 
-async function lookupImoWithWebSearch(apiKey: string, model: string, vesselName: string) {
+async function lookupImoWithWebSearch(
+  apiKey: string,
+  model: string,
+  vesselName: string,
+  source: ParserAiSource,
+) {
   const cleanedVessel = cleanText(vesselName)
   if (!cleanedVessel) return null
 
   try {
+    const startedAt = Date.now()
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -606,6 +613,15 @@ async function lookupImoWithWebSearch(apiKey: string, model: string, vesselName:
     })
 
     const lookupPayload = await response.json().catch(() => ({}))
+    await recordOpenAiUsage({
+      pageId: source === "spc" ? "spc-buyer-enquiries" : "enquiry-worksheet",
+      pagePath: source === "spc" ? "/spc/enquiries" : "/admin/enquiryworksheet",
+      feature: "vessel-imo-web-search",
+      model: process.env.OPENAI_IMO_LOOKUP_MODEL || model,
+      httpStatus: response.status,
+      durationMs: Date.now() - startedAt,
+      payload: lookupPayload,
+    })
     if (!response.ok) return null
     const outputText = extractOutputText(lookupPayload)
     if (!outputText) return null
@@ -683,6 +699,7 @@ export async function POST(request: Request) {
       cleanedText && cleanedText !== rawText ? `Cleaned enquiry:\n${cleanedText}` : "",
     ].filter(Boolean).join("\n\n")
 
+    const startedAt = Date.now()
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -706,6 +723,15 @@ export async function POST(request: Request) {
     })
 
     const aiPayload = await response.json().catch(() => ({}))
+    await recordOpenAiUsage({
+      pageId: source === "spc" ? "spc-buyer-enquiries" : "enquiry-worksheet",
+      pagePath: source === "spc" ? "/spc/enquiries" : "/admin/enquiryworksheet",
+      feature: "parser-correction",
+      model,
+      httpStatus: response.status,
+      durationMs: Date.now() - startedAt,
+      payload: aiPayload,
+    })
     if (!response.ok) {
       throw new HttpError(getAiErrorMessage(aiPayload, "OpenAI request failed."), response.status)
     }
@@ -745,7 +771,7 @@ export async function POST(request: Request) {
 
     let imoSources: ParserAiSourceLink[] = []
     if (!draft.imo && draft.vesselName) {
-      const imoLookup = await lookupImoWithWebSearch(apiKey, model, draft.vesselName)
+      const imoLookup = await lookupImoWithWebSearch(apiKey, model, draft.vesselName, source)
       if (imoLookup?.imo) {
         imoSources = imoLookup.sources
         draft = {

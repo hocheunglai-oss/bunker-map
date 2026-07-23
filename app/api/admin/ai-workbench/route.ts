@@ -10,6 +10,7 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { recordOpenAiUsage } from "@/lib/openAiUsage"
 
 export const maxDuration = 60
 
@@ -441,6 +442,7 @@ async function createOpenAiDraft(prompt: string, access: ReturnType<typeof getAc
 
   const model = process.env.OPENAI_ADMIN_MODEL || "gpt-5.4-mini"
 
+  const startedAt = Date.now()
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -464,6 +466,15 @@ async function createOpenAiDraft(prompt: string, access: ReturnType<typeof getAc
   })
 
   const payload = await response.json().catch(() => ({}))
+  await recordOpenAiUsage({
+    pageId: "admin-home",
+    pagePath: "/admin",
+    feature: "ai-workbench-draft",
+    model,
+    httpStatus: response.status,
+    durationMs: Date.now() - startedAt,
+    payload,
+  })
   if (!response.ok) {
     throw new HttpError(getAiErrorMessage(payload, "OpenAI request failed."), response.status)
   }

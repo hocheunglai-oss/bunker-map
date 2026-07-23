@@ -110,6 +110,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     path: "/admin/systemhealth",
   },
   {
+    id: "openai-usage",
+    label: "OPENAI USAGE",
+    group: "management",
+    path: "/admin/openaiusage",
+  },
+  {
     id: "tech-stack",
     label: "TECH STACK",
     group: "management",

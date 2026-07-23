@@ -1,0 +1,36 @@
+.page {
+  min-height: 100vh;
+  padding: 18px;
+  background: var(--fc-admin-page-bg);
+  color: var(--fc-admin-panel-text);
+  font-family: var(--fc-admin-font);
+}
+
+.shell { width: min(100%, 1240px); margin: 0 auto; }
+.panel { overflow: hidden; border: 1px solid var(--fc-admin-border); border-radius: 8px; background: var(--fc-admin-panel-bg); box-shadow: 0 10px 24px #0000000a; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border-bottom: 1px solid var(--fc-admin-border-soft); background: var(--fc-admin-panel-soft-bg); }
+.header h1 { margin: 0; font-size: 20px; font-weight: 900; }
+.header p { margin: 4px 0 0; color: var(--fc-admin-muted); font-size: 10px; font-weight: 800; }
+.actions { display: flex; gap: 8px; }
+.actions select, .actions button { height: 34px; border: 1px solid var(--fc-admin-button-border); border-radius: 6px; background: var(--fc-admin-button-bg); color: var(--fc-admin-button-text); padding: 0 12px; font-family: inherit; font-size: 11px; font-weight: 900; }
+.actions button { cursor: pointer; }
+.actions button:disabled { opacity: .55; cursor: wait; }
+.metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--fc-admin-border-soft); }
+.metric { padding: 14px; background: var(--fc-admin-panel-bg); }
+.metric span { display: block; color: var(--fc-admin-muted); font-size: 10px; font-weight: 900; }
+.metric strong { display: block; margin-top: 5px; font-size: 21px; }
+.note { padding: 11px 14px; border-top: 1px solid var(--fc-admin-border-soft); border-bottom: 1px solid var(--fc-admin-border-soft); color: var(--fc-admin-muted); font-size: 11px; font-weight: 700; }
+.error { padding: 12px 14px; color: #9f1c27; font-size: 12px; font-weight: 800; }
+.tableWrap { overflow-x: auto; }
+.tableWrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tableWrap th { padding: 10px 12px; background: var(--fc-admin-panel-soft-bg); color: var(--fc-admin-muted); text-align: left; font-size: 10px; font-weight: 900; white-space: nowrap; }
+.tableWrap td { padding: 12px; border-top: 1px solid var(--fc-admin-border-soft); vertical-align: top; }
+.tableWrap a { color: #1b66c9; font-weight: 900; }
+.empty { padding: 40px !important; color: var(--fc-admin-muted); text-align: center; font-weight: 900; }
+
+@media (max-width: 900px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .header { align-items: stretch; flex-direction: column; }
+  .actions { width: 100%; }
+  .actions select, .actions button { flex: 1; min-width: 0; }
+}

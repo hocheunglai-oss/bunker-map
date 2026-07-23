@@ -54,6 +54,7 @@ const SERVICES = [
   ["SPC SUPPLIER DATABASE", "GOOGLE SHEETS API / SHEET-BACKED EDITS", "GOOGLE WORKSPACE", "SINGAPORE PURCHASE CENTRE DATA"],
   ["ADMIN AI WORKBENCH", "GEMINI / OPENAI STRUCTURED DRAFTS", "GOOGLE AI / OPENAI", "CONFIGURED IN VERCEL"],
   ["PARSER AI FALLBACK", "OPENAI RESPONSES API / GPT-5.4-MINI", "OPENAI", "OPENAI_API_KEY IN VERCEL"],
+  ["OPENAI USAGE ATTRIBUTION", "PER-PAGE REQUEST / TOKEN TELEMETRY", "SUPABASE", "/ADMIN/OPENAIUSAGE"],
   ["TRANSACTIONAL EMAIL", "EXCHANGE SMTP", "MICROSOFT 365", "INFO@COSULICH.COM.HK"],
   ["MAPS", "LEAFLET / MAPTILER RASTER TILES", "MAPTILER", "PUBLIC CLIENT KEY"],
 ] as const
@@ -107,7 +108,7 @@ const DATABASE_GROUPS = [
   },
   {
     title: "MESSAGING AND PARSING",
-    tables: ["whatsapp_conversations", "whatsapp_messages", "parser_reports"],
+    tables: ["whatsapp_conversations", "whatsapp_messages", "parser_reports", "openai_usage_events"],
   },
   {
     title: "SPC",
