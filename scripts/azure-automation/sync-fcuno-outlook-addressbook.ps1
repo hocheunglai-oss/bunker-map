@@ -11,7 +11,7 @@ $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.2"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.3"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -1995,52 +1995,141 @@ function Get-FullExchangeTruthCertificationContractError(
   return ""
 }
 
-function Get-OutlookTemplateRecipientReconciliationContractError(
+function Get-StagedExchangeProjectionContractError(
+  $Result,
+  $ExpectedFingerprint,
+  $ExpectedCounts
+) {
+  if (-not [bool](Get-MapValue $Result "staged")) { return "" }
+  $fingerprint = Clean-Text $ExpectedFingerprint
+  foreach ($hashField in @("sourceFingerprint", "projectionSnapshotHash")) {
+    if ((Clean-Text (Get-MapValue $Result $hashField)) -cne $fingerprint) {
+      return "the staged projection receipt '$hashField' does not match the submitted fingerprint"
+    }
+  }
+  if ((Clean-Text (Get-MapValue $Result "workerVersion")) -cne $ExchangeTruthWorkerVersion) {
+    return "the staged projection worker version does not match '$ExchangeTruthWorkerVersion'"
+  }
+  $actualCounts = Get-MapValue $Result "projectionCounts"
+  foreach ($fieldName in @("contacts", "groups", "members", "invalidContacts", "skippedInvalidContacts", "duplicateContacts")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $actualCounts $fieldName))) {
+      return "the staged projection receipt has an invalid '$fieldName' count"
+    }
+    if ([long](Get-MapValue $actualCounts $fieldName) -ne [long](Get-MapValue $ExpectedCounts $fieldName)) {
+      return "the staged projection receipt '$fieldName' count does not match the submitted projection"
+    }
+  }
+  return ""
+}
+
+function Get-StagedRawSourceContractError(
+  $Result,
+  $ExpectedRunId,
+  $ExpectedFingerprint,
+  $ExpectedQueueSequence,
+  $ExpectedQueueUpdatedAt
+) {
+  if (-not [bool](Get-MapValue $Result "staged")) { return "" }
+  $actualRunId = Clean-Text (Get-MapValue $Result "runId")
+  if (-not $actualRunId.Equals((Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase)) {
+    return "the staged raw-source receipt does not match the active run"
+  }
+  if ((Clean-Text (Get-MapValue $Result "sourceFingerprint")) -cne (Clean-Text $ExpectedFingerprint)) {
+    return "the staged raw-source receipt does not match the submitted projection fingerprint"
+  }
+  if ((Clean-Text (Get-MapValue $Result "rawSourceSnapshotHash")) -cnotmatch "^[0-9a-f]{64}$") {
+    return "the staged raw-source receipt has no valid lowercase SHA-256 hash"
+  }
+  $rawCounts = Get-MapValue $Result "rawSourceCounts"
+  foreach ($fieldName in @("contacts", "groups", "members")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $rawCounts $fieldName))) {
+      return "the staged raw-source receipt has an invalid '$fieldName' count"
+    }
+  }
+  $queueFence = Get-MapValue $Result "queueFence"
+  foreach ($fieldName in @("expectedSequence", "currentSequence")) {
+    $fieldValue = Get-MapValue $queueFence $fieldName
+    if (-not (Test-NativeNonnegativeInt64 $fieldValue) -or [long]$fieldValue -ne [long]$ExpectedQueueSequence) {
+      return "the staged raw-source queue fence '$fieldName' does not match the submitted sequence"
+    }
+  }
+  foreach ($fieldName in @("expectedUpdatedAt", "currentUpdatedAt")) {
+    if (-not (Has-MapKey $queueFence $fieldName) -or -not (Test-ExchangeQueueFenceTimestampMatch (Get-MapValue $queueFence $fieldName) $ExpectedQueueUpdatedAt)) {
+      return "the staged raw-source queue fence '$fieldName' does not match the submitted timestamp"
+    }
+  }
+  return ""
+}
+
+function Get-OutlookTemplateRecipientBatchContractError(
   $Result,
   $ExpectedRunId,
   $ExpectedFingerprint
 ) {
-  if (-not [bool](Get-MapValue $Result "reconciled")) { return "" }
+  if (-not [bool](Get-MapValue $Result "processed")) { return "" }
   $actualRunId = Clean-Text (Get-MapValue $Result "runId")
   if (-not $actualRunId.Equals((Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase)) {
-    return "the Outlook-template reconciliation receipt does not match the active run"
+    return "the Outlook-template batch receipt does not match the active run"
   }
   $fingerprint = Clean-Text $ExpectedFingerprint
   if ((Clean-Text (Get-MapValue $Result "sourceFingerprint")) -cne $fingerprint) {
-    return "the Outlook-template reconciliation receipt does not match the certified projection"
+    return "the Outlook-template batch receipt does not match the certified projection"
   }
-  if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $Result "updatedTemplates"))) {
-    return "the Outlook-template reconciliation receipt has an invalid updated-template count"
+  if ((Get-MapValue $Result "complete") -isnot [bool]) {
+    return "the Outlook-template batch receipt has no native completion flag"
   }
-  $verification = Get-MapValue $Result "verification"
-  if (-not $verification) { return "the Outlook-template truth verification is missing" }
-  if ((Clean-Text (Get-MapValue $verification "schema")) -cne "fcuno.outlook-template-recipient-truth/v2") {
-    return "the Outlook-template truth verification schema is invalid"
-  }
-  if ((Get-MapValue $verification "valid") -isnot [bool] -or -not [bool](Get-MapValue $verification "valid")) {
-    return "the Outlook-template recipient truth is not valid"
-  }
-  if ((Get-MapValue $verification "sourceTruthValid") -isnot [bool] -or -not [bool](Get-MapValue $verification "sourceTruthValid")) {
-    return "the Outlook-template source truth is not valid"
-  }
-  if (-not (Clean-Text (Get-MapValue $verification "certificationRunId")).Equals(
-    (Clean-Text $ExpectedRunId),
-    [StringComparison]::OrdinalIgnoreCase
-  )) {
-    return "the Outlook-template truth verification does not match the active certification"
-  }
-  if ((Clean-Text (Get-MapValue $verification "sourceFingerprint")) -cne $fingerprint) {
-    return "the Outlook-template truth verification does not match the certified projection"
-  }
-  $templateCounts = Get-MapValue $verification "templates"
-  foreach ($fieldName in @("total", "unresolved", "stale", "invalidShape", "withMissingRecipients", "withAmbiguousRecipients", "sendable")) {
-    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $templateCounts $fieldName))) {
-      return "the Outlook-template truth verification has an invalid '$fieldName' count"
+  foreach ($fieldName in @("currentTemplates", "remainingTemplates")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $Result $fieldName))) {
+      return "the Outlook-template batch receipt has an invalid '$fieldName' count"
     }
   }
-  foreach ($fieldName in @("unresolved", "stale", "invalidShape")) {
-    if ([long](Get-MapValue $templateCounts $fieldName) -ne 0) {
-      return "the Outlook-template truth verification still has $fieldName template evidence"
+  $batch = Get-MapValue $Result "batch"
+  foreach ($fieldName in @("limit", "selected", "updated")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $batch $fieldName))) {
+      return "the Outlook-template batch receipt has an invalid '$fieldName' batch count"
+    }
+  }
+  if (
+    -not [bool](Get-MapValue $Result "complete") -and
+    [long](Get-MapValue $Result "remainingTemplates") -gt 0 -and
+    [long](Get-MapValue $batch "selected") -eq 0
+  ) {
+    return "the Outlook-template batch made no progress while stale templates remain"
+  }
+  if ([bool](Get-MapValue $Result "complete")) {
+    if ([long](Get-MapValue $Result "remainingTemplates") -ne 0) {
+      return "the completed Outlook-template batch still reports stale templates"
+    }
+    $verification = Get-MapValue $Result "verification"
+    if (-not $verification) { return "the Outlook-template truth verification is missing" }
+    if ((Clean-Text (Get-MapValue $verification "schema")) -cne "fcuno.outlook-template-recipient-truth/v2") {
+      return "the Outlook-template truth verification schema is invalid"
+    }
+    if ((Get-MapValue $verification "valid") -isnot [bool] -or -not [bool](Get-MapValue $verification "valid")) {
+      return "the Outlook-template recipient truth is not valid"
+    }
+    if ((Get-MapValue $verification "sourceTruthValid") -isnot [bool] -or -not [bool](Get-MapValue $verification "sourceTruthValid")) {
+      return "the Outlook-template source truth is not valid"
+    }
+    if (-not (Clean-Text (Get-MapValue $verification "certificationRunId")).Equals(
+      (Clean-Text $ExpectedRunId),
+      [StringComparison]::OrdinalIgnoreCase
+    )) {
+      return "the Outlook-template truth verification does not match the active certification"
+    }
+    if ((Clean-Text (Get-MapValue $verification "sourceFingerprint")) -cne $fingerprint) {
+      return "the Outlook-template truth verification does not match the certified projection"
+    }
+    $templateCounts = Get-MapValue $verification "templates"
+    foreach ($fieldName in @("total", "unresolved", "stale", "invalidShape", "withMissingRecipients", "withAmbiguousRecipients", "sendable")) {
+      if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $templateCounts $fieldName))) {
+        return "the Outlook-template truth verification has an invalid '$fieldName' count"
+      }
+    }
+    foreach ($fieldName in @("unresolved", "stale", "invalidShape")) {
+      if ([long](Get-MapValue $templateCounts $fieldName) -ne 0) {
+        return "the Outlook-template truth verification still has $fieldName template evidence"
+      }
     }
   }
   return ""
@@ -2116,6 +2205,49 @@ function Commit-FullExchangeQueueCertification(
     throw "The canonical FCUNO Exchange projection does not match its source fingerprint."
   }
   $activeRunId = Clean-Text $script:CurrentQueueRunId
+  $projectionStageValidator = {
+    param($response)
+    return Get-StagedExchangeProjectionContractError `
+      $response `
+      $fingerprint `
+      $ProjectionCounts
+  }.GetNewClosure()
+  Invoke-ExchangeAtomicRpcWithRetry `
+    "rpc/stage_outlook_exchange_projection_snapshot" `
+    @{
+      p_source_fingerprint = $fingerprint
+      p_projection_canonical_json = $projectionJson
+      p_projection_counts = $(if ($ProjectionCounts) { $ProjectionCounts } else { @{} })
+      p_verification_summary = $(if ($VerificationSummary) { $VerificationSummary } else { @{} })
+      p_worker_version = $ExchangeTruthWorkerVersion
+    } `
+    "staged" `
+    "projectionCounts" `
+    "Exchange projection evidence staging" `
+    $projectionStageValidator | Out-Null
+  $rawStageValidator = {
+    param($response)
+    return Get-StagedRawSourceContractError `
+      $response `
+      $activeRunId `
+      $fingerprint `
+      $fence.Sequence `
+      $fence.UpdatedAt
+  }.GetNewClosure()
+  $rawStageResult = Invoke-ExchangeAtomicRpcWithRetry `
+    "rpc/stage_outlook_exchange_raw_source_snapshot" `
+    @{
+      p_run_id = $script:CurrentQueueRunId
+      p_queue_high_water_sequence = [long]$fence.Sequence
+      p_queue_high_water_updated_at = $fence.UpdatedAt
+      p_source_fingerprint = $fingerprint
+    } `
+    "staged" `
+    "queueFence" `
+    "Raw FCUNO source evidence staging" `
+    $rawStageValidator
+  $rawSourceSnapshotHash = Clean-Text (Get-MapValue $rawStageResult "rawSourceSnapshotHash")
+  $rawSourceCounts = Get-MapValue $rawStageResult "rawSourceCounts"
   $truthContractValidator = {
     param($response)
     return Get-FullExchangeTruthCertificationContractError `
@@ -2126,14 +2258,15 @@ function Commit-FullExchangeQueueCertification(
       $fence.UpdatedAt
   }.GetNewClosure()
   $result = Invoke-ExchangeAtomicRpcWithRetry `
-    "rpc/certify_full_outlook_exchange_truth" `
+    "rpc/certify_staged_full_outlook_exchange_truth" `
     @{
       p_run_id = $script:CurrentQueueRunId
       p_queue_high_water_sequence = [long]$fence.Sequence
       p_queue_high_water_updated_at = $fence.UpdatedAt
       p_source_fingerprint = $fingerprint
-      p_projection_canonical_json = $projectionJson
+      p_raw_source_snapshot_hash = $rawSourceSnapshotHash
       p_projection_counts = $(if ($ProjectionCounts) { $ProjectionCounts } else { @{} })
+      p_raw_source_counts = $rawSourceCounts
       p_verification_summary = $(if ($VerificationSummary) { $VerificationSummary } else { @{} })
       p_worker_version = $ExchangeTruthWorkerVersion
     } `
@@ -2156,23 +2289,42 @@ function Commit-OutlookTemplateRecipientReconciliation(
   if ($fingerprint -cnotmatch "^[0-9a-f]{64}$") {
     throw "The certified lowercase projection fingerprint is required for Outlook-template recipient reconciliation."
   }
-  $contractValidator = {
+  $batchContractValidator = {
     param($response)
-    return Get-OutlookTemplateRecipientReconciliationContractError `
+    return Get-OutlookTemplateRecipientBatchContractError `
       $response `
       $runId `
       $fingerprint
   }.GetNewClosure()
-  return Invoke-ExchangeAtomicRpcWithRetry `
-    "rpc/reconcile_outlook_templates_with_certification" `
-    @{
-      p_run_id = $runId
-      p_source_fingerprint = $fingerprint
-    } `
-    "reconciled" `
-    "verification" `
-    "Outlook-template recipient reconciliation" `
-    $contractValidator
+  for ($batchNumber = 1; $batchNumber -le 100; $batchNumber += 1) {
+    $batchResult = Invoke-ExchangeAtomicRpcWithRetry `
+      "rpc/reconcile_outlook_templates_with_certification_batch" `
+      @{
+        p_run_id = $runId
+        p_source_fingerprint = $fingerprint
+        p_batch_limit = 25
+      } `
+      "processed" `
+      "batch" `
+      "Outlook-template recipient reconciliation batch" `
+      $batchContractValidator
+    if ([bool](Get-MapValue $batchResult "complete")) {
+      return [pscustomobject]@{
+        reconciled = $true
+        idempotent = [bool](Get-MapValue $batchResult "idempotent")
+        reason = Clean-Text (Get-MapValue $batchResult "reason")
+        runId = Clean-Text (Get-MapValue $batchResult "runId")
+        sourceFingerprint = Clean-Text (Get-MapValue $batchResult "sourceFingerprint")
+        certifiedAt = Get-MapValue $batchResult "certifiedAt"
+        reconciledAt = Get-MapValue $batchResult "reconciledAt"
+        updatedTemplates = [long](Get-MapValue $batchResult "currentTemplates")
+        verification = Get-MapValue $batchResult "verification"
+        supersededCount = 0
+        supersededRows = @()
+      }
+    }
+  }
+  throw "Outlook-template recipient reconciliation did not finish within 100 bounded batches."
 }
 
 function Add-ExchangeTruthLedgerEvidence(
@@ -4283,7 +4435,7 @@ function Get-SyncSummaryLabel($Key) {
     "fullCertificationAt" { return "Certified at" }
     "templateRecipientTruthReconciled" { return "Outlook template recipient truth reconciled" }
     "templateRecipientTruthIdempotent" { return "Outlook template reconciliation replay confirmed" }
-    "templateRecipientTruthUpdatedTemplates" { return "Outlook templates updated with current evidence" }
+    "templateRecipientTruthUpdatedTemplates" { return "Outlook templates on current evidence" }
     "templateRecipientTruthTotalTemplates" { return "Outlook templates checked" }
     "templateRecipientTruthSendableTemplates" { return "Outlook templates currently sendable" }
     "templateRecipientTruthMissingTemplates" { return "Outlook templates blocked by missing recipients" }

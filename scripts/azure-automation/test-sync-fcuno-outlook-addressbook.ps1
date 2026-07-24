@@ -931,6 +931,10 @@ $atomicQueueRowId = "34343434-3434-4434-8434-343434343434"
 $supersededQueueRowId = "56565656-5656-4656-8656-565656565656"
 $script:completionRpcCalls = 0
 $script:completionRpcBodies = @()
+$script:projectionStageRpcCalls = 0
+$script:projectionStageRpcBodies = @()
+$script:rawStageRpcCalls = 0
+$script:rawStageRpcBodies = @()
 $script:certificationRpcCalls = 0
 $script:certificationRpcBodies = @()
 $script:templateReconciliationRpcCalls = 0
@@ -1026,15 +1030,73 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       })
     }
   }
-  if ($Path -eq "rpc/certify_full_outlook_exchange_truth") {
+  if ($Path -eq "rpc/stage_outlook_exchange_projection_snapshot") {
+    $script:projectionStageRpcCalls += 1
+    $script:projectionStageRpcBodies += [pscustomobject]@{
+      fingerprint = $Body.p_source_fingerprint
+      projectionCanonicalJson = $Body.p_projection_canonical_json
+      projectionCounts = $Body.p_projection_counts
+      verificationSummary = $Body.p_verification_summary
+      workerVersion = $Body.p_worker_version
+    }
+    if ($script:projectionStageRpcCalls -eq 1) {
+      throw "The HTTP response was lost after immutable projection staging committed."
+    }
+    return [pscustomobject]@{
+      staged = $true
+      idempotent = $true
+      reason = "The exact canonical Exchange projection was already staged."
+      sourceFingerprint = $atomicProjectionFingerprint
+      projectionSnapshotHash = $atomicProjectionFingerprint
+      projectionCounts = $atomicProjectionCounts
+      workerVersion = $ExchangeTruthWorkerVersion
+      supersededCount = 0
+      supersededRows = @()
+    }
+  }
+  if ($Path -eq "rpc/stage_outlook_exchange_raw_source_snapshot") {
+    $script:rawStageRpcCalls += 1
+    $script:rawStageRpcBodies += [pscustomobject]@{
+      run = $Body.p_run_id
+      sequence = $Body.p_queue_high_water_sequence
+      updatedAt = $Body.p_queue_high_water_updated_at
+      fingerprint = $Body.p_source_fingerprint
+    }
+    if ($script:rawStageRpcCalls -eq 1) {
+      throw "The HTTP response was lost after immutable raw-source staging committed."
+    }
+    return [pscustomobject]@{
+      staged = $true
+      idempotent = $true
+      reason = "The exact raw FCUNO source snapshot was already staged."
+      runId = $script:CurrentQueueRunId
+      sourceFingerprint = $atomicProjectionFingerprint
+      rawSourceSnapshotHash = ("b" * 64)
+      rawSourceCounts = [pscustomobject]@{
+        contacts = 2
+        groups = 2
+        members = 2
+      }
+      supersededCount = 0
+      supersededRows = @()
+      queueFence = [pscustomobject]@{
+        expectedSequence = 42
+        expectedUpdatedAt = "2026-07-22T07:15:00Z"
+        currentSequence = 42
+        currentUpdatedAt = "2026-07-22T07:15:00Z"
+      }
+    }
+  }
+  if ($Path -eq "rpc/certify_staged_full_outlook_exchange_truth") {
     $script:certificationRpcCalls += 1
     $script:certificationRpcBodies += [pscustomobject]@{
       run = $Body.p_run_id
       sequence = $Body.p_queue_high_water_sequence
       updatedAt = $Body.p_queue_high_water_updated_at
       fingerprint = $Body.p_source_fingerprint
-      projectionCanonicalJson = $Body.p_projection_canonical_json
+      rawSourceSnapshotHash = $Body.p_raw_source_snapshot_hash
       projectionCounts = $Body.p_projection_counts
+      rawSourceCounts = $Body.p_raw_source_counts
       verificationSummary = $Body.p_verification_summary
       workerVersion = $Body.p_worker_version
     }
@@ -1087,24 +1149,49 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       })
     }
   }
-  if ($Path -eq "rpc/reconcile_outlook_templates_with_certification") {
+  if ($Path -eq "rpc/reconcile_outlook_templates_with_certification_batch") {
     $script:templateReconciliationRpcCalls += 1
     $script:templateReconciliationRpcBodies += [pscustomobject]@{
       run = $Body.p_run_id
       fingerprint = $Body.p_source_fingerprint
+      batchLimit = $Body.p_batch_limit
     }
     if ($script:templateReconciliationRpcCalls -eq 1) {
-      throw "The HTTP response was lost after Outlook-template reconciliation committed."
+      throw "The HTTP response was lost after a bounded Outlook-template reconciliation batch committed."
+    }
+    if ($script:templateReconciliationRpcCalls -eq 2) {
+      return [pscustomobject]@{
+        processed = $true
+        idempotent = $false
+        reason = "One bounded Outlook template recipient batch was reconciled."
+        runId = $script:CurrentQueueRunId
+        sourceFingerprint = $atomicProjectionFingerprint
+        certifiedAt = "2026-07-22T07:21:00Z"
+        reconciledAt = "2026-07-22T07:21:05Z"
+        complete = $false
+        currentTemplates = 531
+        remainingTemplates = 25
+        verification = $null
+        batch = [pscustomobject]@{
+          limit = 25
+          selected = 25
+          updated = 25
+        }
+        supersededCount = 0
+        supersededRows = @()
+      }
     }
     return [pscustomobject]@{
-      reconciled = $true
-      idempotent = $true
-      reason = "Outlook template recipient evidence already matches this certification."
+      processed = $true
+      idempotent = $false
+      reason = "Outlook template recipient evidence is fully reconciled."
       runId = $script:CurrentQueueRunId
       sourceFingerprint = $atomicProjectionFingerprint
       certifiedAt = "2026-07-22T07:21:00Z"
       reconciledAt = "2026-07-22T07:21:10Z"
-      updatedTemplates = 0
+      complete = $true
+      currentTemplates = 556
+      remainingTemplates = 0
       verification = [pscustomobject]@{
         schema = "fcuno.outlook-template-recipient-truth/v2"
         valid = $true
@@ -1128,6 +1215,11 @@ Set-Item Function:Invoke-SupabaseRest -Value {
           failed = 0
           terminalFailed = 0
         }
+      }
+      batch = [pscustomobject]@{
+        limit = 25
+        selected = 25
+        updated = 25
       }
       supersededCount = 0
       supersededRows = @()
@@ -1207,24 +1299,36 @@ try {
     $atomicProjectionCanonicalJson `
     $atomicProjectionCounts `
     $atomicVerificationSummary
+  Assert-Equal 2 $script:projectionStageRpcCalls "An ambiguous projection-stage response must retry against the immutable snapshot receipt"
+  Assert-Equal 2 $script:rawStageRpcCalls "An ambiguous raw-source-stage response must retry against the immutable snapshot receipt"
   Assert-Equal 2 $script:certificationRpcCalls "An ambiguous full-certification response must retry against its durable certification receipt"
   Assert-True ([bool]$certificationResult.certified -and [bool]$certificationResult.idempotent) "A confirmed idempotent full-certification replay must count as success"
   Assert-True ([bool]$certificationResult.evidenceRecorded) "A successful full certification must confirm canonical projection evidence"
+  Assert-Equal $script:projectionStageRpcBodies[0].fingerprint $script:projectionStageRpcBodies[1].fingerprint "Projection-stage retry must reuse the exact source fingerprint"
+  Assert-Equal $script:projectionStageRpcBodies[0].projectionCanonicalJson $script:projectionStageRpcBodies[1].projectionCanonicalJson "Projection-stage retry must reuse the exact canonical JSON"
+  Assert-Equal $script:rawStageRpcBodies[0].run $script:rawStageRpcBodies[1].run "Raw-source-stage retry must reuse the exact run UUID"
+  Assert-Equal $script:rawStageRpcBodies[0].sequence $script:rawStageRpcBodies[1].sequence "Raw-source-stage retry must reuse the exact queue fence sequence"
+  Assert-Equal $script:rawStageRpcBodies[0].updatedAt $script:rawStageRpcBodies[1].updatedAt "Raw-source-stage retry must reuse the exact queue fence timestamp"
+  Assert-Equal $script:rawStageRpcBodies[0].fingerprint $script:rawStageRpcBodies[1].fingerprint "Raw-source-stage retry must reuse the exact source fingerprint"
   Assert-Equal $script:certificationRpcBodies[0].run $script:certificationRpcBodies[1].run "Full-certification retry must reuse the exact same run UUID"
   Assert-Equal $script:certificationRpcBodies[0].sequence $script:certificationRpcBodies[1].sequence "Full-certification retry must reuse the exact same queue fence sequence"
   Assert-Equal $script:certificationRpcBodies[0].updatedAt $script:certificationRpcBodies[1].updatedAt "Full-certification retry must reuse the exact same queue fence timestamp"
   Assert-Equal $script:certificationRpcBodies[0].fingerprint $script:certificationRpcBodies[1].fingerprint "Full-certification retry must reuse the exact same source fingerprint"
-  Assert-Equal $atomicProjectionCanonicalJson $script:certificationRpcBodies[0].projectionCanonicalJson "Full certification must submit the exact canonical JSON whose bytes produced the fingerprint"
-  Assert-Equal $atomicProjectionFingerprint (Get-Sha256Hex $script:certificationRpcBodies[0].projectionCanonicalJson) "The submitted canonical projection must hash to the submitted fingerprint"
+  Assert-Equal ("b" * 64) $script:certificationRpcBodies[0].rawSourceSnapshotHash "Final certification must consume the separately staged raw-source hash"
+  Assert-Equal $atomicProjectionCanonicalJson $script:projectionStageRpcBodies[0].projectionCanonicalJson "Projection staging must submit the exact canonical JSON whose bytes produced the fingerprint"
+  Assert-Equal $atomicProjectionFingerprint (Get-Sha256Hex $script:projectionStageRpcBodies[0].projectionCanonicalJson) "The staged canonical projection must hash to the submitted fingerprint"
   foreach ($countName in @("contacts", "groups", "members", "invalidContacts", "skippedInvalidContacts", "duplicateContacts")) {
-    Assert-True ($script:certificationRpcBodies[0].projectionCounts.Contains($countName)) "Full certification must submit the '$countName' canonical projection count"
+    Assert-True ($script:projectionStageRpcBodies[0].projectionCounts.Contains($countName)) "Projection staging must submit the '$countName' canonical projection count"
     Assert-Equal `
       $atomicProjectionCounts[$countName] `
-      $script:certificationRpcBodies[0].projectionCounts[$countName] `
-      "Full certification must submit the exact '$countName' canonical projection count"
+      $script:projectionStageRpcBodies[0].projectionCounts[$countName] `
+      "Projection staging must submit the exact '$countName' canonical projection count"
   }
-  Assert-Equal $atomicProjectionFingerprint $script:certificationRpcBodies[0].verificationSummary.sourceFingerprint "The verification summary must link to the exact submitted projection fingerprint"
-  Assert-True ([bool]$script:certificationRpcBodies[0].verificationSummary.sourceFenceStable) "The verification summary must confirm that the source fence remained stable"
+  Assert-Equal $atomicProjectionFingerprint $script:projectionStageRpcBodies[0].verificationSummary.sourceFingerprint "The projection-stage verification summary must link to the exact submitted projection fingerprint"
+  Assert-True ([bool]$script:projectionStageRpcBodies[0].verificationSummary.sourceFenceStable) "The projection-stage verification summary must confirm that the source fence remained stable"
+  Assert-Equal 2 $script:certificationRpcBodies[0].rawSourceCounts.contacts "Final certification must consume separately staged raw contact counts"
+  Assert-Equal 2 $script:certificationRpcBodies[0].rawSourceCounts.groups "Final certification must consume separately staged raw group counts"
+  Assert-Equal 2 $script:certificationRpcBodies[0].rawSourceCounts.members "Final certification must consume separately staged raw membership counts"
   Assert-Equal $ExchangeTruthWorkerVersion $script:certificationRpcBodies[0].workerVersion "Full certification must identify the exact truth-evidence worker contract"
   $certificationResult.runId = "47474747-4747-4474-8474-474747474747"
   Assert-True `
@@ -1253,6 +1357,8 @@ try {
     fullCertificationIdempotent = $false
     changeDetails = @()
   }
+  $projectionStageCallsBeforeEligibleFinalize = $script:projectionStageRpcCalls
+  $rawStageCallsBeforeEligibleFinalize = $script:rawStageRpcCalls
   $certificationCallsBeforeEligibleFinalize = $script:certificationRpcCalls
   Complete-FullExchangeQueueCertificationIfEligible `
     $fullResolvedStats `
@@ -1261,6 +1367,8 @@ try {
     $atomicProjectionCanonicalJson `
     $atomicProjectionCounts `
     @() | Out-Null
+  Assert-Equal ($projectionStageCallsBeforeEligibleFinalize + 1) $script:projectionStageRpcCalls "A zero-failure, zero-drift final projection must stage immutable projection evidence"
+  Assert-Equal ($rawStageCallsBeforeEligibleFinalize + 1) $script:rawStageRpcCalls "A zero-failure, zero-drift final projection must stage immutable raw-source evidence"
   Assert-Equal ($certificationCallsBeforeEligibleFinalize + 1) $script:certificationRpcCalls "A zero-failure, zero-drift final projection must invoke durable full certification"
   Assert-True ([bool]$fullResolvedStats.fullCertificationCommitted) "A confirmed full-certification replay must be recorded as durably committed"
   Assert-True ([bool]$fullResolvedStats.fullCertificationIdempotent) "A confirmed certification receipt replay must retain its idempotent status"
@@ -1270,12 +1378,13 @@ try {
   Assert-Equal $atomicProjectionFingerprint $fullResolvedStats.sourceSnapshotHash "An eligible full run must retain the exact canonical projection snapshot hash"
   Assert-Equal ("b" * 64) $fullResolvedStats.rawSourceSnapshotHash "An eligible full run must retain the raw FCUNO source snapshot hash"
   Assert-Equal $ExchangeTruthWorkerVersion $fullResolvedStats.truthWorkerVersion "An eligible full run must retain the evidence worker version"
-  Assert-Equal 2 $script:templateReconciliationRpcCalls "An ambiguous Outlook-template reconciliation response must retry against its idempotent run/fingerprint contract"
+  Assert-Equal 3 $script:templateReconciliationRpcCalls "An ambiguous Outlook-template batch response must retry and then continue until every stale template is reconciled"
   Assert-Equal $script:templateReconciliationRpcBodies[0].run $script:templateReconciliationRpcBodies[1].run "Outlook-template reconciliation retry must reuse the exact certification run UUID"
   Assert-Equal $script:templateReconciliationRpcBodies[0].fingerprint $script:templateReconciliationRpcBodies[1].fingerprint "Outlook-template reconciliation retry must reuse the exact certified projection fingerprint"
+  Assert-Equal 25 $script:templateReconciliationRpcBodies[0].batchLimit "Outlook-template reconciliation must keep every database transaction to a bounded batch"
   Assert-True ([bool]$fullResolvedStats.templateRecipientTruthReconciled) "A full run is not successful until Outlook-template recipient truth is reconciled"
-  Assert-True ([bool]$fullResolvedStats.templateRecipientTruthIdempotent) "An idempotent Outlook-template reconciliation replay must be recorded"
-  Assert-Equal 0 $fullResolvedStats.templateRecipientTruthUpdatedTemplates "The test reconciliation receipt must retain its updated-template count"
+  Assert-True (-not [bool]$fullResolvedStats.templateRecipientTruthIdempotent) "A completing Outlook-template batch that updates evidence must not be labeled idempotent"
+  Assert-Equal 556 $fullResolvedStats.templateRecipientTruthUpdatedTemplates "The final batch receipt must report every template on current certified evidence"
   Assert-Equal 556 $fullResolvedStats.templateRecipientTruthTotalTemplates "The full run must retain the total Outlook-template verification count"
   Assert-Equal 504 $fullResolvedStats.templateRecipientTruthSendableTemplates "The full run must retain the currently sendable Outlook-template count"
   Assert-Equal 51 $fullResolvedStats.templateRecipientTruthMissingTemplates "Missing Outlook-template recipients must remain visible as safe send blocks"
@@ -1284,6 +1393,8 @@ try {
   Assert-Equal $script:CurrentQueueRunId @($fullResolvedStats.changeDetails)[0].supersededByFullRunId "A full-certification resolution detail must show the certifying run ID"
   Assert-True (@($fullResolvedStats.changeDetails)[0].result -match "Old terminal full-sync error") "A full-certification resolution detail must retain the exact previous terminal error"
 
+  $projectionStageCallsBeforeIneligibleFinalize = $script:projectionStageRpcCalls
+  $rawStageCallsBeforeIneligibleFinalize = $script:rawStageRpcCalls
   $certificationCallsBeforeIneligibleFinalize = $script:certificationRpcCalls
   Complete-FullExchangeQueueCertificationIfEligible `
     @{ failedQueueRows = 1 } `
@@ -1292,6 +1403,8 @@ try {
     $atomicProjectionCanonicalJson `
     $atomicProjectionCounts `
     @() | Out-Null
+  Assert-Equal $projectionStageCallsBeforeIneligibleFinalize $script:projectionStageRpcCalls "Any local full-sync failure must prevent projection evidence staging"
+  Assert-Equal $rawStageCallsBeforeIneligibleFinalize $script:rawStageRpcCalls "Any local full-sync failure must prevent raw-source evidence staging"
   Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any local full-sync failure must prevent the terminal supersession sweep"
   Complete-FullExchangeQueueCertificationIfEligible `
     @{ failedQueueRows = 0 } `
@@ -1300,6 +1413,8 @@ try {
     $atomicProjectionCanonicalJson `
     $atomicProjectionCounts `
     @("queue high-water changed") | Out-Null
+  Assert-Equal $projectionStageCallsBeforeIneligibleFinalize $script:projectionStageRpcCalls "Any source/high-water drift must prevent projection evidence staging"
+  Assert-Equal $rawStageCallsBeforeIneligibleFinalize $script:rawStageRpcCalls "Any source/high-water drift must prevent raw-source evidence staging"
   Assert-Equal $certificationCallsBeforeIneligibleFinalize $script:certificationRpcCalls "Any source/high-water drift must prevent the terminal supersession sweep"
 } finally {
   Set-Item Function:Invoke-SupabaseRest -Value $atomicOriginalInvokeSupabaseRest
