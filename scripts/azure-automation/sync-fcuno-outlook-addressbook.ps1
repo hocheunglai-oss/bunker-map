@@ -9,7 +9,9 @@ $DefaultExchangeOnlineManagementVersion = "3.4.0"
 $CanonicalExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-23.3"
+$IncrementalSyncLockLeaseMinutes = 30
+$FullSyncLockLeaseMinutes = 180
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.1"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -1622,12 +1624,18 @@ function Claim-ExchangeQueueRows($Limit = 200) {
   return @($rows)
 }
 
+function Get-ExchangeSyncLockLeaseMinutes($SyncMode = $script:CurrentSyncMode) {
+  $normalizedMode = (Clean-Text $SyncMode).ToLowerInvariant()
+  if ($normalizedMode -eq "full") { return $FullSyncLockLeaseMinutes }
+  return $IncrementalSyncLockLeaseMinutes
+}
+
 function Acquire-ExchangeSyncLock($SyncMode) {
   if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
   $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/acquire_outlook_exchange_sync_lock" -Body @{
     p_run_id = $script:CurrentQueueRunId
     p_sync_mode = Clean-Text $SyncMode
-    p_lease_minutes = 30
+    p_lease_minutes = Get-ExchangeSyncLockLeaseMinutes $SyncMode
   }
   if ($result -isnot [bool]) {
     throw "The Exchange sync lock acquisition RPC returned malformed confirmation instead of a native boolean."
@@ -1640,7 +1648,7 @@ function Renew-ExchangeSyncLock {
   if (-not $script:CurrentQueueRunId) { throw "Cannot renew the Exchange sync lock without a run ID." }
   $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/renew_outlook_exchange_sync_lock" -Body @{
     p_run_id = $script:CurrentQueueRunId
-    p_lease_minutes = 30
+    p_lease_minutes = Get-ExchangeSyncLockLeaseMinutes
   }
   if ($result -isnot [bool]) {
     throw "The Exchange sync lock renewal RPC returned malformed confirmation instead of a native boolean."

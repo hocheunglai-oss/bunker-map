@@ -1510,6 +1510,8 @@ Set-Item Function:Invoke-SupabaseRest -Value {
   return $script:lockContractResponse
 }
 try {
+  Assert-Equal 30 (Get-ExchangeSyncLockLeaseMinutes "incremental") "Incremental syncs must retain the bounded 30-minute mutation lease"
+  Assert-Equal 180 (Get-ExchangeSyncLockLeaseMinutes "full") "Full reconciliation must retain its mutation lease across slow Exchange Online commands"
   Assert-True (-not (Acquire-ExchangeSyncLock "incremental")) "A native false lock-acquisition result must remain false"
   $script:lockContractResponse = "false"
   $stringAcquireRejected = $false
