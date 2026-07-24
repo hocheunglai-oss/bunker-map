@@ -11,7 +11,7 @@ $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.2"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -1995,6 +1995,57 @@ function Get-FullExchangeTruthCertificationContractError(
   return ""
 }
 
+function Get-OutlookTemplateRecipientReconciliationContractError(
+  $Result,
+  $ExpectedRunId,
+  $ExpectedFingerprint
+) {
+  if (-not [bool](Get-MapValue $Result "reconciled")) { return "" }
+  $actualRunId = Clean-Text (Get-MapValue $Result "runId")
+  if (-not $actualRunId.Equals((Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase)) {
+    return "the Outlook-template reconciliation receipt does not match the active run"
+  }
+  $fingerprint = Clean-Text $ExpectedFingerprint
+  if ((Clean-Text (Get-MapValue $Result "sourceFingerprint")) -cne $fingerprint) {
+    return "the Outlook-template reconciliation receipt does not match the certified projection"
+  }
+  if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $Result "updatedTemplates"))) {
+    return "the Outlook-template reconciliation receipt has an invalid updated-template count"
+  }
+  $verification = Get-MapValue $Result "verification"
+  if (-not $verification) { return "the Outlook-template truth verification is missing" }
+  if ((Clean-Text (Get-MapValue $verification "schema")) -cne "fcuno.outlook-template-recipient-truth/v2") {
+    return "the Outlook-template truth verification schema is invalid"
+  }
+  if ((Get-MapValue $verification "valid") -isnot [bool] -or -not [bool](Get-MapValue $verification "valid")) {
+    return "the Outlook-template recipient truth is not valid"
+  }
+  if ((Get-MapValue $verification "sourceTruthValid") -isnot [bool] -or -not [bool](Get-MapValue $verification "sourceTruthValid")) {
+    return "the Outlook-template source truth is not valid"
+  }
+  if (-not (Clean-Text (Get-MapValue $verification "certificationRunId")).Equals(
+    (Clean-Text $ExpectedRunId),
+    [StringComparison]::OrdinalIgnoreCase
+  )) {
+    return "the Outlook-template truth verification does not match the active certification"
+  }
+  if ((Clean-Text (Get-MapValue $verification "sourceFingerprint")) -cne $fingerprint) {
+    return "the Outlook-template truth verification does not match the certified projection"
+  }
+  $templateCounts = Get-MapValue $verification "templates"
+  foreach ($fieldName in @("total", "unresolved", "stale", "invalidShape", "withMissingRecipients", "withAmbiguousRecipients", "sendable")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $templateCounts $fieldName))) {
+      return "the Outlook-template truth verification has an invalid '$fieldName' count"
+    }
+  }
+  foreach ($fieldName in @("unresolved", "stale", "invalidShape")) {
+    if ([long](Get-MapValue $templateCounts $fieldName) -ne 0) {
+      return "the Outlook-template truth verification still has $fieldName template evidence"
+    }
+  }
+  return ""
+}
+
 function Invoke-ExchangeAtomicRpcWithRetry(
   $Path,
   [hashtable]$Body,
@@ -2091,6 +2142,37 @@ function Commit-FullExchangeQueueCertification(
     "Atomic full Exchange queue certification" `
     $truthContractValidator
   return $result
+}
+
+function Commit-OutlookTemplateRecipientReconciliation(
+  $CertificationResult,
+  $SourceFingerprint
+) {
+  $runId = Clean-Text (Get-MapValue $CertificationResult "runId")
+  $fingerprint = Clean-Text $SourceFingerprint
+  if (-not (Test-GuidText $runId)) {
+    throw "A valid certified run UUID is required for Outlook-template recipient reconciliation."
+  }
+  if ($fingerprint -cnotmatch "^[0-9a-f]{64}$") {
+    throw "The certified lowercase projection fingerprint is required for Outlook-template recipient reconciliation."
+  }
+  $contractValidator = {
+    param($response)
+    return Get-OutlookTemplateRecipientReconciliationContractError `
+      $response `
+      $runId `
+      $fingerprint
+  }.GetNewClosure()
+  return Invoke-ExchangeAtomicRpcWithRetry `
+    "rpc/reconcile_outlook_templates_with_certification" `
+    @{
+      p_run_id = $runId
+      p_source_fingerprint = $fingerprint
+    } `
+    "reconciled" `
+    "verification" `
+    "Outlook-template recipient reconciliation" `
+    $contractValidator
 }
 
 function Add-ExchangeTruthLedgerEvidence(
@@ -4199,6 +4281,13 @@ function Get-SyncSummaryLabel($Key) {
     "fullCertificationCommitted" { return "Durable full certification" }
     "fullCertificationIdempotent" { return "Certification replay confirmed" }
     "fullCertificationAt" { return "Certified at" }
+    "templateRecipientTruthReconciled" { return "Outlook template recipient truth reconciled" }
+    "templateRecipientTruthIdempotent" { return "Outlook template reconciliation replay confirmed" }
+    "templateRecipientTruthUpdatedTemplates" { return "Outlook templates updated with current evidence" }
+    "templateRecipientTruthTotalTemplates" { return "Outlook templates checked" }
+    "templateRecipientTruthSendableTemplates" { return "Outlook templates currently sendable" }
+    "templateRecipientTruthMissingTemplates" { return "Outlook templates blocked by missing recipients" }
+    "templateRecipientTruthAmbiguousTemplates" { return "Outlook templates blocked by ambiguous recipients" }
     "truthEvidenceRecorded" { return "Canonical evidence recorded" }
     "truthEvidenceLedgerSequence" { return "Projection evidence ledger sequence" }
     "truthEvidenceLedgerHash" { return "Projection evidence ledger SHA-256" }
@@ -4439,7 +4528,7 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
 
   $detailsRows = ""
   if ($Details) {
-    foreach ($key in @("runId", "syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "truthEvidenceRecorded", "truthEvidenceLedgerSequence", "truthEvidenceLedgerHash", "sourceSnapshotHash", "rawSourceSnapshotHash", "truthWorkerVersion", "truthLedgerCheckpointVerified", "truthLedgerHeadSequence", "truthLedgerHeadHash", "truthLedgerHeadPreviousHash", "truthLedgerHeadEventType", "truthLedgerHeadRunId", "truthLedgerEntries", "truthSnapshots", "truthCheckpointPendingQueueRows", "truthCheckpointProcessingQueueRows", "truthCheckpointFailedQueueRows", "truthCheckpointTerminalFailedQueueRows", "currentProjectionCertified", "latestCertificationRunId", "latestCertificationAt", "latestSourceFingerprint", "latestCertificationHasProjectionEvidence", "latestProjectionSnapshotHash", "contacts", "groups", "groupMembers", "invalidContacts", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers", "notificationDeliveryStatus", "notificationDeliveryAttempted", "notificationDelivered", "notificationRecipientCount", "notificationDeliveredAt", "notificationError")) {
+    foreach ($key in @("runId", "syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "templateRecipientTruthReconciled", "templateRecipientTruthIdempotent", "templateRecipientTruthUpdatedTemplates", "templateRecipientTruthTotalTemplates", "templateRecipientTruthSendableTemplates", "templateRecipientTruthMissingTemplates", "templateRecipientTruthAmbiguousTemplates", "truthEvidenceRecorded", "truthEvidenceLedgerSequence", "truthEvidenceLedgerHash", "sourceSnapshotHash", "rawSourceSnapshotHash", "truthWorkerVersion", "truthLedgerCheckpointVerified", "truthLedgerHeadSequence", "truthLedgerHeadHash", "truthLedgerHeadPreviousHash", "truthLedgerHeadEventType", "truthLedgerHeadRunId", "truthLedgerEntries", "truthSnapshots", "truthCheckpointPendingQueueRows", "truthCheckpointProcessingQueueRows", "truthCheckpointFailedQueueRows", "truthCheckpointTerminalFailedQueueRows", "currentProjectionCertified", "latestCertificationRunId", "latestCertificationAt", "latestSourceFingerprint", "latestCertificationHasProjectionEvidence", "latestProjectionSnapshotHash", "contacts", "groups", "groupMembers", "invalidContacts", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers", "notificationDeliveryStatus", "notificationDeliveryAttempted", "notificationDelivered", "notificationRecipientCount", "notificationDeliveredAt", "notificationError")) {
       $detailValue = Get-DetailValue $Details $key
       if ($null -ne $detailValue) {
         $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;word-break:break-all;'>$(Escape-Html $detailValue)</td></tr>"
@@ -4899,6 +4988,27 @@ function Complete-FullExchangeQueueCertificationIfEligible(
     $Stats["sourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "sourceSnapshotHash")
     $Stats["rawSourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "rawSourceSnapshotHash")
     $Stats["truthWorkerVersion"] = Clean-Text (Get-MapValue $certificationResult "workerVersion")
+    $templateReconciliationResult =
+      Commit-OutlookTemplateRecipientReconciliation `
+        $certificationResult `
+        $InitialProjectionFingerprint
+    $templateVerification =
+      Get-MapValue $templateReconciliationResult "verification"
+    $templateCounts = Get-MapValue $templateVerification "templates"
+    $Stats["templateRecipientTruthReconciled"] =
+      [bool](Get-MapValue $templateReconciliationResult "reconciled")
+    $Stats["templateRecipientTruthIdempotent"] =
+      [bool](Get-MapValue $templateReconciliationResult "idempotent")
+    $Stats["templateRecipientTruthUpdatedTemplates"] =
+      [long](Get-MapValue $templateReconciliationResult "updatedTemplates")
+    $Stats["templateRecipientTruthTotalTemplates"] =
+      [long](Get-MapValue $templateCounts "total")
+    $Stats["templateRecipientTruthSendableTemplates"] =
+      [long](Get-MapValue $templateCounts "sendable")
+    $Stats["templateRecipientTruthMissingTemplates"] =
+      [long](Get-MapValue $templateCounts "withMissingRecipients")
+    $Stats["templateRecipientTruthAmbiguousTemplates"] =
+      [long](Get-MapValue $templateCounts "withAmbiguousRecipients")
     Add-ExchangeResolvedTerminalQueueDetails $Stats $certificationResult "full"
     return $certificationResult
   } catch {
@@ -4925,6 +5035,8 @@ function New-FullSyncLockFailureDetails($Message) {
     verifiedQueueRows = 0
     fullCertificationCommitted = $false
     fullCertificationIdempotent = $false
+    templateRecipientTruthReconciled = $false
+    templateRecipientTruthIdempotent = $false
     changeDetails = @()
     createdContacts = 0
     updatedContacts = 0
@@ -5257,6 +5369,8 @@ function Invoke-FullExchangeSync {
     verifiedQueueRows = 0
     fullCertificationCommitted = $false
     fullCertificationIdempotent = $false
+    templateRecipientTruthReconciled = $false
+    templateRecipientTruthIdempotent = $false
     changeDetails = @()
     addedMemberEmails = @()
     removedMemberEmails = @()

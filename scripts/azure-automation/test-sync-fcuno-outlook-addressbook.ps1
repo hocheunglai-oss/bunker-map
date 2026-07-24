@@ -933,6 +933,8 @@ $script:completionRpcCalls = 0
 $script:completionRpcBodies = @()
 $script:certificationRpcCalls = 0
 $script:certificationRpcBodies = @()
+$script:templateReconciliationRpcCalls = 0
+$script:templateReconciliationRpcBodies = @()
 $script:capturedResolvedSubject = ""
 $script:capturedResolvedHtml = ""
 $atomicProjectionCanonicalJson = Get-CanonicalExchangeProjectionJson $built
@@ -1085,6 +1087,52 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       })
     }
   }
+  if ($Path -eq "rpc/reconcile_outlook_templates_with_certification") {
+    $script:templateReconciliationRpcCalls += 1
+    $script:templateReconciliationRpcBodies += [pscustomobject]@{
+      run = $Body.p_run_id
+      fingerprint = $Body.p_source_fingerprint
+    }
+    if ($script:templateReconciliationRpcCalls -eq 1) {
+      throw "The HTTP response was lost after Outlook-template reconciliation committed."
+    }
+    return [pscustomobject]@{
+      reconciled = $true
+      idempotent = $true
+      reason = "Outlook template recipient evidence already matches this certification."
+      runId = $script:CurrentQueueRunId
+      sourceFingerprint = $atomicProjectionFingerprint
+      certifiedAt = "2026-07-22T07:21:00Z"
+      reconciledAt = "2026-07-22T07:21:10Z"
+      updatedTemplates = 0
+      verification = [pscustomobject]@{
+        schema = "fcuno.outlook-template-recipient-truth/v2"
+        valid = $true
+        allTemplatesSendable = $false
+        sourceTruthValid = $true
+        certificationRunId = $script:CurrentQueueRunId
+        certifiedAt = "2026-07-22T07:21:00Z"
+        sourceFingerprint = $atomicProjectionFingerprint
+        templates = [pscustomobject]@{
+          total = 556
+          unresolved = 0
+          stale = 0
+          invalidShape = 0
+          withMissingRecipients = 51
+          withAmbiguousRecipients = 1
+          sendable = 504
+        }
+        queue = [pscustomobject]@{
+          pending = 0
+          processing = 0
+          failed = 0
+          terminalFailed = 0
+        }
+      }
+      supersededCount = 0
+      supersededRows = @()
+    }
+  }
   throw "Unexpected REST path $Path"
 }
 Set-Item Function:Get-OptionalAutomationSetting -Value { param($Name) return $null }
@@ -1222,6 +1270,16 @@ try {
   Assert-Equal $atomicProjectionFingerprint $fullResolvedStats.sourceSnapshotHash "An eligible full run must retain the exact canonical projection snapshot hash"
   Assert-Equal ("b" * 64) $fullResolvedStats.rawSourceSnapshotHash "An eligible full run must retain the raw FCUNO source snapshot hash"
   Assert-Equal $ExchangeTruthWorkerVersion $fullResolvedStats.truthWorkerVersion "An eligible full run must retain the evidence worker version"
+  Assert-Equal 2 $script:templateReconciliationRpcCalls "An ambiguous Outlook-template reconciliation response must retry against its idempotent run/fingerprint contract"
+  Assert-Equal $script:templateReconciliationRpcBodies[0].run $script:templateReconciliationRpcBodies[1].run "Outlook-template reconciliation retry must reuse the exact certification run UUID"
+  Assert-Equal $script:templateReconciliationRpcBodies[0].fingerprint $script:templateReconciliationRpcBodies[1].fingerprint "Outlook-template reconciliation retry must reuse the exact certified projection fingerprint"
+  Assert-True ([bool]$fullResolvedStats.templateRecipientTruthReconciled) "A full run is not successful until Outlook-template recipient truth is reconciled"
+  Assert-True ([bool]$fullResolvedStats.templateRecipientTruthIdempotent) "An idempotent Outlook-template reconciliation replay must be recorded"
+  Assert-Equal 0 $fullResolvedStats.templateRecipientTruthUpdatedTemplates "The test reconciliation receipt must retain its updated-template count"
+  Assert-Equal 556 $fullResolvedStats.templateRecipientTruthTotalTemplates "The full run must retain the total Outlook-template verification count"
+  Assert-Equal 504 $fullResolvedStats.templateRecipientTruthSendableTemplates "The full run must retain the currently sendable Outlook-template count"
+  Assert-Equal 51 $fullResolvedStats.templateRecipientTruthMissingTemplates "Missing Outlook-template recipients must remain visible as safe send blocks"
+  Assert-Equal 1 $fullResolvedStats.templateRecipientTruthAmbiguousTemplates "Ambiguous Outlook-template recipients must remain visible as safe send blocks"
   Assert-Equal 1 $fullResolvedStats.resolvedTerminalQueueRows "A successful full certification must count every terminal queue row it superseded"
   Assert-Equal $script:CurrentQueueRunId @($fullResolvedStats.changeDetails)[0].supersededByFullRunId "A full-certification resolution detail must show the certifying run ID"
   Assert-True (@($fullResolvedStats.changeDetails)[0].result -match "Old terminal full-sync error") "A full-certification resolution detail must retain the exact previous terminal error"
@@ -1734,6 +1792,13 @@ try {
     fullCertificationCommitted = $true
     fullCertificationIdempotent = $false
     fullCertificationAt = "2026-07-22T07:21:00Z"
+    templateRecipientTruthReconciled = $true
+    templateRecipientTruthIdempotent = $false
+    templateRecipientTruthUpdatedTemplates = 556
+    templateRecipientTruthTotalTemplates = 556
+    templateRecipientTruthSendableTemplates = 504
+    templateRecipientTruthMissingTemplates = 51
+    templateRecipientTruthAmbiguousTemplates = 1
     truthEvidenceRecorded = $true
     truthEvidenceLedgerSequence = 200
     truthEvidenceLedgerHash = ("f" * 64)
@@ -1779,6 +1844,10 @@ try {
   Assert-True ($script:capturedBacklogHtml -notmatch "does not mean every queued change succeeded") "A fully certified run must not use the generic checkpoint-only qualification"
   Assert-True ($script:capturedBacklogHtml -match "Projection evidence ledger sequence") "The notice summary must label the full-certification receipt sequence separately"
   Assert-True ($script:capturedBacklogHtml -match "Ledger checkpoint sequence") "The notice summary must label the later ledger-head checkpoint separately"
+  Assert-True ($script:capturedBacklogHtml -match "Outlook template recipient truth reconciled") "The full notice must confirm that Outlook-template recipient evidence followed the certified projection"
+  Assert-True ($script:capturedBacklogHtml -match "Outlook templates currently sendable") "The full notice must report how many Outlook templates are currently safe to insert"
+  Assert-True ($script:capturedBacklogHtml -match "Outlook templates blocked by missing recipients") "The full notice must expose missing-recipient send blocks"
+  Assert-True ($script:capturedBacklogHtml -match "Outlook templates blocked by ambiguous recipients") "The full notice must expose ambiguous-recipient send blocks"
   Assert-True ($script:capturedBacklogHtml -match ("f" * 64)) "The notice summary must retain the projection-evidence receipt hash"
   Assert-True ($script:capturedBacklogHtml -match ("c" * 64)) "The notice summary must retain the latest checkpoint head hash"
   Assert-True ($script:capturedBacklogHtml -match $atomicProjectionFingerprint) "The fully certified notice must display the exact canonical FCUNO-to-Exchange projection hash"
