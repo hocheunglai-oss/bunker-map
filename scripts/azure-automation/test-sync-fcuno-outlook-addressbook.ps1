@@ -2054,6 +2054,20 @@ $emptyOutcome = Get-IncrementalSyncOutcome @{
 }
 Assert-Equal "completed" $emptyOutcome.Status "A true zero-backlog incremental no-op must remain successful"
 Assert-True (-not [bool]$emptyOutcome.AlwaysNotify) "A scheduled zero-backlog no-op must remain silent"
+Assert-True (-not (Test-IncrementalSyncNotificationRequired $emptyOutcome)) "An hourly webhook invocation must not override a zero-change outcome and force an email"
+
+$changedOutcome = Get-IncrementalSyncOutcome @{
+  queuedRows = 1
+  completedQueueRows = 1
+  failedQueueRows = 0
+  backlogRows = 0
+  skippedQueueRows = 0
+  supersededQueueRows = 0
+  resolvedTerminalQueueRows = 0
+}
+Assert-Equal "completed" $changedOutcome.Status "A verified user change must complete successfully"
+Assert-True (Test-IncrementalSyncNotificationRequired $changedOutcome) "A verified user change must send an informative email report"
+Assert-True (Test-IncrementalSyncNotificationRequired $backlogOutcome) "An unresolved failure must continue to send an alert"
 
 $fullLockMessage = "Full reconciliation was blocked by an active mutation lease."
 $fullLockDetails = New-FullSyncLockFailureDetails $fullLockMessage

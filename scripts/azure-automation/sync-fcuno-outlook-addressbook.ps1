@@ -11,7 +11,7 @@ $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.3"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.4"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -4966,6 +4966,13 @@ function Get-IncrementalSyncOutcome($Details) {
   }
 }
 
+function Test-IncrementalSyncNotificationRequired($Outcome) {
+  if (-not $Outcome) {
+    throw "An incremental sync outcome is required to decide whether a notice should be sent."
+  }
+  return [bool]$Outcome.AlwaysNotify
+}
+
 function Set-IncrementalBacklogFromTruthCheckpoint([hashtable]$Stats) {
   $checkpointCounts = @{}
   foreach ($mapping in @(
@@ -5744,7 +5751,7 @@ try {
   if ($syncMode -ne "full") {
     $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
     $outcome = Complete-IncrementalSyncOutcomeWithCheckpoint $details
-    if ([bool]$outcome.AlwaysNotify -or $WebhookData) {
+    if (Test-IncrementalSyncNotificationRequired $outcome) {
       $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
         $outcome.Status `
         $outcome.Message `
