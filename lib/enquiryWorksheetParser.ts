@@ -240,7 +240,7 @@ function extractColonProductVessel(lines: string[]) {
 
 function extractDelimitedHeaderVessel(lines: string[], options: EnquiryWorksheetParseOptions) {
   for (const line of lines.slice(0, 6)) {
-    const match = line.match(/^\s*(.+?)\s+(?:-|\/|\|)\s+(.+)$/)
+    const match = line.match(/^\s*(.+?)(?:\s+(?:-|\/|\|)\s+|,\s*)(.+)$/)
     if (!match) continue
 
     const remainder = match[2]

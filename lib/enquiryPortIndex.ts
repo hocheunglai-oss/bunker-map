@@ -17,6 +17,7 @@ export type EnquiryPortIndexOptions = {
 
 const supplementalPorts = [
   "Antwerp",
+  "Busan New Port",
   "Caofeidian",
   "Colombo",
   "Hakata",

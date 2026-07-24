@@ -272,7 +272,7 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`(?<!/)\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`(?<![\\d/.-])\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
   }
@@ -293,7 +293,7 @@ export function findEnquiryDates(value: string) {
   }
 
   for (const match of normalized.matchAll(/\b(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\b(?!\s*[日号])/g)) {
-    const date = normalizeDate(match[1], match[2])
+    const date = normalizeDate(match[1], match[2]) || normalizeDate(match[2], match[1])
     if (date) dates.push(date)
   }
 
@@ -351,6 +351,33 @@ function extractOperationalSchedule(lines: string[]) {
   return Array.from(entries.values())
 }
 
+function extractAlternativeCaseSchedule(
+  lines: string[],
+  options: Pick<BuildShortenedEnquiryOptions, "includePort" | "portNames">,
+) {
+  const caseIndexes = lines
+    .map((line, index) => /^\s*\[\s*case\s+\d+\s*\]\s*:?\s*$/i.test(line) ? index : -1)
+    .filter((index) => index >= 0)
+  if (caseIndexes.length < 2) return ""
+
+  const entries = caseIndexes.flatMap((startIndex, caseIndex) => {
+    const endIndex = caseIndexes[caseIndex + 1] ?? lines.length
+    const block = lines.slice(startIndex + 1, endIndex)
+    const dateLine = block.find((line) =>
+      OPERATIONAL_SCHEDULE_LINE_PATTERN.test(line) || /^\s*(?:delivery|window|date)\b/i.test(line),
+    )
+    const date = findEnquiryDates(dateLine || "")[0] || ""
+    if (!date) return []
+
+    const port = options.includePort
+      ? formatShortenedPort(extractEnquiryPort(block.join("\n"), { portNames: options.portNames }))
+      : ""
+    return [[port, date].filter(Boolean).join(" ")]
+  })
+
+  return entries.length > 1 ? Array.from(new Set(entries)).join(" OR ") : ""
+}
+
 function extractDeliverySchedule(
   text: string,
   options: Pick<BuildShortenedEnquiryOptions, "includePort" | "port" | "portNames"> = {},
@@ -360,6 +387,9 @@ function extractDeliverySchedule(
     .map(cleanSpaces)
     .filter(Boolean)
     .filter((line) => !isContactOrAddressLine(line))
+
+  const alternativeCaseSchedule = extractAlternativeCaseSchedule(lines, options)
+  if (alternativeCaseSchedule) return alternativeCaseSchedule
 
   const operationalSchedule = extractOperationalSchedule(lines)
   if (operationalSchedule.length > 1) {
@@ -602,6 +632,7 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
     const line = nearby[index]
     if (unitOnlyPattern.test(line)) break
     if (containsProduct(line)) break
+    if (/^\s*0+(?:[,.]0+)?\s*$/.test(line)) break
     const labelled = /^\s*(?:qty|quantity)\b/i.test(line)
     const standalone = /^\s*\d+(?:[,.]\d+)?(?:\s*(?:-|~|to)\s*\d+(?:[,.]\d+)?)?\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])?\s*$/i.test(line)
     if (!labelled && !standalone) continue
@@ -726,7 +757,7 @@ export function buildShortenedEnquiry(
     .sort((first, second) => productOrder[first.product] - productOrder[second.product])
     .map((product) => formatProductSegment(product, manualVlsfoRemarks))
 
-  return [vesselName.toLowerCase(), imo, portAndDate || date, ...products]
+  return [vesselName.toLowerCase(), imo, portAndDate || date, ...Array.from(new Set(products))]
     .filter(Boolean)
     .join(" / ")
 }

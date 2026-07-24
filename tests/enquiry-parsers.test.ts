@@ -427,3 +427,63 @@ test("replays the July 22 FCUNO reports without treating viscosity as quantity",
     "storm rider / 9595357 / port klang 29 jul - 13 aug / vlsfo 250-350mts",
   )
 })
+
+test("replays the July 24 FCUNO reports with alternative schedules and exact dates", () => {
+  const anne = [
+    "Vessel: Anne（9474553）",
+    "[Case 1]",
+    "Port: Daesan, South Korea",
+    "ETA: 26th - 30th Jul 2026",
+    "VLSFO (below 0.5% sul): 150MT",
+    "LSMGO (below 0.1% sul): 50MT",
+    "*Agent Info:",
+    "DONGYANG SHIPPING CO., LTD.",
+    "[Case 2]",
+    "Port: Yosu, South Korea",
+    "ETA: 3rd - 7th Aug 2026",
+    "VLSFO (below 0.5% sul): 150MT",
+    "LSMGO (below 0.1% sul): 50MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(anne),
+    "anne / 9474553 / daesan 26 - 30 jul OR yosu 3 - 7 aug / vlsfo 150mts / lsmgo 50mts",
+  )
+
+  assert.equal(
+    worksheetOutput("AL ATHFAR, inchon b/o 25 Jul, Vlsfo 100mt, mgo 50mt"),
+    "al athfar / inchon 25 jul / vlsfo 100mts / lsmgo 50mts",
+  )
+
+  const bbcOcean = [
+    "Account: BLUE WATER SHIPPING PTY LTD",
+    "Vessel: BBC OCEAN",
+    "IMO No: 9569530",
+    "Port: BUSAN NEW PORT",
+    "ETA: 1-Aug-26",
+    "ETS: 3-Aug-26",
+    "Product & Qty: RMG 380 0,5%",
+    "210",
+    "0",
+    "Product & Qty: DMA 0,1%",
+    "15",
+    "0",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(bbcOcean),
+    "bbc ocean / 9569530 / busan new port eta 1 aug, etd 3 aug / vlsfo 210mts / lsmgo 15mts",
+  )
+
+  const buenaSuerte = [
+    "Could you try till 17:20 HK?",
+    "Vessel: BUENA SUERTE",
+    "IMO NO: 9528550",
+    "Port: ONSAN, KOREA",
+    "Date: 7/28~",
+    "Qtty: VLSFO : 135.0 MT",
+    "LSMGO : 45.0 MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(buenaSuerte),
+    "buena suerte / 9528550 / onsan 28 jul / vlsfo 135mts / lsmgo 45mts",
+  )
+})
