@@ -2881,15 +2881,12 @@ async function checkOutlookTemplateRecipientTruth(): Promise<HealthCheckResult> 
   const valid = verification.valid === true
   const missing = getNumber(templates.withMissingRecipients)
   const ambiguous = getNumber(templates.withAmbiguousRecipients)
-  const blocked = missing + ambiguous
 
   return {
-    status: valid ? (blocked > 0 ? "warning" : "ok") : "error",
+    status: valid ? "ok" : "error",
     message: !valid
       ? "Outlook templates are not aligned with the latest certified Exchange projection"
-      : blocked > 0
-        ? "Outlook template truth is current, with templates blocked by unresolved recipients"
-        : "Outlook templates use the latest certified Exchange recipient projection",
+      : "Outlook templates use the latest certified Exchange recipient projection; unresolved recipients remain visible as normal send blocks",
     details: {
       certificationRunId: String(verification.certificationRunId || ""),
       certifiedAt: String(verification.certifiedAt || ""),
