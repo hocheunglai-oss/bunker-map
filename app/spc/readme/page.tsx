@@ -220,7 +220,7 @@ export default function SpcReadmePage() {
   }, [authenticated, canView])
 
   useEffect(() => {
-    document.title = "SPC README"
+    document.title = "SPC INTRODUCTION"
   }, [])
 
   useEffect(() => {
@@ -646,21 +646,8 @@ export default function SpcReadmePage() {
     return <div className="spc-loading">Loading...</div>
   }
 
-  const offlineLabel =
-    offlineState === "ready"
-      ? `READY OFFLINE${offlineProgress.bytes ? ` / ${formatBytes(offlineProgress.bytes)}` : ""}`
-      : offlineState === "preparing"
-        ? `PREPARING ${offlineProgress.complete}/${offlineProgress.total}`
-        : offlineState === "checking"
-          ? "CHECKING MEDIA"
-          : offlineState === "partial"
-            ? `OFFLINE ${offlineProgress.complete}/${offlineProgress.total}`
-            : offlineState === "unavailable"
-              ? "OFFLINE STORAGE UNAVAILABLE"
-              : "MEDIA ONLINE"
-
   return (
-    <SpcShell title="SPC README">
+    <SpcShell title="INTRODUCTION">
       {error ? <div className="spc-alert is-error">{error}</div> : null}
       {message ? <div className="spc-alert">{message}</div> : null}
 
@@ -669,26 +656,6 @@ export default function SpcReadmePage() {
           <div>
             <strong>INCORPORATE AI INTO TRADING</strong>
             <span>INTERMEDIATE / {activeChapter || "NO CHAPTER"}</span>
-          </div>
-          <div className="spc-readme-session-status">
-            <span className={online ? "is-online" : "is-offline"}>{online ? "ONLINE" : "OFFLINE"}</span>
-            <span className={offlineState === "ready" ? "is-ready" : ""}>{offlineLabel}</span>
-          </div>
-          <div className="spc-readme-toolbar-actions">
-            <button type="button" onClick={() => void prepareOffline()} disabled={offlineState === "preparing"}>
-              PREPARE OFFLINE
-            </button>
-            <button type="button" onClick={() => void startPresentation("manual")} disabled={!selected || presenterTransitioning}>
-              PRESENT
-            </button>
-            <button type="button" className="is-primary" onClick={() => void startPresentation("chapter")} disabled={chapterChunks.length === 0 || presenterTransitioning}>
-              PLAY CHAPTER
-            </button>
-            {canEdit ? (
-              <button type="button" className={editing ? "is-active" : ""} onClick={() => setEditing((current) => !current)} disabled={!selected}>
-                {editing ? "CLOSE EDITOR" : "EDIT"}
-              </button>
-            ) : null}
           </div>
         </header>
 
@@ -707,7 +674,7 @@ export default function SpcReadmePage() {
           ))}
         </nav>
 
-        <div className={`spc-readme-workspace${editing ? " is-editing" : ""}`}>
+        <div className="spc-readme-workspace">
           <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
             <div className="spc-readme-chunk-list-header">
               <span>SECTIONS</span>
@@ -764,66 +731,7 @@ export default function SpcReadmePage() {
             )}
           </main>
 
-          {selected && editing && draft ? (
-            <aside className="spc-readme-editor" aria-label="Edit presentation section">
-              <div className="spc-readme-editor-header"><strong>EDIT SECTION</strong><span>REV {selected.revision}</span></div>
-              <label><span>CHAPTER</span><input value={draft.chapterLabel} onChange={(event) => setDraft({ ...draft, chapterLabel: event.target.value })} /></label>
-              <label><span>SECTION</span><input value={draft.sectionLabel} onChange={(event) => setDraft({ ...draft, sectionLabel: event.target.value })} /></label>
-              <label><span>TITLE</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-              <label><span>SUMMARY</span><textarea rows={3} value={draft.summary} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} /></label>
-              <section className="spc-readme-video-copy" aria-label="Video text">
-                <header><strong>VIDEO TEXT</strong><span>USED FOR THE NEXT VIDEO RENDER</span></header>
-                {draft.visualCopy.length > 0 ? draft.visualCopy.map((item) => (
-                  <label key={item.id}>
-                    <span>{item.label}</span>
-                    <textarea
-                      rows={2}
-                      value={item.text}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        visualCopy: draft.visualCopy.map((entry) => (
-                          entry.id === item.id ? { ...entry, text: event.target.value } : entry
-                        )),
-                      })}
-                    />
-                  </label>
-                )) : <p>NO VIDEO TEXT HAS BEEN DEFINED FOR THIS SECTION.</p>}
-              </section>
-              <label><span>KEY POINTS / ONE PER LINE</span><textarea rows={5} value={draft.keyPoints} onChange={(event) => setDraft({ ...draft, keyPoints: event.target.value })} /></label>
-              <label><span>NARRATION SCRIPT</span><textarea rows={9} value={draft.narration} onChange={(event) => setDraft({ ...draft, narration: event.target.value })} /></label>
-              <label><span>Q&amp;A PROMPT</span><textarea rows={3} value={draft.questionPrompt} onChange={(event) => setDraft({ ...draft, questionPrompt: event.target.value })} /></label>
-              <div className="spc-readme-editor-row">
-                <label><span>SCENE</span><select value={draft.visualKind} onChange={(event) => setDraft({ ...draft, visualKind: event.target.value })}>
-                  <option value="chapter-intro">CHAPTER INTRO</option>
-                  <option value="daily-pressure">DAILY PRESSURE</option>
-                  <option value="varied-formats">VARIED FORMATS</option>
-                  <option value="whatsapp-load">WHATSAPP LOAD</option>
-                  <option value="prompt-structure">PROMPT STRUCTURE</option>
-                  <option value="live-prompt">LIVE PROMPT</option>
-                  <option value="ai-response">AI RESPONSE</option>
-                  <option value="human-review">HUMAN REVIEW</option>
-                  <option value="chapter-takeaway">TAKEAWAY</option>
-                  <option value="video">VIDEO</option>
-                </select></label>
-                <label><span>SECONDS</span><input inputMode="numeric" value={draft.durationSeconds} onChange={(event) => setDraft({ ...draft, durationSeconds: event.target.value.replace(/\D/g, "") })} /></label>
-                <label><span>STATUS</span><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value === "draft" ? "draft" : "published" })}><option value="published">PUBLISHED</option><option value="draft">DRAFT</option></select></label>
-              </div>
-              <div className="spc-readme-media-inputs">
-                <label><span>VIDEO {selected.videoBytes ? `/ ${formatBytes(selected.videoBytes)}` : ""}</span><input type="file" accept="video/mp4,video/webm" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("video", file); event.currentTarget.value = "" }} /></label>
-                <label><span>NARRATION {selected.narrationBytes ? `/ ${formatBytes(selected.narrationBytes)}` : ""}</span><input type="file" accept="audio/*" disabled={Boolean(uploading)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia("narration", file); event.currentTarget.value = "" }} /></label>
-              </div>
-              {uploading ? <p className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</p> : null}
-              <div className="spc-readme-order-actions">
-                <button type="button" onClick={() => void moveChunk("earlier")} disabled={saving || chapterSelectedIndex <= 0}>EARLIER</button>
-                <button type="button" onClick={() => void moveChunk("later")} disabled={saving || chapterSelectedIndex >= chapterChunks.length - 1}>LATER</button>
-              </div>
-              <div className="spc-readme-editor-actions">
-                <button type="button" onClick={() => { setDraft(chunkDraft(selected)); setEditing(false) }} disabled={saving}>CANCEL</button>
-                <button type="button" className="is-danger" onClick={() => void deleteChunk()} disabled={saving}>DELETE</button>
-                <button type="button" className="is-primary" onClick={() => void saveDraft()} disabled={saving}>{saving ? "SAVING..." : "SAVE"}</button>
-              </div>
-            </aside>
-          ) : selected ? (
+          {selected ? (
             <aside className="spc-readme-reference">
               <div className="spc-readme-reference-heading">SCRIPT</div>
               <div className="spc-readme-script">{selected.narration}</div>

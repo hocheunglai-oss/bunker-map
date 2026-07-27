@@ -599,14 +599,45 @@ body {
 }
 
 .fc-admin-sidebar-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 12px;
   flex: 0 0 auto;
   border-top: 1px solid var(--fc-admin-border-soft);
   background: var(--fc-admin-panel-bg);
   padding: 12px;
+}
+
+.fc-admin-sidebar-introduction {
+  min-height: 39px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 5px;
+  background: #f7f9fc;
+  color: #26364a;
+  padding: 0 13px;
+  font-size: 11px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.fc-admin-sidebar-introduction:hover {
+  border-color: #a9b8ca;
+  background: #f0f4f9;
+}
+
+.fc-admin-sidebar-introduction.is-active {
+  border-color: #e2492f;
+  background: #fff4f1;
+  color: #bf301b;
+  box-shadow: inset 3px 0 0 #e2492f;
+}
+
+.fc-admin-sidebar-footer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .fc-admin-sidebar-user {
@@ -711,6 +742,14 @@ body {
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-footer {
   margin-top: auto;
   padding: 10px;
+}
+
+.fc-admin-app-shell.is-collapsed .fc-admin-sidebar-introduction {
+  display: none;
+}
+
+.fc-admin-app-shell.is-collapsed .fc-admin-sidebar-footer-meta {
+  justify-content: center;
 }
 
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-user {
@@ -4583,10 +4622,8 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-toolbar {
   min-height: 62px;
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
+  display: flex;
   align-items: center;
-  gap: 18px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
   background: #ffffff;
   padding: 10px 14px;

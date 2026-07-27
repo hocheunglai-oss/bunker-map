@@ -31,7 +31,7 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   },
   {
     id: "spc-readme",
-    label: "README",
+    label: "INTRODUCTION",
     group: "trading",
     path: "/spc/readme",
     matchPrefixes: ["/readme", "/spc/readme"],
