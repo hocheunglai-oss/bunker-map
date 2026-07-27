@@ -13,9 +13,10 @@ This standard applies to every section of **Incorporate AI into Trading (Interme
 
 ## Narration
 
-- Use the same `marin` voice for every chapter and section.
+- Use ElevenLabs `Anna - British Neutral Narration` for every chapter and section.
+- Use `Eleven Multilingual v2` with speed `1.00`, stability `0.50`, similarity `0.75`, style exaggeration `0`, and speaker boost enabled.
 - Generate one continuous take per chapter, then split only at section boundaries.
-- Keep narration at 128 words per minute. Do not accelerate lists or later sections.
+- Match the approved Introduction pace. Do not accelerate lists or later sections.
 - Preserve the speaker's age, accent, pitch, tone, energy, and microphone distance.
 - Begin the introduction with three seconds of silence.
 - Generate lossless audio, master it once, and use only one final lossy encode.

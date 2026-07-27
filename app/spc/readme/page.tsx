@@ -161,6 +161,9 @@ export default function SpcReadmePage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const canView = canAccessSpcPage(permissions, "spc-readme", "view")
+  const editorMode =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("editor") === "1"
   const [chunks, setChunks] = useState<SpcPresentationChunk[]>([])
   const [selectedId, setSelectedId] = useState("")
   const [loading, setLoading] = useState(true)
@@ -674,7 +677,7 @@ export default function SpcReadmePage() {
           ))}
         </nav>
 
-        <div className="spc-readme-workspace">
+        <div className={`spc-readme-workspace${editorMode && canEdit ? " is-editing" : ""}`}>
           <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
             <div className="spc-readme-chunk-list-header">
               <span>SECTIONS</span>
@@ -731,7 +734,102 @@ export default function SpcReadmePage() {
             )}
           </main>
 
-          {selected ? (
+          {selected && editorMode && canEdit && draft ? (
+            <aside className="spc-readme-editor">
+              <div className="spc-readme-editor-header">
+                <strong>PRIVATE EDITOR</strong>
+                <button type="button" onClick={() => { window.location.href = "/readme" }}>VIEW</button>
+              </div>
+              <label>
+                <span>CHAPTER</span>
+                <input
+                  value={draft.chapterLabel}
+                  onChange={(event) => setDraft({ ...draft, chapterLabel: event.target.value })}
+                />
+              </label>
+              <div className="spc-readme-editor-row">
+                <label>
+                  <span>SECTION</span>
+                  <input
+                    value={draft.sectionLabel}
+                    onChange={(event) => setDraft({ ...draft, sectionLabel: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>SECONDS</span>
+                  <input
+                    inputMode="decimal"
+                    value={draft.durationSeconds}
+                    onChange={(event) => setDraft({ ...draft, durationSeconds: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>STATUS</span>
+                  <select
+                    value={draft.status}
+                    onChange={(event) => setDraft({ ...draft, status: event.target.value as ChunkDraft["status"] })}
+                  >
+                    <option value="published">PUBLISHED</option>
+                    <option value="draft">DRAFT</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>TITLE</span>
+                <input
+                  value={draft.title}
+                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>SCRIPT</span>
+                <textarea
+                  rows={22}
+                  value={draft.narration}
+                  onChange={(event) => setDraft({ ...draft, narration: event.target.value })}
+                />
+              </label>
+              <div className="spc-readme-media-inputs">
+                <label>
+                  <span>VIDEO</span>
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm"
+                    disabled={Boolean(uploading) || saving}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) void uploadMedia("video", file)
+                      event.currentTarget.value = ""
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>NARRATION</span>
+                  <input
+                    type="file"
+                    accept="audio/mpeg,audio/mp4,audio/wav"
+                    disabled={Boolean(uploading) || saving}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) void uploadMedia("narration", file)
+                      event.currentTarget.value = ""
+                    }}
+                  />
+                </label>
+              </div>
+              {uploading ? <div className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</div> : null}
+              <div className="spc-readme-editor-actions">
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={saving || Boolean(uploading)}
+                  onClick={() => void saveDraft()}
+                >
+                  {saving ? "SAVING..." : "SAVE"}
+                </button>
+              </div>
+            </aside>
+          ) : selected ? (
             <aside className="spc-readme-reference">
               <div className="spc-readme-reference-heading">SCRIPT</div>
               <div className="spc-readme-script">{selected.narration}</div>
