@@ -250,19 +250,18 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   assert.match(taskpane, /https:\/\/graph\.microsoft\.com\/v1\.0\/me\/messages/)
   assert.match(taskpane, /function reserveNewMessageWindow\(\)/)
   assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
-  assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft, compose\)/)
+  assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft\)/)
   assert.match(
     taskpane,
-    /function trustedOutlookDraftWebLink\(draft, compose\)[\s\S]*?var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?if \(compose && readPathIndex >= 0\)[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/compose\/"/,
+    /function trustedOutlookDraftWebLink\(draft\)[\s\S]*?var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?if \(readPathIndex >= 0\)[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/compose\/"/,
   )
   assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
-  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_RETRY_DELAY_MS = 3000/)
+  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 3000/)
   assert.match(
     taskpane,
-    /async function openGraphDraftInReservedWindow[\s\S]*?trustedOutlookDraftWebLink\(draft, true\)[\s\S]*?popup\.location\.replace\(trustedOutlookDraftWebLink\(draft, false\)\)[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_RETRY_DELAY_MS\)[\s\S]*?popup\.location\.replace\(composeLink\)/,
+    /async function openGraphDraftInReservedWindow[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS\)[\s\S]*?popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/,
   )
-  assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft, false\)\)/)
-  assert.match(taskpane, /popup\.location\.replace\(composeLink\)/)
+  assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/)
   assert.match(taskpane, /await openGraphDraftInReservedWindow\(composeWindow, graphDraft\)/)
   assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
   assert.doesNotMatch(taskpane, /displayMessageForm\(ewsId\)/)

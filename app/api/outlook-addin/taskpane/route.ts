@@ -531,7 +531,7 @@ export async function GET(request: Request) {
         var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
         var GRAPH_SCOPES = ["Mail.ReadWrite"];
         var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
-        var OUTLOOK_DRAFT_COMPOSE_RETRY_DELAY_MS = 3000;
+        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 3000;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -2062,7 +2062,7 @@ export async function GET(request: Request) {
           }
         }
 
-        function trustedOutlookDraftWebLink(draft, compose) {
+        function trustedOutlookDraftWebLink(draft) {
           var parsed;
           try {
             parsed = new URL(String(draft && draft.webLink || ""));
@@ -2083,7 +2083,7 @@ export async function GET(request: Request) {
           }
           var readPath = "/mail/deeplink/read/";
           var readPathIndex = parsed.pathname.toLowerCase().indexOf(readPath);
-          if (compose && readPathIndex >= 0) {
+          if (readPathIndex >= 0) {
             parsed.pathname =
               parsed.pathname.slice(0, readPathIndex) +
               "/mail/compose/" +
@@ -2104,17 +2104,15 @@ export async function GET(request: Request) {
           } catch (error) {
             // The placeholder remains usable even if Outlook owns its document early.
           }
-          var composeLink = trustedOutlookDraftWebLink(draft, true);
-          popup.location.replace(trustedOutlookDraftWebLink(draft, false));
           await new Promise(function (resolve) {
-            window.setTimeout(resolve, OUTLOOK_DRAFT_COMPOSE_RETRY_DELAY_MS);
+            window.setTimeout(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS);
           });
           if (popup.closed) {
             throw new Error(
               "The new Outlook message window was closed before loading completed."
             );
           }
-          popup.location.replace(composeLink);
+          popup.location.replace(trustedOutlookDraftWebLink(draft));
         }
 
         async function insertSelectedTemplate() {
