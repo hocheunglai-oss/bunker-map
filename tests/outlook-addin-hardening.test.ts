@@ -228,50 +228,41 @@ test("taskpane caches are versioned, bounded, and never authorize insertion offl
   assert.doesNotMatch(taskpane, /setRecipients\(item\.to, template\.to\)/)
 })
 
-test("taskpane reserves before mutation, restores conservatively, and records a terminal outcome", async () => {
+test("taskpane reserves before creating a separate Graph draft and records a terminal outcome", async () => {
   const { taskpane } = await sources()
 
-  assert.match(taskpane, /async function snapshotDraft\(item, office\)/)
-  assert.match(taskpane, /item\.subject\.getAsync/)
-  assert.match(taskpane, /getRecipients\(item\.to\)/)
-  assert.match(taskpane, /getRecipients\(item\.cc\)/)
-  assert.match(taskpane, /getRecipients\(item\.bcc\)/)
-  assert.match(taskpane, /item\.body\.getAsync/)
-  assert.match(
+  assert.match(taskpane, /createNestablePublicClientApplication/)
+  assert.match(taskpane, /async function loadMsalBrowser\(\)/)
+  assert.match(taskpane, /script\.src = MSAL_SCRIPT_URL/)
+  assert.match(taskpane, /await loadMsalBrowser\(\)/)
+  assert.doesNotMatch(
     taskpane,
-    /getOptions\.bodyMode = office\.MailboxEnums\.BodyMode\.HostConfig/,
+    /<script src="\/outlook-msal-browser-4\.24\.1\.min\.js"><\/script>/,
   )
   assert.match(
     taskpane,
-    /setOptions\.bodyMode = office\.MailboxEnums\.BodyMode\.HostConfig/,
+    /requirements\.isSetSupported\("NestedAppAuth", "1\.1"\)/,
   )
-  assert.doesNotMatch(taskpane, /window\.confirm\(/)
+  assert.match(taskpane, /scopes: GRAPH_SCOPES\.slice\(\)/)
+  assert.match(taskpane, /acquireTokenSilent\(request\)/)
+  assert.match(taskpane, /acquireTokenPopup\(request\)/)
+  assert.match(taskpane, /graphAccountMatchesMailbox\(result\.account\)/)
+  assert.match(taskpane, /https:\/\/graph\.microsoft\.com\/v1\.0\/me\/messages/)
+  assert.match(taskpane, /mailbox\.convertToEwsId\(draftId, restVersion\.v2_0\)/)
+  assert.match(taskpane, /mailbox\.displayMessageFormAsync\(ewsId, done\)/)
+  assert.match(taskpane, /mailbox\.displayMessageForm\(ewsId\)/)
+  assert.match(taskpane, /async function deleteGraphDraft\(accessToken, draftId\)/)
+  assert.doesNotMatch(taskpane, /role="alertdialog"/)
+  assert.doesNotMatch(taskpane, />Keep draft</)
+  assert.doesNotMatch(taskpane, />Replace draft</)
+  assert.doesNotMatch(taskpane, /confirmDraftReplacement/)
   assert.match(
     taskpane,
-    /await confirmDraftReplacement\(\)[\s\S]*?await loadRecipientMap\(true\)[\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
+    /await loadRecipientMap\(true\)[\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
   )
-  assert.match(taskpane, /role="alertdialog"/)
-  assert.match(taskpane, /closeReplacementConfirmation\(true\)/)
   assert.match(taskpane, /state\.inserting = true/)
   assert.match(taskpane, /state\.inserting = false/)
   assert.match(taskpane, /mutationStarted = true/)
-  assert.match(
-    taskpane,
-    /async function restoreDraft\(item, snapshot, assertCurrentItem\)/,
-  )
-  assert.match(taskpane, /item\.subject\.setAsync\(snapshot\.subject/)
-  assert.match(taskpane, /setRecipients\(item\.to, snapshot\.to\)/)
-  assert.match(taskpane, /setRecipients\(item\.cc, snapshot\.cc\)/)
-  assert.match(taskpane, /setRecipients\(item\.bcc, snapshot\.bcc\)/)
-  assert.match(taskpane, /item\.body\.setAsync\(snapshot\.body/)
-  assert.match(
-    taskpane,
-    /async function restoreDraftIfUnchanged\([\s\S]*?var item = currentInsertionItem\(insertionContext\);[\s\S]*?var currentSnapshot = await snapshotDraft\(item, office\);[\s\S]*?if \(!draftSnapshotsEqual\(currentSnapshot, addinWrittenSnapshot\)\)[\s\S]*?await restoreDraft\(item, originalSnapshot[\s\S]*?var restoredSnapshot = await snapshotDraft\(item, office\);[\s\S]*?return draftSnapshotsEqual\(restoredSnapshot, originalSnapshot\)/,
-  )
-  assert.match(
-    taskpane,
-    /var restored = await restoreDraftIfUnchanged\([\s\S]*?newer edits were kept/,
-  )
 
   assert.match(taskpane, /\.rpc\([\s\S]*?"reserve_outlook_template_insertion"/)
   assert.match(taskpane, /p_template_revision: attemptIdentity\.templateRevision/)
@@ -308,33 +299,33 @@ test("taskpane reserves before mutation, restores conservatively, and records a 
   const reserve = insertion.indexOf(
     'recordInsertionAuditEvent(\n              auditContext,\n              "reserved"',
   )
-  const mutation = insertion.indexOf("mutationStarted = true;", reserve)
-  const firstOfficeWrite = insertion.indexOf(
-    "item.subject.setAsync",
-    mutation,
-  )
-  const bodyWrite = insertion.indexOf("item.body.setAsync", firstOfficeWrite)
-  const completed = insertion.indexOf("mutationCompleted = true;", bodyWrite)
+  const graphCreate = insertion.indexOf("await createGraphDraft(", reserve)
+  const mutation = insertion.indexOf("mutationStarted = true;", graphCreate)
+  const display = insertion.indexOf("await displayGraphDraft(graphDraft.id);", mutation)
+  const completed = insertion.indexOf("mutationCompleted = true;", display)
   const insertedTerminal = insertion.indexOf(
     'recordInsertionAuditEvent(\n                auditContext,\n                "terminal",\n                "inserted"',
     completed,
   )
   assert.ok(
     reserve >= 0 &&
-      reserve < mutation &&
-      mutation < firstOfficeWrite &&
-      firstOfficeWrite < bodyWrite &&
-      bodyWrite < completed &&
+      reserve < graphCreate &&
+      graphCreate < mutation &&
+      mutation < display &&
+      display < completed &&
       completed < insertedTerminal,
-    "reservation must be acknowledged before the first Office write and inserted finalized only after every write",
+    "reservation must be acknowledged before Graph creates the draft and inserted finalized only after Outlook opens it",
   )
+  assert.doesNotMatch(insertion, /\.subject\.setAsync/)
+  assert.doesNotMatch(insertion, /\.body\.setAsync/)
+  assert.doesNotMatch(insertion, /setRecipients\(/)
   assert.match(
     insertion,
     /if \(mutationCompleted\) \{[\s\S]*?return;[\s\S]*?var outcome = "failed-preserved"/,
   )
   assert.match(
     insertion,
-    /if \(restored\) \{[\s\S]*?outcome = "failed-restored"/,
+    /await deleteGraphDraft\([\s\S]*?The unopened new draft was removed/,
   )
   assert.match(
     insertion,
@@ -342,11 +333,11 @@ test("taskpane reserves before mutation, restores conservatively, and records a 
   )
   assert.match(
     insertion,
-    /Template inserted, but FC Uno could not confirm the terminal audit record[\s\S]*?return;/,
+    /The new Outlook message opened, but FC Uno could not confirm the terminal audit record[\s\S]*?return;/,
   )
 })
 
-test("taskpane audit protocol dynamically fails closed and never rolls back a completed insertion", async () => {
+test("taskpane audit protocol dynamically fails closed and cleans up an unopened new draft", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
   const insertionSource = inlineFunctionBlock(
@@ -358,17 +349,15 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
   type HarnessConfig = {
     failReservation?: boolean
     failInsertedTerminal?: boolean
-    failRecipientField?: "to" | "cc" | "bcc"
-    restoreResult?: boolean
-    draftHasContent?: boolean
-    replacementConfirmed?: boolean
+    failDraftCreation?: boolean
+    failDraftDisplay?: boolean
+    cleanupSucceeds?: boolean
   }
   type Harness = {
     run: () => Promise<void>
     auditEvents: Array<{ phase: string; outcome: string | null }>
     notices: Array<{ message: string; tone: string }>
-    restores: string[]
-    writes: string[]
+    graphActions: string[]
     state: { inserting: boolean }
   }
   const makeHarness = Function(
@@ -376,42 +365,14 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
     `
       var auditEvents = [];
       var notices = [];
-      var restores = [];
-      var writes = [];
+      var graphActions = [];
       var state = {
         selectedId: "template-1",
-        composeReady: true,
-        itemChangeGuardRequired: false,
-        itemChangeGuardReady: true,
         inserting: false,
         recipientMapFromNetwork: true,
         recipientMapExpiresAt: Date.now() + 60000
       };
-      var success = "succeeded";
-      function successResult() { return { status: success, value: undefined }; }
-      var item = {
-        subject: {
-          setAsync: function (_value, done) {
-            writes.push("subject");
-            done(successResult());
-          }
-        },
-        to: { field: "to" },
-        cc: { field: "cc" },
-        bcc: { field: "bcc" },
-        body: {
-          setAsync: function (_value, _options, done) {
-            writes.push("body");
-            done(successResult());
-          }
-        }
-      };
-      var window = {
-        Office: { AsyncResultStatus: { Succeeded: success } }
-      };
-      function markComposeReady() { state.composeReady = true; }
       function notice(message, tone) { notices.push({ message: message, tone: tone }); }
-      function captureInsertionRequest() { return { generation: 0, itemIdentity: "" }; }
       async function loadTemplateDetail() {
         return {
           id: "template-1",
@@ -424,23 +385,6 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
       async function loadRecipientMap() { return {}; }
       function resolveStoredRecipientRefs(_template, field) {
         return [{ displayName: field, emailAddress: field + "@example.com" }];
-      }
-      function beginInsertionMutation() { return { item: item }; }
-      function requireCurrentInsertionItem() { return item; }
-      async function snapshotDraft() {
-        return {
-          subject: "",
-          to: [],
-          cc: [],
-          bcc: [],
-          body: "",
-          bodyOptions: {},
-          isHtml: true
-        };
-      }
-      function draftHasContent() { return Boolean(config.draftHasContent); }
-      async function confirmDraftReplacement() {
-        return config.replacementConfirmed !== false;
       }
       function createOperationId() {
         return "11111111-1111-4111-8111-111111111111";
@@ -458,64 +402,38 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
           throw new Error("Terminal acknowledgement lost.");
         }
       }
-      function copyDraftSnapshot(snapshot) {
-        return {
-          subject: snapshot.subject,
-          to: snapshot.to.slice(),
-          cc: snapshot.cc.slice(),
-          bcc: snapshot.bcc.slice(),
-          body: snapshot.body,
-          bodyOptions: snapshot.bodyOptions,
-          isHtml: snapshot.isHtml
-        };
+      async function acquireGraphAccessToken() {
+        graphActions.push("token");
+        return "token";
       }
-      function officeAsync(call) {
-        return new Promise(function (resolve, reject) {
-          call(function (result) {
-            if (result && result.status === success) resolve(result.value);
-            else reject(new Error("Office write failed."));
-          });
-        });
+      function buildGraphDraftPayload() { return { subject: "Subject" }; }
+      async function createGraphDraft() {
+        graphActions.push("create");
+        if (config.failDraftCreation) throw new Error("Draft create failed.");
+        return { id: "draft-1", isDraft: true };
       }
-      async function setRecipients(recipientApi) {
-        if (config.failRecipientField === recipientApi.field) {
-          throw new Error("Recipient write failed.");
-        }
-        writes.push(recipientApi.field);
+      async function displayGraphDraft() {
+        graphActions.push("display");
+        if (config.failDraftDisplay) throw new Error("Draft display failed.");
       }
-      async function restoreDraftIfUnchanged() {
-        restores.push("restore");
-        return config.restoreResult !== false;
+      async function deleteGraphDraft() {
+        graphActions.push("delete");
+        return config.cleanupSucceeds !== false;
       }
       ${insertionSource}
       return {
         run: insertSelectedTemplate,
         auditEvents: auditEvents,
         notices: notices,
-        restores: restores,
-        writes: writes,
+        graphActions: graphActions,
         state: state
       };
     `,
   ) as (config: HarnessConfig) => Harness
 
-  const replacementCancelled = makeHarness({
-    draftHasContent: true,
-    replacementConfirmed: false,
-  })
-  await replacementCancelled.run()
-  assert.deepEqual(replacementCancelled.writes, [])
-  assert.deepEqual(replacementCancelled.auditEvents, [])
-  assert.match(
-    replacementCancelled.notices.at(-1)?.message || "",
-    /Insertion cancelled\. Draft unchanged\./,
-  )
-  assert.equal(replacementCancelled.state.inserting, false)
-
   const reservationFailure = makeHarness({ failReservation: true })
   await reservationFailure.run()
-  assert.deepEqual(reservationFailure.writes, [])
-  assert.deepEqual(reservationFailure.restores, [])
+  assert.deepEqual(reservationFailure.graphActions, [])
   assert.deepEqual(reservationFailure.auditEvents, [
     { phase: "reserved", outcome: null },
   ])
@@ -523,167 +441,81 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
 
   const terminalFailure = makeHarness({ failInsertedTerminal: true })
   await terminalFailure.run()
-  assert.deepEqual(terminalFailure.writes, [
-    "subject",
-    "to",
-    "cc",
-    "bcc",
-    "body",
-  ])
-  assert.deepEqual(terminalFailure.restores, [])
+  assert.deepEqual(terminalFailure.graphActions, ["token", "create", "display"])
   assert.deepEqual(terminalFailure.auditEvents, [
     { phase: "reserved", outcome: null },
     { phase: "terminal", outcome: "inserted" },
   ])
   assert.match(
     terminalFailure.notices.at(-1)?.message || "",
-    /Template inserted, but FC Uno could not confirm the terminal audit record/,
+    /new Outlook message opened, but FC Uno could not confirm the terminal audit record/i,
   )
 
-  const partialFailure = makeHarness({
-    failRecipientField: "to",
-    restoreResult: true,
+  const displayFailure = makeHarness({
+    failDraftDisplay: true,
+    cleanupSucceeds: true,
   })
-  await partialFailure.run()
-  assert.deepEqual(partialFailure.writes, ["subject"])
-  assert.deepEqual(partialFailure.restores, ["restore"])
-  assert.deepEqual(partialFailure.auditEvents, [
-    { phase: "reserved", outcome: null },
-    { phase: "terminal", outcome: "failed-restored" },
+  await displayFailure.run()
+  assert.deepEqual(displayFailure.graphActions, [
+    "token",
+    "create",
+    "display",
+    "delete",
   ])
+  assert.deepEqual(displayFailure.auditEvents, [
+    { phase: "reserved", outcome: null },
+    { phase: "terminal", outcome: "failed-preserved" },
+  ])
+  assert.match(
+    displayFailure.notices.at(-1)?.message || "",
+    /original Outlook draft was not changed/,
+  )
 })
 
-test("taskpane confirms before replacing meaningful non-text HTML", async () => {
+test("Graph draft payload preserves certified recipients and the current Outlook item is never mutated", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
-  const draftHasContent = Function(
-    `${inlineFunctionSource(script, "draftHasContent")}; return draftHasContent;`,
-  )() as (snapshot: Record<string, unknown>) => boolean
-  const snapshot = (body: string) => ({
-    subject: "",
-    to: [],
-    cc: [],
-    bcc: [],
-    body,
-    isHtml: true,
-  })
-
-  assert.equal(draftHasContent(snapshot('<p><img src="cid:logo"></p>')), true)
-  assert.equal(draftHasContent(snapshot("<hr>")), true)
-  assert.equal(draftHasContent(snapshot("<table><tr><td></td></tr></table>")), true)
-  assert.equal(draftHasContent(snapshot("<p>&amp;</p>")), true)
-  assert.equal(draftHasContent(snapshot("<p>&nbsp;</p>")), false)
-  assert.equal(draftHasContent(snapshot("<p>\u00a0</p>")), false)
-  assert.equal(draftHasContent(snapshot("<p><br></p>")), false)
-})
-
-test("taskpane rollback comparison detects every post-insertion draft edit", async () => {
-  const { taskpane } = await sources()
-  const script = renderedInlineTaskpaneScript(taskpane)
-  const draftSnapshotsEqual = Function(
-    [
-      inlineFunctionSource(script, "draftRecipientKey"),
-      inlineFunctionSource(script, "draftRecipientListsEqual"),
-      inlineFunctionSource(script, "draftSnapshotsEqual"),
-      "return draftSnapshotsEqual;",
-    ].join("\n"),
-  )() as (left: Record<string, unknown>, right: Record<string, unknown>) => boolean
-
-  const inserted = {
-    subject: "Confirmed subject",
-    to: [{ displayName: "To", emailAddress: "to@example.com" }],
-    cc: [{ displayName: "Cc", emailAddress: "cc@example.com" }],
-    bcc: [{ displayName: "Bcc", emailAddress: "bcc@example.com" }],
-    body: "<p>Confirmed body</p>",
-    isHtml: true,
-  }
-  assert.equal(draftSnapshotsEqual(inserted, structuredClone(inserted)), true)
-
-  for (const changed of [
-    { ...structuredClone(inserted), subject: "User subject" },
-    {
-      ...structuredClone(inserted),
-      to: [{ displayName: "New To", emailAddress: "new-to@example.com" }],
-    },
-    {
-      ...structuredClone(inserted),
-      cc: [{ displayName: "New Cc", emailAddress: "new-cc@example.com" }],
-    },
-    {
-      ...structuredClone(inserted),
-      bcc: [{ displayName: "New Bcc", emailAddress: "new-bcc@example.com" }],
-    },
-    { ...structuredClone(inserted), body: "<p>User body</p>" },
-  ]) {
-    assert.equal(draftSnapshotsEqual(inserted, changed), false)
-  }
-})
-
-test("pinned taskpane aborts on item changes and never reuses a pre-fetch item", async () => {
-  const { taskpane } = await sources()
-  const script = renderedInlineTaskpaneScript(taskpane)
-
-  assert.match(taskpane, /requirements\.isSetSupported\("Mailbox", "1\.5"\)/)
-  assert.match(
-    taskpane,
-    /mailbox\.addHandlerAsync\([\s\S]*?office\.EventType\.ItemChanged,[\s\S]*?handleMailboxItemChanged/,
-  )
-  assert.match(
-    taskpane,
-    /function handleMailboxItemChanged\(\) \{[\s\S]*?state\.itemGeneration \+= 1;[\s\S]*?markComposeReady\(\)/,
-  )
-  assert.match(
-    taskpane,
-    /var insertionRequest = captureInsertionRequest\(\);[\s\S]*?await loadTemplateDetail\([\s\S]*?insertionContext = beginInsertionMutation\(insertionRequest\);[\s\S]*?await loadRecipientMap\(true\);/,
-  )
-  assert.match(
-    taskpane,
-    /snapshot = await snapshotDraft\(item, office\);[\s\S]*?item = requireCurrentInsertionItem\(insertionContext\);/,
-  )
-  assert.match(
-    taskpane,
-    /restoreDraftIfUnchanged\([\s\S]*?insertionContext,[\s\S]*?office/,
-  )
   const insertSelectedTemplateSource = inlineFunctionSource(
     script,
     "insertSelectedTemplate",
   )
-  assert.doesNotMatch(
-    insertSelectedTemplateSource,
-    /var item = office && office\.context && office\.context\.mailbox && office\.context\.mailbox\.item;[\s\S]*?await loadTemplateDetail/,
-  )
+  assert.doesNotMatch(insertSelectedTemplateSource, /currentComposeItem\(/)
+  assert.doesNotMatch(insertSelectedTemplateSource, /\.setAsync\(/)
+  assert.doesNotMatch(insertSelectedTemplateSource, /captureInsertionRequest\(/)
 
-  const insertionItemMatches = Function(
+  const buildGraphDraftPayload = Function(
     [
-      inlineFunctionSource(script, "mailboxItemIdentity"),
-      inlineFunctionSource(script, "insertionItemMatches"),
-      "return insertionItemMatches;",
+      inlineFunctionSource(script, "graphRecipient"),
+      inlineFunctionSource(script, "buildGraphDraftPayload"),
+      "return buildGraphDraftPayload;",
     ].join("\n"),
   )() as (
-    currentItem: Record<string, unknown> | null,
-    expectedItem: Record<string, unknown> | null,
-    currentGeneration: number,
-    expectedGeneration: number,
-    expectedItemIdentity: string,
-  ) => boolean
-  const originalItem = { itemId: "draft-a" }
-  assert.equal(
-    insertionItemMatches(originalItem, originalItem, 4, 4, "draft-a"),
-    true,
+    template: Record<string, unknown>,
+    to: Record<string, unknown>[],
+    cc: Record<string, unknown>[],
+    bcc: Record<string, unknown>[],
+  ) => Record<string, unknown>
+  assert.deepEqual(
+    buildGraphDraftPayload(
+      { subject: "Certified subject", bodyHtml: "<p>Certified body</p>" },
+      [{ displayName: "To Name", emailAddress: "TO@example.com" }],
+      [{ displayName: "Cc Name", emailAddress: "cc@example.com" }],
+      [{ displayName: "Bcc Name", emailAddress: "bcc@example.com" }],
+    ),
+    {
+      subject: "Certified subject",
+      body: { contentType: "HTML", content: "<p>Certified body</p>" },
+      toRecipients: [
+        { emailAddress: { address: "to@example.com", name: "To Name" } },
+      ],
+      ccRecipients: [
+        { emailAddress: { address: "cc@example.com", name: "Cc Name" } },
+      ],
+      bccRecipients: [
+        { emailAddress: { address: "bcc@example.com", name: "Bcc Name" } },
+      ],
+    },
   )
-  assert.equal(
-    insertionItemMatches({ itemId: "draft-a" }, originalItem, 4, 4, "draft-a"),
-    true,
-  )
-  assert.equal(
-    insertionItemMatches(originalItem, originalItem, 5, 4, "draft-a"),
-    false,
-  )
-  assert.equal(
-    insertionItemMatches({ itemId: "draft-b" }, originalItem, 4, 4, "draft-a"),
-    false,
-  )
-  assert.equal(insertionItemMatches(null, originalItem, 4, 4, "draft-a"), false)
 })
 
 test("network response lifetime is clock-independent while stored envelopes expire locally", async () => {

@@ -315,6 +315,14 @@ export async function GET(request: Request) {
   const templateDetailUrl = `${baseUrl}/api/email-templates`
   const recipientMapUrl = `${baseUrl}/api/outlook-addin/recipient-map`
   const insertionAuditUrl = `${baseUrl}/api/outlook-addin/taskpane`
+  const naaClientId = process.env.OUTLOOK_ADDIN_NAA_CLIENT_ID || ""
+  const naaTenantId =
+    process.env.OUTLOOK_ADDIN_NAA_TENANT_ID ||
+    process.env.EXCHANGE_TENANT_ID ||
+    ""
+  const naaAuthority = naaTenantId
+    ? `https://login.microsoftonline.com/${naaTenantId}`
+    : ""
 
   const html = `<!doctype html>
 <html lang="en">
@@ -486,44 +494,6 @@ export async function GET(request: Request) {
       }
       .notice.error { color: #a12a2a; }
       .notice.success { color: #1d6a3b; }
-      .replaceConfirm {
-        display: grid;
-        gap: 9px;
-        padding: 10px;
-        border: 1px solid #efc66f;
-        border-radius: 8px;
-        background: #fff8e7;
-        color: #493914;
-        font-size: 12px;
-        line-height: 1.4;
-      }
-      .replaceConfirm[hidden] { display: none; }
-      .replaceConfirmActions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 7px;
-      }
-      .replaceConfirmButton {
-        min-height: 32px;
-        border: 1px solid #b7c5d1;
-        border-radius: 7px;
-        background: #fff;
-        color: #203246;
-        cursor: pointer;
-        font: inherit;
-        font-size: 12px;
-        font-weight: 900;
-        padding: 0 11px;
-      }
-      .replaceConfirmButton.primary {
-        border-color: #1672b9;
-        background: #1672b9;
-        color: #fff;
-      }
-      .replaceConfirmButton:focus {
-        outline: 2px solid rgba(22, 114, 185, 0.32);
-        outline-offset: 1px;
-      }
     </style>
   </head>
   <body>
@@ -548,22 +518,6 @@ export async function GET(request: Request) {
         <div class="panelHeader"><span id="listTitle">Templates</span></div>
         <div id="templateList" class="templates"><div class="empty">Loading...</div></div>
       </section>
-      <div
-        id="replaceConfirm"
-        class="replaceConfirm"
-        role="alertdialog"
-        aria-labelledby="replaceConfirmText"
-        hidden
-      >
-        <div id="replaceConfirmText">
-          This draft already contains a subject, recipients, or body content.
-          Replace it with the selected template?
-        </div>
-        <div class="replaceConfirmActions">
-          <button id="replaceCancelButton" class="replaceConfirmButton" type="button">Keep draft</button>
-          <button id="replaceConfirmButton" class="replaceConfirmButton primary" type="button">Replace draft</button>
-        </div>
-      </div>
       <div id="notice" class="notice"></div>
     </div>
 
@@ -574,6 +528,10 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INSERTION_AUDIT_URL = ${JSON.stringify(insertionAuditUrl)};
+        var NAA_CLIENT_ID = ${JSON.stringify(naaClientId)};
+        var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
+        var GRAPH_SCOPES = ["Mail.ReadWrite"];
+        var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -600,17 +558,14 @@ export async function GET(request: Request) {
           selectedFolder: "",
           selectedId: "",
           query: "",
-          composeReady: false,
           inserting: false,
-          itemGeneration: 0,
-          itemChangeGuardRequired: false,
-          itemChangeGuardReady: false,
           authenticated: false,
           authSession: null,
           authGeneration: 0,
           authExpiryTimer: null,
           authDialog: null,
-          replacementConfirmationResolve: null
+          msalScriptPromise: null,
+          graphClientPromise: null
         };
 
         var els = {
@@ -624,9 +579,6 @@ export async function GET(request: Request) {
           folderTree: document.getElementById("folderTree"),
           listTitle: document.getElementById("listTitle"),
           templateList: document.getElementById("templateList"),
-          replaceConfirm: document.getElementById("replaceConfirm"),
-          replaceCancelButton: document.getElementById("replaceCancelButton"),
-          replaceConfirmButton: document.getElementById("replaceConfirmButton"),
           notice: document.getElementById("notice")
         };
 
@@ -645,7 +597,6 @@ export async function GET(request: Request) {
         }
 
         function clearConfidentialState(removeStoredCaches) {
-          closeReplacementConfirmation(false);
           state.templates = [];
           state.detailCache = {};
           state.folderRoot = null;
@@ -1295,146 +1246,6 @@ export async function GET(request: Request) {
           renderTemplates();
         }
 
-        function currentComposeItem() {
-          var office = window.Office;
-          var item = office && office.context && office.context.mailbox && office.context.mailbox.item;
-          var canSetSubject = item && item.subject && typeof item.subject.setAsync === "function";
-          var canReplaceBody = item && item.body && typeof item.body.setAsync === "function";
-          return canSetSubject && canReplaceBody ? item : null;
-        }
-
-        function markComposeReady() {
-          state.composeReady = Boolean(currentComposeItem());
-        }
-
-        function mailboxItemIdentity(item) {
-          return String(item && item.itemId || "").trim();
-        }
-
-        function captureInsertionRequest() {
-          var item = currentComposeItem();
-          if (!item) return null;
-          return {
-            generation: state.itemGeneration,
-            itemIdentity: mailboxItemIdentity(item)
-          };
-        }
-
-        function insertionItemMatches(
-          currentItem,
-          expectedItem,
-          currentGeneration,
-          expectedGeneration,
-          expectedItemIdentity
-        ) {
-          if (!currentItem ||
-              !expectedItem ||
-              currentGeneration !== expectedGeneration) {
-            return false;
-          }
-          if (currentItem === expectedItem) return true;
-          var currentIdentity = mailboxItemIdentity(currentItem);
-          return Boolean(
-            expectedItemIdentity &&
-            currentIdentity &&
-            currentIdentity === expectedItemIdentity
-          );
-        }
-
-        function currentInsertionItem(context) {
-          if (!context) return null;
-          var currentItem = currentComposeItem();
-          return insertionItemMatches(
-            currentItem,
-            context.item,
-            state.itemGeneration,
-            context.generation,
-            context.itemIdentity
-          )
-            ? currentItem
-            : null;
-        }
-
-        function requireCurrentInsertionItem(context) {
-          var item = currentInsertionItem(context);
-          if (!item) {
-            throw new Error(
-              "The selected Outlook draft changed. No further insertion changes were made."
-            );
-          }
-          return item;
-        }
-
-        function beginInsertionMutation(request) {
-          if (!request || state.itemGeneration !== request.generation) {
-            throw new Error(
-              "The selected Outlook draft changed while the template was loading. Try again in the current draft."
-            );
-          }
-          var item = currentComposeItem();
-          var currentIdentity = mailboxItemIdentity(item);
-          if (!item ||
-              (request.itemIdentity && currentIdentity !== request.itemIdentity)) {
-            throw new Error(
-              "The selected Outlook draft changed while the template was loading. Try again in the current draft."
-            );
-          }
-          return {
-            item: item,
-            generation: state.itemGeneration,
-            itemIdentity: currentIdentity
-          };
-        }
-
-        function handleMailboxItemChanged() {
-          state.itemGeneration += 1;
-          state.composeReady = false;
-          markComposeReady();
-          closeReplacementConfirmation(false);
-          if (state.inserting) {
-            notice(
-              "The selected Outlook item changed. The in-progress insertion was stopped.",
-              "error"
-            );
-          }
-        }
-
-        function registerMailboxItemChangedHandler() {
-          var office = window.Office;
-          var mailbox = office && office.context && office.context.mailbox;
-          var requirements = office && office.context && office.context.requirements;
-          var supportsItemChanged = Boolean(
-            requirements &&
-            typeof requirements.isSetSupported === "function" &&
-            requirements.isSetSupported("Mailbox", "1.5")
-          );
-          state.itemChangeGuardRequired = supportsItemChanged;
-          state.itemChangeGuardReady = !supportsItemChanged;
-          if (!supportsItemChanged) return;
-          if (!mailbox ||
-              typeof mailbox.addHandlerAsync !== "function" ||
-              !office.EventType ||
-              !office.EventType.ItemChanged) {
-            return;
-          }
-          mailbox.addHandlerAsync(
-            office.EventType.ItemChanged,
-            handleMailboxItemChanged,
-            function (result) {
-              state.itemChangeGuardReady = Boolean(
-                result &&
-                result.status === office.AsyncResultStatus.Succeeded
-              );
-              if (!state.itemChangeGuardReady) {
-                notice(
-                  "Outlook item-change protection is unavailable. Template insertion is disabled.",
-                  "error"
-                );
-              }
-            }
-          );
-        }
-
         function officeAsync(call) {
           return new Promise(function (resolve, reject) {
             call(function (result) {
@@ -1731,15 +1542,6 @@ export async function GET(request: Request) {
           return recipients;
         }
 
-        async function setRecipients(recipientApi, recipients) {
-          if (!recipientApi) throw new Error("This Outlook client cannot replace recipients.");
-          if (typeof recipientApi.setAsync === "function") {
-            await officeAsync(function (done) { recipientApi.setAsync(recipients, done); });
-            return;
-          }
-          throw new Error("This Outlook client cannot replace recipients.");
-        }
-
         function validApiPayloadTime(data, maxTtlMs) {
           return networkPayloadTtlMs(data, maxTtlMs) > 0;
         }
@@ -1788,185 +1590,6 @@ export async function GET(request: Request) {
           }
           state.detailCache[templateDetailCacheKey(template)] = template;
           return template;
-        }
-
-        async function getRecipients(recipientApi) {
-          if (!recipientApi || typeof recipientApi.getAsync !== "function") {
-            throw new Error("This Outlook client cannot read current recipients.");
-          }
-          var recipients = await officeAsync(function (done) { recipientApi.getAsync(done); });
-          return Array.isArray(recipients) ? recipients : [];
-        }
-
-        function bodyOptionsForType(office, bodyType) {
-          var isHtml = bodyType === office.MailboxEnums.BodyType.Html;
-          var getOptions = {};
-          var setOptions = {
-            coercionType: isHtml ? office.CoercionType.Html : office.CoercionType.Text
-          };
-          if (office.MailboxEnums && office.MailboxEnums.BodyMode && office.MailboxEnums.BodyMode.HostConfig) {
-            getOptions.bodyMode = office.MailboxEnums.BodyMode.HostConfig;
-            setOptions.bodyMode = office.MailboxEnums.BodyMode.HostConfig;
-          }
-          return {
-            isHtml: isHtml,
-            coercionType: setOptions.coercionType,
-            getOptions: getOptions,
-            setOptions: setOptions
-          };
-        }
-
-        async function snapshotDraft(item, office) {
-          if (!item ||
-              !item.subject ||
-              typeof item.subject.getAsync !== "function" ||
-              !item.body ||
-              typeof item.body.getAsync !== "function" ||
-              typeof item.body.getTypeAsync !== "function") {
-            throw new Error("This Outlook client cannot create a safe draft snapshot.");
-          }
-          var bodyType = await officeAsync(function (done) { item.body.getTypeAsync(done); });
-          var bodyFormat = bodyOptionsForType(office, bodyType);
-          var subject = await officeAsync(function (done) { item.subject.getAsync(done); });
-          var to = await getRecipients(item.to);
-          var cc = await getRecipients(item.cc);
-          var bcc = await getRecipients(item.bcc);
-          var body = await officeAsync(function (done) {
-            item.body.getAsync(bodyFormat.coercionType, bodyFormat.getOptions, done);
-          });
-          return {
-            subject: String(subject || ""),
-            to: to,
-            cc: cc,
-            bcc: bcc,
-            body: String(body || ""),
-            bodyOptions: bodyFormat.setOptions,
-            isHtml: bodyFormat.isHtml
-          };
-        }
-
-        function draftHasContent(snapshot) {
-          if (String(snapshot.subject || "").trim()) return true;
-          if (snapshot.to.length || snapshot.cc.length || snapshot.bcc.length) return true;
-          var bodyMarkup = String(snapshot.body || "")
-            .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
-            .replace(/<script[\\s\\S]*?<\\/script>/gi, " ");
-          if (/<(?:img|table|hr|object|embed|iframe|svg|canvas|video|audio|picture|source|v:shape|v:imagedata)\\b/i.test(bodyMarkup)) {
-            return true;
-          }
-          var bodyText = bodyMarkup
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&nbsp;|&#160;|&#x0*a0;/gi, " ")
-            .replace(/\\s+/g, " ")
-            .trim();
-          return bodyText !== "";
-        }
-
-        function closeReplacementConfirmation(confirmed) {
-          var resolve = state.replacementConfirmationResolve;
-          state.replacementConfirmationResolve = null;
-          els.replaceConfirm.hidden = true;
-          if (resolve) resolve(Boolean(confirmed));
-        }
-
-        function confirmDraftReplacement() {
-          if (state.replacementConfirmationResolve) {
-            return Promise.resolve(false);
-          }
-          return new Promise(function (resolve) {
-            state.replacementConfirmationResolve = resolve;
-            els.replaceConfirm.hidden = false;
-            els.replaceConfirmButton.focus();
-          });
-        }
-
-        function copyDraftSnapshot(snapshot) {
-          return {
-            subject: String(snapshot.subject || ""),
-            to: Array.isArray(snapshot.to) ? snapshot.to.slice() : [],
-            cc: Array.isArray(snapshot.cc) ? snapshot.cc.slice() : [],
-            bcc: Array.isArray(snapshot.bcc) ? snapshot.bcc.slice() : [],
-            body: String(snapshot.body || ""),
-            bodyOptions: snapshot.bodyOptions,
-            isHtml: snapshot.isHtml === true
-          };
-        }
-
-        function draftRecipientKey(recipient) {
-          return [
-            String(recipient && recipient.displayName || ""),
-            String(recipient && recipient.emailAddress || ""),
-            String(recipient && recipient.recipientType || "")
-          ].join("\\u0000");
-        }
-
-        function draftRecipientListsEqual(left, right) {
-          if (!Array.isArray(left) || !Array.isArray(right) ||
-              left.length !== right.length) return false;
-          return left.every(function (recipient, index) {
-            return draftRecipientKey(recipient) === draftRecipientKey(right[index]);
-          });
-        }
-
-        function draftSnapshotsEqual(left, right) {
-          return Boolean(left && right) &&
-            String(left.subject || "") === String(right.subject || "") &&
-            draftRecipientListsEqual(left.to, right.to) &&
-            draftRecipientListsEqual(left.cc, right.cc) &&
-            draftRecipientListsEqual(left.bcc, right.bcc) &&
-            String(left.body || "") === String(right.body || "") &&
-            (left.isHtml === true) === (right.isHtml === true);
-        }
-
-        async function restoreDraft(item, snapshot, assertCurrentItem) {
-          var failures = [];
-          async function restore(label, action) {
-            try {
-              if (assertCurrentItem) assertCurrentItem();
-              await action();
-            } catch (error) {
-              failures.push(label);
-            }
-          }
-          await restore("subject", function () {
-            return officeAsync(function (done) { item.subject.setAsync(snapshot.subject, done); });
-          });
-          await restore("To", function () { return setRecipients(item.to, snapshot.to); });
-          await restore("Cc", function () { return setRecipients(item.cc, snapshot.cc); });
-          await restore("Bcc", function () { return setRecipients(item.bcc, snapshot.bcc); });
-          await restore("body", function () {
-            return officeAsync(function (done) {
-              item.body.setAsync(snapshot.body, snapshot.bodyOptions, done);
-            });
-          });
-          if (failures.length) {
-            throw new Error("Draft restore was incomplete for: " + failures.join(", ") + ".");
-          }
-        }
-
-        async function restoreDraftIfUnchanged(
-          insertionContext,
-          office,
-          originalSnapshot,
-          addinWrittenSnapshot
-        ) {
-          if (!addinWrittenSnapshot) return false;
-          var item = currentInsertionItem(insertionContext);
-          if (!item) return false;
-          var currentSnapshot = await snapshotDraft(item, office);
-          item = currentInsertionItem(insertionContext);
-          if (!item) return false;
-          if (!draftSnapshotsEqual(currentSnapshot, addinWrittenSnapshot)) {
-            return false;
-          }
-          await restoreDraft(item, originalSnapshot, function () {
-            requireCurrentInsertionItem(insertionContext);
-          });
-          item = currentInsertionItem(insertionContext);
-          if (!item) return false;
-          var restoredSnapshot = await snapshotDraft(item, office);
-          if (!currentInsertionItem(insertionContext)) return false;
-          return draftSnapshotsEqual(restoredSnapshot, originalSnapshot);
         }
 
         function createOperationId() {
@@ -2096,37 +1719,233 @@ export async function GET(request: Request) {
           throw lastError || new Error("The insertion attempt audit could not be recorded.");
         }
 
-        async function insertSelectedTemplate() {
-          markComposeReady();
-          var office = window.Office;
+        function graphRecipient(recipient) {
+          var address = String(recipient && recipient.emailAddress || "").trim().toLowerCase();
+          if (!/^[^@\\s]+@[^@\\s]+$/.test(address)) {
+            throw new Error("A certified recipient has an invalid email address.");
+          }
+          return {
+            emailAddress: {
+              address: address,
+              name: String(recipient && recipient.displayName || address).trim() || address
+            }
+          };
+        }
 
-          if (!state.selectedId) return;
-          if (!state.composeReady) {
-            notice("Open New mail, then double click a template to insert.", "error");
-            return;
+        function buildGraphDraftPayload(template, toRecipients, ccRecipients, bccRecipients) {
+          return {
+            subject: String(template && template.subject || ""),
+            body: {
+              contentType: "HTML",
+              content: String(template && template.bodyHtml || "<p></p>")
+            },
+            toRecipients: toRecipients.map(graphRecipient),
+            ccRecipients: ccRecipients.map(graphRecipient),
+            bccRecipients: bccRecipients.map(graphRecipient)
+          };
+        }
+
+        function mailboxLoginHint() {
+          var mailbox = window.Office && window.Office.context && window.Office.context.mailbox;
+          return String(
+            mailbox && mailbox.userProfile && mailbox.userProfile.emailAddress || ""
+          ).trim().toLowerCase();
+        }
+
+        async function loadMsalBrowser() {
+          if (window.msal &&
+              typeof window.msal.createNestablePublicClientApplication === "function") {
+            return window.msal;
           }
-          if (state.itemChangeGuardRequired && !state.itemChangeGuardReady) {
-            notice(
-              "Outlook item-change protection is not ready. Close and reopen the template pane, then try again.",
-              "error"
+          if (state.msalScriptPromise) return state.msalScriptPromise;
+          var scriptPromise = new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.src = MSAL_SCRIPT_URL;
+            script.async = true;
+            script.onload = function () {
+              if (window.msal &&
+                  typeof window.msal.createNestablePublicClientApplication === "function") {
+                resolve(window.msal);
+                return;
+              }
+              reject(new Error("Secure Outlook new-message access could not be loaded."));
+            };
+            script.onerror = function () {
+              reject(new Error("Secure Outlook new-message access could not be loaded."));
+            };
+            document.head.appendChild(script);
+          }).catch(function (error) {
+            if (state.msalScriptPromise === scriptPromise) {
+              state.msalScriptPromise = null;
+            }
+            throw error;
+          });
+          state.msalScriptPromise = scriptPromise;
+          return scriptPromise;
+        }
+
+        async function ensureGraphClient() {
+          if (state.graphClientPromise) return state.graphClientPromise;
+          var office = window.Office;
+          var requirements = office && office.context && office.context.requirements;
+          var supportsNestedAuth = Boolean(
+            requirements &&
+            typeof requirements.isSetSupported === "function" &&
+            requirements.isSetSupported("NestedAppAuth", "1.1")
+          );
+          if (!supportsNestedAuth) {
+            throw new Error(
+              "This Outlook version does not support secure new-message sign-in. Update Outlook and try again."
             );
+          }
+          if (!NAA_CLIENT_ID || !NAA_AUTHORITY) {
+            throw new Error("Secure Outlook new-message access is not configured.");
+          }
+          await loadMsalBrowser();
+          if (!window.msal ||
+              typeof window.msal.createNestablePublicClientApplication !== "function") {
+            throw new Error("Secure Outlook new-message access could not be loaded.");
+          }
+          var graphClientPromise = window.msal.createNestablePublicClientApplication({
+            auth: {
+              clientId: NAA_CLIENT_ID,
+              authority: NAA_AUTHORITY,
+              supportsNestedAppAuth: true,
+              clientCapabilities: ["CP1"]
+            },
+            cache: { cacheLocation: "localStorage" }
+          }).catch(function (error) {
+            if (state.graphClientPromise === graphClientPromise) {
+              state.graphClientPromise = null;
+            }
+            throw error;
+          });
+          state.graphClientPromise = graphClientPromise;
+          return graphClientPromise;
+        }
+
+        function graphAccountMatchesMailbox(account) {
+          var mailboxAddress = mailboxLoginHint();
+          var accountAddress = String(account && account.username || "").trim().toLowerCase();
+          return Boolean(mailboxAddress && accountAddress && mailboxAddress === accountAddress);
+        }
+
+        async function acquireGraphAccessToken() {
+          var client = await ensureGraphClient();
+          var loginHint = mailboxLoginHint();
+          if (!loginHint) {
+            throw new Error("Outlook did not provide the signed-in mailbox identity.");
+          }
+          var account = typeof client.getActiveAccount === "function"
+            ? client.getActiveAccount()
+            : null;
+          if (!graphAccountMatchesMailbox(account) &&
+              typeof client.getAccount === "function") {
+            account = client.getAccount({ loginHint: loginHint });
+          }
+          var request = {
+            scopes: GRAPH_SCOPES.slice(),
+            loginHint: loginHint
+          };
+          if (graphAccountMatchesMailbox(account)) request.account = account;
+          var result;
+          try {
+            result = await client.acquireTokenSilent(request);
+          } catch (silentError) {
+            result = await client.acquireTokenPopup(request);
+          }
+          if (!result || !result.accessToken || !graphAccountMatchesMailbox(result.account)) {
+            throw new Error(
+              "Microsoft signed in a different mailbox. Select " + loginHint + " and try again."
+            );
+          }
+          if (typeof client.setActiveAccount === "function") {
+            client.setActiveAccount(result.account);
+          }
+          return result.accessToken;
+        }
+
+        async function readGraphError(response, fallback) {
+          var data = await response.json().catch(function () { return {}; });
+          return new Error(
+            data && data.error && data.error.message
+              ? String(data.error.message)
+              : fallback
+          );
+        }
+
+        async function createGraphDraft(accessToken, payload) {
+          var response = await fetch("https://graph.microsoft.com/v1.0/me/messages", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer " + accessToken,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw await readGraphError(response, "Microsoft Graph could not create the new draft.");
+          }
+          var draft = await response.json();
+          if (!draft || !draft.id || draft.isDraft !== true) {
+            throw new Error("Microsoft Graph returned an invalid new draft.");
+          }
+          return draft;
+        }
+
+        async function deleteGraphDraft(accessToken, draftId) {
+          if (!accessToken || !draftId) return false;
+          var response = await fetch(
+            "https://graph.microsoft.com/v1.0/me/messages/" + encodeURIComponent(draftId),
+            {
+              method: "DELETE",
+              headers: { Authorization: "Bearer " + accessToken }
+            }
+          );
+          return response.ok;
+        }
+
+        function graphDraftEwsId(draftId) {
+          var office = window.Office;
+          var mailbox = office && office.context && office.context.mailbox;
+          var restVersion = office && office.MailboxEnums && office.MailboxEnums.RestVersion;
+          if (!mailbox ||
+              typeof mailbox.convertToEwsId !== "function" ||
+              !restVersion ||
+              !restVersion.v2_0) {
+            throw new Error("This Outlook client cannot open the new draft.");
+          }
+          return mailbox.convertToEwsId(draftId, restVersion.v2_0);
+        }
+
+        async function displayGraphDraft(draftId) {
+          var office = window.Office;
+          var mailbox = office && office.context && office.context.mailbox;
+          var ewsId = graphDraftEwsId(draftId);
+          if (mailbox && typeof mailbox.displayMessageFormAsync === "function") {
+            await officeAsync(function (done) {
+              mailbox.displayMessageFormAsync(ewsId, done);
+            });
             return;
           }
+          if (mailbox && typeof mailbox.displayMessageForm === "function") {
+            mailbox.displayMessageForm(ewsId);
+            return;
+          }
+          throw new Error("This Outlook client cannot open the new draft.");
+        }
+
+        async function insertSelectedTemplate() {
+          if (!state.selectedId) return;
           if (state.inserting) {
             notice("A template insertion is already in progress.", "");
-            return;
-          }
-          var insertionRequest = captureInsertionRequest();
-          if (!insertionRequest) {
-            notice("Open New mail, then double click a template to insert.", "error");
             return;
           }
 
           state.inserting = true;
           notice("Loading template...", "");
-          var snapshot = null;
-          var addinWrittenSnapshot = null;
-          var insertionContext = null;
+          var graphDraft = null;
+          var graphAccessToken = "";
           var mutationStarted = false;
           var mutationCompleted = false;
           var reservationRecorded = false;
@@ -2134,18 +1953,6 @@ export async function GET(request: Request) {
           try {
             var template = await loadTemplateDetail(state.selectedId, true);
             if (!template) throw new Error("Template not found.");
-            insertionContext = beginInsertionMutation(insertionRequest);
-            var item = requireCurrentInsertionItem(insertionContext);
-            snapshot = await snapshotDraft(item, office);
-            item = requireCurrentInsertionItem(insertionContext);
-            if (draftHasContent(snapshot)) {
-              var replaceConfirmed = await confirmDraftReplacement();
-              item = requireCurrentInsertionItem(insertionContext);
-              if (!replaceConfirmed) {
-                notice("Insertion cancelled. Draft unchanged.", "");
-                return;
-              }
-            }
             notice("Loading certified recipients...", "");
             await loadRecipientMap(true);
             var toRecipients = resolveStoredRecipientRefs(template, "to");
@@ -2156,10 +1963,9 @@ export async function GET(request: Request) {
               state.recipientMapExpiresAt <= Date.now()
             ) {
               throw new Error(
-                "The certified recipient map expired while awaiting confirmation. Try the insertion again."
+                "The certified recipient map expired before the new draft was created. Try again."
               );
             }
-            item = requireCurrentInsertionItem(insertionContext);
 
             var operationId = createOperationId();
             auditContext = createInsertionAuditContext(template, operationId);
@@ -2170,32 +1976,19 @@ export async function GET(request: Request) {
               null
             );
             reservationRecorded = true;
-            item = requireCurrentInsertionItem(insertionContext);
-            notice("Inserting...", "");
-            addinWrittenSnapshot = copyDraftSnapshot(snapshot);
-            mutationStarted = true;
-            await officeAsync(function (done) { item.subject.setAsync(template.subject || "", done); });
-            addinWrittenSnapshot.subject = String(template.subject || "");
-            item = requireCurrentInsertionItem(insertionContext);
-            await setRecipients(item.to, toRecipients);
-            addinWrittenSnapshot.to = toRecipients.slice();
-            item = requireCurrentInsertionItem(insertionContext);
-            await setRecipients(item.cc, ccRecipients);
-            addinWrittenSnapshot.cc = ccRecipients.slice();
-            item = requireCurrentInsertionItem(insertionContext);
-            await setRecipients(item.bcc, bccRecipients);
-            addinWrittenSnapshot.bcc = bccRecipients.slice();
-            item = requireCurrentInsertionItem(insertionContext);
-            await officeAsync(function (done) {
-              item.body.setAsync(
-                snapshot.isHtml ? template.bodyHtml : template.bodyText,
-                snapshot.bodyOptions,
-                done
-              );
-            });
-            addinWrittenSnapshot.body = String(
-              snapshot.isHtml ? template.bodyHtml : template.bodyText
+            notice("Creating a new Outlook message...", "");
+            graphAccessToken = await acquireGraphAccessToken();
+            graphDraft = await createGraphDraft(
+              graphAccessToken,
+              buildGraphDraftPayload(
+                template,
+                toRecipients,
+                ccRecipients,
+                bccRecipients
+              )
             );
+            mutationStarted = true;
+            await displayGraphDraft(graphDraft.id);
             mutationCompleted = true;
             try {
               await recordInsertionAuditEvent(
@@ -2205,45 +1998,36 @@ export async function GET(request: Request) {
               );
             } catch (auditError) {
               notice(
-                "Template inserted, but FC Uno could not confirm the terminal audit record. " +
-                  "The reserved audit entry remains visible for review; do not insert this template again into the same draft.",
+                "The new Outlook message opened, but FC Uno could not confirm the terminal audit record. " +
+                  "The reserved audit entry remains visible for review; do not open this template again.",
                 "error"
               );
               return;
             }
-            notice("Inserted. Audit completed.", "success");
+            notice("New message opened. Original draft unchanged. Audit completed.", "success");
           } catch (error) {
             if (mutationCompleted) {
               notice(
                 (error && error.message ? error.message : "Audit finalization failed.") +
-                  " The template remains inserted and its reserved audit entry remains visible for review.",
+                  " The new Outlook message remains open and its reserved audit entry remains visible for review.",
                 "error"
               );
               return;
             }
             var outcome = "failed-preserved";
-            var recoveryMessage = mutationStarted
-              ? " The draft was not restored because its current state could not be verified."
-              : " No draft fields were changed by FC Uno.";
-            if (mutationStarted && snapshot && insertionContext) {
+            var recoveryMessage = " The original Outlook draft was not changed.";
+            if (mutationStarted && graphDraft && graphAccessToken) {
               try {
-                var restored = await restoreDraftIfUnchanged(
-                  insertionContext,
-                  office,
-                  snapshot,
-                  addinWrittenSnapshot
+                var removed = await deleteGraphDraft(
+                  graphAccessToken,
+                  graphDraft.id
                 );
-                if (restored) {
-                  outcome = "failed-restored";
-                  recoveryMessage = " Original draft restored.";
-                } else {
-                  recoveryMessage =
-                    " The draft changed while insertion was completing, so newer edits were kept. Review the draft before sending.";
-                }
-              } catch (restoreError) {
+                recoveryMessage = removed
+                  ? " The unopened new draft was removed; the original Outlook draft was not changed."
+                  : " The original Outlook draft was not changed, but the unopened new draft could not be removed automatically.";
+              } catch (cleanupError) {
                 recoveryMessage =
-                  " The draft was not fully restored because its current state could not be verified. " +
-                  (restoreError && restoreError.message ? restoreError.message : "");
+                  " The original Outlook draft was not changed, but the unopened new draft could not be removed automatically.";
               }
             }
             var auditMessage = "";
@@ -2382,16 +2166,8 @@ export async function GET(request: Request) {
 
         els.signInButton.addEventListener("click", openAuthDialog);
         els.signOutButton.addEventListener("click", signOut);
-        els.replaceCancelButton.addEventListener("click", function () {
-          closeReplacementConfirmation(false);
-        });
-        els.replaceConfirmButton.addEventListener("click", function () {
-          closeReplacementConfirmation(true);
-        });
 
         function initialiseTaskpane() {
-          registerMailboxItemChangedHandler();
-          markComposeReady();
           clearConfidentialState(false);
           var restored = restoreAuthSession();
           if (!restored) {

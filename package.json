@@ -23,6 +23,7 @@
     "uppercase:phonebook": "node scripts/uppercase-phonebook-data.mjs"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.24.1",
     "@google-cloud/storage": "^7.21.0",
     "@supabase/supabase-js": "^2.110.2",
     "@vercel/analytics": "^2.0.1",
