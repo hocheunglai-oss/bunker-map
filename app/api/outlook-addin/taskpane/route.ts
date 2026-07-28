@@ -314,14 +314,6 @@ export async function GET(request: Request) {
   const templateDetailUrl = `${baseUrl}/api/email-templates`
   const recipientMapUrl = `${baseUrl}/api/outlook-addin/recipient-map`
   const insertionAuditUrl = `${baseUrl}/api/outlook-addin/taskpane`
-  const naaClientId = process.env.OUTLOOK_ADDIN_NAA_CLIENT_ID || ""
-  const naaTenantId =
-    process.env.OUTLOOK_ADDIN_NAA_TENANT_ID ||
-    process.env.EXCHANGE_TENANT_ID ||
-    ""
-  const naaAuthority = naaTenantId
-    ? `https://login.microsoftonline.com/${naaTenantId}`
-    : ""
 
   const html = `<!doctype html>
 <html lang="en">
@@ -527,11 +519,7 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INSERTION_AUDIT_URL = ${JSON.stringify(insertionAuditUrl)};
-        var NAA_CLIENT_ID = ${JSON.stringify(naaClientId)};
-        var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
-        var GRAPH_SCOPES = ["Mail.ReadWrite"];
-        var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
-        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 250;
+        var OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH = 30000;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -546,6 +534,7 @@ export async function GET(request: Request) {
         var state = {
           templates: [],
           detailCache: {},
+          detailPromises: {},
           recipientsBySourceKey: {},
           recipientMapLoaded: false,
           recipientMapFromNetwork: false,
@@ -564,9 +553,7 @@ export async function GET(request: Request) {
           authMode: "none",
           authGeneration: 0,
           authExpiryTimer: null,
-          authDialog: null,
-          msalScriptPromise: null,
-          graphClientPromise: null
+          authDialog: null
         };
 
         var els = {
@@ -600,6 +587,7 @@ export async function GET(request: Request) {
         function clearConfidentialState(removeStoredCaches) {
           state.templates = [];
           state.detailCache = {};
+          state.detailPromises = {};
           state.folderRoot = null;
           state.folderIndex = {};
           state.expanded = { "": true };
@@ -1678,34 +1666,46 @@ export async function GET(request: Request) {
           var indexTemplate = state.templates.find(function (template) { return template.id === id; }) || null;
           var cacheKey = templateDetailCacheKey(indexTemplate || { id: id });
           if (!forceRefresh && state.detailCache[cacheKey]) return state.detailCache[cacheKey];
+          if (!forceRefresh && state.detailPromises[cacheKey]) {
+            return state.detailPromises[cacheKey];
+          }
 
-          var result = await authenticatedFetch(
-            TEMPLATE_DETAIL_URL + "?id=" + encodeURIComponent(id)
-          );
-          if (result.response.status === 404) {
-            throw new Error("This template is no longer available.");
-          }
-          if (!result.response.ok) {
-            throw new Error("The current template could not be loaded.");
-          }
-          var data = await result.response.json();
-          assertAuthRequestCurrent(result.context);
-          if (!state.authenticated) {
-            throw new Error("Sign in to FC Uno before loading a template.");
-          }
-          if (data.schema !== "fcuno.outlook-template-detail/v2" ||
-              !validApiPayloadTime(data, INDEX_CACHE_TTL_MS)) {
-            throw new Error("The template response is expired or invalid.");
-          }
-          var template = normaliseTemplate(Object.assign({}, indexTemplate || {}, data.template || {}));
-          if (template.id !== id ||
-              !Number.isSafeInteger(template.revision) ||
-              template.revision < 1 ||
-              !template.updatedAt) {
-            throw new Error("The template revision is invalid.");
-          }
-          state.detailCache[templateDetailCacheKey(template)] = template;
-          return template;
+          var detailRequest = (async function () {
+            var result = await authenticatedFetch(
+              TEMPLATE_DETAIL_URL + "?id=" + encodeURIComponent(id)
+            );
+            if (result.response.status === 404) {
+              throw new Error("This template is no longer available.");
+            }
+            if (!result.response.ok) {
+              throw new Error("The current template could not be loaded.");
+            }
+            var data = await result.response.json();
+            assertAuthRequestCurrent(result.context);
+            if (!state.authenticated) {
+              throw new Error("Sign in to FC Uno before loading a template.");
+            }
+            if (data.schema !== "fcuno.outlook-template-detail/v2" ||
+                !validApiPayloadTime(data, INDEX_CACHE_TTL_MS)) {
+              throw new Error("The template response is expired or invalid.");
+            }
+            var template = normaliseTemplate(Object.assign({}, indexTemplate || {}, data.template || {}));
+            if (template.id !== id ||
+                !Number.isSafeInteger(template.revision) ||
+                template.revision < 1 ||
+                !template.updatedAt) {
+              throw new Error("The template revision is invalid.");
+            }
+            state.detailCache[templateDetailCacheKey(template)] = template;
+            return template;
+          })().finally(function () {
+            if (state.detailPromises[cacheKey] === detailRequest) {
+              delete state.detailPromises[cacheKey];
+            }
+          });
+
+          state.detailPromises[cacheKey] = detailRequest;
+          return detailRequest;
         }
 
         function createOperationId() {
@@ -1835,199 +1835,50 @@ export async function GET(request: Request) {
           throw lastError || new Error("The insertion attempt audit could not be recorded.");
         }
 
-        function graphRecipient(recipient) {
+        function composeRecipientAddress(recipient) {
           var address = String(recipient && recipient.emailAddress || "").trim().toLowerCase();
           if (!/^[^@\\s]+@[^@\\s]+$/.test(address)) {
             throw new Error("A certified recipient has an invalid email address.");
           }
-          return {
-            emailAddress: {
-              address: address,
-              name: String(recipient && recipient.displayName || address).trim() || address
-            }
-          };
-        }
-
-        function buildGraphDraftPayload(template, toRecipients, ccRecipients, bccRecipients) {
-          return {
-            subject: String(template && template.subject || ""),
-            body: {
-              contentType: "HTML",
-              content: String(template && template.bodyHtml || "<p></p>")
-            },
-            toRecipients: toRecipients.map(graphRecipient),
-            ccRecipients: ccRecipients.map(graphRecipient),
-            bccRecipients: bccRecipients.map(graphRecipient)
-          };
-        }
-
-        function mailboxLoginHint() {
-          var mailbox = window.Office && window.Office.context && window.Office.context.mailbox;
-          return String(
-            mailbox && mailbox.userProfile && mailbox.userProfile.emailAddress || ""
-          ).trim().toLowerCase();
-        }
-
-        async function loadMsalBrowser() {
-          if (window.msal &&
-              typeof window.msal.createNestablePublicClientApplication === "function") {
-            return window.msal;
-          }
-          if (state.msalScriptPromise) return state.msalScriptPromise;
-          var scriptPromise = new Promise(function (resolve, reject) {
-            var script = document.createElement("script");
-            script.src = MSAL_SCRIPT_URL;
-            script.async = true;
-            script.onload = function () {
-              if (window.msal &&
-                  typeof window.msal.createNestablePublicClientApplication === "function") {
-                resolve(window.msal);
-                return;
-              }
-              reject(new Error("Secure Outlook new-message access could not be loaded."));
-            };
-            script.onerror = function () {
-              reject(new Error("Secure Outlook new-message access could not be loaded."));
-            };
-            document.head.appendChild(script);
-          }).catch(function (error) {
-            if (state.msalScriptPromise === scriptPromise) {
-              state.msalScriptPromise = null;
-            }
-            throw error;
-          });
-          state.msalScriptPromise = scriptPromise;
-          return scriptPromise;
-        }
-
-        async function ensureGraphClient() {
-          if (state.graphClientPromise) return state.graphClientPromise;
-          var office = window.Office;
-          var requirements = office && office.context && office.context.requirements;
-          var supportsNestedAuth = Boolean(
-            requirements &&
-            typeof requirements.isSetSupported === "function" &&
-            requirements.isSetSupported("NestedAppAuth", "1.1")
-          );
-          if (!supportsNestedAuth) {
-            throw new Error(
-              "This Outlook version does not support secure new-message sign-in. Update Outlook and try again."
-            );
-          }
-          if (!NAA_CLIENT_ID || !NAA_AUTHORITY) {
-            throw new Error("Secure Outlook new-message access is not configured.");
-          }
-          await loadMsalBrowser();
-          if (!window.msal ||
-              typeof window.msal.createNestablePublicClientApplication !== "function") {
-            throw new Error("Secure Outlook new-message access could not be loaded.");
-          }
-          var graphClientPromise = window.msal.createNestablePublicClientApplication({
-            auth: {
-              clientId: NAA_CLIENT_ID,
-              authority: NAA_AUTHORITY,
-              supportsNestedAppAuth: true,
-              clientCapabilities: ["CP1"]
-            },
-            cache: { cacheLocation: "localStorage" }
-          }).catch(function (error) {
-            if (state.graphClientPromise === graphClientPromise) {
-              state.graphClientPromise = null;
-            }
-            throw error;
-          });
-          state.graphClientPromise = graphClientPromise;
-          return graphClientPromise;
+          return address;
         }
 
         function warmInsertionDependencies() {
           loadRecipientMap(true).catch(function () {
             // A click retries and reports any current certification problem.
           });
-          ensureGraphClient().catch(function () {
-            // A click retries and reports any current Microsoft auth problem.
+        }
+
+        function buildOutlookNewMessageUrl(
+          template,
+          toRecipients,
+          ccRecipients,
+          bccRecipients
+        ) {
+          var composeUrl = new URL(
+            "https://outlook.cloud.microsoft/mail/deeplink/compose"
+          );
+          [
+            ["to", toRecipients],
+            ["cc", ccRecipients],
+            ["bcc", bccRecipients]
+          ].forEach(function (entry) {
+            var addresses = entry[1].map(composeRecipientAddress);
+            if (addresses.length) {
+              composeUrl.searchParams.set(entry[0], addresses.join(";"));
+            }
           });
-        }
-
-        function graphAccountMatchesMailbox(account) {
-          var mailboxAddress = mailboxLoginHint();
-          var accountAddress = String(account && account.username || "").trim().toLowerCase();
-          return Boolean(mailboxAddress && accountAddress && mailboxAddress === accountAddress);
-        }
-
-        async function acquireGraphAccessToken() {
-          var client = await ensureGraphClient();
-          var loginHint = mailboxLoginHint();
-          if (!loginHint) {
-            throw new Error("Outlook did not provide the signed-in mailbox identity.");
-          }
-          var account = typeof client.getActiveAccount === "function"
-            ? client.getActiveAccount()
-            : null;
-          if (!graphAccountMatchesMailbox(account) &&
-              typeof client.getAccount === "function") {
-            account = client.getAccount({ loginHint: loginHint });
-          }
-          var request = {
-            scopes: GRAPH_SCOPES.slice(),
-            loginHint: loginHint
-          };
-          if (graphAccountMatchesMailbox(account)) request.account = account;
-          var result;
-          try {
-            result = await client.acquireTokenSilent(request);
-          } catch (silentError) {
-            result = await client.acquireTokenPopup(request);
-          }
-          if (!result || !result.accessToken || !graphAccountMatchesMailbox(result.account)) {
+          var subject = String(template && template.subject || "");
+          var bodyText = String(template && template.bodyText || "");
+          if (subject) composeUrl.searchParams.set("subject", subject);
+          if (bodyText) composeUrl.searchParams.set("body", bodyText);
+          var url = composeUrl.toString();
+          if (url.length > OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH) {
             throw new Error(
-              "Microsoft signed in a different mailbox. Select " + loginHint + " and try again."
+              "This template is too large for a reliable Outlook new-message window. Shorten its body in FC Uno and try again."
             );
           }
-          if (typeof client.setActiveAccount === "function") {
-            client.setActiveAccount(result.account);
-          }
-          return result.accessToken;
-        }
-
-        async function readGraphError(response, fallback) {
-          var data = await response.json().catch(function () { return {}; });
-          return new Error(
-            data && data.error && data.error.message
-              ? String(data.error.message)
-              : fallback
-          );
-        }
-
-        async function createGraphDraft(accessToken, payload) {
-          var response = await fetch("https://graph.microsoft.com/v1.0/me/messages", {
-            method: "POST",
-            headers: {
-              Authorization: "Bearer " + accessToken,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
-          });
-          if (!response.ok) {
-            throw await readGraphError(response, "Microsoft Graph could not create the new draft.");
-          }
-          var draft = await response.json();
-          if (!draft || !draft.id || draft.isDraft !== true || !draft.webLink) {
-            throw new Error("Microsoft Graph returned an invalid new draft.");
-          }
-          return draft;
-        }
-
-        async function deleteGraphDraft(accessToken, draftId) {
-          if (!accessToken || !draftId) return false;
-          var response = await fetch(
-            "https://graph.microsoft.com/v1.0/me/messages/" + encodeURIComponent(draftId),
-            {
-              method: "DELETE",
-              headers: { Authorization: "Bearer " + accessToken }
-            }
-          );
-          return response.ok;
+          return url;
         }
 
         function reserveNewMessageWindow() {
@@ -2062,73 +1913,26 @@ export async function GET(request: Request) {
           }
         }
 
-        function trustedOutlookDraftWebLink(draft) {
-          var parsed;
-          try {
-            parsed = new URL(String(draft && draft.webLink || ""));
-          } catch (error) {
-            throw new Error("Microsoft Graph returned an invalid Outlook message link.");
-          }
-          var hostname = parsed.hostname.toLowerCase();
-          var trustedHosts = [
-            "outlook.office.com",
-            "outlook.office365.com",
-            "outlook.cloud.microsoft"
-          ];
-          var trusted = trustedHosts.some(function (host) {
-            return hostname === host || hostname.endsWith("." + host);
-          });
-          if (parsed.protocol !== "https:" || !trusted) {
-            throw new Error("Microsoft Graph returned an untrusted Outlook message link.");
-          }
-          var itemId = parsed.searchParams.get("ItemID");
-          if (!itemId) {
-            throw new Error("Microsoft Graph returned an Outlook link without an item ID.");
-          }
-          var path = parsed.pathname.toLowerCase();
-          if (
-            path.indexOf("/mail/deeplink/read/") < 0 &&
-            path.indexOf("/mail/deeplink/compose/") < 0 &&
-            path !== "/owa/" &&
-            path !== "/owa"
-          ) {
-            throw new Error("Microsoft Graph returned an unsupported Outlook message link.");
-          }
-          var pathItemId = encodeURIComponent(
-            itemId.replace(/\\//g, "-").replace(/\\+/g, "_")
-          );
-          parsed.hostname = "outlook.office365.com";
-          parsed.pathname = "/mail/deeplink/compose/" + pathItemId;
-          Array.from(parsed.searchParams.keys()).forEach(function (key) {
-            var lowerKey = key.toLowerCase();
-            if (lowerKey === "viewmodel" || lowerKey === "ispopout") {
-              parsed.searchParams.delete(key);
-            }
-          });
-          parsed.searchParams.set("exvsurl", "1");
-          return parsed.toString();
-        }
-
-        async function openGraphDraftInReservedWindow(popup, draft) {
+        function openOutlookNewMessageInReservedWindow(popup, composeUrl) {
           if (!popup || popup.closed) {
             throw new Error(
               "The new Outlook message window was closed before loading completed."
             );
           }
+          var parsed;
           try {
-            popup.document.body.textContent = "Opening your editable Outlook message...";
+            parsed = new URL(String(composeUrl || ""));
           } catch (error) {
-            // The placeholder remains usable even if Outlook owns its document early.
+            throw new Error("Outlook could not build a valid new-message link.");
           }
-          await new Promise(function (resolve) {
-            window.setTimeout(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS);
-          });
-          if (popup.closed) {
-            throw new Error(
-              "The new Outlook message window was closed before loading completed."
-            );
+          if (
+            parsed.protocol !== "https:" ||
+            parsed.hostname.toLowerCase() !== "outlook.cloud.microsoft" ||
+            parsed.pathname.toLowerCase() !== "/mail/deeplink/compose"
+          ) {
+            throw new Error("Outlook could not verify the new-message destination.");
           }
-          popup.location.replace(trustedOutlookDraftWebLink(draft));
+          popup.location.replace(parsed.toString());
         }
 
         async function insertSelectedTemplate() {
@@ -2152,20 +1956,15 @@ export async function GET(request: Request) {
           }
           state.inserting = true;
           notice("Preparing template and certified recipients...", "");
-          var graphDraft = null;
-          var graphAccessToken = "";
-          var mutationStarted = false;
           var mutationCompleted = false;
           var reservationRecorded = false;
           var auditContext = null;
           try {
             var prepared = await Promise.all([
               loadTemplateDetail(state.selectedId, false),
-              loadRecipientMap(true),
-              acquireGraphAccessToken()
+              loadRecipientMap(true)
             ]);
             var template = prepared[0];
-            graphAccessToken = prepared[2];
             if (!template) throw new Error("Template not found.");
             var toRecipients = resolveStoredRecipientRefs(template, "to");
             var ccRecipients = resolveStoredRecipientRefs(template, "cc");
@@ -2175,9 +1974,15 @@ export async function GET(request: Request) {
               state.recipientMapExpiresAt <= Date.now()
             ) {
               throw new Error(
-                "The certified recipient map expired before the new draft was created. Try again."
+                "The certified recipient map expired before the new message was opened. Try again."
               );
             }
+            var composeUrl = buildOutlookNewMessageUrl(
+              template,
+              toRecipients,
+              ccRecipients,
+              bccRecipients
+            );
 
             var operationId = createOperationId();
             auditContext = createInsertionAuditContext(template, operationId);
@@ -2188,18 +1993,8 @@ export async function GET(request: Request) {
               null
             );
             reservationRecorded = true;
-            notice("Creating a new Outlook message...", "");
-            graphDraft = await createGraphDraft(
-              graphAccessToken,
-              buildGraphDraftPayload(
-                template,
-                toRecipients,
-                ccRecipients,
-                bccRecipients
-              )
-            );
-            mutationStarted = true;
-            await openGraphDraftInReservedWindow(composeWindow, graphDraft);
+            notice("Opening a new Outlook message...", "");
+            openOutlookNewMessageInReservedWindow(composeWindow, composeUrl);
             mutationCompleted = true;
             try {
               await recordInsertionAuditEvent(
@@ -2228,20 +2023,6 @@ export async function GET(request: Request) {
             closeReservedNewMessageWindow(composeWindow);
             var outcome = "failed-preserved";
             var recoveryMessage = " The original Outlook draft was not changed.";
-            if (mutationStarted && graphDraft && graphAccessToken) {
-              try {
-                var removed = await deleteGraphDraft(
-                  graphAccessToken,
-                  graphDraft.id
-                );
-                recoveryMessage = removed
-                  ? " The unopened new draft was removed; the original Outlook draft was not changed."
-                  : " The original Outlook draft was not changed, but the unopened new draft could not be removed automatically.";
-              } catch (cleanupError) {
-                recoveryMessage =
-                  " The original Outlook draft was not changed, but the unopened new draft could not be removed automatically.";
-              }
-            }
             var auditMessage = "";
             if (reservationRecorded && auditContext) {
               try {

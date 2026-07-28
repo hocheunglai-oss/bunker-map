@@ -228,46 +228,34 @@ test("taskpane caches are versioned, bounded, and never authorize insertion offl
   assert.doesNotMatch(taskpane, /setRecipients\(item\.to, template\.to\)/)
 })
 
-test("taskpane reserves before creating a separate Graph draft and records a terminal outcome", async () => {
+test("taskpane reserves before opening a direct new-message compose window and records a terminal outcome", async () => {
   const { taskpane } = await sources()
 
-  assert.match(taskpane, /createNestablePublicClientApplication/)
-  assert.match(taskpane, /async function loadMsalBrowser\(\)/)
-  assert.match(taskpane, /script\.src = MSAL_SCRIPT_URL/)
-  assert.match(taskpane, /await loadMsalBrowser\(\)/)
-  assert.doesNotMatch(
-    taskpane,
-    /<script src="\/outlook-msal-browser-4\.24\.1\.min\.js"><\/script>/,
-  )
-  assert.match(
-    taskpane,
-    /requirements\.isSetSupported\("NestedAppAuth", "1\.1"\)/,
-  )
-  assert.match(taskpane, /scopes: GRAPH_SCOPES\.slice\(\)/)
-  assert.match(taskpane, /acquireTokenSilent\(request\)/)
-  assert.match(taskpane, /acquireTokenPopup\(request\)/)
-  assert.match(taskpane, /graphAccountMatchesMailbox\(result\.account\)/)
-  assert.match(taskpane, /https:\/\/graph\.microsoft\.com\/v1\.0\/me\/messages/)
+  assert.doesNotMatch(taskpane, /createNestablePublicClientApplication/)
+  assert.doesNotMatch(taskpane, /Mail\.ReadWrite/)
+  assert.doesNotMatch(taskpane, /graph\.microsoft\.com/)
+  assert.doesNotMatch(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS/)
   assert.match(taskpane, /function reserveNewMessageWindow\(\)/)
   assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
-  assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft\)/)
+  assert.match(taskpane, /function buildOutlookNewMessageUrl\(/)
   assert.match(
     taskpane,
-    /function trustedOutlookDraftWebLink\(draft\)[\s\S]*?parsed\.searchParams\.get\("ItemID"\)[\s\S]*?path !== "\/owa\/"[\s\S]*?itemId\.replace\([\s\S]*?"-"\)\.replace\([\s\S]*?"_"\)[\s\S]*?"\/mail\/deeplink\/compose\/"/,
+    /https:\/\/outlook\.cloud\.microsoft\/mail\/deeplink\/compose/,
   )
-  assert.match(taskpane, /parsed\.hostname = "outlook\.office365\.com"/)
-  assert.match(taskpane, /lowerKey === "viewmodel" \|\| lowerKey === "ispopout"/)
-  assert.match(taskpane, /parsed\.searchParams\.set\("exvsurl", "1"\)/)
-  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 250/)
+  assert.match(taskpane, /OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH = 30000/)
+  assert.match(taskpane, /composeUrl\.searchParams\.set\(entry\[0\], addresses\.join\(";"\)\)/)
+  assert.match(taskpane, /composeUrl\.searchParams\.set\("subject", subject\)/)
+  assert.match(taskpane, /composeUrl\.searchParams\.set\("body", bodyText\)/)
   assert.match(
     taskpane,
-    /async function openGraphDraftInReservedWindow[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS\)[\s\S]*?popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/,
+    /function openOutlookNewMessageInReservedWindow[\s\S]*?popup\.location\.replace\(parsed\.toString\(\)\)/,
   )
-  assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/)
-  assert.match(taskpane, /await openGraphDraftInReservedWindow\(composeWindow, graphDraft\)/)
+  assert.match(
+    taskpane,
+    /openOutlookNewMessageInReservedWindow\(composeWindow, composeUrl\)/,
+  )
   assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
   assert.doesNotMatch(taskpane, /displayMessageForm\(ewsId\)/)
-  assert.match(taskpane, /async function deleteGraphDraft\(accessToken, draftId\)/)
   assert.doesNotMatch(taskpane, /role="alertdialog"/)
   assert.doesNotMatch(taskpane, />Keep draft</)
   assert.doesNotMatch(taskpane, />Replace draft</)
@@ -278,7 +266,7 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   )
   assert.match(taskpane, /state\.inserting = true/)
   assert.match(taskpane, /state\.inserting = false/)
-  assert.match(taskpane, /mutationStarted = true/)
+  assert.match(taskpane, /detailPromises/)
 
   assert.match(taskpane, /\.rpc\([\s\S]*?"reserve_outlook_template_insertion"/)
   assert.match(taskpane, /p_template_revision: attemptIdentity\.templateRevision/)
@@ -315,11 +303,9 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   const reserve = insertion.indexOf(
     'recordInsertionAuditEvent(\n              auditContext,\n              "reserved"',
   )
-  const graphCreate = insertion.indexOf("await createGraphDraft(", reserve)
-  const mutation = insertion.indexOf("mutationStarted = true;", graphCreate)
   const display = insertion.indexOf(
-    "openGraphDraftInReservedWindow(composeWindow, graphDraft);",
-    mutation,
+    "openOutlookNewMessageInReservedWindow(composeWindow, composeUrl);",
+    reserve,
   )
   const completed = insertion.indexOf("mutationCompleted = true;", display)
   const insertedTerminal = insertion.indexOf(
@@ -328,12 +314,10 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   )
   assert.ok(
     reserve >= 0 &&
-      reserve < graphCreate &&
-      graphCreate < mutation &&
-      mutation < display &&
+      reserve < display &&
       display < completed &&
       completed < insertedTerminal,
-    "reservation must be acknowledged before Graph creates the draft and inserted finalized only after Outlook opens it",
+    "reservation must be acknowledged before Outlook opens and inserted finalized only after navigation starts",
   )
   assert.doesNotMatch(insertion, /\.subject\.setAsync/)
   assert.doesNotMatch(insertion, /\.body\.setAsync/)
@@ -342,10 +326,7 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
     insertion,
     /if \(mutationCompleted\) \{[\s\S]*?return;[\s\S]*?var outcome = "failed-preserved"/,
   )
-  assert.match(
-    insertion,
-    /await deleteGraphDraft\([\s\S]*?The unopened new draft was removed/,
-  )
+  assert.doesNotMatch(insertion, /deleteGraphDraft/)
   assert.match(
     insertion,
     /recordInsertionAuditEvent\([\s\S]*?"terminal",[\s\S]*?outcome/,
@@ -356,39 +337,42 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   )
 })
 
-test("legacy Graph OWA read links become official editable compose links", async () => {
+test("direct compose URL preserves certified recipients, subject, and plain-text body", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
-  const functionSource = inlineFunctionSource(
-    script,
-    "trustedOutlookDraftWebLink",
-  )
   const buildLink = Function(
-    `${functionSource}; return trustedOutlookDraftWebLink;`,
-  )() as (draft: { webLink: string }) => string
+    "OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH",
+    [
+      inlineFunctionSource(script, "composeRecipientAddress"),
+      inlineFunctionSource(script, "buildOutlookNewMessageUrl"),
+      "return buildOutlookNewMessageUrl;",
+    ].join("\n"),
+  )(30000) as (
+    template: Record<string, unknown>,
+    to: Record<string, unknown>[],
+    cc: Record<string, unknown>[],
+    bcc: Record<string, unknown>[],
+  ) => string
 
-  const itemId = "AAMkExample/Folder+Draft="
   const result = new URL(
-    buildLink({
-      webLink:
-        "https://outlook.office365.com/owa/?" +
-        `ItemID=${encodeURIComponent(itemId)}` +
-        "&exvsurl=1&viewmodel=ReadMessageItem&ispopout=1",
-    }),
+    buildLink(
+      { subject: "Certified subject", bodyText: "Line 1\nLine 2" },
+      [{ displayName: "To Name", emailAddress: "TO@example.com" }],
+      [{ displayName: "Cc Name", emailAddress: "cc@example.com" }],
+      [{ displayName: "Bcc Name", emailAddress: "bcc@example.com" }],
+    ),
   )
 
-  assert.equal(result.hostname, "outlook.office365.com")
-  assert.equal(
-    result.pathname,
-    `/mail/deeplink/compose/${encodeURIComponent("AAMkExample-Folder_Draft=")}`,
-  )
-  assert.equal(result.searchParams.get("ItemID"), itemId)
-  assert.equal(result.searchParams.get("exvsurl"), "1")
-  assert.equal(result.searchParams.has("viewmodel"), false)
-  assert.equal(result.searchParams.has("ispopout"), false)
+  assert.equal(result.origin, "https://outlook.cloud.microsoft")
+  assert.equal(result.pathname, "/mail/deeplink/compose")
+  assert.equal(result.searchParams.get("to"), "to@example.com")
+  assert.equal(result.searchParams.get("cc"), "cc@example.com")
+  assert.equal(result.searchParams.get("bcc"), "bcc@example.com")
+  assert.equal(result.searchParams.get("subject"), "Certified subject")
+  assert.equal(result.searchParams.get("body"), "Line 1\nLine 2")
 })
 
-test("taskpane audit protocol dynamically fails closed and cleans up an unopened new draft", async () => {
+test("taskpane audit protocol dynamically fails closed around direct compose navigation", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
   const insertionSource = inlineFunctionBlock(
@@ -400,9 +384,7 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
   type HarnessConfig = {
     failReservation?: boolean
     failInsertedTerminal?: boolean
-    failDraftCreation?: boolean
-    failDraftDisplay?: boolean
-    cleanupSucceeds?: boolean
+    failComposeOpen?: boolean
   }
   type Harness = {
     run: () => Promise<void>
@@ -453,10 +435,6 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
           throw new Error("Terminal acknowledgement lost.");
         }
       }
-      async function acquireGraphAccessToken() {
-        graphActions.push("token");
-        return "token";
-      }
       function reserveNewMessageWindow() {
         graphActions.push("reserve-window");
         return { closed: false };
@@ -466,23 +444,12 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
         popup.closed = true;
         graphActions.push("close-window");
       }
-      function buildGraphDraftPayload() { return { subject: "Subject" }; }
-      async function createGraphDraft() {
-        graphActions.push("create");
-        if (config.failDraftCreation) throw new Error("Draft create failed.");
-        return {
-          id: "draft-1",
-          isDraft: true,
-          webLink: "https://outlook.office.com/mail/deeplink/compose"
-        };
+      function buildOutlookNewMessageUrl() {
+        return "https://outlook.cloud.microsoft/mail/deeplink/compose";
       }
-      function openGraphDraftInReservedWindow() {
+      function openOutlookNewMessageInReservedWindow() {
         graphActions.push("display");
-        if (config.failDraftDisplay) throw new Error("Draft display failed.");
-      }
-      async function deleteGraphDraft() {
-        graphActions.push("delete");
-        return config.cleanupSucceeds !== false;
+        if (config.failComposeOpen) throw new Error("Compose open failed.");
       }
       ${insertionSource}
       return {
@@ -499,7 +466,6 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
   await reservationFailure.run()
   assert.deepEqual(reservationFailure.graphActions, [
     "reserve-window",
-    "token",
     "close-window",
   ])
   assert.deepEqual(reservationFailure.auditEvents, [
@@ -511,8 +477,6 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
   await terminalFailure.run()
   assert.deepEqual(terminalFailure.graphActions, [
     "reserve-window",
-    "token",
-    "create",
     "display",
   ])
   assert.deepEqual(terminalFailure.auditEvents, [
@@ -524,18 +488,12 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
     /new Outlook message opened, but FC Uno could not confirm the terminal audit record/i,
   )
 
-  const displayFailure = makeHarness({
-    failDraftDisplay: true,
-    cleanupSucceeds: true,
-  })
+  const displayFailure = makeHarness({ failComposeOpen: true })
   await displayFailure.run()
   assert.deepEqual(displayFailure.graphActions, [
     "reserve-window",
-    "token",
-    "create",
     "display",
     "close-window",
-    "delete",
   ])
   assert.deepEqual(displayFailure.auditEvents, [
     { phase: "reserved", outcome: null },
@@ -547,7 +505,7 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
   )
 })
 
-test("Graph draft payload preserves certified recipients and the current Outlook item is never mutated", async () => {
+test("direct compose rejects invalid recipients and oversized messages while never mutating the current Outlook item", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
   const insertSelectedTemplateSource = inlineFunctionSource(
@@ -558,38 +516,39 @@ test("Graph draft payload preserves certified recipients and the current Outlook
   assert.doesNotMatch(insertSelectedTemplateSource, /\.setAsync\(/)
   assert.doesNotMatch(insertSelectedTemplateSource, /captureInsertionRequest\(/)
 
-  const buildGraphDraftPayload = Function(
+  const buildOutlookNewMessageUrl = Function(
+    "OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH",
     [
-      inlineFunctionSource(script, "graphRecipient"),
-      inlineFunctionSource(script, "buildGraphDraftPayload"),
-      "return buildGraphDraftPayload;",
+      inlineFunctionSource(script, "composeRecipientAddress"),
+      inlineFunctionSource(script, "buildOutlookNewMessageUrl"),
+      "return buildOutlookNewMessageUrl;",
     ].join("\n"),
-  )() as (
+  )(250) as (
     template: Record<string, unknown>,
     to: Record<string, unknown>[],
     cc: Record<string, unknown>[],
     bcc: Record<string, unknown>[],
-  ) => Record<string, unknown>
-  assert.deepEqual(
-    buildGraphDraftPayload(
-      { subject: "Certified subject", bodyHtml: "<p>Certified body</p>" },
-      [{ displayName: "To Name", emailAddress: "TO@example.com" }],
-      [{ displayName: "Cc Name", emailAddress: "cc@example.com" }],
-      [{ displayName: "Bcc Name", emailAddress: "bcc@example.com" }],
-    ),
-    {
-      subject: "Certified subject",
-      body: { contentType: "HTML", content: "<p>Certified body</p>" },
-      toRecipients: [
-        { emailAddress: { address: "to@example.com", name: "To Name" } },
-      ],
-      ccRecipients: [
-        { emailAddress: { address: "cc@example.com", name: "Cc Name" } },
-      ],
-      bccRecipients: [
-        { emailAddress: { address: "bcc@example.com", name: "Bcc Name" } },
-      ],
-    },
+  ) => string
+
+  assert.throws(
+    () =>
+      buildOutlookNewMessageUrl(
+        { subject: "Subject", bodyText: "Body" },
+        [{ emailAddress: "not-an-email" }],
+        [],
+        [],
+      ),
+    /invalid email address/,
+  )
+  assert.throws(
+    () =>
+      buildOutlookNewMessageUrl(
+        { subject: "Subject", bodyText: "x".repeat(400) },
+        [],
+        [],
+        [],
+      ),
+    /too large/,
   )
 })
 
