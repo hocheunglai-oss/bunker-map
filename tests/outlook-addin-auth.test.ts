@@ -147,6 +147,10 @@ test("taskpane uses Office Dialog API with a partitioned cookie and stale-safe p
   assert.match(taskpane, /action: "establish-taskpane-session"/)
   assert.match(taskpane, /credentials: "include"/)
   assert.match(taskpane, /state\.authMode === "cookie"/)
+  assert.match(
+    taskpane,
+    /var restored = restoreAuthSession\(\)[\s\S]*?applyAuthSession\(restored, false\)[\s\S]*?await establishCookieAuthenticationAndLoad\(\)/,
+  )
   assert.match(authDialog, /setOutlookAddinCookie\(/)
   assert.match(authDialog, /clearOutlookAddinCookie\(/)
   assert.match(adminAuth, /OUTLOOK_ADDIN_COOKIE_NAME/)

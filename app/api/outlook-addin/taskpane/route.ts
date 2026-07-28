@@ -2081,6 +2081,14 @@ export async function GET(request: Request) {
           if (parsed.protocol !== "https:" || !trusted) {
             throw new Error("Microsoft Graph returned an untrusted Outlook message link.");
           }
+          var readPath = "/mail/deeplink/read/";
+          var readPathIndex = parsed.pathname.toLowerCase().indexOf(readPath);
+          if (readPathIndex >= 0) {
+            parsed.pathname =
+              parsed.pathname.slice(0, readPathIndex) +
+              "/mail/deeplink/compose/" +
+              parsed.pathname.slice(readPathIndex + readPath.length);
+          }
           parsed.searchParams.set("ispopout", "1");
           return parsed.toString();
         }
@@ -2356,10 +2364,15 @@ export async function GET(request: Request) {
           }
           state.authGeneration += 1;
           state.authenticated = false;
-          state.authSession = restored;
-          scheduleAuthExpiry(restored.expiresAt);
+          applyAuthSession(restored, false);
           showAuthenticationState("Checking your FC Uno sign-in...", false);
-          validateAuthenticationAndLoad();
+          try {
+            await establishCookieAuthenticationAndLoad();
+          } catch (error) {
+            if (state.authMode === "bearer") {
+              await validateAuthenticationAndLoad();
+            }
+          }
         }
 
         if (window.Office && typeof window.Office.onReady === "function") {

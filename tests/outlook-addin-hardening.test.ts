@@ -251,6 +251,10 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   assert.match(taskpane, /function reserveNewMessageWindow\(\)/)
   assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
   assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft\)/)
+  assert.match(
+    taskpane,
+    /var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/deeplink\/compose\/"/,
+  )
   assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
   assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/)
   assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
