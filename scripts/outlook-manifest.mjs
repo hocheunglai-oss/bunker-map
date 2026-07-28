@@ -7,8 +7,8 @@ function xmlEscape(value) {
     .replace(/'/g, "&apos;")
 }
 
-export const OUTLOOK_ADDIN_VERSION = "1.0.12.0"
-export const OUTLOOK_ADDIN_ASSET_VERSION = "2026-07-28-persistent-popout-v2"
+export const OUTLOOK_ADDIN_VERSION = "1.0.13.0"
+export const OUTLOOK_ADDIN_ASSET_VERSION = "2026-07-28-persistent-popout-v3"
 export const OUTLOOK_ADDIN_ICON_SIZES = Object.freeze([16, 32, 64, 80, 128])
 
 export function buildOutlookManifest(rawBaseUrl) {

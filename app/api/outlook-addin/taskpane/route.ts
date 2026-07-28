@@ -16,8 +16,7 @@ function buildBaseUrl(request: Request) {
 function htmlHeaders() {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control":
-      "public, max-age=0, s-maxage=604800, stale-while-revalidate=86400",
+    "Cache-Control": "private, no-store, max-age=0",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
   }

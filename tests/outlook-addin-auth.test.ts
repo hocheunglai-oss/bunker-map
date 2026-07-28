@@ -83,15 +83,15 @@ test("all confidential Outlook APIs accept bearer-or-cookie request auth", async
   assert.match(taskpane, /export async function POST\(request: Request\)/)
 })
 
-test("public Outlook shells use version-safe CDN caching while authenticated data stays private", async () => {
+test("Outlook shells avoid stale executable caching while authenticated data stays private", async () => {
   const { authDialog, taskpane } = await sources()
 
   for (const source of [authDialog, taskpane]) {
-    assert.match(
+    assert.match(source, /private, no-store, max-age=0/)
+    assert.doesNotMatch(
       source,
       /public, max-age=0, s-maxage=604800, stale-while-revalidate=86400/,
     )
-    assert.match(source, /private, no-store, max-age=0/)
   }
 })
 
