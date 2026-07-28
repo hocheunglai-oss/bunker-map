@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
-import { getAdminSession } from "@/lib/adminAuth"
+import { getRefreshedAdminSession } from "@/lib/adminAuth"
 
 export async function GET() {
-  const session = await getAdminSession()
+  const session = await getRefreshedAdminSession()
 
   return NextResponse.json(session)
 }

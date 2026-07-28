@@ -233,6 +233,24 @@ export async function getAdminSession(): Promise<AdminSession> {
   return (await resolveAdminSession()).publicSession
 }
 
+export async function getRefreshedAdminSession(): Promise<AdminSession> {
+  const resolved = await resolveAdminSession()
+
+  if (resolved.publicSession.authenticated && resolved.expiresAt) {
+    const cookieStore = await cookies()
+    const token = cookieStore.get(ADMIN_COOKIE_NAME)?.value
+    if (token) {
+      cookieStore.set(
+        ADMIN_COOKIE_NAME,
+        token,
+        cookieOptions(resolved.expiresAt),
+      )
+    }
+  }
+
+  return resolved.publicSession
+}
+
 export async function requireAdminSession() {
   return requireAuthenticatedResolvedSession(
     await resolveAdminSession(),
