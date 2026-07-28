@@ -257,7 +257,8 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   )
   assert.match(taskpane, /parsed\.hostname = "outlook\.cloud\.microsoft"/)
   assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
-  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 6000/)
+  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 30000/)
+  assert.match(taskpane, /dataset\.outlookDraftComposeLink/)
   assert.match(
     taskpane,
     /async function openGraphDraftInReservedWindow[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS\)[\s\S]*?popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/,
