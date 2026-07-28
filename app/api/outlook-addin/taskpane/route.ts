@@ -2086,7 +2086,7 @@ export async function GET(request: Request) {
           if (readPathIndex >= 0) {
             parsed.pathname =
               parsed.pathname.slice(0, readPathIndex) +
-              "/mail/deeplink/compose/" +
+              "/mail/compose/" +
               parsed.pathname.slice(readPathIndex + readPath.length);
           }
           parsed.searchParams.set("ispopout", "1");
