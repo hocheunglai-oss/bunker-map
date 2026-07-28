@@ -394,6 +394,17 @@ export async function GET(request: Request) {
         font-weight: 900;
         text-transform: uppercase;
       }
+      .panelHeaderButton {
+        border: 0;
+        background: transparent;
+        color: #536b7e;
+        cursor: pointer;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+      .panelHeaderButton:disabled { cursor: wait; opacity: 0.55; }
       .folders { max-height: 35vh; overflow: auto; padding: 5px; }
       .templates { max-height: 54vh; overflow: auto; padding: 5px; }
       .folderNode { position: relative; }
@@ -474,6 +485,44 @@ export async function GET(request: Request) {
       }
       .notice.error { color: #a12a2a; }
       .notice.success { color: #1d6a3b; }
+      .replaceConfirm {
+        display: grid;
+        gap: 9px;
+        padding: 10px;
+        border: 1px solid #efc66f;
+        border-radius: 8px;
+        background: #fff8e7;
+        color: #493914;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .replaceConfirm[hidden] { display: none; }
+      .replaceConfirmActions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 7px;
+      }
+      .replaceConfirmButton {
+        min-height: 32px;
+        border: 1px solid #b7c5d1;
+        border-radius: 7px;
+        background: #fff;
+        color: #203246;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 0 11px;
+      }
+      .replaceConfirmButton.primary {
+        border-color: #1672b9;
+        background: #1672b9;
+        color: #fff;
+      }
+      .replaceConfirmButton:focus {
+        outline: 2px solid rgba(22, 114, 185, 0.32);
+        outline-offset: 1px;
+      }
     </style>
   </head>
   <body>
@@ -488,13 +537,32 @@ export async function GET(request: Request) {
     <div id="templateApp" class="app" hidden>
       <input id="searchInput" class="search" type="search" placeholder="Search templates" autocomplete="off" />
       <section class="panel">
-        <div class="panelHeader"><span>Folders</span></div>
+        <div class="panelHeader">
+          <span>Folders</span>
+          <button id="signOutButton" class="panelHeaderButton" type="button">Sign out</button>
+        </div>
         <div id="folderTree" class="folders"><div class="empty">Loading...</div></div>
       </section>
       <section class="panel">
         <div class="panelHeader"><span id="listTitle">Templates</span></div>
         <div id="templateList" class="templates"><div class="empty">Loading...</div></div>
       </section>
+      <div
+        id="replaceConfirm"
+        class="replaceConfirm"
+        role="alertdialog"
+        aria-labelledby="replaceConfirmText"
+        hidden
+      >
+        <div id="replaceConfirmText">
+          This draft already contains a subject, recipients, or body content.
+          Replace it with the selected template?
+        </div>
+        <div class="replaceConfirmActions">
+          <button id="replaceCancelButton" class="replaceConfirmButton" type="button">Keep draft</button>
+          <button id="replaceConfirmButton" class="replaceConfirmButton primary" type="button">Replace draft</button>
+        </div>
+      </div>
       <div id="notice" class="notice"></div>
     </div>
 
@@ -505,9 +573,12 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INSERTION_AUDIT_URL = ${JSON.stringify(insertionAuditUrl)};
-        var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
+        var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
+        var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
         var AUTH_MESSAGE_SCHEMA = "fcuno.outlook-addin-auth/v1";
+        var AUTH_SESSION_MAX_TTL_MS = 400 * 24 * 60 * 60 * 1000;
+        var AUTH_SESSION_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
         var INDEX_CACHE_KEY = "fcuno-outlook-template-index-v6";
         var RECIPIENT_MAP_CACHE_KEY = "fcuno-outlook-certified-recipient-map-v5";
         var INDEX_CACHE_SCHEMA = "fcuno.outlook-template-index-cache/v1";
@@ -537,7 +608,8 @@ export async function GET(request: Request) {
           authSession: null,
           authGeneration: 0,
           authExpiryTimer: null,
-          authDialog: null
+          authDialog: null,
+          replacementConfirmationResolve: null
         };
 
         var els = {
@@ -545,11 +617,15 @@ export async function GET(request: Request) {
           authText: document.getElementById("authText"),
           authMessage: document.getElementById("authMessage"),
           signInButton: document.getElementById("signInButton"),
+          signOutButton: document.getElementById("signOutButton"),
           templateApp: document.getElementById("templateApp"),
           search: document.getElementById("searchInput"),
           folderTree: document.getElementById("folderTree"),
           listTitle: document.getElementById("listTitle"),
           templateList: document.getElementById("templateList"),
+          replaceConfirm: document.getElementById("replaceConfirm"),
+          replaceCancelButton: document.getElementById("replaceCancelButton"),
+          replaceConfirmButton: document.getElementById("replaceConfirmButton"),
           notice: document.getElementById("notice")
         };
 
@@ -568,6 +644,7 @@ export async function GET(request: Request) {
         }
 
         function clearConfidentialState(removeStoredCaches) {
+          closeReplacementConfirmation(false);
           state.templates = [];
           state.detailCache = {};
           state.folderRoot = null;
@@ -616,32 +693,51 @@ export async function GET(request: Request) {
           }
         }
 
+        function removeStoredAuthSessions() {
+          try {
+            if (window.localStorage) {
+              window.localStorage.removeItem(AUTH_SESSION_KEY);
+            }
+          } catch (localStorageError) {
+            // Continue clearing every other storage and the in-memory session.
+          }
+          try {
+            if (window.sessionStorage) {
+              window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+              window.sessionStorage.removeItem(LEGACY_AUTH_SESSION_KEY);
+            }
+          } catch (sessionStorageError) {
+            // The in-memory session is still cleared if storage is unavailable.
+          }
+        }
+
         function clearAuthentication(message, permissionRequired) {
           state.authGeneration += 1;
           state.authenticated = false;
           state.authSession = null;
           clearAuthExpiryTimer();
-          try {
-            if (window.sessionStorage) {
-              window.sessionStorage.removeItem(AUTH_SESSION_KEY);
-            }
-          } catch (error) {
-            // The in-memory session is still cleared if storage is unavailable.
-          }
+          removeStoredAuthSessions();
           clearConfidentialState(true);
           showAuthenticationState(message, permissionRequired);
         }
 
         function scheduleAuthExpiry(expiresAt) {
           clearAuthExpiryTimer();
-          var remaining = expiresAt - Date.now();
-          if (remaining <= 0) {
-            clearAuthentication("Your FC Uno sign-in expired. Sign in again.", false);
-            return;
+          function checkExpiry() {
+            var remaining = expiresAt - Date.now();
+            if (remaining <= 0) {
+              clearAuthentication(
+                "Your FC Uno sign-in expired. Sign in again.",
+                false
+              );
+              return;
+            }
+            state.authExpiryTimer = window.setTimeout(
+              checkExpiry,
+              Math.min(remaining, 2147483647)
+            );
           }
-          state.authExpiryTimer = window.setTimeout(function () {
-            clearAuthentication("Your FC Uno sign-in expired. Sign in again.", false);
-          }, Math.min(remaining, 2147483647));
+          checkExpiry();
         }
 
         function parseAuthSession(input, expectedSchema) {
@@ -654,7 +750,8 @@ export async function GET(request: Request) {
           var now = Date.now();
           if (!Number.isFinite(expiresAt) ||
               expiresAt <= now ||
-              expiresAt > now + 40 * 60 * 1000) {
+              expiresAt >
+                now + AUTH_SESSION_MAX_TTL_MS + AUTH_SESSION_CLOCK_SKEW_MS) {
             return null;
           }
           return {
@@ -664,14 +761,88 @@ export async function GET(request: Request) {
         }
 
         function restoreAuthSession() {
+          var stored = null;
           try {
-            var stored = window.sessionStorage &&
-              window.sessionStorage.getItem(AUTH_SESSION_KEY);
-            if (!stored) return null;
-            return parseAuthSession(JSON.parse(stored), AUTH_SESSION_SCHEMA);
-          } catch (error) {
+            stored = window.localStorage &&
+              window.localStorage.getItem(AUTH_SESSION_KEY);
+          } catch (localStorageError) {
+            stored = null;
+          }
+          try {
+            if (!stored && window.sessionStorage) {
+              stored =
+                window.sessionStorage.getItem(AUTH_SESSION_KEY) ||
+                window.sessionStorage.getItem(LEGACY_AUTH_SESSION_KEY);
+            }
+          } catch (sessionStorageError) {
+            stored = null;
+          }
+          if (!stored) return null;
+          try {
+            var parsed = parseAuthSession(JSON.parse(stored), AUTH_SESSION_SCHEMA);
+            if (!parsed) {
+              removeStoredAuthSessions();
+              return null;
+            }
+            persistAuthSession(parsed);
+            return parsed;
+          } catch (parseError) {
+            removeStoredAuthSessions();
             return null;
           }
+        }
+
+        function persistAuthSession(session) {
+          var stored = {
+            schema: AUTH_SESSION_SCHEMA,
+            token: session.token,
+            expiresAt: new Date(session.expiresAt).toISOString()
+          };
+          var persisted = false;
+          try {
+            if (window.localStorage) {
+              window.localStorage.setItem(
+                AUTH_SESSION_KEY,
+                JSON.stringify(stored)
+              );
+              persisted = true;
+            }
+          } catch (persistentStorageError) {
+            persisted = false;
+          }
+          if (persisted) {
+            try {
+              if (window.sessionStorage) {
+                window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+                window.sessionStorage.removeItem(LEGACY_AUTH_SESSION_KEY);
+              }
+            } catch (sessionCleanupError) {
+              // Persistent storage is authoritative even if legacy cleanup fails.
+            }
+            return;
+          }
+          try {
+            if (window.sessionStorage) {
+              window.sessionStorage.setItem(
+                AUTH_SESSION_KEY,
+                JSON.stringify(stored)
+              );
+              return;
+            }
+          } catch (sessionStorageError) {
+            // Report one storage error below.
+          }
+          if (!persisted) {
+            throw new Error("This Outlook client cannot store a secure session.");
+          }
+        }
+
+        function applyAuthSession(parsed, advanceGeneration) {
+          persistAuthSession(parsed);
+          if (advanceGeneration) state.authGeneration += 1;
+          state.authSession = parsed;
+          scheduleAuthExpiry(parsed.expiresAt);
+          return parsed;
         }
 
         function storeAuthSession(message) {
@@ -679,20 +850,25 @@ export async function GET(request: Request) {
           if (!parsed) {
             throw new Error("FC Uno returned an invalid sign-in session.");
           }
-          var stored = {
-            schema: AUTH_SESSION_SCHEMA,
-            token: parsed.token,
-            expiresAt: new Date(parsed.expiresAt).toISOString()
-          };
-          if (!window.sessionStorage) {
-            throw new Error("This Outlook client cannot store a secure session.");
-          }
-          window.sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(stored));
           state.authGeneration += 1;
           state.authenticated = false;
-          state.authSession = parsed;
-          scheduleAuthExpiry(parsed.expiresAt);
-          return parsed;
+          return applyAuthSession(parsed, false);
+        }
+
+        function refreshAuthSessionExpiry(expiresAt) {
+          var current = state.authSession;
+          var refreshed = parseAuthSession(
+            {
+              schema: AUTH_SESSION_SCHEMA,
+              token: current && current.token,
+              expiresAt: expiresAt
+            },
+            AUTH_SESSION_SCHEMA
+          );
+          if (!refreshed) {
+            throw new Error("FC Uno returned an invalid renewed session.");
+          }
+          return applyAuthSession(refreshed, false);
         }
 
         function currentAuthSession() {
@@ -757,6 +933,22 @@ export async function GET(request: Request) {
           els.signInButton.disabled = false;
         }
 
+        async function signOut() {
+          els.signOutButton.disabled = true;
+          try {
+            await authenticatedFetch(AUTH_DIALOG_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "logout" })
+            });
+          } catch (error) {
+            // Local sign-out still completes if the revocation request fails.
+          } finally {
+            els.signOutButton.disabled = false;
+            clearAuthentication("Signed out.", false);
+          }
+        }
+
         async function validateAuthenticationAndLoad() {
           var result;
           try {
@@ -764,21 +956,12 @@ export async function GET(request: Request) {
             if (!result.response.ok) {
               throw new Error("FC Uno could not verify this sign-in.");
             }
-            await result.response.json();
+            var validation = await result.response.json();
             assertAuthRequestCurrent(result.context);
+            refreshAuthSessionExpiry(validation.expiresAt);
             state.authenticated = true;
             showAuthenticatedApp();
-            await Promise.all([
-              loadTemplates(),
-              loadRecipientMap(true).catch(function (error) {
-                notice(
-                  error && error.message
-                    ? error.message
-                    : "Certified recipients are unavailable.",
-                  "error"
-                );
-              })
-            ]);
+            await loadTemplates();
           } catch (error) {
             if (!state.authSession) return;
             state.authenticated = false;
@@ -1206,6 +1389,7 @@ export async function GET(request: Request) {
           state.itemGeneration += 1;
           state.composeReady = false;
           markComposeReady();
+          closeReplacementConfirmation(false);
           if (state.inserting) {
             notice(
               "The selected Outlook item changed. The in-progress insertion was stopped.",
@@ -1677,6 +1861,24 @@ export async function GET(request: Request) {
           return bodyText !== "";
         }
 
+        function closeReplacementConfirmation(confirmed) {
+          var resolve = state.replacementConfirmationResolve;
+          state.replacementConfirmationResolve = null;
+          els.replaceConfirm.hidden = true;
+          if (resolve) resolve(Boolean(confirmed));
+        }
+
+        function confirmDraftReplacement() {
+          if (state.replacementConfirmationResolve) {
+            return Promise.resolve(false);
+          }
+          return new Promise(function (resolve) {
+            state.replacementConfirmationResolve = resolve;
+            els.replaceConfirm.hidden = false;
+            els.replaceConfirmButton.focus();
+          });
+        }
+
         function copyDraftSnapshot(snapshot) {
           return {
             subject: String(snapshot.subject || ""),
@@ -1931,19 +2133,23 @@ export async function GET(request: Request) {
           try {
             var template = await loadTemplateDetail(state.selectedId, true);
             if (!template) throw new Error("Template not found.");
-            await loadRecipientMap(true);
-            var toRecipients = resolveStoredRecipientRefs(template, "to");
-            var ccRecipients = resolveStoredRecipientRefs(template, "cc");
-            var bccRecipients = resolveStoredRecipientRefs(template, "bcc");
             insertionContext = beginInsertionMutation(insertionRequest);
             var item = requireCurrentInsertionItem(insertionContext);
             snapshot = await snapshotDraft(item, office);
             item = requireCurrentInsertionItem(insertionContext);
-            if (draftHasContent(snapshot) &&
-                !window.confirm("This draft already contains a subject, recipients, or body content. Replace it with the selected template?")) {
-              notice("Insertion cancelled. Draft unchanged.", "");
-              return;
+            if (draftHasContent(snapshot)) {
+              var replaceConfirmed = await confirmDraftReplacement();
+              item = requireCurrentInsertionItem(insertionContext);
+              if (!replaceConfirmed) {
+                notice("Insertion cancelled. Draft unchanged.", "");
+                return;
+              }
             }
+            notice("Loading certified recipients...", "");
+            await loadRecipientMap(true);
+            var toRecipients = resolveStoredRecipientRefs(template, "to");
+            var ccRecipients = resolveStoredRecipientRefs(template, "cc");
+            var bccRecipients = resolveStoredRecipientRefs(template, "bcc");
             if (
               !state.recipientMapFromNetwork ||
               state.recipientMapExpiresAt <= Date.now()
@@ -2174,6 +2380,13 @@ export async function GET(request: Request) {
         });
 
         els.signInButton.addEventListener("click", openAuthDialog);
+        els.signOutButton.addEventListener("click", signOut);
+        els.replaceCancelButton.addEventListener("click", function () {
+          closeReplacementConfirmation(false);
+        });
+        els.replaceConfirmButton.addEventListener("click", function () {
+          closeReplacementConfirmation(true);
+        });
 
         function initialiseTaskpane() {
           registerMailboxItemChangedHandler();

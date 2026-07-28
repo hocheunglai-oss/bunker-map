@@ -335,13 +335,19 @@ export async function requireAdminPagePermissionForRequest(
   pageId: string,
   access: "view" | "edit" = "view",
 ) {
-  const session = await requireAdminSessionForRequest(request)
+  const resolved = requireAuthenticatedResolvedSession(
+    await resolveAdminRequestSession(request),
+  )
+  const session = resolved.publicSession
 
   if (!hasAdminPagePermission(session, pageId, access)) {
     throw new Error("Forbidden")
   }
 
-  return session
+  return {
+    ...session,
+    expiresAt: resolved.expiresAt,
+  }
 }
 
 export async function createOutlookAddinAdminSession(user: {

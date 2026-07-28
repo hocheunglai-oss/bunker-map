@@ -10,6 +10,7 @@ import {
   getAdminSessionExpiry,
   hashAdminSessionToken,
   revokeDatabaseAdminSession,
+  shouldRenewAdminSession,
 } from "@/lib/adminSessions"
 import { getAdminPasswordValidationError } from "@/lib/adminUsers"
 
@@ -36,13 +37,16 @@ test("admin sessions use the browser maximum persistent-cookie lifetime", () => 
   )
 })
 
-test("Outlook add-in sessions receive a bounded 30-minute absolute expiry", () => {
+test("Outlook add-in sessions use the browser-maximum renewable expiry", () => {
   const now = new Date("2026-07-23T12:00:00.000Z")
   const expiresAt = new Date(
     getAdminSessionExpiry(now, OUTLOOK_ADDIN_SESSION_DURATION_SECONDS),
   )
 
-  assert.equal(OUTLOOK_ADDIN_SESSION_DURATION_SECONDS, 30 * 60)
+  assert.equal(
+    OUTLOOK_ADDIN_SESSION_DURATION_SECONDS,
+    ADMIN_SESSION_DURATION_SECONDS,
+  )
   assert.equal(
     expiresAt.getTime() - now.getTime(),
     OUTLOOK_ADDIN_SESSION_DURATION_SECONDS * 1000,
@@ -50,6 +54,29 @@ test("Outlook add-in sessions receive a bounded 30-minute absolute expiry", () =
   assert.throws(
     () => getAdminSessionExpiry(now, ADMIN_SESSION_DURATION_SECONDS + 1),
     /duration is invalid/,
+  )
+})
+
+test("legacy short Outlook sessions renew immediately without over-touching fresh sessions", () => {
+  const now = new Date("2026-07-28T04:00:00.000Z")
+  const recent = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+  const thirtyMinutes = new Date(now.getTime() + 30 * 60 * 1000).toISOString()
+  const fourHundredDays = new Date(
+    now.getTime() + ADMIN_SESSION_DURATION_SECONDS * 1000,
+  ).toISOString()
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString()
+
+  assert.equal(
+    shouldRenewAdminSession(now, recent, thirtyMinutes),
+    true,
+  )
+  assert.equal(
+    shouldRenewAdminSession(now, recent, fourHundredDays),
+    false,
+  )
+  assert.equal(
+    shouldRenewAdminSession(now, oneHourAgo, fourHundredDays),
+    true,
   )
 })
 

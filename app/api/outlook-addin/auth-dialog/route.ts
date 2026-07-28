@@ -110,6 +110,19 @@ export async function POST(request: Request) {
 
   const action = String(payload.action || "")
 
+  if (action === "logout") {
+    try {
+      const token = getAdminRequestBearerToken(request)
+      if (token) await revokeDatabaseAdminSession(token)
+      return NextResponse.json(
+        { success: true },
+        { headers: privateHeaders() },
+      )
+    } catch (error) {
+      return errorResponse(error)
+    }
+  }
+
   if (action === "login") {
     const username = typeof payload.username === "string"
       ? payload.username.trim()
@@ -214,6 +227,7 @@ export async function GET(request: Request) {
           authenticated: true,
           username: session.username,
           displayName: session.displayName || session.username,
+          expiresAt: session.expiresAt,
         },
         { headers: privateHeaders() },
       )

@@ -106,24 +106,28 @@ test("public taskpane stays inert until a protected bearer validation succeeds",
     loadTemplates[1].indexOf("if (!state.authenticated)") <
       loadTemplates[1].indexOf("loadCachedIndex()"),
   )
-  assert.match(taskpane, /clearAuthentication\([\s\S]*?sessionStorage\.removeItem\(AUTH_SESSION_KEY\)/)
+  assert.match(taskpane, /function removeStoredAuthSessions\(\)[\s\S]*?localStorage\.removeItem\(AUTH_SESSION_KEY\)/)
+  assert.match(taskpane, /clearAuthentication\([\s\S]*?removeStoredAuthSessions\(\)/)
   assert.match(taskpane, /localStorage\.removeItem\(INDEX_CACHE_KEY\)/)
   assert.match(taskpane, /localStorage\.removeItem\(RECIPIENT_MAP_CACHE_KEY\)/)
 })
 
 test("taskpane uses Office Dialog API and one stale-safe bearer fetch path", async () => {
-  const { taskpane } = await sources()
+  const { authDialog, taskpane } = await sources()
 
   assert.match(taskpane, /displayDialogAsync\(/)
   assert.match(taskpane, /displayInIframe: false/)
   assert.match(taskpane, /DialogMessageReceived/)
   assert.match(taskpane, /DialogEventReceived/)
   assert.doesNotMatch(taskpane, /window\.open\(/)
-  assert.match(taskpane, /window\.sessionStorage\.setItem\(AUTH_SESSION_KEY/)
-  assert.doesNotMatch(
-    taskpane,
-    /window\.localStorage\.setItem\(AUTH_SESSION_KEY/,
-  )
+  assert.match(taskpane, /window\.localStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
+  assert.match(taskpane, /window\.sessionStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
+  assert.match(taskpane, /AUTH_SESSION_MAX_TTL_MS = 400 \* 24 \* 60 \* 60 \* 1000/)
+  assert.match(taskpane, /refreshAuthSessionExpiry\(validation\.expiresAt\)/)
+  assert.match(authDialog, /expiresAt: session\.expiresAt/)
+  assert.match(taskpane, /function scheduleAuthExpiry\([\s\S]*?checkExpiry[\s\S]*?Math\.min\(remaining, 2147483647\)/)
+  assert.match(taskpane, /JSON\.stringify\(\{ action: "logout" \}\)/)
+  assert.match(authDialog, /if \(action === "logout"\)[\s\S]*?revokeDatabaseAdminSession\(token\)/)
   assert.match(taskpane, /headers\.Authorization = "Bearer " \+ session\.token/)
   assert.match(taskpane, /credentials: "omit"/)
 

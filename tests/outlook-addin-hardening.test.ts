@@ -245,11 +245,13 @@ test("taskpane reserves before mutation, restores conservatively, and records a 
     taskpane,
     /setOptions\.bodyMode = office\.MailboxEnums\.BodyMode\.HostConfig/,
   )
-  assert.match(taskpane, /window\.confirm\(/)
+  assert.doesNotMatch(taskpane, /window\.confirm\(/)
   assert.match(
     taskpane,
-    /window\.confirm\([\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
+    /await confirmDraftReplacement\(\)[\s\S]*?await loadRecipientMap\(true\)[\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
   )
+  assert.match(taskpane, /role="alertdialog"/)
+  assert.match(taskpane, /closeReplacementConfirmation\(true\)/)
   assert.match(taskpane, /state\.inserting = true/)
   assert.match(taskpane, /state\.inserting = false/)
   assert.match(taskpane, /mutationStarted = true/)
@@ -358,6 +360,8 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
     failInsertedTerminal?: boolean
     failRecipientField?: "to" | "cc" | "bcc"
     restoreResult?: boolean
+    draftHasContent?: boolean
+    replacementConfirmed?: boolean
   }
   type Harness = {
     run: () => Promise<void>
@@ -403,8 +407,7 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
         }
       };
       var window = {
-        Office: { AsyncResultStatus: { Succeeded: success } },
-        confirm: function () { return true; }
+        Office: { AsyncResultStatus: { Succeeded: success } }
       };
       function markComposeReady() { state.composeReady = true; }
       function notice(message, tone) { notices.push({ message: message, tone: tone }); }
@@ -435,7 +438,10 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
           isHtml: true
         };
       }
-      function draftHasContent() { return false; }
+      function draftHasContent() { return Boolean(config.draftHasContent); }
+      async function confirmDraftReplacement() {
+        return config.replacementConfirmed !== false;
+      }
       function createOperationId() {
         return "11111111-1111-4111-8111-111111111111";
       }
@@ -492,6 +498,19 @@ test("taskpane audit protocol dynamically fails closed and never rolls back a co
       };
     `,
   ) as (config: HarnessConfig) => Harness
+
+  const replacementCancelled = makeHarness({
+    draftHasContent: true,
+    replacementConfirmed: false,
+  })
+  await replacementCancelled.run()
+  assert.deepEqual(replacementCancelled.writes, [])
+  assert.deepEqual(replacementCancelled.auditEvents, [])
+  assert.match(
+    replacementCancelled.notices.at(-1)?.message || "",
+    /Insertion cancelled\. Draft unchanged\./,
+  )
+  assert.equal(replacementCancelled.state.inserting, false)
 
   const reservationFailure = makeHarness({ failReservation: true })
   await reservationFailure.run()
@@ -615,7 +634,7 @@ test("pinned taskpane aborts on item changes and never reuses a pre-fetch item",
   )
   assert.match(
     taskpane,
-    /var insertionRequest = captureInsertionRequest\(\);[\s\S]*?await loadTemplateDetail\([\s\S]*?await loadRecipientMap\(true\);[\s\S]*?insertionContext = beginInsertionMutation\(insertionRequest\);/,
+    /var insertionRequest = captureInsertionRequest\(\);[\s\S]*?await loadTemplateDetail\([\s\S]*?insertionContext = beginInsertionMutation\(insertionRequest\);[\s\S]*?await loadRecipientMap\(true\);/,
   )
   assert.match(
     taskpane,

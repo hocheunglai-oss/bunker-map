@@ -6,7 +6,8 @@ import { createClient } from "@supabase/supabase-js"
 // while password rotation, account disablement, and explicit revocation
 // continue to invalidate the server-side session immediately.
 export const ADMIN_SESSION_DURATION_SECONDS = 60 * 60 * 24 * 400
-export const OUTLOOK_ADDIN_SESSION_DURATION_SECONDS = 60 * 30
+export const OUTLOOK_ADDIN_SESSION_DURATION_SECONDS =
+  ADMIN_SESSION_DURATION_SECONDS
 
 const ADMIN_SESSION_TOKEN_BYTES = 32
 const ADMIN_SESSION_TOUCH_INTERVAL_MS = 60 * 60 * 1000
@@ -77,6 +78,24 @@ export function getAdminSessionExpiry(
   ).toISOString()
 }
 
+export function shouldRenewAdminSession(
+  now: Date,
+  lastSeenAt: string,
+  expiresAt: string,
+) {
+  const lastSeenTime = Date.parse(lastSeenAt)
+  const expiryTime = Date.parse(expiresAt)
+  const renewalThresholdMs =
+    ADMIN_SESSION_DURATION_SECONDS * 1000 - ADMIN_SESSION_TOUCH_INTERVAL_MS
+
+  return (
+    (Number.isFinite(lastSeenTime) &&
+      now.getTime() - lastSeenTime >= ADMIN_SESSION_TOUCH_INTERVAL_MS) ||
+    !Number.isFinite(expiryTime) ||
+    expiryTime - now.getTime() < renewalThresholdMs
+  )
+}
+
 export async function createDatabaseAdminSession(
   adminUserId: string,
   observedUserUpdatedAt: string,
@@ -135,12 +154,8 @@ export async function getDatabaseAdminSession(
   if (!data) return null
 
   const row = data as AdminSessionRow
-  const lastSeenAt = Date.parse(row.last_seen_at)
   let expiresAt = row.expires_at
-  if (
-    Number.isFinite(lastSeenAt) &&
-    now.getTime() - lastSeenAt >= ADMIN_SESSION_TOUCH_INTERVAL_MS
-  ) {
+  if (shouldRenewAdminSession(now, row.last_seen_at, row.expires_at)) {
     const renewedExpiry = getAdminSessionExpiry(now)
     const { data: renewedSession, error: renewalError } = await supabase
       .from("admin_sessions")
