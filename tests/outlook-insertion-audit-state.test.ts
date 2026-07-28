@@ -373,7 +373,7 @@ test("Audit Log makes incomplete and terminal insertion status explicit", () => 
   )
   assert.equal(
     completedTerminal.summary,
-    'Inserted Outlook template "Daily Bunker Update" into the draft.',
+    'Inserted Outlook template "Daily Bunker Update" into an Outlook message.',
   )
   assert.match(completedTerminal.details.join(" "), new RegExp(reservation.id))
 

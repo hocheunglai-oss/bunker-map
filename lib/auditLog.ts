@@ -695,7 +695,7 @@ function outlookInsertionOutcomeSummary(
   recordLabel: string,
 ) {
   if (outcome === "inserted") {
-    return `Inserted Outlook template "${recordLabel}" into the draft.`
+    return `Inserted Outlook template "${recordLabel}" into an Outlook message.`
   }
   if (outcome === "failed-restored") {
     return `Outlook insertion failed for template "${recordLabel}"; the original draft was restored.`
