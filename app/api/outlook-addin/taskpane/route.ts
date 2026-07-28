@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
-import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
+import { requireOutlookAddinPagePermissionForRequest } from "@/lib/adminAuth"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -107,7 +107,7 @@ function insertionAuditSuccess(phase: InsertionAuditPhase) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAdminPagePermissionForRequest(
+    const session = await requireOutlookAddinPagePermissionForRequest(
       request,
       "email-templates",
       "view",
@@ -561,6 +561,7 @@ export async function GET(request: Request) {
           inserting: false,
           authenticated: false,
           authSession: null,
+          authMode: "none",
           authGeneration: 0,
           authExpiryTimer: null,
           authDialog: null,
@@ -667,6 +668,7 @@ export async function GET(request: Request) {
           state.authGeneration += 1;
           state.authenticated = false;
           state.authSession = null;
+          state.authMode = "none";
           clearAuthExpiryTimer();
           removeStoredAuthSessions();
           clearConfidentialState(true);
@@ -710,6 +712,18 @@ export async function GET(request: Request) {
             token: String(input.token),
             expiresAt: expiresAt
           };
+        }
+
+        function parseAuthExpiry(input) {
+          var expiresAt = Date.parse(String(input && input.expiresAt || ""));
+          var now = Date.now();
+          if (!Number.isFinite(expiresAt) ||
+              expiresAt <= now ||
+              expiresAt >
+                now + AUTH_SESSION_MAX_TTL_MS + AUTH_SESSION_CLOCK_SKEW_MS) {
+            return null;
+          }
+          return expiresAt;
         }
 
         function restoreAuthSession() {
@@ -793,8 +807,22 @@ export async function GET(request: Request) {
           persistAuthSession(parsed);
           if (advanceGeneration) state.authGeneration += 1;
           state.authSession = parsed;
+          state.authMode = "bearer";
           scheduleAuthExpiry(parsed.expiresAt);
           return parsed;
+        }
+
+        function applyCookieAuthSession(input, advanceGeneration) {
+          var expiresAt = parseAuthExpiry(input);
+          if (!expiresAt) {
+            throw new Error("FC Uno returned an invalid renewed session.");
+          }
+          if (advanceGeneration) state.authGeneration += 1;
+          state.authSession = { token: "", expiresAt: expiresAt };
+          state.authMode = "cookie";
+          scheduleAuthExpiry(expiresAt);
+          removeStoredAuthSessions();
+          return state.authSession;
         }
 
         function storeAuthSession(message) {
@@ -808,6 +836,9 @@ export async function GET(request: Request) {
         }
 
         function refreshAuthSessionExpiry(expiresAt) {
+          if (state.authMode === "cookie") {
+            return applyCookieAuthSession({ expiresAt: expiresAt }, false);
+          }
           var current = state.authSession;
           var refreshed = parseAuthSession(
             {
@@ -836,7 +867,8 @@ export async function GET(request: Request) {
           var current = state.authSession;
           if (!current ||
               context.generation !== state.authGeneration ||
-              context.token !== current.token) {
+              context.mode !== state.authMode ||
+              (context.mode === "bearer" && context.token !== current.token)) {
             throw new Error("The FC Uno sign-in changed while loading data.");
           }
         }
@@ -850,14 +882,20 @@ export async function GET(request: Request) {
           Object.keys(inputHeaders).forEach(function (name) {
             headers[name] = inputHeaders[name];
           });
-          headers.Authorization = "Bearer " + session.token;
+          if (state.authMode === "bearer") {
+            headers.Authorization = "Bearer " + session.token;
+          }
           var requestOptions = Object.assign({}, options || {}, {
             cache: "no-store",
-            credentials: "omit",
+            credentials: state.authMode === "cookie" ? "include" : "omit",
             headers: headers
           });
           var response = await fetch(url, requestOptions);
-          var context = { generation: generation, token: session.token };
+          var context = {
+            generation: generation,
+            mode: state.authMode,
+            token: state.authMode === "bearer" ? session.token : ""
+          };
           assertAuthRequestCurrent(context);
           if (response.status === 401) {
             clearAuthentication("Your FC Uno sign-in is invalid or expired.", false);
@@ -914,6 +952,7 @@ export async function GET(request: Request) {
             state.authenticated = true;
             showAuthenticatedApp();
             await loadTemplates();
+            warmInsertionDependencies();
           } catch (error) {
             if (!state.authSession) return;
             state.authenticated = false;
@@ -926,12 +965,86 @@ export async function GET(request: Request) {
           }
         }
 
+        async function validateCookieAuthenticationAndLoad() {
+          var validationGeneration = state.authGeneration + 1;
+          state.authGeneration = validationGeneration;
+          try {
+            var response = await fetch(AUTH_DIALOG_URL + "?mode=session", {
+              cache: "no-store",
+              credentials: "include"
+            });
+            var validation = await response.json().catch(function () {
+              return {};
+            });
+            if (validationGeneration !== state.authGeneration) return false;
+            if (!response.ok) return false;
+            applyCookieAuthSession(validation, false);
+            state.authenticated = true;
+            showAuthenticatedApp();
+            await loadTemplates();
+            warmInsertionDependencies();
+            return true;
+          } catch (error) {
+            if (validationGeneration !== state.authGeneration) return false;
+            return false;
+          }
+        }
+
+        async function establishCookieAuthenticationAndLoad() {
+          var session = currentAuthSession();
+          if (!session || state.authMode !== "bearer") {
+            throw new Error("Sign in to FC Uno to continue.");
+          }
+          var generation = state.authGeneration;
+          var response = await fetch(AUTH_DIALOG_URL, {
+            method: "POST",
+            cache: "no-store",
+            credentials: "include",
+            headers: {
+              Authorization: "Bearer " + session.token,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ action: "establish-taskpane-session" })
+          });
+          var validation = await response.json().catch(function () {
+            return {};
+          });
+          if (generation !== state.authGeneration ||
+              state.authMode !== "bearer" ||
+              state.authSession !== session) {
+            throw new Error("The FC Uno sign-in changed while loading data.");
+          }
+          if (!response.ok) {
+            throw new Error(
+              validation.message || "FC Uno could not keep this sign-in."
+            );
+          }
+          applyCookieAuthSession(validation, false);
+          state.authenticated = true;
+          showAuthenticatedApp();
+          await loadTemplates();
+          warmInsertionDependencies();
+        }
+
         function acceptDialogMessage(event) {
           try {
             var message = JSON.parse(String(event && event.message || ""));
             storeAuthSession(message);
             closeAuthDialog();
-            validateAuthenticationAndLoad();
+            establishCookieAuthenticationAndLoad().catch(function (error) {
+              if (!state.authSession) return;
+              if (state.authMode === "bearer") {
+                validateAuthenticationAndLoad();
+                return;
+              }
+              state.authenticated = false;
+              showAuthenticationState(
+                error && error.message
+                  ? error.message
+                  : "FC Uno could not keep this sign-in.",
+                false
+              );
+            });
           } catch (error) {
             closeAuthDialog();
             clearAuthentication(
@@ -1228,6 +1341,9 @@ export async function GET(request: Request) {
             row.className = "templateRow" + (template.id === state.selectedId ? " active" : "");
             row.addEventListener("click", function () {
               state.selectedId = template.id;
+              loadTemplateDetail(template.id, false).catch(function () {
+                // The insertion path reports a fresh detail error if preloading fails.
+              });
               renderTemplates();
             });
             row.addEventListener("dblclick", function () {
@@ -1824,6 +1940,15 @@ export async function GET(request: Request) {
           return graphClientPromise;
         }
 
+        function warmInsertionDependencies() {
+          loadRecipientMap(true).catch(function () {
+            // A click retries and reports any current certification problem.
+          });
+          ensureGraphClient().catch(function () {
+            // A click retries and reports any current Microsoft auth problem.
+          });
+        }
+
         function graphAccountMatchesMailbox(account) {
           var mailboxAddress = mailboxLoginHint();
           var accountAddress = String(account && account.username || "").trim().toLowerCase();
@@ -1887,7 +2012,7 @@ export async function GET(request: Request) {
             throw await readGraphError(response, "Microsoft Graph could not create the new draft.");
           }
           var draft = await response.json();
-          if (!draft || !draft.id || draft.isDraft !== true) {
+          if (!draft || !draft.id || draft.isDraft !== true || !draft.webLink) {
             throw new Error("Microsoft Graph returned an invalid new draft.");
           }
           return draft;
@@ -1905,34 +2030,68 @@ export async function GET(request: Request) {
           return response.ok;
         }
 
-        function graphDraftEwsId(draftId) {
-          var office = window.Office;
-          var mailbox = office && office.context && office.context.mailbox;
-          var restVersion = office && office.MailboxEnums && office.MailboxEnums.RestVersion;
-          if (!mailbox ||
-              typeof mailbox.convertToEwsId !== "function" ||
-              !restVersion ||
-              !restVersion.v2_0) {
-            throw new Error("This Outlook client cannot open the new draft.");
+        function reserveNewMessageWindow() {
+          var popup = window.open(
+            "about:blank",
+            "_blank",
+            "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes"
+          );
+          if (!popup) {
+            throw new Error(
+              "Outlook blocked the new message window. Allow pop-ups for Outlook and try again."
+            );
           }
-          return mailbox.convertToEwsId(draftId, restVersion.v2_0);
+          try {
+            popup.document.title = "Preparing Outlook message";
+            popup.document.body.style.cssText =
+              "margin:0;display:grid;min-height:100vh;place-items:center;" +
+              "background:#f4f6f8;color:#172534;font:600 15px Roboto,Arial,sans-serif";
+            popup.document.body.textContent = "Preparing your Outlook message...";
+          } catch (error) {
+            // The reserved window can still be navigated if its placeholder cannot be styled.
+          }
+          return popup;
         }
 
-        async function displayGraphDraft(draftId) {
-          var office = window.Office;
-          var mailbox = office && office.context && office.context.mailbox;
-          var ewsId = graphDraftEwsId(draftId);
-          if (mailbox && typeof mailbox.displayMessageFormAsync === "function") {
-            await officeAsync(function (done) {
-              mailbox.displayMessageFormAsync(ewsId, done);
-            });
-            return;
+        function closeReservedNewMessageWindow(popup) {
+          if (!popup || popup.closed) return;
+          try {
+            popup.close();
+          } catch (error) {
+            // The browser may already have released the placeholder window.
           }
-          if (mailbox && typeof mailbox.displayMessageForm === "function") {
-            mailbox.displayMessageForm(ewsId);
-            return;
+        }
+
+        function trustedOutlookDraftWebLink(draft) {
+          var parsed;
+          try {
+            parsed = new URL(String(draft && draft.webLink || ""));
+          } catch (error) {
+            throw new Error("Microsoft Graph returned an invalid Outlook message link.");
           }
-          throw new Error("This Outlook client cannot open the new draft.");
+          var hostname = parsed.hostname.toLowerCase();
+          var trustedHosts = [
+            "outlook.office.com",
+            "outlook.office365.com",
+            "outlook.cloud.microsoft"
+          ];
+          var trusted = trustedHosts.some(function (host) {
+            return hostname === host || hostname.endsWith("." + host);
+          });
+          if (parsed.protocol !== "https:" || !trusted) {
+            throw new Error("Microsoft Graph returned an untrusted Outlook message link.");
+          }
+          parsed.searchParams.set("ispopout", "1");
+          return parsed.toString();
+        }
+
+        function openGraphDraftInReservedWindow(popup, draft) {
+          if (!popup || popup.closed) {
+            throw new Error(
+              "The new Outlook message window was closed before loading completed."
+            );
+          }
+          popup.location.replace(trustedOutlookDraftWebLink(draft));
         }
 
         async function insertSelectedTemplate() {
@@ -1942,8 +2101,20 @@ export async function GET(request: Request) {
             return;
           }
 
+          var composeWindow;
+          try {
+            composeWindow = reserveNewMessageWindow();
+          } catch (error) {
+            notice(
+              error && error.message
+                ? error.message
+                : "Outlook could not open a new message window.",
+              "error"
+            );
+            return;
+          }
           state.inserting = true;
-          notice("Loading template...", "");
+          notice("Preparing template and certified recipients...", "");
           var graphDraft = null;
           var graphAccessToken = "";
           var mutationStarted = false;
@@ -1951,10 +2122,14 @@ export async function GET(request: Request) {
           var reservationRecorded = false;
           var auditContext = null;
           try {
-            var template = await loadTemplateDetail(state.selectedId, true);
+            var prepared = await Promise.all([
+              loadTemplateDetail(state.selectedId, false),
+              loadRecipientMap(true),
+              acquireGraphAccessToken()
+            ]);
+            var template = prepared[0];
+            graphAccessToken = prepared[2];
             if (!template) throw new Error("Template not found.");
-            notice("Loading certified recipients...", "");
-            await loadRecipientMap(true);
             var toRecipients = resolveStoredRecipientRefs(template, "to");
             var ccRecipients = resolveStoredRecipientRefs(template, "cc");
             var bccRecipients = resolveStoredRecipientRefs(template, "bcc");
@@ -1977,7 +2152,6 @@ export async function GET(request: Request) {
             );
             reservationRecorded = true;
             notice("Creating a new Outlook message...", "");
-            graphAccessToken = await acquireGraphAccessToken();
             graphDraft = await createGraphDraft(
               graphAccessToken,
               buildGraphDraftPayload(
@@ -1988,7 +2162,7 @@ export async function GET(request: Request) {
               )
             );
             mutationStarted = true;
-            await displayGraphDraft(graphDraft.id);
+            openGraphDraftInReservedWindow(composeWindow, graphDraft);
             mutationCompleted = true;
             try {
               await recordInsertionAuditEvent(
@@ -2014,6 +2188,7 @@ export async function GET(request: Request) {
               );
               return;
             }
+            closeReservedNewMessageWindow(composeWindow);
             var outcome = "failed-preserved";
             var recoveryMessage = " The original Outlook draft was not changed.";
             if (mutationStarted && graphDraft && graphAccessToken) {
@@ -2052,6 +2227,9 @@ export async function GET(request: Request) {
             );
           } finally {
             state.inserting = false;
+            if (!mutationCompleted) {
+              closeReservedNewMessageWindow(composeWindow);
+            }
           }
         }
 
@@ -2167,8 +2345,10 @@ export async function GET(request: Request) {
         els.signInButton.addEventListener("click", openAuthDialog);
         els.signOutButton.addEventListener("click", signOut);
 
-        function initialiseTaskpane() {
+        async function initialiseTaskpane() {
           clearConfidentialState(false);
+          showAuthenticationState("Checking your FC Uno sign-in...", false);
+          if (await validateCookieAuthenticationAndLoad()) return;
           var restored = restoreAuthSession();
           if (!restored) {
             clearAuthentication("", false);

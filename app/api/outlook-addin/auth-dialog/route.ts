@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server"
 import {
+  OUTLOOK_ADDIN_COOKIE_NAME,
   createOutlookAddinAdminSession,
+  expiredOutlookAddinCookieOptions,
   getAdminRequestBearerToken,
-  requireAdminPagePermissionForRequest,
+  getOutlookAddinRequestCookieToken,
+  outlookAddinCookieOptions,
   requireAdminPasswordResetSessionForRequest,
+  requireOutlookAddinPagePermissionForRequest,
   validateOutlookAddinCredentials,
 } from "@/lib/adminAuth"
 import { revokeDatabaseAdminSession } from "@/lib/adminSessions"
@@ -86,11 +90,33 @@ async function verifyOutlookPermission(
   const bearerRequest = new Request(requestUrl, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  await requireAdminPagePermissionForRequest(
+  await requireOutlookAddinPagePermissionForRequest(
     bearerRequest,
     "email-templates",
     "view",
   )
+}
+
+function setOutlookAddinCookie(
+  response: NextResponse,
+  token: string,
+  expiresAt: string,
+) {
+  response.cookies.set(
+    OUTLOOK_ADDIN_COOKIE_NAME,
+    token,
+    outlookAddinCookieOptions(expiresAt),
+  )
+  return response
+}
+
+function clearOutlookAddinCookie(response: NextResponse) {
+  response.cookies.set(
+    OUTLOOK_ADDIN_COOKIE_NAME,
+    "",
+    expiredOutlookAddinCookieOptions(),
+  )
+  return response
 }
 
 export async function POST(request: Request) {
@@ -114,11 +140,44 @@ export async function POST(request: Request) {
 
   if (action === "logout") {
     try {
-      const token = getAdminRequestBearerToken(request)
+      const token =
+        getAdminRequestBearerToken(request) ||
+        getOutlookAddinRequestCookieToken(request)
       if (token) await revokeDatabaseAdminSession(token)
-      return NextResponse.json(
-        { success: true },
-        { headers: privateHeaders() },
+      return clearOutlookAddinCookie(
+        NextResponse.json(
+          { success: true },
+          { headers: privateHeaders() },
+        ),
+      )
+    } catch (error) {
+      return errorResponse(error)
+    }
+  }
+
+  if (action === "establish-taskpane-session") {
+    try {
+      const token = getAdminRequestBearerToken(request)
+      if (!token) throw new Error("Unauthorized")
+      const session = await requireOutlookAddinPagePermissionForRequest(
+        request,
+        "email-templates",
+        "view",
+      )
+      if (!session.expiresAt) throw new Error("Unauthorized")
+
+      return setOutlookAddinCookie(
+        NextResponse.json(
+          {
+            authenticated: true,
+            username: session.username,
+            displayName: session.displayName || session.username,
+            expiresAt: session.expiresAt,
+          },
+          { headers: privateHeaders() },
+        ),
+        token,
+        session.expiresAt,
       )
     } catch (error) {
       return errorResponse(error)
@@ -219,12 +278,12 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   if (url.searchParams.get("mode") === "session") {
     try {
-      const session = await requireAdminPagePermissionForRequest(
+      const session = await requireOutlookAddinPagePermissionForRequest(
         request,
         "email-templates",
         "view",
       )
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           authenticated: true,
           username: session.username,
@@ -233,8 +292,19 @@ export async function GET(request: Request) {
         },
         { headers: privateHeaders() },
       )
+      const cookieToken = getOutlookAddinRequestCookieToken(request)
+      return cookieToken && session.expiresAt
+        ? setOutlookAddinCookie(
+            response,
+            cookieToken,
+            session.expiresAt,
+          )
+        : response
     } catch (error) {
-      return errorResponse(error)
+      const response = errorResponse(error)
+      return getOutlookAddinRequestCookieToken(request)
+        ? clearOutlookAddinCookie(response)
+        : response
     }
   }
 

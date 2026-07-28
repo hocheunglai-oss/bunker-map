@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
+import { requireOutlookAddinPagePermissionForRequest } from "@/lib/adminAuth"
 import { loadEmailTemplate, loadTemplateIndex } from "@/lib/emailTemplates"
 
 export const dynamic = "force-dynamic"
@@ -62,7 +62,7 @@ function taskpaneTemplate(template: Awaited<ReturnType<typeof loadEmailTemplate>
 
 export async function GET(request: Request) {
   try {
-    await requireAdminPagePermissionForRequest(
+    await requireOutlookAddinPagePermissionForRequest(
       request,
       "email-templates",
       "view",

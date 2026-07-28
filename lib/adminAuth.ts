@@ -22,6 +22,7 @@ import {
 
 export const ADMIN_COOKIE_NAME = "bunker_admin_auth"
 export const ADMIN_USER_COOKIE_NAME = "bunker_admin_user"
+export const OUTLOOK_ADDIN_COOKIE_NAME = "bunker_outlook_addin_auth"
 
 export type AdminSession = {
   authenticated: boolean
@@ -75,6 +76,29 @@ function expiredCookieOptions() {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
+    maxAge: 0,
+  }
+}
+
+export function outlookAddinCookieOptions(expiresAt: string) {
+  return {
+    httpOnly: true,
+    sameSite: "none" as const,
+    secure: true,
+    partitioned: true,
+    path: "/api",
+    maxAge: OUTLOOK_ADDIN_SESSION_DURATION_SECONDS,
+    expires: new Date(expiresAt),
+  }
+}
+
+export function expiredOutlookAddinCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "none" as const,
+    secure: true,
+    partitioned: true,
+    path: "/api",
     maxAge: 0,
   }
 }
@@ -203,6 +227,23 @@ export function getAdminRequestBearerToken(request: Request) {
   return match[1]
 }
 
+export function getOutlookAddinRequestCookieToken(request: Request) {
+  const cookieHeader = request.headers.get("cookie")
+  if (!cookieHeader) return null
+
+  for (const part of cookieHeader.split(";")) {
+    const separator = part.indexOf("=")
+    if (separator < 0) continue
+    if (part.slice(0, separator).trim() !== OUTLOOK_ADDIN_COOKIE_NAME) {
+      continue
+    }
+    const token = part.slice(separator + 1).trim()
+    return /^[A-Za-z0-9_-]{40,256}$/.test(token) ? token : null
+  }
+
+  return null
+}
+
 async function resolveAdminRequestSession(
   request: Request,
 ): Promise<ResolvedAdminSession> {
@@ -214,6 +255,20 @@ async function resolveAdminRequestSession(
   if (!token) return unresolvedAdminSession(pages)
 
   return resolveAdminSessionToken(token, pages)
+}
+
+async function resolveOutlookAddinRequestSession(
+  request: Request,
+): Promise<ResolvedAdminSession> {
+  const authorization = request.headers.get("authorization")
+  if (authorization !== null) {
+    return resolveAdminRequestSession(request)
+  }
+
+  const token = getOutlookAddinRequestCookieToken(request)
+  if (!token) return resolveAdminSession()
+
+  return resolveAdminSessionToken(token, await getDiscoveredAdminPages())
 }
 
 function requireAuthenticatedResolvedSession(
@@ -337,6 +392,26 @@ export async function requireAdminPagePermissionForRequest(
 ) {
   const resolved = requireAuthenticatedResolvedSession(
     await resolveAdminRequestSession(request),
+  )
+  const session = resolved.publicSession
+
+  if (!hasAdminPagePermission(session, pageId, access)) {
+    throw new Error("Forbidden")
+  }
+
+  return {
+    ...session,
+    expiresAt: resolved.expiresAt,
+  }
+}
+
+export async function requireOutlookAddinPagePermissionForRequest(
+  request: Request,
+  pageId: string,
+  access: "view" | "edit" = "view",
+) {
+  const resolved = requireAuthenticatedResolvedSession(
+    await resolveOutlookAddinRequestSession(request),
   )
   const session = resolved.publicSession
 

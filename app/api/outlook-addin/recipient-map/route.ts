@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
-import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
+import { requireOutlookAddinPagePermissionForRequest } from "@/lib/adminAuth"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -214,7 +214,7 @@ function authError(error: unknown) {
 
 export async function GET(request: Request) {
   try {
-    await requireAdminPagePermissionForRequest(
+    await requireOutlookAddinPagePermissionForRequest(
       request,
       "email-templates",
       "view",

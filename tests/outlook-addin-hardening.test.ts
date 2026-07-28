@@ -73,7 +73,7 @@ test("all Outlook reads are confidential and permission-gated", async () => {
   )) {
     assert.match(
       value,
-      /requireAdminPagePermissionForRequest\([\s\S]*?request,[\s\S]*?"email-templates",[\s\S]*?"view"/,
+      /requireOutlookAddinPagePermissionForRequest\([\s\S]*?request,[\s\S]*?"email-templates",[\s\S]*?"view"/,
       `${name} must require Outlook Templates view permission`,
     )
     assert.doesNotMatch(
@@ -86,13 +86,13 @@ test("all Outlook reads are confidential and permission-gated", async () => {
 
   assert.ok(
     source.templates.indexOf(
-      "await requireAdminPagePermissionForRequest(",
+      "await requireOutlookAddinPagePermissionForRequest(",
     ) < source.templates.indexOf("loadEmailTemplate(id)"),
     "permission must be checked before any template detail read",
   )
   assert.ok(
     source.templates.indexOf(
-      "await requireAdminPagePermissionForRequest(",
+      "await requireOutlookAddinPagePermissionForRequest(",
     ) < source.templates.indexOf("loadTemplateIndex()"),
     "permission must be checked before any template index read",
   )
@@ -209,10 +209,10 @@ test("taskpane caches are versioned, bounded, and never authorize insertion offl
     taskpane,
     /!state\.recipientMapFromNetwork[\s\S]*state\.recipientMapExpiresAt <= Date\.now\(\)/,
   )
-  assert.match(taskpane, /await loadRecipientMap\(true\)/)
-  assert.match(taskpane, /loadTemplateDetail\(state\.selectedId, true\)/)
+  assert.match(taskpane, /loadRecipientMap\(true\)/)
+  assert.match(taskpane, /loadTemplateDetail\(state\.selectedId, false\)/)
   assert.match(taskpane, /cache: "no-store"/)
-  assert.match(taskpane, /credentials: "omit"/)
+  assert.match(taskpane, /credentials: state\.authMode === "cookie" \? "include" : "omit"/)
   assert.match(taskpane, /headers\.Authorization = "Bearer " \+ session\.token/)
   assert.match(
     taskpane,
@@ -248,9 +248,13 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   assert.match(taskpane, /acquireTokenPopup\(request\)/)
   assert.match(taskpane, /graphAccountMatchesMailbox\(result\.account\)/)
   assert.match(taskpane, /https:\/\/graph\.microsoft\.com\/v1\.0\/me\/messages/)
-  assert.match(taskpane, /mailbox\.convertToEwsId\(draftId, restVersion\.v2_0\)/)
-  assert.match(taskpane, /mailbox\.displayMessageFormAsync\(ewsId, done\)/)
-  assert.match(taskpane, /mailbox\.displayMessageForm\(ewsId\)/)
+  assert.match(taskpane, /function reserveNewMessageWindow\(\)/)
+  assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
+  assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft\)/)
+  assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
+  assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/)
+  assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
+  assert.doesNotMatch(taskpane, /displayMessageForm\(ewsId\)/)
   assert.match(taskpane, /async function deleteGraphDraft\(accessToken, draftId\)/)
   assert.doesNotMatch(taskpane, /role="alertdialog"/)
   assert.doesNotMatch(taskpane, />Keep draft</)
@@ -258,7 +262,7 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   assert.doesNotMatch(taskpane, /confirmDraftReplacement/)
   assert.match(
     taskpane,
-    /await loadRecipientMap\(true\)[\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
+    /Promise\.all\([\s\S]*?loadRecipientMap\(true\)[\s\S]*?state\.recipientMapExpiresAt <= Date\.now\(\)[\s\S]*?Reserving certified insertion/,
   )
   assert.match(taskpane, /state\.inserting = true/)
   assert.match(taskpane, /state\.inserting = false/)
@@ -301,7 +305,10 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   )
   const graphCreate = insertion.indexOf("await createGraphDraft(", reserve)
   const mutation = insertion.indexOf("mutationStarted = true;", graphCreate)
-  const display = insertion.indexOf("await displayGraphDraft(graphDraft.id);", mutation)
+  const display = insertion.indexOf(
+    "openGraphDraftInReservedWindow(composeWindow, graphDraft);",
+    mutation,
+  )
   const completed = insertion.indexOf("mutationCompleted = true;", display)
   const insertedTerminal = insertion.indexOf(
     'recordInsertionAuditEvent(\n                auditContext,\n                "terminal",\n                "inserted"',
@@ -406,13 +413,26 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
         graphActions.push("token");
         return "token";
       }
+      function reserveNewMessageWindow() {
+        graphActions.push("reserve-window");
+        return { closed: false };
+      }
+      function closeReservedNewMessageWindow(popup) {
+        if (!popup || popup.closed) return;
+        popup.closed = true;
+        graphActions.push("close-window");
+      }
       function buildGraphDraftPayload() { return { subject: "Subject" }; }
       async function createGraphDraft() {
         graphActions.push("create");
         if (config.failDraftCreation) throw new Error("Draft create failed.");
-        return { id: "draft-1", isDraft: true };
+        return {
+          id: "draft-1",
+          isDraft: true,
+          webLink: "https://outlook.office.com/mail/deeplink/compose"
+        };
       }
-      async function displayGraphDraft() {
+      function openGraphDraftInReservedWindow() {
         graphActions.push("display");
         if (config.failDraftDisplay) throw new Error("Draft display failed.");
       }
@@ -433,7 +453,11 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
 
   const reservationFailure = makeHarness({ failReservation: true })
   await reservationFailure.run()
-  assert.deepEqual(reservationFailure.graphActions, [])
+  assert.deepEqual(reservationFailure.graphActions, [
+    "reserve-window",
+    "token",
+    "close-window",
+  ])
   assert.deepEqual(reservationFailure.auditEvents, [
     { phase: "reserved", outcome: null },
   ])
@@ -441,7 +465,12 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
 
   const terminalFailure = makeHarness({ failInsertedTerminal: true })
   await terminalFailure.run()
-  assert.deepEqual(terminalFailure.graphActions, ["token", "create", "display"])
+  assert.deepEqual(terminalFailure.graphActions, [
+    "reserve-window",
+    "token",
+    "create",
+    "display",
+  ])
   assert.deepEqual(terminalFailure.auditEvents, [
     { phase: "reserved", outcome: null },
     { phase: "terminal", outcome: "inserted" },
@@ -457,9 +486,11 @@ test("taskpane audit protocol dynamically fails closed and cleans up an unopened
   })
   await displayFailure.run()
   assert.deepEqual(displayFailure.graphActions, [
+    "reserve-window",
     "token",
     "create",
     "display",
+    "close-window",
     "delete",
   ])
   assert.deepEqual(displayFailure.auditEvents, [

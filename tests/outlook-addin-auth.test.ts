@@ -48,9 +48,18 @@ test("request-aware admin auth prefers strict bearer validation and preserves co
   assert.match(adminAuth, /\^Bearer \(\[A-Za-z0-9_-\]\{40,256\}\)\$\/i/)
   assert.match(adminAuth, /requireAdminPagePermissionForRequest/)
   assert.match(adminAuth, /requireAdminPasswordResetSessionForRequest/)
+  assert.match(adminAuth, /requireOutlookAddinPagePermissionForRequest/)
   assert.match(adminAuth, /getDatabaseAdminUserByIdStrict/)
   assert.match(adminUsers, /if \(error\) throw error[\s\S]*if \(!data\) return null/)
-  assert.doesNotMatch(adminAuth, /sameSite:\s*"none"/i)
+  assert.match(adminAuth, /function cookieOptions\([\s\S]*?sameSite: "lax"/)
+  assert.match(
+    adminAuth,
+    /function outlookAddinCookieOptions\([\s\S]*?sameSite: "none"[\s\S]*?secure: true[\s\S]*?partitioned: true/,
+  )
+  assert.match(
+    adminAuth,
+    /resolveOutlookAddinRequestSession\([\s\S]*?getOutlookAddinRequestCookieToken\(request\)/,
+  )
 })
 
 test("all confidential Outlook APIs accept bearer-or-cookie request auth", async () => {
@@ -63,7 +72,7 @@ test("all confidential Outlook APIs accept bearer-or-cookie request auth", async
   })) {
     assert.match(
       source,
-      /requireAdminPagePermissionForRequest\([\s\S]*?request,[\s\S]*?"email-templates",[\s\S]*?"view"/,
+      /requireOutlookAddinPagePermissionForRequest\([\s\S]*?request,[\s\S]*?"email-templates",[\s\S]*?"view"/,
       `${name} must enforce current Outlook Templates permission`,
     )
     assert.match(source, /private, no-store, max-age=0/)
@@ -124,16 +133,24 @@ test("public taskpane stays inert until a protected bearer validation succeeds",
   assert.match(taskpane, /localStorage\.removeItem\(RECIPIENT_MAP_CACHE_KEY\)/)
 })
 
-test("taskpane uses Office Dialog API and one stale-safe bearer fetch path", async () => {
-  const { authDialog, taskpane } = await sources()
+test("taskpane uses Office Dialog API with a partitioned cookie and stale-safe protected fetch path", async () => {
+  const { adminAuth, authDialog, taskpane } = await sources()
 
   assert.match(taskpane, /displayDialogAsync\(/)
   assert.match(taskpane, /displayInIframe: false/)
   assert.match(taskpane, /DialogMessageReceived/)
   assert.match(taskpane, /DialogEventReceived/)
-  assert.doesNotMatch(taskpane, /window\.open\(/)
+  assert.doesNotMatch(authDialog, /window\.open\(/)
+  assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
   assert.match(taskpane, /window\.localStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
   assert.match(taskpane, /window\.sessionStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
+  assert.match(taskpane, /action: "establish-taskpane-session"/)
+  assert.match(taskpane, /credentials: "include"/)
+  assert.match(taskpane, /state\.authMode === "cookie"/)
+  assert.match(authDialog, /setOutlookAddinCookie\(/)
+  assert.match(authDialog, /clearOutlookAddinCookie\(/)
+  assert.match(adminAuth, /OUTLOOK_ADDIN_COOKIE_NAME/)
+  assert.match(adminAuth, /partitioned: true/)
   assert.match(taskpane, /AUTH_SESSION_MAX_TTL_MS = 400 \* 24 \* 60 \* 60 \* 1000/)
   assert.match(taskpane, /refreshAuthSessionExpiry\(validation\.expiresAt\)/)
   assert.match(authDialog, /expiresAt: session\.expiresAt/)
@@ -141,7 +158,10 @@ test("taskpane uses Office Dialog API and one stale-safe bearer fetch path", asy
   assert.match(taskpane, /JSON\.stringify\(\{ action: "logout" \}\)/)
   assert.match(authDialog, /if \(action === "logout"\)[\s\S]*?revokeDatabaseAdminSession\(token\)/)
   assert.match(taskpane, /headers\.Authorization = "Bearer " \+ session\.token/)
-  assert.match(taskpane, /credentials: "omit"/)
+  assert.match(
+    taskpane,
+    /credentials: state\.authMode === "cookie" \? "include" : "omit"/,
+  )
 
   for (const protectedCall of [
     "RECIPIENT_MAP_URL",
@@ -152,7 +172,7 @@ test("taskpane uses Office Dialog API and one stale-safe bearer fetch path", asy
     assert.match(
       taskpane,
       new RegExp(`authenticatedFetch\\(\\s*${protectedCall}`),
-      `${protectedCall} must use the shared bearer wrapper`,
+      `${protectedCall} must use the shared protected wrapper`,
     )
   }
 
