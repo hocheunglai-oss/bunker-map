@@ -136,21 +136,31 @@ export async function getDatabaseAdminSession(
 
   const row = data as AdminSessionRow
   const lastSeenAt = Date.parse(row.last_seen_at)
+  let expiresAt = row.expires_at
   if (
     Number.isFinite(lastSeenAt) &&
     now.getTime() - lastSeenAt >= ADMIN_SESSION_TOUCH_INTERVAL_MS
   ) {
-    await supabase
+    const renewedExpiry = getAdminSessionExpiry(now)
+    const { data: renewedSession, error: renewalError } = await supabase
       .from("admin_sessions")
-      .update({ last_seen_at: now.toISOString() })
+      .update({
+        last_seen_at: now.toISOString(),
+        expires_at: renewedExpiry,
+      })
       .eq("id", row.id)
       .is("revoked_at", null)
+      .select("expires_at")
+      .single()
+
+    if (renewalError) throw renewalError
+    expiresAt = String(renewedSession.expires_at)
   }
 
   return {
     id: row.id,
     adminUserId: row.admin_user_id,
-    expiresAt: row.expires_at,
+    expiresAt,
   }
 }
 
