@@ -519,7 +519,6 @@ export async function GET(request: Request) {
         var TEMPLATE_DETAIL_URL = ${JSON.stringify(templateDetailUrl)};
         var RECIPIENT_MAP_URL = ${JSON.stringify(recipientMapUrl)};
         var INSERTION_AUDIT_URL = ${JSON.stringify(insertionAuditUrl)};
-        var OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH = 30000;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -548,6 +547,8 @@ export async function GET(request: Request) {
           selectedId: "",
           query: "",
           inserting: false,
+          itemGeneration: 0,
+          itemChangedHandlerRegistered: false,
           authenticated: false,
           authSession: null,
           authMode: "none",
@@ -1350,6 +1351,88 @@ export async function GET(request: Request) {
           renderTemplates();
         }
 
+        function currentComposeItem() {
+          var office = window.Office;
+          var item = office && office.context && office.context.mailbox &&
+            office.context.mailbox.item;
+          var canSetSubject =
+            item && item.subject && typeof item.subject.setAsync === "function";
+          var canReplaceBody =
+            item && item.body && typeof item.body.setAsync === "function";
+          return canSetSubject && canReplaceBody ? item : null;
+        }
+
+        function mailboxItemIdentity(item) {
+          return String(item && item.itemId || "").trim();
+        }
+
+        function captureComposeContext() {
+          var item = currentComposeItem();
+          if (!item) return null;
+          return {
+            item: item,
+            generation: state.itemGeneration,
+            itemIdentity: mailboxItemIdentity(item)
+          };
+        }
+
+        function requireComposeContext(context) {
+          var item = currentComposeItem();
+          var currentIdentity = mailboxItemIdentity(item);
+          if (
+            !context ||
+            !item ||
+            state.itemGeneration !== context.generation ||
+            (
+              item !== context.item &&
+              (
+                !context.itemIdentity ||
+                !currentIdentity ||
+                currentIdentity !== context.itemIdentity
+              )
+            )
+          ) {
+            throw new Error(
+              "The selected Outlook message changed. No further template fields were changed."
+            );
+          }
+          return item;
+        }
+
+        function handleMailboxItemChanged() {
+          state.itemGeneration += 1;
+          if (state.inserting) {
+            notice(
+              "The selected Outlook message changed. The in-progress insertion was stopped.",
+              "error"
+            );
+          }
+        }
+
+        function registerMailboxItemChangedHandler() {
+          if (state.itemChangedHandlerRegistered) return;
+          var office = window.Office;
+          var mailbox = office && office.context && office.context.mailbox;
+          if (
+            !mailbox ||
+            typeof mailbox.addHandlerAsync !== "function" ||
+            !office.EventType ||
+            !office.EventType.ItemChanged
+          ) {
+            return;
+          }
+          mailbox.addHandlerAsync(
+            office.EventType.ItemChanged,
+            handleMailboxItemChanged,
+            function (result) {
+              state.itemChangedHandlerRegistered = Boolean(
+                result &&
+                result.status === office.AsyncResultStatus.Succeeded
+              );
+            }
+          );
+        }
+
         function officeAsync(call) {
           return new Promise(function (resolve, reject) {
             call(function (result) {
@@ -1646,6 +1729,221 @@ export async function GET(request: Request) {
           return recipients;
         }
 
+        async function setRecipients(recipientApi, recipients) {
+          if (!recipientApi || typeof recipientApi.setAsync !== "function") {
+            throw new Error("This Outlook client cannot replace recipients.");
+          }
+          await officeAsync(function (done) {
+            recipientApi.setAsync(recipients, done);
+          });
+        }
+
+        async function getRecipients(recipientApi) {
+          if (!recipientApi || typeof recipientApi.getAsync !== "function") {
+            throw new Error("This Outlook client cannot read current recipients.");
+          }
+          var recipients = await officeAsync(function (done) {
+            recipientApi.getAsync(done);
+          });
+          return Array.isArray(recipients) ? recipients : [];
+        }
+
+        function bodyOptionsForType(office, bodyType) {
+          var isHtml = bodyType === office.MailboxEnums.BodyType.Html;
+          var getOptions = {};
+          var setOptions = {
+            coercionType: isHtml
+              ? office.CoercionType.Html
+              : office.CoercionType.Text
+          };
+          if (
+            office.MailboxEnums &&
+            office.MailboxEnums.BodyMode &&
+            office.MailboxEnums.BodyMode.HostConfig
+          ) {
+            getOptions.bodyMode = office.MailboxEnums.BodyMode.HostConfig;
+            setOptions.bodyMode = office.MailboxEnums.BodyMode.HostConfig;
+          }
+          return {
+            isHtml: isHtml,
+            coercionType: setOptions.coercionType,
+            getOptions: getOptions,
+            setOptions: setOptions
+          };
+        }
+
+        async function snapshotDraft(item, office) {
+          if (
+            !item ||
+            !item.subject ||
+            typeof item.subject.getAsync !== "function" ||
+            !item.body ||
+            typeof item.body.getAsync !== "function" ||
+            typeof item.body.getTypeAsync !== "function"
+          ) {
+            throw new Error("This Outlook client cannot create a safe draft snapshot.");
+          }
+          var bodyType = await officeAsync(function (done) {
+            item.body.getTypeAsync(done);
+          });
+          var bodyFormat = bodyOptionsForType(office, bodyType);
+          var subject = await officeAsync(function (done) {
+            item.subject.getAsync(done);
+          });
+          var to = await getRecipients(item.to);
+          var cc = await getRecipients(item.cc);
+          var bcc = await getRecipients(item.bcc);
+          var body = await officeAsync(function (done) {
+            item.body.getAsync(
+              bodyFormat.coercionType,
+              bodyFormat.getOptions,
+              done
+            );
+          });
+          return {
+            subject: String(subject || ""),
+            to: to,
+            cc: cc,
+            bcc: bcc,
+            body: String(body || ""),
+            bodyOptions: bodyFormat.setOptions,
+            isHtml: bodyFormat.isHtml
+          };
+        }
+
+        function draftContainsUserContent(snapshot) {
+          if (String(snapshot.subject || "").trim()) return true;
+          if (snapshot.to.length || snapshot.cc.length || snapshot.bcc.length) {
+            return true;
+          }
+          var bodyMarkup = String(snapshot.body || "")
+            .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+            .replace(/<script[\\s\\S]*?<\\/script>/gi, " ");
+          if (
+            /<(?:img|table|hr|object|embed|iframe|svg|canvas|video|audio|picture|source|v:shape|v:imagedata)\\b/i.test(
+              bodyMarkup
+            )
+          ) {
+            return true;
+          }
+          var bodyText = bodyMarkup
+            .replace(/<br\\s*\\/?>/gi, "\\n")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;|&#160;|&#x0*a0;/gi, " ")
+            .replace(/&amp;/gi, "&")
+            .replace(/\\s+/g, " ")
+            .trim();
+          if (!bodyText) return false;
+          var isStandardSignature =
+            bodyText.length <= 1400 &&
+            /best regards/i.test(bodyText) &&
+            /fratelli cosulich bunkers/i.test(bodyText) &&
+            /@cosulich\\.com\\.hk/i.test(bodyText);
+          return !isStandardSignature;
+        }
+
+        function copyDraftSnapshot(snapshot) {
+          return {
+            subject: String(snapshot.subject || ""),
+            to: Array.isArray(snapshot.to) ? snapshot.to.slice() : [],
+            cc: Array.isArray(snapshot.cc) ? snapshot.cc.slice() : [],
+            bcc: Array.isArray(snapshot.bcc) ? snapshot.bcc.slice() : [],
+            body: String(snapshot.body || ""),
+            bodyOptions: snapshot.bodyOptions,
+            isHtml: snapshot.isHtml === true
+          };
+        }
+
+        function draftRecipientKey(recipient) {
+          return [
+            String(recipient && recipient.displayName || ""),
+            String(recipient && recipient.emailAddress || ""),
+            String(recipient && recipient.recipientType || "")
+          ].join("\\u0000");
+        }
+
+        function draftRecipientListsEqual(left, right) {
+          if (
+            !Array.isArray(left) ||
+            !Array.isArray(right) ||
+            left.length !== right.length
+          ) {
+            return false;
+          }
+          return left.every(function (recipient, index) {
+            return draftRecipientKey(recipient) ===
+              draftRecipientKey(right[index]);
+          });
+        }
+
+        function draftSnapshotsEqual(left, right) {
+          return Boolean(left && right) &&
+            String(left.subject || "") === String(right.subject || "") &&
+            draftRecipientListsEqual(left.to, right.to) &&
+            draftRecipientListsEqual(left.cc, right.cc) &&
+            draftRecipientListsEqual(left.bcc, right.bcc) &&
+            String(left.body || "") === String(right.body || "") &&
+            (left.isHtml === true) === (right.isHtml === true);
+        }
+
+        async function restoreDraft(item, snapshot, assertCurrentItem) {
+          var failures = [];
+          async function restore(label, action) {
+            try {
+              assertCurrentItem();
+              await action();
+            } catch (error) {
+              failures.push(label);
+            }
+          }
+          await restore("subject", function () {
+            return officeAsync(function (done) {
+              item.subject.setAsync(snapshot.subject, done);
+            });
+          });
+          await restore("To", function () {
+            return setRecipients(item.to, snapshot.to);
+          });
+          await restore("Cc", function () {
+            return setRecipients(item.cc, snapshot.cc);
+          });
+          await restore("Bcc", function () {
+            return setRecipients(item.bcc, snapshot.bcc);
+          });
+          await restore("body", function () {
+            return officeAsync(function (done) {
+              item.body.setAsync(snapshot.body, snapshot.bodyOptions, done);
+            });
+          });
+          if (failures.length) {
+            throw new Error(
+              "Draft restore was incomplete for: " + failures.join(", ") + "."
+            );
+          }
+        }
+
+        async function restoreDraftIfUnchanged(
+          composeContext,
+          office,
+          originalSnapshot,
+          addinWrittenSnapshot
+        ) {
+          if (!addinWrittenSnapshot) return false;
+          var item = requireComposeContext(composeContext);
+          var currentSnapshot = await snapshotDraft(item, office);
+          item = requireComposeContext(composeContext);
+          if (!draftSnapshotsEqual(currentSnapshot, addinWrittenSnapshot)) {
+            return false;
+          }
+          await restoreDraft(item, originalSnapshot, function () {
+            requireComposeContext(composeContext);
+          });
+          item = requireComposeContext(composeContext);
+          var restoredSnapshot = await snapshotDraft(item, office);
+          requireComposeContext(composeContext);
+          return draftSnapshotsEqual(restoredSnapshot, originalSnapshot);
+        }
+
         function validApiPayloadTime(data, maxTtlMs) {
           return networkPayloadTtlMs(data, maxTtlMs) > 0;
         }
@@ -1835,7 +2133,7 @@ export async function GET(request: Request) {
           throw lastError || new Error("The insertion attempt audit could not be recorded.");
         }
 
-        function composeRecipientAddress(recipient) {
+        function certifiedRecipientAddress(recipient) {
           var address = String(recipient && recipient.emailAddress || "").trim().toLowerCase();
           if (!/^[^@\\s]+@[^@\\s]+$/.test(address)) {
             throw new Error("A certified recipient has an invalid email address.");
@@ -1849,90 +2147,40 @@ export async function GET(request: Request) {
           });
         }
 
-        function buildOutlookNewMessageUrl(
+        function buildNewMessageForm(
           template,
           toRecipients,
           ccRecipients,
           bccRecipients
         ) {
-          var composeUrl = new URL(
-            "https://outlook.cloud.microsoft/mail/deeplink/compose"
-          );
-          [
-            ["to", toRecipients],
-            ["cc", ccRecipients],
-            ["bcc", bccRecipients]
-          ].forEach(function (entry) {
-            var addresses = entry[1].map(composeRecipientAddress);
-            if (addresses.length) {
-              composeUrl.searchParams.set(entry[0], addresses.join(";"));
-            }
-          });
-          var subject = String(template && template.subject || "");
-          var bodyText = String(template && template.bodyText || "");
-          if (subject) composeUrl.searchParams.set("subject", subject);
-          if (bodyText) composeUrl.searchParams.set("body", bodyText);
-          var url = composeUrl.toString();
-          if (url.length > OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH) {
-            throw new Error(
-              "This template is too large for a reliable Outlook new-message window. Shorten its body in FC Uno and try again."
-            );
-          }
-          return url;
+          return {
+            toRecipients: toRecipients.map(certifiedRecipientAddress),
+            ccRecipients: ccRecipients.map(certifiedRecipientAddress),
+            bccRecipients: bccRecipients.map(certifiedRecipientAddress),
+            subject: String(template && template.subject || ""),
+            htmlBody: String(template && template.bodyHtml || "<p></p>")
+          };
         }
 
-        function reserveNewMessageWindow() {
-          var popup = window.open(
-            "about:blank",
-            "_blank",
-            "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes"
-          );
-          if (!popup) {
-            throw new Error(
-              "Outlook blocked the new message window. Allow pop-ups for Outlook and try again."
-            );
-          }
-          try {
-            popup.document.title = "Preparing Outlook message";
-            popup.document.body.style.cssText =
-              "margin:0;display:grid;min-height:100vh;place-items:center;" +
-              "background:#f4f6f8;color:#172534;font:600 15px Roboto,Arial,sans-serif";
-            popup.document.body.textContent = "Preparing your Outlook message...";
-          } catch (error) {
-            // The reserved window can still be navigated if its placeholder cannot be styled.
-          }
-          return popup;
-        }
-
-        function closeReservedNewMessageWindow(popup) {
-          if (!popup || popup.closed) return;
-          try {
-            popup.close();
-          } catch (error) {
-            // The browser may already have released the placeholder window.
-          }
-        }
-
-        function openOutlookNewMessageInReservedWindow(popup, composeUrl) {
-          if (!popup || popup.closed) {
-            throw new Error(
-              "The new Outlook message window was closed before loading completed."
-            );
-          }
-          var parsed;
-          try {
-            parsed = new URL(String(composeUrl || ""));
-          } catch (error) {
-            throw new Error("Outlook could not build a valid new-message link.");
-          }
+        async function openSupportedNewMessageForm(messageForm) {
+          var office = window.Office;
+          var mailbox = office && office.context && office.context.mailbox;
           if (
-            parsed.protocol !== "https:" ||
-            parsed.hostname.toLowerCase() !== "outlook.cloud.microsoft" ||
-            parsed.pathname.toLowerCase() !== "/mail/deeplink/compose"
+            mailbox &&
+            typeof mailbox.displayNewMessageFormAsync === "function"
           ) {
-            throw new Error("Outlook could not verify the new-message destination.");
+            await officeAsync(function (done) {
+              mailbox.displayNewMessageFormAsync(messageForm, done);
+            });
+            return;
           }
-          popup.location.replace(parsed.toString());
+          if (mailbox && typeof mailbox.displayNewMessageForm === "function") {
+            mailbox.displayNewMessageForm(messageForm);
+            return;
+          }
+          throw new Error(
+            "Outlook can only open a separate template message from a reading pane. Open New mail to insert into a blank message."
+          );
         }
 
         async function insertSelectedTemplate() {
@@ -1941,21 +2189,13 @@ export async function GET(request: Request) {
             notice("A template insertion is already in progress.", "");
             return;
           }
-
-          var composeWindow;
-          try {
-            composeWindow = reserveNewMessageWindow();
-          } catch (error) {
-            notice(
-              error && error.message
-                ? error.message
-                : "Outlook could not open a new message window.",
-              "error"
-            );
-            return;
-          }
+          var office = window.Office;
+          var composeContext = captureComposeContext();
           state.inserting = true;
           notice("Preparing template and certified recipients...", "");
+          var originalSnapshot = null;
+          var addinWrittenSnapshot = null;
+          var mutationStarted = false;
           var mutationCompleted = false;
           var reservationRecorded = false;
           var auditContext = null;
@@ -1977,12 +2217,20 @@ export async function GET(request: Request) {
                 "The certified recipient map expired before the new message was opened. Try again."
               );
             }
-            var composeUrl = buildOutlookNewMessageUrl(
-              template,
-              toRecipients,
-              ccRecipients,
-              bccRecipients
-            );
+
+            var item = null;
+            if (composeContext) {
+              item = requireComposeContext(composeContext);
+              originalSnapshot = await snapshotDraft(item, office);
+              item = requireComposeContext(composeContext);
+              if (draftContainsUserContent(originalSnapshot)) {
+                notice(
+                  "This message already contains your own content. Start a blank New mail, then double click the template. Nothing was changed.",
+                  "error"
+                );
+                return;
+              }
+            }
 
             var operationId = createOperationId();
             auditContext = createInsertionAuditContext(template, operationId);
@@ -1993,8 +2241,51 @@ export async function GET(request: Request) {
               null
             );
             reservationRecorded = true;
-            notice("Opening a new Outlook message...", "");
-            openOutlookNewMessageInReservedWindow(composeWindow, composeUrl);
+            if (composeContext) {
+              item = requireComposeContext(composeContext);
+              addinWrittenSnapshot = copyDraftSnapshot(originalSnapshot);
+              mutationStarted = true;
+              notice("Inserting into this blank new message...", "");
+              await officeAsync(function (done) {
+                item.subject.setAsync(template.subject || "", done);
+              });
+              addinWrittenSnapshot.subject = String(template.subject || "");
+              item = requireComposeContext(composeContext);
+              await setRecipients(item.to, toRecipients);
+              addinWrittenSnapshot.to = toRecipients.slice();
+              item = requireComposeContext(composeContext);
+              await setRecipients(item.cc, ccRecipients);
+              addinWrittenSnapshot.cc = ccRecipients.slice();
+              item = requireComposeContext(composeContext);
+              await setRecipients(item.bcc, bccRecipients);
+              addinWrittenSnapshot.bcc = bccRecipients.slice();
+              item = requireComposeContext(composeContext);
+              await officeAsync(function (done) {
+                item.body.setAsync(
+                  originalSnapshot.isHtml
+                    ? template.bodyHtml
+                    : template.bodyText,
+                  originalSnapshot.bodyOptions,
+                  done
+                );
+              });
+              addinWrittenSnapshot.body = String(
+                originalSnapshot.isHtml
+                  ? template.bodyHtml
+                  : template.bodyText
+              );
+            } else {
+              notice("Opening a separate new Outlook message...", "");
+              await openSupportedNewMessageForm(
+                buildNewMessageForm(
+                  template,
+                  toRecipients,
+                  ccRecipients,
+                  bccRecipients
+                )
+              );
+              mutationStarted = true;
+            }
             mutationCompleted = true;
             try {
               await recordInsertionAuditEvent(
@@ -2004,25 +2295,59 @@ export async function GET(request: Request) {
               );
             } catch (auditError) {
               notice(
-                "The new Outlook message opened, but FC Uno could not confirm the terminal audit record. " +
-                  "The reserved audit entry remains visible for review; do not open this template again.",
+                "The template was inserted, but FC Uno could not confirm the terminal audit record. " +
+                  "The reserved audit entry remains visible for review; do not insert this template again.",
                 "error"
               );
               return;
             }
-            notice("New message opened. Original draft unchanged. Audit completed.", "success");
+            notice(
+              composeContext
+                ? "Inserted into this blank new message. Audit completed."
+                : "New message opened. Audit completed.",
+              "success"
+            );
           } catch (error) {
             if (mutationCompleted) {
               notice(
                 (error && error.message ? error.message : "Audit finalization failed.") +
-                  " The new Outlook message remains open and its reserved audit entry remains visible for review.",
+                  " The template remains inserted and its reserved audit entry remains visible for review.",
                 "error"
               );
               return;
             }
-            closeReservedNewMessageWindow(composeWindow);
             var outcome = "failed-preserved";
-            var recoveryMessage = " The original Outlook draft was not changed.";
+            var recoveryMessage = mutationStarted
+              ? " The original message could not be restored automatically; review it before sending."
+              : " No Outlook fields were changed by FC Uno.";
+            if (
+              mutationStarted &&
+              composeContext &&
+              originalSnapshot &&
+              addinWrittenSnapshot
+            ) {
+              try {
+                var restored = await restoreDraftIfUnchanged(
+                  composeContext,
+                  office,
+                  originalSnapshot,
+                  addinWrittenSnapshot
+                );
+                if (restored) {
+                  outcome = "failed-restored";
+                  recoveryMessage = " Original message restored.";
+                } else {
+                  recoveryMessage =
+                    " The message changed while insertion was completing, so newer edits were kept. Review it before sending.";
+                }
+              } catch (restoreError) {
+                recoveryMessage =
+                  " The original message could not be fully restored. " +
+                  (restoreError && restoreError.message
+                    ? restoreError.message
+                    : "");
+              }
+            }
             var auditMessage = "";
             if (reservationRecorded && auditContext) {
               try {
@@ -2045,9 +2370,6 @@ export async function GET(request: Request) {
             );
           } finally {
             state.inserting = false;
-            if (!mutationCompleted) {
-              closeReservedNewMessageWindow(composeWindow);
-            }
           }
         }
 
@@ -2164,6 +2486,7 @@ export async function GET(request: Request) {
         els.signOutButton.addEventListener("click", signOut);
 
         async function initialiseTaskpane() {
+          registerMailboxItemChangedHandler();
           clearConfidentialState(false);
           showAuthenticationState("Checking your FC Uno sign-in...", false);
           if (await validateCookieAuthenticationAndLoad()) return;

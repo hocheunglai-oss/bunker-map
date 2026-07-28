@@ -228,32 +228,23 @@ test("taskpane caches are versioned, bounded, and never authorize insertion offl
   assert.doesNotMatch(taskpane, /setRecipients\(item\.to, template\.to\)/)
 })
 
-test("taskpane reserves before opening a direct new-message compose window and records a terminal outcome", async () => {
+test("taskpane uses supported read-mode new-message forms and guarded blank-compose insertion", async () => {
   const { taskpane } = await sources()
 
   assert.doesNotMatch(taskpane, /createNestablePublicClientApplication/)
   assert.doesNotMatch(taskpane, /Mail\.ReadWrite/)
   assert.doesNotMatch(taskpane, /graph\.microsoft\.com/)
   assert.doesNotMatch(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS/)
-  assert.match(taskpane, /function reserveNewMessageWindow\(\)/)
-  assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
-  assert.match(taskpane, /function buildOutlookNewMessageUrl\(/)
-  assert.match(
-    taskpane,
-    /https:\/\/outlook\.cloud\.microsoft\/mail\/deeplink\/compose/,
-  )
-  assert.match(taskpane, /OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH = 30000/)
-  assert.match(taskpane, /composeUrl\.searchParams\.set\(entry\[0\], addresses\.join\(";"\)\)/)
-  assert.match(taskpane, /composeUrl\.searchParams\.set\("subject", subject\)/)
-  assert.match(taskpane, /composeUrl\.searchParams\.set\("body", bodyText\)/)
-  assert.match(
-    taskpane,
-    /function openOutlookNewMessageInReservedWindow[\s\S]*?popup\.location\.replace\(parsed\.toString\(\)\)/,
-  )
-  assert.match(
-    taskpane,
-    /openOutlookNewMessageInReservedWindow\(composeWindow, composeUrl\)/,
-  )
+  assert.doesNotMatch(taskpane, /mail\/deeplink\/compose/)
+  assert.doesNotMatch(taskpane, /window\.open\(/)
+  assert.match(taskpane, /function currentComposeItem\(\)/)
+  assert.match(taskpane, /function captureComposeContext\(\)/)
+  assert.match(taskpane, /function requireComposeContext\(context\)/)
+  assert.match(taskpane, /function draftContainsUserContent\(snapshot\)/)
+  assert.match(taskpane, /function buildNewMessageForm\(/)
+  assert.match(taskpane, /htmlBody: String\(template && template\.bodyHtml/)
+  assert.match(taskpane, /displayNewMessageFormAsync\(messageForm, done\)/)
+  assert.match(taskpane, /displayNewMessageForm\(messageForm\)/)
   assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
   assert.doesNotMatch(taskpane, /displayMessageForm\(ewsId\)/)
   assert.doesNotMatch(taskpane, /role="alertdialog"/)
@@ -267,6 +258,8 @@ test("taskpane reserves before opening a direct new-message compose window and r
   assert.match(taskpane, /state\.inserting = true/)
   assert.match(taskpane, /state\.inserting = false/)
   assert.match(taskpane, /detailPromises/)
+  assert.match(taskpane, /registerMailboxItemChangedHandler\(\)/)
+  assert.match(taskpane, /restoreDraftIfUnchanged/)
 
   assert.match(taskpane, /\.rpc\([\s\S]*?"reserve_outlook_template_insertion"/)
   assert.match(taskpane, /p_template_revision: attemptIdentity\.templateRevision/)
@@ -303,76 +296,85 @@ test("taskpane reserves before opening a direct new-message compose window and r
   const reserve = insertion.indexOf(
     'recordInsertionAuditEvent(\n              auditContext,\n              "reserved"',
   )
-  const display = insertion.indexOf(
-    "openOutlookNewMessageInReservedWindow(composeWindow, composeUrl);",
+  const subjectWrite = insertion.indexOf(
+    "item.subject.setAsync(template.subject || \"\", done);",
     reserve,
   )
-  const completed = insertion.indexOf("mutationCompleted = true;", display)
+  const bccWrite = insertion.indexOf(
+    "await setRecipients(item.bcc, bccRecipients);",
+    subjectWrite,
+  )
+  const bodyWrite = insertion.indexOf(
+    "item.body.setAsync(",
+    bccWrite,
+  )
+  const completed = insertion.indexOf("mutationCompleted = true;", bodyWrite)
   const insertedTerminal = insertion.indexOf(
     'recordInsertionAuditEvent(\n                auditContext,\n                "terminal",\n                "inserted"',
     completed,
   )
   assert.ok(
     reserve >= 0 &&
-      reserve < display &&
-      display < completed &&
+      reserve < subjectWrite &&
+      subjectWrite < bccWrite &&
+      bccWrite < bodyWrite &&
+      bodyWrite < completed &&
       completed < insertedTerminal,
-    "reservation must be acknowledged before Outlook opens and inserted finalized only after navigation starts",
+    "reservation must be acknowledged before any compose mutation and inserted finalized only after all fields are written",
   )
-  assert.doesNotMatch(insertion, /\.subject\.setAsync/)
-  assert.doesNotMatch(insertion, /\.body\.setAsync/)
-  assert.doesNotMatch(insertion, /setRecipients\(/)
+  assert.match(insertion, /\.subject\.setAsync/)
+  assert.match(insertion, /\.body\.setAsync/)
+  assert.match(insertion, /setRecipients\(/)
   assert.match(
     insertion,
     /if \(mutationCompleted\) \{[\s\S]*?return;[\s\S]*?var outcome = "failed-preserved"/,
   )
   assert.doesNotMatch(insertion, /deleteGraphDraft/)
+  assert.match(insertion, /restoreDraftIfUnchanged\(/)
   assert.match(
     insertion,
     /recordInsertionAuditEvent\([\s\S]*?"terminal",[\s\S]*?outcome/,
   )
   assert.match(
     insertion,
-    /The new Outlook message opened, but FC Uno could not confirm the terminal audit record[\s\S]*?return;/,
+    /The template was inserted, but FC Uno could not confirm the terminal audit record[\s\S]*?return;/,
   )
 })
 
-test("direct compose URL preserves certified recipients, subject, and plain-text body", async () => {
+test("supported new-message form preserves certified recipients, subject, and HTML body", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
-  const buildLink = Function(
-    "OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH",
+  const buildForm = Function(
     [
-      inlineFunctionSource(script, "composeRecipientAddress"),
-      inlineFunctionSource(script, "buildOutlookNewMessageUrl"),
-      "return buildOutlookNewMessageUrl;",
+      inlineFunctionSource(script, "certifiedRecipientAddress"),
+      inlineFunctionSource(script, "buildNewMessageForm"),
+      "return buildNewMessageForm;",
     ].join("\n"),
-  )(30000) as (
+  )() as (
     template: Record<string, unknown>,
     to: Record<string, unknown>[],
     cc: Record<string, unknown>[],
     bcc: Record<string, unknown>[],
-  ) => string
+  ) => Record<string, unknown>
 
-  const result = new URL(
-    buildLink(
-      { subject: "Certified subject", bodyText: "Line 1\nLine 2" },
+  assert.deepEqual(
+    buildForm(
+      { subject: "Certified subject", bodyHtml: "<p>Certified body</p>" },
       [{ displayName: "To Name", emailAddress: "TO@example.com" }],
       [{ displayName: "Cc Name", emailAddress: "cc@example.com" }],
       [{ displayName: "Bcc Name", emailAddress: "bcc@example.com" }],
     ),
+    {
+      toRecipients: ["to@example.com"],
+      ccRecipients: ["cc@example.com"],
+      bccRecipients: ["bcc@example.com"],
+      subject: "Certified subject",
+      htmlBody: "<p>Certified body</p>",
+    },
   )
-
-  assert.equal(result.origin, "https://outlook.cloud.microsoft")
-  assert.equal(result.pathname, "/mail/deeplink/compose")
-  assert.equal(result.searchParams.get("to"), "to@example.com")
-  assert.equal(result.searchParams.get("cc"), "cc@example.com")
-  assert.equal(result.searchParams.get("bcc"), "bcc@example.com")
-  assert.equal(result.searchParams.get("subject"), "Certified subject")
-  assert.equal(result.searchParams.get("body"), "Line 1\nLine 2")
 })
 
-test("taskpane audit protocol dynamically fails closed around direct compose navigation", async () => {
+test("taskpane audit protocol dynamically fails closed around supported new-message opening", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
   const insertionSource = inlineFunctionBlock(
@@ -390,7 +392,7 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
     run: () => Promise<void>
     auditEvents: Array<{ phase: string; outcome: string | null }>
     notices: Array<{ message: string; tone: string }>
-    graphActions: string[]
+    outlookActions: string[]
     state: { inserting: boolean }
   }
   const makeHarness = Function(
@@ -398,7 +400,8 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
     `
       var auditEvents = [];
       var notices = [];
-      var graphActions = [];
+      var outlookActions = [];
+      var window = { Office: {} };
       var state = {
         selectedId: "template-1",
         inserting: false,
@@ -435,20 +438,10 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
           throw new Error("Terminal acknowledgement lost.");
         }
       }
-      function reserveNewMessageWindow() {
-        graphActions.push("reserve-window");
-        return { closed: false };
-      }
-      function closeReservedNewMessageWindow(popup) {
-        if (!popup || popup.closed) return;
-        popup.closed = true;
-        graphActions.push("close-window");
-      }
-      function buildOutlookNewMessageUrl() {
-        return "https://outlook.cloud.microsoft/mail/deeplink/compose";
-      }
-      function openOutlookNewMessageInReservedWindow() {
-        graphActions.push("display");
+      function captureComposeContext() { return null; }
+      function buildNewMessageForm() { return {}; }
+      async function openSupportedNewMessageForm() {
+        outlookActions.push("display");
         if (config.failComposeOpen) throw new Error("Compose open failed.");
       }
       ${insertionSource}
@@ -456,7 +449,7 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
         run: insertSelectedTemplate,
         auditEvents: auditEvents,
         notices: notices,
-        graphActions: graphActions,
+        outlookActions: outlookActions,
         state: state
       };
     `,
@@ -464,10 +457,7 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
 
   const reservationFailure = makeHarness({ failReservation: true })
   await reservationFailure.run()
-  assert.deepEqual(reservationFailure.graphActions, [
-    "reserve-window",
-    "close-window",
-  ])
+  assert.deepEqual(reservationFailure.outlookActions, [])
   assert.deepEqual(reservationFailure.auditEvents, [
     { phase: "reserved", outcome: null },
   ])
@@ -475,80 +465,102 @@ test("taskpane audit protocol dynamically fails closed around direct compose nav
 
   const terminalFailure = makeHarness({ failInsertedTerminal: true })
   await terminalFailure.run()
-  assert.deepEqual(terminalFailure.graphActions, [
-    "reserve-window",
-    "display",
-  ])
+  assert.deepEqual(terminalFailure.outlookActions, ["display"])
   assert.deepEqual(terminalFailure.auditEvents, [
     { phase: "reserved", outcome: null },
     { phase: "terminal", outcome: "inserted" },
   ])
   assert.match(
     terminalFailure.notices.at(-1)?.message || "",
-    /new Outlook message opened, but FC Uno could not confirm the terminal audit record/i,
+    /template was inserted, but FC Uno could not confirm the terminal audit record/i,
   )
 
   const displayFailure = makeHarness({ failComposeOpen: true })
   await displayFailure.run()
-  assert.deepEqual(displayFailure.graphActions, [
-    "reserve-window",
-    "display",
-    "close-window",
-  ])
+  assert.deepEqual(displayFailure.outlookActions, ["display"])
   assert.deepEqual(displayFailure.auditEvents, [
     { phase: "reserved", outcome: null },
     { phase: "terminal", outcome: "failed-preserved" },
   ])
   assert.match(
     displayFailure.notices.at(-1)?.message || "",
-    /original Outlook draft was not changed/,
+    /No Outlook fields were changed by FC Uno/,
   )
 })
 
-test("direct compose rejects invalid recipients and oversized messages while never mutating the current Outlook item", async () => {
+test("blank-compose guard accepts only empty or standard-signature drafts and rejects invalid recipients", async () => {
   const { taskpane } = await sources()
   const script = renderedInlineTaskpaneScript(taskpane)
   const insertSelectedTemplateSource = inlineFunctionSource(
     script,
     "insertSelectedTemplate",
   )
-  assert.doesNotMatch(insertSelectedTemplateSource, /currentComposeItem\(/)
-  assert.doesNotMatch(insertSelectedTemplateSource, /\.setAsync\(/)
-  assert.doesNotMatch(insertSelectedTemplateSource, /captureInsertionRequest\(/)
+  assert.match(insertSelectedTemplateSource, /captureComposeContext\(\)/)
+  assert.match(insertSelectedTemplateSource, /\.setAsync\(/)
+  assert.match(insertSelectedTemplateSource, /draftContainsUserContent\(/)
 
-  const buildOutlookNewMessageUrl = Function(
-    "OUTLOOK_NEW_MESSAGE_URL_MAX_LENGTH",
+  const draftContainsUserContent = Function(
+    `${inlineFunctionSource(script, "draftContainsUserContent")}; return draftContainsUserContent;`,
+  )() as (snapshot: Record<string, unknown>) => boolean
+  assert.equal(
+    draftContainsUserContent({ subject: "", to: [], cc: [], bcc: [], body: "" }),
+    false,
+  )
+  assert.equal(
+    draftContainsUserContent({
+      subject: "",
+      to: [],
+      cc: [],
+      bcc: [],
+      body:
+        "<p>Best Regards, Otto Lai</p><p>Fratelli Cosulich Bunkers (HK) Ltd " +
+        "Email bunker@cosulich.com.hk</p>",
+    }),
+    false,
+  )
+  assert.equal(
+    draftContainsUserContent({
+      subject: "",
+      to: [],
+      cc: [],
+      bcc: [],
+      body: "<p>My unsent negotiation note</p>",
+    }),
+    true,
+  )
+  assert.equal(
+    draftContainsUserContent({
+      subject: "Existing subject",
+      to: [],
+      cc: [],
+      bcc: [],
+      body: "",
+    }),
+    true,
+  )
+
+  const buildNewMessageForm = Function(
     [
-      inlineFunctionSource(script, "composeRecipientAddress"),
-      inlineFunctionSource(script, "buildOutlookNewMessageUrl"),
-      "return buildOutlookNewMessageUrl;",
+      inlineFunctionSource(script, "certifiedRecipientAddress"),
+      inlineFunctionSource(script, "buildNewMessageForm"),
+      "return buildNewMessageForm;",
     ].join("\n"),
-  )(250) as (
+  )() as (
     template: Record<string, unknown>,
     to: Record<string, unknown>[],
     cc: Record<string, unknown>[],
     bcc: Record<string, unknown>[],
-  ) => string
+  ) => Record<string, unknown>
 
   assert.throws(
     () =>
-      buildOutlookNewMessageUrl(
-        { subject: "Subject", bodyText: "Body" },
+      buildNewMessageForm(
+        { subject: "Subject", bodyHtml: "<p>Body</p>" },
         [{ emailAddress: "not-an-email" }],
         [],
         [],
       ),
     /invalid email address/,
-  )
-  assert.throws(
-    () =>
-      buildOutlookNewMessageUrl(
-        { subject: "Subject", bodyText: "x".repeat(400) },
-        [],
-        [],
-        [],
-      ),
-    /too large/,
   )
 })
 
