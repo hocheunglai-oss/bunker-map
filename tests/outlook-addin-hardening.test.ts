@@ -255,6 +255,7 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
     taskpane,
     /function trustedOutlookDraftWebLink\(draft\)[\s\S]*?var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?if \(readPathIndex >= 0\)[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/compose\/"/,
   )
+  assert.match(taskpane, /parsed\.hostname = "outlook\.cloud\.microsoft"/)
   assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
   assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 3000/)
   assert.match(

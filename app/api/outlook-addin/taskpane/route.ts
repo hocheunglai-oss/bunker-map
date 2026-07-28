@@ -2081,6 +2081,7 @@ export async function GET(request: Request) {
           if (parsed.protocol !== "https:" || !trusted) {
             throw new Error("Microsoft Graph returned an untrusted Outlook message link.");
           }
+          parsed.hostname = "outlook.cloud.microsoft";
           var readPath = "/mail/deeplink/read/";
           var readPathIndex = parsed.pathname.toLowerCase().indexOf(readPath);
           if (readPathIndex >= 0) {
