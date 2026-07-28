@@ -256,7 +256,13 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
     /var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/deeplink\/compose\/"/,
   )
   assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
+  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 2000/)
+  assert.match(
+    taskpane,
+    /async function openGraphDraftInReservedWindow[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS\)[\s\S]*?popup\.location\.replace/,
+  )
   assert.match(taskpane, /popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/)
+  assert.match(taskpane, /await openGraphDraftInReservedWindow\(composeWindow, graphDraft\)/)
   assert.doesNotMatch(taskpane, /displayMessageFormAsync/)
   assert.doesNotMatch(taskpane, /displayMessageForm\(ewsId\)/)
   assert.match(taskpane, /async function deleteGraphDraft\(accessToken, draftId\)/)

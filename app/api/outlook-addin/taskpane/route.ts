@@ -531,6 +531,7 @@ export async function GET(request: Request) {
         var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
         var GRAPH_SCOPES = ["Mail.ReadWrite"];
         var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
+        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 2000;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -2092,8 +2093,21 @@ export async function GET(request: Request) {
           return parsed.toString();
         }
 
-        function openGraphDraftInReservedWindow(popup, draft) {
+        async function openGraphDraftInReservedWindow(popup, draft) {
           if (!popup || popup.closed) {
+            throw new Error(
+              "The new Outlook message window was closed before loading completed."
+            );
+          }
+          try {
+            popup.document.body.textContent = "Opening your editable Outlook message...";
+          } catch (error) {
+            // The placeholder remains usable even if Outlook owns its document early.
+          }
+          await new Promise(function (resolve) {
+            window.setTimeout(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS);
+          });
+          if (popup.closed) {
             throw new Error(
               "The new Outlook message window was closed before loading completed."
             );
@@ -2169,7 +2183,7 @@ export async function GET(request: Request) {
               )
             );
             mutationStarted = true;
-            openGraphDraftInReservedWindow(composeWindow, graphDraft);
+            await openGraphDraftInReservedWindow(composeWindow, graphDraft);
             mutationCompleted = true;
             try {
               await recordInsertionAuditEvent(
