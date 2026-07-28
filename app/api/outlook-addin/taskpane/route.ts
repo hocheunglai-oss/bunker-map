@@ -531,7 +531,7 @@ export async function GET(request: Request) {
         var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
         var GRAPH_SCOPES = ["Mail.ReadWrite"];
         var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
-        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 30000;
+        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 250;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
@@ -2081,16 +2081,31 @@ export async function GET(request: Request) {
           if (parsed.protocol !== "https:" || !trusted) {
             throw new Error("Microsoft Graph returned an untrusted Outlook message link.");
           }
-          parsed.hostname = "outlook.cloud.microsoft";
-          var readPath = "/mail/deeplink/read/";
-          var readPathIndex = parsed.pathname.toLowerCase().indexOf(readPath);
-          if (readPathIndex >= 0) {
-            parsed.pathname =
-              parsed.pathname.slice(0, readPathIndex) +
-              "/mail/compose/" +
-              parsed.pathname.slice(readPathIndex + readPath.length);
+          var itemId = parsed.searchParams.get("ItemID");
+          if (!itemId) {
+            throw new Error("Microsoft Graph returned an Outlook link without an item ID.");
           }
-          parsed.searchParams.set("ispopout", "1");
+          var path = parsed.pathname.toLowerCase();
+          if (
+            path.indexOf("/mail/deeplink/read/") < 0 &&
+            path.indexOf("/mail/deeplink/compose/") < 0 &&
+            path !== "/owa/" &&
+            path !== "/owa"
+          ) {
+            throw new Error("Microsoft Graph returned an unsupported Outlook message link.");
+          }
+          var pathItemId = encodeURIComponent(
+            itemId.replace(/\\//g, "-").replace(/\\+/g, "_")
+          );
+          parsed.hostname = "outlook.office365.com";
+          parsed.pathname = "/mail/deeplink/compose/" + pathItemId;
+          Array.from(parsed.searchParams.keys()).forEach(function (key) {
+            var lowerKey = key.toLowerCase();
+            if (lowerKey === "viewmodel" || lowerKey === "ispopout") {
+              parsed.searchParams.delete(key);
+            }
+          });
+          parsed.searchParams.set("exvsurl", "1");
           return parsed.toString();
         }
 
@@ -2102,8 +2117,6 @@ export async function GET(request: Request) {
           }
           try {
             popup.document.body.textContent = "Opening your editable Outlook message...";
-            popup.document.body.dataset.outlookDraftComposeLink =
-              trustedOutlookDraftWebLink(draft);
           } catch (error) {
             // The placeholder remains usable even if Outlook owns its document early.
           }

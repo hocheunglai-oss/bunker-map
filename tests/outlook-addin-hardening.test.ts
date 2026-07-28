@@ -253,12 +253,12 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
   assert.match(taskpane, /function trustedOutlookDraftWebLink\(draft\)/)
   assert.match(
     taskpane,
-    /function trustedOutlookDraftWebLink\(draft\)[\s\S]*?var readPath = "\/mail\/deeplink\/read\/"[\s\S]*?if \(readPathIndex >= 0\)[\s\S]*?parsed\.pathname[\s\S]*?"\/mail\/compose\/"/,
+    /function trustedOutlookDraftWebLink\(draft\)[\s\S]*?parsed\.searchParams\.get\("ItemID"\)[\s\S]*?path !== "\/owa\/"[\s\S]*?itemId\.replace\([\s\S]*?"-"\)\.replace\([\s\S]*?"_"\)[\s\S]*?"\/mail\/deeplink\/compose\/"/,
   )
-  assert.match(taskpane, /parsed\.hostname = "outlook\.cloud\.microsoft"/)
-  assert.match(taskpane, /parsed\.searchParams\.set\("ispopout", "1"\)/)
-  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 30000/)
-  assert.match(taskpane, /dataset\.outlookDraftComposeLink/)
+  assert.match(taskpane, /parsed\.hostname = "outlook\.office365\.com"/)
+  assert.match(taskpane, /lowerKey === "viewmodel" \|\| lowerKey === "ispopout"/)
+  assert.match(taskpane, /parsed\.searchParams\.set\("exvsurl", "1"\)/)
+  assert.match(taskpane, /OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 250/)
   assert.match(
     taskpane,
     /async function openGraphDraftInReservedWindow[\s\S]*?window\.setTimeout\(resolve, OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS\)[\s\S]*?popup\.location\.replace\(trustedOutlookDraftWebLink\(draft\)\)/,
@@ -354,6 +354,38 @@ test("taskpane reserves before creating a separate Graph draft and records a ter
     insertion,
     /The new Outlook message opened, but FC Uno could not confirm the terminal audit record[\s\S]*?return;/,
   )
+})
+
+test("legacy Graph OWA read links become official editable compose links", async () => {
+  const { taskpane } = await sources()
+  const script = renderedInlineTaskpaneScript(taskpane)
+  const functionSource = inlineFunctionSource(
+    script,
+    "trustedOutlookDraftWebLink",
+  )
+  const buildLink = Function(
+    `${functionSource}; return trustedOutlookDraftWebLink;`,
+  )() as (draft: { webLink: string }) => string
+
+  const itemId = "AAMkExample/Folder+Draft="
+  const result = new URL(
+    buildLink({
+      webLink:
+        "https://outlook.office365.com/owa/?" +
+        `ItemID=${encodeURIComponent(itemId)}` +
+        "&exvsurl=1&viewmodel=ReadMessageItem&ispopout=1",
+    }),
+  )
+
+  assert.equal(result.hostname, "outlook.office365.com")
+  assert.equal(
+    result.pathname,
+    `/mail/deeplink/compose/${encodeURIComponent("AAMkExample-Folder_Draft=")}`,
+  )
+  assert.equal(result.searchParams.get("ItemID"), itemId)
+  assert.equal(result.searchParams.get("exvsurl"), "1")
+  assert.equal(result.searchParams.has("viewmodel"), false)
+  assert.equal(result.searchParams.has("ispopout"), false)
 })
 
 test("taskpane audit protocol dynamically fails closed and cleans up an unopened new draft", async () => {
