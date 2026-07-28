@@ -25,11 +25,11 @@ test("admin session tokens are random bearer secrets stored as stable hashes", (
   assert.notEqual(hashAdminSessionToken(first), hashAdminSessionToken(second))
 })
 
-test("admin sessions receive a fixed 12-hour absolute expiry", () => {
+test("admin sessions use the browser maximum persistent-cookie lifetime", () => {
   const now = new Date("2026-07-23T12:00:00.000Z")
   const expiresAt = new Date(getAdminSessionExpiry(now))
 
-  assert.equal(ADMIN_SESSION_DURATION_SECONDS, 12 * 60 * 60)
+  assert.equal(ADMIN_SESSION_DURATION_SECONDS, 400 * 24 * 60 * 60)
   assert.equal(
     expiresAt.getTime() - now.getTime(),
     ADMIN_SESSION_DURATION_SECONDS * 1000,

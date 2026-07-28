@@ -1,11 +1,15 @@
 import { createHash, randomBytes } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 
-export const ADMIN_SESSION_DURATION_SECONDS = 60 * 60 * 12
+// Chromium-based browsers cap persistent cookies at 400 days. Use that
+// browser maximum so FCUNO remains signed in until logout in normal use,
+// while password rotation, account disablement, and explicit revocation
+// continue to invalidate the server-side session immediately.
+export const ADMIN_SESSION_DURATION_SECONDS = 60 * 60 * 24 * 400
 export const OUTLOOK_ADDIN_SESSION_DURATION_SECONDS = 60 * 30
 
 const ADMIN_SESSION_TOKEN_BYTES = 32
-const ADMIN_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+const ADMIN_SESSION_TOUCH_INTERVAL_MS = 60 * 60 * 1000
 
 type AdminSessionRow = {
   id: string
