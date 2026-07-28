@@ -25,6 +25,8 @@ function privateHeaders() {
 function htmlHeaders() {
   return {
     ...privateHeaders(),
+    "Cache-Control":
+      "public, max-age=0, s-maxage=604800, stale-while-revalidate=86400",
     "Content-Type": "text/html; charset=utf-8",
   }
 }
