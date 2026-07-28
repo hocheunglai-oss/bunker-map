@@ -531,7 +531,7 @@ export async function GET(request: Request) {
         var NAA_AUTHORITY = ${JSON.stringify(naaAuthority)};
         var GRAPH_SCOPES = ["Mail.ReadWrite"];
         var MSAL_SCRIPT_URL = "/outlook-msal-browser-4.24.1.min.js";
-        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 3000;
+        var OUTLOOK_DRAFT_COMPOSE_READY_DELAY_MS = 6000;
         var AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v2";
         var LEGACY_AUTH_SESSION_KEY = "fcuno-outlook-addin-auth-v1";
         var AUTH_SESSION_SCHEMA = "fcuno.outlook-addin-auth-session/v1";
