@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto"
-import { createReadStream, createWriteStream } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -10,6 +9,10 @@ import { createClient } from "@supabase/supabase-js"
 import type { drive_v3 } from "googleapis"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import {
+  createCompressedBackupStage,
+  createCompressedBackupStageReadStream,
+} from "@/lib/compressedBackupStage"
 import { loadGoogleApis } from "@/lib/googleApis"
 
 export const dynamic = "force-dynamic"
@@ -29,7 +32,7 @@ const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
-const MAX_TEMP_BACKUP_BYTES = 400 * 1024 * 1024
+const MAX_COMPRESSED_STAGING_BYTES = 400 * 1024 * 1024
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 
@@ -69,8 +72,9 @@ type BackupSectionManifest = Record<
 >
 
 type BackupDataWriter = {
-  stream: ReturnType<typeof createWriteStream>
-  byteLength: number
+  stream: ReturnType<typeof createCompressedBackupStage>["writable"]
+  stage: ReturnType<typeof createCompressedBackupStage>
+  sourceByteLength: number
 }
 
 type BackupFinalWriter = {
@@ -98,6 +102,8 @@ type PreparedBackupData = {
   latestCertificationRunId: string
   latestProjectionSnapshotSha256: string
   generatedAt: string
+  stagingSourceByteLength: number
+  stagingFileByteLength: number
 }
 
 type StreamedBackupFile = {
@@ -398,15 +404,15 @@ async function writeDataChunk(
   value: string | Buffer
 ) {
   const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8")
-  writer.byteLength += chunk.byteLength
-  if (writer.byteLength > MAX_TEMP_BACKUP_BYTES) {
-    throw new Error(
-      `Backup data exceeds the ${MAX_TEMP_BACKUP_BYTES}-byte bounded temporary-storage limit.`
-    )
+  writer.stage.throwIfFailed()
+  writer.sourceByteLength += chunk.byteLength
+  if (!Number.isSafeInteger(writer.sourceByteLength)) {
+    throw new Error("Backup staging source exceeds the safe integer byte range.")
   }
   if (!writer.stream.write(chunk)) {
     await once(writer.stream, "drain")
   }
+  writer.stage.throwIfFailed()
 }
 
 async function writeFinalChunk(
@@ -908,9 +914,14 @@ async function buildBackupFile(
       ],
     },
   }
+  const stage = createCompressedBackupStage(
+    filePath,
+    MAX_COMPRESSED_STAGING_BYTES
+  )
   const writer: BackupDataWriter = {
-    stream: createWriteStream(filePath, { flags: "wx", mode: 0o600 }),
-    byteLength: 0,
+    stream: stage.writable,
+    stage,
+    sourceByteLength: 0,
   }
 
   try {
@@ -1256,7 +1267,7 @@ async function buildBackupFile(
 
     await writeDataChunk(writer, "}")
     writer.stream.end()
-    await finished(writer.stream)
+    const { storedByteLength } = await writer.stage.complete()
 
     const latestCertificationRunId = String(
       checkpointAfterExport.latestCertificationRunId || ""
@@ -1310,11 +1321,15 @@ async function buildBackupFile(
       latestCertificationRunId,
       latestProjectionSnapshotSha256,
       generatedAt,
+      stagingSourceByteLength: writer.sourceByteLength,
+      stagingFileByteLength: storedByteLength,
     }
   } catch (error) {
-    writer.stream.destroy()
+    writer.stage.abort(
+      error instanceof Error ? error : new Error(getErrorMessage(error))
+    )
     try {
-      await finished(writer.stream)
+      await writer.stage.complete()
     } catch {
       // The original export error is more useful than the stream teardown error.
     }
@@ -1365,7 +1380,9 @@ async function streamPreparedBackupToDrive(
         writer,
         `${serializedPrefix.slice(0, -1)},"counts":${JSON.stringify(prepared.counts)},"data":`
       )
-      for await (const chunk of createReadStream(prepared.dataPath)) {
+      for await (const chunk of createCompressedBackupStageReadStream(
+        prepared.dataPath
+      )) {
         await writeFinalChunk(writer, chunk)
       }
       await writeFinalChunk(writer, ',"warnings":[]')
@@ -1847,7 +1864,7 @@ async function createBackup(provenance: BackupProvenance) {
     tempDirectory = await mkdtemp(
       join(tmpdir(), "bunker-map-backup-")
     )
-    const dataPath = join(tempDirectory, "data.json")
+    const dataPath = join(tempDirectory, "data.json.gz")
     const prepared = await buildBackupFile(
       supabase,
       dataPath,
@@ -1901,6 +1918,9 @@ async function createBackup(provenance: BackupProvenance) {
         artifactSha256: streamed.artifactSha256,
         uploadedFileSha256: streamed.uploadedFileSha256,
         fileByteLength: streamed.fileByteLength,
+        stagingEncoding: "gzip",
+        stagingSourceByteLength: prepared.stagingSourceByteLength,
+        stagingFileByteLength: prepared.stagingFileByteLength,
         verificationStatus: "complete",
         retentionDays: RETENTION_DAYS,
       },

@@ -1,6 +1,6 @@
 # Backup and Restore Runbook
 
-Last audited: 2026-07-23
+Last audited: 2026-07-29
 
 ## Recovery contract
 
@@ -57,6 +57,11 @@ The route uses `SUPABASE_SERVICE_ROLE_KEY` to read the backup data. It does not
 fall back to the public anonymous key. A backup is only published as successful
 after its uploaded bytes are downloaded from Drive and their SHA-256 is
 rechecked. Retention pruning happens only after that verification succeeds.
+During export, the paged data body is held in a bounded gzip-compressed
+temporary staging file and decompressed directly into the Drive upload stream.
+The published artifact remains ordinary JSON, so existing validators and
+restore evidence remain compatible while temporary storage no longer grows at
+the full uncompressed database size.
 System Health independently downloads the latest verified file and its
 immediate verified predecessor, rechecks both artifacts and their Drive
 application properties, and rejects a broken or skipped predecessor anchor.
