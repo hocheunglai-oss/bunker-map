@@ -11,7 +11,7 @@ $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-24.4"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-29.1"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -4973,6 +4973,32 @@ function Test-IncrementalSyncNotificationRequired($Outcome) {
   return [bool]$Outcome.AlwaysNotify
 }
 
+function Test-FullSyncNotificationRequired($Status, $Details) {
+  if ((Clean-Text $Status) -ne "completed") {
+    return $true
+  }
+
+  $Details = Get-StatsObject $Details
+  if ([int](Get-DetailValue $Details "failedQueueRows") -gt 0) {
+    return $true
+  }
+
+  [decimal]$mutationCount = 0
+  foreach ($key in @(
+    "createdContacts",
+    "updatedContacts",
+    "removedContacts",
+    "createdGroups",
+    "updatedGroups",
+    "removedGroups",
+    "addedMembers",
+    "removedMembers"
+  )) {
+    $mutationCount += [int](Get-DetailValue $Details $key)
+  }
+  return $mutationCount -gt 0
+}
+
 function Set-IncrementalBacklogFromTruthCheckpoint([hashtable]$Stats) {
   $checkpointCounts = @{}
   foreach ($mapping in @(
@@ -5787,7 +5813,21 @@ try {
       $details `
       $true `
       (Get-DetailValue $details "sourceSnapshotHash") | Out-Null
-    $notificationDelivery = Invoke-ExchangeSyncNotificationSafely "completed" $message $details $webhookPayload
+    if (Test-FullSyncNotificationRequired "completed" $details) {
+      $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
+        "completed" `
+        $message `
+        $details `
+        $webhookPayload
+    } else {
+      $notificationDelivery = New-ExchangeNotificationDeliveryResult `
+        "not_required" `
+        $false `
+        $false `
+        0 `
+        "" `
+        ""
+    }
     Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
     Save-SyncStatusAfterNotification "completed" $message $details | Out-Null
   }

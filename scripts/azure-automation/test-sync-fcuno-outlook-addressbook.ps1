@@ -2069,6 +2069,39 @@ Assert-Equal "completed" $changedOutcome.Status "A verified user change must com
 Assert-True (Test-IncrementalSyncNotificationRequired $changedOutcome) "A verified user change must send an informative email report"
 Assert-True (Test-IncrementalSyncNotificationRequired $backlogOutcome) "An unresolved failure must continue to send an alert"
 
+$silentFullOutcome = @{
+  failedQueueRows = 0
+  skippedQueueRows = 3
+  createdContacts = 0
+  updatedContacts = 0
+  removedContacts = 0
+  createdGroups = 0
+  updatedGroups = 0
+  removedGroups = 0
+  addedMembers = 0
+  removedMembers = 0
+}
+Assert-True (-not (Test-FullSyncNotificationRequired "completed" $silentFullOutcome)) "A verified daily full reconciliation with no Exchange mutations must remain silent"
+$mutatedFullOutcome = @{}
+foreach ($key in @(
+  "createdContacts",
+  "updatedContacts",
+  "removedContacts",
+  "createdGroups",
+  "updatedGroups",
+  "removedGroups",
+  "addedMembers",
+  "removedMembers"
+)) {
+  $mutatedFullOutcome[$key] = 1
+  Assert-True (Test-FullSyncNotificationRequired "completed" $mutatedFullOutcome) "A successful full reconciliation must notify when $key records an Exchange mutation"
+  $mutatedFullOutcome[$key] = 0
+}
+Assert-True (Test-FullSyncNotificationRequired "failed" $silentFullOutcome) "A failed full reconciliation must always notify"
+$failedFullOutcome = $silentFullOutcome.Clone()
+$failedFullOutcome.failedQueueRows = 1
+Assert-True (Test-FullSyncNotificationRequired "completed" $failedFullOutcome) "A full reconciliation with a recorded row failure must always notify"
+
 $fullLockMessage = "Full reconciliation was blocked by an active mutation lease."
 $fullLockDetails = New-FullSyncLockFailureDetails $fullLockMessage
 Assert-Equal 1 $fullLockDetails.failedQueueRows "A lock-denied full run must record one explicit certification failure"
