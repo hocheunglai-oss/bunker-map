@@ -5,7 +5,7 @@ import { getErrorMessage, getSystemHealth, type HealthCheck } from "@/lib/system
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 45
+export const maxDuration = 240
 
 const NON_ALERTING_CHECK_IDS = new Set([
   "schema",

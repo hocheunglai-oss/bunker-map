@@ -65,6 +65,8 @@ the full uncompressed database size.
 System Health independently downloads the latest verified file and its
 immediate verified predecessor, rechecks both artifacts and their Drive
 application properties, and rejects a broken or skipped predecessor anchor.
+Its backup check has a dedicated three-minute verification budget so these
+full streamed byte checks remain reliable as the artifacts grow.
 Unverified managed backup files are surfaced for review rather than silently
 treated as valid recovery points.
 

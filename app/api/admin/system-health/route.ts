@@ -5,7 +5,7 @@ import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 30
+export const maxDuration = 240
 
 const HEALTH_CACHE_MS = 60_000
 let cachedHealth: { expiresAt: number; value: Awaited<ReturnType<typeof getSystemHealth>> } | null = null
