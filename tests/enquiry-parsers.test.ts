@@ -352,7 +352,7 @@ test("replays the July 17 FCUNO reports with canonical schedules and fuels", () 
 
   assert.equal(
     worksheetOutput("TS Shanghai / IMO 9937517\nETA Xiamen 05-12 Aug\nETA Nansha 07-14 Aug\n1,200 mt HSFO max 3,5%"),
-    "ts shanghai / 9937517 / xiamen 5 - 12 aug and nansha 7 - 14 aug / HSFO 1,200mts",
+    "ts shanghai / 9937517 / xiamen 5 - 12 aug OR nansha 7 - 14 aug / HSFO 1,200mts",
   )
 
   assert.equal(
@@ -485,5 +485,51 @@ test("replays the July 24 FCUNO reports with alternative schedules and exact dat
   assert.equal(
     worksheetOutput(buenaSuerte),
     "buena suerte / 9528550 / onsan 28 jul / vlsfo 135mts / lsmgo 45mts",
+  )
+})
+
+test("replays the July 30 FCUNO reports with delivery windows and candidate ports", () => {
+  const weaverArrow = [
+    "Offer Required:",
+    "Buyer",
+    "G2 Ocean AS",
+    "Vessel: WEAVER ARROW",
+    "IMO: 9151826",
+    "Port: Kaohsiung",
+    "ETA: 03 Aug 26",
+    "ETD: 07 Aug 26",
+    "Grades and Quantities",
+    "ISO 8217 2017 RMG180 0.50%",
+    "330 mt",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(weaverArrow),
+    "weaver arrow / 9151826 / kaohsiung 3 - 7 aug / vlsfo 330mts",
+  )
+
+  const xingChangHai = [
+    "M/V XING CHANG HAI (9758492)",
+    "YEOSU, SOUTH KOREA (FOR BUNKERS ONLY)",
+    "04th - 07th August, 2026",
+    "650 - 750 MT // VLSFO / RMG 380 - Sulphur max 0.50 % ISO 8217 - 2017",
+    "80 - 100 MT // LS MGO DMA - Sulphur max 0.10% - ISO 8217 - 2017",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(xingChangHai),
+    "xing chang hai / 9758492 / yosu 4 - 7 aug / vlsfo 650-750mts / lsmgo 80-100mts",
+  )
+
+  const gaschemAfrica = [
+    "GASCHEM AFRICA / Bunker Request:",
+    "LPG/C GASCHEM AFRICA",
+    "VLSFO = 650 MT RMG 380 ISO 2017 0.5%",
+    "LSMGO = 100 MT MGO DMA 0.1 ISO 2017",
+    "ETA:",
+    "Ulsan -> 29 July 2026",
+    "Daesan -> 02 August 2026",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(gaschemAfrica),
+    "gaschem africa / ulsan 29 jul OR daesan 2 aug / vlsfo 650mts / lsmgo 100mts",
   )
 })

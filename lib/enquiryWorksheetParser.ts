@@ -127,6 +127,7 @@ function cleanVesselName(value: string) {
   next = removeVesselLabel(next)
   next = next.replace(/\bIMO(?:\s*NO\.?|\s*NUMBER)?\b[\s:#.-]*\d{0,7}.*$/i, "")
   next = next.replace(/^\s*(?:M\s*[./-]?\s*V|M\s*[./-]?\s*T|MV|MT)\b\s*/i, "")
+  next = next.replace(/^\s*(?:LPG|LNG)\s*\/?\s*C\b\s*/i, "")
   next = next.replace(/\(\s*(?:V|VOY|VOYAGE)\.?\s*[\w./-]+\s*\)/gi, "")
   next = next.replace(/\s*\/+\s*$/, "")
   next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker)\s*\)?\.?\s*$/i, "")
@@ -439,7 +440,7 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     })
     if (contextualPort) return contextualPort
 
-    if (/\b(?:bunker|eta|etb|etd|ets|vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /\b\d{1,2}(?:[./-]\d{1,2}|st|nd|rd|th)\b/i.test(line) || /\b\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /[月日号월일]|到达|抵达/.test(line)) {
+    if (/\b(?:bunkers?|eta|etb|etd|ets|vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /\b\d{1,2}(?:[./-]\d{1,2}|st|nd|rd|th)\b/i.test(line) || /\b\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(line) || /[月日号월일]|到达|抵达/.test(line)) {
       const known = findKnownPort(line, { ...options, includeShortAliases: true })
       if (known) return known
     }

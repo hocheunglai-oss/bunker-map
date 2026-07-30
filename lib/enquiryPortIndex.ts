@@ -20,6 +20,7 @@ const supplementalPorts = [
   "Busan New Port",
   "Caofeidian",
   "Colombo",
+  "Daesan",
   "Hakata",
   "Hong Kong",
   "Laemchabang",

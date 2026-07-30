@@ -186,6 +186,12 @@ function isContactOrAddressLine(value: string) {
     /\b(?:flr|floor|suite|unit|building|bldg|street|road|avenue|district|postal\s+code)\b/i.test(value)
 }
 
+function monthTokenFollowsDay(value: string, monthIndex: number) {
+  return /\b\d{1,2}(?:st|nd|rd|th)?\s+$/i.test(
+    value.slice(Math.max(0, monthIndex - 8), monthIndex),
+  )
+}
+
 export function findEnquiryDates(value: string) {
   const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
   const dates: string[] = []
@@ -273,11 +279,13 @@ export function findEnquiryDates(value: string) {
   }
 
   for (const match of normalized.matchAll(new RegExp(`(?<![\\d/.-])\\b(${monthNamePattern})\\s*[./-]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:\\s*['’]\\d{2,4}|\\s+\\d{4})?\\b`, "gi"))) {
+    if (monthTokenFollowsDay(normalized, match.index ?? 0)) continue
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
   }
 
   for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"))) {
+    if (monthTokenFollowsDay(normalized, match.index ?? 0)) continue
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
   }
@@ -351,6 +359,13 @@ function extractOperationalSchedule(lines: string[]) {
   return Array.from(entries.values())
 }
 
+function formatOperationalWindow(firstDate: string, secondDate: string) {
+  const first = firstDate.match(/^(\d{1,2})\s+([a-z]{3})$/i)
+  const second = secondDate.match(/^(\d{1,2})\s+([a-z]{3})$/i)
+  if (!first || !second) return ""
+  return formatDateRange(first[1], first[2], second[1], second[2])
+}
+
 function extractAlternativeCaseSchedule(
   lines: string[],
   options: Pick<BuildShortenedEnquiryOptions, "includePort" | "portNames">,
@@ -396,6 +411,19 @@ function extractDeliverySchedule(
     const port = options.includePort
       ? formatShortenedPort(options.port?.trim() || extractEnquiryPort(text, { portNames: options.portNames }))
       : ""
+    const hasExplicitEtd = lines.some((line) => {
+      const match = line.match(OPERATIONAL_SCHEDULE_LINE_PATTERN)
+      return match?.[1].replace(/[^a-z]/gi, "").toLowerCase() === "etd"
+    })
+    const eta = operationalSchedule.find((entry) => entry.label === "eta")
+    const etd = operationalSchedule.find((entry) => entry.label === "etd")
+    const usesDeliveryWindowTemplate = /\bgrades?\s+and\s+quantities\b/i.test(text)
+    const window = usesDeliveryWindowTemplate && hasExplicitEtd &&
+      operationalSchedule.length === 2 && eta && etd
+      ? formatOperationalWindow(eta.date, etd.date)
+      : ""
+    if (window) return [port, window].filter(Boolean).join(" ")
+
     const events = operationalSchedule.map((entry) => `${entry.label} ${entry.date}`).join(", ")
     return [port, events].filter(Boolean).join(" ")
   }
@@ -429,7 +457,7 @@ function extractDeliverySchedule(
     new Set(selectedEntries.map((entry) => [entry.port, entry.date].filter(Boolean).join(" "))),
   )
   const distinctPorts = new Set(selectedEntries.map((entry) => entry.port).filter(Boolean))
-  return uniqueEntries.join(distinctPorts.size > 1 ? " and " : ", ")
+  return uniqueEntries.join(distinctPorts.size > 1 ? " OR " : ", ")
 }
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
