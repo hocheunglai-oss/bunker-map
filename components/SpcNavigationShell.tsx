@@ -133,14 +133,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
     )
   }, [pages, permissions, query])
 
-  const introductionPage = useMemo(
-    () => pages.find((page) => page.id === "spc-readme") || null,
-    [pages],
-  )
-  const introductionPermission: SpcPagePermission = introductionPage
-    ? permissions[introductionPage.id] || "none"
-    : "none"
-
   if (loading || !authenticated) return <>{children}</>
 
   function toggleCollapsed() {
@@ -318,18 +310,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
         </div>
 
         <div className="fc-admin-sidebar-footer">
-          {introductionPage && introductionPermission !== "none" ? (
-            <Link
-              href={introductionPage.path}
-              prefetch={false}
-              className={`fc-admin-sidebar-introduction${isActive(introductionPage) ? " is-active" : ""}`}
-              aria-current={isActive(introductionPage) ? "page" : undefined}
-              onPointerEnter={() => router.prefetch(introductionPage.path)}
-              onFocus={() => router.prefetch(introductionPage.path)}
-            >
-              INTRODUCTION
-            </Link>
-          ) : null}
           <div className="fc-admin-sidebar-footer-meta">
             <div className="fc-admin-sidebar-user">
               <span>{(displayName || "SPC").trim().slice(0, 2).toUpperCase()}</span>

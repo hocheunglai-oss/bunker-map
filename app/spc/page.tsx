@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
@@ -224,7 +225,10 @@ export default function SpcLoginPage() {
       <SpcShell title="SPC Welcome">
         <section className="fc-admin-welcome-page spc-welcome-page" aria-label="SPC welcome">
           <div className="fc-admin-welcome-content spc-welcome-content">
-            <h1>Welcome{displayName || sessionUsername ? `, ${displayName || sessionUsername}` : ""}</h1>
+            <h1>WELCOME{displayName || sessionUsername ? `, ${displayName || sessionUsername}` : ""}</h1>
+            <p className="spc-welcome-introduction">
+              YOU ARE INVITED TO THE <Link href="/spc/readme">INTRODUCTION</Link>
+            </p>
 
             <div className="fc-admin-dashboard-swatches spc-dashboard-swatches" aria-label="SPC dashboard watch">
               <section className="fc-admin-swatch-card is-holiday" aria-label="Upcoming public holidays">

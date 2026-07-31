@@ -607,32 +607,6 @@ body {
   padding: 12px;
 }
 
-.fc-admin-sidebar-introduction {
-  min-height: 39px;
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--fc-admin-border-soft);
-  border-radius: 5px;
-  background: #f7f9fc;
-  color: #26364a;
-  padding: 0 13px;
-  font-size: 11px;
-  font-weight: 850;
-  text-decoration: none;
-}
-
-.fc-admin-sidebar-introduction:hover {
-  border-color: #a9b8ca;
-  background: #f0f4f9;
-}
-
-.fc-admin-sidebar-introduction.is-active {
-  border-color: #e2492f;
-  background: #fff4f1;
-  color: #bf301b;
-  box-shadow: inset 3px 0 0 #e2492f;
-}
-
 .fc-admin-sidebar-footer-meta {
   display: flex;
   align-items: center;
@@ -742,10 +716,6 @@ body {
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-footer {
   margin-top: auto;
   padding: 10px;
-}
-
-.fc-admin-app-shell.is-collapsed .fc-admin-sidebar-introduction {
-  display: none;
 }
 
 .fc-admin-app-shell.is-collapsed .fc-admin-sidebar-footer-meta {
@@ -865,6 +835,28 @@ body {
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 1.08;
+}
+
+.spc-welcome-introduction {
+  margin: 13px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.45;
+}
+
+.spc-welcome-introduction a {
+  color: #0b6ee8;
+  font-weight: 850;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.spc-welcome-introduction a:hover,
+.spc-welcome-introduction a:focus-visible {
+  color: #0758bd;
+  text-decoration: underline;
 }
 
 .fc-admin-ai-workbench {
