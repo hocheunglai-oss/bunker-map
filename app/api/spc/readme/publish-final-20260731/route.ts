@@ -51,12 +51,47 @@ function requiredEnv(name: string) {
   return value
 }
 
+function presentationClient() {
+  return createClient(
+    requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
+  )
+}
+
+export async function GET() {
+  try {
+    const client = presentationClient()
+    const { data: chunk, error } = await client
+      .from("spc_presentation_chunks")
+      .select(
+        "id,chapter_label,section_label,title,duration_seconds,revision,media_version,video_path,video_mime_type,video_bytes,status",
+      )
+      .eq("id", CHUNK_ID)
+      .maybeSingle()
+    if (error) throw error
+    if (
+      !chunk ||
+      chunk.video_path !== MEDIA_PATH ||
+      Number(chunk.video_bytes) !== EXPECTED_BYTES ||
+      Number(chunk.revision) !== EXPECTED_REVISION + 1
+    ) {
+      return NextResponse.json({ message: "Final chapter verification failed." }, { status: 409 })
+    }
+
+    const { data: signed, error: signedError } = await client.storage
+      .from(BUCKET)
+      .createSignedUrl(MEDIA_PATH, 10 * 60)
+    if (signedError) throw signedError
+    return NextResponse.json({ success: true, chunk, videoUrl: signed.signedUrl })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not verify final chapter."
+    return NextResponse.json({ message }, { status: 500 })
+  }
+}
+
 export async function POST() {
   try {
-    const client = createClient(
-      requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
-    )
+    const client = presentationClient()
 
     const { data: current, error: currentError } = await client
       .from("spc_presentation_chunks")
