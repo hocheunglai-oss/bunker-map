@@ -3787,8 +3787,8 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-fixture-supplier-menu {
   position: absolute;
   top: calc(100% + 5px);
-  left: 3px;
-  z-index: 40;
+  right: 3px;
+  z-index: 18;
   width: max(230px, calc(100% + 88px));
   max-height: 198px;
   overflow-y: auto;
@@ -3981,6 +3981,13 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 .spc-table.spc-fixture-table button.spc-fixture-complete-button,
 .spc-fixture-external-actions button.spc-fixture-complete-button {
   min-width: 76px;
+}
+
+.spc-table.spc-fixture-table button.spc-fixture-complete-button.is-ready,
+.spc-fixture-external-actions button.spc-fixture-complete-button.is-ready {
+  border-color: #0071e3;
+  background: #0071e3;
+  color: #ffffff;
 }
 
 .spc-table.spc-fixture-table button.spc-fixture-save-button,

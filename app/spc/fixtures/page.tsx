@@ -1023,13 +1023,14 @@ export default function SpcFixturesPage() {
 
   function rowActionButtons(fixture: SpcFixture, editing: boolean, missing: string[]) {
     if (fixture.fixtureStatus === "pending") {
+      const ready = missing.length === 0
       return (
         <button
           type="button"
-          className="spc-fixture-complete-button"
+          className={`spc-fixture-complete-button${ready ? " is-ready" : ""}`}
           onClick={() => void submitFixture(fixture, "complete")}
-          disabled={missing.length > 0 || savingId === `${fixture.id}:complete`}
-          title={missing.length > 0 ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
+          disabled={!ready || savingId === `${fixture.id}:complete`}
+          title={!ready ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
         >
           {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
         </button>

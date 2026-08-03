@@ -98,6 +98,11 @@ const AUDIT_PREVIEW_FIELDS = [
   "group_name",
   "phone_e164",
   "body",
+  "vessel_name",
+  "fixture_date",
+  "supplier_name",
+  "supplier_trader_display_name",
+  "buyer_trader_display_name",
   "port_id",
   "recorded_at",
   "hsfo",
@@ -308,8 +313,7 @@ function isSpcAuditRecord(record: AuditLogRecord) {
   if (SPC_TABLE_NAMES.has(record.tableName)) return true
 
   if (record.tableName === "office_calendar_store") {
-    const row = record.afterRow || record.beforeRow || {}
-    return String(row.key || "") === "spc-permission-groups"
+    return getOfficeCalendarStoreKey(record) === "spc-permission-groups"
   }
 
   if (record.tableName === "parser_reports") {
@@ -408,6 +412,12 @@ function getContextText(context: Record<string, unknown>, ...keys: string[]) {
   return null
 }
 
+function getOfficeCalendarStoreKey(record: AuditLogRecord) {
+  const row = record.afterRow || record.beforeRow || {}
+  const key = row.key ?? record.recordPk.key
+  return typeof key === "string" ? key : ""
+}
+
 function pageFromPath(pathname: string, pages: AuditPageDefinition[]) {
   return pages.find((page) => {
     if (pathname === page.path) return true
@@ -445,8 +455,7 @@ function inferRemarksPageId(record: AuditLogRecord) {
 }
 
 function inferOfficeCalendarPageId(record: AuditLogRecord) {
-  const row = record.afterRow || record.beforeRow || {}
-  const key = typeof row.key === "string" ? row.key : ""
+  const key = getOfficeCalendarStoreKey(record)
   if (key === "spc-permission-groups") return "spc-user-management"
   if (key === "parser-reports") {
     return record.actorId?.trim().toLowerCase().startsWith("spc:")
@@ -814,7 +823,7 @@ function getRecordLabel(
       "spc-permission-groups": "SPC permission groups",
       "parser-reports": "parser reports",
     }
-    const key = typeof row.key === "string" ? row.key : ""
+    const key = getOfficeCalendarStoreKey(record)
     return labels[key] || "shared store"
   }
 
@@ -846,6 +855,7 @@ function getRecordLabel(
     "folder_name",
     "group_name",
     "phone_e164",
+    "vessel_name",
     "body",
   ]
 
@@ -909,6 +919,225 @@ function getPriceSettingSummary(
   return `Changed ${changes.join(", ")} for "${recordLabel}".`
 }
 
+function asAuditObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function asAuditObjectArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : []
+}
+
+function auditText(value: unknown) {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function auditIdentity(item: Record<string, unknown>, fallback: string) {
+  return (
+    auditText(item.userId) ||
+    auditText(item.username).toLowerCase() ||
+    auditText(item.role).toUpperCase() ||
+    fallback
+  )
+}
+
+function mapAuditItems(value: unknown) {
+  return new Map(
+    asAuditObjectArray(value).map((item, index) => [
+      auditIdentity(item, String(index)),
+      item,
+    ]),
+  )
+}
+
+function auditUsername(item: Record<string, unknown> | undefined) {
+  return auditText(item?.username) || "user"
+}
+
+function auditRole(item: Record<string, unknown> | undefined) {
+  return auditText(item?.role).toUpperCase() || "DEFAULT"
+}
+
+function auditPermission(value: unknown) {
+  const permission = auditText(value).toUpperCase()
+  return permission === "VIEW" || permission === "EDIT" ? permission : "NONE"
+}
+
+function auditPageLabel(pageId: string) {
+  return (
+    AUDIT_PAGE_LABELS[pageId] ||
+    pageId
+      .replace(/^spc-/, "")
+      .replace(/-/g, " ")
+      .toUpperCase()
+  )
+}
+
+function getSpcUserManagementChanges(record: AuditLogRecord) {
+  if (
+    record.tableName !== "office_calendar_store" ||
+    getOfficeCalendarStoreKey(record) !== "spc-permission-groups"
+  ) {
+    return null
+  }
+
+  const beforePayload = asAuditObject(record.beforeRow?.payload)
+  const afterPayload = asAuditObject(record.afterRow?.payload)
+  const details: string[] = []
+
+  const beforeRoles = mapAuditItems(beforePayload.userRoles)
+  const afterRoles = mapAuditItems(afterPayload.userRoles)
+  for (const identity of new Set([...beforeRoles.keys(), ...afterRoles.keys()])) {
+    const before = beforeRoles.get(identity)
+    const after = afterRoles.get(identity)
+    const username = auditUsername(after || before)
+    if (!before && after) {
+      details.push(`Assigned the ${auditRole(after)} role to ${username}.`)
+    } else if (before && !after) {
+      details.push(`Removed the ${auditRole(before)} role assignment from ${username}.`)
+    } else if (before && after && auditRole(before) !== auditRole(after)) {
+      details.push(
+        `Changed ${username}'s role from ${auditRole(before)} to ${auditRole(after)}.`,
+      )
+    }
+  }
+
+  const beforeProfiles = mapAuditItems(beforePayload.userProfiles)
+  const afterProfiles = mapAuditItems(afterPayload.userProfiles)
+  for (const identity of new Set([...beforeProfiles.keys(), ...afterProfiles.keys()])) {
+    const before = beforeProfiles.get(identity)
+    const after = afterProfiles.get(identity)
+    const username = auditUsername(after || before)
+    if (!before && after) {
+      const office = auditText(after.office)
+      if (office) details.push(`Set ${username}'s office to ${office}.`)
+      if (after.mustChangePassword === true) {
+        details.push(`Required ${username} to change password on the next login.`)
+      }
+    } else if (before && !after) {
+      details.push(`Removed the saved user-management profile for ${username}.`)
+    } else if (before && after) {
+      const beforeOffice = auditText(before.office)
+      const afterOffice = auditText(after.office)
+      if (beforeOffice !== afterOffice) {
+        details.push(
+          `Changed ${username}'s office from ${beforeOffice || "blank"} to ${afterOffice || "blank"}.`,
+        )
+      }
+      if (before.mustChangePassword !== after.mustChangePassword) {
+        details.push(
+          after.mustChangePassword === true
+            ? `Required ${username} to change password on the next login.`
+            : `Removed the next-login password change requirement for ${username}.`,
+        )
+      }
+    }
+  }
+
+  const beforeGroups = mapAuditItems(beforePayload.groups)
+  const afterGroups = mapAuditItems(afterPayload.groups)
+  for (const identity of new Set([...beforeGroups.keys(), ...afterGroups.keys()])) {
+    const before = beforeGroups.get(identity)
+    const after = afterGroups.get(identity)
+    const role = auditRole(after || before)
+    if (!before && after) {
+      details.push(`Added the ${role} permission group.`)
+      continue
+    }
+    if (before && !after) {
+      details.push(`Removed the ${role} permission group.`)
+      continue
+    }
+    const beforePermissions = asAuditObject(before?.permissions)
+    const afterPermissions = asAuditObject(after?.permissions)
+    for (const pageId of new Set([
+      ...Object.keys(beforePermissions),
+      ...Object.keys(afterPermissions),
+    ])) {
+      const beforePermission = auditPermission(beforePermissions[pageId])
+      const afterPermission = auditPermission(afterPermissions[pageId])
+      if (beforePermission === afterPermission) continue
+      details.push(
+        `Changed ${auditPageLabel(pageId)} access for ${role} from ${beforePermission} to ${afterPermission}.`,
+      )
+    }
+  }
+
+  const beforeOffices = new Set(
+    (Array.isArray(beforePayload.offices) ? beforePayload.offices : [])
+      .map(auditText)
+      .filter(Boolean),
+  )
+  const afterOffices = new Set(
+    (Array.isArray(afterPayload.offices) ? afterPayload.offices : [])
+      .map(auditText)
+      .filter(Boolean),
+  )
+  for (const office of afterOffices) {
+    if (!beforeOffices.has(office)) details.push(`Added the ${office} office.`)
+  }
+  for (const office of beforeOffices) {
+    if (!afterOffices.has(office)) details.push(`Removed the ${office} office.`)
+  }
+
+  const uniqueDetails = Array.from(new Set(details)).slice(0, 12)
+  if (uniqueDetails.length === 0) {
+    return {
+      summary: "Updated SPC user management settings.",
+      details: ["Updated SPC user management settings."],
+    }
+  }
+
+  const firstChange = uniqueDetails[0].replace(/\.$/, "")
+  return {
+    summary:
+      uniqueDetails.length === 1
+        ? uniqueDetails[0]
+        : `${firstChange} and ${uniqueDetails.length - 1} other user-management ${uniqueDetails.length === 2 ? "change" : "changes"}.`,
+    details: uniqueDetails,
+  }
+}
+
+function getDeletedFixtureDetails(record: AuditLogRecord, recordLabel: string) {
+  if (record.tableName !== "spc_fixtures" || record.operation !== "DELETE") {
+    return null
+  }
+
+  const row = record.beforeRow || record.afterRow || {}
+  const details = [`Deleted SPC fixture "${recordLabel}".`]
+  const fixtureFieldLabels: Record<string, string> = {
+    hsfo: "HSFO quantity",
+    vlsfo: "VLSFO quantity",
+    lsmgo: "LSMGO quantity",
+  }
+  for (const field of [
+    "fixture_date",
+    "earliest_eta",
+    "supplier_name",
+    "supplier_trader_display_name",
+    "buyer_trader_display_name",
+    "account",
+    "hsfo",
+    "vlsfo",
+    "lsmgo",
+    "price",
+    "barging",
+  ]) {
+    const value = row[field]
+    if (value === null || value === undefined || value === "") continue
+    details.push(
+      `${fixtureFieldLabels[field] || getFieldLabel(field)}: ${formatValue(field, value)}.`,
+    )
+  }
+  return details.slice(0, 12)
+}
+
 function buildSummary(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
@@ -917,6 +1146,8 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  const userManagementChanges = getSpcUserManagementChanges(record)
+  if (userManagementChanges) return userManagementChanges.summary
   if (record.tableName === "outlook_template_insertion_attempts") {
     return getOutlookInsertionAuditPresentation(
       record,
@@ -924,6 +1155,7 @@ function buildSummary(
       insertionCorrelation?.events,
     ).summary
   }
+
   const publicationSummary = getReportPublicationSummary(record)
   if (publicationSummary) return publicationSummary
   if (record.tableName === "price_history" && record.operation === "INSERT") {
@@ -964,6 +1196,12 @@ function buildDetails(
       insertionCorrelation?.events,
     ).details
   }
+
+  const userManagementChanges = getSpcUserManagementChanges(record)
+  if (userManagementChanges) return userManagementChanges.details
+
+  const deletedFixtureDetails = getDeletedFixtureDetails(record, recordLabel)
+  if (deletedFixtureDetails) return deletedFixtureDetails
 
   const publicationSummary = getReportPublicationSummary(record)
   if (publicationSummary) {
@@ -1122,8 +1360,9 @@ export function isUserAuditRecord(record: AuditLogRecord) {
   }
 
   if (record.tableName === "office_calendar_store") {
-    const row = record.afterRow || record.beforeRow || {}
-    return ["event-calendar", "task-calendar", "spc-permission-groups", "parser-reports"].includes(String(row.key || ""))
+    return ["event-calendar", "task-calendar", "spc-permission-groups", "parser-reports"].includes(
+      getOfficeCalendarStoreKey(record),
+    )
   }
 
   return true
