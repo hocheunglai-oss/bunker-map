@@ -6,45 +6,6 @@ import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import { SpcShell } from "@/components/SpcShell"
 
-const HOLIDAY_MARKET_CODES = "IT HK MC FR US GR SG JP KR VN"
-
-type SpcHoliday = {
-  countryCode: string
-  countryName: string
-  date: string
-  name: string
-  localName: string | null
-  daysUntil: number
-}
-
-type SpcDashboardWatchData = {
-  holidays: {
-    countries: string
-    items: SpcHoliday[]
-    error: string | null
-  }
-}
-
-function dateFromKey(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map((part) => Number(part))
-  return new Date(Date.UTC(year, month - 1, day))
-}
-
-function formatHolidayDate(dateKey: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    timeZone: "Asia/Hong_Kong",
-  }).format(dateFromKey(dateKey))
-}
-
-function formatDaysUntil(daysUntil: number) {
-  if (daysUntil === 0) return "Today"
-  if (daysUntil === 1) return "Tomorrow"
-  return `In ${daysUntil} days`
-}
-
 export default function SpcLoginPage() {
   const router = useRouter()
   const {
@@ -65,38 +26,10 @@ export default function SpcLoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
-  const [dashboardData, setDashboardData] = useState<SpcDashboardWatchData | null>(null)
-  const [dashboardError, setDashboardError] = useState("")
 
   useEffect(() => {
     document.title = "Singapore Purchasing Center"
   }, [])
-
-  useEffect(() => {
-    if (!authenticated) return
-
-    let cancelled = false
-    setDashboardError("")
-
-    fetch("/api/spc/dashboard-watch", { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.message || "SPC dashboard watch unavailable.")
-        return data as SpcDashboardWatchData
-      })
-      .then((data) => {
-        if (!cancelled) setDashboardData(data)
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setDashboardError(error instanceof Error ? error.message : "SPC dashboard watch unavailable.")
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [authenticated])
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -229,47 +162,6 @@ export default function SpcLoginPage() {
             <p className="spc-welcome-introduction">
               YOU ARE INVITED TO THE <Link href="/spc/readme">INTRODUCTION</Link>
             </p>
-
-            <div className="fc-admin-dashboard-swatches spc-dashboard-swatches" aria-label="SPC dashboard watch">
-              <section className="fc-admin-swatch-card is-holiday" aria-label="Upcoming public holidays">
-                <div className="fc-admin-swatch-heading">
-                  <div>
-                    <span>Public Holidays</span>
-                    <small>{dashboardData?.holidays.countries || HOLIDAY_MARKET_CODES}</small>
-                  </div>
-                </div>
-
-                {dashboardError ? (
-                  <p className="fc-admin-swatch-empty">{dashboardError}</p>
-                ) : !dashboardData ? (
-                  <p className="fc-admin-swatch-empty">Loading holiday watch...</p>
-                ) : dashboardData.holidays.error ? (
-                  <p className="fc-admin-swatch-empty">{dashboardData.holidays.error}</p>
-                ) : dashboardData.holidays.items.length ? (
-                  <div className="fc-admin-holiday-list spc-holiday-list">
-                    {dashboardData.holidays.items.map((holiday) => (
-                      <article
-                        key={`${holiday.countryCode}-${holiday.date}-${holiday.name}`}
-                        className="fc-admin-holiday-item"
-                      >
-                        <span className="fc-admin-holiday-code">{holiday.countryCode}</span>
-                        <div>
-                          <strong>{holiday.countryName}</strong>
-                          <span>{holiday.name}</span>
-                        </div>
-                        <time dateTime={holiday.date}>
-                          {formatHolidayDate(holiday.date)}
-                          <span>{formatDaysUntil(holiday.daysUntil)}</span>
-                        </time>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="fc-admin-swatch-empty">No upcoming public holidays found.</p>
-                )}
-              </section>
-
-            </div>
           </div>
         </section>
       </SpcShell>

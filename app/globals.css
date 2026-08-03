@@ -838,12 +838,12 @@ body {
 }
 
 .spc-welcome-introduction {
-  margin: 13px 0 0;
+  margin: 18px 0 0;
   color: var(--fc-admin-muted);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.45;
+  font-size: clamp(21px, 3vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
 }
 
 .spc-welcome-introduction a {
@@ -2502,6 +2502,10 @@ body {
 
 .spc-welcome-content {
   width: min(1120px, 100%);
+}
+
+.spc-welcome-content h1 {
+  text-transform: uppercase;
 }
 
 .spc-dashboard-swatches {
