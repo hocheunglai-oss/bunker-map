@@ -62,6 +62,30 @@ test("blocks dangerous link, image, and CSS schemes", () => {
   assert.match(sanitized, /protocol-relative link/)
 })
 
+test("preserves only the trusted FCUNO H-drive file-link namespace", () => {
+  const trustedHref =
+    "file:///H:/Task%20Administration%20-Accounting/General%20Expense%20Administration/Bank%20Payment%20Expense/Bank%20Payment%20General%20Expense%20Administration.xlsm"
+  const sanitized = sanitizeTemplateBodyHtml(`
+    <a href="${trustedHref}">trusted H-drive workbook</a>
+    <a href="file:///C:/Users/Public/unsafe.xlsx">other local drive</a>
+    <a href="file://server/share/unsafe.xlsx">UNC share</a>
+    <a href="file:///H:/Approved/../Restricted/unsafe.xlsx">path traversal</a>
+    <a href="file:///H:/Approved/%2e%2e/Restricted/encoded-unsafe.xlsx">encoded traversal</a>
+  `)
+
+  assert.match(
+    sanitized,
+    new RegExp(`<a href="${trustedHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">trusted H-drive workbook<\\/a>`)
+  )
+  assert.doesNotMatch(sanitized, /href="file:\/\/\/C:/i)
+  assert.doesNotMatch(sanitized, /href="file:\/\/server/i)
+  assert.doesNotMatch(sanitized, /href="[^"]*(?:\.\.|%2e%2e)/i)
+  assert.match(sanitized, /other local drive/)
+  assert.match(sanitized, /UNC share/)
+  assert.match(sanitized, /path traversal/)
+  assert.match(sanitized, /encoded traversal/)
+})
+
 test("allows raster data images but rejects executable image formats", () => {
   const safePng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
   const sanitized = sanitizeTemplateBodyHtml(`

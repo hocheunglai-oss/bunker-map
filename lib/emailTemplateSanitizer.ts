@@ -117,11 +117,31 @@ function uriScheme(value: string) {
   return compact.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() || ""
 }
 
+function isSafeFcunoHDriveHref(value: string) {
+  if (!/^file:\/\/\/h:\//i.test(value) || /[\\?#]/.test(value)) return false
+
+  let decoded = ""
+  try {
+    decoded = decodeURIComponent(value)
+  } catch {
+    return false
+  }
+
+  if (!/^file:\/\/\/h:\//i.test(decoded) || /[\\?#]/.test(decoded)) return false
+  const path = decoded.slice("file:///H:/".length)
+  if (!path) return false
+
+  return path
+    .split("/")
+    .every((segment) => Boolean(segment) && segment !== "." && segment !== "..")
+}
+
 function isSafeLinkHref(value: string) {
   const href = cleanUri(value)
   if (!href || href.startsWith("//")) return false
 
   const scheme = uriScheme(href)
+  if (scheme === "file") return isSafeFcunoHDriveHref(href)
   return !scheme || ["http", "https", "mailto", "tel"].includes(scheme)
 }
 
@@ -259,7 +279,7 @@ function sanitizeHtmlAllowlist(value: string) {
         "empty-cells": [safeCssPattern(String.raw`(?:show|hide)`)],
       },
     },
-    allowedSchemes: ["http", "https", "mailto", "tel"],
+    allowedSchemes: ["http", "https", "mailto", "tel", "file"],
     allowedSchemesByTag: {
       img: ["http", "https", "cid", "data"],
     },
