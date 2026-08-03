@@ -61,6 +61,62 @@ try {
   $embeddedTransportNotFoundError = $_
 }
 Assert-True (-not (Test-ExchangeIdentityNotFoundError $embeddedTransportNotFoundError)) "An embedded Exchange transport separator must not turn an unrelated outer error into a retryable not-found response"
+$temporaryExchangeMessage = "A server side error has occurred because of which the operation could not be completed. Please try again after some time. If the problem still persists, please reach out to MS support."
+$temporaryExchangeError = $null
+try {
+  throw $temporaryExchangeMessage
+} catch {
+  $temporaryExchangeError = $_
+}
+Assert-True (Test-ExchangeTemporaryServerError $temporaryExchangeError) "The exact Microsoft Exchange temporary server response must be retried inside the same run"
+$wrappedTemporaryExchangeError = $null
+try {
+  throw "Exchange group membership verification failed (verification read failed: $temporaryExchangeMessage)."
+} catch {
+  $wrappedTemporaryExchangeError = $_
+}
+Assert-True (Test-ExchangeTemporaryServerError $wrappedTemporaryExchangeError) "A safely wrapped membership failure must retain the exact temporary Exchange classification"
+$unrelatedExchangeError = $null
+try {
+  throw "Exchange group membership differs and requires correction in FCUNO."
+} catch {
+  $unrelatedExchangeError = $_
+}
+Assert-True (-not (Test-ExchangeTemporaryServerError $unrelatedExchangeError)) "A real validation mismatch must never be suppressed as temporary"
+$script:temporaryRetryAttempts = 0
+$temporaryRetryResult = ""
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $temporaryRetryResult = Invoke-ExchangeOperationWithTemporaryRetry `
+    "Temporary retry unit test" `
+    {
+      $script:temporaryRetryAttempts += 1
+      if ($script:temporaryRetryAttempts -eq 1) { throw $temporaryExchangeMessage }
+      return "recovered"
+    } `
+    3 `
+    0
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+}
+Assert-Equal 2 $script:temporaryRetryAttempts "A temporary Exchange error must retry once and stop after recovery"
+Assert-Equal "recovered" $temporaryRetryResult "A recovered temporary Exchange operation must return its successful result"
+$script:nonTemporaryRetryAttempts = 0
+$nonTemporaryRetryFailedClosed = $false
+try {
+  Invoke-ExchangeOperationWithTemporaryRetry `
+    "Non-temporary retry unit test" `
+    {
+      $script:nonTemporaryRetryAttempts += 1
+      throw "Permanent validation failure."
+    } `
+    3 `
+    0 | Out-Null
+} catch {
+  $nonTemporaryRetryFailedClosed = $_.Exception.Message -eq "Permanent validation failure."
+}
+Assert-True $nonTemporaryRetryFailedClosed "A non-temporary Exchange error must fail closed immediately"
+Assert-Equal 1 $script:nonTemporaryRetryAttempts "A non-temporary Exchange error must not consume retry attempts"
 Assert-Equal `
   "22222222-2222-4222-8222-222222222222" `
   (Get-ExchangeContactProfileCommandIdentity ([pscustomobject]@{ Guid = "22222222-2222-4222-8222-222222222222"; DistinguishedName = "CN=Profile,DC=example,DC=com"; ExternalEmailAddress = "valid@example.com" })) `
@@ -3623,11 +3679,16 @@ $script:getDistributionGroupMemberCalls = 0
 $script:forceMembershipVerificationFailure = $false
 $script:duplicateUnexpectedMemberSnapshot = $false
 $script:memberAddFailures = @()
+$script:temporaryMemberReadFailuresRemaining = 0
 function Get-DistributionGroupMember {
   [CmdletBinding()]
   param($Identity, $ResultSize)
   $script:getDistributionGroupMemberCalls += 1
   $script:memberReadGroupIdentities += (Clean-Text $Identity)
+  if ($script:temporaryMemberReadFailuresRemaining -gt 0) {
+    $script:temporaryMemberReadFailuresRemaining -= 1
+    throw $temporaryExchangeMessage
+  }
   if ($script:duplicateUnexpectedMemberSnapshot) {
     return @(
       [pscustomobject]@{ Identity = "Display Member One"; ExternalEmailAddress = "unexpected@example.com" },
@@ -3673,6 +3734,23 @@ Assert-Equal 1 $script:getDistributionGroupMemberCalls "An exact full-sync membe
 Assert-Equal 0 @($script:attemptedMemberAdds).Count "An exact full-sync membership snapshot must not attempt any member add"
 Assert-Equal 0 @($script:removedMemberEmails).Count "An exact full-sync membership snapshot must not attempt any member removal"
 Assert-Equal $script:noOpDistributionGroup.Guid $script:memberReadGroupIdentities[0] "Membership reads must use the freshly resolved immutable group identity, never the mutable alias"
+
+$script:memberState = @{
+  "existing@example.com" = $true
+  "missing@example.com" = $true
+}
+$script:getDistributionGroupMemberCalls = 0
+$script:memberReadGroupIdentities = @()
+$script:temporaryMemberReadFailuresRemaining = 1
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers @{} $true $script:noOpDistributionGroup $true $script:noOpGroupProfile
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  $script:temporaryMemberReadFailuresRemaining = 0
+}
+Assert-Equal 2 $script:getDistributionGroupMemberCalls "A temporary membership read must recover inside the same reconciliation"
+Assert-True (@($script:memberReadGroupIdentities | Where-Object { $_ -ne $script:noOpDistributionGroup.Guid }).Count -eq 0) "A retried membership read must retain the immutable Exchange group identity"
 
 $script:memberState = @{
   "existing@example.com" = $true

@@ -9,9 +9,11 @@ $DefaultExchangeOnlineManagementVersion = "3.4.0"
 $CanonicalExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
+$ExchangeTemporaryErrorMaxAttempts = 3
+$ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-07-29.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-08-03.1"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -585,6 +587,45 @@ function Test-ExchangeIdentityNotFoundError($ErrorRecord) {
   # message containing the not-found text later in its body cannot be retried.
   $message = $message -replace "^\|\|\s*", ""
   return $message -match "(?i)^The operation couldn't be performed because object '.+' couldn't be found(?: on '.+')?\.?$"
+}
+
+function Test-ExchangeTemporaryServerError($ErrorRecord) {
+  if (-not $ErrorRecord) { return $false }
+  $exceptionType = ""
+  if ($ErrorRecord.Exception) {
+    $exceptionType = Clean-Text $ErrorRecord.Exception.GetType().FullName
+  }
+  $fullyQualifiedErrorId = Clean-Text $ErrorRecord.FullyQualifiedErrorId
+  if (
+    $exceptionType -match "(?i)(ServerTransientException|ServiceUnavailableException|TimeoutException|TaskCanceledException)$" -or
+    $fullyQualifiedErrorId -match "(?i)(ServerTransientException|ServiceUnavailableException|TimeoutException|TooManyRequests)"
+  ) {
+    return $true
+  }
+  $message = Clean-Text $ErrorRecord.Exception.Message
+  $message = $message -replace "^\|\|\s*", ""
+  return $message -match "(?i)A server side error has occurred because of which the operation could not be completed\.\s*Please try again after some time\.\s*If the problem still persists, please reach out to MS support\."
+}
+
+function Invoke-ExchangeOperationWithTemporaryRetry(
+  $Label,
+  [scriptblock]$Operation,
+  [int]$MaxAttempts = $ExchangeTemporaryErrorMaxAttempts,
+  [int]$RetryDelaySeconds = $ExchangeTemporaryErrorRetryDelaySeconds
+) {
+  if (-not $Operation) { throw "$Label has no Exchange operation to run." }
+  if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    try {
+      return & $Operation
+    } catch {
+      if (-not (Test-ExchangeTemporaryServerError $_) -or $attempt -ge $MaxAttempts) { throw }
+      $message = Clean-Text $_.Exception.Message
+      Write-Warning ("{0} received a temporary Microsoft Exchange error on attempt {1} of {2}; retrying without publishing a failure notice: {3}" -f $Label, $attempt, $MaxAttempts, $message)
+      Renew-ExchangeSyncLockIfDue
+      if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+    }
+  }
 }
 
 function New-ExchangeGroupProfileLookup($Profiles) {
@@ -3654,7 +3695,14 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
 
   $groupSourceKey = Clean-Text $Group.SourceKey
   if (-not $groupSourceKey) { throw "Exchange group membership mutation was blocked because the FCUNO group source key is missing." }
-  $resolvedGroups = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $groupSourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  $resolvedGroups = @(
+    Invoke-ExchangeOperationWithTemporaryRetry `
+      "Exchange group lookup for $($Group.GroupName)" `
+      {
+        Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $groupSourceKey)'" -ResultSize Unlimited -ErrorAction Stop |
+          Where-Object { $null -ne $_ }
+      }
+  )
   Renew-ExchangeSyncLockIfDue
   if ($resolvedGroups.Count -ne 1) {
     throw "Exchange group membership mutation was blocked because source key $groupSourceKey resolved to $($resolvedGroups.Count) groups after upsert."
@@ -3675,7 +3723,11 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
   $currentMembershipState = @{ EmailCounts = @{}; UnresolvedMembers = @() }
   if ($SkipNoOpWrites) {
     Renew-ExchangeSyncLockIfDue
-    $currentMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
+    $currentMembers = @(
+      Invoke-ExchangeOperationWithTemporaryRetry `
+        "Initial membership read for $($Group.GroupName)" `
+        { Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop }
+    )
     Renew-ExchangeSyncLockIfDue
     $currentMembershipState = Get-ExchangeGroupMembershipState $currentMembers
     $initialMissingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $currentMembershipState.EmailCounts $_) })
@@ -3722,7 +3774,11 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
 
   if (-not $SkipNoOpWrites) {
     Renew-ExchangeSyncLockIfDue
-    $currentMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
+    $currentMembers = @(
+      Invoke-ExchangeOperationWithTemporaryRetry `
+        "Post-add membership read for $($Group.GroupName)" `
+        { Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop }
+    )
     Renew-ExchangeSyncLockIfDue
     $currentMembershipState = Get-ExchangeGroupMembershipState $currentMembers
   }
@@ -3779,7 +3835,11 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
     for ($verificationAttempt = 1; $verificationAttempt -le 4; $verificationAttempt += 1) {
       if ($verificationAttempt -gt 1) { Start-Sleep -Seconds 2 }
       Renew-ExchangeSyncLockIfDue
-      $verifiedMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
+      $verifiedMembers = @(
+        Invoke-ExchangeOperationWithTemporaryRetry `
+          "Final membership read for $($Group.GroupName)" `
+          { Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop }
+      )
       Renew-ExchangeSyncLockIfDue
       $verifiedState = Get-ExchangeGroupMembershipState $verifiedMembers
       $missingEmails = @($desiredMembers.Keys | Where-Object { -not (Has-MapKey $verifiedState.EmailCounts $_) } | Sort-Object)
@@ -5379,19 +5439,23 @@ function Confirm-FinalExchangeGroupMemberships($ExchangeRows, [hashtable]$Stats)
     $groupPosition += 1
     Renew-ExchangeSyncLockIfDue
     try {
-      $sourceKey = Clean-Text $group.SourceKey
-      if (-not $sourceKey) { throw "The FCUNO group source key is missing." }
-      $resolvedGroups = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-      if ($resolvedGroups.Count -ne 1) { throw "Source key $sourceKey resolved to $($resolvedGroups.Count) Exchange groups." }
-      $groupIdentity = Get-ExchangeStrongCommandIdentity $resolvedGroups[0]
-      if (-not $groupIdentity) { throw "Source key $sourceKey has no immutable Exchange group identity." }
-      $actualMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
-      Renew-ExchangeSyncLockIfDue
-      $desiredMembers = if (Has-MapKey $membersByGroupId (Clean-Text $group.SourceGroupId)) { @($membersByGroupId[(Clean-Text $group.SourceGroupId)]) } else { @() }
-      $mismatches = @(Get-ExchangeGroupMembershipMismatches $desiredMembers $actualMembers)
-      if ($mismatches.Count -gt 0) {
-        Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership differs: " + ($mismatches -join "; ") + ".")
-      }
+      Invoke-ExchangeOperationWithTemporaryRetry `
+        "Final membership certification for $($group.GroupName)" `
+        {
+          $sourceKey = Clean-Text $group.SourceKey
+          if (-not $sourceKey) { throw "The FCUNO group source key is missing." }
+          $resolvedGroups = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+          if ($resolvedGroups.Count -ne 1) { throw "Source key $sourceKey resolved to $($resolvedGroups.Count) Exchange groups." }
+          $groupIdentity = Get-ExchangeStrongCommandIdentity $resolvedGroups[0]
+          if (-not $groupIdentity) { throw "Source key $sourceKey has no immutable Exchange group identity." }
+          $actualMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
+          Renew-ExchangeSyncLockIfDue
+          $desiredMembers = if (Has-MapKey $membersByGroupId (Clean-Text $group.SourceGroupId)) { @($membersByGroupId[(Clean-Text $group.SourceGroupId)]) } else { @() }
+          $mismatches = @(Get-ExchangeGroupMembershipMismatches $desiredMembers $actualMembers)
+          if ($mismatches.Count -gt 0) {
+            Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership differs: " + ($mismatches -join "; ") + ".")
+          }
+        } | Out-Null
     } catch {
       Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership certification failed: " + $_.Exception.Message)
     }
@@ -5646,15 +5710,19 @@ function Invoke-FullExchangeSync {
   foreach ($contact in @($exchangeRows.Contacts)) {
     $contactPosition += 1
     try {
-      Renew-ExchangeSyncLockIfDue
-      $contactDirectoryBase = (Get-ExchangeDirectoryNameBase $contact.DisplayName).ToLowerInvariant()
-      if (Has-MapKey $failedDirectoryPrerequisites $contactDirectoryBase) {
-        throw "Contact reconciliation was blocked because its collision-safe group directory prerequisite failed: $($failedDirectoryPrerequisites[$contactDirectoryBase])"
-      }
-      $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
-      $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
-      $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
-      Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
+      Invoke-ExchangeOperationWithTemporaryRetry `
+        "Full reconciliation for contact $($contact.DisplayName)" `
+        {
+          Renew-ExchangeSyncLockIfDue
+          $contactDirectoryBase = (Get-ExchangeDirectoryNameBase $contact.DisplayName).ToLowerInvariant()
+          if (Has-MapKey $failedDirectoryPrerequisites $contactDirectoryBase) {
+            throw "Contact reconciliation was blocked because its collision-safe group directory prerequisite failed: $($failedDirectoryPrerequisites[$contactDirectoryBase])"
+          }
+          $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
+          $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
+          $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
+          Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
+        } | Out-Null
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }
     } catch {
       Add-FullSyncFailure $stats "Contact" $contact.DisplayName $contact.ExternalEmailAddress $_.Exception.Message
@@ -5666,12 +5734,16 @@ function Invoke-FullExchangeSync {
   foreach ($group in @($exchangeRows.Groups)) {
     $groupPosition += 1
     try {
-      Renew-ExchangeSyncLockIfDue
-      $existingHint = Resolve-ExchangeDistributionGroupHint $group $distributionGroupLookup
-      $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeGroupProfileHint $existingHint $groupProfileLookup } else { $null }
-      $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeDistributionGroupMatches $existingHint $group $existingProfileHint)
-      $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq (Clean-Text $group.SourceGroupId) })
-      Sync-ExchangeGroupMembers $group $members $stats $true $existingHint $useExistingHint $existingProfileHint
+      Invoke-ExchangeOperationWithTemporaryRetry `
+        "Full reconciliation for group $($group.GroupName)" `
+        {
+          Renew-ExchangeSyncLockIfDue
+          $existingHint = Resolve-ExchangeDistributionGroupHint $group $distributionGroupLookup
+          $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeGroupProfileHint $existingHint $groupProfileLookup } else { $null }
+          $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeDistributionGroupMatches $existingHint $group $existingProfileHint)
+          $members = @($exchangeRows.Members | Where-Object { (Clean-Text $_.SourceGroupId) -eq (Clean-Text $group.SourceGroupId) })
+          Sync-ExchangeGroupMembers $group $members $stats $true $existingHint $useExistingHint $existingProfileHint
+        } | Out-Null
     } catch {
       Add-FullSyncFailure $stats "Group" $group.GroupName $group.Alias $_.Exception.Message
       Write-Warning ("Full reconciliation failed for group {0}: {1}" -f $group.GroupName, $_.Exception.Message)
