@@ -149,6 +149,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_fixtures: "spc-fixtures",
   spc_role_defaults: "spc-user-management",
   spc_suppliers: "spc-suppliers",
+  spc_speedboard_notices: "spc-chrome-extension",
   spc_presentation_chunks: "spc-readme",
   openai_usage_events: "openai-usage",
 }
@@ -195,6 +196,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_fixtures: "SPC fixture",
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
+  spc_speedboard_notices: "SPC Speed Board update notice",
   parser_reports: "parser report",
   openai_usage_events: "OpenAI usage event",
 }
@@ -258,6 +260,9 @@ const FIELD_LABELS: Record<string, string> = {
   barging: "barging",
   content: "content",
   body: "content",
+  version: "version",
+  recipient_role: "recipient role",
+  recipient_count: "recipient count",
 }
 
 const HIDDEN_FIELDS = new Set([
@@ -283,6 +288,7 @@ const SPC_TABLE_NAMES = new Set([
   "spc_fixtures",
   "spc_role_defaults",
   "spc_suppliers",
+  "spc_speedboard_notices",
 ])
 
 const NON_UNDOABLE_TABLES = new Set([
@@ -290,6 +296,7 @@ const NON_UNDOABLE_TABLES = new Set([
   "openai_usage_events",
   "outlook_template_insertion_attempts",
   "spc_suppliers",
+  "spc_speedboard_notices",
 ])
 
 function isSpcAuditRecord(record: AuditLogRecord) {
@@ -1152,7 +1159,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices)",
     )
   }
 

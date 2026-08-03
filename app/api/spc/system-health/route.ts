@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
@@ -48,6 +49,7 @@ async function countRows(supabase: ReturnType<typeof getHealthSupabaseClient>, t
 async function getSpcHealth() {
   const checkedAt = new Date().toISOString()
   const supabase = getHealthSupabaseClient()
+  const emailNotice = getEmailNoticeConfigStatus()
   const [users, enquiries, fixtures] = await Promise.all([
     countRows(supabase, "spc_users"),
     countRows(supabase, "spc_enquiries"),
@@ -85,6 +87,20 @@ async function getSpcHealth() {
       message: "spc.fcuno.com is served by this Vercel project",
       checkedAt,
       details: { domain: "spc.fcuno.com" },
+    },
+    {
+      id: "spc-speedboard-update-email",
+      label: "SPEED BOARD UPDATE EMAIL",
+      status: emailNotice.missing.length ? "warning" as const : "ok" as const,
+      message: emailNotice.missing.length
+        ? "Exchange notice email configuration incomplete"
+        : "Exchange notice email configured",
+      checkedAt,
+      details: {
+        sender: emailNotice.from,
+        host: emailNotice.host,
+        missing: emailNotice.missing.join(", ") || "none",
+      },
     },
   ]
 

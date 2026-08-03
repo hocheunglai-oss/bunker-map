@@ -1,13 +1,13 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
+import { SPC_SPEED_BOARD_VERSION } from "@/lib/spcSpeedBoardNotice"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
 const PAGE_TITLE = "WHATSAPP EXTENSION"
-const EXTENSION_VERSION = "0.4.8"
 
 type Step = {
   title: string
@@ -22,7 +22,7 @@ const STEPS: readonly Step[] = [
   {
     title: "Download",
     details: [
-      `Download extension version ${EXTENSION_VERSION}.`,
+      `Download extension version ${SPC_SPEED_BOARD_VERSION}.`,
       "Extract the ZIP and save to a folder such as Documents.",
     ],
     action: {
@@ -57,7 +57,11 @@ const STEPS: readonly Step[] = [
 export default function SpcChromeExtensionPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
+  const [noticeSending, setNoticeSending] = useState(false)
+  const [noticeMessage, setNoticeMessage] = useState("")
+  const [noticeIsError, setNoticeIsError] = useState(false)
   const canView = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "view")
+  const canEdit = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(
     permissions,
     "spc-chrome-extension",
@@ -72,15 +76,67 @@ export default function SpcChromeExtensionPage() {
     if (!authLoading && authenticated && hasPermissionSnapshot && !canView) router.replace("/spc")
   }, [authLoading, authenticated, canView, hasPermissionSnapshot, router])
 
+  async function sendUpdateNotice() {
+    if (
+      !window.confirm(
+        `Send SPC Speed Board ${SPC_SPEED_BOARD_VERSION} update instructions to all active supplier traders?`,
+      )
+    ) {
+      return
+    }
+
+    setNoticeSending(true)
+    setNoticeMessage("")
+    setNoticeIsError(false)
+    try {
+      const response = await fetch("/api/spc/chrome-extension/notify", { method: "POST" })
+      const data = (await response.json()) as {
+        message?: string
+        skipped?: number
+        warning?: string
+      }
+      if (!response.ok) throw new Error(data.message || "Failed to send the update notice.")
+
+      const skippedMessage = data.skipped
+        ? ` ${data.skipped} account${data.skipped === 1 ? " was" : "s were"} skipped because the username is not a valid email address.`
+        : ""
+      setNoticeMessage(`${data.message || "Update notice sent."}${skippedMessage}${data.warning ? ` ${data.warning}` : ""}`)
+    } catch (error) {
+      setNoticeMessage(error instanceof Error ? error.message : "Failed to send the update notice.")
+      setNoticeIsError(true)
+    } finally {
+      setNoticeSending(false)
+    }
+  }
+
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
   return (
     <SpcShell title={PAGE_TITLE}>
+      {noticeMessage ? (
+        <div
+          className={`spc-alert spc-chrome-feedback${noticeIsError ? " is-error" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {noticeMessage}
+        </div>
+      ) : null}
       <section className="spc-panel spc-chrome-installation-panel">
         <div className="spc-panel-header">
           <h2>INSTALLATION</h2>
+          {canEdit ? (
+            <button
+              type="button"
+              className="spc-page-action spc-chrome-notice-button"
+              onClick={() => void sendUpdateNotice()}
+              disabled={noticeSending}
+            >
+              {noticeSending ? "Sending..." : "Send Update Notice"}
+            </button>
+          ) : null}
         </div>
         <div className="spc-guide-list">
           {STEPS.map((step, index) => (

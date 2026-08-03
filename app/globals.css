@@ -2759,6 +2759,16 @@ body {
   margin: 0 auto;
 }
 
+.spc-chrome-feedback {
+  max-width: 980px;
+  margin: 0 auto 12px;
+}
+
+.spc-chrome-notice-button {
+  min-width: 168px;
+  white-space: nowrap;
+}
+
 .spc-chrome-installation-panel .spc-panel-header {
   min-height: 50px;
   background: #ffffff;

@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer"
 import type SMTPTransport from "nodemailer/lib/smtp-transport"
 
+export { normalizeEmailList } from "@/lib/emailAddress"
+
 const DEFAULT_NOTICE_FROM = "FC Uno <info@cosulich.com.hk>"
 const DEFAULT_SMTP_HOST = "smtp.office365.com"
 const DEFAULT_SMTP_PORT = 587
@@ -35,22 +37,6 @@ function getSmtpUser(from: string) {
   return cleanText(process.env.EXCHANGE_SMTP_USER) || extractEmailAddress(from) || "info@cosulich.com.hk"
 }
 
-export function normalizeEmailList(value: unknown) {
-  const raw = Array.isArray(value) ? value.join(",") : typeof value === "string" ? value : ""
-
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\n,;]+/)
-        .map((item) => {
-          const trimmed = item.trim().toLowerCase()
-          return trimmed.match(/<([^<>@\s]+@[^<>@\s]+\.[^<>@\s]+)>/)?.[1] || trimmed
-        })
-        .filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item))
-    )
-  )
-}
-
 export function getEmailNoticeConfigStatus() {
   const from = getNoticeFrom()
   const user = getSmtpUser(from)
@@ -71,12 +57,15 @@ export function getEmailNoticeConfigStatus() {
 export async function sendNoticeEmail(input: {
   to: string[]
   cc?: string[]
+  bcc?: string[]
   subject: string
   html: string
 }) {
   const config = getEmailNoticeConfigStatus()
   const password = process.env.EXCHANGE_SMTP_PASSWORD
+  const hasRecipients = Boolean(input.to.length || input.cc?.length || input.bcc?.length)
 
+  if (!hasRecipients) throw new Error("At least one email recipient is required.")
   if (!config.user) throw new Error("EXCHANGE_SMTP_USER is not configured.")
   if (!password) throw new Error("EXCHANGE_SMTP_PASSWORD is not configured.")
 
@@ -97,8 +86,9 @@ export async function sendNoticeEmail(input: {
   const transporter = nodemailer.createTransport(transportOptions)
   const result = await transporter.sendMail({
     from: config.from,
-    to: input.to,
+    ...(input.to.length ? { to: input.to } : {}),
     ...(input.cc?.length ? { cc: input.cc } : {}),
+    ...(input.bcc?.length ? { bcc: input.bcc } : {}),
     subject: input.subject,
     html: input.html,
   })
