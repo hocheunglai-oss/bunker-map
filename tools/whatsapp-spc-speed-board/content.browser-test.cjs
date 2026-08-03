@@ -6,7 +6,7 @@ const { chromium } = require("playwright")
 
 const extensionSource = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
 const extensionStyles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
-const enquiryChatButton = fs.readFileSync(path.join(__dirname, "spc-enquiry-chat-button.png"))
+const enquiryChatButton = fs.readFileSync(path.join(__dirname, "spc-enquiry-chat-button.webp"))
 const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
@@ -110,7 +110,7 @@ const html = `<!doctype html>
         runtime: {
           id: "fcuno-spc-test-extension",
           lastError: null,
-          getURL: (asset) => asset,
+          getURL: (asset) => new URL(asset, window.location.href).href,
           sendMessage: (message, callback) => {
             if (message && message.type === "load-spc-enquiries") {
               const enquiries = [
@@ -216,8 +216,8 @@ const html = `<!doctype html>
 
 async function withServer(callback) {
   const server = http.createServer((request, response) => {
-    if (request.url === "/spc-enquiry-chat-button.png") {
-      response.writeHead(200, { "content-type": "image/png" })
+    if (request.url === "/spc-enquiry-chat-button.webp") {
+      response.writeHead(200, { "content-type": "image/webp" })
       response.end(enquiryChatButton)
       return
     }
@@ -307,9 +307,11 @@ async function main() {
           arrowTag: arrow?.tagName || "",
           arrowHref: arrow?.getAttribute("href") || "",
           arrowText: arrow?.textContent?.trim() || "",
-          arrowBackground: arrow ? getComputedStyle(arrow).backgroundImage : "",
           arrowWidth: arrow ? getComputedStyle(arrow).width : "",
           arrowHeight: arrow ? getComputedStyle(arrow).height : "",
+          imageSrc: arrow?.querySelector("img")?.getAttribute("src") || "",
+          imageWidth: arrow?.querySelector("img")?.naturalWidth || 0,
+          imageHeight: arrow?.querySelector("img")?.naturalHeight || 0,
           vesselText: row?.querySelector(".fcuno-wa-spc-enquiry-vessel")?.textContent || "",
           vesselColor: row?.querySelector(".fcuno-wa-spc-enquiry-vessel") ? getComputedStyle(row.querySelector(".fcuno-wa-spc-enquiry-vessel")).color : "",
           senderText: row?.querySelector(".fcuno-wa-spc-enquiry-sender")?.textContent || "",
@@ -321,9 +323,11 @@ async function main() {
         arrowTag: "BUTTON",
         arrowHref: "",
         arrowText: "",
-        arrowBackground: `url("${url}spc-enquiry-chat-button.png")`,
         arrowWidth: "34px",
         arrowHeight: "34px",
+        imageSrc: `${url}spc-enquiry-chat-button.webp`,
+        imageWidth: 224,
+        imageHeight: 224,
         vesselText: "taisei maru no.15",
         vesselColor: "rgb(22, 131, 232)",
         senderText: "OL",
@@ -339,7 +343,7 @@ async function main() {
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
       await page.waitForFunction(() => (
         document.getElementById("chatTitle")?.getAttribute("title") === "BARRY KHOO" &&
-        document.getElementById("composer")?.innerText === "Re Taisei Maru No.15" &&
+        window.editorModel === "Re: Taisei Maru No.15, " &&
         document.getElementById("search")?.value === "" &&
         document.activeElement === document.getElementById("composer")
       ), { timeout: 3000 })
@@ -347,7 +351,7 @@ async function main() {
         sameDocument: window.senderOpenDocument === document.documentElement,
         chatTitle: document.getElementById("chatTitle")?.getAttribute("title") || "",
         searchText: document.getElementById("search")?.value || "",
-        composerText: document.getElementById("composer")?.innerText || "",
+        composerText: window.editorModel,
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
       }))
@@ -356,7 +360,7 @@ async function main() {
         sameDocument: true,
         chatTitle: "BARRY KHOO",
         searchText: "",
-        composerText: "Re Taisei Maru No.15",
+        composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
       })
@@ -367,14 +371,14 @@ async function main() {
         document.getElementById("composer").blur()
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
-      await page.waitForFunction(() => document.getElementById("composer")?.innerText === "Re Taisei Maru No.15", { timeout: 3000 })
+      await page.waitForFunction(() => window.editorModel === "Re: Taisei Maru No.15, ", { timeout: 3000 })
       const sameChatPrefill = await page.evaluate(() => ({
-        composerText: document.getElementById("composer")?.innerText || "",
+        composerText: window.editorModel,
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
       }))
       assert.deepEqual(sameChatPrefill, {
-        composerText: "Re Taisei Maru No.15",
+        composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
       })

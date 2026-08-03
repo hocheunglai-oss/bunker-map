@@ -13,7 +13,7 @@ const EXTENSION_FILES = [
   "content.js",
   "styles.css",
   "spc-sidebar-logo.png",
-  "spc-enquiry-chat-button.png",
+  "spc-enquiry-chat-button.webp",
   "README.md",
 ] as const
 

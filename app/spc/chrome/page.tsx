@@ -7,7 +7,7 @@ import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
 const PAGE_TITLE = "WHATSAPP EXTENSION"
-const EXTENSION_VERSION = "0.4.7"
+const EXTENSION_VERSION = "0.4.8"
 
 type Step = {
   title: string

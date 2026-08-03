@@ -17,6 +17,10 @@
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
       : "https://spc.fcuno.com/spc-sidebar-logo.png"
+  const ENQUIRY_CHAT_BUTTON_SRC =
+    typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
+      ? chrome.runtime.getURL("spc-enquiry-chat-button.webp")
+      : "https://spc.fcuno.com/spc-enquiry-chat-button.webp"
 
   const existingBoardOwner = document.documentElement?.getAttribute(BOARD_OWNER_ATTRIBUTE) || ""
   if (existingBoardOwner && existingBoardOwner !== BOARD_OWNER) {
@@ -1033,7 +1037,7 @@
       if (currentChatMatchesContact(contact) && prepareComposerDraftText(replyText)) {
         window.setTimeout(() => {
           const composer = findComposer()
-          if (currentChatMatchesContact(contact) && composerText(composer) === replyText) {
+          if (currentChatMatchesContact(contact) && composerText(composer) === cleanText(replyText)) {
             focusComposerAtEnd(composer)
           }
         }, 180)
@@ -1139,7 +1143,7 @@
 
   function enquiryReplyText(enquiry) {
     const vessel = enquiryVesselName(enquiry)
-    return vessel ? `Re ${vessel}` : ""
+    return vessel ? `Re: ${vessel}, ` : ""
   }
 
   function enquiryTextForDrag(id) {
@@ -1261,15 +1265,16 @@
   }
 
   function prepareComposerDraftText(text) {
-    const message = cleanText(text)
+    const message = String(text || "")
+    const comparableMessage = cleanText(message)
     const composer = findComposer()
-    if (!composer || !message) return false
+    if (!composer || !comparableMessage) return false
 
     clearComposerText(composer)
     composer.focus()
     const sent = sendRuntimeMessage({ type: "spc-native-insert-text", text: message }, (response, runtimeError) => {
       const nextComposer = findComposer()
-      const nativeReady = !runtimeError && response?.ok === true && nextComposer && composerText(nextComposer) === message
+      const nativeReady = !runtimeError && response?.ok === true && nextComposer && composerText(nextComposer) === comparableMessage
       if (!nativeReady && !insertComposerText(message)) return
       focusComposerAtEnd(findComposer())
     })
@@ -1612,8 +1617,8 @@
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           ${senderContact
-            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}"></button>`
-            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"></button>`}
+            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`
+            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`}
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
