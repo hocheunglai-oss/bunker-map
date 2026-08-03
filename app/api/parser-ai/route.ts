@@ -4,6 +4,7 @@ import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
+  findEnquiryDates,
   normalizeEnquiryQuantityText,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
@@ -15,6 +16,7 @@ import {
 import {
   buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
+  extractExplicitSpcFuelFields,
   parseSpcEnquiryText,
 } from "@/lib/spcEnquiryText"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
@@ -432,6 +434,7 @@ function buildInstructions(source: ParserAiSource) {
     "Normalize quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
     "Use the calendar year to interpret dates but omit the year from correctedOutput.",
+    "A day/day followed by a month is a delivery range: 1/5 aug means 1 - 5 aug, never 5 jan or only 5 aug.",
     "Viscosity and specification numbers such as VLSFO 380, RMG 380, 380 CST, 380 Centistoke, and ISO 8217 are not quantities. Prefer the number explicitly paired with MT, MTS, CBM, KL, tons, or Chinese quantity units.",
     "Omit the eta label when ETA is the only event type. In a Grades and Quantities offer template, render explicit ETA and ETD as one delivery range, e.g. kaohsiung 3 - 7 aug. Otherwise preserve multiple event labels and normalize ETS to etd, e.g. inchon eta 27 jul, etd 29 jul.",
     "When multiple candidate ports are listed, include every port and its own window in one schedule segment joined by uppercase OR. Copy each port name from the raw enquiry exactly before normalizing its spelling; never substitute a different port.",
@@ -488,29 +491,84 @@ function buildFallbackOutput(
   )
 }
 
+function normalizedFuelQuantity(value: string) {
+  return cleanText(value).toLowerCase().replace(/[\s,]/g, "")
+}
+
+function reconcileExplicitSpcFuels(sourceText: string, draft: ParserAiDraft) {
+  const explicit = extractExplicitSpcFuelFields(sourceText)
+  if (!explicit.hsfo && !explicit.vlsfo && !explicit.lsmgo) return draft
+
+  let hsfo = explicit.hsfo || draft.hsfo
+  const vlsfo = explicit.vlsfo || draft.vlsfo
+  const lsmgo = explicit.lsmgo || draft.lsmgo
+
+  if (
+    explicit.vlsfo &&
+    !explicit.hsfo &&
+    normalizedFuelQuantity(hsfo) === normalizedFuelQuantity(explicit.vlsfo)
+  ) {
+    hsfo = ""
+  }
+
+  const warnings = explicit.vlsfo && !explicit.hsfo
+    ? draft.warnings.filter((warning) =>
+        !/(?:\blsfo\b.*\bhsfo\b|\bhsfo\b.*\blsfo\b)/i.test(warning),
+      )
+    : draft.warnings
+
+  return { ...draft, hsfo, vlsfo, lsmgo, warnings }
+}
+
+function explicitSlashDateRange(sourceText: string) {
+  const month = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+  const match = sourceText.match(new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s*\\/\\s*\\d{1,2}(?:st|nd|rd|th)?\\s*(?:of\\s+)?(?:${month})\\b`, "i"))
+  return match ? findEnquiryDates(match[0])[0] || "" : ""
+}
+
+function applyExplicitWorksheetDateRange(output: string, sourceText: string, portValue: string) {
+  const dateRange = explicitSlashDateRange(sourceText)
+  if (!dateRange) return { output, dateRange: "" }
+
+  const port = displayPortForShortenedOutput(portValue || extractEnquiryPort(sourceText))
+  const schedule = [port, dateRange].filter(Boolean).join(" ")
+  const parts = cleanText(output).split("/").map(cleanText).filter(Boolean)
+  const scheduleIndex = parts.findIndex((part, index) => index > 0 && DATE_EXPRESSION_PATTERN.test(part))
+  if (scheduleIndex >= 0) parts[scheduleIndex] = schedule
+
+  return {
+    output: scheduleIndex >= 0 ? parts.join(" / ") : output,
+    dateRange,
+  }
+}
+
 function normalizeOutputForSource(
   source: ParserAiSource,
   rawText: string,
   cleanedText: string,
   draft: ParserAiDraft,
 ) {
-  const correctedOutput = buildFallbackOutput(source, rawText, cleanedText, draft)
-  const vlsfoMaxRemarks = draft.vlsfoMaxRemarks.length
-    ? draft.vlsfoMaxRemarks
+  const sourceText = cleanedText || rawText
+  const reconciledDraft = source === "spc"
+    ? reconcileExplicitSpcFuels(sourceText, draft)
+    : draft
+  const correctedOutput = buildFallbackOutput(source, rawText, cleanedText, reconciledDraft)
+  const vlsfoMaxRemarks = reconciledDraft.vlsfoMaxRemarks.length
+    ? reconciledDraft.vlsfoMaxRemarks
     : detectVlsfoMaxRemarks(correctedOutput)
 
   if (source === "spc") {
     const parsed = parseSpcEnquiryText(correctedOutput, vlsfoMaxRemarks)
     return {
-      ...draft,
+      ...reconciledDraft,
       correctedOutput: parsed.standardText || correctedOutput,
-      vesselName: draft.vesselName || parsed.vesselName,
-      imo: draft.imo || parsed.imo,
-      eta: draft.eta || parsed.eta,
-      hsfo: draft.hsfo || parsed.hsfo,
-      vlsfo: draft.vlsfo || parsed.vlsfo,
-      lsmgo: draft.lsmgo || parsed.lsmgo,
-      remarks: draft.remarks || parsed.remarks,
+      vesselName: reconciledDraft.vesselName || parsed.vesselName,
+      imo: reconciledDraft.imo || parsed.imo,
+      eta: reconciledDraft.eta || parsed.eta,
+      hsfo: reconciledDraft.hsfo || parsed.hsfo,
+      vlsfo: reconciledDraft.vlsfo || parsed.vlsfo,
+      lsmgo: reconciledDraft.lsmgo || parsed.lsmgo,
+      remarks: reconciledDraft.remarks || parsed.remarks,
       port: "",
       buyer: "",
       vlsfoMaxRemarks,
@@ -518,14 +576,21 @@ function normalizeOutputForSource(
   }
 
   const worksheetOutput = normalizeEnquiryWorksheetAiOutput(correctedOutput)
-  const guess = parseEnquiryWorksheetGuess(worksheetOutput)
+  const reconciledSchedule = applyExplicitWorksheetDateRange(
+    worksheetOutput,
+    sourceText,
+    reconciledDraft.port,
+  )
+  const normalizedWorksheetOutput = reconciledSchedule.output
+  const guess = parseEnquiryWorksheetGuess(normalizedWorksheetOutput)
   return {
-    ...draft,
-    correctedOutput: worksheetOutput,
-    vesselName: draft.vesselName || guess.vesselName,
-    imo: draft.imo || guess.imo,
-    port: draft.port || guess.port,
-    buyer: draft.buyer || guess.buyer,
+    ...reconciledDraft,
+    correctedOutput: normalizedWorksheetOutput,
+    vesselName: reconciledDraft.vesselName || guess.vesselName,
+    imo: reconciledDraft.imo || guess.imo,
+    port: reconciledDraft.port || guess.port,
+    buyer: reconciledDraft.buyer || guess.buyer,
+    eta: reconciledSchedule.dateRange || reconciledDraft.eta,
     vlsfoMaxRemarks,
   }
 }

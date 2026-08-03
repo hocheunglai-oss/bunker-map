@@ -26,10 +26,10 @@ type ImoCandidate = {
 }
 
 const VESSEL_LABEL_PATTERN =
-  /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|船名)/i
+  /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|\bname\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)/i
 
 const VESSEL_FIELD_PATTERN =
-  /^\s*['"]?\s*(?:[-•*=]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
+  /^\s*['"]?\s*(?:[-•*=]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|name\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
 
 const BUYER_LABEL_PATTERN =
   /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
@@ -111,6 +111,7 @@ function findBestImo(lines: string[]) {
 
 function removeVesselLabel(value: string) {
   return value
+    .replace(/^\s*name\s*\(\s*imo(?:\s*no\.?)?\s*\)\s*(?:[:：#\-/]\s*)?/i, "")
     .replace(/^\s*船名(?:\s*\(\s*IMO(?:\s*NO\.?|\s*NUMBER)?\s*\.?\s*\))?\s*(?:[:：]\s*)?/i, "")
     .replace(
       /^\s*(?:performing\s+vessel|vessel\s*(?:name|\s*\/\s*imo|\(\s*imo\s*\))?|vsl(?:\s+name)?|ship(?:\s+name)?)\s*[:#\-/]?\s*/i,
@@ -144,7 +145,7 @@ function isPlausibleVesselName(value: string) {
   if (!value) return false
   if (value.length < 2 || value.length > 60) return false
   if (!/[A-Z]/.test(value)) return false
-  if (/^(?:PORT|LOCATION|ETA|ETB|ETD|ETS|DATE|DELIVERY|PRODUCT|SPEC|QUANTITY|BUYER|AGENT|ACCOUNT|CLIENT|TERMS|PAYMENT|REMARKS|SUPPLY RESTRICTIONS|BUNKER ONLY|VOYAGE|VOY)\b/i.test(value) || /^(?:\u822a\u6b21\u53f7?|\u8239\u540d)\s*[:：]?/i.test(value)) {
+  if (/^(?:NAME|PORT|LOCATION|ETA|ETB|ETD|ETS|DATE|DELIVERY|PRODUCT|SPEC|QUANTITY|BUYER|AGENT|ACCOUNT|CLIENT|TERMS|PAYMENT|REMARKS|SUPPLY RESTRICTIONS|BUNKER ONLY|VOYAGE|VOY)\b/i.test(value) || /^(?:\u822a\u6b21\u53f7?|\u8239\u540d)\s*[:：]?/i.test(value)) {
     return false
   }
   if (/\b\d{1,2}\s*(?:[./-]\s*\d{1,2}|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/i.test(value)) return false

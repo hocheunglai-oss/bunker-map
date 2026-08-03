@@ -212,6 +212,11 @@ export function findEnquiryDates(value: string) {
     if (date) dates.push(date)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*\\/\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[3], match[2], match[3])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(/(?:^|\n)\s*[A-Za-z][A-Za-z .'-]{1,36}\s+(\d{1,2})[./](\d{1,2})(?=$|[^\d])/gm)) {
     const date = normalizeDate(match[2], match[1])
     if (date) dates.push(date)
@@ -254,11 +259,6 @@ export function findEnquiryDates(value: string) {
   }
 
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
-    const range = formatDateRange(match[1], match[3], match[2], match[3])
-    if (range) dates.push(range)
-  }
-
-  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*\\/\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
   }
@@ -491,6 +491,7 @@ function isNonRequestProductReference(value: string) {
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(normalized) ||
     /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
+    /^\s*(?:fuel|diesel)\s+oils?\b.*\bspecs?\b/i.test(normalized) ||
     /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(normalized) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(normalized)
 }
@@ -536,7 +537,7 @@ function extractQuantityFromInlineUnit(value: string) {
 
 function extractBareQuantity(value: string) {
   const quantityText = value
-    .replace(/\biso\s*\d{3,5}(?:\s*[-:/]\s*\d{2,4})?\b/gi, " ")
+    .replace(/\biso\s*[-:]?\s*\d{3,5}(?:\s*[-:/]?\s*\d{2,4})?\b/gi, " ")
     .replace(/\b(?:rmg|rmk|dma|dmb)\s*[-:]?\s*\d+(?:[,.]\d+)?\b/gi, " ")
     .replace(/\b\d+(?:[,.]\d+)?\s*(?:cst|centistokes?)\b/gi, " ")
     .replace(/\b(?:sulphur|sulfur|flash\s+point|density)\b[^\n;/]*/gi, " ")

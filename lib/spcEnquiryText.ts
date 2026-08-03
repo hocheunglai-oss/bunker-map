@@ -162,6 +162,8 @@ function looksLikeFuel(value: string) {
 
 export type SpcFuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
+export type ExplicitSpcFuelFields = Partial<Record<SpcFuelKey, string>>
+
 function classifyFuel(value: string): SpcFuelKey | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
@@ -185,6 +187,24 @@ function extractQuantity(value: string) {
     .map((match) => match[1])
   const quantity = matches.at(-1)
   return quantity ? `${normalizeEnquiryQuantityNumber(quantity)}mts` : ""
+}
+
+export function extractExplicitSpcFuelFields(rawValue: string): ExplicitSpcFuelFields {
+  const fields: ExplicitSpcFuelFields = {}
+  const lines = cleanSpcEnquiryText(rawValue).split("\n")
+
+  for (const line of lines) {
+    const match = line.match(
+      /^\s*(?:[-*]\s*)?(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s*[:=-]\s*(.+)$/i,
+    )
+    if (!match) continue
+
+    const fuel = classifyFuel(match[1])
+    const quantity = extractQuantity(match[2])
+    if (fuel && quantity) fields[fuel] = quantity
+  }
+
+  return fields
 }
 
 function vlsfoRemarks(value: string) {

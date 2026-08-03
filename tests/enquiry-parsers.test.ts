@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import test, { mock } from "node:test"
 import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
@@ -8,7 +8,10 @@ import {
   normalizeEnquiryQuantityText,
 } from "../lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
-import { parseSpcEnquiryText } from "../lib/spcEnquiryText"
+import { extractExplicitSpcFuelFields, parseSpcEnquiryText } from "../lib/spcEnquiryText"
+
+mock.timers.enable({ apis: ["Date"], now: new Date("2026-07-30T00:00:00.000Z") })
+test.after(() => mock.timers.reset())
 
 function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"180cst max" | "120cst max"> = []) {
   const guess = parseEnquiryWorksheetGuess(rawText)
@@ -531,5 +534,33 @@ test("replays the July 30 FCUNO reports with delivery windows and candidate port
   assert.equal(
     worksheetOutput(gaschemAfrica),
     "gaschem africa / ulsan 29 jul OR daesan 2 aug / vlsfo 650mts / lsmgo 100mts",
+  )
+})
+
+test("replays the August 3 reports with slash windows and structured SPC specifications", () => {
+  assert.equal(
+    worksheetOutput("mv bei yuan eta busan 1/5 aug abt vlsfo 200/300 mts"),
+    "bei yuan / busan 1 - 5 aug / vlsfo 200-300mts",
+  )
+
+  const harmony = [
+    "NAME(IMO NO.):HARMONY IMO: 9402017",
+    "VOYAGE NO:2605",
+    "BUNKER PORT:SINGAPORE",
+    "ETA SINGAPORE:22ND AUG -06TH SEP",
+    "BUNKER QUANTITY AND SPECS:",
+    "LSFO:700MT",
+    "LSMGO:30MT",
+    "FUEL OIL 380 CST SPECS: ISO 8217 2010 RMG 380 (SULPHUR CONTENT < 0.5%)",
+    "DIESEL OILS SPECS: ISO-8217 2010 DMA/B (SULPHUR CONTENT < 0.1%)",
+  ].join("\n")
+
+  assert.deepEqual(extractExplicitSpcFuelFields(harmony), {
+    vlsfo: "700mts",
+    lsmgo: "30mts",
+  })
+  assert.equal(
+    parseSpcEnquiryText(harmony).standardText,
+    "harmony / 9402017 / 22 aug - 6 sep / vlsfo 700mts / lsmgo 30mts",
   )
 })
