@@ -7,6 +7,7 @@ import { canAccessSpcPage } from "@/lib/spcPages"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
 const PAGE_TITLE = "WHATSAPP EXTENSION"
+const EXTENSION_VERSION = "0.4.7"
 
 type Step = {
   title: string
@@ -21,7 +22,7 @@ const STEPS: readonly Step[] = [
   {
     title: "Download",
     details: [
-      "Download extension.",
+      `Download extension version ${EXTENSION_VERSION}.`,
       "Extract the ZIP and save to a folder such as Documents.",
     ],
     action: {

@@ -415,6 +415,14 @@ setHeaderTitles("SUMITOMO DESK")
 assert.equal(api.currentChatMatchesContact(renameSafeContact), false)
 
 const enquiry = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
+assert.equal(
+  api.enquiryReplyText({ vesselName: "long pu 16", formattedText: enquiry }),
+  "Re Long Pu 16",
+)
+assert.equal(
+  api.enquiryReplyText({ formattedText: "aal antwerp / 9958781 / 9 - 13 aug / vlsfo 150mts" }),
+  "Re Aal Antwerp",
+)
 let composer = setComposer(enquiry)
 assert.equal(api.insertComposerText(enquiry), true)
 assert.equal(api.composerText(composer), enquiry)
@@ -468,9 +476,9 @@ assert.equal(api.acquireSendLock("same-contact", "same message"), false)
 
 api.state.templateEnabled = false
 api.state.enquiries = [
-  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
-  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
-  { id: "enq-2", formattedText: duplicateMessage, createdAt: "2026-07-01T08:00:00Z", status: "sent" },
+  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-24T08:00:00Z", status: "sent" },
+  { id: "enq-1", formattedText: duplicateMessage, createdAt: "2026-07-24T08:00:00Z", status: "sent" },
+  { id: "enq-2", formattedText: duplicateMessage, createdAt: "2026-07-24T08:00:00Z", status: "sent" },
 ]
 api.state.selectedEnquiries = { "enq-1": true, "enq-2": true }
 assert.equal(api.selectedEnquiryText(), duplicateMessage)

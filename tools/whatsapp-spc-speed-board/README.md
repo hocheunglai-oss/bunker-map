@@ -16,12 +16,12 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user click an enquiry row to select it with a blue highlight, then click it again to cancel selection.
 - Shows the Send command and effective selection inside the fixed button, including whether the opening template will be included.
-- Shows a WhatsApp-style paper-plane button on each enquiry. It opens the sender's individual chat through WhatsApp's visible search results without navigating or refreshing the page; ambiguous phonebook matches are never guessed.
+- Shows the supplied green paper-plane button on each enquiry. It opens the sender's individual chat through WhatsApp's visible search results without navigating or refreshing the page, prefills `Re <Vessel Name>`, and leaves the composer focused without sending; ambiguous phonebook matches are never guessed.
 - Uses checkbox-free enquiry rows and sends all currently blue-selected enquiries into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
 - Lets each trader locally remove one enquiry or clear the visible list without affecting other traders.
 - The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and reliably rearranges saved chats when dragged.
-- A new installation starts with an empty enquiry panel by baselining the existing API history; only enquiries created after that first successful load appear.
+- All authenticated traders share enquiries created after the controlled feed start on 23 July 2026, while Remove and Clear All remain local to each Chrome profile.
 - `Rename` changes only the local display label. The original WhatsApp contact or group name remains hidden as the routing identity, so renaming cannot redirect the shortcut.
 - After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
 

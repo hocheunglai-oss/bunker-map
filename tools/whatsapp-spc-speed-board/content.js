@@ -1023,9 +1023,25 @@
     }
   }
 
-  function openEnquirySenderChat(enquiry) {
+  async function openEnquirySenderChat(enquiry) {
     const contact = enquirySenderContact(enquiry)
-    return contact ? openContact(contact, { allowNavigation: false }) : Promise.resolve(false)
+    const replyText = enquiryReplyText(enquiry)
+    if (!contact || !replyText) return false
+    if (!(await openContact(contact, { allowNavigation: false }))) return false
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (currentChatMatchesContact(contact) && prepareComposerDraftText(replyText)) {
+        window.setTimeout(() => {
+          const composer = findComposer()
+          if (currentChatMatchesContact(contact) && composerText(composer) === replyText) {
+            focusComposerAtEnd(composer)
+          }
+        }, 180)
+        return true
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    }
+    return false
   }
 
   function recordEnquirySeen(enquiry) {
@@ -1110,6 +1126,20 @@
     const details = body.slice(separatorIndex)
     if (!vessel) return escapeHtml(body)
     return `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(vessel)}</strong> ${escapeHtml(details)}`
+  }
+
+  function enquiryVesselName(enquiry) {
+    const explicitName = cleanText(enquiry?.vesselName || enquiry?.vessel_name)
+    const bodyName = enquiryBodyText(enquiry).split("/")[0]
+    const vessel = cleanText(explicitName || bodyName)
+    return vessel.toLowerCase().replace(/(^|[\s/-])([a-z])/g, (_match, separator, letter) => {
+      return `${separator}${letter.toUpperCase()}`
+    })
+  }
+
+  function enquiryReplyText(enquiry) {
+    const vessel = enquiryVesselName(enquiry)
+    return vessel ? `Re ${vessel}` : ""
   }
 
   function enquiryTextForDrag(id) {
@@ -1207,13 +1237,47 @@
   function replaceComposerText(composer, text) {
     clearComposerText(composer)
     setComposerDomText(composer, text)
+    focusComposerAtEnd(composer)
     return composerText(composer) === cleanText(text)
+  }
+
+  function focusComposerAtEnd(composer) {
+    if (!composer) return false
+    composer.focus()
+    const selection = window.getSelection()
+    if (!selection) return true
+    const range = document.createRange()
+    range.selectNodeContents(composer)
+    range.collapse(false)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    return true
   }
 
   function insertComposerText(text) {
     const composer = findComposer()
     if (!composer) return false
     return replaceComposerText(composer, text)
+  }
+
+  function prepareComposerDraftText(text) {
+    const message = cleanText(text)
+    const composer = findComposer()
+    if (!composer || !message) return false
+
+    clearComposerText(composer)
+    composer.focus()
+    const sent = sendRuntimeMessage({ type: "spc-native-insert-text", text: message }, (response, runtimeError) => {
+      const nextComposer = findComposer()
+      const nativeReady = !runtimeError && response?.ok === true && nextComposer && composerText(nextComposer) === message
+      if (!nativeReady && !insertComposerText(message)) return
+      focusComposerAtEnd(findComposer())
+    })
+
+    if (sent) return true
+    if (!insertComposerText(message)) return false
+    focusComposerAtEnd(findComposer())
+    return true
   }
 
   function prepareComposerTextForSend(text, onReady) {
@@ -1548,8 +1612,8 @@
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           ${senderContact
-            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)}"><svg class="fcuno-wa-spc-send-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 20.5v-17L22 12 4 20.5Zm2-3L16.85 12 6 6.5v3.85L11.5 12 6 13.65v3.85Z"></path></svg></button>`
-            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><svg class="fcuno-wa-spc-send-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 20.5v-17L22 12 4 20.5Zm2-3L16.85 12 6 6.5v3.85L11.5 12 6 13.65v3.85Z"></path></svg></button>`}
+            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}"></button>`
+            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"></button>`}
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
@@ -2056,11 +2120,13 @@
       getCurrentChat,
       enquiryTextForIds,
       enquirySenderContact,
+      enquiryReplyText,
       loadCrudeWatch,
       insertComposerText,
       loadEnquiries,
       moveContact,
       phoneDigits,
+      prepareComposerDraftText,
       prepareComposerTextForSend,
       refreshUnreadIndicators,
       renameContact,

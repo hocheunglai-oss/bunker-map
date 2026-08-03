@@ -6,6 +6,7 @@ const { chromium } = require("playwright")
 
 const extensionSource = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
 const extensionStyles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
+const enquiryChatButton = fs.readFileSync(path.join(__dirname, "spc-enquiry-chat-button.png"))
 const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
@@ -116,6 +117,7 @@ const html = `<!doctype html>
                 {
                   id: "enq-1",
                   formattedText: ${JSON.stringify(enquiry)},
+                  vesselName: "taisei maru no.15",
                   createdAt: "2026-07-23T09:21:00Z",
                   updatedAt: "2026-07-23T09:21:00Z",
                   status: "sent",
@@ -213,7 +215,12 @@ const html = `<!doctype html>
 </html>`
 
 async function withServer(callback) {
-  const server = http.createServer((_request, response) => {
+  const server = http.createServer((request, response) => {
+    if (request.url === "/spc-enquiry-chat-button.png") {
+      response.writeHead(200, { "content-type": "image/png" })
+      response.end(enquiryChatButton)
+      return
+    }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
     response.end(html)
   })
@@ -228,7 +235,7 @@ async function withServer(callback) {
 async function main() {
   await withServer(async (url) => {
     const browser = await chromium.launch({
-      executablePath: chromium.executablePath(),
+      executablePath: process.env.CHROME_EXECUTABLE_PATH || chromium.executablePath(),
       headless: true,
     })
     try {
@@ -300,8 +307,7 @@ async function main() {
           arrowTag: arrow?.tagName || "",
           arrowHref: arrow?.getAttribute("href") || "",
           arrowText: arrow?.textContent?.trim() || "",
-          glyphCount: arrow?.querySelectorAll("svg.fcuno-wa-spc-send-glyph path").length || 0,
-          glyphViewBox: arrow?.querySelector("svg.fcuno-wa-spc-send-glyph")?.getAttribute("viewBox") || "",
+          arrowBackground: arrow ? getComputedStyle(arrow).backgroundImage : "",
           arrowWidth: arrow ? getComputedStyle(arrow).width : "",
           arrowHeight: arrow ? getComputedStyle(arrow).height : "",
           vesselText: row?.querySelector(".fcuno-wa-spc-enquiry-vessel")?.textContent || "",
@@ -315,8 +321,7 @@ async function main() {
         arrowTag: "BUTTON",
         arrowHref: "",
         arrowText: "",
-        glyphCount: 1,
-        glyphViewBox: "0 0 24 24",
+        arrowBackground: `url("${url}spc-enquiry-chat-button.png")`,
         arrowWidth: "34px",
         arrowHeight: "34px",
         vesselText: "taisei maru no.15",
@@ -332,18 +337,54 @@ async function main() {
         document.getElementById("senderRow").style.display = "none"
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
-      await page.waitForFunction(() => document.getElementById("chatTitle")?.getAttribute("title") === "BARRY KHOO", { timeout: 3000 })
-      await page.waitForTimeout(180)
+      await page.waitForFunction(() => (
+        document.getElementById("chatTitle")?.getAttribute("title") === "BARRY KHOO" &&
+        document.getElementById("composer")?.innerText === "Re Taisei Maru No.15" &&
+        document.getElementById("search")?.value === "" &&
+        document.activeElement === document.getElementById("composer")
+      ), { timeout: 3000 })
       const senderOpenResult = await page.evaluate(() => ({
         sameDocument: window.senderOpenDocument === document.documentElement,
         chatTitle: document.getElementById("chatTitle")?.getAttribute("title") || "",
         searchText: document.getElementById("search")?.value || "",
+        composerText: document.getElementById("composer")?.innerText || "",
+        composerFocused: document.activeElement === document.getElementById("composer"),
+        sentCount: window.sentMessages.length,
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
         sameDocument: true,
         chatTitle: "BARRY KHOO",
         searchText: "",
+        composerText: "Re Taisei Maru No.15",
+        composerFocused: true,
+        sentCount: 0,
+      })
+
+      await page.evaluate(() => {
+        window.editorModel = ""
+        document.getElementById("composer").replaceChildren()
+        document.getElementById("composer").blur()
+      })
+      await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
+      await page.waitForFunction(() => document.getElementById("composer")?.innerText === "Re Taisei Maru No.15", { timeout: 3000 })
+      const sameChatPrefill = await page.evaluate(() => ({
+        composerText: document.getElementById("composer")?.innerText || "",
+        composerFocused: document.activeElement === document.getElementById("composer"),
+        sentCount: window.sentMessages.length,
+      }))
+      assert.deepEqual(sameChatPrefill, {
+        composerText: "Re Taisei Maru No.15",
+        composerFocused: true,
+        sentCount: 0,
+      })
+
+      await page.evaluate(() => {
+        window.editorModel = ""
+        window.nativeInsertCount = 0
+        window.nativeEnterCount = 0
+        window.nativeClickCount = 0
+        document.getElementById("composer").replaceChildren()
       })
 
       const firstEnquiryText = page.locator("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] em")

@@ -563,32 +563,31 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   align-items: center;
   justify-content: center;
   align-self: center;
-  border: 1px solid #008069;
+  border: 0;
   border-radius: 50%;
-  background: #00a884;
+  background-color: #00a884;
+  background-image: url("spc-enquiry-chat-button.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 148% 148%;
   color: #ffffff;
   cursor: pointer;
   line-height: 1;
   text-decoration: none;
-}
-
-.fcuno-wa-spc-send-glyph {
-  width: 20px;
-  height: 20px;
-  display: block;
-  flex: 0 0 auto;
-  fill: currentColor;
+  box-shadow: 0 1px 2px rgba(0, 128, 105, 0.24);
 }
 
 .fcuno-wa-spc-enquiry-chat:hover {
-  background: #008f72;
+  filter: brightness(0.96);
 }
 
 .fcuno-wa-spc-enquiry-chat.is-unavailable {
   border-color: #cfd6df;
-  background: #e9edef;
+  background-color: #e9edef;
   color: #8696a0;
   cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.55;
 }
 
 .fcuno-wa-spc-enquiry-copy {
