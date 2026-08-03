@@ -3,8 +3,8 @@ import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { sendNoticeEmail } from "@/lib/emailNotice"
 import {
+  buildSpcSpeedBoardNoticeDelivery,
   buildSpcSpeedBoardUpdateEmail,
-  resolveSpcSpeedBoardNoticeRecipients,
   SPC_SPEED_BOARD_ROLE,
   SPC_SPEED_BOARD_VERSION,
 } from "@/lib/spcSpeedBoardNotice"
@@ -57,10 +57,10 @@ export async function POST(request: Request) {
   try {
     const session = await requireSpcPagePermission("spc-chrome-extension", "edit")
     const supplierTraders = await listSupplierTraderOptions()
-    const recipients = resolveSpcSpeedBoardNoticeRecipients(supplierTraders)
-    const skipped = Math.max(supplierTraders.length - recipients.length, 0)
+    const delivery = buildSpcSpeedBoardNoticeDelivery(supplierTraders)
+    const skipped = Math.max(supplierTraders.length - delivery.to.length, 0)
 
-    if (!recipients.length) {
+    if (!delivery.to.length) {
       return NextResponse.json(
         { message: "No active supplier trader has a valid email username." },
         { status: 400 },
@@ -69,8 +69,8 @@ export async function POST(request: Request) {
 
     const email = buildSpcSpeedBoardUpdateEmail()
     await sendNoticeEmail({
-      to: [],
-      bcc: recipients,
+      to: delivery.to,
+      cc: delivery.cc,
       subject: email.subject,
       html: email.html,
     })
@@ -78,17 +78,17 @@ export async function POST(request: Request) {
     const auditContext = createSpcAuditContext(session, request, "spc-chrome-extension")
     let auditRecorded = true
     try {
-      await recordUpdateNoticeAudit(auditContext, recipients.length)
+      await recordUpdateNoticeAudit(auditContext, delivery.to.length)
     } catch (error) {
       auditRecorded = false
       console.error("SPC Speed Board update notice audit failed", error)
     }
 
-    const traderLabel = recipients.length === 1 ? "supplier trader" : "supplier traders"
+    const traderLabel = delivery.to.length === 1 ? "supplier trader" : "supplier traders"
     return NextResponse.json({
       success: true,
-      message: `Update notice sent to ${recipients.length} ${traderLabel}.`,
-      recipientCount: recipients.length,
+      message: `Update notice sent to ${delivery.to.length} ${traderLabel}.`,
+      recipientCount: delivery.to.length,
       skipped,
       auditRecorded,
       warning: auditRecorded ? undefined : "Email sent, but the audit record could not be saved.",
