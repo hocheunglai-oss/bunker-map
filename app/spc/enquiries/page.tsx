@@ -216,6 +216,7 @@ function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = [])
   }
   return {
     ...draft,
+    rawText,
     standardText: standardTextForDraft(draft, vlsfoMaxRemarks),
   }
 }
