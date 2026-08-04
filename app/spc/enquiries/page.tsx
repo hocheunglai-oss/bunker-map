@@ -20,6 +20,7 @@ import {
   detectSpcCautionTerms,
   detectVlsfoMaxRemarks,
   formatVlsfoMaxRemark,
+  formatSpcCautionWarning,
   replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
@@ -486,7 +487,7 @@ export default function SpcEnquiriesPage() {
     if (key === "hsfo" || key === "vlsfo" || key === "lsmgo") dismissDraftMissingField("fuel")
 
     if (key === "rawText") {
-      setRmkMode(false)
+      setRmkMode(detectSpcCautionTerms(value).includes("RMK"))
       setVlsfoMaxRemarks([])
       setParserAiStatus("idle")
       setParserAiTarget("")
@@ -1002,7 +1003,7 @@ export default function SpcEnquiriesPage() {
               </label>
               {cautionTerms.length > 0 ? (
                 <div className="spc-enquiry-warning">
-                  WARNING: {cautionTerms.join(" / ")} spotted. Confirm viscosity and RMK requirements before sending.
+                  {formatSpcCautionWarning(cautionTerms)}
                 </div>
               ) : null}
               {attentionTerms.length > 0 ? (

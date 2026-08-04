@@ -468,7 +468,7 @@ function classifyProduct(value: string): ProductSegment["product"] | "" {
   if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
-  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
+  if (/\b(?:hsfo|hfo|ifo|rmk)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "hsfo"
   }
   return ""
@@ -524,6 +524,18 @@ export function detectSpcCautionTerms(value: string) {
   if (/(^|\D)180(?!\d)/.test(value)) terms.push("180")
   if (/\br\s*\.?\s*m\s*\.?\s*k\s*\.?s?\b/i.test(value)) terms.push("RMK")
   return terms
+}
+
+export function formatSpcCautionWarning(terms: string[]) {
+  const hasViscosity = terms.some((term) => term === "80" || term === "120" || term === "180")
+  const hasRmk = terms.includes("RMK")
+  const requirement = hasViscosity && hasRmk
+    ? "VLSFO viscosity and RMK requirements"
+    : hasViscosity
+      ? "VLSFO viscosity requirement"
+      : "RMK requirement"
+
+  return `WARNING: ${terms.join(" / ")} spotted. Confirm ${requirement} before sending.`
 }
 
 export function replaceHsfoWithRmk(value: string) {
@@ -622,7 +634,7 @@ function extractQuantityFromBlock(lines: string[]) {
 
 function productMatches(line: string) {
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,

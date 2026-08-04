@@ -5,6 +5,7 @@ import {
   buildShortenedEnquiry,
   detectAttentionTerms,
   detectSpcCautionTerms,
+  formatSpcCautionWarning,
   normalizeEnquiryQuantityNumber,
   normalizeEnquiryQuantityText,
   replaceHsfoWithRmk,
@@ -175,6 +176,30 @@ test("flags all requested caution terms", () => {
     detectSpcCautionTerms("VLSFO 80CST / 120CST / 180CST / RMK"),
     ["80", "120", "180", "RMK"],
   )
+  assert.equal(
+    formatSpcCautionWarning(["80"]),
+    "WARNING: 80 spotted. Confirm VLSFO viscosity requirement before sending.",
+  )
+  assert.equal(
+    formatSpcCautionWarning(["RMK"]),
+    "WARNING: RMK spotted. Confirm RMK requirement before sending.",
+  )
+  assert.equal(
+    formatSpcCautionWarning(["80", "RMK"]),
+    "WARNING: 80 / RMK spotted. Confirm VLSFO viscosity and RMK requirements before sending.",
+  )
+})
+
+test("SPC parser preserves RMK as the HSFO-side product", () => {
+  const parsed = parseSpcEnquiryText("chan ming / 12 aug / RMK 500mts")
+  assert.equal(parsed.hsfo, "500mts")
+  assert.equal(parsed.vlsfo, "")
+  assert.equal(parsed.lsmgo, "")
+  assert.equal(parsed.standardText, "chan ming / 12 aug / RMK 500mts")
+
+  const structured = parseSpcEnquiryText("VESSEL: CHAN MING\nETA: 12 AUG\nRMK: 500MT")
+  assert.equal(structured.hsfo, "500mts")
+  assert.equal(structured.standardText, "chan ming / 12 aug / RMK 500mts")
 })
 
 test("RMK conversion changes HSFO only", () => {

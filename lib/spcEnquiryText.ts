@@ -3,6 +3,7 @@ import {
   detectVlsfoMaxRemarks,
   formatVlsfoMaxRemark,
   normalizeEnquiryQuantityNumber,
+  replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
@@ -52,7 +53,8 @@ export type SpcEnquiryTextInput = {
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
-const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|mgo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
+const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|rmk|mgo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
+const RMK_PRODUCT_PATTERN = /\br\s*\.?\s*m\s*\.?\s*k\s*\.?s?\b/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "imo",
   "lostReason",
@@ -170,7 +172,7 @@ function classifyFuel(value: string): SpcFuelKey | "" {
   if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
-  if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
+  if (/\b(?:hsfo|hfo|ifo|rmk)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "hsfo"
   }
   return ""
@@ -195,7 +197,7 @@ export function extractExplicitSpcFuelFields(rawValue: string): ExplicitSpcFuelF
 
   for (const line of lines) {
     const match = line.match(
-      /^\s*(?:[-*]\s*)?(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s*[:=-]\s*(.+)$/i,
+      /^\s*(?:[-*]\s*)?(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|rmk|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s*[:=-]\s*(.+)$/i,
     )
     if (!match) continue
 
@@ -238,7 +240,7 @@ export function cleanSpcFuelValue(value: string | null | undefined, fuel: SpcFue
     .replace(/\s+/g, " ")
     .trim()
 
-  if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|rmg\s*380|3\s*[,.]\s*5)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
+  if (fuel === "hsfo") text = text.replace(/^\s*(?:hsfo|hfo|ifo|rmk|rmg\s*380|3\s*[,.]\s*5)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
   if (fuel === "vlsfo") text = text.replace(/^\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|0\s*[,.]\s*5|0\s*[,.]\s*50|rmg\s*180)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
   if (fuel === "lsmgo") text = text.replace(/^\s*(?:l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)(?=\s|[:/-]|\d|$)\s*[:/-]?\s*/i, "")
 
@@ -350,7 +352,7 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
     if (seenTradingDetail) remarks.push(lowerText(part))
   })
 
-  const standardText = buildSpcStandardEnquiry({
+  const builtStandardText = buildSpcStandardEnquiry({
     vesselName,
     imo,
     eta,
@@ -361,6 +363,10 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
     vlsfoMaxRemarks: manualVlsfoRemarks,
   })
   const title = [lowerText(vesselName) || "new enquiry", eta].filter(Boolean).join(" / ")
+
+  const standardText = RMK_PRODUCT_PATTERN.test(rawText)
+    ? replaceHsfoWithRmk(builtStandardText)
+    : builtStandardText
 
   return {
     rawText,
@@ -413,7 +419,7 @@ export function parseSpcEnquiryText(
   const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
   const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo
   const remarks = ""
-  const standardText = buildSpcStandardEnquiry({
+  const builtStandardText = buildSpcStandardEnquiry({
     vesselName,
     imo,
     eta,
@@ -423,6 +429,10 @@ export function parseSpcEnquiryText(
     remarks,
     vlsfoMaxRemarks: manualVlsfoRemarks,
   })
+
+  const standardText = RMK_PRODUCT_PATTERN.test(rawText)
+    ? replaceHsfoWithRmk(builtStandardText)
+    : builtStandardText
 
   return {
     rawText,
