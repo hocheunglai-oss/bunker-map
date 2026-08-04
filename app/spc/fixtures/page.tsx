@@ -455,7 +455,7 @@ export default function SpcFixturesPage() {
   const [actionPositions, setActionPositions] = useState<Record<string, number>>({})
   const [supplierMenuKey, setSupplierMenuKey] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
-  const [fixtureMonthFilter, setFixtureMonthFilter] = useState(initialPeriod.month)
+  const [fixtureMonthFilter, setFixtureMonthFilter] = useState("")
   const [loading, setLoading] = useState(false)
   const [savingId, setSavingId] = useState("")
   const [message, setMessage] = useState("")

@@ -262,14 +262,21 @@ export async function updateSpcEnquiryOutcome(
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  if (outcome === "cancel") {
+    const { error } = await supabase
+      .from("spc_enquiries")
+      .delete()
+      .eq("id", enquiryId)
+
+    if (error) throw error
+    return { ...mapEnquiry(existing), status: "closed" }
+  }
   const status =
     outcome === "stem"
       ? "quoted"
       : outcome === "lost"
         ? "cancelled"
-        : outcome === "cancel"
-          ? "closed"
-          : existing.status || "sent"
+        : existing.status || "sent"
   const now = new Date().toISOString()
   const currentText = formatSpcEnquiry(existing)
   const nextMeta: SpcEnquiryMeta = {
@@ -291,13 +298,6 @@ export async function updateSpcEnquiryOutcome(
       cleanText(input.supplierTraderDisplayName) || cleanText(input.supplierTraderUsername) || undefined
     nextMeta.postponedAt = undefined
     nextMeta.cancelledAt = undefined
-  } else if (outcome === "cancel") {
-    nextMeta.outcomeAt = now
-    nextMeta.cancelledAt = now
-    nextMeta.lostReason = undefined
-    nextMeta.stemSupplierTraderUsername = undefined
-    nextMeta.stemSupplierTraderDisplayName = undefined
-    nextMeta.postponedAt = undefined
   } else {
     nextMeta.postponedAt = now
   }

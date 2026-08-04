@@ -202,6 +202,10 @@ function standardTextForDraft(
   return buildSpcStandardEnquiry({ ...draft, vlsfoMaxRemarks })
 }
 
+function rmkStandardText(text: string) {
+  return text.replace(/\b(?:hsfo|vlsfo|lsmgo)\b/i, "RMK")
+}
+
 function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
   const parsed = parseSpcEnquiryText(rawText, vlsfoMaxRemarks)
   const draft = {
@@ -358,6 +362,7 @@ export default function SpcEnquiriesPage() {
   const [dismissedReofferMissingFields, setDismissedReofferMissingFields] = useState<Set<DraftFieldKey>>(() => new Set())
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [rmkMode, setRmkMode] = useState(false)
   const [updatingId, setUpdatingId] = useState("")
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
@@ -478,6 +483,7 @@ export default function SpcEnquiriesPage() {
     if (key === "hsfo" || key === "vlsfo" || key === "lsmgo") dismissDraftMissingField("fuel")
 
     if (key === "rawText") {
+      setRmkMode(false)
       setVlsfoMaxRemarks([])
       setParserAiStatus("idle")
       setParserAiTarget("")
@@ -507,6 +513,7 @@ export default function SpcEnquiriesPage() {
         [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? spcFuelInputValue(value, key) : value,
       }
       next.standardText = standardTextForDraft(next, vlsfoMaxRemarks)
+      if (rmkMode) next.standardText = rmkStandardText(next.standardText)
       next.title = [next.vesselName || "new enquiry", next.eta]
         .filter(Boolean)
         .join(" / ")
@@ -568,7 +575,9 @@ export default function SpcEnquiriesPage() {
 
       setDraft((draftCurrent) => ({
         ...draftCurrent,
-        standardText: standardTextForDraft(draftCurrent, next),
+        standardText: rmkMode
+          ? rmkStandardText(standardTextForDraft(draftCurrent, next))
+          : standardTextForDraft(draftCurrent, next),
       }))
       return next
     })
@@ -576,6 +585,7 @@ export default function SpcEnquiriesPage() {
 
   function clearDraft() {
     setDraft(emptyDraft)
+    setRmkMode(false)
     setVlsfoMaxRemarks([])
     setValidationAttempted(false)
     setDismissedDraftMissingFields(new Set())
@@ -819,6 +829,7 @@ export default function SpcEnquiriesPage() {
         const withoutDuplicate = current.filter((enquiry) => enquiry.id !== data.enquiry!.id)
         return [data.enquiry!, ...withoutDuplicate]
       })
+      setRmkMode(false)
     } catch (error) {
       reportEnquiryError(error, "Failed to send enquiry.")
     } finally {
@@ -885,6 +896,9 @@ export default function SpcEnquiriesPage() {
     setUpdatingId(enquiry.id)
     try {
       await patchOutcome({ id: enquiry.id, outcome })
+      if (outcome === "cancel") {
+        setEnquiries((current) => current.filter((row) => row.id !== enquiry.id))
+      }
     } catch (error) {
       reportEnquiryError(error, "Failed to update enquiry.")
     } finally {
@@ -1031,6 +1045,24 @@ export default function SpcEnquiriesPage() {
                 </label>
               </div>
               <div className="spc-vlsfo-remark-row" aria-label="VLSFO max viscosity controls">
+                <button
+                  type="button"
+                  className={rmkMode ? "is-active" : ""}
+                  aria-pressed={rmkMode}
+                  onClick={() => {
+                    const next = !rmkMode
+                    setRmkMode(next)
+                    setDraft((draftCurrent) => ({
+                      ...draftCurrent,
+                      standardText: next
+                        ? rmkStandardText(standardTextForDraft(draftCurrent, vlsfoMaxRemarks))
+                        : standardTextForDraft(draftCurrent, vlsfoMaxRemarks),
+                    }))
+                  }}
+                  disabled={!canEdit || (!draft.hsfo && !draft.vlsfo && !draft.lsmgo)}
+                >
+                  RMK
+                </button>
                 {vlsfoRemarkOptions.map((remark) => {
                   const active = vlsfoMaxRemarks.includes(remark)
                   return (
