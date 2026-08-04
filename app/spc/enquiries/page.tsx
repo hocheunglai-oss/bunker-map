@@ -217,10 +217,13 @@ function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = [])
     vlsfo: spcFuelInputValue(parsed.vlsfo, "vlsfo"),
     lsmgo: spcFuelInputValue(parsed.lsmgo, "lsmgo"),
   }
+  const standardText = standardTextForDraft(draft, vlsfoMaxRemarks)
   return {
     ...draft,
     rawText,
-    standardText: standardTextForDraft(draft, vlsfoMaxRemarks),
+    standardText: detectSpcCautionTerms(rawText).includes("RMK")
+      ? rmkStandardText(standardText)
+      : standardText,
   }
 }
 
