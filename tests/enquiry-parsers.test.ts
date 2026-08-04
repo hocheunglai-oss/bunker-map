@@ -4,8 +4,10 @@ import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
   detectAttentionTerms,
+  detectSpcCautionTerms,
   normalizeEnquiryQuantityNumber,
   normalizeEnquiryQuantityText,
+  replaceHsfoWithRmk,
 } from "../lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
 import { extractExplicitSpcFuelFields, parseSpcEnquiryText } from "../lib/spcEnquiryText"
@@ -13,7 +15,7 @@ import { extractExplicitSpcFuelFields, parseSpcEnquiryText } from "../lib/spcEnq
 mock.timers.enable({ apis: ["Date"], now: new Date("2026-07-30T00:00:00.000Z") })
 test.after(() => mock.timers.reset())
 
-function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"180cst max" | "120cst max"> = []) {
+function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"80cst max" | "120cst max" | "180cst max"> = []) {
   const guess = parseEnquiryWorksheetGuess(rawText)
   return buildShortenedEnquiry(
     rawText,
@@ -169,13 +171,28 @@ test("does not use specification or viscosity numbers as quantities", () => {
 
 test("flags all requested caution terms", () => {
   assert.deepEqual(detectAttentionTerms("RMK: 200 CBM / 250 KL"), ["RMK", "CBM", "KL"])
+  assert.deepEqual(
+    detectSpcCautionTerms("VLSFO 80CST / 120CST / 180CST / RMK"),
+    ["80", "120", "180", "RMK"],
+  )
+})
+
+test("RMK conversion changes HSFO only", () => {
+  assert.equal(
+    replaceHsfoWithRmk("ship / hsfo 500mts / vlsfo 200mts / lsmgo 50mts"),
+    "ship / RMK 500mts / vlsfo 200mts / lsmgo 50mts",
+  )
+  assert.equal(
+    replaceHsfoWithRmk("ship / vlsfo 200mts / lsmgo 50mts"),
+    "ship / vlsfo 200mts / lsmgo 50mts",
+  )
 })
 
 test("replays the remaining distinct historical report formats", () => {
   const worksheetCases: Array<{
     raw: string
     expected: string
-    remarks?: Array<"180cst max" | "120cst max">
+    remarks?: Array<"80cst max" | "120cst max" | "180cst max">
   }> = [
     {
       raw: "MOONLIT (9293882) in Singapore inner anchorage\n300 mt VLSFO\n30 mt LSMGO\n12th July 2026",
@@ -339,6 +356,10 @@ test("replays the July 15 FCUNO reports without rebuilding manual edits", () => 
   assert.equal(
     applyVlsfoMaxRemarksToShortenedEnquiry(withRemark, []),
     editedDraft,
+  )
+  assert.equal(
+    applyVlsfoMaxRemarksToShortenedEnquiry(editedDraft, ["80cst max"]),
+    "zhida 2 / 9602851 / zhoushan 2 - 6 aug / vlsfo 80CST MAX 250-300mts / lsmgo 5mts",
   )
 })
 

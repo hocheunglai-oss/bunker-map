@@ -17,8 +17,10 @@ import {
 } from "@/lib/spcEnquiryText"
 import {
   detectAttentionTerms,
+  detectSpcCautionTerms,
   detectVlsfoMaxRemarks,
-  hasVlsfoMaxCaution,
+  formatVlsfoMaxRemark,
+  replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 
@@ -140,7 +142,7 @@ const LOST_REASONS = [
   "UNKNOWN",
 ] as const
 
-const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["120cst max", "180cst max"]
+const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["80cst max", "120cst max", "180cst max"]
 
 const emptyDraft: DraftEnquiry = {
   rawText: "",
@@ -203,7 +205,7 @@ function standardTextForDraft(
 }
 
 function rmkStandardText(text: string) {
-  return text.replace(/\b(?:hsfo|vlsfo|lsmgo)\b/i, "RMK")
+  return replaceHsfoWithRmk(text)
 }
 
 function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
@@ -226,7 +228,7 @@ function cleanAiVlsfoMaxRemarks(value: ParserAiResponse["vlsfoMaxRemarks"]) {
   return Array.from(
     new Set(
       value.filter((item): item is VlsfoMaxRemark =>
-        item === "180cst max" || item === "120cst max",
+        item === "80cst max" || item === "120cst max" || item === "180cst max",
       ),
     ),
   )
@@ -402,8 +404,8 @@ export default function SpcEnquiriesPage() {
   )
   const draftPreviousMatches = useMemo(() => matchesForVesselName(draft.vesselName), [draft.vesselName, outcomeMatchesByVessel])
   const imoSearchUrl = useMemo(() => googleImoSearchUrl(draft), [draft])
-  const viscosityCautionDetected = hasVlsfoMaxCaution(draft.rawText)
-  const attentionTerms = detectAttentionTerms(draft.rawText)
+  const cautionTerms = detectSpcCautionTerms(draft.rawText)
+  const attentionTerms = detectAttentionTerms(draft.rawText).filter((term) => term !== "RMK")
   const reofferAttentionTerms = detectAttentionTerms(reofferDraft?.rawText || reofferDraft?.standardText || "")
 
   function shouldShowDraftMissing(field: DraftFieldKey) {
@@ -998,9 +1000,9 @@ export default function SpcEnquiriesPage() {
                   disabled={!canEdit}
                 />
               </label>
-              {viscosityCautionDetected ? (
+              {cautionTerms.length > 0 ? (
                 <div className="spc-enquiry-warning">
-                  WARNING: 180 / 120 spotted. Confirm whether VLSFO 180CST MAX or 120CST MAX applies.
+                  WARNING: {cautionTerms.join(" / ")} spotted. Confirm viscosity and RMK requirements before sending.
                 </div>
               ) : null}
               {attentionTerms.length > 0 ? (
@@ -1060,7 +1062,7 @@ export default function SpcEnquiriesPage() {
                         : standardTextForDraft(draftCurrent, vlsfoMaxRemarks),
                     }))
                   }}
-                  disabled={!canEdit || (!draft.hsfo && !draft.vlsfo && !draft.lsmgo)}
+                  disabled={!canEdit || !draft.hsfo}
                 >
                   RMK
                 </button>
@@ -1073,9 +1075,9 @@ export default function SpcEnquiriesPage() {
                       className={active ? "is-active" : ""}
                       aria-pressed={active}
                       onClick={() => toggleVlsfoMaxRemark(remark)}
-                      disabled={!canEdit}
+                      disabled={!canEdit || !draft.vlsfo}
                     >
-                      Add {remark === "120cst max" ? "120CST MAX" : "180CST MAX"}
+                      Add {formatVlsfoMaxRemark(remark)}
                     </button>
                   )
                 })}

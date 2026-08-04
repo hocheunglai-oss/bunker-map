@@ -220,6 +220,7 @@ function mergeVlsfoMaxRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
 
 function stripVlsfoMaxRemarks(value: string) {
   return value
+    .replace(/\b80\s*cst\s*max\b/gi, "")
     .replace(/\b180\s*cst\s*max\b/gi, "")
     .replace(/\b120\s*cst\s*max\b/gi, "")
     .replace(/\s+/g, " ")

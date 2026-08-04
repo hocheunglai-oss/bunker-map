@@ -92,7 +92,7 @@ const PARSER_AI_SCHEMA = {
     remarks: { type: "string" },
     vlsfoMaxRemarks: {
       type: "array",
-      items: { type: "string", enum: ["180cst max", "120cst max"] },
+      items: { type: "string", enum: ["80cst max", "120cst max", "180cst max"] },
     },
     confidence: { type: "number" },
     warnings: { type: "array", items: { type: "string" } },
@@ -169,7 +169,7 @@ function cleanVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
   return Array.from(
     new Set(
       value.filter((item): item is VlsfoMaxRemark =>
-        item === "180cst max" || item === "120cst max",
+        item === "80cst max" || item === "120cst max" || item === "180cst max",
       ),
     ),
   )
@@ -445,7 +445,7 @@ function buildInstructions(source: ParserAiSource) {
     "RMG 380 with explicit 0.5% sulphur is VLSFO, never HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
     "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO as lsmgo. Order fuel segments as HSFO, vlsfo, then lsmgo regardless of their order in the raw enquiry.",
-    "Do not infer or add 180CST MAX or 120CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO max remarks; the user controls these manually.",
+    "Do not infer or add 80CST MAX, 120CST MAX or 180CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO max remarks; the user controls these manually.",
     "If RMK, CBM, or KL appears, add a warning.",
     "Return vlsfoMaxRemarks as lower-case enum values only.",
   ].join("\n")

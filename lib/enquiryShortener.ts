@@ -1,6 +1,6 @@
 import { extractEnquiryPort } from "@/lib/enquiryWorksheetParser"
 
-export type VlsfoMaxRemark = "180cst max" | "120cst max"
+export type VlsfoMaxRemark = "80cst max" | "120cst max" | "180cst max"
 
 export type BuildShortenedEnquiryOptions = {
   autoDetectVlsfoRemarks?: boolean
@@ -465,7 +465,7 @@ function extractDeliverySchedule(
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:120|180)c+s+t)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
+  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
   if (/\b(?:hsfo|hfo|ifo)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
@@ -501,6 +501,9 @@ function isNonRequestProductReference(value: string) {
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
   const normalized = normalizeInput(value)
   const remarks: VlsfoMaxRemark[] = []
+  if (/(?:rmg\s*)?80\s*cst\b/i.test(normalized) || /\brmg\s*80\b/i.test(normalized)) {
+    remarks.push("80cst max")
+  }
   if (/(?:rmg\s*)?180\s*cst\b/i.test(normalized) || /\brmg\s*180\b/i.test(normalized)) {
     remarks.push("180cst max")
   }
@@ -511,7 +514,20 @@ export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
 }
 
 export function hasVlsfoMaxCaution(value: string) {
-  return /(^|\D)(?:180|120)(?!\d)/.test(value)
+  return /(^|\D)(?:80|120|180)(?!\d)/.test(value)
+}
+
+export function detectSpcCautionTerms(value: string) {
+  const terms: string[] = []
+  if (/(^|\D)80(?!\d)/.test(value)) terms.push("80")
+  if (/(^|\D)120(?!\d)/.test(value)) terms.push("120")
+  if (/(^|\D)180(?!\d)/.test(value)) terms.push("180")
+  if (/\br\s*\.?\s*m\s*\.?\s*k\s*\.?s?\b/i.test(value)) terms.push("RMK")
+  return terms
+}
+
+export function replaceHsfoWithRmk(value: string) {
+  return value.replace(/\bhsfo\b/i, "RMK")
 }
 
 export function detectAttentionTerms(value: string) {
@@ -606,7 +622,7 @@ function extractQuantityFromBlock(lines: string[]) {
 
 function productMatches(line: string) {
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|l\s*s\s*(?:120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,
@@ -732,7 +748,7 @@ function mergeRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
 }
 
 export function formatVlsfoMaxRemark(remark: VlsfoMaxRemark) {
-  return remark === "180cst max" ? "180CST MAX" : "120CST MAX"
+  return remark.replace("cst max", "CST MAX")
 }
 
 export function applyVlsfoMaxRemarksToShortenedEnquiry(
@@ -748,7 +764,7 @@ export function applyVlsfoMaxRemarksToShortenedEnquiry(
       if (!/^vlsfo\b/i.test(trimmed)) return trimmed
 
       const withoutRemarks = trimmed
-        .replace(/\s+(?:180|120)\s*CST\s+MAX\b/gi, "")
+        .replace(/\s+(?:80|120|180)\s*CST\s+MAX\b/gi, "")
         .replace(/\s+/g, " ")
         .trim()
 

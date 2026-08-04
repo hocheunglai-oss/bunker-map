@@ -91,7 +91,10 @@ export function parserReportFromRow(row: ParserReportRow): ParserReportRecord {
 function manualVlsfoMaxRemarksFrom(metadata: Record<string, unknown>): VlsfoMaxRemark[] {
   const value = metadata.manualVlsfoMaxRemarks
   if (!Array.isArray(value)) return []
-  return value.filter((item): item is VlsfoMaxRemark => item === "180cst max" || item === "120cst max")
+  return value.filter(
+    (item): item is VlsfoMaxRemark =>
+      item === "80cst max" || item === "120cst max" || item === "180cst max",
+  )
 }
 
 export function normalizeParserReportOutput(value: string) {

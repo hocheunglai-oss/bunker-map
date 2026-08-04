@@ -244,7 +244,7 @@ function gradeValue(value: unknown, key: FuelKey) {
 function quantityMedium(value: unknown) {
   const cleaned = cleanText(value)
     .replace(/[–—]/g, "-")
-    .replace(/\b(120|180)\s*CST\s*MAX\b/gi, " ")
+    .replace(/\b(80|120|180)\s*CST\s*MAX\b/gi, " ")
     .replace(/\bCST\b/gi, " ")
   if (!cleaned) return 0
   const range = cleaned.match(/(\d[\d,]*(?:\.\d+)?)\s*-\s*(\d[\d,]*(?:\.\d+)?)/)
