@@ -21,6 +21,7 @@ type ManagedSpcUser = {
   roleLabel: string
   office: string
   mustChangePassword: boolean
+  isSupplierTrader: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
   createdAt: string
@@ -55,6 +56,7 @@ type UserDraft = {
   office: string
   password: string
   mustChangePassword: boolean
+  isSupplierTrader: boolean
   isActive: boolean
 }
 
@@ -87,6 +89,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
     office,
     password: DEFAULT_PASSWORD,
     mustChangePassword: true,
+    isSupplierTrader: role === "SUPPLIER TRADER",
     isActive: true,
   }
 }
@@ -104,6 +107,7 @@ function userToDraft(user: ManagedSpcUser, fallbackOffice: string): UserDraft {
     office: user.office || fallbackOffice,
     password: "",
     mustChangePassword: user.mustChangePassword,
+    isSupplierTrader: user.isSupplierTrader,
     isActive: user.isActive,
   }
 }
@@ -649,6 +653,15 @@ export default function SpcUserManagementPage() {
                   autoComplete="new-password"
                   required={!userDraft.id}
                 />
+              </label>
+              <label className="spc-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={userDraft.role === "SUPPLIER TRADER" || userDraft.isSupplierTrader}
+                  onChange={(event) => updateDraft("isSupplierTrader", event.target.checked)}
+                  disabled={userDraft.role === "SUPPLIER TRADER"}
+                />
+                <span>Include in Supplier Trader lists</span>
               </label>
               <label className="spc-checkbox-field">
                 <input

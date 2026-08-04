@@ -24,6 +24,7 @@ type UserActionPayload = {
     role?: string
     office?: string
     mustChangePassword?: boolean
+    isSupplierTrader?: boolean
     password?: string
     isActive?: boolean
   }
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
           role: payload.user.role,
           office: payload.user.office,
           mustChangePassword: payload.user.mustChangePassword,
+          isSupplierTrader: payload.user.isSupplierTrader,
           password: payload.user.password,
           isActive: payload.user.isActive,
         },

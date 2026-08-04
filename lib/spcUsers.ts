@@ -70,6 +70,7 @@ type SpcPermissionGroupStorePayload = {
     username?: unknown
     office?: unknown
     mustChangePassword?: unknown
+    isSupplierTrader?: unknown
     updatedAt?: unknown
   }>
   offices?: unknown
@@ -87,6 +88,7 @@ type SpcUserProfileAssignment = {
   username: string
   office: string
   mustChangePassword: boolean
+  isSupplierTrader: boolean
   updatedAt: string | null
 }
 
@@ -98,6 +100,7 @@ export type ManagedSpcUser = {
   roleLabel: string
   office: string
   mustChangePassword: boolean
+  isSupplierTrader: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
   createdAt: string
@@ -145,6 +148,7 @@ export type SaveSpcUserInput = {
   role?: string
   office?: string
   mustChangePassword?: boolean
+  isSupplierTrader?: boolean
   password?: string
   isActive?: boolean
 }
@@ -303,6 +307,7 @@ function parseUserProfileStore(payload: unknown): SpcUserProfileAssignment[] {
         username: item.username,
         office: normaliseOffice(typeof item.office === "string" ? item.office : "") || SPC_DEFAULT_OFFICES[0],
         mustChangePassword: item.mustChangePassword === true,
+        isSupplierTrader: item.isSupplierTrader === true,
         updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : null,
       },
     ]
@@ -332,6 +337,7 @@ function buildStorePayload(
       username: profile.username,
       office: profile.office,
       mustChangePassword: profile.mustChangePassword,
+      isSupplierTrader: profile.isSupplierTrader,
       updatedAt: profile.updatedAt,
     })),
     offices,
@@ -528,6 +534,7 @@ async function saveStoredUserMetadata(
   profile: {
     office?: string
     mustChangePassword?: boolean
+    isSupplierTrader?: boolean
   },
   actor?: SpcActor,
 ) {
@@ -572,6 +579,10 @@ async function saveStoredUserMetadata(
       typeof profile.mustChangePassword === "boolean"
         ? profile.mustChangePassword
         : previousProfile?.mustChangePassword === true,
+    isSupplierTrader:
+      typeof profile.isSupplierTrader === "boolean"
+        ? profile.isSupplierTrader
+        : previousProfile?.isSupplierTrader === true,
     updatedAt,
   })
 
@@ -647,6 +658,7 @@ function mapSpcUser(
     roleLabel: getSpcRoleLabel(role),
     office: profile?.office || SPC_DEFAULT_OFFICES[0],
     mustChangePassword: profile?.mustChangePassword === true,
+    isSupplierTrader: role === "SUPPLIER TRADER" || profile?.isSupplierTrader === true,
     permissions,
     isActive: row.is_active !== false,
     createdAt: row.created_at,
@@ -828,13 +840,19 @@ export async function listSpcAuditUserOptions(): Promise<SpcAuditUserOption[]> {
   }
 }
 
+export function isActiveSupplierTraderOption(
+  user: Pick<ManagedSpcUser, "isActive" | "isSupplierTrader">,
+) {
+  return user.isActive && user.isSupplierTrader
+}
+
 export async function listSupplierTraderOptions(
   roleDefaults?: ManagedSpcRoleDefault[],
   pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
 ) {
   const users = await listManagedSpcUsers(roleDefaults, pages)
   return users
-    .filter((user) => user.isActive && normaliseSpcRole(user.role) === "SUPPLIER TRADER")
+    .filter(isActiveSupplierTraderOption)
     .map((user) => ({
       username: user.username,
       displayName: user.displayName || user.username,
@@ -1130,6 +1148,8 @@ export async function saveManagedSpcUser(
           typeof input.mustChangePassword === "boolean"
             ? input.mustChangePassword
             : Boolean(passwordInput) || !existing?.data,
+        isSupplierTrader:
+          role === "SUPPLIER TRADER" ? true : input.isSupplierTrader === true,
       },
       actor,
     )
