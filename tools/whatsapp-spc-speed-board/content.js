@@ -66,6 +66,7 @@
   let memorySendLock = { key: "", at: 0 }
   let extensionContextStopped = false
   let renderPending = false
+  let resolvingContactPhones = false
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -400,12 +401,15 @@
               const savedName = cleanText(contact.name)
               const chatName = cleanText(contact.chatName || contact.searchName || contact.whatsappName || contact.originalName || savedName)
               const phone = cleanText(contact.phone)
+              const kind = contact.kind === "group" ? "group" : contact.kind === "contact" || phone ? "contact" : ""
               return {
                 id: String(contact.id || uid()),
                 name: savedName || chatName || phone || "Unnamed chat",
                 chatName,
                 company: cleanText(contact.company),
                 phone,
+                phonebookContactId: cleanText(contact.phonebookContactId),
+                kind,
                 directUrl: cleanText(contact.directUrl),
                 list: contact.list === "buyer" ? "buyer" : "supplier",
                 order: Number.isFinite(Number(contact.order)) ? Number(contact.order) : index + 1,
@@ -484,9 +488,10 @@
 
   function contactSearchCandidates(contact) {
     const phone = phoneDigits(contact?.phone)
-    const candidates = contact?.preferPhoneSearch
-      ? [phone, contactSearchText(contact), contactDisplayName(contact)]
-      : [contactSearchText(contact), phone, contactDisplayName(contact)]
+    const usePhone = contact?.kind !== "group" && Boolean(phone)
+    const candidates = usePhone
+      ? [`+${phone}`, contactSearchText(contact), contactDisplayName(contact)]
+      : [contactSearchText(contact), contactDisplayName(contact)]
     return Array.from(new Set(candidates.map(cleanText).filter(Boolean)))
   }
 
@@ -569,6 +574,18 @@
       })
   }
 
+  function currentChatKind(main, candidates) {
+    try {
+      const labels = Array.from(main.querySelectorAll("[aria-label], [title]"))
+        .map((element) => cleanText(element.getAttribute("aria-label") || element.getAttribute("title")))
+        .filter(Boolean)
+      if (labels.some((label) => /\b(?:message to group|group info)\b/i.test(label))) return "group"
+    } catch {
+    }
+    const subtitle = candidates.slice(1).join(" ")
+    return /[,，]/.test(subtitle) && /\byou\b/i.test(subtitle) ? "group" : "contact"
+  }
+
   function getCurrentChat() {
     try {
       const main = document.querySelector("#main") || document.querySelector("[role='main']")
@@ -579,7 +596,8 @@
       const name = candidates.find((text) => phoneDigits(text).length < 7) || candidates[0] || ""
       const phone = phoneDigits(name).length >= 7 ? phoneDigits(name) : ""
       if (!name && !phone) return null
-      return { name: cleanText(name || phone), company: "", phone, directUrl: getDirectUrl(phone) }
+      const kind = currentChatKind(main, candidates)
+      return { name: cleanText(name || phone), company: "", phone, kind, directUrl: getDirectUrl(phone) }
     } catch {
       return null
     }
@@ -601,8 +619,9 @@
       const hasAlias = previousChatName && cleanText(duplicate.name).toLowerCase() !== previousChatName.toLowerCase()
       if (!hasAlias) duplicate.name = keyName
       duplicate.chatName = keyName
-      duplicate.phone = chat.phone || duplicate.phone
-      duplicate.directUrl = chat.directUrl || duplicate.directUrl
+      duplicate.kind = chat.kind
+      duplicate.phone = chat.kind === "group" ? "" : chat.phone || duplicate.phone
+      duplicate.directUrl = chat.kind === "group" ? "" : chat.directUrl || duplicate.directUrl
       duplicate.updatedAt = new Date().toISOString()
     } else {
       state.contacts.push({
@@ -611,6 +630,8 @@
         chatName: keyName,
         company: "",
         phone: chat.phone,
+        phonebookContactId: "",
+        kind: chat.kind,
         directUrl: chat.directUrl,
         list,
         order: contactsFor(list).length * 1000 + 1000,
@@ -620,6 +641,7 @@
     }
     saveState()
     render()
+    resolveSavedContactPhones()
   }
 
   function removeContact(id) {
@@ -797,6 +819,49 @@
 
     clearEditableText(searchBox)
     return false
+  }
+
+  function normalizedContactLookupName(value) {
+    return cleanText(value).normalize("NFKC").toLowerCase()
+  }
+
+  function resolveSavedContactPhones() {
+    if (resolvingContactPhones || extensionContextStopped) return false
+    const names = Array.from(new Map(state.contacts.flatMap((contact) => {
+      if (contact.kind === "group" || phoneDigits(contact.phone)) return []
+      const name = contactChatName(contact)
+      const lookupName = normalizedContactLookupName(name)
+      return name && lookupName ? [[lookupName, name]] : []
+    })).values())
+    if (names.length === 0) return false
+
+    resolvingContactPhones = true
+    const sent = sendRuntimeMessage({ type: "resolve-spc-saved-contact-phones", names }, (response, runtimeError) => {
+      resolvingContactPhones = false
+      if (runtimeError || !response?.ok || !Array.isArray(response.contacts)) return
+      const byName = new Map(response.contacts.flatMap((contact) => {
+        const lookupName = normalizedContactLookupName(contact?.name)
+        const phone = phoneDigits(contact?.phone)
+        return lookupName && phone.length >= 8 && phone.length <= 15 ? [[lookupName, { ...contact, phone }]] : []
+      }))
+      let changed = false
+      state.contacts.forEach((contact) => {
+        if (contact.kind === "group" || phoneDigits(contact.phone)) return
+        const resolved = byName.get(normalizedContactLookupName(contactChatName(contact)))
+        if (!resolved) return
+        contact.phone = resolved.phone
+        contact.phonebookContactId = cleanText(resolved.phonebookContactId)
+        contact.kind = "contact"
+        contact.updatedAt = new Date().toISOString()
+        changed = true
+      })
+      if (changed) {
+        saveState()
+        render()
+      }
+    })
+    if (!sent) resolvingContactPhones = false
+    return sent
   }
 
   async function openContact(contact, { allowNavigation = true } = {}) {
@@ -2119,7 +2184,9 @@
       contactNameIsPhone,
       contactsFor,
       contactDragId,
+      contactSearchCandidates,
       contactSearchText,
+      currentChatKind,
       currentChatMatchesContact,
       findSendButton,
       getCurrentChat,
@@ -2135,6 +2202,7 @@
       prepareComposerTextForSend,
       refreshUnreadIndicators,
       renameContact,
+      resolveSavedContactPhones,
       render,
       sanitizeSavedState,
       sanitizeSenderContacts,
@@ -2157,6 +2225,7 @@
     if (extensionContextStopped) return
     saveState()
     render()
+    safeRun(resolveSavedContactPhones)
     safeRun(loadEnquiries)
     safeRun(loadCrudeWatch)
     safeRun(refreshUnreadIndicators)

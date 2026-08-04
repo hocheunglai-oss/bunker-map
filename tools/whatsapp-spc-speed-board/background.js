@@ -2,6 +2,7 @@ const SPC_SHARED_FEED_STARTED_AT = "2026-07-23T09:20:00.000Z"
 const SPC_ENQUIRIES_URL =
   `https://spc.fcuno.com/api/spc/enquiries?limit=250&createdAfter=${encodeURIComponent(SPC_SHARED_FEED_STARTED_AT)}`
 const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
+const SPC_WHATSAPP_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/whatsapp-chat-contacts"
 const BRENT_API_URL = "https://spc.fcuno.com/api/market/brent"
 const CRUDE_CACHE_TTL_MS = 30000
 const MAX_CRUDE_AGE_MS = 60 * 60 * 1000
@@ -13,6 +14,8 @@ let enquiryCache = { payload: null, cursor: "", sessionKey: "" }
 let enquiryPromise = null
 let senderContactCache = { sessionKey: "", byUsername: new Map() }
 let senderContactPromise = null
+const savedChatContactCache = new Map()
+let savedChatContactPromise = null
 const debuggerQueues = new Map()
 
 async function fetchWithTimeout(url, options = {}) {
@@ -332,6 +335,54 @@ async function fetchSpcEnquiryChatContacts(usernames, sessionKey = enquiryCache.
   }))
 }
 
+function normalizeSavedChatName(value) {
+  return String(value || "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()
+}
+
+async function fetchSpcSavedChatContacts(names) {
+  const requested = Array.from(new Map((names || []).flatMap((value) => {
+    const name = String(value || "").normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, 180)
+    const lookupName = normalizeSavedChatName(name)
+    return name && lookupName ? [[lookupName, name]] : []
+  })).entries()).slice(0, 80)
+  if (requested.length === 0) return []
+
+  const missing = requested.filter(([lookupName]) => !savedChatContactCache.has(lookupName))
+  if (missing.length && !savedChatContactPromise) {
+    savedChatContactPromise = (async () => {
+      const query = missing.map(([, name]) => `name=${encodeURIComponent(name)}`).join("&")
+      const response = await fetchWithTimeout(`${SPC_WHATSAPP_CHAT_CONTACTS_URL}?${query}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.message || `SPC WhatsApp chat contacts failed: ${response.status}`)
+
+      missing.forEach(([lookupName]) => savedChatContactCache.set(lookupName, null))
+      ;(Array.isArray(data.contacts) ? data.contacts : []).forEach((contact) => {
+        const name = String(contact?.name || "").normalize("NFKC").replace(/\s+/g, " ").trim()
+        const lookupName = normalizeSavedChatName(name)
+        const phone = String(contact?.phone || "").replace(/\D/g, "")
+        if (!lookupName || phone.length < 8 || phone.length > 15) return
+        savedChatContactCache.set(lookupName, {
+          name,
+          phone,
+          phonebookContactId: String(contact?.phonebookContactId || ""),
+        })
+      })
+    })().finally(() => {
+      savedChatContactPromise = null
+    })
+  }
+
+  if (savedChatContactPromise) await savedChatContactPromise
+  return requested.flatMap(([lookupName]) => {
+    const contact = savedChatContactCache.get(lookupName)
+    return contact ? [contact] : []
+  })
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
 
@@ -415,6 +466,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           message: error instanceof Error ? error.message : "Unable to load crude quote.",
+        })
+      })
+
+    return true
+  }
+
+  if (message.type === "resolve-spc-saved-contact-phones") {
+    fetchSpcSavedChatContacts(Array.isArray(message.names) ? message.names : [])
+      .then((contacts) => sendResponse({ ok: true, contacts }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Unable to resolve saved chat contacts.",
         })
       })
 

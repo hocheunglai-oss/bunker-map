@@ -178,6 +178,32 @@ const senderFetchCount = fetchedUrls.length
 await context.fetchSpcEnquiryChatContacts(["barry@cosulich.com.sg"], "trader-b")
 assert.equal(fetchedUrls.length, senderFetchCount)
 
+enquiryResponses.push({
+  contacts: [
+    {
+      name: "MICHELLE ANTHONEY",
+      phone: "6596791141",
+      phonebookContactId: "phonebook-michelle",
+    },
+  ],
+})
+const savedChatContacts = await context.fetchSpcSavedChatContacts([" MICHELLE  ANTHONEY ", "KOREA"])
+assert.deepEqual(JSON.parse(JSON.stringify(savedChatContacts)), [
+  {
+    name: "MICHELLE ANTHONEY",
+    phone: "6596791141",
+    phonebookContactId: "phonebook-michelle",
+  },
+])
+assert.equal(
+  fetchedUrls.at(-1),
+  "https://spc.fcuno.com/api/spc/whatsapp-chat-contacts?name=MICHELLE%20ANTHONEY&name=KOREA",
+)
+assert.equal(fetchedOptions.at(-1).method, undefined)
+const savedChatFetchCount = fetchedUrls.length
+await context.fetchSpcSavedChatContacts(["michelle anthoney"])
+assert.equal(fetchedUrls.length, savedChatFetchCount)
+
 const debuggerOrder = []
 let releaseDebugger
 const debuggerGate = new Promise((resolve) => {

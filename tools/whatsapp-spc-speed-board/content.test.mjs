@@ -363,6 +363,7 @@ setHeaderTitles("KOREA", "+60 12-699 4488, You")
 const groupChat = api.getCurrentChat()
 assert.equal(groupChat.name, "KOREA")
 assert.equal(groupChat.phone, "")
+assert.equal(groupChat.kind, "group")
 assert.equal(groupChat.directUrl, "")
 assert.equal(api.canUseDirectUrl({ name: "KOREA", phone: "+60126994488" }), false)
 assert.equal(api.canUseDirectUrl({ name: "+85266885575", phone: "+85266885575" }), true)
@@ -371,6 +372,30 @@ setHeaderTitleAndSubtitle("Cosulich - Sumitomo (South Korea/Taiwan)", "ATSUSHI, 
 const renamedGroupChat = api.getCurrentChat()
 assert.equal(renamedGroupChat.name, "Cosulich - Sumitomo (South Korea/Taiwan)")
 assert.equal(renamedGroupChat.phone, "")
+assert.equal(renamedGroupChat.kind, "group")
+
+setHeaderTitleAndSubtitle("MICHELLE ANTHONEY", "online")
+const individualChat = api.getCurrentChat()
+assert.equal(individualChat.name, "MICHELLE ANTHONEY")
+assert.equal(individualChat.kind, "contact")
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.contactSearchCandidates({
+    name: "MICHELLE ANTHONEY",
+    chatName: "MICHELLE ANTHONEY",
+    phone: "+65 9679 1141",
+    kind: "contact",
+  }))),
+  ["+6596791141", "MICHELLE ANTHONEY"],
+)
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.contactSearchCandidates({
+    name: "KOREA",
+    chatName: "KOREA",
+    phone: "+65 9679 1141",
+    kind: "group",
+  }))),
+  ["KOREA"],
+)
 
 setHeaderTitles("SUMITOMO KOREA TAIWAN")
 assert.equal(api.currentChatMatchesContact({ name: "KOREA", chatName: "KOREA", phone: "" }), false)
