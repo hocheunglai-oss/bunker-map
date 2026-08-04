@@ -6,6 +6,8 @@ create table if not exists public.spc_users (
   id uuid primary key default gen_random_uuid(),
   username text not null,
   display_name text,
+  whatsapp_phone text
+    check (whatsapp_phone is null or whatsapp_phone ~ '^[1-9][0-9]{7,14}$'),
   role text not null default 'buyer_trader'
     check (role in ('buyer_trader', 'supplier_trader')),
   password_hash text not null,

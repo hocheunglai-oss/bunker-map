@@ -7,6 +7,7 @@ const EMAIL_FIELDS = ["personal_email", "general_email", "private_email", "email
 type SpcUserRow = {
   username: string
   display_name: string | null
+  whatsapp_phone: string | null
 }
 
 type PhonebookContactRow = {
@@ -116,6 +117,15 @@ export function resolveSpcEnquiryChatContacts(users: SpcUserRow[], contacts: Pho
 
   return users.flatMap<SpcEnquiryChatContact>((user) => {
     const username = normalizeSpcChatUsername(user.username)
+    const explicitPhone = normalizeWhatsappPhone(user.whatsapp_phone, username)
+    if (username && explicitPhone) {
+      return [{
+        username,
+        displayName: user.display_name?.trim() || username,
+        phone: explicitPhone,
+        phonebookContactId: "",
+      }]
+    }
     const matches = contactsByUsername.get(username) || []
     if (!username || matches.length !== 1) return []
     const phone = preferredPhone(matches[0], username)
@@ -144,7 +154,7 @@ export async function listSpcEnquiryChatContacts(requestedUsernames: unknown) {
   )
   const { data: userData, error: userError } = await supabase
     .from("spc_users")
-    .select("username,display_name")
+    .select("username,display_name,whatsapp_phone")
     .eq("is_active", true)
     .in("username", usernames)
 

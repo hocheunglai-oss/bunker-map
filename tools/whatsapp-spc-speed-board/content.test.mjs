@@ -378,6 +378,20 @@ setHeaderTitleAndSubtitle("MICHELLE ANTHONEY", "online")
 const individualChat = api.getCurrentChat()
 assert.equal(individualChat.name, "MICHELLE ANTHONEY")
 assert.equal(individualChat.kind, "contact")
+assert.equal(
+  api.contactInfoPhoneFromText(
+    "Contact info\nMICHELLE ANTHONEY\n+65 9679 1141\nVoice\nVideo\nSearch",
+    "MICHELLE ANTHONEY",
+  ),
+  "6596791141",
+)
+assert.equal(
+  api.contactInfoPhoneFromText(
+    "Contact info\nMICHELLE ANTHONEY\nAbout\nNo phone shown\n4 groups in common\n+65 9000 0000",
+    "MICHELLE ANTHONEY",
+  ),
+  "",
+)
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
     name: "MICHELLE ANTHONEY",

@@ -67,6 +67,7 @@
   let extensionContextStopped = false
   let renderPending = false
   let resolvingContactPhones = false
+  let capturingCurrentContact = false
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -603,9 +604,112 @@
     }
   }
 
-  function addContact(list) {
+  function contactInfoPhoneFromText(value, expectedName = "") {
+    const lines = String(value || "")
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map(cleanText)
+      .filter(Boolean)
+    const headingIndex = lines.findIndex((line) => /^contact info$/i.test(line))
+    if (headingIndex < 0) return ""
+
+    const normalizedName = cleanText(expectedName).toLowerCase()
+    const nameIndex = normalizedName
+      ? lines.findIndex((line, index) => index > headingIndex && line.toLowerCase() === normalizedName)
+      : headingIndex
+    if (normalizedName && nameIndex < 0) return ""
+
+    const start = Math.max(headingIndex, nameIndex) + 1
+    for (const line of lines.slice(start, start + 3)) {
+      if (!line.startsWith("+")) continue
+      const phone = phoneDigits(line)
+      if (phone.length >= 8 && phone.length <= 15) return phone
+    }
+    return ""
+  }
+
+  function controlLabel(element) {
+    return cleanText(
+      element?.getAttribute?.("aria-label") ||
+        element?.getAttribute?.("title") ||
+        element?.textContent,
+    )
+  }
+
+  function findVisibleControl(root, labelPattern) {
+    if (!root?.querySelectorAll) return null
+    const matches = Array.from(root.querySelectorAll("button, [role='button'], [aria-label], [title]"))
+      .filter(isVisible)
+      .filter((element) => labelPattern.test(controlLabel(element)))
+    const element = matches[0]
+    return element?.closest?.("button, [role='button']") || element || null
+  }
+
+  function activateControl(control) {
+    if (!control) return false
+    control.focus?.()
+    try {
+      ;["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
+        const EventCtor = type.startsWith("pointer") && typeof PointerEvent !== "undefined" ? PointerEvent : MouseEvent
+        control.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, view: window, button: 0 }))
+      })
+    } catch {
+      control.click?.()
+    }
+    return true
+  }
+
+  function visibleContactInfoPhone(expectedName) {
+    const panels = Array.from(document.querySelectorAll("aside, section, div"))
+      .filter(isVisible)
+      .filter((element) => /^\s*contact info\b/i.test(element.innerText || element.textContent || ""))
+    for (const panel of panels) {
+      const phone = contactInfoPhoneFromText(panel.innerText || panel.textContent, expectedName)
+      if (phone) return phone
+    }
+    return ""
+  }
+
+  function closeContactInfo() {
+    const close = findVisibleControl(document.body, /^close$/i)
+    return activateControl(close)
+  }
+
+  async function captureCurrentContactPhone(expectedName) {
+    const main = document.querySelector("#main") || document.querySelector("[role='main']")
+    const header = main?.querySelector("header")
+    const profile = findVisibleControl(header, /^(?:profile details|contact info|open chat details)$/i)
+    if (!profile || !activateControl(profile)) return ""
+
+    try {
+      for (const delay of [80, 140, 220, 320]) {
+        await new Promise((resolve) => window.setTimeout(resolve, delay))
+        const phone = visibleContactInfoPhone(expectedName)
+        if (phone) return phone
+      }
+      return ""
+    } finally {
+      closeContactInfo()
+    }
+  }
+
+  async function addContact(list) {
+    if (capturingCurrentContact) return
     const chat = getCurrentChat()
     if (!chat) return
+
+    if (chat.kind !== "group" && !phoneDigits(chat.phone)) {
+      capturingCurrentContact = true
+      try {
+        const phone = await captureCurrentContactPhone(chat.name)
+        if (phone) {
+          chat.phone = phone
+          chat.directUrl = getDirectUrl(phone)
+        }
+      } finally {
+        capturingCurrentContact = false
+      }
+    }
 
     const keyName = chat.name || chat.phone
     const duplicate = state.contacts.find((contact) => {
@@ -1974,7 +2078,9 @@
     })
 
     host.querySelectorAll("[data-action='add-current']").forEach((button) => {
-      button.addEventListener("click", () => addContact(button.dataset.list === "buyer" ? "buyer" : "supplier"))
+      button.addEventListener("click", () => {
+        void addContact(button.dataset.list === "buyer" ? "buyer" : "supplier")
+      })
     })
 
     host.querySelectorAll("[data-action='open-contact']").forEach((button) => {
@@ -2186,6 +2292,7 @@
       contactDragId,
       contactSearchCandidates,
       contactSearchText,
+      contactInfoPhoneFromText,
       currentChatKind,
       currentChatMatchesContact,
       findSendButton,

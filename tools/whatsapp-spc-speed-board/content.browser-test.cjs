@@ -44,6 +44,7 @@ const html = `<!doctype html>
       #sendButton { width: 48px; height: 48px; border-radius: 50%; background: #00a884; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
       #decoySend { margin: 24px; padding: 8px 12px; }
       #sent { white-space: pre-wrap; border-top: 1px solid #ddd; padding: 10px; }
+      #contactInfo { display: none; position: fixed; inset: 56px 0 0 auto; width: 360px; background: #fff; z-index: 5; }
     </style>
     <style>${extensionStyles.replaceAll("</style>", "<\/style>")}</style>
   </head>
@@ -59,7 +60,11 @@ const html = `<!doctype html>
       </div>
     </div>
     <div id="main">
-      <header><span id="chatTitle" title="Otto Tone">Otto Tone</span></header>
+      <header>
+        <button id="profileDetails" type="button" aria-label="Profile details" onclick="document.getElementById('contactInfo').style.display='block'">
+          <span id="chatTitle" title="Otto Tone">Otto Tone</span>
+        </button>
+      </header>
       <div class="messages">
         <button id="decoySend" aria-label="Send" onclick="window.decoyClicks += 1">Old send-like control</button>
       </div>
@@ -75,6 +80,10 @@ const html = `<!doctype html>
         "><span data-icon="wds-ic-send-filled">send</span></div>
       </div>
     </div>
+    <aside id="contactInfo">
+      <div>Contact info</div><div>Otto Tone</div><div>+852 6688 5575</div><div>Voice</div><div>Video</div><div>Search</div>
+      <button type="button" aria-label="Close" onclick="this.parentElement.style.display='none'">Close</button>
+    </aside>
     <pre id="sent"></pre>
     <script>
       window.sentMessages = [];
@@ -259,6 +268,21 @@ async function main() {
         crudeResult.title,
         /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
       )
+
+      await page.locator("#fcuno-wa-spc-board [data-action='add-current'][data-list='supplier']").click()
+      await page.waitForFunction(() => {
+        const contact = window.storageData["fcuno-wa-spc-board-v1"]?.contacts?.[0]
+        return contact?.chatName === "Otto Tone" && contact?.phone === "85266885575"
+      })
+      const capturedContact = await page.evaluate(() => window.storageData["fcuno-wa-spc-board-v1"].contacts[0])
+      assert.equal(capturedContact.phone, "85266885575")
+      assert.equal(capturedContact.kind, "contact")
+      assert.equal(await page.locator("#contactInfo").isVisible(), false)
+      await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.contacts = []
+        api.render()
+      })
 
       const stableRefresh = await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__

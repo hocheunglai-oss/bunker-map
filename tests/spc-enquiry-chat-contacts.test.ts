@@ -22,8 +22,8 @@ test("normalizes international and known-office local phone numbers", () => {
 
 test("resolves only one exact phonebook email match", () => {
   const users = [
-    { username: "barry@cosulich.com.sg", display_name: "BARRY KHOO" },
-    { username: "duplicate@cosulich.com.sg", display_name: "DUPLICATE" },
+    { username: "barry@cosulich.com.sg", display_name: "BARRY KHOO", whatsapp_phone: null },
+    { username: "duplicate@cosulich.com.sg", display_name: "DUPLICATE", whatsapp_phone: null },
   ]
   const base = {
     full_name: "BARRY KHOO",
@@ -51,6 +51,23 @@ test("resolves only one exact phonebook email match", () => {
       displayName: "BARRY KHOO",
       phone: "6591456766",
       phonebookContactId: "barry",
+    },
+  ])
+})
+
+test("uses the verified SPC user WhatsApp phone before phonebook fallback", () => {
+  const users = [{
+    username: "barry@cosulich.com.sg",
+    display_name: "BARRY KHOO",
+    whatsapp_phone: "6591456766",
+  }]
+
+  assert.deepEqual(resolveSpcEnquiryChatContacts(users, []), [
+    {
+      username: "barry@cosulich.com.sg",
+      displayName: "BARRY KHOO",
+      phone: "6591456766",
+      phonebookContactId: "",
     },
   ])
 })

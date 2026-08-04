@@ -34,6 +34,7 @@ type SpcUserRow = {
   id: string
   username: string
   display_name: string | null
+  whatsapp_phone: string | null
   role: string
   password_hash: string
   is_active: boolean
@@ -96,6 +97,7 @@ export type ManagedSpcUser = {
   id: string
   username: string
   displayName: string
+  whatsappPhone: string
   role: SpcRoleId
   roleLabel: string
   office: string
@@ -145,6 +147,7 @@ export type SaveSpcUserInput = {
   id?: string
   username: string
   displayName?: string
+  whatsappPhone?: string
   role?: string
   office?: string
   mustChangePassword?: boolean
@@ -197,6 +200,27 @@ function getServiceClient(actor?: SpcActor) {
 
 function normaliseUsername(username: string) {
   return username.trim()
+}
+
+export function normaliseSpcWhatsappPhone(value: string | null | undefined) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+
+  let digits = raw.replace(/\D/g, "")
+  if (raw.startsWith("00")) digits = digits.slice(2)
+  if (!/^[1-9]\d{7,14}$/.test(digits)) {
+    throw new Error("WhatsApp phone must include the country code, for example +65 9145 6766.")
+  }
+  return digits
+}
+
+export function normaliseSpcWhatsappPhoneInput(value: string | null | undefined) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+  if (!raw.startsWith("+") && !raw.startsWith("00")) {
+    throw new Error("WhatsApp phone must include the country code, for example +65 9145 6766.")
+  }
+  return normaliseSpcWhatsappPhone(raw)
 }
 
 function normaliseOffice(value: string | null | undefined) {
@@ -654,6 +678,7 @@ function mapSpcUser(
     id: row.id,
     username: row.username,
     displayName: row.display_name || row.username,
+    whatsappPhone: row.whatsapp_phone ? `+${normaliseSpcWhatsappPhone(row.whatsapp_phone)}` : "",
     role,
     roleLabel: getSpcRoleLabel(role),
     office: profile?.office || SPC_DEFAULT_OFFICES[0],
@@ -1093,6 +1118,7 @@ export async function saveManagedSpcUser(
     const payload: Record<string, unknown> = {
       username,
       display_name: input.displayName?.trim() || username,
+      whatsapp_phone: normaliseSpcWhatsappPhoneInput(input.whatsappPhone) || null,
       role: getDatabaseRole(role),
       is_active: input.isActive !== false,
       updated_at: updatedAt,

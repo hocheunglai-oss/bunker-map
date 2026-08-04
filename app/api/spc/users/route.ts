@@ -21,6 +21,7 @@ type UserActionPayload = {
     id?: string
     username?: string
     displayName?: string
+    whatsappPhone?: string
     role?: string
     office?: string
     mustChangePassword?: boolean
@@ -46,6 +47,7 @@ function errorResponse(error: unknown, fallback: string) {
         : message.includes("required") ||
             message.includes("cannot delete") ||
             message.includes("valid permission group") ||
+            message.includes("WhatsApp phone") ||
             message.includes("Built-in") ||
             message.includes("Move all users") ||
             message.includes("Move users")
@@ -116,6 +118,7 @@ export async function POST(request: Request) {
           id: payload.user.id,
           username: payload.user.username,
           displayName: payload.user.displayName,
+          whatsappPhone: payload.user.whatsappPhone,
           role: payload.user.role,
           office: payload.user.office,
           mustChangePassword: payload.user.mustChangePassword,

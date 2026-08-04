@@ -18,6 +18,7 @@ type ManagedSpcUser = {
   id: string
   username: string
   displayName: string
+  whatsappPhone: string
   role: SpcRoleId
   roleLabel: string
   office: string
@@ -53,6 +54,7 @@ type UserDraft = {
   id?: string
   username: string
   displayName: string
+  whatsappPhone: string
   role: Exclude<UserTab, "OFFICE">
   office: string
   password: string
@@ -86,6 +88,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
   return {
     username: "",
     displayName: "",
+    whatsappPhone: "",
     role,
     office,
     password: DEFAULT_PASSWORD,
@@ -104,6 +107,7 @@ function userToDraft(user: ManagedSpcUser, fallbackOffice: string): UserDraft {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
+    whatsappPhone: user.whatsappPhone,
     role,
     office: user.office || fallbackOffice,
     password: "",
@@ -477,6 +481,7 @@ export default function SpcUserManagementPage() {
                       <strong>{user.displayName || user.username}</strong>
                       <small>
                         {user.username} · {user.office || firstOffice}
+                        {user.whatsappPhone ? ` · ${user.whatsappPhone}` : ""}
                         {user.role !== activeTab ? ` · ${user.roleLabel || roleLabel(user.role)}` : ""}
                       </small>
                     </span>
@@ -529,7 +534,10 @@ export default function SpcUserManagementPage() {
                     <article key={user.id} className={user.isActive ? "spc-authority-row" : "spc-authority-row is-disabled"}>
                       <span>
                         <strong>{user.displayName || user.username}</strong>
-                        <small>{user.roleLabel || roleLabel(user.role)} · {user.username}</small>
+                        <small>
+                          {user.roleLabel || roleLabel(user.role)} · {user.username}
+                          {user.whatsappPhone ? ` · ${user.whatsappPhone}` : ""}
+                        </small>
                       </span>
                       <div>
                         <button
@@ -626,6 +634,16 @@ export default function SpcUserManagementPage() {
                 <input
                   value={userDraft.displayName}
                   onChange={(event) => updateDraft("displayName", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>WhatsApp Phone</span>
+                <input
+                  type="tel"
+                  value={userDraft.whatsappPhone}
+                  onChange={(event) => updateDraft("whatsappPhone", event.target.value)}
+                  placeholder="+65 9145 6766"
+                  autoComplete="tel"
                 />
               </label>
               <label>
