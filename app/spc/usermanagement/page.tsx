@@ -12,6 +12,7 @@ import {
   type SpcPagePermissionMap,
   type SpcRoleId,
 } from "@/lib/spcPages"
+import { isSpcUserInCategory } from "@/lib/spcUserCategories"
 
 type ManagedSpcUser = {
   id: string
@@ -133,7 +134,7 @@ export default function SpcUserManagementPage() {
   const canEdit = canAccessSpcPage(permissions, "spc-user-management", "edit")
   const firstOffice = offices[0] || DEFAULT_OFFICES[0]
   const activeUsers = useMemo(
-    () => users.filter((user) => user.role === activeTab),
+    () => activeTab === "OFFICE" ? [] : users.filter((user) => isSpcUserInCategory(user, activeTab)),
     [activeTab, users],
   )
   const usersByOffice = useMemo(() => {
@@ -154,10 +155,11 @@ export default function SpcUserManagementPage() {
       })
   }, [activeOffice, firstOffice, users])
   const roleCounts = useMemo(() => {
-    return users.reduce<Record<string, number>>((map, user) => {
-      map[user.role] = (map[user.role] || 0) + 1
-      return map
-    }, {})
+    return {
+      "SUPPLIER TRADER": users.filter((user) => isSpcUserInCategory(user, "SUPPLIER TRADER")).length,
+      "BUYER TRADER": users.filter((user) => isSpcUserInCategory(user, "BUYER TRADER")).length,
+      ADMIN: users.filter((user) => isSpcUserInCategory(user, "ADMIN")).length,
+    }
   }, [users])
   const selectedRoleDefault = useMemo(() => {
     if (activeTab === "OFFICE") return null
@@ -473,7 +475,10 @@ export default function SpcUserManagementPage() {
                   <article key={user.id} className={user.isActive ? "spc-compact-row" : "spc-compact-row is-disabled"}>
                     <span>
                       <strong>{user.displayName || user.username}</strong>
-                      <small>{user.username} · {user.office || firstOffice}</small>
+                      <small>
+                        {user.username} · {user.office || firstOffice}
+                        {user.role !== activeTab ? ` · ${user.roleLabel || roleLabel(user.role)}` : ""}
+                      </small>
                     </span>
                     <div>
                       <button type="button" onClick={() => editUser(user)} disabled={!canEdit}>
