@@ -1071,12 +1071,13 @@ export async function saveManagedSpcUser(
       ? await supabase.from("spc_users").select("*").eq("id", input.id).maybeSingle()
       : null
     if (existing?.error) throw existing.error
+    const updatedAt = new Date().toISOString()
     const payload: Record<string, unknown> = {
       username,
       display_name: input.displayName?.trim() || username,
       role: getDatabaseRole(role),
       is_active: input.isActive !== false,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     }
     const passwordInput = input.password?.trim() || (!input.id ? SPC_DEFAULT_PASSWORD : "")
 
@@ -1093,6 +1094,32 @@ export async function saveManagedSpcUser(
     const { data, error } = await query.select("*").single()
     if (error) throw error
     const row = data as SpcUserRow
+    if (passwordInput) {
+      const { data: auditRow, error: auditLookupError } = await supabase
+        .from("audit_logs")
+        .select("id,request_context")
+        .eq("table_schema", "public")
+        .eq("table_name", "spc_users")
+        .eq("operation", input.id ? "UPDATE" : "INSERT")
+        .contains("record_pk", { id: row.id })
+        .gte("occurred_at", updatedAt)
+        .order("occurred_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (auditLookupError) throw auditLookupError
+      if (!auditRow) throw new Error("Password audit record was not created.")
+
+      const { error: auditUpdateError } = await supabase
+        .from("audit_logs")
+        .update({
+          request_context: {
+            ...(auditRow.request_context || {}),
+            passwordChanged: true,
+          },
+        })
+        .eq("id", auditRow.id)
+      if (auditUpdateError) throw auditUpdateError
+    }
     await saveStoredUserMetadata(
       supabase,
       row,

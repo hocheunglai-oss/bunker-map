@@ -443,7 +443,7 @@ function draftFromFixture(fixture: SpcFixture): FixtureDraft {
 
 export default function SpcFixturesPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, username, permissions } = useSpcAuth()
+  const { loading: authLoading, authenticated, role, permissions } = useSpcAuth()
   const fixtureTableRef = useRef<HTMLDivElement | null>(null)
   const fixtureCanvasRef = useRef<HTMLDivElement | null>(null)
   const initialPeriod = useMemo(() => hongKongYearMonth(), [])
@@ -606,7 +606,7 @@ export default function SpcFixturesPage() {
       }
     }
     return rows
-  }, [drafts, editingId, filteredCompletedFixtures, pendingFixtures, username, canEdit, officeOptions])
+  }, [drafts, editingId, filteredCompletedFixtures, pendingFixtures, role, canEdit, officeOptions])
 
   useLayoutEffect(() => {
     function measureActions() {
@@ -683,14 +683,10 @@ export default function SpcFixturesPage() {
     })
   }
 
-  function sameUsername(left: string | null | undefined, right: string | null | undefined) {
-    return cleanText(left).toLowerCase() === cleanText(right).toLowerCase()
-  }
-
   function canEditFixture(fixture: SpcFixture, mode: "pending" | "completed") {
     if (!canEdit) return false
     if (fixture.fixtureStatus === "pending") {
-      return sameUsername(username, fixture.supplierTraderUsername)
+      return role === "SUPPLIER TRADER" || role === "ADMIN"
     }
     return mode === "completed"
   }
@@ -761,8 +757,8 @@ export default function SpcFixturesPage() {
 
   async function submitFixture(fixture: SpcFixture, action: "save" | "complete") {
     if (!canEdit) return
-    if (fixture.fixtureStatus === "pending" && !sameUsername(username, fixture.supplierTraderUsername)) {
-      setMessage("ONLY THE ASSIGNED SUPPLIER TRADER CAN EDIT THIS NEW STEM.")
+    if (fixture.fixtureStatus === "pending" && role !== "SUPPLIER TRADER" && role !== "ADMIN") {
+      setMessage("ONLY SUPPLIER TRADERS AND ADMINS CAN EDIT THIS NEW STEM.")
       setMessageIsError(true)
       return
     }

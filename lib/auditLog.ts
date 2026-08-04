@@ -884,7 +884,11 @@ function subjectFor(record: AuditLogRecord, recordLabel: string) {
 }
 
 function getChangedFields(record: AuditLogRecord) {
-  return record.changedFields.filter((field) => !isTechnicalField(field))
+  const fields = record.changedFields.filter((field) => !isTechnicalField(field))
+  if (record.requestContext?.passwordChanged === true && !fields.includes("password_hash")) {
+    fields.push("password_hash")
+  }
+  return fields
 }
 
 function getReportPublicationSummary(record: AuditLogRecord) {

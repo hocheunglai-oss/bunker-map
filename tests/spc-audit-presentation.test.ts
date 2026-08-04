@@ -173,3 +173,28 @@ test("SPC user-management page is inferred from the record key in audit previews
   assert.equal(presented.summary, "Updated SPC user management settings.")
   assert.doesNotMatch(presented.summary, /calendar/i)
 })
+
+test("SPC password changes are described without storing the credential hash", async () => {
+  const [presented] = await presentAuditLogs(
+    [
+      auditRecord({
+        tableName: "spc_users",
+        operation: "UPDATE",
+        recordPk: { id: "user-1" },
+        changedFields: [],
+        beforeRow: { id: "user-1", display_name: "FILIPPO MATTIOLI" },
+        afterRow: { id: "user-1", display_name: "FILIPPO MATTIOLI" },
+        requestContext: {
+          pageId: "spc-user-management",
+          pageLabel: "SPC USER MANAGEMENT",
+          pagePath: "/spc/usermanagement",
+          passwordChanged: true,
+        },
+      }),
+    ],
+    SPC_PAGE_DEFINITIONS,
+  )
+
+  assert.equal(presented.summary, 'Changed password for SPC user "FILIPPO MATTIOLI".')
+  assert.deepEqual(presented.details, ["Changed the password."])
+})

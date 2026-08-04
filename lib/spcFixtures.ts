@@ -552,8 +552,12 @@ export async function updateSpcFixture(
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadFixtureRow(supabase, fixtureId)
 
-  if (existing.fixture_status === "pending" && !sameUsername(session.username, existing.supplier_trader_username)) {
-    throw new Error("Only the assigned supplier trader can edit this new stem.")
+  if (
+    existing.fixture_status === "pending" &&
+    session.role !== "SUPPLIER TRADER" &&
+    session.role !== "ADMIN"
+  ) {
+    throw new Error("Only supplier traders and admins can edit this new stem.")
   }
 
   const users = await listActiveSpcUserOptions()
