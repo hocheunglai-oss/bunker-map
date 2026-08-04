@@ -564,3 +564,34 @@ test("replays the August 3 reports with slash windows and structured SPC specifi
     "harmony / 9402017 / 22 aug - 6 sep / vlsfo 700mts / lsmgo 30mts",
   )
 })
+
+test("ignores narrative dates beneath an operational notes heading", () => {
+  const ravenArrow = [
+    "Vessel:",
+    "Raven Arrow",
+    "IMO:",
+    "9574858",
+    "Port:",
+    "Singapore",
+    "Agent:",
+    "TBA",
+    "ETA:",
+    "01 Sep 26",
+    "Operational Notes",
+    "IF UNABLE TO OFFER FOR A DELIVERY 1 JANUARY, PLS OFFER BASED ON YR EARLIEST DELIVERY DATE.",
+    "OFFICIAL SAMPLES FOR DISPUTE RESOLUTION ARE TO BE TAKEN AT THE RECEIVING VESSELS MANIFOLD.",
+    "G2 Ocean will appoint Lintec/Intertek to perform a Bunker Quantity Survey on this delivery.",
+    "The Bunker delivery is NOT to commence until the Surveyor is present and has performed pre delivery checks.",
+    "Note: In ports where procedures permit the vessel must receive a Certificate of Quality (COQ) for each supply of VLSFO.",
+    "Grades and Quantities",
+    "Spec",
+    "Quantity",
+    "ISO 8217 2017 VLSFO RMG 380 0.50%",
+    "1000 mt",
+  ].join("\n")
+
+  assert.equal(
+    parseSpcEnquiryText(ravenArrow).standardText,
+    "raven arrow / 9574858 / 1 sep / vlsfo 1,000mts",
+  )
+})

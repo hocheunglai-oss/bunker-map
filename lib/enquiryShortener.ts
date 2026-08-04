@@ -402,16 +402,18 @@ function extractDeliverySchedule(
     .map(cleanSpaces)
     .filter(Boolean)
     .filter((line) => !isContactOrAddressLine(line))
+  const operationalNotesIndex = lines.findIndex((line) => /^operational\s+notes?\s*:?s*$/i.test(line))
+  const scheduleLines = operationalNotesIndex >= 0 ? lines.slice(0, operationalNotesIndex) : lines
 
-  const alternativeCaseSchedule = extractAlternativeCaseSchedule(lines, options)
+  const alternativeCaseSchedule = extractAlternativeCaseSchedule(scheduleLines, options)
   if (alternativeCaseSchedule) return alternativeCaseSchedule
 
-  const operationalSchedule = extractOperationalSchedule(lines)
+  const operationalSchedule = extractOperationalSchedule(scheduleLines)
   if (operationalSchedule.length > 1) {
     const port = options.includePort
       ? formatShortenedPort(options.port?.trim() || extractEnquiryPort(text, { portNames: options.portNames }))
       : ""
-    const hasExplicitEtd = lines.some((line) => {
+    const hasExplicitEtd = scheduleLines.some((line) => {
       const match = line.match(OPERATIONAL_SCHEDULE_LINE_PATTERN)
       return match?.[1].replace(/[^a-z]/gi, "").toLowerCase() === "etd"
     })
@@ -429,7 +431,7 @@ function extractDeliverySchedule(
   }
 
   const entries: Array<{ port: string; date: string }> = []
-  for (const line of lines) {
+  for (const line of scheduleLines) {
     const date = findEnquiryDates(line)[0] || ""
     if (!date) continue
 
@@ -444,7 +446,7 @@ function extractDeliverySchedule(
   }
 
   const requestedPort = options.includePort ? formatShortenedPort(options.port?.trim() || "") : ""
-  const hasExplicitRequestedPort = requestedPort && lines.some((line) =>
+  const hasExplicitRequestedPort = requestedPort && scheduleLines.some((line) =>
     EXPLICIT_PORT_LINE_PATTERN.test(line) &&
     formatShortenedPort(extractEnquiryPort(line, { portNames: options.portNames })) === requestedPort,
   )
