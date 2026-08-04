@@ -137,7 +137,8 @@ export function parserReportWithState(report: ParserReportRecord): ParserReportW
     currentParserOutput = ""
   }
 
-  const resolved = Boolean(currentParserOutput.trim()) &&
+  const pendingReview = report.metadata.pendingReview === true
+  const resolved = !pendingReview && Boolean(currentParserOutput.trim()) &&
     normalizeParserReportOutput(currentParserOutput) === normalizeParserReportOutput(report.correctedOutput)
 
   return {

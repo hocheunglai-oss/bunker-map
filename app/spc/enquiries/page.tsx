@@ -373,6 +373,7 @@ export default function SpcEnquiriesPage() {
   const [updatingId, setUpdatingId] = useState("")
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
+  const [reportButtonState, setReportButtonState] = useState<"" | "new-enquiry" | "reoffer">("")
   const [parserReportCount, setParserReportCount] = useState(0)
   const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
   const [parserAiTarget, setParserAiTarget] = useState<ParserReportDialog["context"] | "">("")
@@ -602,39 +603,51 @@ export default function SpcEnquiriesPage() {
     setParserAiSuggestion(null)
   }
 
+  async function queueParserReport(context: ParserReportDialog["context"]) {
+    const targetDraft = context === "reoffer" ? reofferDraft : draft
+    if (!targetDraft || reportButtonState) return
+    const rawText = (targetDraft.rawText || targetDraft.standardText).trim()
+    const parserOutput = targetDraft.standardText.trim() || standardTextForDraft(
+      targetDraft,
+      context === "reoffer" ? [] : vlsfoMaxRemarks,
+    )
+    if (!rawText || !parserOutput) return
+
+    setReportButtonState(context)
+    try {
+      const response = await fetch("/api/parser-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "spc",
+          context,
+          rawText,
+          parserOutput,
+          correctedOutput: parserOutput,
+          pageUrl: window.location.href,
+          metadata: {
+            draft: targetDraft,
+            manualVlsfoMaxRemarks: context === "reoffer" ? [] : vlsfoMaxRemarks,
+            pendingReview: true,
+          },
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to send report.")
+      await loadParserReportCount()
+      window.setTimeout(() => setReportButtonState(""), 5_000)
+    } catch (error) {
+      setReportButtonState("")
+      reportEnquiryError(error, "Failed to send parser report.")
+    }
+  }
+
   function openDraftParserReport() {
-    const aiOutput = parserAiSuggestion?.context === "new-enquiry" ? parserAiSuggestion.correctedOutput : ""
-    const parserOutput = parserAiSuggestion?.context === "new-enquiry"
-      ? parserAiSuggestion.parserOutput
-      : standardTextForDraft(draft, vlsfoMaxRemarks)
-    setParserReportDialog({
-      context: "new-enquiry",
-      rawText: draft.rawText,
-      parserOutput,
-      aiOutput,
-      aiSources: parserAiSuggestion?.context === "new-enquiry" ? parserAiSuggestion.imoSources : [],
-      correctedOutput: draft.standardText || standardTextForDraft(draft, vlsfoMaxRemarks),
-      note: "",
-    })
-    setParserReportStatus("idle")
+    void queueParserReport("new-enquiry")
   }
 
   function openReofferParserReport() {
-    if (!reofferDraft) return
-    const aiOutput = parserAiSuggestion?.context === "reoffer" ? parserAiSuggestion.correctedOutput : ""
-    const parserOutput = parserAiSuggestion?.context === "reoffer"
-      ? parserAiSuggestion.parserOutput
-      : standardTextForDraft(reofferDraft, [])
-    setParserReportDialog({
-      context: "reoffer",
-      rawText: reofferDraft.rawText || reofferDraft.standardText,
-      parserOutput,
-      aiOutput,
-      aiSources: parserAiSuggestion?.context === "reoffer" ? parserAiSuggestion.imoSources : [],
-      correctedOutput: reofferDraft.standardText || standardTextForDraft(reofferDraft, []),
-      note: "",
-    })
-    setParserReportStatus("idle")
+    void queueParserReport("reoffer")
   }
 
   function applyCorrectedParserReport(dialog: ParserReportDialog, correctedOutput: string) {
@@ -989,7 +1002,7 @@ export default function SpcEnquiriesPage() {
           <section className="spc-panel spc-enquiry-entry-panel">
             <div className="spc-panel-header">
               <h2>New Enquiry</h2>
-              <button type="button" onClick={clearDraft} disabled={!canEdit || saving}>
+              <button type="button" className="spc-blue-action" onClick={clearDraft} disabled={!canEdit || saving}>
                 Clear
               </button>
             </div>
@@ -1101,7 +1114,7 @@ export default function SpcEnquiriesPage() {
                   <span>Standard Format Preview</span>
                   <button
                     type="button"
-                    className="spc-ai-parser-button"
+                    className="spc-ai-parser-button spc-blue-action"
                     onClick={() => void runParserAi("new-enquiry")}
                     disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}
                   >
@@ -1109,10 +1122,11 @@ export default function SpcEnquiriesPage() {
                   </button>
                   <button
                     type="button"
+                    className="spc-blue-action"
                     onClick={openDraftParserReport}
-                    disabled={!canEdit || !draft.rawText.trim()}
+                    disabled={!canEdit || !draft.rawText.trim() || Boolean(reportButtonState)}
                   >
-                    REPORT
+                    {reportButtonState === "new-enquiry" ? "SENT" : "REPORT"}
                   </button>
                 </span>
                 <textarea
@@ -1363,7 +1377,7 @@ export default function SpcEnquiriesPage() {
                   <span>Standard Format Preview</span>
                   <button
                     type="button"
-                    className="spc-ai-parser-button"
+                    className="spc-ai-parser-button spc-blue-action"
                     onClick={() => void runParserAi("reoffer")}
                     disabled={saving || !reofferDraft.standardText.trim() || parserAiStatus === "loading"}
                   >
@@ -1371,10 +1385,11 @@ export default function SpcEnquiriesPage() {
                   </button>
                   <button
                     type="button"
+                    className="spc-blue-action"
                     onClick={openReofferParserReport}
-                    disabled={saving || !reofferDraft.standardText.trim()}
+                    disabled={saving || !reofferDraft.standardText.trim() || Boolean(reportButtonState)}
                   >
-                    REPORT
+                    {reportButtonState === "reoffer" ? "SENT" : "REPORT"}
                   </button>
                 </span>
                 <textarea value={reofferDraft.standardText} onChange={(event) => updateReofferDraft("standardText", event.target.value)} rows={3} disabled={saving} />

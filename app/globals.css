@@ -2984,6 +2984,13 @@ body {
   font-weight: 900;
 }
 
+.spc-panel-header button.spc-blue-action,
+.spc-preview-label-row button.spc-blue-action {
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
 .spc-preview-label-row button:disabled {
   cursor: default;
   opacity: 0.55;
@@ -3486,6 +3493,29 @@ body {
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0;
+}
+
+.spc-parser-report-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.spc-parser-report-list button {
+  min-height: 42px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 10px;
+  background: var(--fc-admin-surface);
+  color: var(--fc-admin-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  text-align: left;
+  padding: 10px 12px;
+}
+
+.spc-parser-report-list button:hover {
+  border-color: var(--fc-admin-primary-button-bg);
 }
 
 .spc-reoffer-form {

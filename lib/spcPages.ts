@@ -72,6 +72,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/auditlog", "/spc/auditlog"],
   },
   {
+    id: "spc-parser-reports",
+    label: "PARSER REPORT",
+    group: "management",
+    path: "/spc/parser-reports",
+    matchPrefixes: ["/parser-reports", "/spc/parser-reports"],
+  },
+  {
     id: "spc-user-management",
     label: "USER MANAGEMENT",
     group: "management",
@@ -180,7 +187,9 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "BUYER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = page.id === "spc-readme" ? "view" : "edit"
+      permissions[page.id] = page.id === "spc-parser-reports"
+        ? "none"
+        : page.id === "spc-readme" ? "view" : "edit"
       return permissions
     }, {})
   }

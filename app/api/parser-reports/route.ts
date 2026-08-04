@@ -24,6 +24,8 @@ const MAX_TEXT_LENGTH = 20_000
 const MAX_NOTE_LENGTH = 2_000
 
 type ParserReportPayload = {
+  id?: unknown
+  action?: unknown
   source?: unknown
   context?: unknown
   rawText?: unknown
@@ -74,14 +76,15 @@ async function getSessionAndClient(
   source: ParserReportSource,
   request: Request,
   access: "view" | "edit",
+  spcPageId = "spc-buyer-enquiries",
 ) {
   if (source === "spc") {
-    const session = await requireSpcPagePermission("spc-buyer-enquiries", access)
+    const session = await requireSpcPagePermission(spcPageId, access)
     return {
       username: session.username || "spc",
       displayName: session.displayName || session.username || "SPC",
       supabase: createSpcAuditedSupabaseClient(
-        createSpcAuditContext(session, request, "spc-buyer-enquiries"),
+        createSpcAuditContext(session, request, spcPageId),
       ),
     }
   }
@@ -112,7 +115,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
 
-    const { supabase } = await getSessionAndClient(source, request, "view")
+    const { supabase } = await getSessionAndClient(
+      source,
+      request,
+      "view",
+      source === "spc" && !summaryOnly ? "spc-parser-reports" : "spc-buyer-enquiries",
+    )
     const { data, error } = await supabase
       .from("parser_reports")
       .select("*")
@@ -148,6 +156,38 @@ export async function POST(request: Request) {
     const source = sourceFrom(payload.source)
     if (!source) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
+    }
+
+    if (source === "spc" && payload.action === "review") {
+      const id = asString(payload.id, 100)
+      const correctedOutput = asString(payload.correctedOutput)
+      if (!id || !correctedOutput) {
+        return NextResponse.json({ message: "Report and corrected output are required." }, { status: 400 })
+      }
+      const { supabase } = await getSessionAndClient(source, request, "edit", "spc-parser-reports")
+      const { data: existing, error: existingError } = await supabase
+        .from("parser_reports")
+        .select("metadata")
+        .eq("id", id)
+        .eq("source", "spc")
+        .maybeSingle()
+      if (existingError) throw existingError
+      if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
+      const { data, error } = await supabase
+        .from("parser_reports")
+        .update({
+          corrected_output: correctedOutput,
+          note: asString(payload.note, MAX_NOTE_LENGTH),
+          metadata: { ...asParserReportMetadata(existing.metadata), pendingReview: false },
+          status: "reviewed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("source", "spc")
+        .select("*")
+        .single()
+      if (error) throw error
+      return NextResponse.json({ success: true, report: parserReportFromRow(data as ParserReportRow) })
     }
 
     const rawText = asString(payload.rawText)
