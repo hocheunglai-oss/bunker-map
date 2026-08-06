@@ -1130,6 +1130,7 @@ function SimpleTable({
     }
   }, [])
   const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
+  const dataRowCount = Math.max(rows.length - 1, 0)
   const columnCount = Math.max(2, ...rows.map((row) => row.length))
   const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
   const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
@@ -1249,8 +1250,11 @@ function SimpleTable({
     setEditing(false)
   }
   return (
-    <div style={{ display: "grid", gap: "8px", overflowX: "auto" }}>
-      <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
+    <div
+      data-ccinfo-table-row-count={dataRowCount}
+      style={{ display: "grid", gap: "8px", width: "100%", minWidth: 0, overflowX: "auto", overflowY: "visible" }}
+    >
+      <table ref={tableRef} style={{ width: "100%", height: "max-content", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
         <colgroup>
           {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
         </colgroup>
@@ -1311,6 +1315,9 @@ function SimpleTable({
             <button type="button" onClick={() => void pasteTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Paste</button>
             <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
             <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
+            <span aria-live="polite" style={{ alignSelf: "center", marginLeft: "auto", color: "var(--fc-admin-muted)", fontSize: "9px", lineHeight: 1.2 }}>
+              {dataRowCount} {dataRowCount === 1 ? "row" : "rows"}
+            </span>
           </div>
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Drag the header borders to resize columns.</div>
         </div>
@@ -1319,6 +1326,9 @@ function SimpleTable({
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
           <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: copied ? "var(--fc-admin-success-bg)" : buttonStyle.background, color: copied ? "var(--fc-admin-success-text)" : buttonStyle.color }}>{copied ? "Copied" : "Copy Table"}</button>
+          <span aria-live="polite" style={{ alignSelf: "center", marginLeft: "auto", color: "var(--fc-admin-muted)", fontSize: "9px", lineHeight: 1.2 }}>
+            {dataRowCount} {dataRowCount === 1 ? "row" : "rows"}
+          </span>
         </div>
       )}
     </div>
@@ -1787,7 +1797,7 @@ export default function CountryCompanyInfoPage() {
   async function loadRecentAuditLogs() {
     setAuditLoading(true)
     try {
-      const response = await fetch("/api/admin/audit-logs?table=ccinfo&limit=60&details=1")
+      const response = await fetch("/api/admin/audit-logs?table=ccinfo&limit=60&details=1", { cache: "no-store" })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message || "Unable to load audit logs.")
       const logs = ((payload.logs || []) as AuditLogRecord[])
@@ -2683,6 +2693,7 @@ export default function CountryCompanyInfoPage() {
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
     if (error) throw error
+    await loadRecentAuditLogs()
   }
 
   async function persistMainSections(nextSections: HighlightCard[]) {
@@ -2690,6 +2701,7 @@ export default function CountryCompanyInfoPage() {
     const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     const { error } = await supabase.from(table).update({ summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, nextSections) }).eq("id", selectedId)
     if (error) throw error
+    await loadRecentAuditLogs()
   }
 
   async function saveHighlightCard() {
