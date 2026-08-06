@@ -122,10 +122,13 @@ test("global response headers retain the baseline and stage the application CSP"
 })
 
 test("security.txt publishes the approved contact and a one-year expiry", async () => {
-  const securityTxt = await readFile(
-    new URL("../public/.well-known/security.txt", import.meta.url),
-    "utf8",
-  )
+  const [securityTxt, proxySource] = await Promise.all([
+    readFile(
+      new URL("../public/.well-known/security.txt", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../proxy.ts", import.meta.url), "utf8"),
+  ])
 
   assert.match(securityTxt, /^Contact: mailto:info@cosulich\.it$/m)
   assert.match(securityTxt, /^Expires: 2027-08-06T00:00:00Z$/m)
@@ -140,5 +143,10 @@ test("security.txt publishes the approved contact and a one-year expiry", async 
   assert.equal(
     Date.parse(expires),
     Date.parse("2026-08-06T00:00:00Z") + 365 * 24 * 60 * 60 * 1000,
+  )
+  assert.match(
+    proxySource,
+    /pathname === "\/\.well-known\/security\.txt"[\s\S]*?NextResponse\.next\(\)/,
+    "the SPC hostname rewrite must preserve the standard security.txt path",
   )
 })

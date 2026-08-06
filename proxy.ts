@@ -5,6 +5,11 @@ export function proxy(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0].toLowerCase()
   const isSpcHost = host === "spc.fcuno.com"
 
+  // Keep the RFC 9116 contact at the same public path on every hostname.
+  if (request.nextUrl.pathname === "/.well-known/security.txt") {
+    return NextResponse.next()
+  }
+
   if (isSpcHost && request.nextUrl.pathname === "/spc") {
     const target = request.nextUrl.clone()
     target.pathname = "/"
