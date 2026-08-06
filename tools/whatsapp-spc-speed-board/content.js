@@ -490,9 +490,10 @@
   function contactSearchCandidates(contact) {
     const phone = phoneDigits(contact?.phone)
     const usePhone = contact?.kind !== "group" && Boolean(phone)
+    const searchName = contactSearchText(contact)
     const candidates = usePhone
-      ? [`+${phone}`, contactSearchText(contact), contactDisplayName(contact)]
-      : [contactSearchText(contact), contactDisplayName(contact)]
+      ? [searchName, `+${phone}`]
+      : [searchName || contactDisplayName(contact)]
     return Array.from(new Set(candidates.map(cleanText).filter(Boolean)))
   }
 
@@ -902,7 +903,9 @@
     const searchBox = findSideSearchBox()
     if (!searchBox) return false
 
-    for (const searchText of contactSearchCandidates(contact)) {
+    const searchCandidates = contactSearchCandidates(contact)
+    for (let index = 0; index < searchCandidates.length; index += 1) {
+      const searchText = searchCandidates[index]
       setEditableText(searchBox, searchText)
       const immediateRow = findVisibleChatRow(contact)
       if (immediateRow) {
@@ -910,7 +913,9 @@
         window.setTimeout(() => clearEditableText(searchBox), 80)
         return true
       }
-      for (const delay of [120, 260, 480]) {
+      const isFastNameAttempt = index === 0 && searchCandidates.length > 1
+      const delays = isFastNameAttempt ? [60, 140, 220] : [100, 220, 420]
+      for (const delay of delays) {
         await new Promise((resolve) => window.setTimeout(resolve, delay))
         const row = findVisibleChatRow(contact)
         if (row) {
@@ -1723,7 +1728,7 @@
   function renderContactList(list) {
     const hasSelectedEnquiries = selectedSendableEnquiryIds().length > 0
     const rows = contactsFor(list).map((contact) => {
-      const details = [contact.company, contact.phone].filter(Boolean).join(" · ")
+      const details = cleanText(contact.company)
       const displayName = contactDisplayName(contact)
       const menuOpen = state.contactMenuId === contact.id
       return `

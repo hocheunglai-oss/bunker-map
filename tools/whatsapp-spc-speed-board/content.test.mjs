@@ -399,7 +399,16 @@ assert.deepEqual(
     phone: "+65 9679 1141",
     kind: "contact",
   }))),
-  ["+6596791141", "MICHELLE ANTHONEY"],
+  ["MICHELLE ANTHONEY", "+6596791141"],
+)
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.contactSearchCandidates({
+    name: "MICHELLE",
+    chatName: "MICHELLE ANTHONEY",
+    phone: "+65 9679 1141",
+    kind: "contact",
+  }))),
+  ["MICHELLE ANTHONEY", "+6596791141"],
 )
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({

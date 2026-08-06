@@ -278,6 +278,9 @@ async function main() {
       assert.equal(capturedContact.phone, "85266885575")
       assert.equal(capturedContact.kind, "contact")
       assert.equal(await page.locator("#contactInfo").isVisible(), false)
+      const capturedContactLabel = await page.locator(".fcuno-wa-spc-contact-list[data-list='supplier'] .fcuno-wa-spc-list-button").innerText()
+      assert.equal(capturedContactLabel.trim(), "Otto Tone")
+      assert.doesNotMatch(capturedContactLabel, /85266885575/)
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
         api.state.contacts = []
