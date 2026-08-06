@@ -1,5 +1,33 @@
+const isDevelopment = process.env.NODE_ENV === "development"
+
+const enforcedContentSecurityPolicy = [
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com https://*.office.com https://*.office365.com",
+  "upgrade-insecure-requests",
+].join("; ")
+
+const contentSecurityPolicyReportOnly = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""} https://s3.tradingview.com https://appsforoffice.microsoft.com`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://api.maptiler.com https://*.tile.openstreetmap.org",
+  "font-src 'self' data:",
+  "connect-src 'self' https://gglyugbrnyvyfktgwert.supabase.co https://api.maptiler.com https://www.googleapis.com",
+  "media-src 'self' data: blob: https://gglyugbrnyvyfktgwert.supabase.co",
+  "frame-src 'self' https://*.tradingview.com https://*.tradingview-widget.com https://drive.google.com https://docs.google.com https://www.hko.gov.hk",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com https://*.office.com https://*.office365.com",
+  "upgrade-insecure-requests",
+].join("; ")
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   outputFileTracingIncludes: {
     "/api/spc/chrome-extension/download": ["./tools/whatsapp-spc-speed-board/**/*"],
   },
@@ -8,6 +36,14 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
+          {
+            key: "Content-Security-Policy",
+            value: enforcedContentSecurityPolicy,
+          },
+          {
+            key: "Content-Security-Policy-Report-Only",
+            value: contentSecurityPolicyReportOnly,
+          },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "no-referrer" },
           {

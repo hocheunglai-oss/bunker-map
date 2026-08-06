@@ -1,9 +1,15 @@
 import { cookies } from "next/headers"
 import {
-  getDatabaseSpcUserByUsername,
+  getDatabaseSpcUserById,
   type AuthenticatedSpcUser,
   validateDatabaseSpcUser,
 } from "@/lib/spcUsers"
+import {
+  SPC_SESSION_DURATION_SECONDS,
+  createDatabaseSpcSession,
+  getDatabaseSpcSession,
+  revokeDatabaseSpcSession,
+} from "@/lib/spcSessions"
 import {
   canAccessSpcPage,
   normaliseSpcRole,
@@ -12,10 +18,8 @@ import {
 } from "@/lib/spcPages"
 
 export const SPC_COOKIE_NAME = "spc_auth"
+// Retained only so legacy forgeable username cookies can be expired.
 export const SPC_USER_COOKIE_NAME = "spc_user"
-
-const SPC_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
-const SPC_USER_LOOKUP_CACHE_MS = 3000
 
 export type SpcSession = {
   authenticated: boolean
@@ -27,46 +31,8 @@ export type SpcSession = {
   permissions: SpcPagePermissionMap
 }
 
-type DatabaseSpcUser = Awaited<ReturnType<typeof getDatabaseSpcUserByUsername>>
-
-const spcUserLookupCache = new Map<
-  string,
-  { user: DatabaseSpcUser; expiresAt: number }
->()
-const spcUserLookupPromises = new Map<string, Promise<DatabaseSpcUser>>()
-
 function normaliseUsername(username: string) {
   return username.trim()
-}
-
-async function getCachedDatabaseSpcUser(username: string) {
-  const cached = spcUserLookupCache.get(username)
-  if (cached && cached.expiresAt > Date.now()) return cached.user
-
-  const pending = spcUserLookupPromises.get(username)
-  if (pending) return pending
-
-  const lookup = getDatabaseSpcUserByUsername(username)
-    .then((user) => {
-      spcUserLookupCache.set(username, {
-        user,
-        expiresAt: Date.now() + SPC_USER_LOOKUP_CACHE_MS,
-      })
-      return user
-    })
-    .finally(() => {
-      spcUserLookupPromises.delete(username)
-    })
-
-  spcUserLookupPromises.set(username, lookup)
-  return lookup
-}
-
-export function invalidateSpcUserLookupCache(username: string | null | undefined) {
-  const key = normaliseUsername(username || "")
-  if (!key) return
-  spcUserLookupCache.delete(key)
-  spcUserLookupPromises.delete(key)
 }
 
 export async function validateSpcCredentials(
@@ -76,49 +42,66 @@ export async function validateSpcCredentials(
   return validateDatabaseSpcUser(normaliseUsername(username), password)
 }
 
-function cookieOptions() {
+function cookieOptions(expiresAt: string) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SPC_COOKIE_MAX_AGE,
+    maxAge: SPC_SESSION_DURATION_SECONDS,
+    expires: new Date(expiresAt),
   }
 }
 
-export async function setSpcSession(user: { username: string }) {
-  const cookieStore = await cookies()
-  cookieStore.set(SPC_COOKIE_NAME, "1", cookieOptions())
-  cookieStore.set(SPC_USER_COOKIE_NAME, user.username, cookieOptions())
-}
-
-export async function refreshSpcSession() {
-  const cookieStore = await cookies()
-  const authenticated = cookieStore.get(SPC_COOKIE_NAME)?.value === "1"
-  if (!authenticated) return
-
-  const username = cookieStore.get(SPC_USER_COOKIE_NAME)?.value
-  if (!username) {
-    await clearSpcSession()
-    return
-  }
-
-  cookieStore.set(SPC_COOKIE_NAME, "1", cookieOptions())
-  cookieStore.set(SPC_USER_COOKIE_NAME, username, cookieOptions())
-}
-
-export async function clearSpcSession() {
-  const cookieStore = await cookies()
-  const options = {
+function expiredCookieOptions() {
+  return {
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 0,
   }
+}
+
+function clearSpcCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  const options = expiredCookieOptions()
 
   cookieStore.set(SPC_COOKIE_NAME, "", options)
   cookieStore.set(SPC_USER_COOKIE_NAME, "", options)
+}
+
+export async function setSpcSession(user: {
+  id: string
+  credentialUpdatedAt: string
+}) {
+  const cookieStore = await cookies()
+  const previousToken = cookieStore.get(SPC_COOKIE_NAME)?.value
+  const session = await createDatabaseSpcSession(
+    user.id,
+    user.credentialUpdatedAt,
+  )
+
+  cookieStore.set(
+    SPC_COOKIE_NAME,
+    session.token,
+    cookieOptions(session.expiresAt),
+  )
+  cookieStore.set(SPC_USER_COOKIE_NAME, "", expiredCookieOptions())
+
+  if (previousToken && previousToken !== session.token) {
+    await revokeDatabaseSpcSession(previousToken)
+  }
+}
+
+export async function clearSpcSession() {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SPC_COOKIE_NAME)?.value
+
+  try {
+    if (token) await revokeDatabaseSpcSession(token)
+  } finally {
+    clearSpcCookies(cookieStore)
+  }
 }
 
 function unauthenticatedSession(): SpcSession {
@@ -135,19 +118,30 @@ function unauthenticatedSession(): SpcSession {
 
 export async function getSpcSession(): Promise<SpcSession> {
   const cookieStore = await cookies()
-  const authenticated = cookieStore.get(SPC_COOKIE_NAME)?.value === "1"
-
-  if (!authenticated) return unauthenticatedSession()
-
-  const username = cookieStore.get(SPC_USER_COOKIE_NAME)?.value
-  if (!username) {
-    await clearSpcSession()
+  const token = cookieStore.get(SPC_COOKIE_NAME)?.value
+  if (!token) {
+    if (cookieStore.get(SPC_USER_COOKIE_NAME)?.value) clearSpcCookies(cookieStore)
     return unauthenticatedSession()
   }
 
-  const databaseUser = await getCachedDatabaseSpcUser(username)
+  try {
+    const databaseSession = await getDatabaseSpcSession(token)
+    if (!databaseSession) {
+      clearSpcCookies(cookieStore)
+      return unauthenticatedSession()
+    }
 
-  if (databaseUser) {
+    const databaseUser = await getDatabaseSpcUserById(databaseSession.spcUserId)
+
+    if (
+      !databaseUser ||
+      databaseUser.credentialUpdatedAt !== databaseSession.userUpdatedAt
+    ) {
+      await revokeDatabaseSpcSession(token)
+      clearSpcCookies(cookieStore)
+      return unauthenticatedSession()
+    }
+
     return {
       authenticated: true,
       username: databaseUser.username,
@@ -157,10 +151,10 @@ export async function getSpcSession(): Promise<SpcSession> {
       mustChangePassword: databaseUser.mustChangePassword,
       permissions: databaseUser.permissions,
     }
+  } catch {
+    clearSpcCookies(cookieStore)
+    return unauthenticatedSession()
   }
-
-  await clearSpcSession()
-  return unauthenticatedSession()
 }
 
 export async function requireSpcSession() {
@@ -170,9 +164,9 @@ export async function requireSpcSession() {
 }
 
 export function hasSpcRole(session: SpcSession, roles: SpcRoleId | SpcRoleId[]) {
-  if (!session.authenticated || !session.role) return false
+  if (!session.authenticated || session.mustChangePassword || !session.role) return false
   const allowedRoles = Array.isArray(roles) ? roles : [roles]
-  return allowedRoles.includes(session.role)
+  return allowedRoles.map(normaliseSpcRole).includes(normaliseSpcRole(session.role))
 }
 
 export async function requireSpcRole(roles: SpcRoleId | SpcRoleId[]) {
@@ -186,8 +180,18 @@ export function hasSpcPagePermission(
   pageId: string,
   access: "view" | "edit" = "view",
 ) {
-  if (!session.authenticated) return false
+  if (!session.authenticated || session.mustChangePassword) return false
   return canAccessSpcPage(session.permissions, pageId, access)
+}
+
+export function hasSpcAdminPagePermission(
+  session: SpcSession,
+  access: "view" | "edit" = "view",
+) {
+  return (
+    hasSpcRole(session, "ADMIN") &&
+    hasSpcPagePermission(session, "spc-user-management", access)
+  )
 }
 
 export async function requireSpcPagePermission(
@@ -196,5 +200,19 @@ export async function requireSpcPagePermission(
 ) {
   const session = await requireSpcSession()
   if (!hasSpcPagePermission(session, pageId, access)) throw new Error("Forbidden")
+  return session
+}
+
+export async function requireSpcAdminPagePermission(
+  pageId: "spc-user-management",
+  access: "view" | "edit" = "view",
+) {
+  const session = await requireSpcSession()
+  if (
+    pageId !== "spc-user-management" ||
+    !hasSpcAdminPagePermission(session, access)
+  ) {
+    throw new Error("Forbidden")
+  }
   return session
 }

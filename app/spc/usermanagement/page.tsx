@@ -73,7 +73,6 @@ const USER_TABS: Array<{ id: UserTab; label: string }> = [
 const USER_ROLE_OPTIONS = USER_TABS.filter(
   (tab): tab is { id: Exclude<UserTab, "OFFICE">; label: string } => tab.id !== "OFFICE",
 )
-const DEFAULT_PASSWORD = "Since1857"
 const DEFAULT_OFFICES = ["ITALY", "HONG KONG", "SINGAPORE", "MONACO", "FRANCE", "USA", "KOREA", "JAPAN", "VIETNAM"]
 
 function cleanOffice(value: string) {
@@ -91,7 +90,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
     whatsappPhone: "",
     role,
     office,
-    password: DEFAULT_PASSWORD,
+    password: "",
     mustChangePassword: true,
     isSupplierTrader: role === "SUPPLIER TRADER",
     isActive: true,
@@ -674,6 +673,8 @@ export default function SpcUserManagementPage() {
                   value={userDraft.password}
                   onChange={(event) => updateDraft("password", event.target.value)}
                   autoComplete="new-password"
+                  minLength={12}
+                  maxLength={256}
                   required={!userDraft.id}
                 />
               </label>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   presentAuditLogs,
+  redactSpcUserManagementInvestigation,
   type AuditLogRecord,
   type AuditOperation,
 } from "../lib/auditLog"
@@ -136,6 +137,7 @@ test("SPC permission store audit is presented as user management with semantic c
   assert.equal(presented.pageId, "spc-user-management")
   assert.equal(presented.pageLabel, "SPC USER MANAGEMENT")
   assert.equal(presented.recordLabel, "SPC permission groups")
+  assert.equal(presented.undoable, false)
   assert.doesNotMatch(presented.summary, /calendar/i)
   assert.ok(
     presented.details.includes(
@@ -197,4 +199,120 @@ test("SPC password changes are described without storing the credential hash", a
 
   assert.equal(presented.summary, 'Changed password for SPC user "FILIPPO MATTIOLI".')
   assert.deepEqual(presented.details, ["Changed the password."])
+})
+
+test("failed SPC user-management events expose investigation references without secrets", async () => {
+  const [presented] = await presentAuditLogs(
+    [
+      auditRecord({
+        tableName: "spc_user_management_events",
+        operation: "UPDATE",
+        recordPk: {
+          requestId: "11111111-1111-4111-8111-111111111111",
+          targetType: "spc-user",
+          targetId: "user-1",
+        },
+        afterRow: {
+          schema: "fcuno.spc-user-management-audit/v1",
+          action: "update-user",
+          outcome: "denied",
+          errorCode: "admin-required",
+          targetType: "spc-user",
+          targetId: "user-1",
+          targetUsername: "buyer@example.com",
+        },
+        requestContext: {
+          pageId: "spc-user-management",
+          pageLabel: "SPC USER MANAGEMENT",
+          pagePath: "/spc/usermanagement",
+          sourceIp: "203.0.113.19",
+          correlationId: "11111111-1111-4111-8111-111111111111",
+          requestId: "11111111-1111-4111-8111-111111111111",
+          platformRequestId: "hkg1::iad1::request-123",
+          actorRole: "BUYER TRADER",
+          action: "update-user",
+          targetType: "spc-user",
+          targetId: "user-1",
+          targetUsername: "buyer@example.com",
+          outcome: "denied",
+          approvalReference: "CHANGE-2042",
+        },
+      }),
+    ],
+    SPC_PAGE_DEFINITIONS,
+  )
+
+  assert.equal(presented.pageId, "spc-user-management")
+  assert.equal(presented.recordLabel, "buyer@example.com")
+  assert.equal(presented.summary, 'Denied update user for "buyer@example.com".')
+  assert.equal(presented.auditOutcome, "denied")
+  assert.equal(presented.auditAction, "update-user")
+  assert.equal(presented.sourceIp, "203.0.113.19")
+  assert.equal(presented.errorCode, "admin-required")
+  assert.equal(presented.undoable, false)
+  assert.ok(presented.details.includes("Outcome: DENIED."))
+  assert.ok(presented.details.includes("Source IP: 203.0.113.19."))
+  assert.ok(
+    presented.details.includes(
+      "Correlation ID: 11111111-1111-4111-8111-111111111111.",
+    ),
+  )
+  assert.ok(presented.details.includes("Vercel request ID: hkg1::iad1::request-123."))
+  assert.ok(presented.details.includes("Error code: admin-required."))
+  assert.doesNotMatch(JSON.stringify(presented), /password_hash|credential-value|token-value/)
+})
+
+test("SPC user-management investigation identifiers are visible only to administrators", async () => {
+  const [presented] = await presentAuditLogs(
+    [
+      auditRecord({
+        tableName: "spc_user_management_events",
+        operation: "UPDATE",
+        recordPk: {
+          requestId: "55555555-5555-4555-8555-555555555555",
+          targetType: "spc-user",
+        },
+        afterRow: {
+          schema: "fcuno.spc-user-management-audit/v1",
+          action: "change-password",
+          outcome: "failed",
+          errorCode: "invalid_request",
+          targetType: "spc-user",
+        },
+        requestContext: {
+          pageId: "spc-user-management",
+          pageLabel: "SPC USER MANAGEMENT",
+          pagePath: "/spc/usermanagement",
+          sourceIp: "203.0.113.21",
+          correlationId: "55555555-5555-4555-8555-555555555555",
+          requestId: "55555555-5555-4555-8555-555555555555",
+          platformRequestId: "hkg1::restricted-request",
+          actorRole: "BUYER TRADER",
+          action: "change-password",
+          targetType: "spc-user",
+          outcome: "failed",
+        },
+      }),
+    ],
+    SPC_PAGE_DEFINITIONS,
+  )
+
+  const normalUserView = redactSpcUserManagementInvestigation(presented, false)
+  assert.equal(normalUserView.sourceIp, null)
+  assert.equal(normalUserView.correlationId, null)
+  assert.equal(normalUserView.requestId, null)
+  assert.equal(normalUserView.platformRequestId, null)
+  assert.doesNotMatch(
+    JSON.stringify(normalUserView.details),
+    /203\.0\.113\.21|55555555-5555-4555-8555-555555555555|restricted-request/,
+  )
+
+  const adminView = redactSpcUserManagementInvestigation(presented, true)
+  assert.equal(adminView.sourceIp, "203.0.113.21")
+  assert.equal(
+    adminView.correlationId,
+    "55555555-5555-4555-8555-555555555555",
+  )
+  assert.equal(adminView.platformRequestId, "hkg1::restricted-request")
+  assert.ok(adminView.details.includes("Source IP: 203.0.113.21."))
 })

@@ -130,6 +130,8 @@ export default function SpcLoginPage() {
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
                 autoComplete="new-password"
+                minLength={12}
+                maxLength={256}
                 required
               />
             </label>
@@ -140,6 +142,8 @@ export default function SpcLoginPage() {
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 autoComplete="new-password"
+                minLength={12}
+                maxLength={256}
                 required
               />
             </label>
@@ -191,6 +195,7 @@ export default function SpcLoginPage() {
                 aria-label="Username"
                 autoCapitalize="none"
                 spellCheck={false}
+                maxLength={320}
                 required
               />
             </span>
@@ -215,6 +220,7 @@ export default function SpcLoginPage() {
                 aria-label="Password"
                 autoCapitalize="none"
                 spellCheck={false}
+                maxLength={256}
                 required
               />
               <button

@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js"
+import {
+  createSpcAuditedSupabaseClient,
+  type SpcAuditContext,
+} from "@/lib/spcAudit"
 export type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
+export type AuditOutcome = "success" | "failed" | "denied"
 
 type AuditPageDefinition = {
   id: string
@@ -43,6 +48,18 @@ export type PresentedAuditLogRecord = AuditLogRecord & {
   summary: string
   details: string[]
   undoable: boolean
+  sourceIp: string | null
+  correlationId: string | null
+  requestId: string | null
+  platformRequestId: string | null
+  actorRole: string | null
+  auditAction: string | null
+  auditOutcome: AuditOutcome | null
+  targetType: string | null
+  targetId: string | null
+  targetUsername: string | null
+  approvalReference: string | null
+  errorCode: string | null
 }
 
 type AuditLogRow = {
@@ -109,6 +126,12 @@ const AUDIT_PREVIEW_FIELDS = [
   "vlsfo",
   "mgo",
   "deleted_at",
+  "action",
+  "outcome",
+  "errorCode",
+  "targetType",
+  "targetId",
+  "targetUsername",
 ] as const
 
 const AUDIT_INDEX_SELECT = [
@@ -147,6 +170,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   shared_addressbook_group_members: "outlook-addressbook",
   email_templates: "email-templates",
   outlook_template_insertion_attempts: "email-templates",
+  spc_user_management_events: "spc-user-management",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
   spc_users: "spc-user-management",
@@ -194,6 +218,7 @@ const ENTITY_NAMES: Record<string, string> = {
   office_calendar_store: "calendar",
   email_templates: "email template",
   outlook_template_insertion_attempts: "Outlook template insertion attempt",
+  spc_user_management_events: "SPC user-management action",
   admin_users: "user",
   admin_role_defaults: "role defaults",
   spc_users: "SPC user",
@@ -294,12 +319,15 @@ const SPC_TABLE_NAMES = new Set([
   "spc_role_defaults",
   "spc_suppliers",
   "spc_speedboard_notices",
+  "spc_user_management_events",
 ])
 
 const NON_UNDOABLE_TABLES = new Set([
   "admin_users",
   "openai_usage_events",
   "outlook_template_insertion_attempts",
+  "spc_users",
+  "spc_user_management_events",
   "spc_suppliers",
   "spc_speedboard_notices",
 ])
@@ -322,6 +350,51 @@ function isSpcAuditRecord(record: AuditLogRecord) {
   }
 
   return false
+}
+
+export function isSpcUserManagementAuditRecord(record: AuditLogRecord) {
+  if (
+    record.tableName === "spc_user_management_events" ||
+    record.tableName === "spc_users" ||
+    record.tableName === "spc_role_defaults"
+  ) {
+    return true
+  }
+  if (record.tableName === "office_calendar_store") {
+    return getOfficeCalendarStoreKey(record) === "spc-permission-groups"
+  }
+  return (
+    getContextText(record.requestContext, "pageId", "page_id") ===
+    "spc-user-management"
+  )
+}
+
+const SPC_INVESTIGATION_DETAIL_PREFIXES = [
+  "Source IP:",
+  "Request ID:",
+  "Correlation ID:",
+  "Vercel request ID:",
+] as const
+
+export function redactSpcUserManagementInvestigation(
+  record: PresentedAuditLogRecord,
+  viewerIsAdmin: boolean,
+) {
+  if (viewerIsAdmin || !isSpcUserManagementAuditRecord(record)) return record
+
+  return {
+    ...record,
+    sourceIp: null,
+    correlationId: null,
+    requestId: null,
+    platformRequestId: null,
+    details: record.details.filter(
+      (detail) =>
+        !SPC_INVESTIGATION_DETAIL_PREFIXES.some((prefix) =>
+          detail.startsWith(prefix),
+        ),
+    ),
+  }
 }
 
 function requireEnv(name: string) {
@@ -389,6 +462,12 @@ function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
 }
 
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  if (
+    record.tableName === "office_calendar_store" &&
+    getOfficeCalendarStoreKey(record) === "spc-permission-groups"
+  ) {
+    return false
+  }
   return !NON_UNDOABLE_TABLES.has(record.tableName)
 }
 
@@ -410,6 +489,147 @@ function getContextText(context: Record<string, unknown>, ...keys: string[]) {
     if (typeof value === "string" && value.trim()) return value.trim()
   }
   return null
+}
+
+type AuditInvestigationFields = {
+  sourceIp: string | null
+  correlationId: string | null
+  requestId: string | null
+  platformRequestId: string | null
+  actorRole: string | null
+  auditAction: string | null
+  auditOutcome: AuditOutcome | null
+  targetType: string | null
+  targetId: string | null
+  targetUsername: string | null
+  approvalReference: string | null
+  errorCode: string | null
+}
+
+function getObjectText(value: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const item = value[key]
+    if (typeof item === "string" && item.trim()) return item.trim()
+  }
+  return null
+}
+
+function getAuditInvestigationFields(
+  record: AuditLogRecord,
+): AuditInvestigationFields {
+  const context = record.requestContext
+  const event = record.afterRow || {}
+  const auditOutcome =
+    getContextText(context, "outcome") || getObjectText(event, "outcome")
+
+  return {
+    sourceIp: getContextText(context, "sourceIp", "source_ip"),
+    correlationId: getContextText(
+      context,
+      "correlationId",
+      "correlation_id",
+    ),
+    requestId:
+      getContextText(context, "requestId", "request_id") ||
+      getObjectText(record.recordPk, "requestId", "request_id"),
+    platformRequestId: getContextText(
+      context,
+      "platformRequestId",
+      "platform_request_id",
+    ),
+    actorRole: getContextText(context, "actorRole", "actor_role"),
+    auditAction:
+      getContextText(context, "action") || getObjectText(event, "action"),
+    auditOutcome:
+      auditOutcome === "success" ||
+      auditOutcome === "failed" ||
+      auditOutcome === "denied"
+        ? auditOutcome
+        : null,
+    targetType:
+      getContextText(context, "targetType", "target_type") ||
+      getObjectText(event, "targetType", "target_type") ||
+      getObjectText(record.recordPk, "targetType", "target_type"),
+    targetId:
+      getContextText(context, "targetId", "target_id") ||
+      getObjectText(event, "targetId", "target_id") ||
+      getObjectText(record.recordPk, "targetId", "target_id"),
+    targetUsername:
+      getContextText(context, "targetUsername", "target_username") ||
+      getObjectText(event, "targetUsername", "target_username"),
+    approvalReference: getContextText(
+      context,
+      "approvalReference",
+      "approval_reference",
+    ),
+    errorCode: getObjectText(event, "errorCode", "error_code"),
+  }
+}
+
+function readableAuditCode(value: string | null, fallback: string) {
+  return value?.replace(/[._:-]+/g, " ").trim() || fallback
+}
+
+function buildSpcInvestigationDetails(
+  record: AuditLogRecord,
+  investigation: AuditInvestigationFields,
+) {
+  if (
+    !isSpcUserManagementAuditRecord(record) ||
+    !Object.values(investigation).some(Boolean)
+  ) {
+    return []
+  }
+
+  const details = [
+    `Actor: ${record.actorName || record.actorId || "not recorded"}${
+      record.actorName && record.actorId ? ` (${record.actorId})` : ""
+    }.`,
+  ]
+  if (investigation.actorRole) {
+    details.push(`Actor role: ${investigation.actorRole}.`)
+  }
+  if (investigation.auditOutcome) {
+    details.push(`Outcome: ${investigation.auditOutcome.toUpperCase()}.`)
+  }
+  if (investigation.auditAction) {
+    details.push(
+      `Action: ${readableAuditCode(investigation.auditAction, "unspecified")}.`,
+    )
+  }
+
+  const targetName = investigation.targetUsername || investigation.targetId
+  if (investigation.targetType || targetName) {
+    details.push(
+      `Target: ${readableAuditCode(investigation.targetType, "record")}${
+        targetName ? ` "${targetName}"` : ""
+      }.`,
+    )
+  }
+
+  const occurredAt = new Date(record.occurredAt)
+  if (!Number.isNaN(occurredAt.getTime())) {
+    details.push(`Occurred at (UTC): ${occurredAt.toISOString()}.`)
+  }
+  if (investigation.sourceIp) {
+    details.push(`Source IP: ${investigation.sourceIp}.`)
+  }
+  if (investigation.requestId) {
+    details.push(`Request ID: ${investigation.requestId}.`)
+  }
+  if (investigation.correlationId) {
+    details.push(`Correlation ID: ${investigation.correlationId}.`)
+  }
+  if (investigation.platformRequestId) {
+    details.push(`Vercel request ID: ${investigation.platformRequestId}.`)
+  }
+  if (investigation.approvalReference) {
+    details.push(`Approval reference: ${investigation.approvalReference}.`)
+  }
+  if (investigation.errorCode) {
+    details.push(`Error code: ${investigation.errorCode}.`)
+  }
+  return details
 }
 
 function getOfficeCalendarStoreKey(record: AuditLogRecord) {
@@ -809,6 +1029,14 @@ function getRecordLabel(
   insertionCorrelation?: OutlookInsertionAuditCorrelation,
 ) {
   const row = record.afterRow || record.beforeRow || {}
+  if (record.tableName === "spc_user_management_events") {
+    const investigation = getAuditInvestigationFields(record)
+    return (
+      investigation.targetUsername ||
+      investigation.targetId ||
+      readableAuditCode(investigation.targetType, "SPC user-management action")
+    )
+  }
   if (record.tableName === "outlook_template_insertion_attempts") {
     return getOutlookInsertionAuditRecordLabel(
       record,
@@ -1150,6 +1378,14 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  if (record.tableName === "spc_user_management_events") {
+    const investigation = getAuditInvestigationFields(record)
+    const outcome = investigation.auditOutcome === "denied" ? "Denied" : "Failed"
+    const action = readableAuditCode(investigation.auditAction, "user-management action")
+    const target =
+      recordLabel === "SPC user-management action" ? "" : ` for "${recordLabel}"`
+    return `${outcome} ${action}${target}.`
+  }
   const userManagementChanges = getSpcUserManagementChanges(record)
   if (userManagementChanges) return userManagementChanges.summary
   if (record.tableName === "outlook_template_insertion_attempts") {
@@ -1188,6 +1424,14 @@ function buildDetails(
 ) {
   const subject = subjectFor(record, recordLabel)
   const details: string[] = []
+  const investigation = getAuditInvestigationFields(record)
+  const finish = (items: string[]) =>
+    Array.from(
+      new Set([
+        ...items,
+        ...buildSpcInvestigationDetails(record, investigation),
+      ]),
+    ).slice(0, 24)
 
   if (record.undoOfLogId) {
     details.push(`This change restored the previous version of ${subject}.`)
@@ -1202,7 +1446,11 @@ function buildDetails(
   }
 
   const userManagementChanges = getSpcUserManagementChanges(record)
-  if (userManagementChanges) return userManagementChanges.details
+  if (userManagementChanges) return finish(userManagementChanges.details)
+
+  if (record.tableName === "spc_user_management_events") {
+    return finish([])
+  }
 
   const deletedFixtureDetails = getDeletedFixtureDetails(record, recordLabel)
   if (deletedFixtureDetails) return deletedFixtureDetails
@@ -1271,7 +1519,7 @@ function buildDetails(
     details.push(`Deleted ${subject}.`)
   }
 
-  return Array.from(new Set(details)).slice(0, 12)
+  return finish(details)
 }
 
 async function getPortNames(records: AuditLogRecord[]) {
@@ -1320,6 +1568,7 @@ export async function presentAuditLogs(
       portNames,
       insertionCorrelation,
     )
+    const investigation = getAuditInvestigationFields(record)
 
     return {
       ...record,
@@ -1340,6 +1589,7 @@ export async function presentAuditLogs(
         insertionCorrelation,
       ),
       undoable: canUndoAuditLogRecord(record),
+      ...investigation,
     }
   })
 }
@@ -1392,7 +1642,7 @@ export async function listAuditLogs(options: {
     .from("audit_logs")
     .select(options.includeRows === false ? AUDIT_INDEX_SELECT : AUDIT_SELECT)
     .or(
-      "table_schema.eq.public,and(table_schema.eq.app,table_name.eq.outlook_template_insertion_attempts)"
+      "table_schema.eq.public,and(table_schema.eq.app,table_name.in.(outlook_template_insertion_attempts,spc_user_management_events))"
     )
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
@@ -1402,7 +1652,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices,spc_user_management_events)",
     )
   }
 
@@ -1432,8 +1682,11 @@ export async function listAuditLogs(options: {
 export async function undoAuditLog(
   logId: string,
   session: { username: string | null; displayName: string | null },
+  auditContext?: SpcAuditContext,
 ) {
-  const supabase = getSupabaseAuditClient()
+  const supabase = auditContext
+    ? createSpcAuditedSupabaseClient(auditContext)
+    : getSupabaseAuditClient()
   const actorId = session.username || "admin"
   const actorName = session.displayName || session.username || "Admin"
 

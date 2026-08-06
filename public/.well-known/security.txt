@@ -1,0 +1,4 @@
+Contact: mailto:info@cosulich.it
+Expires: 2027-08-06T00:00:00Z
+Preferred-Languages: en, it
+Canonical: https://spc.fcuno.com/.well-known/security.txt

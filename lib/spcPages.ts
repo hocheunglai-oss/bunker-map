@@ -145,6 +145,26 @@ export function isSpcBuiltInRole(role: string | null | undefined) {
   )
 }
 
+export function constrainSpcPermissionForRole(
+  role: string | null | undefined,
+  pageId: string,
+  permission: SpcPagePermission,
+) {
+  const roleId = normaliseSpcRole(role)
+
+  if (pageId === "spc-user-management") {
+    return roleId === "ADMIN" ? "edit" : "none"
+  }
+
+  if (pageId === "spc-audit-log") {
+    return roleId === "ADMIN"
+      ? "edit"
+      : permission === "edit" ? "view" : permission
+  }
+
+  return permission
+}
+
 export function getFullSpcPagePermissions(
   pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
 ): SpcPagePermissionMap {
@@ -180,23 +200,28 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "ADMIN") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = "edit"
+      permissions[page.id] = constrainSpcPermissionForRole(roleId, page.id, "edit")
       return permissions
     }, {})
   }
 
   if (roleId === "BUYER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] = page.id === "spc-parser-reports"
+      const permission = page.id === "spc-parser-reports"
         ? "none"
         : page.id === "spc-readme" ? "view" : "edit"
+      permissions[page.id] = constrainSpcPermissionForRole(
+        roleId,
+        page.id,
+        permission,
+      )
       return permissions
     }, {})
   }
 
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      permissions[page.id] =
+      const permission =
         page.id === "spc-buyer-enquiries" ||
         page.id === "spc-chrome-extension" ||
         page.id === "spc-readme" ||
@@ -205,11 +230,23 @@ export function getDefaultSpcPermissionsForRole(
         page.id === "spc-statistics"
           ? "view"
           : "none"
+      permissions[page.id] = constrainSpcPermissionForRole(
+        roleId,
+        page.id,
+        permission,
+      )
       return permissions
     }, {})
   }
 
-  return normaliseSpcPagePermissions(null, "view", pages)
+  return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
+    permissions[page.id] = constrainSpcPermissionForRole(
+      roleId,
+      page.id,
+      "view",
+    )
+    return permissions
+  }, {})
 }
 
 export function canAccessSpcPage(

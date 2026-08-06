@@ -1,22 +1,41 @@
 import { NextResponse } from "next/server"
-import { requireSpcPagePermission } from "@/lib/spcAuth"
+import {
+  hasSpcPagePermission,
+  hasSpcRole,
+  requireSpcPagePermission,
+  requireSpcSession,
+} from "@/lib/spcAuth"
 import {
   canUndoAuditLogRecord,
   getAuditLogRecord,
   isUserAuditRecord,
+  isSpcUserManagementAuditRecord,
   listAuditLogs,
   matchesAuditActor,
   matchesAuditScope,
   presentAuditLogs,
+  redactSpcUserManagementInvestigation,
   type PresentedAuditLogRecord,
   undoAuditLog,
 } from "@/lib/auditLog"
-import { listSpcAuditUserOptions } from "@/lib/spcUsers"
+import {
+  createSpcAuditContext,
+  recordSpcUserManagementAuditEvent,
+  type SpcAuditContext,
+} from "@/lib/spcAudit"
+import {
+  listSpcAuditUserOptions,
+} from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { timedJson } from "@/lib/serverTiming"
 
 const PAGE_TABLES: Record<string, string[]> = {
-  "spc-user-management": ["spc_users", "office_calendar_store"],
+  "spc-user-management": [
+    "spc_users",
+    "spc_role_defaults",
+    "spc_user_management_events",
+    "office_calendar_store",
+  ],
   "spc-buyer-enquiries": ["spc_enquiries", "office_calendar_store"],
   "spc-fixtures": ["spc_enquiries", "spc_fixtures"],
   "spc-lost-record": ["spc_enquiries"],
@@ -120,22 +139,42 @@ function buildAuditUserFilters(
   return Array.from(userMap.values()).sort((a, b) => a.label.localeCompare(b.label))
 }
 
-function presentAuditLogForClient(record: PresentedAuditLogRecord, detailsLoaded = false) {
+function presentAuditLogForClient(
+  record: PresentedAuditLogRecord,
+  detailsLoaded = false,
+  viewerIsAdmin = false,
+) {
+  const visibleRecord = redactSpcUserManagementInvestigation(
+    record,
+    viewerIsAdmin,
+  )
   return {
-    id: record.id,
-    occurredAt: record.occurredAt,
-    actorId: record.actorId,
-    actorName: record.actorName,
-    displayOperation: record.displayOperation,
-    pageId: record.pageId,
-    pageLabel: record.pageLabel,
-    recordLabel: record.recordLabel,
-    summary: record.summary,
-    details: detailsLoaded ? record.details : [],
+    id: visibleRecord.id,
+    occurredAt: visibleRecord.occurredAt,
+    actorId: visibleRecord.actorId,
+    actorName: visibleRecord.actorName,
+    displayOperation: visibleRecord.displayOperation,
+    pageId: visibleRecord.pageId,
+    pageLabel: visibleRecord.pageLabel,
+    recordLabel: visibleRecord.recordLabel,
+    summary: visibleRecord.summary,
+    details: detailsLoaded ? visibleRecord.details : [],
     detailsLoaded,
-    undoOfLogId: record.undoOfLogId,
-    undoneAt: record.undoneAt,
-    undoable: record.undoable,
+    sourceIp: visibleRecord.sourceIp,
+    correlationId: visibleRecord.correlationId,
+    requestId: visibleRecord.requestId,
+    platformRequestId: visibleRecord.platformRequestId,
+    actorRole: visibleRecord.actorRole,
+    auditAction: visibleRecord.auditAction,
+    auditOutcome: visibleRecord.auditOutcome,
+    targetType: visibleRecord.targetType,
+    targetId: visibleRecord.targetId,
+    targetUsername: visibleRecord.targetUsername,
+    approvalReference: visibleRecord.approvalReference,
+    errorCode: visibleRecord.errorCode,
+    undoOfLogId: visibleRecord.undoOfLogId,
+    undoneAt: visibleRecord.undoneAt,
+    undoable: visibleRecord.undoable,
   }
 }
 
@@ -143,6 +182,7 @@ export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
     const session = await requireSpcPagePermission("spc-audit-log", "view")
+    const viewerIsAdmin = hasSpcRole(session, "ADMIN")
     const url = new URL(request.url)
     const requestedId = url.searchParams.get("id")?.trim()
     if (requestedId) {
@@ -165,7 +205,7 @@ export async function GET(request: Request) {
       return timedJson(
         "/api/spc/audit-logs",
         startedAt,
-        { log: presentAuditLogForClient(presented, true) },
+        { log: presentAuditLogForClient(presented, true, viewerIsAdmin) },
         undefined,
         { mode: "detail" },
       )
@@ -199,7 +239,9 @@ export async function GET(request: Request) {
       .filter((record) => !operation || operation === "ALL" || record.displayOperation === operation)
       .filter((record) => matchesAuditActor(record, actor))
       .slice(0, requestedLimit)
-      .map((record) => presentAuditLogForClient(record, false))
+      .map((record) =>
+        presentAuditLogForClient(record, false, viewerIsAdmin),
+      )
 
     return timedJson(
       "/api/spc/audit-logs",
@@ -228,8 +270,30 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let auditContext: SpcAuditContext | null = null
+  let outcomeAuditAttempted = false
+
   try {
-    const session = await requireSpcPagePermission("spc-audit-log", "edit")
+    const session = await requireSpcSession()
+    if (!hasSpcPagePermission(session, "spc-audit-log", "edit")) {
+      auditContext = createSpcAuditContext(
+        session,
+        request,
+        "spc-user-management",
+        {
+          action: "undo-user-management-audit",
+          targetType: "spc-user-management-audit",
+          outcome: "denied",
+        },
+      )
+      outcomeAuditAttempted = true
+      await recordSpcUserManagementAuditEvent(auditContext, {
+        operation: "UPDATE",
+        errorCode: "forbidden",
+      })
+      throw new Error("Forbidden")
+    }
+
     const payload = (await request.json()) as { action?: string; id?: string }
 
     if (payload.action !== "undo") {
@@ -242,26 +306,89 @@ export async function POST(request: Request) {
     if (!target || !isUserAuditRecord(target) || !matchesAuditScope(target, "spc")) {
       return NextResponse.json({ message: "Audit log was not found." }, { status: 404 })
     }
+    if (isSpcUserManagementAuditRecord(target)) {
+      auditContext = createSpcAuditContext(
+        session,
+        request,
+        "spc-user-management",
+        {
+          action: "undo-user-management-audit",
+          targetType: "audit-log",
+          targetId: target.id,
+          outcome: hasSpcRole(session, "ADMIN") ? "success" : "denied",
+        },
+      )
+      if (!hasSpcRole(session, "ADMIN")) {
+        outcomeAuditAttempted = true
+        await recordSpcUserManagementAuditEvent(auditContext, {
+          operation: "UPDATE",
+          errorCode: "forbidden",
+        })
+        throw new Error("Forbidden")
+      }
+    }
     if (!canUndoAuditLogRecord(target)) {
-      return NextResponse.json({ message: "This SPC supplier change must be edited from the supplier database." }, { status: 400 })
+      if (auditContext) {
+        outcomeAuditAttempted = true
+        await recordSpcUserManagementAuditEvent(
+          { ...auditContext, outcome: "failed" },
+          { operation: "UPDATE", errorCode: "not_undoable" },
+        )
+      }
+      return NextResponse.json(
+        { message: "This change must be corrected from its management page." },
+        { status: 400 },
+      )
     }
 
-    const undoLogId = await undoAuditLog(payload.id, {
-      username: session.username ? `spc:${session.username}` : null,
-      displayName: session.displayName,
-    })
+    const undoLogId = await undoAuditLog(
+      payload.id,
+      {
+        username: session.username ? `spc:${session.username}` : null,
+        displayName: session.displayName,
+      },
+      auditContext || undefined,
+    )
     return NextResponse.json({ success: true, undoLogId })
   } catch (error) {
+    if (auditContext && !outcomeAuditAttempted) {
+      outcomeAuditAttempted = true
+      try {
+        await recordSpcUserManagementAuditEvent(
+          { ...auditContext, outcome: "failed" },
+          { operation: "UPDATE", errorCode: "operation_failed" },
+        )
+      } catch {
+        return NextResponse.json(
+          {
+            message: `Audit evidence could not be recorded. Reference: ${auditContext.correlationId}.`,
+          },
+          {
+            status: 500,
+            headers: { "Cache-Control": "private, no-store" },
+          },
+        )
+      }
+    }
+
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
         { message: error.message },
-        { status: error.message === "Unauthorized" ? 401 : 403 },
+        {
+          status: error.message === "Unauthorized" ? 401 : 403,
+          headers: { "Cache-Control": "private, no-store" },
+        },
       )
     }
 
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to apply SPC audit undo." },
-      { status: 500 },
+      {
+        message: `Failed to apply SPC audit undo.${auditContext ? ` Reference: ${auditContext.correlationId}.` : ""}`,
+      },
+      {
+        status: 500,
+        headers: { "Cache-Control": "private, no-store" },
+      },
     )
   }
 }
