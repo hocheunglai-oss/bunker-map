@@ -513,7 +513,7 @@ export default function OutlookAddressBookPage() {
   const [message, setMessage] = useState("")
   const [exchangeSyncStatus, setExchangeSyncStatus] = useState<ExchangeSyncStatus | null>(null)
   const [exchangeSyncing, setExchangeSyncing] = useState(false)
-  const [exchangeButtonLabel, setExchangeButtonLabel] = useState("Sync Exchange")
+  const [exchangeButtonLabel, setExchangeButtonLabel] = useState("Sync now")
   const [exchangeSyncStartedAt, setExchangeSyncStartedAt] = useState<string | null>(null)
   const contactDraftsRef = useRef<Record<string, SharedContact>>({})
   const groupDraftsRef = useRef<Record<string, SharedGroup>>({})
@@ -540,12 +540,12 @@ export default function OutlookAddressBookPage() {
     const status = exchangeSyncStatus?.status.status
     if (status === "completed") {
       setExchangeSyncing(false)
-      setExchangeButtonLabel("Syncing Completed")
+      setExchangeButtonLabel("Sync completed")
       return
     }
     if (status === "failed") {
       setExchangeSyncing(false)
-      setExchangeButtonLabel("Sync Exchange")
+      setExchangeButtonLabel("Sync now")
       setMessage(exchangeSyncStatus?.status.message || "Exchange sync failed.")
       return
     }
@@ -555,8 +555,8 @@ export default function OutlookAddressBookPage() {
     const requestedAtMs = requestedAt ? Date.parse(requestedAt) : NaN
     if (!hasActiveLease && Number.isFinite(requestedAtMs) && Date.now() - requestedAtMs > EXCHANGE_SYNC_TIMEOUT_MS) {
       setExchangeSyncing(false)
-      setExchangeButtonLabel("Sync Exchange")
-      setMessage("Exchange sync did not finish within 10 minutes. Check Azure Automation jobs for the exact error, then press Sync Exchange again.")
+      setExchangeButtonLabel("Sync now")
+      setMessage("Exchange sync did not finish within 10 minutes. Check Azure Automation jobs for the exact error, or wait for the next automatic hourly sync.")
       return
     }
     const timer = window.setTimeout(() => {
@@ -711,7 +711,7 @@ export default function OutlookAddressBookPage() {
 
   function markExchangeNeedsSync() {
     clearAdminClientCache(OUTLOOK_ADDRESS_BOOK_CACHE_KEY)
-    if (!exchangeSyncing) setExchangeButtonLabel("Sync Exchange")
+    if (!exchangeSyncing) setExchangeButtonLabel("Sync now")
     setExchangeSyncStartedAt(null)
   }
 
@@ -789,7 +789,7 @@ export default function OutlookAddressBookPage() {
       markExchangeNeedsSync()
       await loadAll({ loadSecondary: false })
       await loadRecentActivities()
-      setMessage("Undo applied. Press Sync Exchange when all changes are ready.")
+      setMessage("Undo applied. Exchange will update automatically within the next hour, or select Sync now.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to undo recent activity.")
     } finally {
@@ -1149,7 +1149,7 @@ export default function OutlookAddressBookPage() {
         },
       })
       setMessage(messageText)
-      setExchangeButtonLabel("Sync Exchange")
+      setExchangeButtonLabel("Sync now")
       setExchangeSyncing(false)
       setExchangeSyncStartedAt(null)
     } finally {
@@ -1173,7 +1173,7 @@ export default function OutlookAddressBookPage() {
       <header style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "flex", alignItems: "end", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-            Sync only when all changes are made.
+            Changes sync to Exchange automatically every hour.
           </div>
           <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing}>
             {exchangeButtonLabel}
