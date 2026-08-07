@@ -641,3 +641,50 @@ test("ignores narrative dates beneath an operational notes heading", () => {
     "raven arrow / 9574858 / 1 sep / vlsfo 1,000mts",
   )
 })
+
+test("replays the August 7 compact IMO, separated port, KL, and gas oil reports", () => {
+  const tigerPioneer = [
+    "船名（IMO NO.)：TIGER PIONEER (IMO9712199)",
+    "航次号：20-0419",
+    "加油港口：BUSAN（挂靠）",
+    "定油公司：LYNUX SHIPPING BULK PTE LIMITED",
+    "ETA/D: 12TH/22TH AUG, 2026",
+    "加油量及规格: LSFO 300-400 MT (380 as per I.S.O 8217 - 2017)",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(tigerPioneer),
+    "tiger pioneer / 9712199 / busan 12 - 22 aug / vlsfo 300-400mts",
+  )
+
+  const goldenShine = [
+    "GOLDEN SHINE (IMO: 9902457) / HONGKONG",
+    "LYCN 14TH-28TH,AUG",
+    "VLSFO 100-140MT under 180cst",
+    "LSMGO 35-50 MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(goldenShine, ["180cst max"]),
+    "golden shine / 9902457 / hk 14 - 28 aug / vlsfo 180CST MAX 100-140mts / lsmgo 35-50mts",
+  )
+
+  assert.equal(
+    worksheetOutput("Ile De Re 8200278 / Taichung / 11-19 August / LSMGO 400kl"),
+    "ile de re / 8200278 / taichung 11 - 19 aug / lsmgo 400kl",
+  )
+
+  const barbaraLeeBattler = [
+    "Barbara Lee Battler(IMO8738328)",
+    "DATE: 01ST SEP 26",
+    "FUEL OIL 0.5 500MTS",
+    "GAS OIL S0.1 100MTS",
+    "REFUELING PORT: SINGAPORE",
+  ].join("\n")
+  assert.deepEqual(extractExplicitSpcFuelFields(barbaraLeeBattler), {
+    vlsfo: "500mts",
+    lsmgo: "100mts",
+  })
+  assert.equal(
+    parseSpcEnquiryText(barbaraLeeBattler).standardText,
+    "barbara lee battler / 8738328 / 1 sep / vlsfo 500mts / lsmgo 100mts",
+  )
+})

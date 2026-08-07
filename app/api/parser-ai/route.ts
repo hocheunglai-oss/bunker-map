@@ -371,6 +371,12 @@ function normalizeEnquiryWorksheetAiOutput(output: string) {
     const part = parts[index]
     const next = parts[index + 1] || ""
     const port = getPortOnlySegment(part)
+    const compactImo = part.match(/^imo\s*[:#.-]?\s*(\d{7})$/i)
+
+    if (compactImo && isValidImo(compactImo[1])) {
+      normalized.push(compactImo[1])
+      continue
+    }
 
     if (port && isDateOnlySegment(next)) {
       normalized.push(`${port} ${next.toLowerCase()}`)
@@ -431,7 +437,7 @@ function buildInstructions(source: ParserAiSource) {
     "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
     "The Chinese place name 新加坡 explicitly means Singapore; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
-    "Normalize quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts.",
+    "Normalize mass quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts. Preserve explicit KL as kl and CBM as cbm; never convert a volume unit into mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
     "Use the calendar year to interpret dates but omit the year from correctedOutput.",
     "A day/day followed by a month is a delivery range: 1/5 aug means 1 - 5 aug, never 5 jan or only 5 aug.",
@@ -444,7 +450,7 @@ function buildInstructions(source: ParserAiSource) {
     "RMG180, RMG380, 120CST, and 180CST alone do not prove sulphur class. Use the explicit VLSFO/LSFO/0.5 or HSFO/HFO/IFO/3.5 context; 3.5% RMG380 is HSFO.",
     "RMG 380 with explicit 0.5% sulphur is VLSFO, never HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
-    "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO as lsmgo. Order fuel segments as HSFO, vlsfo, then lsmgo regardless of their order in the raw enquiry.",
+    "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO/GAS OIL as lsmgo. Order fuel segments as HSFO, vlsfo, then lsmgo regardless of their order in the raw enquiry.",
     "Do not infer or add 80CST MAX, 120CST MAX or 180CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO max remarks; the user controls these manually.",
     "If RMK, CBM, or KL appears, add a warning.",
     "Return vlsfoMaxRemarks as lower-case enum values only.",

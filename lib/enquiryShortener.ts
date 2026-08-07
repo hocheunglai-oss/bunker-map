@@ -16,6 +16,7 @@ type ProductSegment = {
 }
 
 const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
+const KL_UNIT_PATTERN = String.raw`k\s*\.?\s*l`
 const EXPLICIT_PORT_LINE_PATTERN =
   /^\s*(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)(?:\s|[:#(（-]|$)/i
 const OPERATIONAL_SCHEDULE_LINE_PATTERN =
@@ -263,7 +264,7 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*\\/\\s*(${monthNamePattern})\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*[,/]\\s*(${monthNamePattern})\\b`, "gi"))) {
     const range = formatDateRange(match[1], match[3], match[2], match[3])
     if (range) dates.push(range)
   }
@@ -455,16 +456,19 @@ function extractDeliverySchedule(
     : []
   const selectedEntries = requestedPortEntries.length > 0 ? requestedPortEntries : entries
 
+  const fallbackPort = requestedPort && selectedEntries.every((entry) => !entry.port)
+    ? requestedPort
+    : ""
   const uniqueEntries = Array.from(
-    new Set(selectedEntries.map((entry) => [entry.port, entry.date].filter(Boolean).join(" "))),
+    new Set(selectedEntries.map((entry) => [entry.port || fallbackPort, entry.date].filter(Boolean).join(" "))),
   )
-  const distinctPorts = new Set(selectedEntries.map((entry) => entry.port).filter(Boolean))
+  const distinctPorts = new Set(selectedEntries.map((entry) => entry.port || fallbackPort).filter(Boolean))
   return uniqueEntries.join(distinctPorts.size > 1 ? " OR " : ", ")
 }
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
-  if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb)/i.test(compact)) return "lsmgo"
+  if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb|gasoil)/i.test(compact)) return "lsmgo"
   if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
@@ -552,6 +556,17 @@ export function detectAttentionTerms(value: string) {
 }
 
 function extractQuantityFromInlineUnit(value: string) {
+  const klRange = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${KL_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
+  if (klRange) {
+    return `${normalizeEnquiryQuantityNumber(klRange[1])}-${normalizeEnquiryQuantityNumber(klRange[2])}kl`
+  }
+
+  const klMatches = Array.from(value.matchAll(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*${KL_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "gi")))
+    .map((match) => match[1])
+    .filter(isUsableQuantityNumber)
+  const klQuantity = klMatches.at(-1)
+  if (klQuantity) return `${normalizeEnquiryQuantityNumber(klQuantity)}kl`
+
   const range = value.match(new RegExp(String.raw`\b(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i"))
   if (range) {
     return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
@@ -588,6 +603,16 @@ function extractQuantityFromProductSegment(value: string) {
 }
 
 function extractQuantityImmediatelyBeforeProduct(value: string) {
+  const klRange = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${KL_UNIT_PATTERN}\s*$`, "i"))
+  if (klRange && isUsableQuantityNumber(klRange[1]) && isUsableQuantityNumber(klRange[2])) {
+    return `${normalizeEnquiryQuantityNumber(klRange[1])}-${normalizeEnquiryQuantityNumber(klRange[2])}kl`
+  }
+
+  const klSingle = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*${KL_UNIT_PATTERN}\s*$`, "i"))
+  if (klSingle && isUsableQuantityNumber(klSingle[1])) {
+    return `${normalizeEnquiryQuantityNumber(klSingle[1])}kl`
+  }
+
   const range = value.match(new RegExp(String.raw`(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*${QUANTITY_UNIT_PATTERN}\s*$`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
     return `${normalizeEnquiryQuantityNumber(range[1])}-${normalizeEnquiryQuantityNumber(range[2])}mts`
@@ -634,7 +659,7 @@ function extractQuantityFromBlock(lines: string[]) {
 
 function productMatches(line: string) {
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,

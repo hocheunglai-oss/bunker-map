@@ -85,7 +85,7 @@ function scoreImoCandidate(candidate: string, line: string) {
   const valid = isValidImo(candidate)
   let score = valid ? 100 : -50
 
-  if (/\bIMO(?:\s*NO\.?|\s*NUMBER)?\b/i.test(line)) score += 70
+  if (/\bIMO(?:\s*NO\.?|\s*NUMBER)?(?=\s|[:#.(\-]|\d|$)/i.test(line)) score += 70
   if (VESSEL_LABEL_PATTERN.test(line)) score += 30
   if (new RegExp(`\\(\\s*${candidate}\\s*\\)`).test(line)) score += 20
   if (new RegExp(`\\/\\s*${candidate}\\s*\\/`).test(line)) score += 20
@@ -98,7 +98,7 @@ function findBestImo(lines: string[]) {
   const candidates: ImoCandidate[] = []
 
   for (const line of lines) {
-    for (const match of line.matchAll(/\b\d{7}\b/g)) {
+    for (const match of line.matchAll(/(?<!\d)\d{7}(?!\d)/g)) {
       const value = match[0]
       const { score, valid } = scoreImoCandidate(value, line)
       candidates.push({ value, line, score, valid })
@@ -126,7 +126,7 @@ function cleanVesselName(value: string) {
   next = next.replace(/^\s*\d+\s*[\).:-]\s*/, "")
   next = next.replace(/^\s*['"]?\s*[-•*=]\s*/, "")
   next = removeVesselLabel(next)
-  next = next.replace(/\bIMO(?:\s*NO\.?|\s*NUMBER)?\b[\s:#.-]*\d{0,7}.*$/i, "")
+  next = next.replace(/\bIMO(?:\s*NO\.?|\s*NUMBER)?[\s:#.-]*\d{0,7}.*$/i, "")
   next = next.replace(/^\s*(?:M\s*[./-]?\s*V|M\s*[./-]?\s*T|MV|MT)\b\s*/i, "")
   next = next.replace(/^\s*(?:LPG|LNG)\s*\/?\s*C\b\s*/i, "")
   next = next.replace(/\(\s*(?:V|VOY|VOYAGE)\.?\s*[\w./-]+\s*\)/gi, "")
@@ -354,15 +354,16 @@ function extractStructuredSlashPort(
   lines: string[],
   options: EnquiryWorksheetParseOptions,
 ) {
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex]
     const structuredLine = line.replace(/^\s*\[[^\]]+\]\s*[^:]{1,40}:\s*/i, "")
     const parts = structuredLine.split("/").map(cleanSpaces).filter(Boolean)
     if (parts.length < 2) continue
 
     const firstPart = parts[0]
-    const hasVesselIdentity = /\b\d{7}\b/.test(firstPart) ||
+    const hasVesselIdentity = /(?<!\d)\d{7}(?!\d)/.test(firstPart) ||
       isPlausibleVesselName(cleanVesselName(firstPart))
-    const tradingText = parts.slice(1).join(" / ")
+    const tradingText = [parts.slice(1).join(" / "), ...lines.slice(lineIndex + 1)].join("\n")
     const hasTradingDetails = /\b(?:eta|etb|etd|ets|vlsfo|lsfo|hsfo|hfo|ifo|lsmgo|mgo|mt|mts|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(tradingText) ||
       /\b\d{1,2}\s*(?:-|~|to)?\s*\d{0,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(tradingText)
     if (!hasVesselIdentity || !hasTradingDetails) continue
