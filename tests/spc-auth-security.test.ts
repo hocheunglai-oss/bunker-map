@@ -219,6 +219,33 @@ test("SPC session migration is version-bound, private, revocable, and fixed to 1
   )
 })
 
+test("SPC sessions are explicitly ephemeral across the backup contract", () => {
+  const backupRoute = readFileSync(
+    new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url),
+    "utf8",
+  )
+  const systemHealth = readFileSync(
+    new URL("../lib/systemHealth.ts", import.meta.url),
+    "utf8",
+  )
+  const validator = readFileSync(
+    new URL("../scripts/validate-backup.mjs", import.meta.url),
+    "utf8",
+  )
+
+  for (const source of [backupRoute, systemHealth, validator]) {
+    assert.match(source, /["']spc_sessions["']/)
+  }
+  assert.match(
+    backupRoute,
+    /inventory\.unfencedTables[\s\S]*EXPLICITLY_EPHEMERAL_TABLES\.has\(table\)/,
+  )
+  assert.match(
+    systemHealth,
+    /inventoryUnfencedTables\.filter\([\s\S]*!BACKUP_EPHEMERAL_TABLES\.includes\(table\)/,
+  )
+})
+
 test("SPC user lifecycle is atomic and the final ADMIN invariant is database-enforced", () => {
   const usersSource = readFileSync(
     new URL("../lib/spcUsers.ts", import.meta.url),

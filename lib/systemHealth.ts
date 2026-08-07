@@ -123,6 +123,7 @@ const BACKUP_EPHEMERAL_TABLES = [
   "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
+  "spc_sessions",
 ].sort()
 const BACKUP_REGISTERED_TABLES = [
   ...BACKUP_TABLE_SECTIONS.map(({ table }) => table),
@@ -1052,9 +1053,12 @@ async function getCurrentBackupInventory() {
     inventory.tables,
     "Live backup database tables"
   )
-  const unfencedTables = requireSortedUniqueStrings(
+  const inventoryUnfencedTables = requireSortedUniqueStrings(
     inventory.unfencedTables,
     "Live mutation-unfenced backup tables"
+  )
+  const unfencedTables = inventoryUnfencedTables.filter(
+    (table) => !BACKUP_EPHEMERAL_TABLES.includes(table)
   )
   const catalogSha256 = requireSha256(
     inventory.catalogSha256,

@@ -115,6 +115,7 @@ const EXPLICITLY_EPHEMERAL_TABLES = [
   "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
+  "spc_sessions",
 ]
 const EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",

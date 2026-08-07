@@ -166,6 +166,7 @@ const EXPLICITLY_EPHEMERAL_TABLES = new Set([
   "outlook_exchange_sync_lock",
   "bunker_map_backup_lock",
   "admin_sessions",
+  "spc_sessions",
 ])
 
 function requireEnv(name: string) {
@@ -523,15 +524,18 @@ async function getBackupInventory(
     !Array.isArray(inventory.unfencedTables) ||
     inventory.unfencedTables.some(
       (table) => typeof table !== "string" || !table
-    ) ||
-    inventory.unfencedTables.length > 0
+    )
   ) {
     throw new Error(
-      `Backup database inventory has mutation-unfenced tables: ${
-        Array.isArray(inventory.unfencedTables)
-          ? inventory.unfencedTables.join(", ") || "none"
-          : "inventory contract missing"
-      }.`
+      "Backup database inventory returned an invalid mutation-fence list."
+    )
+  }
+  const unfencedTables = (inventory.unfencedTables as string[]).filter(
+    (table) => !EXPLICITLY_EPHEMERAL_TABLES.has(table)
+  )
+  if (unfencedTables.length > 0) {
+    throw new Error(
+      `Backup database inventory has mutation-unfenced tables: ${unfencedTables.join(", ")}.`
     )
   }
 
