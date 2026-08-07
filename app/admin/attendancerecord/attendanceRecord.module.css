@@ -1,0 +1,56 @@
+.page {
+  display: grid;
+  min-height: 100vh;
+  padding: 18px;
+  place-items: start center;
+  background: var(--fc-admin-page-bg);
+  color: var(--fc-admin-panel-text);
+  font-family: var(--fc-admin-font);
+}
+
+.panel {
+  width: min(100%, 1240px);
+  padding: 44px 24px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 10px 24px #0000000a;
+  text-align: center;
+}
+
+.status {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid #ead28a;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #fff6dd;
+  color: #765400;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.panel h1 {
+  margin: 14px 0 0;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.panel p {
+  margin: 7px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 12px;
+  }
+
+  .panel {
+    padding: 34px 18px;
+  }
+}
