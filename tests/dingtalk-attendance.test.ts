@@ -18,7 +18,7 @@ test("validates, trims, and deduplicates a DingTalk attendance query", () => {
     userIds: ["test-user-001"],
     checkDateFrom: "2026-08-01 00:00:00",
     checkDateTo: "2026-08-07 23:59:59",
-    isI18n: true,
+    isI18n: false,
   })
 })
 
@@ -115,11 +115,16 @@ test("uses the official token and raw-record endpoints without caching responses
   )
   assert.equal(attendanceRequest.init?.method, "POST")
   assert.equal(attendanceRequest.init?.cache, "no-store")
-  const attendanceBody = new URLSearchParams(String(attendanceRequest.init?.body))
-  assert.equal(attendanceBody.get("checkDateFrom"), VALID_QUERY.checkDateFrom)
-  assert.equal(attendanceBody.get("checkDateTo"), VALID_QUERY.checkDateTo)
-  assert.equal(attendanceBody.get("isI18n"), "true")
-  assert.equal(attendanceBody.get("userIds"), JSON.stringify(["test-user-001"]))
+  assert.equal(
+    new Headers(attendanceRequest.init?.headers).get("Content-Type"),
+    "application/json",
+  )
+  assert.deepEqual(JSON.parse(String(attendanceRequest.init?.body)), {
+    userIds: ["test-user-001"],
+    checkDateFrom: VALID_QUERY.checkDateFrom,
+    checkDateTo: VALID_QUERY.checkDateTo,
+    isI18n: false,
+  })
 })
 
 test("upstream authentication failures never expose credentials or a token", async () => {

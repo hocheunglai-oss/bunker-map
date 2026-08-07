@@ -172,7 +172,7 @@ export function validateDingTalkAttendanceQuery(
     userIds,
     checkDateFrom: from.value,
     checkDateTo: to.value,
-    isI18n: input.isI18n ?? true,
+    isI18n: input.isI18n ?? false,
   }
 }
 
@@ -281,20 +281,14 @@ export class DingTalkAttendanceClient {
   async listRecords(input: unknown) {
     const query = validateDingTalkAttendanceQuery(input, this.now())
     const accessToken = await this.getToken()
-    const body = new URLSearchParams({
-      checkDateFrom: query.checkDateFrom,
-      checkDateTo: query.checkDateTo,
-      isI18n: String(query.isI18n),
-      userIds: JSON.stringify(query.userIds),
-    })
     const response = await this.fetchImpl(
       `${DINGTALK_ATTENDANCE_URL}?access_token=${encodeURIComponent(accessToken)}`,
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+          "Content-Type": "application/json",
         },
-        body,
+        body: JSON.stringify(query),
         cache: "no-store",
         signal: AbortSignal.timeout(this.timeoutMs),
       },
