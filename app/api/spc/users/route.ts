@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server"
 import {
   hasSpcAdminPagePermission,
   requireSpcAdminPagePermission,
@@ -23,6 +22,7 @@ import {
   spcUserCanManageUsers,
 } from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 type UserActionPayload = {
   action?: string
@@ -149,10 +149,7 @@ function errorResponse(
     status === 500
       ? `${fallback}${correlationId ? ` Reference: ${correlationId}.` : ""}`
       : rawMessage
-  return NextResponse.json(
-    { message },
-    { status, headers: { "Cache-Control": "private, no-store" } },
-  )
+  return spcPrivateJson({ message }, { status })
 }
 
 function auditErrorCode(error: unknown) {
@@ -183,16 +180,13 @@ export async function GET() {
       listManagedSpcUsers(roleDefaultState, SPC_PAGE_DEFINITIONS),
       listManagedSpcOffices(),
     ])
-    return NextResponse.json(
-      {
-        users,
-        offices,
-        pages: SPC_PAGE_DEFINITIONS,
-        roleDefaults: roleDefaultState,
-        groupStorage: "shared-store",
-      },
-      { headers: { "Cache-Control": "private, no-store" } },
-    )
+    return spcPrivateJson({
+      users,
+      offices,
+      pages: SPC_PAGE_DEFINITIONS,
+      roleDefaults: roleDefaultState,
+      groupStorage: "shared-store",
+    })
   } catch (error) {
     return errorResponse(error, "Failed to load SPC users.")
   }
@@ -258,7 +252,7 @@ export async function POST(request: Request) {
       }
 
       await deleteManagedSpcUser(payload.id, auditContext)
-      return NextResponse.json({ success: true })
+      return spcPrivateJson({ success: true })
     }
 
     if (payload.action === "save") {
@@ -284,7 +278,7 @@ export async function POST(request: Request) {
         SPC_PAGE_DEFINITIONS,
         roleDefaults,
       )
-      return NextResponse.json({ success: true, user })
+      return spcPrivateJson({ success: true, user })
     }
 
     if (payload.action === "save-office") {
@@ -293,7 +287,7 @@ export async function POST(request: Request) {
       }
 
       const offices = await saveManagedSpcOffice(payload.office, auditContext)
-      return NextResponse.json({ success: true, offices })
+      return spcPrivateJson({ success: true, offices })
     }
 
     if (payload.action === "delete-office") {
@@ -302,7 +296,7 @@ export async function POST(request: Request) {
       }
 
       const offices = await deleteManagedSpcOffice(payload.office, auditContext)
-      return NextResponse.json({ success: true, offices })
+      return spcPrivateJson({ success: true, offices })
     }
 
     if (payload.action === "save-role-default") {
@@ -319,7 +313,7 @@ export async function POST(request: Request) {
         SPC_PAGE_DEFINITIONS,
       )
 
-      return NextResponse.json({ success: true, roleDefault })
+      return spcPrivateJson({ success: true, roleDefault })
     }
 
     if (payload.action === "delete-role-default") {
@@ -328,7 +322,7 @@ export async function POST(request: Request) {
       }
 
       await deleteManagedSpcRoleDefault(payload.roleDefault.role, auditContext)
-      return NextResponse.json({ success: true })
+      return spcPrivateJson({ success: true })
     }
 
     throw new Error("Unsupported action.")

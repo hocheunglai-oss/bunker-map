@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 export function timedJson(
   route: string,
@@ -16,7 +16,7 @@ export function timedJson(
     ...details,
   }))
 
-  const response = NextResponse.json(payload, init)
+  const response = spcPrivateJson(payload, init)
   response.headers.set("Server-Timing", `total;dur=${durationMs}`)
   return response
 }

@@ -51,6 +51,23 @@ The SQL currently attaches triggers to the main app tables:
 
 Each record stores the actor, table, operation, primary key snapshot, changed fields, before row, after row, and undo status.
 
+### SPC user-management evidence
+
+SPC user-management events add the authenticated actor and role, trusted source
+IP, controlled action, target, outcome, correlation ID and platform request ID.
+Protected database triggers retain changed fields and safe before/after state.
+Password hashes and other credential material are redacted.
+
+Protected SPC user-management evidence is append-only: ordinary update, delete
+and truncate operations are blocked. Permission/profile changes cannot be
+partially restored through generic audit undo because that could desynchronise
+the permission store from `spc_users`.
+
+This protection does not establish an approved audit-retention period or a
+central SIEM/SOC alerting process. Those remain pending Group Information
+Security approval. The operational review and evidence checklist is maintained
+in [`spc-security-operations-runbook.md`](spc-security-operations-runbook.md).
+
 Shared-address-book audit rows are part of the authoritative FCUNO-to-Exchange evidence chain. After the Exchange truth-ledger migration, those rows cannot be rewritten or deleted except for the dedicated undo metadata fields. The mutable Exchange delivery queue records work state; canonical snapshots, certifications, and the append-only SHA-256 truth ledger record durable system evidence.
 
 ## Undo

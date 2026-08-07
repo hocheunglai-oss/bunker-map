@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server"
 import { requireSpcSession, setSpcSession } from "@/lib/spcAuth"
 import {
   createSpcAuditContext,
@@ -6,6 +5,7 @@ import {
   type SpcAuditContext,
 } from "@/lib/spcAudit"
 import { changeManagedSpcUserPassword } from "@/lib/spcUsers"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 function passwordErrorStatus(error: unknown) {
   const message = error instanceof Error ? error.message : ""
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const user = await changeManagedSpcUserPassword(session.username, password, auditContext)
     await setSpcSession(user)
 
-    return NextResponse.json({
+    return spcPrivateJson({
       success: true,
       user: {
         username: user.username,
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
           },
         )
       } catch {
-        return NextResponse.json(
+        return spcPrivateJson(
           {
             message: `Audit evidence could not be recorded. Reference: ${auditContext.correlationId}.`,
           },
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     }
 
     const message = error instanceof Error ? error.message : "Failed to update password."
-    return NextResponse.json(
+    return spcPrivateJson(
       {
         message:
           status === 500

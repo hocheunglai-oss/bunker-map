@@ -40,5 +40,6 @@ if (unpushed > 0) {
   fail(`Release check failed: ${unpushed} local commit(s) have not been pushed.`)
 }
 
+execSync("npm run test:security", { stdio: "inherit" })
 execSync("npm run build", { stdio: "inherit" })
-console.log("Release check passed: working tree clean, branch pushed, build ok.")
+console.log("Release check passed: working tree clean, branch pushed, security tests and build ok.")

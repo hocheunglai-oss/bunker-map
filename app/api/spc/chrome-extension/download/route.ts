@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { NextResponse } from "next/server"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 export const runtime = "nodejs"
 
@@ -139,7 +139,7 @@ export async function GET() {
 
     return new Response(zip, {
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store",
         "Content-Disposition": 'attachment; filename="fcuno-spc-whatsapp-board.zip"',
         "Content-Length": String(zip.length),
         "Content-Type": "application/zip",
@@ -147,13 +147,13 @@ export async function GET() {
     })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json(
+      return spcPrivateJson(
         { message: error.message },
         { status: error.message === "Unauthorized" ? 401 : 403 },
       )
     }
 
-    return NextResponse.json(
+    return spcPrivateJson(
       { message: error instanceof Error ? error.message : "Failed to download extension." },
       { status: 500 },
     )

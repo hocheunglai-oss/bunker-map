@@ -1,0 +1,107 @@
+name: SPC security baseline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 1 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/spc-security-baseline.yml"
+      - "app/api/spc/**"
+      - "docs/**"
+      - "lib/**"
+      - "package.json"
+      - "package-lock.json"
+      - "public/.well-known/security.txt"
+      - "scripts/check-live-security-baseline.mjs"
+      - "supabase/migrations/**"
+      - "tests/**"
+  pull_request:
+    paths:
+      - ".github/workflows/spc-security-baseline.yml"
+      - "app/api/spc/**"
+      - "docs/**"
+      - "lib/**"
+      - "package.json"
+      - "package-lock.json"
+      - "public/.well-known/security.txt"
+      - "scripts/check-live-security-baseline.mjs"
+      - "supabase/migrations/**"
+      - "tests/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spc-security-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-security-evidence:
+    name: Focused tests and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run focused security tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:security 2>&1 | tee security-tests.tap
+
+      - name: Audit production dependencies
+        shell: bash
+        run: npm audit --omit=dev --audit-level=high --json > security-audit.json
+
+      - name: Retain sanitized security evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spc-security-evidence-${{ github.run_id }}
+          path: |
+            security-tests.tap
+            security-audit.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  live-production-baseline:
+    name: Read-only production baseline
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: static-security-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check both production hostnames
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run security:check-live 2>&1 | tee live-security-baseline.txt
+
+      - name: Retain live-check evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spc-live-security-baseline-${{ github.run_id }}
+          path: live-security-baseline.txt
+          if-no-files-found: warn
+          retention-days: 90

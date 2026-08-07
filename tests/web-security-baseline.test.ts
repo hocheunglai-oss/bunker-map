@@ -29,7 +29,12 @@ test("global response headers retain the baseline and stage the application CSP"
 
   const rules = await nextConfig.headers!()
   const globalRule = rules.find((rule) => rule.source === "/:path*")
+  const spcApiRule = rules.find((rule) => rule.source === "/api/spc/:path*")
   assert.ok(globalRule, "global response-header rule should exist")
+  assert.ok(spcApiRule, "SPC API response-header rule should exist")
+  assert.deepEqual(spcApiRule.headers, [
+    { key: "Cache-Control", value: "private, no-store" },
+  ])
 
   const headers = new Map(
     globalRule.headers.map(({ key, value }) => [key.toLowerCase(), value]),
@@ -121,7 +126,7 @@ test("global response headers retain the baseline and stage the application CSP"
   assert.doesNotMatch(csp, /connect-src[^;]*\shttps:\s/)
 })
 
-test("security.txt publishes the approved contact and a one-year expiry", async () => {
+test("security.txt publishes the approved contact, both canonical URLs, and a renewable expiry", async () => {
   const [securityTxt, proxySource] = await Promise.all([
     readFile(
       new URL("../public/.well-known/security.txt", import.meta.url),
@@ -131,18 +136,29 @@ test("security.txt publishes the approved contact and a one-year expiry", async 
   ])
 
   assert.match(securityTxt, /^Contact: mailto:info@cosulich\.it$/m)
-  assert.match(securityTxt, /^Expires: 2027-08-06T00:00:00Z$/m)
-  assert.match(securityTxt, /^Preferred-Languages: en, it$/m)
   assert.match(
     securityTxt,
-    /^Canonical: https:\/\/spc\.fcuno\.com\/\.well-known\/security\.txt$/m,
+    /^Expires: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m,
+  )
+  assert.match(securityTxt, /^Preferred-Languages: en, it$/m)
+  assert.deepEqual(
+    [...securityTxt.matchAll(/^Canonical: (.+)$/gm)].map((match) => match[1]),
+    [
+      "https://fcuno.com/.well-known/security.txt",
+      "https://spc.fcuno.com/.well-known/security.txt",
+    ],
   )
 
   const expires = securityTxt.match(/^Expires: (.+)$/m)?.[1]
   assert.ok(expires)
-  assert.equal(
-    Date.parse(expires),
-    Date.parse("2026-08-06T00:00:00Z") + 365 * 24 * 60 * 60 * 1000,
+  const remainingMs = Date.parse(expires) - Date.now()
+  assert.ok(
+    remainingMs >= 90 * 24 * 60 * 60 * 1000,
+    "security.txt should be renewed before fewer than 90 days remain",
+  )
+  assert.ok(
+    remainingMs <= 366 * 24 * 60 * 60 * 1000,
+    "RFC 9116 expiry should not be more than one year in the future",
   )
   assert.match(
     proxySource,

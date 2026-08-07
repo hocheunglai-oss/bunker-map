@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server"
 import { clearSpcSession } from "@/lib/spcAuth"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 export async function POST() {
   await clearSpcSession()
 
-  return NextResponse.json({ success: true })
+  return spcPrivateJson({ success: true })
 }

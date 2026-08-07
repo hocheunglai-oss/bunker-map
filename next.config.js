@@ -34,6 +34,12 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: "/api/spc/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      {
         source: "/:path*",
         headers: [
           {

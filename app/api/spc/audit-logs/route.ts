@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server"
 import {
   hasSpcPagePermission,
   hasSpcRole,
@@ -28,6 +27,7 @@ import {
 } from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { timedJson } from "@/lib/serverTiming"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 const PAGE_TABLES: Record<string, string[]> = {
   "spc-user-management": [
@@ -191,7 +191,7 @@ export async function GET(request: Request) {
         loadAuditUserMap(),
       ])
       if (!record || !isUserAuditRecord(record) || !matchesAuditScope(record, "spc")) {
-        return NextResponse.json({ message: "Audit log not found." }, { status: 404 })
+        return spcPrivateJson({ message: "Audit log not found." }, { status: 404 })
       }
 
       const [presented] = normalizeSpcAuditActors(
@@ -199,7 +199,7 @@ export async function GET(request: Request) {
         usersByUsername,
       )
       if (!presented?.pageId.startsWith("spc-")) {
-        return NextResponse.json({ message: "Audit log not found." }, { status: 404 })
+        return spcPrivateJson({ message: "Audit log not found." }, { status: 404 })
       }
 
       return timedJson(
@@ -256,13 +256,13 @@ export async function GET(request: Request) {
     )
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json(
+      return spcPrivateJson(
         { message: error.message },
         { status: error.message === "Unauthorized" ? 401 : 403 },
       )
     }
 
-    return NextResponse.json(
+    return spcPrivateJson(
       { message: error instanceof Error ? error.message : "Failed to load SPC audit logs." },
       { status: 500 },
     )
@@ -297,14 +297,14 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as { action?: string; id?: string }
 
     if (payload.action !== "undo") {
-      return NextResponse.json({ message: "Unsupported action." }, { status: 400 })
+      return spcPrivateJson({ message: "Unsupported action." }, { status: 400 })
     }
     if (!payload.id) {
-      return NextResponse.json({ message: "Missing audit log id." }, { status: 400 })
+      return spcPrivateJson({ message: "Missing audit log id." }, { status: 400 })
     }
     const target = await getAuditLogRecord(payload.id)
     if (!target || !isUserAuditRecord(target) || !matchesAuditScope(target, "spc")) {
-      return NextResponse.json({ message: "Audit log was not found." }, { status: 404 })
+      return spcPrivateJson({ message: "Audit log was not found." }, { status: 404 })
     }
     if (isSpcUserManagementAuditRecord(target)) {
       auditContext = createSpcAuditContext(
@@ -335,7 +335,7 @@ export async function POST(request: Request) {
           { operation: "UPDATE", errorCode: "not_undoable" },
         )
       }
-      return NextResponse.json(
+      return spcPrivateJson(
         { message: "This change must be corrected from its management page." },
         { status: 400 },
       )
@@ -349,7 +349,7 @@ export async function POST(request: Request) {
       },
       auditContext || undefined,
     )
-    return NextResponse.json({ success: true, undoLogId })
+    return spcPrivateJson({ success: true, undoLogId })
   } catch (error) {
     if (auditContext && !outcomeAuditAttempted) {
       outcomeAuditAttempted = true
@@ -359,7 +359,7 @@ export async function POST(request: Request) {
           { operation: "UPDATE", errorCode: "operation_failed" },
         )
       } catch {
-        return NextResponse.json(
+        return spcPrivateJson(
           {
             message: `Audit evidence could not be recorded. Reference: ${auditContext.correlationId}.`,
           },
@@ -372,7 +372,7 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json(
+      return spcPrivateJson(
         { message: error.message },
         {
           status: error.message === "Unauthorized" ? 401 : 403,
@@ -381,7 +381,7 @@ export async function POST(request: Request) {
       )
     }
 
-    return NextResponse.json(
+    return spcPrivateJson(
       {
         message: `Failed to apply SPC audit undo.${auditContext ? ` Reference: ${auditContext.correlationId}.` : ""}`,
       },
