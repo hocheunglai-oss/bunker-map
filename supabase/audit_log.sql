@@ -748,7 +748,13 @@ begin
     'admin_role_defaults',
     'spc_users',
     'spc_enquiries',
-    'spc_fixtures'
+    'spc_fixtures',
+    'attendance_people',
+    'attendance_leave_entries',
+    'attendance_manual_overrides',
+    'attendance_entitlements',
+    'attendance_monthly_adjustments',
+    'attendance_monthly_confirmations'
   ]
   loop
     table_reg := to_regclass('public.' || table_name);

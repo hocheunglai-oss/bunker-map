@@ -47,6 +47,7 @@ const MINIMUM_BACKUP_MIGRATION_HEAD = "20260723080326"
 const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
+const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -98,6 +99,46 @@ const BACKUP_TABLE_SECTIONS = [
     introducedAt: OPENAI_USAGE_MIGRATION_HEAD,
   },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks" },
+  {
+    key: "attendancePeople",
+    table: "attendance_people",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceRawPunches",
+    table: "attendance_raw_punches",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceLeaveEntries",
+    table: "attendance_leave_entries",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceManualOverrides",
+    table: "attendance_manual_overrides",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceEntitlements",
+    table: "attendance_entitlements",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceMonthlyAdjustments",
+    table: "attendance_monthly_adjustments",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceMonthlyConfirmations",
+    table: "attendance_monthly_confirmations",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceSyncRuns",
+    table: "attendance_sync_runs",
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
 ] as const
 
 const BACKUP_TRUTH_SECTIONS = [
@@ -1154,6 +1195,80 @@ async function checkOptionalSchema(): Promise<HealthCheckResult> {
   }
 
   throw error
+}
+
+async function checkAttendanceSync(): Promise<HealthCheckResult> {
+  const supabase = getSupabaseClient()
+  const configured = Boolean(
+    process.env.DINGTALK_CLIENT_ID && process.env.DINGTALK_CLIENT_SECRET
+  )
+  const [activeResponse, mappedResponse, latestResponse] = await Promise.all([
+    supabase
+      .from("attendance_people")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true),
+    supabase
+      .from("attendance_people")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true)
+      .not("dingtalk_user_id", "is", null),
+    supabase
+      .from("attendance_sync_runs")
+      .select(
+        "started_at,completed_at,status,window_from,window_to,people_requested,records_fetched,records_inserted,error_summary"
+      )
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  if (activeResponse.error) throw activeResponse.error
+  if (mappedResponse.error) throw mappedResponse.error
+  if (latestResponse.error) throw latestResponse.error
+
+  const activePeople = activeResponse.count || 0
+  const mappedPeople = mappedResponse.count || 0
+  const latest = latestResponse.data
+  const startedAt = latest?.started_at ? Date.parse(latest.started_at) : 0
+  const ageMinutes = startedAt
+    ? Math.max(0, Math.round((Date.now() - startedAt) / 60_000))
+    : null
+  const stale = ageMinutes !== null && ageMinutes > 60
+  const incompleteMappings = mappedPeople < activePeople
+  const latestStatus = String(latest?.status || "never")
+  const unhealthyRun = ["failed", "partial"].includes(latestStatus)
+
+  const warnings: string[] = []
+  if (!configured) warnings.push("DingTalk credentials are not configured")
+  if (!activePeople) warnings.push("no active attendance people are configured")
+  if (incompleteMappings) {
+    warnings.push(`${activePeople - mappedPeople} active people need a DingTalk user mapping`)
+  }
+  if (configured && mappedPeople && !latest) warnings.push("the automatic sync has not run yet")
+  if (stale) warnings.push("the latest automatic sync is older than one hour")
+  if (unhealthyRun) warnings.push(`the latest automatic sync is ${latestStatus}`)
+
+  return {
+    status: warnings.length ? "warning" : "ok",
+    message: warnings.length
+      ? `Attendance sync needs attention: ${warnings.join("; ")}`
+      : "Attendance sync is configured, current, and covers every active mapped person",
+    details: {
+      configured,
+      activePeople,
+      mappedPeople,
+      latestStatus,
+      latestStartedAt: latest?.started_at || null,
+      latestCompletedAt: latest?.completed_at || null,
+      latestWindowFrom: latest?.window_from || null,
+      latestWindowTo: latest?.window_to || null,
+      latestPeopleRequested: latest?.people_requested || 0,
+      latestRecordsFetched: latest?.records_fetched || 0,
+      latestRecordsInserted: latest?.records_inserted || 0,
+      latestError: latest?.error_summary || null,
+      ageMinutes,
+    },
+  }
 }
 
 function escapeDriveQueryValue(value: string) {
@@ -2950,6 +3065,7 @@ async function checkCronConfig(): Promise<HealthCheckResult> {
     message: missing ? "CRON_SECRET is not configured" : "Cron secret configured",
     details: {
       dailyBackupSchedule: "0 19 * * * UTC",
+      attendanceSyncSchedule: "Every 15 minutes",
       hongKongTime: "Daily 03:00",
     },
   }
@@ -2959,6 +3075,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
   const checks = await Promise.all([
     runCheck("supabase", "Supabase", checkSupabase),
     runCheck("schema", "Optional Schema", checkOptionalSchema),
+    runCheck("attendance-sync", "Attendance Sync", checkAttendanceSync),
     runCheck(
       "backup",
       "Daily Backup",

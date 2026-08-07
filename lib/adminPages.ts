@@ -86,16 +86,16 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     path: "/admin/eventcalendar",
   },
   {
-    id: "attendance-record",
-    label: "ATTENDANCE RECORD (UNDER CONSTRUCTION)",
-    group: "office",
-    path: "/admin/attendancerecord",
-  },
-  {
     id: "task-calendar",
     label: "TASK CALENDAR",
     group: "office",
     path: "/admin/taskcalendar",
+  },
+  {
+    id: "attendance-record",
+    label: "ATTENDANCE RECORD",
+    group: "office",
+    path: "/admin/attendancerecord",
   },
   {
     id: "audit-log",

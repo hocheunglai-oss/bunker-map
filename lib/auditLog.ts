@@ -135,6 +135,20 @@ const AUDIT_PREVIEW_FIELDS = [
   "targetType",
   "targetId",
   "targetUsername",
+  "initials",
+  "staff_code",
+  "work_group",
+  "team",
+  "attendance_date",
+  "work_date",
+  "leave_date",
+  "leave_code",
+  "code",
+  "period",
+  "portion",
+  "year",
+  "month",
+  "status",
 ] as const
 
 const AUDIT_INDEX_SELECT = [
@@ -185,6 +199,12 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_speedboard_notices: "spc-chrome-extension",
   spc_presentation_chunks: "spc-readme",
   openai_usage_events: "openai-usage",
+  attendance_people: "attendance-record",
+  attendance_leave_entries: "attendance-record",
+  attendance_manual_overrides: "attendance-record",
+  attendance_entitlements: "attendance-record",
+  attendance_monthly_adjustments: "attendance-record",
+  attendance_monthly_confirmations: "attendance-record",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -201,6 +221,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",
   "spc-tech-stack": "SPC TECH STACK",
+  "attendance-record": "ATTENDANCE RECORD",
 }
 
 const ENTITY_NAMES: Record<string, string> = {
@@ -233,6 +254,12 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_speedboard_notices: "SPC Speed Board update notice",
   parser_reports: "parser report",
   openai_usage_events: "OpenAI usage event",
+  attendance_people: "attendance person",
+  attendance_leave_entries: "attendance leave entry",
+  attendance_manual_overrides: "attendance correction",
+  attendance_entitlements: "attendance entitlement",
+  attendance_monthly_adjustments: "attendance opening record",
+  attendance_monthly_confirmations: "attendance monthly confirmation",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -297,6 +324,29 @@ const FIELD_LABELS: Record<string, string> = {
   version: "version",
   recipient_role: "recipient role",
   recipient_count: "recipient count",
+  initials: "initials",
+  staff_code: "staff code",
+  work_group: "work group",
+  team: "team",
+  dingtalk_user_id: "DingTalk user",
+  attendance_date: "attendance date",
+  work_date: "attendance date",
+  leave_date: "leave date",
+  leave_code: "leave code",
+  code: "leave code",
+  period: "day portion",
+  portion: "day portion",
+  units: "days",
+  year: "year",
+  month: "month",
+  allowance: "annual allowance",
+  allowance_units: "annual allowance",
+  carry_forward: "carry-forward",
+  opening_carry_forward_units: "carry-forward",
+  holiday_attendance: "holiday attendance credit",
+  confirmed: "confirmed",
+  is_confirmed: "confirmed",
+  reason: "reason",
 }
 
 const HIDDEN_FIELDS = new Set([
@@ -1072,6 +1122,21 @@ function getRecordLabel(
       105: "report display settings",
     }
     return labels[getRecordId(record)] || "remark"
+  }
+
+  if (record.tableName.startsWith("attendance_")) {
+    const staff =
+      getContextText(record.requestContext, "staffCode", "staff_code") ||
+      (typeof row.staff_code === "string" ? row.staff_code : "")
+    const code = typeof row.code === "string" ? row.code : ""
+    const date =
+      (typeof row.leave_date === "string" && row.leave_date) ||
+      (typeof row.work_date === "string" && row.work_date) ||
+      ([row.year, row.month].every((value) => value !== null && value !== undefined)
+        ? `${row.year}-${String(row.month).padStart(2, "0")}`
+        : "")
+    const label = [staff, code, date].filter(Boolean).join(" · ")
+    if (label) return label
   }
 
   const preferredKeys = [

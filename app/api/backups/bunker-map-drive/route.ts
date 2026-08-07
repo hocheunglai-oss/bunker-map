@@ -155,6 +155,14 @@ const TABLES: TableConfig[] = [
   { key: "parserReports", table: "parser_reports", order: [{ column: "id", ascending: true }] },
   { key: "openAiUsageEvents", table: "openai_usage_events", order: [{ column: "id", ascending: true }] },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks", order: [{ column: "id", ascending: true }] },
+  { key: "attendancePeople", table: "attendance_people", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceRawPunches", table: "attendance_raw_punches", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceLeaveEntries", table: "attendance_leave_entries", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceManualOverrides", table: "attendance_manual_overrides", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceEntitlements", table: "attendance_entitlements", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceMonthlyAdjustments", table: "attendance_monthly_adjustments", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceMonthlyConfirmations", table: "attendance_monthly_confirmations", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceSyncRuns", table: "attendance_sync_runs", order: [{ column: "id", ascending: true }] },
 ]
 
 const TRUTH_MANAGED_TABLES = new Set([

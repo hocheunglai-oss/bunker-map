@@ -12,6 +12,7 @@ const MINIMUM_V2_MIGRATION_HEAD = "20260723080326"
 const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
+const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -83,6 +84,54 @@ const TABLE_SECTIONS = [
     key: "spcPresentationChunks",
     table: "spc_presentation_chunks",
     primaryKey: ["id"],
+  },
+  {
+    key: "attendancePeople",
+    table: "attendance_people",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceRawPunches",
+    table: "attendance_raw_punches",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceLeaveEntries",
+    table: "attendance_leave_entries",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceManualOverrides",
+    table: "attendance_manual_overrides",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceEntitlements",
+    table: "attendance_entitlements",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceMonthlyAdjustments",
+    table: "attendance_monthly_adjustments",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceMonthlyConfirmations",
+    table: "attendance_monthly_confirmations",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceSyncRuns",
+    table: "attendance_sync_runs",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
   },
 ]
 
@@ -1403,6 +1452,8 @@ function validateSections(backup, errors, warnings) {
   const spcUserIds = idSet(data, "spcUsers")
   const spcEnquiryIds = idSet(data, "spcEnquiries")
   const whatsappConversationIds = idSet(data, "whatsappConversations")
+  const attendancePersonIds = idSet(data, "attendancePeople")
+  const attendanceRawPunchIds = idSet(data, "attendanceRawPunches")
 
   checkReferences(
     rows(data, "ccCompanyFiles"),
@@ -1492,6 +1543,30 @@ function validateSections(backup, errors, warnings) {
     "whatsappMessages.conversation_id",
     errors,
     { required: true }
+  )
+  for (const [section, label] of [
+    ["attendanceRawPunches", "attendanceRawPunches.person_id"],
+    ["attendanceLeaveEntries", "attendanceLeaveEntries.person_id"],
+    ["attendanceManualOverrides", "attendanceManualOverrides.person_id"],
+    ["attendanceEntitlements", "attendanceEntitlements.person_id"],
+    ["attendanceMonthlyAdjustments", "attendanceMonthlyAdjustments.person_id"],
+    ["attendanceMonthlyConfirmations", "attendanceMonthlyConfirmations.person_id"],
+  ]) {
+    checkReferences(
+      rows(data, section),
+      "person_id",
+      attendancePersonIds,
+      label,
+      errors,
+      { required: true }
+    )
+  }
+  checkReferences(
+    rows(data, "attendanceManualOverrides"),
+    "raw_punch_id",
+    attendanceRawPunchIds,
+    "attendanceManualOverrides.raw_punch_id",
+    errors
   )
 
   const polymorphicParents = {
