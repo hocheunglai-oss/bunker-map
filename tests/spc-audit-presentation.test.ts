@@ -20,6 +20,7 @@ function auditRecord(input: {
   return {
     id: "11111111-1111-4111-8111-111111111111",
     occurredAt: "2026-08-03T10:15:00.000Z",
+    actorUserId: "22222222-2222-4222-8222-222222222222",
     actorId: "spc:otto@cosulich.com.hk",
     actorName: "OTTO LAI",
     actorSource: "app",

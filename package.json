@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "lint": "eslint app components lib",
     "test:parsers": "tsx --test tests/enquiry-parsers.test.ts",
-    "test:security": "tsx --test tests/spc-auth-security.test.ts tests/spc-login-rate-limit.test.ts tests/spc-login-route-security.test.ts tests/spc-security-maintenance.test.ts tests/spc-audit-context.test.ts tests/spc-audit-presentation.test.ts tests/spc-audit-route-enforcement.test.ts tests/spc-user-audit-sql.test.ts tests/spc-private-response-cache.test.ts tests/trusted-request-context.test.ts tests/web-security-baseline.test.ts tests/security-documentation.test.ts tests/spc-speedboard-update-notice.test.ts tests/brent-market-data.test.ts",
+    "test:security": "tsx --test tests/spc-auth-security.test.ts tests/spc-session-cookie-security.test.ts tests/spc-actor-user-id-audit.test.ts tests/spc-login-rate-limit.test.ts tests/spc-login-route-security.test.ts tests/spc-security-maintenance.test.ts tests/spc-audit-context.test.ts tests/spc-audit-presentation.test.ts tests/spc-audit-route-enforcement.test.ts tests/spc-user-audit-sql.test.ts tests/spc-private-response-cache.test.ts tests/trusted-request-context.test.ts tests/web-security-baseline.test.ts tests/security-documentation.test.ts tests/spc-speedboard-update-notice.test.ts tests/brent-market-data.test.ts tests/outlook-graph-callback-security.test.ts tests/query-escaping-security.test.ts tests/codeql-regex-safety.test.ts tests/google-drive-upload-url-security.test.ts",
     "security:check": "npm run test:security && npm audit --omit=dev --audit-level=high",
     "security:check-live": "node scripts/check-live-security-baseline.mjs",
     "start": "next start",

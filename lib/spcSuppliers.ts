@@ -825,6 +825,7 @@ async function writeSupplierStoreAudit(
   afterRow: SupplierStoreRow,
 ) {
   await supabase.from("audit_logs").insert({
+    actor_user_id: context.actorUserId,
     actor_id: `spc:${context.username}`,
     actor_name: context.displayName || context.username,
     actor_source: "app",

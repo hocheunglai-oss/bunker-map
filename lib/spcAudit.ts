@@ -15,6 +15,7 @@ export type SpcAuditActionContext = {
 }
 
 export type SpcAuditContext = {
+  actorUserId: string
   username: string
   displayName: string
   role: string | null
@@ -77,6 +78,14 @@ function cleanAuditCode(value: string | null | undefined, fallback: string) {
   return clean
 }
 
+function requireAuditActorUserId(value: string | null | undefined) {
+  const clean = value?.trim().toLowerCase() || ""
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(clean)) {
+    throw new Error("Authenticated SPC user id is required for auditing.")
+  }
+  return clean
+}
+
 function pageFromRequest(request: Request | undefined, fallbackPageId: string) {
   const referer = request?.headers.get("referer")
   let pathname = ""
@@ -108,6 +117,7 @@ export function createSpcAuditContext(
   const actorRole = session.role || null
 
   return {
+    actorUserId: requireAuditActorUserId(session.userId),
     username: session.username,
     displayName: session.displayName || session.username,
     role: actorRole,
@@ -128,6 +138,7 @@ export function createSpcAuditHeaders(context: SpcAuditContext) {
   const headers: Record<string, string> = {
     "x-bunker-admin-user": `spc:${context.username}`,
     "x-bunker-admin-display-name": context.displayName,
+    "x-bunker-audit-actor-user-id": context.actorUserId,
     "x-bunker-admin-role": context.actorRole || "",
     "x-bunker-admin-page-id": context.pageId,
     "x-bunker-admin-page-label": context.pageLabel,
@@ -164,6 +175,7 @@ export function buildSpcUserManagementAuditEvent(
     Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== ""))
 
   return {
+    actor_user_id: context.actorUserId,
     actor_id: `spc:${context.username}`,
     actor_name: context.displayName,
     actor_source: "app",

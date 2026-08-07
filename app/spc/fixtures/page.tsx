@@ -614,10 +614,13 @@ export default function SpcFixturesPage() {
       if (!canvas) return
       const canvasRect = canvas.getBoundingClientRect()
       const next: Record<string, number> = {}
+      const actionNodes = new Map(
+        Array.from(canvas.querySelectorAll<HTMLElement>("[data-fixture-action-key]"))
+          .map((node) => [node.dataset.fixtureActionKey || "", node] as const),
+      )
       floatingActionRows.forEach((row) => {
-        const escapedKey = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(row.key) : row.key.replace(/"/g, '\\"')
-        const node = canvas.querySelector(`[data-fixture-action-key="${escapedKey}"]`)
-        if (!(node instanceof HTMLElement)) return
+        const node = actionNodes.get(row.key)
+        if (!node) return
         const rect = node.getBoundingClientRect()
         next[row.key] = rect.top - canvasRect.top + rect.height / 2
       })

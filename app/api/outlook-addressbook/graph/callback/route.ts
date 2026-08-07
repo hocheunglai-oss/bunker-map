@@ -1,18 +1,11 @@
-import { NextResponse } from "next/server"
 import { getGraphConfig, requireAdminAccess, saveGraphStore } from "../_shared"
-
-function html(title: string, body: string) {
-  return new NextResponse(
-    `<!doctype html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:Arial,sans-serif;background:#071a2c;color:#edf7ff;padding:32px"><h1>${title}</h1><p>${body}</p><p>You may close this tab and return to FC Uno.</p></body></html>`,
-    { headers: { "Content-Type": "text/html; charset=utf-8" } }
-  )
-}
+import { graphCallbackHtmlResponse } from "./response"
 
 export async function GET(request: Request) {
   try {
     await requireAdminAccess("edit")
   } catch (error) {
-    return html(
+    return graphCallbackHtmlResponse(
       "Microsoft Graph Consent Failed",
       error instanceof Error ? error.message : "Permission denied."
     )
@@ -25,9 +18,9 @@ export async function GET(request: Request) {
   const tenantId = url.searchParams.get("tenant") || ""
   const error = url.searchParams.get("error_description") || url.searchParams.get("error")
 
-  if (error) return html("Microsoft Graph Consent Failed", error)
-  if (state !== config.state) return html("Microsoft Graph Consent Failed", "The consent state did not match.")
-  if (!adminConsent || !tenantId) return html("Microsoft Graph Consent Failed", "Admin consent was not completed.")
+  if (error) return graphCallbackHtmlResponse("Microsoft Graph Consent Failed", error)
+  if (state !== config.state) return graphCallbackHtmlResponse("Microsoft Graph Consent Failed", "The consent state did not match.")
+  if (!adminConsent || !tenantId) return graphCallbackHtmlResponse("Microsoft Graph Consent Failed", "Admin consent was not completed.")
 
   await saveGraphStore({
     tenantId,
@@ -35,5 +28,5 @@ export async function GET(request: Request) {
     consentedAt: new Date().toISOString(),
   })
 
-  return html("Microsoft Graph Consent Saved", "Admin consent has been recorded for this tenant.")
+  return graphCallbackHtmlResponse("Microsoft Graph Consent Saved", "Admin consent has been recorded for this tenant.")
 }

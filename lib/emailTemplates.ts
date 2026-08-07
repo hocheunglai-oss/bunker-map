@@ -17,6 +17,7 @@ import {
   EmailTemplateConflictError,
   isEmailTemplateConflict,
 } from "@/lib/emailTemplateCanonicalUtils"
+import { slugifyEmailTemplate } from "@/lib/emailTemplateSlug"
 
 export {
   computeEmailTemplateLibraryRevision,
@@ -99,14 +100,6 @@ export async function requireAdminSession() {
   return requireSharedAdminSession()
 }
 
-function slugify(input: string) {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80)
-}
-
 export function extractPlaceholders(...values: string[]) {
   const found = new Set<string>()
 
@@ -127,7 +120,7 @@ function normaliseTemplate(template: EmailTemplate): EmailTemplate {
   return {
     ...sanitized,
     placeholders: extractPlaceholders(sanitized.subject || "", sanitized.bodyHtml || "", sanitized.bodyText || ""),
-    slug: sanitized.slug || slugify(`${sanitized.folder}-${sanitized.title}`) || sanitized.id,
+    slug: sanitized.slug || slugifyEmailTemplate(`${sanitized.folder}-${sanitized.title}`) || sanitized.id,
     isActive: sanitized.isActive !== false,
     recipientResolution:
       sanitized.recipientResolution &&

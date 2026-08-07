@@ -50,6 +50,7 @@ function insertionEvent(input: {
   return {
     id: input.id,
     occurredAt: input.occurredAt,
+    actorUserId: null,
     actorId: "sc",
     actorName: "SC",
     actorSource: "app",

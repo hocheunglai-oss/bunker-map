@@ -22,6 +22,9 @@
 /exports/
 /backups/
 
+# Restricted local assessment evidence (never commit generated evidence packs)
+/output/pdf/nis2-security-evidence-*/
+
 # misc
 .DS_Store
 *.pem

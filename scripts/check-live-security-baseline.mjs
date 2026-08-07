@@ -4,6 +4,7 @@ const SECURITY_TXT_CANONICALS = HOSTS.map(
 )
 const REQUEST_TIMEOUT_MS = 15_000
 const MINIMUM_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000
+const MAXIMUM_EXPIRY_MS = 366 * 24 * 60 * 60 * 1000
 
 const checks = [
   { path: "/", status: 200, label: "public root" },
@@ -14,10 +15,34 @@ const checks = [
     securityTxt: true,
   },
   {
+    path: "/api/spc/session",
+    status: 200,
+    label: "anonymous session API",
+    privateJsonResponse: true,
+  },
+  {
     path: "/api/spc/users",
     status: 401,
     label: "protected user API",
-    privateResponse: true,
+    privateJsonResponse: true,
+  },
+  {
+    path: "/api/spc/audit-logs",
+    status: 401,
+    label: "protected audit-log API",
+    privateJsonResponse: true,
+  },
+  {
+    path: "/api/spc/chrome-extension/download",
+    status: 401,
+    label: "protected extension download",
+    privateJsonResponse: true,
+  },
+  {
+    path: "/api/spc/security-maintenance",
+    status: 401,
+    label: "protected security maintenance",
+    privateJsonResponse: true,
   },
   {
     path: "/__spc_security_baseline_missing__",
@@ -110,6 +135,19 @@ function validateSecurityTxt(body, response) {
     Number.isFinite(remainingMs) && remainingMs >= MINIMUM_EXPIRY_MS,
     "security.txt should be renewed before fewer than 90 days remain",
   )
+  assertCondition(
+    remainingMs <= MAXIMUM_EXPIRY_MS,
+    "RFC 9116 expiry should not be more than one year in the future",
+  )
+}
+
+function validatePrivateJsonResponse(response, host, label) {
+  headerIncludes(response, "content-type", "application/json")
+  const cacheControl = (response.headers.get("cache-control") ?? "").toLowerCase()
+  assertCondition(
+    cacheControl.includes("private") && cacheControl.includes("no-store"),
+    `${host} ${label} should be private and no-store; received ${cacheControl || "<missing>"}`,
+  )
 }
 
 async function fetchChecked(url, options = {}) {
@@ -149,12 +187,8 @@ async function checkHost(host) {
     )
     validateBaselineHeaders(response)
 
-    if (check.privateResponse) {
-      const cacheControl = response.headers.get("cache-control") ?? ""
-      assertCondition(
-        cacheControl.includes("private") && cacheControl.includes("no-store"),
-        `${host} protected API should be private and no-store; received ${cacheControl || "<missing>"}`,
-      )
+    if (check.privateJsonResponse) {
+      validatePrivateJsonResponse(response, host, check.label)
     }
 
     if (check.securityTxt) {

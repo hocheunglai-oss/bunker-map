@@ -28,6 +28,7 @@ async function recordUpdateNoticeAudit(
   const supabase = createSpcAuditedSupabaseClient(context)
   const title = `SPC Speed Board ${SPC_SPEED_BOARD_VERSION} update notice`
   const { error } = await supabase.from("audit_logs").insert({
+    actor_user_id: context.actorUserId,
     actor_id: `spc:${context.username}`,
     actor_name: context.displayName,
     actor_source: "app",

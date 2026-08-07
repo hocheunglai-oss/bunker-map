@@ -11,10 +11,12 @@ import {
 } from "../lib/spcAudit"
 
 const REQUEST_ID = "11111111-1111-4111-8111-111111111111"
+const ACTOR_USER_ID = "22222222-2222-4222-8222-222222222222"
 
 function session(): SpcSession {
   return {
     authenticated: true,
+    userId: ACTOR_USER_ID,
     username: "admin@example.com",
     displayName: "SPC ADMINISTRATOR",
     role: "ADMIN",
@@ -28,6 +30,7 @@ function auditContext(
   input: Partial<SpcAuditContext> = {},
 ): SpcAuditContext {
   return {
+    actorUserId: ACTOR_USER_ID,
     username: "admin@example.com",
     displayName: "SPC ADMINISTRATOR",
     role: "ADMIN",
@@ -68,15 +71,40 @@ test("SPC audit context generates correlation and action metadata before a write
   assert.match(context.requestId, /^[0-9a-f-]{36}$/i)
   assert.equal(context.correlationId, context.requestId)
   assert.equal(context.action, "create-user")
+  assert.equal(context.actorUserId, ACTOR_USER_ID)
   assert.equal(context.targetUsername, "new.user@example.com")
   assert.equal(context.actorRole, "ADMIN")
   assert.equal(context.pagePath, "/spc/usermanagement")
+})
+
+test("SPC audit context rejects a missing or malformed server-session user id", () => {
+  const request = new Request("https://spc.fcuno.com/api/spc/users")
+
+  assert.throws(
+    () =>
+      createSpcAuditContext(
+        { ...session(), userId: null },
+        request,
+        "spc-user-management",
+      ),
+    /Authenticated SPC user id is required for auditing/,
+  )
+  assert.throws(
+    () =>
+      createSpcAuditContext(
+        { ...session(), userId: "client-selected-id" },
+        request,
+        "spc-user-management",
+      ),
+    /Authenticated SPC user id is required for auditing/,
+  )
 })
 
 test("audited Supabase headers carry investigation and safe password-change metadata", () => {
   const headers = createSpcAuditHeaders(auditContext())
 
   assert.equal(headers["x-bunker-admin-user"], "spc:admin@example.com")
+  assert.equal(headers["x-bunker-audit-actor-user-id"], ACTOR_USER_ID)
   assert.equal(headers["x-bunker-audit-source-ip"], "203.0.113.19")
   assert.equal(headers["x-bunker-audit-correlation-id"], REQUEST_ID)
   assert.equal(headers["x-bunker-audit-request-id"], REQUEST_ID)
@@ -99,6 +127,7 @@ test("synthetic denied events contain only allowlisted investigation metadata", 
 
   assert.equal(event.table_schema, "app")
   assert.equal(event.table_name, "spc_user_management_events")
+  assert.equal(event.actor_user_id, ACTOR_USER_ID)
   assert.equal(event.after_row.outcome, "denied")
   assert.equal(event.after_row.errorCode, "admin-required")
   assert.equal(event.request_context.sourceIp, "203.0.113.19")
@@ -129,11 +158,19 @@ test("synthetic audit insertion fails loudly without exposing the database respo
   const previousFetch = globalThis.fetch
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://audit-test.supabase.co"
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test-key"
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify({ message: "raw-db-message credential-value" }), {
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    assert.equal(
+      request.headers.get("x-bunker-audit-actor-user-id"),
+      ACTOR_USER_ID,
+    )
+    const body = JSON.parse(await request.text()) as { actor_user_id?: string }
+    assert.equal(body.actor_user_id, ACTOR_USER_ID)
+    return new Response(JSON.stringify({ message: "raw-db-message credential-value" }), {
       status: 400,
       headers: { "content-type": "application/json" },
     })
+  }
 
   try {
     await assert.rejects(
@@ -171,6 +208,7 @@ test("SPC undo RPC carries the same trusted investigation headers", async () => 
     )
     assert.equal(request.headers.get("x-bunker-audit-source-ip"), "203.0.113.19")
     assert.equal(request.headers.get("x-bunker-audit-action"), "update-user")
+    assert.equal(request.headers.get("x-bunker-audit-actor-user-id"), ACTOR_USER_ID)
     assert.equal(request.headers.get("x-bunker-audit-outcome"), "success")
     return new Response(JSON.stringify("undo-log-id"), {
       status: 200,

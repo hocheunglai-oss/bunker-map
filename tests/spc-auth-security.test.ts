@@ -25,6 +25,7 @@ import {
 function session(input: Partial<SpcSession> = {}): SpcSession {
   return {
     authenticated: true,
+    userId: "22222222-2222-4222-8222-222222222222",
     username: "buyer@example.com",
     displayName: "Buyer",
     role: "BUYER TRADER",
@@ -188,6 +189,27 @@ test("SPC authentication trusts only the opaque database session token", () => {
   assert.doesNotMatch(authSource, /cookieStore\.set\(SPC_COOKIE_NAME,\s*"1"/)
   assert.match(sessionSource, /\.is\("revoked_at", null\)/)
   assert.match(sessionSource, /revokeDatabaseSpcSession/)
+})
+
+test("SPC stable user id stays server-side while audit context receives it", () => {
+  const authSource = readFileSync(
+    new URL("../lib/spcAuth.ts", import.meta.url),
+    "utf8",
+  )
+  const sessionRoute = readFileSync(
+    new URL("../app/api/spc/session/route.ts", import.meta.url),
+    "utf8",
+  )
+  const auditSource = readFileSync(
+    new URL("../lib/spcAudit.ts", import.meta.url),
+    "utf8",
+  )
+
+  assert.match(authSource, /userId: databaseUser\.id/)
+  assert.doesNotMatch(sessionRoute, /userId: session\.userId/)
+  assert.doesNotMatch(sessionRoute, /\.\.\.session,/)
+  assert.match(auditSource, /actorUserId: requireAuditActorUserId\(session\.userId\)/)
+  assert.match(auditSource, /"x-bunker-audit-actor-user-id": context\.actorUserId/)
 })
 
 test("SPC session migration is version-bound, private, revocable, and fixed to 12 hours", () => {

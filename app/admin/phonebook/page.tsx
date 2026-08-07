@@ -1248,7 +1248,7 @@ export default function PhonebookPage() {
     if (creatingContact) {
       const insertPayload = {
         ...payload,
-        source_key: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        source_key: `manual-${crypto.randomUUID()}`,
       }
       const { data, error } = await supabase.from("phonebook_contacts").insert(insertPayload).select("*").single()
       if (error || !data) {
@@ -1410,7 +1410,7 @@ export default function PhonebookPage() {
       buyer_remark_3: null,
       buyer_remark_4: null,
       notes: null,
-      source_key: `manual-company-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      source_key: `manual-company-${crypto.randomUUID()}`,
     })
     setCompanyModalOpen(true)
     setMessage("")
@@ -1744,7 +1744,7 @@ export default function PhonebookPage() {
   function recordChange(entry: Omit<ChangeLogEntry, "id" | "timestamp">) {
     const nextEntry: ChangeLogEntry = {
       ...entry,
-      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `log-${crypto.randomUUID()}`,
       timestamp: new Date().toISOString(),
     }
     setChangeLog((prev) => [nextEntry, ...prev].slice(0, 10))

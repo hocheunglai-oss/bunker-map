@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { getAuditChangeSummary, getAuditSubject, isCcinfoAuditLog } from "@/lib/auditDisplay"
+import { buildPostgrestCountryMatchFilter } from "@/lib/queryEscaping"
 
 type RecordKind = "company" | "country" | "port"
 
@@ -2361,7 +2362,7 @@ export default function CountryCompanyInfoPage() {
     const portsResult = await supabase
       .from("cc_ports")
       .select("id,name,summary,notes,updated_at")
-      .or(`country_id.eq.${id},country_name.ilike.${countryName.replace(/,/g, "\\,")}`)
+      .or(buildPostgrestCountryMatchFilter(id, countryName, "ilike"))
       .order("name", { ascending: true })
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry(data as CountryRecord)
@@ -2632,7 +2633,7 @@ export default function CountryCompanyInfoPage() {
           const { error: portError } = await supabase
             .from("cc_ports")
             .delete()
-            .or(`country_id.eq.${selectedId},country_name.eq.${currentRecord.name.replace(/,/g, "\\,")}`)
+            .or(buildPostgrestCountryMatchFilter(selectedId, currentRecord.name, "eq"))
           if (portError) throw portError
         }
       }

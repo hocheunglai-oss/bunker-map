@@ -141,7 +141,7 @@ test("taskpane uses Office Dialog API with a partitioned cookie and stale-safe p
   assert.match(taskpane, /DialogMessageReceived/)
   assert.match(taskpane, /DialogEventReceived/)
   assert.doesNotMatch(authDialog, /window\.open\(/)
-  assert.match(taskpane, /window\.open\([\s\S]*?"about:blank"/)
+  assert.doesNotMatch(taskpane, /window\.open\(/)
   assert.match(taskpane, /window\.localStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
   assert.match(taskpane, /window\.sessionStorage\.setItem\([\s\S]*?AUTH_SESSION_KEY/)
   assert.match(taskpane, /action: "establish-taskpane-session"/)
@@ -228,7 +228,7 @@ test("Outlook insertion attempts are visible and non-undoable in Audit Log", asy
 
   assert.match(
     auditLog,
-    /table_schema\.eq\.public,and\(table_schema\.eq\.app,table_name\.eq\.outlook_template_insertion_attempts\)/,
+    /table_schema\.eq\.public,and\(table_schema\.eq\.app,table_name\.in\.\(outlook_template_insertion_attempts,spc_user_management_events\)\)/,
   )
   assert.match(
     auditLog,

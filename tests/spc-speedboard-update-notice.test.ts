@@ -46,7 +46,7 @@ test("builds beginner update instructions for the current SPC Speed Board versio
   const email = buildSpcSpeedBoardUpdateEmail()
 
   assert.equal(email.subject, `SPC Speed Board ${SPC_SPEED_BOARD_VERSION} - Update Notice`)
-  assert.match(email.html, new RegExp(SPC_SPEED_BOARD_PAGE_URL.replace(/[./]/g, "\\$&")))
+  assert.ok(email.html.includes(SPC_SPEED_BOARD_PAGE_URL))
   assert.match(email.html, /chrome:\/\/extensions/)
   assert.match(email.html, /existing folder that Chrome already uses/)
   assert.match(email.html, /click <strong>Reload<\/strong>/)

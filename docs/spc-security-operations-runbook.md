@@ -82,17 +82,19 @@ hashes, phone numbers, session tokens or unrelated user data.
 | SPC login-attempt evidence | Automatic 30-day retention and daily bounded purge | Confirm legal/security suitability and access to the retained evidence |
 | SPC sessions | Fixed 12-hour validity; expired or revoked rows are pruned after 30 days | Confirm whether the operational history is sufficient |
 | SPC user-management audit | Credential-redacted and append-only for protected events | Deletion/retention period is not approved; do not invent or apply one |
-| Vercel and application logs | Available according to provider/project configuration | Retention, log-drain scope and access are not verified |
+| Vercel and application logs | Live logs, a default all-type alert rule and one-year production deployment retention were verified; no project drain is configured | Runtime-log retention, central destination, alert recipients/escalation and access approval remain open |
 | Verified logical Drive backups | 35-day managed window with verification evidence | Confirm authorised access, encryption assurance, restore coverage and disposal |
 | GitHub security-check artifacts | Workflow retains sanitized test and dependency-audit output for 90 days | Security to confirm whether a longer evidence period is required |
 
 ## 5. Automated security evidence
 
-The `SPC security baseline` GitHub workflow runs the focused security suite and
-production dependency audit on relevant changes and weekly. Scheduled and
-manual runs also perform the read-only live two-domain baseline check. The
-workflow stores sanitized TAP, audit JSON and live-check output as evidence; it
-must never print environment secrets or user records.
+The `SPC security baseline` GitHub workflow runs the focused security suite,
+production and full high-severity dependency audits, registry-signature
+verification and a production CycloneDX SBOM on every push and pull request and
+weekly. Scheduled and manual runs also perform the read-only live two-domain
+baseline check. The workflow stores sanitized TAP, audit, signature, SBOM and
+live-check output as evidence; it must never print environment secrets or user
+records.
 
 Review a failed run before release. A passing run supports technical evidence
 but does not replace independent authenticated testing.
@@ -132,10 +134,11 @@ targeted authenticated retest. At minimum, retain evidence for:
 
 ## 8. Controls that remain open
 
-This runbook does not implement or approve MFA, restriction of the public trial
-portal, GDPR deletion/DSR handling, SIEM/log drains, alert recipients,
-application-audit retention, WAF/bot policy, provider contracts, backup/restore
-acceptance, extension signing or independent assessment closure.
+This runbook does not implement or approve Vercel account MFA, restriction of
+the public trial portal, GDPR deletion/DSR handling, SIEM/log drains, alert
+recipients, application-audit retention, custom WAF/bot policy, DNS-integration
+scope, provider contracts, backup/restore acceptance, extension signing or
+independent assessment closure.
 
 ## 9. Concise change-summary record
 
@@ -152,3 +155,106 @@ Use this record when preparing the later management or Security email:
 
 Summarise outcomes by control theme. Do not list every file or implementation
 step unless Security asks for the technical detail.
+
+## 10. SPC system incident lifecycle
+
+Use this lifecycle for suspected compromise, unauthorised access, data
+exposure, malicious login activity, privileged-user misuse, failed security
+controls, provider incidents and material availability/integrity events that
+affect FCUNO/SPC. It supplements, and does not replace, the Group incident
+process.
+
+1. **Received** - create an internal reference, record the UTC observation
+   window, affected hostname/component and reporting source.
+2. **Triaged** - preserve original evidence, state confirmed facts separately
+   from hypotheses, identify potentially affected identities/data/functions and
+   ask Group Information Security to determine severity and escalation.
+3. **Contained** - record authorised account/session revocation, key rotation,
+   feature isolation, provider control or deployment action and its approval.
+4. **Eradicated and recovered** - record the corrected revision/configuration,
+   data-integrity checks, restoration evidence and expected-function checks.
+5. **Monitored** - correlate application audit, Vercel, Supabase, GitHub and
+   provider references for the agreed observation period without copying raw
+   secrets or personal records into the incident summary.
+6. **Closed or risk accepted** - record the Security/authorised risk-owner
+   decision, residual risk, required notifications and lessons/actions. An
+   implementation result alone cannot close the incident.
+
+For an SPC incident, collect only the minimum required sanitized references:
+
+- both hostnames, UTC range and the deployed revision from each
+  `/api/deploy-info` endpoint;
+- route/control, HTTP result, correlation ID, platform request ID and relevant
+  protected audit-event identifiers, without request bodies or session values;
+- affected stable user IDs/roles and authorised session/access changes in the
+  restricted evidence location, not the repository;
+- Supabase project/region, affected logical tables/buckets, migration and
+  RLS/grant/advisor results, without secret keys or row exports;
+- Vercel deployment/firewall/log/alert references and GitHub commit/workflow
+  artifacts;
+- relevant Exchange, Google, AI, market-data, map, extension or other provider
+  incident references; and
+- containment rollback, recovery check and post-recovery observation result.
+
+Group Information Security determines legal, regulatory, customer, insurer,
+provider and law-enforcement notification. No incident SLA, accountable owner
+or evidence-retention period is created by this lifecycle.
+
+## 11. Vulnerability lifecycle
+
+Track a reported or detected weakness through these states without treating a
+scanner result as proof or a passing test as closure:
+
+1. **Received** - record source, UTC date, affected revision/component and a
+   restricted reference to the report.
+2. **Reproduced, already safe or unproven** - document the reachable boundary,
+   required preconditions, expected security invariant and strongest safe
+   reproducer. Keep uncertainty explicit.
+3. **Assessed** - Group Information Security or its delegate determines
+   severity, affected data/service, response priority and escalation.
+4. **Planned** - record the smallest complete fix, compatibility/performance
+   constraints, test strategy, migration/backout needs and approval reference.
+5. **Implemented and validated** - retain focused regression, legitimate-flow,
+   bypass-review, build, dependency and database evidence as applicable.
+6. **Deployed and observed** - record the commit, both production
+   `/api/deploy-info` revisions, live baseline, migration result and relevant
+   provider/log observations.
+7. **Independently retested** - retain the appointed tester's sanitized
+   request/response or configuration evidence and residual finding.
+8. **Closed or risk accepted** - record the authorised Security/assessor or
+   risk-owner decision. Code merge, deployment or an automated pass does not
+   provide that decision.
+
+The vulnerability record must identify the security boundary, affected and
+fixed revisions, tests performed, skipped/unknown validation, operational
+impact, rollback path, collector, technical reviewer and Security/assessor
+decision. No remediation SLA, fixed severity owner or evidence-retention period
+is created by this lifecycle.
+
+## 12. Technical change evidence record
+
+Use this sanitized record for a security-relevant application, database,
+identity, provider or deployment change. Store detailed/raw evidence only in
+the approved restricted location.
+
+| Field | Record |
+| --- | --- |
+| Change reference and UTC window | |
+| Control theme and affected boundary | |
+| Request / approval reference | |
+| Pre-change revision or configuration | |
+| Files, migrations or provider settings changed | |
+| Security invariant and intended result | |
+| Compatibility, speed, reliability and data-integrity constraints | |
+| Focused security and legitimate-flow checks | |
+| Build, dependency and migration validation | |
+| Rollback / recovery method | |
+| Production commit and both `/api/deploy-info` results | |
+| Post-deployment live and provider/log observations | |
+| Exceptions, unknowns and residual risk | |
+| Restricted evidence reference | |
+| Collector and technical reviewer | |
+| Group Information Security / assessor decision | |
+
+The record proves what was changed and checked; it does not assign an owner,
+approve risk, promise a deadline or create a retention rule.

@@ -191,14 +191,17 @@ function safeSlug(value: string) {
   return slug || `chunk-${Date.now()}`
 }
 
-function safeFileName(value: string) {
+export function safeFileName(value: string) {
   const dot = value.lastIndexOf(".")
   const extension = dot >= 0 ? value.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, "") : ""
-  const base = (dot >= 0 ? value.slice(0, dot) : value)
+  const hyphenatedBase = (dot >= 0 ? value.slice(0, dot) : value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64)
+  let start = 0
+  let end = hyphenatedBase.length
+  while (hyphenatedBase.charCodeAt(start) === 45) start += 1
+  while (end > start && hyphenatedBase.charCodeAt(end - 1) === 45) end -= 1
+  const base = hyphenatedBase.slice(start, end).slice(0, 64)
   return `${base || "media"}${extension.slice(0, 10)}`
 }
 

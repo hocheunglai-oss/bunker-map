@@ -1,0 +1,22 @@
+version: 2
+
+# Dependabot opens reviewable pull requests only. Automatic merging is not
+# configured by this repository.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:17"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:47"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3

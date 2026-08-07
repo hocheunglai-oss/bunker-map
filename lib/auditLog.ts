@@ -17,6 +17,7 @@ type AuditPageDefinition = {
 export type AuditLogRecord = {
   id: string
   occurredAt: string
+  actorUserId: string | null
   actorId: string | null
   actorName: string | null
   actorSource: string
@@ -65,6 +66,7 @@ export type PresentedAuditLogRecord = AuditLogRecord & {
 type AuditLogRow = {
   id: string
   occurred_at: string
+  actor_user_id: string | null
   actor_id: string | null
   actor_name: string | null
   actor_source: string
@@ -84,6 +86,7 @@ type AuditLogRow = {
 const AUDIT_SELECT = [
   "id",
   "occurred_at",
+  "actor_user_id",
   "actor_id",
   "actor_name",
   "actor_source",
@@ -137,6 +140,7 @@ const AUDIT_PREVIEW_FIELDS = [
 const AUDIT_INDEX_SELECT = [
   "id",
   "occurred_at",
+  "actor_user_id",
   "actor_id",
   "actor_name",
   "actor_source",
@@ -414,6 +418,7 @@ function mapAuditLog(row: AuditLogRow): AuditLogRecord {
   return {
     id: row.id,
     occurredAt: row.occurred_at,
+    actorUserId: row.actor_user_id,
     actorId: row.actor_id,
     actorName: row.actor_name,
     actorSource: row.actor_source,
@@ -444,6 +449,7 @@ function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
   return {
     id: String(row.id || ""),
     occurredAt: String(row.occurred_at || ""),
+    actorUserId: typeof row.actor_user_id === "string" ? row.actor_user_id : null,
     actorId: typeof row.actor_id === "string" ? row.actor_id : null,
     actorName: typeof row.actor_name === "string" ? row.actor_name : null,
     actorSource: String(row.actor_source || ""),

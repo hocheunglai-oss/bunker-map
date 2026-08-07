@@ -13,6 +13,8 @@ import {
   loadCcinfoDriveContext,
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { requireGoogleDriveUploadSessionUrl } from "@/lib/googleDriveUploadUrl"
+import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -81,9 +83,8 @@ function getMimeType(fileName: string, browserMimeType?: string | null) {
 }
 
 async function ensureFolder(drive: any, parentId: string, name: string) {
-  const escapedName = name.replace(/'/g, "\\'")
   const lookup = await drive.files.list({
-    q: `trashed = false and mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and '${parentId}' in parents`,
+    q: buildGoogleDriveFolderLookupQuery(parentId, name),
     fields: "files(id,name)",
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
@@ -138,15 +139,6 @@ async function makeDriveFilePublic(drive: any, fileId: string) {
     console.warn("ccinfo direct upload sharing skipped", { fileId, message })
     return message
   }
-}
-
-function requireGoogleUploadUrl(value: string) {
-  const url = new URL(value)
-  const allowedHosts = new Set(["www.googleapis.com", "content.googleapis.com"])
-  if (!allowedHosts.has(url.hostname) || !url.pathname.startsWith("/upload/drive/v3/files")) {
-    throw new Error("Invalid Google Drive upload session.")
-  }
-  return url.toString()
 }
 
 function getReceivedByteCount(rangeHeader: string | null, fallback: number) {
@@ -208,8 +200,9 @@ export async function POST(request: Request) {
     }
     const uploadUrl = response.headers.get("location")
     if (!uploadUrl) throw new Error("Google Drive did not return an upload session.")
+    const validatedUploadUrl = requireGoogleDriveUploadSessionUrl(uploadUrl)
 
-    return NextResponse.json({ uploadUrl, mimeType })
+    return NextResponse.json({ uploadUrl: validatedUploadUrl, mimeType })
   } catch (error) {
     console.error("ccinfo upload session failed", error)
     return NextResponse.json({ message: messageFromError(error) }, { status: 500 })
@@ -224,7 +217,7 @@ export async function PUT(request: Request) {
       request.headers.get("x-google-drive-upload-url") ||
       requestUrl.searchParams.get("uploadUrl") ||
       ""
-    const uploadUrl = requireGoogleUploadUrl(String(uploadSessionUrl))
+    const uploadUrl = requireGoogleDriveUploadSessionUrl(String(uploadSessionUrl))
     const start = Number(requestUrl.searchParams.get("start") || 0)
     const end = Number(requestUrl.searchParams.get("end") || -1)
     const total = Number(requestUrl.searchParams.get("total") || 0)
@@ -256,6 +249,7 @@ export async function PUT(request: Request) {
 
     const googleResponse = await fetch(uploadUrl, {
       method: "PUT",
+      redirect: "manual",
       headers: {
         "Content-Type": mimeType,
         "Content-Length": String(chunk.byteLength),

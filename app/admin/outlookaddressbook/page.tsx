@@ -243,8 +243,7 @@ function downloadText(filename: string, content: string, type = "text/csv;charse
 }
 
 function newId(prefix: string) {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return `${prefix}-${crypto.randomUUID()}`
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${crypto.randomUUID()}`
 }
 
 function matchesSearch(values: unknown[], query: string) {

@@ -11,6 +11,7 @@ type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
 type AuditLogRecord = {
   id: string
   occurredAt: string
+  actorUserId: string | null
   actorId: string | null
   actorName: string | null
   displayOperation: AuditOperation

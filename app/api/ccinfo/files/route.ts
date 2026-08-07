@@ -11,6 +11,7 @@ import {
   loadCcinfoDriveContext,
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 
@@ -44,9 +45,8 @@ async function getDriveClient() {
 }
 
 async function ensureFolder(drive: any, parentId: string, name: string) {
-  const escapedName = name.replace(/'/g, "\\'")
   const lookup = await drive.files.list({
-    q: `trashed = false and mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and '${parentId}' in parents`,
+    q: buildGoogleDriveFolderLookupQuery(parentId, name),
     fields: "files(id,name)",
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,

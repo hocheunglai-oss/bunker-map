@@ -23,6 +23,7 @@ export const SPC_USER_COOKIE_NAME = "spc_user"
 
 export type SpcSession = {
   authenticated: boolean
+  userId: string | null
   username: string | null
   displayName: string | null
   role: SpcRoleId | null
@@ -107,6 +108,7 @@ export async function clearSpcSession() {
 function unauthenticatedSession(): SpcSession {
   return {
     authenticated: false,
+    userId: null,
     username: null,
     displayName: null,
     role: null,
@@ -144,6 +146,7 @@ export async function getSpcSession(): Promise<SpcSession> {
 
     return {
       authenticated: true,
+      userId: databaseUser.id,
       username: databaseUser.username,
       displayName: databaseUser.displayName,
       role: normaliseSpcRole(databaseUser.role),

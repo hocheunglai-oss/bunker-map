@@ -151,6 +151,7 @@ function presentAuditLogForClient(
   return {
     id: visibleRecord.id,
     occurredAt: visibleRecord.occurredAt,
+    actorUserId: visibleRecord.actorUserId,
     actorId: visibleRecord.actorId,
     actorName: visibleRecord.actorName,
     displayOperation: visibleRecord.displayOperation,

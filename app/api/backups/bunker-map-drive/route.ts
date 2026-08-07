@@ -14,6 +14,7 @@ import {
   createCompressedBackupStageReadStream,
 } from "@/lib/compressedBackupStage"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -373,9 +374,8 @@ async function ensureDriveFolder(
   name: string,
   sharedDriveId: string | null
 ) {
-  const escapedName = name.replace(/'/g, "\\'")
   const lookup = await drive.files.list({
-    q: `trashed = false and mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and '${parentId}' in parents`,
+    q: buildGoogleDriveFolderLookupQuery(parentId, name),
     fields: "files(id,name,createdTime)",
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,

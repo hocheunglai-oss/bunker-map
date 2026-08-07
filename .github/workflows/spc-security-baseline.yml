@@ -6,29 +6,7 @@ on:
     - cron: "17 1 * * 1"
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/spc-security-baseline.yml"
-      - "app/api/spc/**"
-      - "docs/**"
-      - "lib/**"
-      - "package.json"
-      - "package-lock.json"
-      - "public/.well-known/security.txt"
-      - "scripts/check-live-security-baseline.mjs"
-      - "supabase/migrations/**"
-      - "tests/**"
   pull_request:
-    paths:
-      - ".github/workflows/spc-security-baseline.yml"
-      - "app/api/spc/**"
-      - "docs/**"
-      - "lib/**"
-      - "package.json"
-      - "package-lock.json"
-      - "public/.well-known/security.txt"
-      - "scripts/check-live-security-baseline.mjs"
-      - "supabase/migrations/**"
-      - "tests/**"
 
 permissions:
   contents: read
@@ -38,56 +16,118 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  production-runtime-build:
+    name: Node 24 production build
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:65535
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-placeholder
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Match the Vercel Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build the production application
+        run: npm run build
+
   static-security-evidence:
     name: Focused tests and dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Use Node.js 22
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
       - name: Install locked dependencies
+        id: install
         run: npm ci
 
       - name: Run focused security tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
           npm run test:security 2>&1 | tee security-tests.tap
 
       - name: Audit production dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
-        run: npm audit --omit=dev --audit-level=high --json > security-audit.json
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --audit-level=high --json | tee security-audit-production.json
+
+      - name: Audit all dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high --json | tee security-audit-full.json
+
+      - name: Verify npm registry signatures
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit signatures 2>&1 | tee npm-signature-audit.txt
+
+      - name: Generate production CycloneDX SBOM
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: npm sbom --omit=dev --sbom-format=cyclonedx > sbom-production.cdx.json
+
+      - name: Extract informational open-source licence inventory
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/summarize-sbom-licenses.mjs sbom-production.cdx.json > sbom-production-licenses.json
 
       - name: Retain sanitized security evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: spc-security-evidence-${{ github.run_id }}
           path: |
             security-tests.tap
-            security-audit.json
+            security-audit-production.json
+            security-audit-full.json
+            npm-signature-audit.txt
+            sbom-production.cdx.json
+            sbom-production-licenses.json
           if-no-files-found: warn
           retention-days: 90
 
   live-production-baseline:
     name: Read-only production baseline
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.static-security-evidence.result != 'cancelled' }}
     needs: static-security-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Use Node.js 22
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -99,7 +139,7 @@ jobs:
 
       - name: Retain live-check evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: spc-live-security-baseline-${{ github.run_id }}
           path: live-security-baseline.txt
