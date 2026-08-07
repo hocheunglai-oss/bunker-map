@@ -202,10 +202,7 @@ test("sanitized SPC system inventory records confirmed boundaries and pending ow
     "35-day managed window",
     "no project log drain was observed",
   ]) {
-    assert.match(
-      inventory,
-      new RegExp(fact.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-    )
+    assert.ok(inventory.toLowerCase().includes(fact.toLowerCase()))
   }
   assert.match(inventory, /contains no credential values, user records, message content/)
   assert.match(inventory, /Service owner \| Pending management confirmation/)
