@@ -81,18 +81,48 @@ test("all confidential Outlook APIs accept bearer-or-cookie request auth", async
   assert.match(templates, /export async function GET\(request: Request\)/)
   assert.match(recipients, /export async function GET\(request: Request\)/)
   assert.match(taskpane, /export async function POST\(request: Request\)/)
-})
-
-test("Outlook shells avoid stale executable caching while authenticated data stays private", async () => {
-  const { authDialog, taskpane } = await sources()
-
-  for (const source of [authDialog, taskpane]) {
-    assert.match(source, /private, no-store, max-age=0/)
+  for (const [name, source] of Object.entries({ templates, recipients })) {
     assert.doesNotMatch(
       source,
-      /public, max-age=0, s-maxage=604800, stale-while-revalidate=86400/,
+      /Vercel-CDN-Cache-Control|OUTLOOK_SHELL_EDGE_CACHE_CONTROL/,
+      `${name} must never opt confidential JSON into edge caching`,
     )
   }
+})
+
+test("Outlook taskpane uses bounded edge caching while authenticated data stays private", async () => {
+  const { authDialog, taskpane } = await sources()
+
+  const taskpaneHtmlHeaders = taskpane.match(
+    /function htmlHeaders\(\) \{([\s\S]*?)\n\}/,
+  )
+  assert.ok(taskpaneHtmlHeaders, "taskpane HTML headers should be present")
+  assert.match(
+    taskpane,
+    /OUTLOOK_SHELL_BROWSER_CACHE_CONTROL =\n  "public, max-age=0, must-revalidate"/,
+  )
+  assert.match(
+    taskpane,
+    /OUTLOOK_SHELL_EDGE_CACHE_CONTROL =\n  "public, max-age=300, must-revalidate"/,
+  )
+  assert.match(
+    taskpaneHtmlHeaders[1],
+    /"Cache-Control": OUTLOOK_SHELL_BROWSER_CACHE_CONTROL/,
+  )
+  assert.match(
+    taskpaneHtmlHeaders[1],
+    /"Vercel-CDN-Cache-Control": OUTLOOK_SHELL_EDGE_CACHE_CONTROL/,
+  )
+  assert.doesNotMatch(taskpaneHtmlHeaders[1], /private|no-store|stale-while-revalidate|immutable/)
+  assert.doesNotMatch(taskpane, /s-maxage=604800|stale-while-revalidate=86400/)
+
+  assert.match(authDialog, /private, no-store, max-age=0/)
+  assert.doesNotMatch(
+    authDialog,
+    /Vercel-CDN-Cache-Control|OUTLOOK_SHELL_EDGE_CACHE_CONTROL/,
+  )
+  assert.match(taskpane, /function jsonHeaders\(\)[\s\S]*?private, no-store, max-age=0/)
+  assert.match(taskpane, /function insertionAuditSuccess\([\s\S]*?private, no-store, max-age=0/)
 })
 
 test("public taskpane stays inert until a protected bearer validation succeeds", async () => {

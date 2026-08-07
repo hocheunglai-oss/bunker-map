@@ -8,6 +8,10 @@ export const revalidate = 0
 const RECIPIENT_MAP_TTL_SECONDS = 120
 const DEFAULT_CERTIFICATION_MAX_AGE_SECONDS = 36 * 60 * 60
 const MAX_CERTIFICATION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+const OUTLOOK_SHELL_BROWSER_CACHE_CONTROL =
+  "public, max-age=0, must-revalidate"
+const OUTLOOK_SHELL_EDGE_CACHE_CONTROL =
+  "public, max-age=300, must-revalidate"
 
 function buildBaseUrl(request: Request) {
   return new URL(request.url).origin
@@ -16,7 +20,8 @@ function buildBaseUrl(request: Request) {
 function htmlHeaders() {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "private, no-store, max-age=0",
+    "Cache-Control": OUTLOOK_SHELL_BROWSER_CACHE_CONTROL,
+    "Vercel-CDN-Cache-Control": OUTLOOK_SHELL_EDGE_CACHE_CONTROL,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
   }
