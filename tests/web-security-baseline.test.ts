@@ -23,6 +23,17 @@ function directiveValues(csp: string, directiveName: string) {
   return directive.slice(directiveName.length + 1).split(/\s+/)
 }
 
+const expectedOfficeFrameAncestors = [
+  "'self'",
+  "https://outlook.office.com",
+  "https://outlook.office365.com",
+  "https://*.office.com",
+  "https://*.office365.com",
+  "https://*.officeapps.live.com",
+  "https://*.microsoft365.com",
+  "https://*.cloud.microsoft",
+]
+
 test("global response headers retain the baseline and stage the application CSP", async () => {
   assert.equal(nextConfig.poweredByHeader, false)
   assert.equal(typeof nextConfig.headers, "function")
@@ -64,6 +75,11 @@ test("global response headers retain the baseline and stage the application CSP"
       new RegExp(directive.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     )
   }
+  assert.deepEqual(
+    directiveValues(enforcedCsp, "frame-ancestors"),
+    expectedOfficeFrameAncestors,
+    "the enforced framing policy should support legacy and current Microsoft 365 Outlook hosts",
+  )
 
   const csp = headers.get("content-security-policy-report-only")
   assert.ok(csp, "report-only CSP should be configured")
@@ -93,6 +109,12 @@ test("global response headers retain the baseline and stage the application CSP"
   ]) {
     assert.ok(csp.includes(requiredOrigin), `${requiredOrigin} should be allowlisted`)
   }
+
+  assert.deepEqual(
+    directiveValues(csp, "frame-ancestors"),
+    expectedOfficeFrameAncestors,
+    "the staged policy should retain the same Outlook framing contract",
+  )
 
   assert.deepEqual(directiveValues(csp, "connect-src"), [
     "'self'",

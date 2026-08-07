@@ -75,6 +75,9 @@ function validateBaselineHeaders(response) {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'self'",
+    "https://*.officeapps.live.com",
+    "https://*.microsoft365.com",
+    "https://*.cloud.microsoft",
     "upgrade-insecure-requests",
   ]) {
     assertCondition(

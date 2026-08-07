@@ -1,10 +1,21 @@
 const isDevelopment = process.env.NODE_ENV === "development"
 
+const officeFrameAncestors = [
+  "'self'",
+  "https://outlook.office.com",
+  "https://outlook.office365.com",
+  "https://*.office.com",
+  "https://*.office365.com",
+  "https://*.officeapps.live.com",
+  "https://*.microsoft365.com",
+  "https://*.cloud.microsoft",
+].join(" ")
+
 const enforcedContentSecurityPolicy = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
-  "frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com https://*.office.com https://*.office365.com",
+  `frame-ancestors ${officeFrameAncestors}`,
   "upgrade-insecure-requests",
 ].join("; ")
 
@@ -21,7 +32,7 @@ const contentSecurityPolicyReportOnly = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
-  "frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com https://*.office.com https://*.office365.com",
+  `frame-ancestors ${officeFrameAncestors}`,
   "upgrade-insecure-requests",
 ].join("; ")
 
