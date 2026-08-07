@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { hktTimeFromTimestamp } from "@/lib/attendanceRules"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./attendanceRecord.module.css"
 import type {
@@ -357,8 +358,7 @@ function displayDateTime(value: string | null) {
 
 function displayTime(value: string | null) {
   if (!value) return "—"
-  const match = value.match(/(?:T|\s)(\d{2}:\d{2})/)
-  return match?.[1] || value.slice(0, 5)
+  return hktTimeFromTimestamp(value) || value.slice(0, 5)
 }
 
 function displayDays(value: number) {

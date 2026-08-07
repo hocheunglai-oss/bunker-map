@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   ATTENDANCE_SCHEDULES,
   deriveAttendanceExpectation,
+  hktTimeFromTimestamp,
   hktTimestampForDateAndTime,
   hktYearMonth,
   isPersonEmployedOnDate,
@@ -116,4 +117,9 @@ test("default period helpers use Hong Kong date boundaries", () => {
     year: 2026,
     month: 1,
   })
+})
+
+test("displays stored UTC punches in Hong Kong time", () => {
+  assert.equal(hktTimeFromTimestamp("2026-08-07T04:32:00.000Z"), "12:32")
+  assert.equal(hktTimeFromTimestamp("not-a-time"), null)
 })

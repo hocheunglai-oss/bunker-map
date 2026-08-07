@@ -116,6 +116,18 @@ export function hktDateFromTimestamp(timestamp: number | Date) {
   return formatIsoDate(date)
 }
 
+export function hktTimeFromTimestamp(timestamp: number | Date | string) {
+  const source =
+    timestamp instanceof Date
+      ? timestamp
+      : new Date(timestamp)
+  if (!Number.isFinite(source.getTime())) return null
+  const hkt = new Date(source.getTime() + HONG_KONG_OFFSET_MS)
+  return `${String(hkt.getUTCHours()).padStart(2, "0")}:${String(
+    hkt.getUTCMinutes(),
+  ).padStart(2, "0")}`
+}
+
 export function hktTimestampForDateAndTime(dateText: string, timeText: string) {
   const date = parseIsoDate(dateText)
   const timeMatch = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(timeText)
