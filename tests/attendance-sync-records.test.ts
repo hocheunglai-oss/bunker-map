@@ -15,6 +15,8 @@ test("normalizes a fictional DingTalk punch in Hong Kong time", () => {
     checkType: "OnDuty",
     sourceType: "ATM",
     deviceSN: "FICTIONAL-DEVICE-001",
+    photoUrl: "https://sensitive.invalid/photo.jpg",
+    locationDetail: "Sensitive fictional location",
   }
 
   const first = normalizeDingTalkPunch(record, people)
@@ -24,7 +26,18 @@ test("normalizes a fictional DingTalk punch in Hong Kong time", () => {
   assert.equal(first.work_date, "2026-08-08")
   assert.equal(first.source_record_key.length, 64)
   assert.equal(first.source_record_key, second?.source_record_key)
-  assert.equal(first.raw_payload, record)
+  assert.deepEqual(first.raw_payload, {
+    id: "987654",
+    userId: "fictional-user-001",
+    checkType: "OnDuty",
+    userCheckTime: Date.parse("2026-08-07T16:30:00.000Z"),
+    sourceType: "ATM",
+    deviceSN: "FICTIONAL-DEVICE-001",
+    timeResult: null,
+    locationResult: null,
+  })
+  assert.equal("photoUrl" in first.raw_payload, false)
+  assert.equal("locationDetail" in first.raw_payload, false)
 })
 
 test("rejects invalid or unmapped DingTalk punches", () => {

@@ -71,6 +71,14 @@ test("every attendance table is RLS-restricted, mutation-fenced, backed up, and 
     migration,
     /grant select, insert, update, delete on table public\.attendance_raw_punches/,
   )
+  assert.match(
+    migration,
+    /existing\.source like 'legacy-monthly:%'/,
+  )
+  assert.match(
+    migration,
+    /existing\.note like 'Imported from legacy monthly statement %'/,
+  )
 })
 
 test("human attendance changes are visible through the page-scoped Audit Log", () => {

@@ -670,6 +670,56 @@ begin
     true
   );
 
+  -- An annual workbook is an authoritative replacement for its year. Remove
+  -- only rows previously owned by the legacy importer; manual records remain.
+  delete from public.attendance_entitlements as existing
+  where existing.note like 'Imported from legacy attendance workbook (%'
+    and existing.year in (
+      select scope.year
+      from (
+        select opening.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'openings', '[]'::jsonb))
+          as opening(year integer)
+        union
+        select monthly.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'monthly', '[]'::jsonb))
+          as monthly(year integer)
+      ) as scope
+      where scope.year between 2000 and 2200
+    );
+
+  delete from public.attendance_monthly_adjustments as existing
+  where existing.source like 'legacy-monthly:%'
+    and existing.year in (
+      select scope.year
+      from (
+        select opening.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'openings', '[]'::jsonb))
+          as opening(year integer)
+        union
+        select monthly.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'monthly', '[]'::jsonb))
+          as monthly(year integer)
+      ) as scope
+      where scope.year between 2000 and 2200
+    );
+
+  delete from public.attendance_monthly_confirmations as existing
+  where existing.note like 'Imported from legacy monthly statement %'
+    and existing.year in (
+      select scope.year
+      from (
+        select opening.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'openings', '[]'::jsonb))
+          as opening(year integer)
+        union
+        select monthly.year
+        from jsonb_to_recordset(coalesce(p_payload -> 'monthly', '[]'::jsonb))
+          as monthly(year integer)
+      ) as scope
+      where scope.year between 2000 and 2200
+    );
+
   insert into public.attendance_entitlements (
     person_id,
     year,
@@ -709,21 +759,6 @@ begin
     note = excluded.note,
     updated_by = excluded.updated_by;
   get diagnostics entitlement_count = row_count;
-
-  delete from public.attendance_monthly_adjustments as existing
-  using jsonb_to_recordset(coalesce(p_payload -> 'monthly', '[]'::jsonb)) as monthly(
-    person_id uuid,
-    year integer,
-    month integer,
-    source_key text,
-    statement_date date,
-    categories jsonb,
-    is_confirmed boolean
-  )
-  where existing.person_id = monthly.person_id
-    and existing.year = monthly.year
-    and existing.month = monthly.month
-    and existing.source = monthly.source_key;
 
   insert into public.attendance_monthly_adjustments (
     person_id,

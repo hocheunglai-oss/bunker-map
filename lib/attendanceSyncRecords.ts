@@ -19,7 +19,7 @@ export type NormalizedRawPunch = {
   device_sn: string | null
   time_result: string | null
   location_result: string | null
-  raw_payload: DingTalkAttendanceRecord
+  raw_payload: Record<string, string | number | null>
 }
 
 function cleanString(value: unknown, maxLength = 500) {
@@ -68,18 +68,33 @@ export function normalizeDingTalkPunch(
   const punchTime = new Date(timestamp)
   if (!Number.isFinite(punchTime.getTime())) return null
 
+  const sourceRecordId = cleanString(record.id, 200)
+  const sourceType = cleanString(record.sourceType, 100)
+  const deviceSn = cleanString(record.deviceSN, 200)
+  const timeResult = cleanString(record.timeResult, 100)
+  const locationResult = cleanString(record.locationResult, 100)
+
   return {
     person_id: person.id,
     source_record_key: makeRecordKey(record),
-    source_record_id: cleanString(record.id, 200),
+    source_record_id: sourceRecordId,
     dingtalk_user_id: userId,
     check_type: checkType,
     punch_time: punchTime.toISOString(),
     work_date: hktDateFromTimestamp(punchTime),
-    source_type: cleanString(record.sourceType, 100),
-    device_sn: cleanString(record.deviceSN, 200),
-    time_result: cleanString(record.timeResult, 100),
-    location_result: cleanString(record.locationResult, 100),
-    raw_payload: record,
+    source_type: sourceType,
+    device_sn: deviceSn,
+    time_result: timeResult,
+    location_result: locationResult,
+    raw_payload: {
+      id: sourceRecordId,
+      userId,
+      checkType,
+      userCheckTime: timestamp,
+      sourceType,
+      deviceSN: deviceSn,
+      timeResult,
+      locationResult,
+    },
   }
 }
