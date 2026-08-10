@@ -8,6 +8,7 @@ export const runtime = "nodejs"
 export const maxDuration = 240
 
 const NON_ALERTING_CHECK_IDS = new Set([
+  "attendance-sync",
   "schema",
 ])
 

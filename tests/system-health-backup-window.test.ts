@@ -33,3 +33,18 @@ test("System Health keeps enough runtime for full backup-chain byte verification
   assert.ok(pageDurationSeconds * 1_000 >= backupTimeoutMs + 30_000)
   assert.ok(noticeDurationSeconds * 1_000 >= backupTimeoutMs + 30_000)
 })
+
+test("Attendance Sync remains visible in System Health without sending email notices", () => {
+  assert.match(
+    healthSource,
+    /runCheck\("attendance-sync", "Attendance Sync", checkAttendanceSync\)/,
+  )
+  assert.match(
+    noticeRouteSource,
+    /NON_ALERTING_CHECK_IDS = new Set\(\[[\s\S]*"attendance-sync"[\s\S]*\]\)/,
+  )
+  assert.match(
+    noticeRouteSource,
+    /check\.status !== "ok" && !isNonAlertingCheck\(check\)/,
+  )
+})
