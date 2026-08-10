@@ -401,6 +401,7 @@ export async function requireAdminPagePermissionForRequest(
 
   return {
     ...session,
+    adminUserId: resolved.adminUserId,
     expiresAt: resolved.expiresAt,
   }
 }
@@ -421,6 +422,7 @@ export async function requireOutlookAddinPagePermissionForRequest(
 
   return {
     ...session,
+    adminUserId: resolved.adminUserId,
     expiresAt: resolved.expiresAt,
   }
 }

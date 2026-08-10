@@ -92,12 +92,14 @@ test("human attendance changes are visible through the page-scoped Audit Log", (
 test("Attendance API, workbook routes, and cron enforce the intended permissions", () => {
   assert.match(
     attendanceRoute,
-    /requireAdminPagePermissionForRequest\(request, ATTENDANCE_PAGE_ID, "view"\)/,
+    /requireAdminPagePermissionForRequest\(\s*request,\s*ATTENDANCE_PAGE_ID,\s*"view"/,
   )
   assert.match(
     attendanceRoute,
-    /ATTENDANCE_PAGE_ID,\s+"edit",/,
+    /hasAdminPagePermission\(session, ATTENDANCE_PAGE_ID, "edit"\)/,
   )
+  assert.match(attendanceRoute, /attendancePersonBelongsToAdminUser/)
+  assert.match(attendanceRoute, /if \(!canEdit\) throw new Error\("Forbidden"\)/)
   assert.match(importRoute, /ATTENDANCE_PAGE_ID,\s+"edit",/)
   assert.match(exportRoute, /ATTENDANCE_PAGE_ID,\s+"view",/)
   assert.match(importRoute, /mode === "apply"/)

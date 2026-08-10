@@ -48,11 +48,13 @@ const PAGE_TABLES: Record<string, string[]> = {
   "openai-usage": ["openai_usage_events"],
   "attendance-record": [
     "attendance_people",
+    "attendance_team_assignments",
     "attendance_leave_entries",
     "attendance_manual_overrides",
     "attendance_entitlements",
     "attendance_monthly_adjustments",
     "attendance_monthly_confirmations",
+    "attendance_reminder_dispatches",
   ],
 }
 

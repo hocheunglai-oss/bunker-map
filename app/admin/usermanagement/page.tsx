@@ -21,6 +21,7 @@ type ManagedAdminUser = {
   username: string
   displayName: string
   role: string
+  attendanceGroup: "BT" | "BS" | "AC" | null
   permissions: AdminPagePermissionMap
   createdAt: string
   updatedAt: string
@@ -49,6 +50,7 @@ type DraftUser = {
   username: string
   displayName: string
   role: string
+  attendanceGroup: "" | "BT" | "BS" | "AC"
   password: string
 }
 
@@ -121,10 +123,14 @@ const labelStyle: React.CSSProperties = {
 }
 
 function createDraftUser(role = "AC"): DraftUser {
+  const attendanceGroup = ["BT", "BS", "AC"].includes(role)
+    ? (role as "BT" | "BS" | "AC")
+    : ""
   return {
     username: "",
     displayName: "",
     role,
+    attendanceGroup,
     password: "",
   }
 }
@@ -135,6 +141,7 @@ function userToDraft(user: ManagedAdminUser): DraftUser {
     username: user.username,
     displayName: user.displayName,
     role: normaliseAdminRole(user.role),
+    attendanceGroup: user.attendanceGroup || "",
     password: "",
   }
 }
@@ -317,6 +324,7 @@ export default function UserManagementPage() {
             username: draft.username,
             displayName: draft.displayName,
             role: draft.role,
+            attendanceGroup: draft.attendanceGroup || null,
             password: draft.password,
           },
         }),
@@ -614,20 +622,36 @@ export default function UserManagementPage() {
                     >
                       {user.username}
                     </div>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        marginTop: "7px",
-                        border: "1px solid var(--fc-admin-border)",
-                        borderRadius: "999px",
-                        padding: "3px 7px",
-                        color: "var(--fc-admin-muted)",
-                        fontSize: "10px",
-                        fontWeight: 900,
-                      }}
-                    >
-                      {user.role}
-                    </span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginTop: "7px" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          border: "1px solid var(--fc-admin-border)",
+                          borderRadius: "999px",
+                          padding: "3px 7px",
+                          color: "var(--fc-admin-muted)",
+                          fontSize: "10px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {user.role}
+                      </span>
+                      {user.attendanceGroup ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            border: "1px solid #1473e655",
+                            borderRadius: "999px",
+                            padding: "3px 7px",
+                            color: "#1473e6",
+                            fontSize: "10px",
+                            fontWeight: 900,
+                          }}
+                        >
+                          ATTENDANCE {user.attendanceGroup}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -1000,6 +1024,28 @@ export default function UserManagementPage() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label style={labelStyle}>
+                  Attendance Group
+                  <select
+                    value={draft.attendanceGroup}
+                    onChange={(event) =>
+                      updateDraft(
+                        "attendanceGroup",
+                        event.target.value as DraftUser["attendanceGroup"],
+                      )
+                    }
+                    disabled={!canEdit || saving}
+                    style={inputStyle}
+                  >
+                    <option value="">Not included in attendance</option>
+                    <option value="BT">BT · Bunker Trader</option>
+                    <option value="BS">BS · Bunker Support</option>
+                    <option value="AC">AC · Accounts</option>
+                  </select>
+                  <span style={{ color: "var(--fc-admin-muted)", fontSize: "10px", fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>
+                    Attendance Record uses this group for working hours and lateness rules.
+                  </span>
                 </label>
 
                 <div

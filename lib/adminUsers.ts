@@ -16,7 +16,11 @@ import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 
 const scryptAsync = promisify(scrypt)
 const ADMIN_ROLE_METADATA_KEY = "__adminRole"
+export const ADMIN_ATTENDANCE_GROUP_METADATA_KEY = "__attendanceGroup"
 const ADMIN_PERMISSION_GROUPS_STORE_KEY = "admin-permission-groups"
+
+export const ADMIN_ATTENDANCE_GROUPS = ["BT", "BS", "AC"] as const
+export type AdminAttendanceGroup = (typeof ADMIN_ATTENDANCE_GROUPS)[number]
 
 type AdminUserRow = {
   id: string
@@ -55,6 +59,7 @@ export type ManagedAdminUser = {
   username: string
   displayName: string
   role: string
+  attendanceGroup: AdminAttendanceGroup | null
   isActive: boolean
   passwordResetRequired: boolean
   permissions: AdminPagePermissionMap
@@ -77,6 +82,7 @@ export type AuthenticatedAdminUser = {
   username: string
   displayName: string
   role: string
+  attendanceGroup: AdminAttendanceGroup | null
   passwordResetRequired: boolean
   credentialUpdatedAt: string
   permissions: AdminPagePermissionMap
@@ -88,6 +94,7 @@ export type SaveAdminUserInput = {
   username: string
   displayName?: string
   role?: string
+  attendanceGroup?: AdminAttendanceGroup | null
   password?: string
 }
 
@@ -194,6 +201,35 @@ function getStoredAdminRole(row: Pick<AdminUserRow, "role" | "permissions">) {
   return normaliseAdminRole(
     typeof metadataRole === "string" ? metadataRole : row.role
   )
+}
+
+export function normaliseAdminAttendanceGroup(
+  value: unknown,
+): AdminAttendanceGroup | null {
+  const normalised = typeof value === "string" ? value.trim().toUpperCase() : ""
+  return ADMIN_ATTENDANCE_GROUPS.includes(
+    normalised as AdminAttendanceGroup,
+  )
+    ? (normalised as AdminAttendanceGroup)
+    : null
+}
+
+function getStoredAdminAttendanceGroup(
+  row: Pick<AdminUserRow, "role" | "permissions">,
+) {
+  if (
+    row.permissions &&
+    Object.prototype.hasOwnProperty.call(
+      row.permissions,
+      ADMIN_ATTENDANCE_GROUP_METADATA_KEY,
+    )
+  ) {
+    return normaliseAdminAttendanceGroup(
+      row.permissions[ADMIN_ATTENDANCE_GROUP_METADATA_KEY],
+    )
+  }
+
+  return normaliseAdminAttendanceGroup(getStoredAdminRole(row))
 }
 
 function getRoleDefaultMap(roleDefaults: ManagedAdminRoleDefault[]) {
@@ -527,6 +563,7 @@ function mapAdminUser(
     username: row.username,
     displayName: row.display_name || row.username,
     role,
+    attendanceGroup: getStoredAdminAttendanceGroup(row),
     isActive: row.is_active !== false,
     passwordResetRequired: row.password_reset_required === true,
     permissions,
@@ -573,6 +610,7 @@ function mapAuthenticatedAdminUser(
     username: user.username,
     displayName: user.displayName,
     role: user.role,
+    attendanceGroup: user.attendanceGroup,
     passwordResetRequired: user.passwordResetRequired,
     credentialUpdatedAt: row.updated_at,
     permissions: user.permissions,
@@ -894,6 +932,29 @@ export async function saveManagedAdminUser(
   try {
     const supabase = getServiceClient(actor)
     const useLegacyRoles = await usesLegacyAdminRoleValues(supabase)
+    let attendanceGroup = input.attendanceGroup
+    if (attendanceGroup === undefined && input.id) {
+      const { data: existingUser, error: existingUserError } = await supabase
+        .from("admin_users")
+        .select("role,permissions")
+        .eq("id", input.id)
+        .maybeSingle()
+      if (existingUserError) throw existingUserError
+      if (existingUser) {
+        attendanceGroup = getStoredAdminAttendanceGroup(
+          existingUser as Pick<AdminUserRow, "role" | "permissions">,
+        )
+      }
+    }
+    if (attendanceGroup === undefined) {
+      attendanceGroup = normaliseAdminAttendanceGroup(role)
+    }
+    if (
+      attendanceGroup !== null &&
+      !ADMIN_ATTENDANCE_GROUPS.includes(attendanceGroup)
+    ) {
+      throw new Error("Select a valid attendance group.")
+    }
     const payload: Record<string, unknown> = {
       username,
       display_name: input.displayName?.trim() || username,
@@ -901,6 +962,7 @@ export async function saveManagedAdminUser(
       permissions: {
         ...permissions,
         [ADMIN_ROLE_METADATA_KEY]: role,
+        [ADMIN_ATTENDANCE_GROUP_METADATA_KEY]: attendanceGroup,
       },
       updated_at: new Date().toISOString(),
     }
@@ -954,6 +1016,17 @@ export async function deleteManagedAdminUser(id: string, actor?: AdminActor) {
 
   try {
     const supabase = getServiceClient(actor)
+    const { data: attendancePerson, error: attendanceError } = await supabase
+      .from("attendance_people")
+      .select("id")
+      .eq("admin_user_id", id)
+      .maybeSingle()
+    if (attendanceError) throw attendanceError
+    if (attendancePerson) {
+      throw new Error(
+        "This user cannot be deleted while included in Attendance Record. Remove them from ALL TIME first.",
+      )
+    }
     const { error } = await supabase.from("admin_users").delete().eq("id", id)
     if (error) throw error
   } catch (error) {

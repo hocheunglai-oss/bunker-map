@@ -200,11 +200,13 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_presentation_chunks: "spc-readme",
   openai_usage_events: "openai-usage",
   attendance_people: "attendance-record",
+  attendance_team_assignments: "attendance-record",
   attendance_leave_entries: "attendance-record",
   attendance_manual_overrides: "attendance-record",
   attendance_entitlements: "attendance-record",
   attendance_monthly_adjustments: "attendance-record",
   attendance_monthly_confirmations: "attendance-record",
+  attendance_reminder_dispatches: "attendance-record",
 }
 
 const AUDIT_PAGE_LABELS: Record<string, string> = {
@@ -255,11 +257,13 @@ const ENTITY_NAMES: Record<string, string> = {
   parser_reports: "parser report",
   openai_usage_events: "OpenAI usage event",
   attendance_people: "attendance person",
+  attendance_team_assignments: "attendance group assignment",
   attendance_leave_entries: "attendance leave entry",
   attendance_manual_overrides: "attendance correction",
   attendance_entitlements: "attendance entitlement",
   attendance_monthly_adjustments: "attendance opening record",
   attendance_monthly_confirmations: "attendance monthly confirmation",
+  attendance_reminder_dispatches: "attendance reminder dispatch",
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -328,6 +332,8 @@ const FIELD_LABELS: Record<string, string> = {
   staff_code: "staff code",
   work_group: "work group",
   team: "team",
+  effective_from: "effective from",
+  effective_to: "effective to",
   dingtalk_user_id: "DingTalk user",
   attendance_date: "attendance date",
   work_date: "attendance date",

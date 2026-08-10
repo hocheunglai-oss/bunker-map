@@ -17,6 +17,7 @@ type UserActionPayload = {
     username?: string
     displayName?: string
     role?: string
+    attendanceGroup?: "BT" | "BS" | "AC" | null
     password?: string
   }
   roleDefault?: {
@@ -37,6 +38,7 @@ function errorResponse(error: unknown, fallback: string) {
             message.includes("Password") ||
             message.includes("password") ||
             message.includes("valid permission group") ||
+            message.includes("valid attendance group") ||
             message.includes("cannot be deleted") ||
             message.includes("Move all users")
           ? 400
@@ -100,6 +102,7 @@ export async function POST(request: Request) {
           username: payload.user.username,
           displayName: payload.user.displayName,
           role: payload.user.role,
+          attendanceGroup: payload.user.attendanceGroup,
           password: payload.user.password,
         },
         session,

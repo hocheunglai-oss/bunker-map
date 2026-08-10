@@ -13,6 +13,7 @@ const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
+const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -92,6 +93,12 @@ const TABLE_SECTIONS = [
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
   },
   {
+    key: "attendanceTeamAssignments",
+    table: "attendance_team_assignments",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD,
+  },
+  {
     key: "attendanceRawPunches",
     table: "attendance_raw_punches",
     primaryKey: ["id"],
@@ -126,6 +133,12 @@ const TABLE_SECTIONS = [
     table: "attendance_monthly_confirmations",
     primaryKey: ["id"],
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceReminderDispatches",
+    table: "attendance_reminder_dispatches",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD,
   },
   {
     key: "attendanceSyncRuns",
@@ -1449,11 +1462,20 @@ function validateSections(backup, errors, warnings) {
   const sharedContactIds = idSet(data, "sharedAddressbookContacts")
   const sharedGroupIds = idSet(data, "sharedAddressbookGroups")
   const auditLogIds = idSet(data, "auditLogs")
+  const adminUserIds = idSet(data, "adminUsers")
   const spcUserIds = idSet(data, "spcUsers")
   const spcEnquiryIds = idSet(data, "spcEnquiries")
   const whatsappConversationIds = idSet(data, "whatsappConversations")
   const attendancePersonIds = idSet(data, "attendancePeople")
   const attendanceRawPunchIds = idSet(data, "attendanceRawPunches")
+
+  checkReferences(
+    rows(data, "attendancePeople"),
+    "admin_user_id",
+    adminUserIds,
+    "attendancePeople.admin_user_id",
+    errors
+  )
 
   checkReferences(
     rows(data, "ccCompanyFiles"),
@@ -1545,12 +1567,14 @@ function validateSections(backup, errors, warnings) {
     { required: true }
   )
   for (const [section, label] of [
+    ["attendanceTeamAssignments", "attendanceTeamAssignments.person_id"],
     ["attendanceRawPunches", "attendanceRawPunches.person_id"],
     ["attendanceLeaveEntries", "attendanceLeaveEntries.person_id"],
     ["attendanceManualOverrides", "attendanceManualOverrides.person_id"],
     ["attendanceEntitlements", "attendanceEntitlements.person_id"],
     ["attendanceMonthlyAdjustments", "attendanceMonthlyAdjustments.person_id"],
     ["attendanceMonthlyConfirmations", "attendanceMonthlyConfirmations.person_id"],
+    ["attendanceReminderDispatches", "attendanceReminderDispatches.person_id"],
   ]) {
     checkReferences(
       rows(data, section),

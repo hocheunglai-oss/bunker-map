@@ -48,6 +48,7 @@ const OPENAI_USAGE_MIGRATION_HEAD = "20260723083832"
 const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
+const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -105,6 +106,11 @@ const BACKUP_TABLE_SECTIONS = [
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
   },
   {
+    key: "attendanceTeamAssignments",
+    table: "attendance_team_assignments",
+    introducedAt: ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD,
+  },
+  {
     key: "attendanceRawPunches",
     table: "attendance_raw_punches",
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
@@ -133,6 +139,11 @@ const BACKUP_TABLE_SECTIONS = [
     key: "attendanceMonthlyConfirmations",
     table: "attendance_monthly_confirmations",
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceReminderDispatches",
+    table: "attendance_reminder_dispatches",
+    introducedAt: ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD,
   },
   {
     key: "attendanceSyncRuns",
@@ -1202,7 +1213,12 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   const configured = Boolean(
     process.env.DINGTALK_CLIENT_ID && process.env.DINGTALK_CLIENT_SECRET
   )
-  const [activeResponse, mappedResponse, latestResponse] = await Promise.all([
+  const [
+    activeResponse,
+    mappedResponse,
+    currentGroupResponse,
+    latestResponse,
+  ] = await Promise.all([
     supabase
       .from("attendance_people")
       .select("id", { count: "exact", head: true })
@@ -1212,6 +1228,10 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
       .select("id", { count: "exact", head: true })
       .eq("is_active", true)
       .not("dingtalk_user_id", "is", null),
+    supabase
+      .from("attendance_team_assignments")
+      .select("person_id", { count: "exact", head: true })
+      .is("effective_to", null),
     supabase
       .from("attendance_sync_runs")
       .select(
@@ -1224,10 +1244,12 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
 
   if (activeResponse.error) throw activeResponse.error
   if (mappedResponse.error) throw mappedResponse.error
+  if (currentGroupResponse.error) throw currentGroupResponse.error
   if (latestResponse.error) throw latestResponse.error
 
   const activePeople = activeResponse.count || 0
   const mappedPeople = mappedResponse.count || 0
+  const currentGroupAssignments = currentGroupResponse.count || 0
   const latest = latestResponse.data
   const startedAt = latest?.started_at ? Date.parse(latest.started_at) : 0
   const ageMinutes = startedAt
@@ -1244,6 +1266,9 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   if (incompleteMappings) {
     warnings.push(`${activePeople - mappedPeople} active people need a DingTalk user mapping`)
   }
+  if (currentGroupAssignments !== activePeople) {
+    warnings.push("active attendance people and current group history do not match")
+  }
   if (configured && mappedPeople && !latest) warnings.push("the automatic sync has not run yet")
   if (stale) warnings.push("the latest automatic sync is older than one hour")
   if (unhealthyRun) warnings.push(`the latest automatic sync is ${latestStatus}`)
@@ -1257,6 +1282,7 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
       configured,
       activePeople,
       mappedPeople,
+      currentGroupAssignments,
       latestStatus,
       latestStartedAt: latest?.started_at || null,
       latestCompletedAt: latest?.completed_at || null,

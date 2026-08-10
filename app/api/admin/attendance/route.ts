@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server"
-import { requireAdminPagePermissionForRequest } from "@/lib/adminAuth"
+import {
+  hasAdminPagePermission,
+  requireAdminPagePermissionForRequest,
+} from "@/lib/adminAuth"
 import { createAdminAuditContext, createAdminAuditedSupabaseClient } from "@/lib/adminAudit"
 import {
   AttendanceValidationError,
+  attendancePersonBelongsToAdminUser,
   deleteAttendanceLeave,
   deleteAttendanceMonthlyAdjustment,
   deleteAttendanceOverride,
   getAttendanceLeave,
+  getAllTimeAttendance,
   getAttendanceSettings,
   getDailyAttendance,
   getMonthlyAttendance,
@@ -16,6 +21,8 @@ import {
   saveAttendanceMonthlyConfirmation,
   saveAttendanceOverride,
   saveAttendancePerson,
+  removeAttendancePerson,
+  sendAttendanceConfirmationReminders,
 } from "@/lib/attendanceData"
 import { ATTENDANCE_PAGE_ID, hktDateFromTimestamp } from "@/lib/attendanceRules"
 import { runAttendanceSync } from "@/lib/attendanceSync"
@@ -64,9 +71,14 @@ async function readJson(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    await requireAdminPagePermissionForRequest(request, ATTENDANCE_PAGE_ID, "view")
+    const session = await requireAdminPagePermissionForRequest(
+      request,
+      ATTENDANCE_PAGE_ID,
+      "view",
+    )
     const url = new URL(request.url)
     const view = url.searchParams.get("view") || "daily"
+    const canEdit = hasAdminPagePermission(session, ATTENDANCE_PAGE_ID, "edit")
     let response: unknown
     if (view === "daily") {
       response = await getDailyAttendance(
@@ -75,12 +87,27 @@ export async function GET(request: Request) {
     } else if (view === "leave") {
       response = await getAttendanceLeave(url.searchParams.get("year"))
     } else if (view === "monthly") {
+      const scope = url.searchParams.get("scope")
+      if (scope && scope !== "year") {
+        throw new AttendanceValidationError("Attendance scope is unsupported.")
+      }
       response = await getMonthlyAttendance(
         url.searchParams.get("year"),
         url.searchParams.get("month"),
+        {
+          adminUserId: session.adminUserId,
+          canEdit,
+          includeYearSummary: scope === "year",
+        },
       )
+    } else if (view === "all-time") {
+      response = await getAllTimeAttendance(url.searchParams.get("year"), {
+        includeAvailableUsers: canEdit,
+      })
     } else if (view === "settings") {
-      response = await getAttendanceSettings(url.searchParams.get("year"))
+      response = await getAttendanceSettings(url.searchParams.get("year"), {
+        includeAvailableUsers: canEdit,
+      })
     } else {
       throw new AttendanceValidationError("Attendance view is unsupported.")
     }
@@ -100,7 +127,7 @@ export async function POST(request: Request) {
     const session = await requireAdminPagePermissionForRequest(
       request,
       ATTENDANCE_PAGE_ID,
-      "edit",
+      "view",
     )
     const payload = await readJson(request)
     const action = payload.action
@@ -111,12 +138,48 @@ export async function POST(request: Request) {
     if (!actor) throw new Error("Unauthorized")
     const context = createAdminAuditContext(session, request, ATTENDANCE_PAGE_ID)
     const client = createAdminAuditedSupabaseClient(context, { useServiceRole: true })
+    const canEdit = hasAdminPagePermission(session, ATTENDANCE_PAGE_ID, "edit")
+
+    if (action === "save-confirmation") {
+      const confirmationInput = payload.confirmation
+      const confirmationRow =
+        confirmationInput &&
+        typeof confirmationInput === "object" &&
+        !Array.isArray(confirmationInput)
+          ? (confirmationInput as Record<string, unknown>)
+          : {}
+      if (!canEdit) {
+        if (confirmationRow.status !== "confirmed") {
+          throw new Error("Forbidden")
+        }
+        const ownsPerson = session.adminUserId
+          ? await attendancePersonBelongsToAdminUser(
+              client,
+              confirmationRow.personId,
+              session.adminUserId,
+            )
+          : false
+        if (!ownsPerson) throw new Error("Forbidden")
+      }
+      const confirmation = await saveAttendanceMonthlyConfirmation(
+        client,
+        confirmationInput,
+        actor,
+      )
+      return privateJson({ success: true, confirmation })
+    }
+
+    if (!canEdit) throw new Error("Forbidden")
 
     if (action === "save-person" || action === "save-employee") {
       const person = await saveAttendancePerson(
         client,
         payload.person ?? payload.employee,
       )
+      return privateJson({ success: true, person })
+    }
+    if (action === "remove-person") {
+      const person = await removeAttendancePerson(client, payload.id)
       return privateJson({ success: true, person })
     }
     if (action === "save-leave") {
@@ -168,13 +231,30 @@ export async function POST(request: Request) {
       await deleteAttendanceMonthlyAdjustment(client, payload.id)
       return privateJson({ success: true })
     }
-    if (action === "save-confirmation") {
-      const confirmation = await saveAttendanceMonthlyConfirmation(
+    if (action === "send-reminder") {
+      const reminder = await sendAttendanceConfirmationReminders(
         client,
-        payload.confirmation,
+        payload,
         actor,
       )
-      return privateJson({ success: true, confirmation })
+      if (reminder.failed > 0) {
+        return privateJson(
+          {
+            success: false,
+            message: `${reminder.sent} reminder(s) sent; ${reminder.failed} failed. Try the failed recipients again.`,
+            reminder,
+          },
+          { status: 502 },
+        )
+      }
+      const skippedMessage = reminder.skipped
+        ? ` ${reminder.skipped} recently sent reminder(s) were not sent again.`
+        : ""
+      return privateJson({
+        success: true,
+        message: `${reminder.sent} reminder(s) sent.${skippedMessage}`,
+        reminder,
+      })
     }
     if (action === "sync" || action === "sync-dingtalk") {
       const sync = await runAttendanceSync()
