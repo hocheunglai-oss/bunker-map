@@ -93,7 +93,12 @@ export type SpcMfaTestAuditStatus =
   | SpcMfaTestVerificationResult
 
 export class SpcMfaTestDeliveryError extends Error {
-  readonly category: "configuration" | "timeout" | "rejected" | "invalid-response"
+  readonly category:
+    | "configuration"
+    | "timeout"
+    | "rejected"
+    | "template-unavailable"
+    | "invalid-response"
   readonly upstreamStatus: number | null
   readonly upstreamCode: string | null
 
@@ -181,7 +186,8 @@ export function isSpcMfaTestConfigured() {
   const secret = process.env.SPC_WHATSAPP_MFA_TEST_SECRET || ""
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || ""
   const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || ""
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || ""
+  const phoneNumberId =
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
   let validSupabaseUrl = false
   try {
     validSupabaseUrl = new URL(supabaseUrl).protocol === "https:"
@@ -319,7 +325,7 @@ export async function sendSpcMfaTestCode(
 ) {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
   const graphVersion = requireEnv("WHATSAPP_GRAPH_API_VERSION")
-  const phoneNumberId = requireEnv("WHATSAPP_PHONE_NUMBER_ID")
+  const phoneNumberId = requireEnv("SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID")
   if (!GRAPH_VERSION_PATTERN.test(graphVersion) || !GRAPH_ID_PATTERN.test(phoneNumberId)) {
     throw new SpcMfaTestDeliveryError("configuration")
   }
@@ -351,10 +357,14 @@ export async function sendSpcMfaTestCode(
 
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new SpcMfaTestDeliveryError("rejected", {
-      upstreamStatus: response.status,
-      upstreamCode: safeUpstreamCode(payload) || undefined,
-    })
+    const upstreamCode = safeUpstreamCode(payload)
+    throw new SpcMfaTestDeliveryError(
+      upstreamCode === "132001" ? "template-unavailable" : "rejected",
+      {
+        upstreamStatus: response.status,
+        upstreamCode: upstreamCode || undefined,
+      },
+    )
   }
 
   const messageId = safeMessageId(payload)

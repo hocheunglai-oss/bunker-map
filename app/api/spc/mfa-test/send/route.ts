@@ -147,7 +147,16 @@ export async function POST(request: Request) {
           }
         : { category: "unknown", requestId: requestedContext.requestId }
       console.error("[spc-mfa-test-delivery]", safeDetails)
-      return unavailableResponse(502)
+      return error instanceof SpcMfaTestDeliveryError &&
+        error.category === "template-unavailable"
+        ? spcPrivateJson(
+            {
+              message:
+                "The approved WhatsApp MFA test template is unavailable for the configured sender.",
+            },
+            { status: 502 },
+          )
+        : unavailableResponse(502)
     }
 
     try {

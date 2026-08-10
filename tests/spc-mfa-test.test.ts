@@ -125,18 +125,18 @@ test("SPC MFA configuration check validates the HMAC and Meta endpoint fields", 
     "NEXT_PUBLIC_SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SPC_WHATSAPP_MFA_TEST_SECRET",
+    "SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID",
     "WHATSAPP_ACCESS_TOKEN",
     "WHATSAPP_GRAPH_API_VERSION",
-    "WHATSAPP_PHONE_NUMBER_ID",
   ]
   const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   try {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co"
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role"
     process.env.SPC_WHATSAPP_MFA_TEST_SECRET = TEST_SECRET
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID = "123456789012345"
     process.env.WHATSAPP_ACCESS_TOKEN = "meta-token"
     process.env.WHATSAPP_GRAPH_API_VERSION = "v23.0"
-    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789012345"
     assert.equal(isSpcMfaTestConfigured(), true)
 
     process.env.SPC_WHATSAPP_MFA_TEST_SECRET = "short"
@@ -178,13 +178,15 @@ test("Meta send uses the configured endpoint and sanitizes upstream failures", a
   const keys = [
     "WHATSAPP_ACCESS_TOKEN",
     "WHATSAPP_GRAPH_API_VERSION",
+    "SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID",
     "WHATSAPP_PHONE_NUMBER_ID",
   ]
   const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   try {
     process.env.WHATSAPP_ACCESS_TOKEN = "top-secret-token"
     process.env.WHATSAPP_GRAPH_API_VERSION = "v23.0"
-    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789012345"
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID = "123456789012345"
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "999999999999999"
     let capturedUrl = ""
     let capturedInit: RequestInit | undefined
     const acceptedFetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -225,6 +227,25 @@ test("Meta send uses the configured endpoint and sanitizes upstream failures", a
         assert.equal(error.category, "rejected")
         assert.equal(error.upstreamStatus, 400)
         assert.equal(error.upstreamCode, "131000")
+        assert.doesNotMatch(error.message, /private upstream|token/i)
+        return true
+      },
+    )
+
+    const mismatchedTemplateFetch = (async () => new Response(
+      JSON.stringify({ error: { code: 132001, message: "raw private upstream detail" } }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch
+    await assert.rejects(
+      () => sendSpcMfaTestCode(
+        { to: "85291234567", code: "004219" },
+        mismatchedTemplateFetch,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SpcMfaTestDeliveryError)
+        assert.equal(error.category, "template-unavailable")
+        assert.equal(error.upstreamStatus, 404)
+        assert.equal(error.upstreamCode, "132001")
         assert.doesNotMatch(error.message, /private upstream|token/i)
         return true
       },
