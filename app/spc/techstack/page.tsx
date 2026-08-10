@@ -31,6 +31,7 @@ const SERVICES = [
   ["APPLICATION", "NEXT.JS 16 / REACT 19 / TYPESCRIPT", "VERCEL", "SPC.FCUNO.COM"],
   ["AUTHENTICATION", "OPAQUE 12-HOUR SERVER SESSIONS / SHA-256 TOKEN HASH / REVOCATION / PASSWORD-CHANGE INVALIDATION", "SPC APP / SUPABASE", "SPC USERS"],
   ["LOGIN SECURITY", "PERSISTENT 15-MINUTE RATE LIMIT / COALESCED BLOCK MONITORING / HASHED USERNAME + TRUSTED IP / GENERIC FAILURES / DAILY 30-DAY RETENTION PURGE", "SPC APP / SUPABASE / VERCEL CRON", "/API/SPC/LOGIN"],
+  ["WHATSAPP LOGIN MFA", "FEATURE-FLAGGED REAL-LOGIN PILOT FOR OTTO ONLY / PASSWORD THEN SIX-DIGIT WHATSAPP CODE / KEYED-HASH OTP / 5-MINUTE EXPIRY / SINGLE USE / 5 ATTEMPTS / 60-SECOND NEW-CODE LIMIT / ALL OTHER SPC ACCOUNTS REMAIN PASSWORD-ONLY", "SPC APP / WHATSAPP CLOUD API / SUPABASE", "/API/SPC/LOGIN/MFA"],
   ["WHATSAPP MFA TEST", "ADMIN-ONLY INACTIVE-ACCOUNT PILOT / DEDICATED META TEST SENDER / SIX-DIGIT KEYED-HASH OTP / 5-MINUTE EXPIRY / SINGLE USE / 5 ATTEMPTS / 60-SECOND, 10-HOURLY AND 20-DAILY SEND LIMITS / NOT LOGIN ENFORCEMENT", "WHATSAPP CLOUD API / SUPABASE", "/SPC/MFA-TEST"],
   ["USER AUTHORITY", "ADMIN-ONLY SERVER ENFORCEMENT / ROLE-BOUND PERMISSIONS / FINAL ACTIVE ADMIN GUARD", "SPC APP / SHARED CONFIG STORE", "SPC GROUPS"],
   ["DATABASE", "POSTGRESQL", "SUPABASE", "SPC_USERS / SPC_ENQUIRIES / SPC_FIXTURES"],
@@ -49,7 +50,7 @@ const SERVICES = [
 ] as const
 
 const DATABASE_GROUPS = [
-  { title: "SPC AUTH", tables: ["spc_users", "spc_sessions", "private.spc_login_attempts", "private.spc_whatsapp_mfa_test_challenges", "office_calendar_store: spc-permission-groups"] },
+  { title: "SPC AUTH", tables: ["spc_users", "spc_sessions", "private.spc_login_attempts", "private.spc_whatsapp_login_mfa_challenges", "private.spc_whatsapp_mfa_test_challenges", "office_calendar_store: spc-permission-groups"] },
   { title: "SPC OPERATIONS", tables: ["spc_enquiries", "spc_fixtures"] },
   { title: "SPC PARSER REVIEW", tables: ["parser_reports"] },
   { title: "SPC PRESENTATION", tables: ["spc_presentation_chunks", "Supabase Storage: spc-presentation-media"] },

@@ -13,6 +13,17 @@ import {
 } from "@/lib/spcLoginSecurity"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { createTrustedRequestContext } from "@/lib/trustedRequestContext"
+import {
+  SpcWhatsappLoginMfaDeliveryError,
+  beginSpcWhatsappLoginMfaChallenge,
+  cancelSpcWhatsappLoginMfaChallenge,
+  completeSpcWhatsappLoginMfaDelivery,
+  isSameOriginSpcWhatsappLoginMfaRequest,
+  isSpcWhatsappLoginMfaConfigured,
+  requiresSpcWhatsappLoginMfa,
+  sendSpcWhatsappLoginMfaCode,
+  setSpcWhatsappLoginMfaPendingCookie,
+} from "@/lib/spcWhatsappLoginMfa"
 
 const SPC_LOGIN_USERNAME_MAX_LENGTH = 320
 const SPC_LOGIN_PASSWORD_MAX_LENGTH = 256
@@ -190,6 +201,151 @@ export async function POST(request: Request) {
     return loginResponse(
       { success: false, message: "Invalid username or password." },
       401,
+    )
+  }
+
+  if (requiresSpcWhatsappLoginMfa(user.username)) {
+    if (!isSameOriginSpcWhatsappLoginMfaRequest(request)) {
+      await bestEffortCancelSpcLoginAttempt(
+        attempt.attemptId,
+        "authentication_unavailable",
+        logDetails,
+      )
+      return loginResponse({ success: false, message: "Forbidden" }, 403)
+    }
+
+    if (!isSpcWhatsappLoginMfaConfigured()) {
+      await bestEffortCancelSpcLoginAttempt(
+        attempt.attemptId,
+        "authentication_unavailable",
+        logDetails,
+      )
+      logLoginSecurityEvent("mfa_unavailable", logDetails)
+      return loginResponse(
+        { success: false, message: "Sign-in is temporarily unavailable. Please try again." },
+        503,
+      )
+    }
+
+    try {
+      await completeSpcLoginAttempt({
+        attemptId: attempt.attemptId,
+        succeeded: true,
+      })
+    } catch (error) {
+      await bestEffortCancelSpcLoginAttempt(
+        attempt.attemptId,
+        "attempt_monitoring_unavailable",
+        logDetails,
+      )
+      logLoginSecurityEvent("attempt_monitoring_unavailable", {
+        ...logDetails,
+        error,
+      })
+      return loginResponse(
+        { success: false, message: "Sign-in is temporarily unavailable. Please try again." },
+        503,
+      )
+    }
+
+    let challenge: Awaited<ReturnType<typeof beginSpcWhatsappLoginMfaChallenge>>
+    try {
+      challenge = await beginSpcWhatsappLoginMfaChallenge({
+        spcUserId: user.id,
+        credentialUpdatedAt: user.credentialUpdatedAt,
+        loginAttemptId: attempt.attemptId,
+        trustedSourceIp: sourceIp,
+        requestId: requestContext.requestId,
+      })
+    } catch (error) {
+      logLoginSecurityEvent("mfa_unavailable", { ...logDetails, error })
+      return loginResponse(
+        { success: false, message: "Sign-in is temporarily unavailable. Please try again." },
+        503,
+      )
+    }
+
+    if (!challenge.allowed) {
+      logLoginSecurityEvent("mfa_rate_limited", {
+        ...logDetails,
+        retryAfterSeconds: challenge.retryAfterSeconds,
+      })
+      return loginResponse(
+        {
+          success: false,
+          message: "Please wait before requesting another WhatsApp code.",
+          retryAfterSeconds: challenge.retryAfterSeconds,
+        },
+        429,
+        { "Retry-After": String(challenge.retryAfterSeconds) },
+      )
+    }
+
+    let messageId = ""
+    try {
+      const delivery = await sendSpcWhatsappLoginMfaCode({
+        to: challenge.user.whatsappPhone,
+        code: challenge.code,
+      })
+      messageId = delivery.messageId
+    } catch (error) {
+      await completeSpcWhatsappLoginMfaDelivery({
+        challengeId: challenge.challengeId,
+        pendingTokenHash: challenge.pendingTokenHash,
+        succeeded: false,
+      }).catch(() => undefined)
+      const safeDetails = error instanceof SpcWhatsappLoginMfaDeliveryError
+        ? {
+            event: "mfa_delivery_unavailable",
+            requestId: requestContext.requestId,
+            platformRequestId: requestContext.platformRequestId,
+            category: error.category,
+            upstreamStatus: error.upstreamStatus,
+            upstreamCode: error.upstreamCode,
+          }
+        : {
+            event: "mfa_delivery_unavailable",
+            requestId: requestContext.requestId,
+            platformRequestId: requestContext.platformRequestId,
+            category: "unknown",
+          }
+      console.error("[spc-login-security]", safeDetails)
+      return loginResponse(
+        { success: false, message: "Sign-in is temporarily unavailable. Please try again." },
+        502,
+      )
+    }
+
+    try {
+      await completeSpcWhatsappLoginMfaDelivery({
+        challengeId: challenge.challengeId,
+        pendingTokenHash: challenge.pendingTokenHash,
+        succeeded: true,
+        messageId,
+      })
+      await setSpcWhatsappLoginMfaPendingCookie(
+        challenge.pendingToken,
+        challenge.expiresAt,
+      )
+    } catch (error) {
+      await cancelSpcWhatsappLoginMfaChallenge(challenge.pendingToken)
+        .catch(() => undefined)
+      logLoginSecurityEvent("mfa_unavailable", { ...logDetails, error })
+      return loginResponse(
+        { success: false, message: "Sign-in is temporarily unavailable. Please try again." },
+        503,
+      )
+    }
+
+    logLoginSecurityEvent("mfa_challenge_issued", logDetails)
+    return loginResponse(
+      {
+        success: true,
+        mfaRequired: true,
+        phoneHint: challenge.user.phoneHint,
+        expiresAt: challenge.expiresAt,
+      },
+      202,
     )
   }
 

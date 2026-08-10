@@ -40,6 +40,7 @@ function adminSession(role = "ADMIN"): SpcSession {
     role,
     office: "HONG KONG",
     mustChangePassword: false,
+    mfaVerifiedAt: null,
     permissions: { "spc-mfa-test": "edit" },
   }
 }
@@ -351,6 +352,7 @@ test("MFA migration is private, atomic, rate-limited, append-only and canonical"
   const canonical = readFileSync(new URL("../supabase/spc_schema.sql", import.meta.url), "utf8")
   const marker = "-- Isolated SPC WhatsApp MFA proof of concept."
   const actorIndexMarker = "-- Cover administrator-bound challenge status and verification lookups."
+  const loginMfaMarker = "-- Single-account WhatsApp login MFA pilot for otto@cosulich.com.hk."
   const actorIndexMigration = readFileSync(
     new URL(
       "../supabase/migrations/20260810050008_add_spc_whatsapp_mfa_test_actor_index.sql",
@@ -366,7 +368,12 @@ test("MFA migration is private, atomic, rate-limited, append-only and canonical"
     migration.trim(),
   )
   assert.equal(
-    canonical.slice(canonical.lastIndexOf(actorIndexMarker)).trim(),
+    canonical
+      .slice(
+        canonical.lastIndexOf(actorIndexMarker),
+        canonical.lastIndexOf(loginMfaMarker),
+      )
+      .trim(),
     actorIndexMigration.trim(),
   )
   assert.match(migration, /create table if not exists private\.spc_whatsapp_mfa_test_challenges/)

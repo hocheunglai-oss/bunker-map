@@ -10,6 +10,7 @@ type SpcSessionRow = {
   spc_user_id: string
   user_updated_at: string
   expires_at: string
+  mfa_verified_at: string | null
   revoked_at: string | null
   spc_users:
     | {
@@ -27,6 +28,7 @@ export type DatabaseSpcSession = {
   spcUserId: string
   userUpdatedAt: string
   expiresAt: string
+  mfaVerifiedAt: string | null
 }
 
 function requireEnv(name: string) {
@@ -97,6 +99,48 @@ export async function createDatabaseSpcSession(
   }
 }
 
+export async function createDatabaseSpcSessionFromAssuredSession(
+  spcUserId: string,
+  observedUserUpdatedAt: string,
+  previousToken: string,
+) {
+  if (
+    !observedUserUpdatedAt ||
+    !Number.isFinite(Date.parse(observedUserUpdatedAt)) ||
+    !isPlausibleSpcSessionToken(previousToken)
+  ) {
+    throw new Error("The assured SPC-session rotation parameters are invalid.")
+  }
+
+  const token = createSpcSessionToken()
+  const { data, error } = await getServiceClient()
+    .rpc("create_spc_session_from_assured_session", {
+      p_spc_user_id: spcUserId,
+      p_observed_user_updated_at: observedUserUpdatedAt,
+      p_previous_token_hash: hashSpcSessionToken(previousToken),
+      p_token_hash: hashSpcSessionToken(token),
+    })
+    .select("id,expires_at,mfa_verified_at")
+    .single()
+
+  if (error) throw error
+  const expiresAt = String(data.expires_at || "")
+  const mfaVerifiedAt = String(data.mfa_verified_at || "")
+  if (
+    !Number.isFinite(Date.parse(expiresAt)) ||
+    !Number.isFinite(Date.parse(mfaVerifiedAt))
+  ) {
+    throw new Error("The assured SPC session response is invalid.")
+  }
+
+  return {
+    id: String(data.id),
+    token,
+    expiresAt,
+    mfaVerifiedAt,
+  }
+}
+
 export async function getDatabaseSpcSession(
   token: string,
 ): Promise<DatabaseSpcSession | null> {
@@ -105,7 +149,7 @@ export async function getDatabaseSpcSession(
   const { data, error } = await getServiceClient()
     .from("spc_sessions")
     .select(
-      "id,spc_user_id,user_updated_at,expires_at,revoked_at,spc_users!inner(updated_at,is_active)",
+      "id,spc_user_id,user_updated_at,expires_at,revoked_at,mfa_verified_at,spc_users!inner(updated_at,is_active)",
     )
     .eq("token_hash", hashSpcSessionToken(token))
     .is("revoked_at", null)
@@ -133,6 +177,7 @@ export async function getDatabaseSpcSession(
     spcUserId: row.spc_user_id,
     userUpdatedAt: row.user_updated_at,
     expiresAt: row.expires_at,
+    mfaVerifiedAt: row.mfa_verified_at || null,
   }
 }
 

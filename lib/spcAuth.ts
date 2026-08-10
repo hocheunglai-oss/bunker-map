@@ -7,7 +7,9 @@ import {
 import {
   SPC_SESSION_DURATION_SECONDS,
   createDatabaseSpcSession,
+  createDatabaseSpcSessionFromAssuredSession,
   getDatabaseSpcSession,
+  isPlausibleSpcSessionToken,
   revokeDatabaseSpcSession,
 } from "@/lib/spcSessions"
 import {
@@ -16,6 +18,7 @@ import {
   type SpcPagePermissionMap,
   type SpcRoleId,
 } from "@/lib/spcPages"
+import { requiresSpcWhatsappLoginMfa } from "@/lib/spcWhatsappLoginMfa"
 
 export const SPC_COOKIE_NAME = "spc_auth"
 // Retained only so legacy forgeable username cookies can be expired.
@@ -29,6 +32,7 @@ export type SpcSession = {
   role: SpcRoleId | null
   office: string | null
   mustChangePassword: boolean
+  mfaVerifiedAt: string | null
   permissions: SpcPagePermissionMap
 }
 
@@ -44,13 +48,18 @@ export async function validateSpcCredentials(
 }
 
 function cookieOptions(expiresAt: string) {
+  const expires = new Date(expiresAt)
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil((expires.getTime() - Date.now()) / 1000),
+  )
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SPC_SESSION_DURATION_SECONDS,
-    expires: new Date(expiresAt),
+    maxAge: Math.min(SPC_SESSION_DURATION_SECONDS, remainingSeconds),
+    expires,
   }
 }
 
@@ -74,13 +83,19 @@ function clearSpcCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
 export async function setSpcSession(user: {
   id: string
   credentialUpdatedAt: string
-}) {
+}, options: { preserveMfaFromCurrentSession?: boolean } = {}) {
   const cookieStore = await cookies()
   const previousToken = cookieStore.get(SPC_COOKIE_NAME)?.value
-  const session = await createDatabaseSpcSession(
-    user.id,
-    user.credentialUpdatedAt,
-  )
+  const session = options.preserveMfaFromCurrentSession
+    ? await createDatabaseSpcSessionFromAssuredSession(
+        user.id,
+        user.credentialUpdatedAt,
+        previousToken || "",
+      )
+    : await createDatabaseSpcSession(
+        user.id,
+        user.credentialUpdatedAt,
+      )
 
   cookieStore.set(
     SPC_COOKIE_NAME,
@@ -90,6 +105,36 @@ export async function setSpcSession(user: {
   cookieStore.set(SPC_USER_COOKIE_NAME, "", expiredCookieOptions())
 
   if (previousToken && previousToken !== session.token) {
+    await revokeDatabaseSpcSession(previousToken)
+  }
+}
+
+export async function setSpcVerifiedSession(input: {
+  token: string
+  expiresAt: string
+  mfaVerifiedAt: string
+}) {
+  const now = Date.now()
+  const expiresAt = Date.parse(input.expiresAt)
+  const mfaVerifiedAt = Date.parse(input.mfaVerifiedAt)
+  if (
+    !isPlausibleSpcSessionToken(input.token) ||
+    !Number.isFinite(expiresAt) ||
+    !Number.isFinite(mfaVerifiedAt) ||
+    expiresAt <= now ||
+    expiresAt > now + (SPC_SESSION_DURATION_SECONDS + 60) * 1000 ||
+    mfaVerifiedAt > now + 60_000 ||
+    mfaVerifiedAt < now - 10 * 60_000
+  ) {
+    throw new Error("The verified SPC session is invalid.")
+  }
+
+  const cookieStore = await cookies()
+  const previousToken = cookieStore.get(SPC_COOKIE_NAME)?.value
+  cookieStore.set(SPC_COOKIE_NAME, input.token, cookieOptions(input.expiresAt))
+  cookieStore.set(SPC_USER_COOKIE_NAME, "", expiredCookieOptions())
+
+  if (previousToken && previousToken !== input.token) {
     await revokeDatabaseSpcSession(previousToken)
   }
 }
@@ -114,6 +159,7 @@ function unauthenticatedSession(): SpcSession {
     role: null,
     office: null,
     mustChangePassword: false,
+    mfaVerifiedAt: null,
     permissions: {},
   }
 }
@@ -144,6 +190,15 @@ export async function getSpcSession(): Promise<SpcSession> {
       return unauthenticatedSession()
     }
 
+    if (
+      requiresSpcWhatsappLoginMfa(databaseUser.username) &&
+      !databaseSession.mfaVerifiedAt
+    ) {
+      await revokeDatabaseSpcSession(token)
+      clearSpcCookies(cookieStore)
+      return unauthenticatedSession()
+    }
+
     return {
       authenticated: true,
       userId: databaseUser.id,
@@ -152,6 +207,7 @@ export async function getSpcSession(): Promise<SpcSession> {
       role: normaliseSpcRole(databaseUser.role),
       office: databaseUser.office,
       mustChangePassword: databaseUser.mustChangePassword,
+      mfaVerifiedAt: databaseSession.mfaVerifiedAt,
       permissions: databaseUser.permissions,
     }
   } catch {

@@ -22,6 +22,7 @@ function session(): SpcSession {
     role: "ADMIN",
     office: "HONG KONG",
     mustChangePassword: false,
+    mfaVerifiedAt: null,
     permissions: {},
   }
 }

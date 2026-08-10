@@ -38,7 +38,9 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as { password?: unknown }
     const password = typeof payload.password === "string" ? payload.password : ""
     const user = await changeManagedSpcUserPassword(session.username, password, auditContext)
-    await setSpcSession(user)
+    await setSpcSession(user, {
+      preserveMfaFromCurrentSession: Boolean(session.mfaVerifiedAt),
+    })
 
     return spcPrivateJson({
       success: true,

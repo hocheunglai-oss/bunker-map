@@ -31,6 +31,7 @@ function session(input: Partial<SpcSession> = {}): SpcSession {
     role: "BUYER TRADER",
     office: "HONG KONG",
     mustChangePassword: false,
+    mfaVerifiedAt: null,
     permissions: {
       "spc-user-management": "edit",
       "spc-audit-log": "edit",

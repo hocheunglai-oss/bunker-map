@@ -42,9 +42,10 @@ test("SPC session cookies retain browser security protections", () => {
 
   assert.match(
     persistentOptions,
-    /maxAge:\s*SPC_SESSION_DURATION_SECONDS/,
+    /maxAge:\s*Math\.min\(SPC_SESSION_DURATION_SECONDS, remainingSeconds\)/,
   )
-  assert.match(persistentOptions, /expires:\s*new Date\(expiresAt\)/)
+  assert.match(persistentOptions, /const expires = new Date\(expiresAt\)/)
+  assert.match(persistentOptions, /\n\s*expires,/)
 })
 
 test("SPC cookie lifetime and clear paths remain complete", () => {

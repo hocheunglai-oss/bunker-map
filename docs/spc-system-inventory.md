@@ -34,7 +34,7 @@ an assignment to Group Information Security.
 | SPC database | Supabase PostgreSQL 17.6.1 in `ap-south-1`; reviewed public tables use RLS and browser-role access was reviewed | Users, permissions, enquiries, fixtures, suppliers, audit and supporting application records | Database/service-key owner: Pending |
 | Object/media storage | Supabase Storage supports protected presentation/media content | Stored objects and authenticated delivery | Bucket-policy, recovery and retention approval: Pending |
 | Audit and request context | Database-backed audit records, stable actor identifier, actor/role, trusted source IP, target, safe changes, outcome and correlation/platform request IDs; protected SPC user-management evidence is append-only | Security events and restricted investigation metadata | Retention, central destination and alert owner: Pending |
-| Login/session protection | Database-backed repeated-failure limits, generic login errors, fixed 12-hour SPC sessions, secure cookies in production and session revocation | Public authentication to authenticated session boundary | Threshold/policy acceptance and monitoring owner: Pending |
+| Login/session protection | Database-backed repeated-failure limits, generic login errors, fixed 12-hour SPC sessions, secure cookies in production and session revocation. A separate feature-flagged real-login MFA pilot applies only to `otto@cosulich.com.hk`: password validation is followed by a six-digit WhatsApp code before a session is created. All other SPC accounts remain password-only. | Public authentication, Otto pre-authentication challenge and authenticated session boundaries | Otto pilot evidence, threshold/policy acceptance and monitoring owner: Pending |
 | Edge and transport | Vercel platform firewall/DDoS mitigation, HTTPS redirect and HSTS; no custom WAF/IP/bypass rules observed and bot protection/Attack Mode were off | Internet edge, TLS and forwarded request context | Platform owner and residual-control decision: Pending |
 | Web-response hardening | Enforced high-value CSP, fuller Report-Only CSP, `nosniff`, `no-referrer`, restricted browser features, no framework-powered header and private/no-store SPC API responses | Browser, embedded services, downloads and API responses | Full CSP enforcement decision: Pending Security/owner validation |
 | Backups and recovery | Verified logical Drive backup process documents a 35-day managed window | Logical application/Drive recovery artifacts | RTO/RPO, full restore, provider backup/PITR and recovery access: Pending |
@@ -58,13 +58,13 @@ not evidence that its contract, data location or security approval is complete.
 | ICE | Brent market-data dependency with contract/freshness/range validation and fail-closed behavior | Licence and permitted internal use |
 | TradingView | Embedded chart/widget origins are configured | Current business use, widget terms, privacy impact and exit |
 | Hong Kong Observatory | Weather content origin is configured for supported presentation/embedding | Current use, terms and owner confirmation |
-| Meta / WhatsApp | SPC browser-extension/company-number workflows and an ADMIN-only Cloud API OTP delivery/verification pilot for the inactive `MFA_TEST` account are documented; the pilot uses a dedicated Meta test sender and does not enforce login MFA | Approved service model, recipient-number verification, delivery-metadata retention, extension distribution, privacy role, DPA and provider/contract review |
+| Meta / WhatsApp | SPC browser-extension/company-number workflows, an ADMIN-only inactive-account OTP test and a separate feature-flagged real-login pilot for `otto@cosulich.com.hk` are documented. The ADMIN test never affects login; the Otto pilot requires a valid password before the WhatsApp code and leaves every other SPC account password-only. | End-to-end Otto pilot evidence; approved service model, recipient-number verification, delivery-metadata retention, extension distribution, privacy role, DPA and provider/contract review |
 
 ## Data categories and exposure
 
 - Account, role, office and page-permission data for SPC users.
 - Enquiry, fixture, supplier and operational workflow data.
-- Audit, login-pressure, session and request-correlation evidence.
+- Audit, login-pressure, session, Otto-only WhatsApp login-challenge and request-correlation evidence.
 - Contact/address-book and mail-integration data used by related FCUNO flows.
 - Presentation/media objects and logical backup artifacts.
 - Public market, map, chart and weather content obtained from external sources.
