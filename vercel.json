@@ -25,7 +25,7 @@
     },
     {
       "path": "/api/cron/attendance-month-end-reminder",
-      "schedule": "0 8 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/spc/security-maintenance",

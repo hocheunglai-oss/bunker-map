@@ -39,10 +39,10 @@ test("last Hong Kong working day excludes later weekdays, weekends, and persiste
   )
 })
 
-test("month-end reminder is authenticated, daily scheduled at 16:00 HKT, and retry-safe", () => {
+test("month-end reminder is authenticated, daily scheduled at 08:00 HKT, and retry-safe", () => {
   assert.match(route, /timingSafeEqual/)
   assert.match(route, /CRON_SECRET/)
-  assert.match(vercel, /attendance-month-end-reminder[\s\S]*?"schedule": "0 8 \* \* \*"/)
+  assert.match(vercel, /attendance-month-end-reminder[\s\S]*?"schedule": "0 0 \* \* \*"/)
   assert.match(data, /loadAttendanceCalendarContext/)
   assert.match(data, /system:attendance-month-end-cron/)
   assert.match(data, /dispatch_kind: "month_end_review"/)
