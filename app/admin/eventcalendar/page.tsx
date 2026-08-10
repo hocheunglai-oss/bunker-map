@@ -647,7 +647,7 @@ export default function EventCalendarPage() {
   }, [authenticated, deletedEventIds, deletedRequiredSeedIds, emailRecipientsText, events, people])
 
   useEffect(() => {
-    if (!authenticated || !loadedRef.current) return
+    if (!authenticated || !calendarLoaded || !loadedRef.current) return
     const currentYear = new Date().getFullYear()
     const years = [currentYear, currentYear + 1].join(",")
     let cancelled = false
@@ -677,7 +677,7 @@ export default function EventCalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [authenticated])
+  }, [authenticated, calendarLoaded])
 
   useEffect(() => {
     if (!authenticated || !loadedRef.current) return

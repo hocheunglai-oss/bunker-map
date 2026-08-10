@@ -117,3 +117,19 @@ test("foreign public holidays never receive the HK attendance title", () => {
   assert.match(route, /country\.code === "HK"/)
   assert.doesNotMatch(route, /titleStyle === "holiday-attendance"/)
 })
+
+test("holiday import waits for the shared calendar before running", () => {
+  const page = source("../app/admin/eventcalendar/page.tsx")
+  const importFunction = page.indexOf("async function importPublicHolidays()")
+  const importEffectStart = page.lastIndexOf("useEffect(() => {", importFunction)
+  const importEffectEnd = page.indexOf("}, [authenticated, calendarLoaded])", importFunction)
+
+  assert.ok(importFunction >= 0)
+  assert.ok(importEffectStart >= 0)
+  assert.ok(importEffectEnd > importFunction)
+  const importEffect = page.slice(importEffectStart, importEffectEnd)
+  assert.match(
+    importEffect,
+    /if \(!authenticated \|\| !calendarLoaded \|\| !loadedRef\.current\) return/,
+  )
+})
