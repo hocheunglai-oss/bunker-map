@@ -13,6 +13,7 @@ import {
   type SpcRoleId,
 } from "@/lib/spcPages"
 import { isSpcUserInCategory } from "@/lib/spcUserCategories"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 
 type ManagedSpcUser = {
   id: string
@@ -673,8 +674,8 @@ export default function SpcUserManagementPage() {
                   value={userDraft.password}
                   onChange={(event) => updateDraft("password", event.target.value)}
                   autoComplete="new-password"
-                  minLength={12}
-                  maxLength={256}
+                  minLength={PASSWORD_MIN_LENGTH}
+                  maxLength={PASSWORD_MAX_LENGTH}
                   required={!userDraft.id}
                 />
               </label>

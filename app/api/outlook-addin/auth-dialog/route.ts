@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 import {
   OUTLOOK_ADDIN_COOKIE_NAME,
   createOutlookAddinAdminSession,
@@ -390,11 +391,11 @@ export async function GET(request: Request) {
         <form id="resetForm">
           <label>
             New password
-            <input id="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required />
+            <input id="newPassword" type="password" autocomplete="new-password" minlength="${PASSWORD_MIN_LENGTH}" maxlength="${PASSWORD_MAX_LENGTH}" required />
           </label>
           <label>
             Confirm new password
-            <input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required />
+            <input id="confirmPassword" type="password" autocomplete="new-password" minlength="${PASSWORD_MIN_LENGTH}" maxlength="${PASSWORD_MAX_LENGTH}" required />
           </label>
           <button id="resetButton" type="submit">Update password</button>
         </form>

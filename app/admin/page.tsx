@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 import { AdminAiWorkbench } from "@/components/AdminAiWorkbench"
+import { PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
@@ -590,7 +591,7 @@ export default function AdminPage() {
                 }}
               >
                 Your account is protected, but you must choose a new password
-                before continuing. Use at least 12 characters.
+                before continuing. Use at least {PASSWORD_MIN_LENGTH} characters.
               </p>
             </div>
 
@@ -603,7 +604,7 @@ export default function AdminPage() {
                   onChange={(event) => setNewPassword(event.target.value)}
                   autoComplete="new-password"
                   className="fc-admin-auth-input"
-                  minLength={12}
+                  minLength={PASSWORD_MIN_LENGTH}
                   required
                 />
               </label>
@@ -616,7 +617,7 @@ export default function AdminPage() {
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   autoComplete="new-password"
                   className="fc-admin-auth-input"
-                  minLength={12}
+                  minLength={PASSWORD_MIN_LENGTH}
                   required
                 />
               </label>

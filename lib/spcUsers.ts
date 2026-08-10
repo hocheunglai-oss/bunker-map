@@ -20,11 +20,12 @@ import {
   type SpcPagePermissionMap,
   type SpcRoleId,
 } from "@/lib/spcPages"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 
 const scryptAsync = promisify(scrypt)
 const SPC_PERMISSION_GROUPS_STORE_KEY = "spc-permission-groups"
-export const SPC_PASSWORD_MIN_LENGTH = 12
-export const SPC_PASSWORD_MAX_LENGTH = 256
+export const SPC_PASSWORD_MIN_LENGTH = PASSWORD_MIN_LENGTH
+export const SPC_PASSWORD_MAX_LENGTH = PASSWORD_MAX_LENGTH
 export const SPC_DEFAULT_OFFICES = [
   "ITALY",
   "HONG KONG",

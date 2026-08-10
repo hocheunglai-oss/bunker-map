@@ -201,9 +201,10 @@ test("database race guard serializes password rotation against session issuance"
 })
 
 test("forced password rotation rejects short and oversized passwords", () => {
+  assert.equal(getAdminPasswordValidationError("12345678"), null)
   assert.match(
-    getAdminPasswordValidationError("too-short") || "",
-    /at least 12/,
+    getAdminPasswordValidationError("1234567") || "",
+    /at least 8/,
   )
   assert.equal(getAdminPasswordValidationError("correct horse battery staple"), null)
   assert.match(

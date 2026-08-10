@@ -140,9 +140,10 @@ test("the final active SPC ADMIN cannot be demoted, deactivated, or deleted", ()
   )
 })
 
-test("new and changed SPC passwords must contain 12 to 256 characters", () => {
+test("new and changed SPC passwords must contain 8 to 256 characters", () => {
   assert.match(getSpcPasswordValidationError("") || "", /required/i)
-  assert.match(getSpcPasswordValidationError("too-short") || "", /at least 12/i)
+  assert.match(getSpcPasswordValidationError("1234567") || "", /at least 8/i)
+  assert.equal(getSpcPasswordValidationError("12345678"), null)
   assert.equal(getSpcPasswordValidationError("correct horse battery staple"), null)
   assert.equal(getSpcPasswordValidationError("x".repeat(256)), null)
   assert.match(getSpcPasswordValidationError("x".repeat(257)) || "", /no more than 256/i)

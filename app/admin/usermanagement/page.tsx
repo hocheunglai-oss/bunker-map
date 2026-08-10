@@ -12,6 +12,7 @@ import {
   type AdminPagePermission,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
@@ -979,6 +980,8 @@ export default function UserManagementPage() {
                     type="password"
                     placeholder={draft.id ? "Leave blank to keep current password" : "Required"}
                     onChange={(event) => updateDraft("password", event.target.value)}
+                    minLength={PASSWORD_MIN_LENGTH}
+                    maxLength={PASSWORD_MAX_LENGTH}
                     disabled={!canEdit || saving}
                     style={inputStyle}
                   />

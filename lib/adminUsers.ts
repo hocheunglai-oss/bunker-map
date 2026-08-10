@@ -12,6 +12,7 @@ import {
   type AdminPagePermission,
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 
 const scryptAsync = promisify(scrypt)
 const ADMIN_ROLE_METADATA_KEY = "__adminRole"
@@ -552,11 +553,11 @@ async function verifyPassword(password: string, passwordHash: string) {
 }
 
 export function getAdminPasswordValidationError(password: string) {
-  if (password.length < 12) {
-    return "Password must be at least 12 characters."
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`
   }
-  if (password.length > 256) {
-    return "Password must be no more than 256 characters."
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `Password must be no more than ${PASSWORD_MAX_LENGTH} characters.`
   }
   return null
 }
