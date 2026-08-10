@@ -1,5 +1,7 @@
 export type AttendanceGroup = "BT" | "BS" | "AC"
 
+export type AttendanceWorkMode = "office" | "home-office" | "business-trip"
+
 export type AttendanceLeaveCode =
   | "ALS"
   | "ALU"
@@ -88,8 +90,26 @@ export type ApiAttendanceDailyItem = {
   status: string
   late: boolean
   early: boolean
+  workMode?: AttendanceWorkMode
+  defaultWorkMode?: AttendanceWorkMode
+  workModeSource?: "default" | "manual" | "leave" | null
+  workModeOverride?: {
+    id?: string | null
+    mode: AttendanceWorkMode
+  } | null
+  holidayAttendance?: boolean
+  derivedHomeOfficeUnits?: number
+  derivedBusinessTripUnits?: number
   date?: string
   workDate?: string
+}
+
+export type ApiAttendanceHoliday = {
+  eventId?: string | null
+  title: string
+  name?: string | null
+  attendeeStaffCodes?: string[]
+  people?: string[]
 }
 
 export type ApiAttendanceMonthlySummary = {
@@ -111,6 +131,7 @@ export type ApiAttendanceCalendarDay = {
   weekday?: string
   isWeekend?: boolean
   isFuture?: boolean
+  holiday?: ApiAttendanceHoliday | null
 }
 
 export type ApiMonthlyResponse = {
@@ -121,6 +142,8 @@ export type ApiMonthlyResponse = {
   people: ApiAttendancePerson[]
   summaries: ApiAttendanceMonthlySummary[]
   calendarDays: ApiAttendanceCalendarDay[]
+  staffOrder?: string[]
+  availableYears?: number[]
   months?: Array<{
     month: number
     periodClosed: boolean
@@ -163,6 +186,29 @@ export type ApiAllTimeSummary = {
   lateDays: number
 }
 
+export type ApiAttendanceAnnualSummary = {
+  personId: string
+  allowanceUnits: number
+  openingCarryForwardUnits: number
+  codeTotals: Record<string, number>
+  leavePaidUnits?: number | null
+}
+
+export type ApiAttendanceEntitlement = {
+  personId: string
+  year: number
+  allowanceUnits: number
+  openingCarryForwardUnits: number
+}
+
+export type ApiAttendanceMonthlyAdjustment = {
+  personId: string
+  year: number
+  month: number
+  code: string
+  units: number
+}
+
 export type ApiSettingsResponse = {
   view: "settings"
   year: number
@@ -171,6 +217,11 @@ export type ApiSettingsResponse = {
   syncRuns: ApiAttendanceSyncRun[]
   availableUsers: ManagedAttendanceUser[]
   allTimeSummaries: ApiAllTimeSummary[]
+  annualSummaries: ApiAttendanceAnnualSummary[]
+  entitlements: ApiAttendanceEntitlement[]
+  monthlyAdjustments: ApiAttendanceMonthlyAdjustment[]
+  staffOrder: string[]
+  availableYears: number[]
 }
 
 export type AttendanceMonthData = {
@@ -180,4 +231,6 @@ export type AttendanceMonthData = {
   people: ApiAttendancePerson[]
   summaries: ApiAttendanceMonthlySummary[]
   calendarDays: ApiAttendanceCalendarDay[]
+  staffOrder?: string[]
+  availableYears?: number[]
 }

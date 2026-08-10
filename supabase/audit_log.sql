@@ -753,6 +753,8 @@ begin
     'attendance_team_assignments',
     'attendance_leave_entries',
     'attendance_manual_overrides',
+    'attendance_work_mode_policies',
+    'attendance_work_mode_overrides',
     'attendance_entitlements',
     'attendance_monthly_adjustments',
     'attendance_monthly_confirmations',

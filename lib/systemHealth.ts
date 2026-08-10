@@ -49,6 +49,7 @@ const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
 const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
+const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -124,6 +125,16 @@ const BACKUP_TABLE_SECTIONS = [
     key: "attendanceManualOverrides",
     table: "attendance_manual_overrides",
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceWorkModePolicies",
+    table: "attendance_work_mode_policies",
+    introducedAt: ATTENDANCE_WORK_MODE_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceWorkModeOverrides",
+    table: "attendance_work_mode_overrides",
+    introducedAt: ATTENDANCE_WORK_MODE_MIGRATION_HEAD,
   },
   {
     key: "attendanceEntitlements",

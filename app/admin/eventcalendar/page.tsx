@@ -5,6 +5,7 @@ import {
   OfficeCalendarEvent,
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
+import { mergeImportedEvents } from "@/lib/eventCalendarImport"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
@@ -475,22 +476,6 @@ function ensureRequiredSeedEvents(events: ManagedEvent[], deletedRequiredSeedIds
     ...events,
     ...missingRequiredSeeds,
   ]
-}
-
-function mergeImportedEvents(current: ManagedEvent[], imported: ManagedEvent[]) {
-  const seen = new Set(current.map((event) => `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`))
-  const seenIds = new Set(current.map((event) => event.id))
-  const nextEvents = [...current]
-
-  for (const event of imported) {
-    const key = `${event.startDate}|${event.endDate}|${event.title.toUpperCase()}`
-    if (seen.has(key) || seenIds.has(event.id)) continue
-    seen.add(key)
-    seenIds.add(event.id)
-    nextEvents.push(event)
-  }
-
-  return nextEvents
 }
 
 export default function EventCalendarPage() {

@@ -37,7 +37,7 @@
 }
 
 .tab {
-  background: #e8e8ed;
+  background: var(--fc-row-bg);
 }
 
 .activeTab {
@@ -159,7 +159,7 @@
   max-height: min(72vh, 820px);
   border: 1px solid var(--fc-admin-border-soft);
   border-radius: 12px;
-  background: #fff;
+  background: var(--fc-admin-panel-bg);
 }
 
 .monthRecordTable,
@@ -168,7 +168,7 @@
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  color: #111;
+  color: var(--fc-admin-panel-text);
   font-family: var(--fc-admin-font), Roboto, Arial, sans-serif;
 }
 
@@ -177,8 +177,8 @@
 .yearSummaryTable th,
 .yearSummaryTable td {
   box-sizing: border-box;
-  border-right: 1px solid #222;
-  border-bottom: 1px solid #222;
+  border-right: 1px solid var(--fc-admin-border-soft);
+  border-bottom: 1px solid var(--fc-admin-border-soft);
   text-align: center;
   vertical-align: middle;
 }
@@ -187,19 +187,20 @@
 .monthRecordTable td:first-child,
 .yearSummaryTable th:first-child,
 .yearSummaryTable td:first-child {
-  border-left: 1px solid #222;
+  border-left: 1px solid var(--fc-admin-border-soft);
 }
 
 .monthRecordTable thead tr:first-child th,
 .yearSummaryTable thead th {
-  border-top: 1px solid #222;
+  border-top: 1px solid var(--fc-admin-border-soft);
 }
 
 .monthRecordTable thead th,
 .monthRecordTable tfoot th,
 .monthRecordTable tfoot td,
 .yearSummaryTable thead th {
-  background: #fffda2;
+  background: var(--fc-table-head-bg);
+  color: var(--fc-table-head-text);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.02em;
@@ -255,17 +256,34 @@
   width: 104px;
   height: 27px;
   padding: 4px 7px;
-  background: #fff;
+  background: var(--fc-row-bg);
+  color: var(--fc-admin-panel-text);
   font-size: 9px;
   font-weight: 800;
   text-align: left;
   white-space: nowrap;
 }
 
+.monthRecordTable tbody th span {
+  display: block;
+}
+
+.monthRecordTable tbody th em {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--fc-admin-link);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+}
+
 .monthRecordTable tbody td {
   height: 27px;
   padding: 3px 4px;
-  background: #fff;
+  background: var(--fc-row-bg);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   font-weight: 750;
@@ -289,9 +307,31 @@
 }
 
 .monthRecordTable td.leaveCell {
-  background: #fff7c9;
-  color: #765400;
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
   font-weight: 900;
+}
+
+.monthRecordTable td.homeOfficeCell {
+  background: color-mix(in srgb, var(--fc-admin-success-bg) 9%, var(--fc-admin-panel-bg));
+  color: #067647;
+  font-weight: 900;
+}
+
+.monthRecordTable td.businessTripCell,
+.monthRecordTable td.holidayCell {
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
+  font-weight: 900;
+}
+
+.monthRecordTable .holidayRow > th {
+  border-left: 4px solid var(--fc-admin-link);
+  background: var(--fc-admin-selected-bg);
+}
+
+.monthRecordTable .holidayRow > td:not(.lateCell):not(.earlyCell):not(.leaveCell):not(.homeOfficeCell):not(.businessTripCell) {
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 62%, var(--fc-admin-panel-bg));
 }
 
 .monthRecordTable td.lateCell,
@@ -346,13 +386,13 @@
 .yearSummaryTable tbody td {
   height: 35px;
   padding: 5px 7px;
-  background: #fff;
+  background: var(--fc-row-bg);
   font-size: 10px;
 }
 
 .yearSummaryTable tbody tr:hover td,
 .yearSummaryTable tbody tr:hover .summaryStaffCell {
-  background: #f7f9fc;
+  background: var(--fc-admin-selected-bg);
 }
 
 .yearSummaryTable .monthCell {
@@ -360,7 +400,8 @@
   z-index: 2;
   left: 0;
   width: 94px;
-  background: #fffda2;
+  background: var(--fc-table-head-bg);
+  color: var(--fc-table-head-text);
   font-size: 9px;
   letter-spacing: 0.035em;
 }
@@ -370,7 +411,7 @@
   z-index: 2;
   left: 94px;
   width: 150px;
-  background: #fff;
+  background: var(--fc-row-bg);
   text-align: left;
 }
 
@@ -441,14 +482,37 @@
   color: #667085;
 }
 
-.rosterControls label {
+.rosterControls label,
+.yearSelector,
+.compactYearSelector {
   display: grid;
-  width: min(380px, 100%);
   gap: 5px;
 }
 
+.rosterControls > label {
+  width: min(380px, 100%);
+}
+
+.rosterFilters {
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  gap: 10px;
+}
+
+.rosterFilters > label:last-child {
+  width: min(330px, 45vw);
+}
+
+.yearSelector,
+.compactYearSelector {
+  width: 112px;
+}
+
 .rosterControls label span,
-.modalSelect {
+.modalSelect,
+.yearSelector > span,
+.compactYearSelector > span {
   color: var(--fc-admin-muted);
   font-size: 9px;
   font-weight: 900;
@@ -457,7 +521,9 @@
 }
 
 .rosterControls input,
-.modalSelect select {
+.modalSelect select,
+.yearSelector select,
+.compactYearSelector select {
   width: 100%;
   min-height: 36px;
   box-sizing: border-box;
@@ -471,14 +537,16 @@
 }
 
 .rosterControls input:focus,
-.modalSelect select:focus {
+.modalSelect select:focus,
+.yearSelector select:focus,
+.compactYearSelector select:focus {
   border-color: var(--fc-admin-selected-border);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fc-admin-selected-bg) 70%, transparent);
 }
 
 .allTimeTable {
   width: 100%;
-  min-width: 1080px;
+  min-width: 1540px;
   border-collapse: collapse;
 }
 
@@ -493,7 +561,7 @@
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.045em;
-  text-align: left;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -501,24 +569,53 @@
   height: 39px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
   padding: 6px 8px;
+  background: var(--fc-row-bg);
   font-size: 11px;
   vertical-align: middle;
+  text-align: center;
 }
 
 .allTimeTable tbody tr:hover {
-  background: var(--fc-admin-panel-soft-bg);
+  background: var(--fc-admin-selected-bg);
 }
 
-.allTimeTable td:first-child strong,
-.allTimeTable td:first-child span {
+.allTimeTable tbody tr:hover td {
+  background: var(--fc-admin-selected-bg);
+}
+
+.allTimeTable tfoot th,
+.allTimeTable tfoot td {
+  border-top: 1px solid var(--fc-admin-border);
+  padding: 8px;
+  background: var(--fc-table-head-bg);
+  color: var(--fc-table-head-text);
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.annualStaffCell {
+  min-width: 138px;
+  text-align: left !important;
+}
+
+.annualStaffCell > strong,
+.annualStaffCell > span {
   display: block;
 }
 
-.allTimeTable td:first-child span {
+.annualStaffCell > span {
   margin-top: 2px;
   color: var(--fc-admin-muted);
   font-size: 9px;
   font-weight: 600;
+}
+
+.annualStaffCell small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .groupBadge,
@@ -548,9 +645,9 @@
 }
 
 .unmappedBadge {
-  border-color: #ead293;
-  background: #fff8e2;
-  color: #765400;
+  border-color: var(--fc-admin-border-soft);
+  background: var(--fc-row-bg);
+  color: var(--fc-admin-muted);
 }
 
 .removeButton {
@@ -932,6 +1029,18 @@
   }
 
   .rosterControls label {
+    width: 100%;
+  }
+
+  .rosterFilters {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .rosterFilters > label:last-child,
+  .yearSelector,
+  .compactYearSelector {
     width: 100%;
   }
 

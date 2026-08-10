@@ -160,6 +160,8 @@ const TABLES: TableConfig[] = [
   { key: "attendanceRawPunches", table: "attendance_raw_punches", order: [{ column: "id", ascending: true }] },
   { key: "attendanceLeaveEntries", table: "attendance_leave_entries", order: [{ column: "id", ascending: true }] },
   { key: "attendanceManualOverrides", table: "attendance_manual_overrides", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceWorkModePolicies", table: "attendance_work_mode_policies", order: [{ column: "person_id", ascending: true }, { column: "effective_from", ascending: true }] },
+  { key: "attendanceWorkModeOverrides", table: "attendance_work_mode_overrides", order: [{ column: "work_date", ascending: true }, { column: "person_id", ascending: true }] },
   { key: "attendanceEntitlements", table: "attendance_entitlements", order: [{ column: "id", ascending: true }] },
   { key: "attendanceMonthlyAdjustments", table: "attendance_monthly_adjustments", order: [{ column: "id", ascending: true }] },
   { key: "attendanceMonthlyConfirmations", table: "attendance_monthly_confirmations", order: [{ column: "id", ascending: true }] },

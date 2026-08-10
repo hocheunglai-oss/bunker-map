@@ -31,12 +31,12 @@ function parseYears(value: string | null) {
 
 function parseCountries(value: string | null) {
   const allowedCountries = new Set<HolidayCountryCode>(HOLIDAY_COUNTRIES.map((country) => country.code))
-  const countries = (value || "TW,US,SG")
+  const countries = (value || "TW,US,SG,HK")
     .split(",")
     .map((item) => item.trim().toUpperCase())
     .filter((item): item is HolidayCountryCode => allowedCountries.has(item as HolidayCountryCode))
 
-  return Array.from(new Set(countries.length ? countries : ["TW", "US", "SG"]))
+  return Array.from(new Set(countries.length ? countries : ["TW", "US", "SG", "HK"]))
 }
 
 async function fetchCountryHolidays(year: number, countryCode: string) {
@@ -67,7 +67,6 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const years = parseYears(searchParams.get("years"))
     const countries = parseCountries(searchParams.get("countries"))
-    const titleStyle = searchParams.get("titleStyle")
     const events: OfficeCalendarEvent[] = []
     const seen = new Set<string>()
 
@@ -92,7 +91,7 @@ export async function GET(request: Request) {
             startDate: holiday.date,
             endDate: holiday.date,
             title:
-              titleStyle === "holiday-attendance"
+              country.code === "HK"
                 ? `HOLIDAY ATTENDANCE - ${(holiday.name || holiday.localName || country.label).toUpperCase()}`
                 : `PUBLIC HOLIDAY - ${country.label}`,
             people: [],

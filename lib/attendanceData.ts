@@ -8,12 +8,24 @@ import {
 } from "@/lib/adminUsers"
 import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
 import {
+  loadAttendanceCalendarContext,
+  sortAttendancePeople,
+  type AttendanceHoliday,
+} from "@/lib/attendanceCalendar"
+import {
   attendanceTeamAssignmentForDate,
   attendanceTeamAssignmentOverlapsPeriod,
   hasAttendanceTeamHistory,
   resolveAttendanceTeamForDate,
   type AttendanceTeamAssignment,
 } from "@/lib/attendanceTeamHistory"
+import {
+  derivedBusinessTripUnits,
+  derivedHomeOfficeUnits,
+  resolveAttendanceWorkMode,
+  type AttendanceWorkModeOverride,
+  type AttendanceWorkModePolicy,
+} from "@/lib/attendanceWorkModes"
 import {
   ATTENDANCE_MONTHLY_CODES,
   ATTENDANCE_SCHEDULES,
@@ -300,6 +312,33 @@ function mapOverride(value: unknown): AttendanceManualOverride {
   }
 }
 
+function mapWorkModePolicy(value: unknown): AttendanceWorkModePolicy {
+  const row = asRow(value)
+  return {
+    id: String(row.id),
+    personId: String(row.person_id),
+    mode: String(row.mode) as AttendanceWorkModePolicy["mode"],
+    effectiveFrom: String(row.effective_from),
+    effectiveTo: stringOrNull(row.effective_to),
+    source: String(row.source || "manual"),
+  }
+}
+
+function mapWorkModeOverride(value: unknown): AttendanceWorkModeOverride {
+  const row = asRow(value)
+  return {
+    id: String(row.id),
+    personId: String(row.person_id),
+    workDate: String(row.work_date),
+    mode: String(row.mode) as AttendanceWorkModeOverride["mode"],
+    note: String(row.note || ""),
+    createdBy: String(row.created_by),
+    updatedBy: String(row.updated_by),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  }
+}
+
 function mapEntitlement(value: unknown): AttendanceEntitlement {
   const row = asRow(value)
   return {
@@ -491,6 +530,15 @@ export async function listAttendancePeople(includeInactive = true) {
   return mapPeopleWithManagedUsers(data || [], managed.byId)
 }
 
+async function loadAttendanceAvailableYears(client: SupabaseClient) {
+  const { data, error } = await client.rpc("list_attendance_available_years")
+  throwIfError(error, "Could not load attendance years.")
+  const years: number[] = (Array.isArray(data) ? data : [])
+    .map((value: unknown) => numberValue(asRow(value).year))
+    .filter((year) => Number.isInteger(year) && year >= 2000 && year <= 2200)
+  return [...new Set<number>(years)].sort((left, right) => right - left)
+}
+
 function dateRangeForMonth(year: number, month: number) {
   const start = `${year}-${String(month).padStart(2, "0")}-01`
   const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`
@@ -505,6 +553,8 @@ type AttendancePunchRow = {
   punch: AttendancePunch
 }
 
+const ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE = "2026-09-01"
+
 function buildAttendanceRecord(
   person: AttendancePerson,
   workDate: string,
@@ -512,6 +562,9 @@ function buildAttendanceRecord(
   overrides: AttendanceManualOverride[],
   leaves: AttendanceLeaveEntry[],
   teamAssignments: AttendanceTeamAssignment[],
+  workModePolicies: AttendanceWorkModePolicy[],
+  workModeOverrides: AttendanceWorkModeOverride[],
+  holiday: AttendanceHoliday | null,
 ) {
   const personPunchRows = rawPunchRows.filter(
     (entry) => entry.personId === person.id && entry.workDate === workDate,
@@ -522,6 +575,28 @@ function buildAttendanceRecord(
   const personLeaves = leaves.filter(
     (entry) => entry.personId === person.id && entry.leaveDate === workDate,
   )
+  const absenceLeaves = personLeaves.filter(
+    (entry) => entry.code !== "HO" && entry.code !== "OS",
+  )
+  const recordedWorkMode = personLeaves.find(
+    (entry) => entry.code === "HO" || entry.code === "OS",
+  )
+  const {
+    override: workModeOverride,
+    defaultWorkMode,
+    workMode,
+    workModeSource,
+  } = resolveAttendanceWorkMode({
+    personId: person.id,
+    workDate,
+    policies: workModePolicies,
+    overrides: workModeOverrides,
+    recordedCode:
+      recordedWorkMode?.code === "HO" || recordedWorkMode?.code === "OS"
+        ? recordedWorkMode.code
+        : null,
+  })
+  const today = hktDateFromTimestamp(new Date())
   const excludedPunchIds = new Set(
     personOverrides
       .filter((entry) => entry.action === "exclude" && entry.rawPunchId)
@@ -558,22 +633,90 @@ function buildAttendanceRecord(
     teamAssignments,
   )
   const schedule = ATTENDANCE_SCHEDULES[team]
+  const normallyRequired =
+    isPersonExpectedOnDate(workDate, person) &&
+    (!hasTeamHistory || Boolean(datedAssignment))
+  const attendanceHoliday =
+    workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE ? holiday : null
   const expectation = deriveAttendanceExpectation({
     workDate,
     team,
-    leavePortions: personLeaves.map((entry) => entry.portion),
+    leavePortions: absenceLeaves.map((entry) => entry.portion),
     effectiveSignIn,
     effectiveSignOut,
-    required:
-      isPersonExpectedOnDate(workDate, person) &&
-      (!hasTeamHistory || Boolean(datedAssignment)),
+    required: normallyRequired && !attendanceHoliday,
   })
-  const effectiveExpectation =
-    workDate > hktDateFromTimestamp(new Date()) &&
+  let effectiveExpectation =
+    workDate > today &&
     expectation.status !== "leave" &&
     expectation.status !== "rest-day"
       ? { ...expectation, status: "pending", late: false, early: false }
       : expectation
+  const fullDayAbsent = absenceLeaves.some((entry) => entry.portion === "full")
+  const hasManualWorkEvidence = Boolean(
+    workModeOverride?.mode === "home-office" ||
+      workModeOverride?.mode === "business-trip" ||
+      recordedWorkMode?.code === "HO" ||
+      recordedWorkMode?.code === "OS",
+  )
+  const holidayAttendance = Boolean(
+    attendanceHoliday &&
+      !fullDayAbsent &&
+      (attendanceHoliday.attendeeStaffCodes.includes(person.staffCode.toUpperCase()) ||
+        effectiveSignIn ||
+        effectiveSignOut ||
+        hasManualWorkEvidence),
+  )
+  if (attendanceHoliday) {
+    effectiveExpectation = {
+      ...expectation,
+      required: false,
+      signInDeadline: null,
+      signOutDeadline: null,
+      late: false,
+      early: false,
+      status: holidayAttendance ? "holiday-attendance" : "holiday",
+    }
+  } else if (
+    normallyRequired &&
+    workDate <= today &&
+    !fullDayAbsent &&
+    (workMode === "home-office" || workMode === "business-trip")
+  ) {
+    effectiveExpectation = {
+      ...expectation,
+      required: true,
+      signInDeadline: null,
+      signOutDeadline: null,
+      late: false,
+      early: false,
+      status: workMode,
+    }
+  }
+
+  const absenceUnits = Math.min(
+    1,
+    absenceLeaves.reduce((total, entry) => total + entry.units, 0),
+  )
+  const derivedWorkModeSource = recordedWorkMode ? "leave" : workModeSource
+  const homeOfficeUnits = derivedHomeOfficeUnits({
+    workMode,
+    // A legacy HO/OS day already contributes through its stored monthly code.
+    // Do not add a second derived work-mode unit on that day.
+    workModeSource: derivedWorkModeSource,
+    required: normallyRequired,
+    holiday: Boolean(attendanceHoliday),
+    future: workDate > today,
+    absenceUnits,
+  })
+  const businessTripUnits = derivedBusinessTripUnits({
+    workMode,
+    workModeSource: derivedWorkModeSource,
+    required: normallyRequired,
+    holiday: Boolean(attendanceHoliday),
+    future: workDate > today,
+    absenceUnits,
+  })
 
   return {
     date: workDate,
@@ -584,6 +727,16 @@ function buildAttendanceRecord(
     leave: personLeaves,
     effectiveSignIn,
     effectiveSignOut,
+    workMode,
+    defaultWorkMode,
+    workModeSource,
+    workModeOverride: workModeOverride
+      ? { id: workModeOverride.id, mode: workModeOverride.mode }
+      : null,
+    holiday,
+    holidayAttendance,
+    derivedHomeOfficeUnits: homeOfficeUnits,
+    derivedBusinessTripUnits: businessTripUnits,
     ...effectiveExpectation,
   }
 }
@@ -597,6 +750,9 @@ export async function getDailyAttendance(date: string) {
     overrideResult,
     leaveResult,
     teamAssignmentResult,
+    workModePolicyResult,
+    workModeOverrideResult,
+    calendarContext,
     managed,
   ] = await Promise.all([
     supabase.from("attendance_people").select("*").order("staff_code"),
@@ -608,6 +764,17 @@ export async function getDailyAttendance(date: string) {
       .select("*")
       .lte("effective_from", workDate)
       .order("effective_from"),
+    supabase
+      .from("attendance_work_mode_policies")
+      .select("*")
+      .lte("effective_from", workDate)
+      .or(`effective_to.is.null,effective_to.gte.${workDate}`)
+      .order("effective_from"),
+    supabase
+      .from("attendance_work_mode_overrides")
+      .select("*")
+      .eq("work_date", workDate),
+    loadAttendanceCalendarContext(supabase),
     managedAdminUsersById(),
   ])
   throwIfError(peopleResult.error, "Could not load attendance people.")
@@ -617,6 +784,14 @@ export async function getDailyAttendance(date: string) {
   throwIfError(
     teamAssignmentResult.error,
     "Could not load attendance group history.",
+  )
+  throwIfError(
+    workModePolicyResult.error,
+    "Could not load attendance work-mode policies.",
+  )
+  throwIfError(
+    workModeOverrideResult.error,
+    "Could not load attendance work-mode overrides.",
   )
 
   const allPeople = mapPeopleWithManagedUsers(peopleResult.data || [], managed.byId)
@@ -633,16 +808,25 @@ export async function getDailyAttendance(date: string) {
   const teamAssignments = (teamAssignmentResult.data || []).map(
     mapTeamAssignment,
   )
-  const people = allPeople.filter((person) =>
-    hasAttendanceTeamHistory(person.id, teamAssignments)
-      ? Boolean(
-          attendanceTeamAssignmentForDate(
-            person.id,
-            workDate,
-            teamAssignments,
-          ),
-        )
-      : isPersonEmployedOnDate(workDate, person),
+  const workModePolicies = (workModePolicyResult.data || []).map(
+    mapWorkModePolicy,
+  )
+  const workModeOverrides = (workModeOverrideResult.data || []).map(
+    mapWorkModeOverride,
+  )
+  const people = sortAttendancePeople(
+    allPeople.filter((person) =>
+      hasAttendanceTeamHistory(person.id, teamAssignments)
+        ? Boolean(
+            attendanceTeamAssignmentForDate(
+              person.id,
+              workDate,
+              teamAssignments,
+            ),
+          )
+        : isPersonEmployedOnDate(workDate, person),
+    ),
+    calendarContext.staffOrder,
   )
 
   const records = people.map((person) =>
@@ -653,10 +837,20 @@ export async function getDailyAttendance(date: string) {
       overrides,
       leaves,
       teamAssignments,
+      workModePolicies,
+      workModeOverrides,
+      calendarContext.holidaysByDate.get(workDate) || null,
     ),
   )
 
-  return { view: "daily" as const, date: workDate, people, records }
+  return {
+    view: "daily" as const,
+    date: workDate,
+    people,
+    records,
+    staffOrder: calendarContext.staffOrder,
+    holiday: calendarContext.holidaysByDate.get(workDate) || null,
+  }
 }
 
 export async function getAttendanceLeave(yearInput: unknown) {
@@ -746,7 +940,11 @@ function countsAsAttended(record: ReturnType<typeof buildAttendanceRecord>) {
   return Boolean(
     record.required &&
       record.status !== "leave" &&
-      record.effectiveSignIn,
+      record.status !== "pending" &&
+      record.date <= hktDateFromTimestamp(new Date()) &&
+      (record.effectiveSignIn ||
+        record.workMode === "home-office" ||
+        record.workMode === "business-trip"),
   )
 }
 
@@ -785,6 +983,10 @@ export async function getMonthlyAttendance(
     overrideResult,
     reminderResult,
     teamAssignmentResult,
+    workModePolicyResult,
+    workModeOverrideResult,
+    calendarContext,
+    availableYears,
     managed,
   ] =
     await Promise.all([
@@ -823,6 +1025,19 @@ export async function getMonthlyAttendance(
         .from("attendance_team_assignments")
         .select("*")
         .order("effective_from"),
+      supabase
+        .from("attendance_work_mode_policies")
+        .select("*")
+        .lte("effective_from", monthRange.end)
+        .or(`effective_to.is.null,effective_to.gte.${yearStart}`)
+        .order("effective_from"),
+      supabase
+        .from("attendance_work_mode_overrides")
+        .select("*")
+        .gte("work_date", yearStart)
+        .lte("work_date", monthRange.end),
+      loadAttendanceCalendarContext(supabase),
+      loadAttendanceAvailableYears(supabase),
       managedAdminUsersById(),
     ])
   throwIfError(peopleResult.error, "Could not load attendance people.")
@@ -835,6 +1050,14 @@ export async function getMonthlyAttendance(
   throwIfError(
     teamAssignmentResult.error,
     "Could not load attendance group history.",
+  )
+  throwIfError(
+    workModePolicyResult.error,
+    "Could not load attendance work-mode policies.",
+  )
+  throwIfError(
+    workModeOverrideResult.error,
+    "Could not load attendance work-mode overrides.",
   )
 
   const allPeople = mapPeopleWithManagedUsers(
@@ -858,16 +1081,28 @@ export async function getMonthlyAttendance(
   const teamAssignments = (teamAssignmentResult.data || []).map(
     mapTeamAssignment,
   )
-  const yearPeople = allPeople.filter((person) =>
-    personOverlapsPeriod(person, yearStart, monthRange.end, teamAssignments),
+  const workModePolicies = (workModePolicyResult.data || []).map(
+    mapWorkModePolicy,
   )
-  const people = yearPeople.filter((person) =>
-    personOverlapsPeriod(
-      person,
-      monthRange.start,
-      monthRange.end,
-      teamAssignments,
+  const workModeOverrides = (workModeOverrideResult.data || []).map(
+    mapWorkModeOverride,
+  )
+  const yearPeople = sortAttendancePeople(
+    allPeople.filter((person) =>
+      personOverlapsPeriod(person, yearStart, monthRange.end, teamAssignments),
     ),
+    calendarContext.staffOrder,
+  )
+  const people = sortAttendancePeople(
+    yearPeople.filter((person) =>
+      personOverlapsPeriod(
+        person,
+        monthRange.start,
+        monthRange.end,
+        teamAssignments,
+      ),
+    ),
+    calendarContext.staffOrder,
   )
 
   const personContexts = new Map(
@@ -889,6 +1124,9 @@ export async function getMonthlyAttendance(
           overrides,
           leaveEntries,
           teamAssignments,
+          workModePolicies,
+          workModeOverrides,
+          calendarContext.holidaysByDate.get(date) || null,
         ),
       )
       return [
@@ -922,6 +1160,54 @@ export async function getMonthlyAttendance(
       }
       if (entry.leaveDate >= targetRange.start && entry.leaveDate <= targetRange.end) {
         addCodeTotal(selectedTotals, entry.code, entry.units)
+      }
+    })
+    const hasLegacyMonthlyCode = (
+      targetCode: AttendanceMonthlyCode,
+      targetCodeMonth: number,
+    ) =>
+      context.personAdjustments.some(
+        (entry) =>
+          entry.month === targetCodeMonth &&
+          entry.code === targetCode &&
+          entry.source.startsWith("legacy-monthly:"),
+      )
+    context.yearRecords.forEach((record) => {
+      if (record.date > targetRange.end) return
+      const recordMonth = Number(record.date.slice(5, 7))
+      const selected = recordMonth === targetMonth
+      if (
+        record.holidayAttendance &&
+        !hasLegacyMonthlyCode("HOL", recordMonth)
+      ) {
+        addCodeTotal(ytdTotals, "HOL", 1)
+        if (selected) addCodeTotal(selectedTotals, "HOL", 1)
+      }
+      if (
+        record.derivedHomeOfficeUnits > 0 &&
+        !hasLegacyMonthlyCode("HO", recordMonth)
+      ) {
+        addCodeTotal(ytdTotals, "HO", record.derivedHomeOfficeUnits)
+        if (selected) {
+          addCodeTotal(
+            selectedTotals,
+            "HO",
+            record.derivedHomeOfficeUnits,
+          )
+        }
+      }
+      if (
+        record.derivedBusinessTripUnits > 0 &&
+        !hasLegacyMonthlyCode("OS", recordMonth)
+      ) {
+        addCodeTotal(ytdTotals, "OS", record.derivedBusinessTripUnits)
+        if (selected) {
+          addCodeTotal(
+            selectedTotals,
+            "OS",
+            record.derivedBusinessTripUnits,
+          )
+        }
       }
     })
 
@@ -995,13 +1281,16 @@ export async function getMonthlyAttendance(
     ? Array.from({ length: month }, (_, index) => {
         const targetMonth = index + 1
         const targetRange = dateRangeForMonth(year, targetMonth)
-        const targetPeople = yearPeople.filter((person) =>
-          personOverlapsPeriod(
-            person,
-            targetRange.start,
-            targetRange.end,
-            teamAssignments,
+        const targetPeople = sortAttendancePeople(
+          yearPeople.filter((person) =>
+            personOverlapsPeriod(
+              person,
+              targetRange.start,
+              targetRange.end,
+              teamAssignments,
+            ),
           ),
+          calendarContext.staffOrder,
         )
         return {
           month: targetMonth,
@@ -1028,10 +1317,15 @@ export async function getMonthlyAttendance(
     year,
     month,
     periodClosed,
-    calendarDays,
+    calendarDays: calendarDays.map((day) => ({
+      ...day,
+      holiday: calendarContext.holidaysByDate.get(day.date) || null,
+    })),
     dailyRecords: summaries.flatMap((summary) => summary.records),
     people,
     summaries,
+    staffOrder: calendarContext.staffOrder,
+    availableYears,
     ...(months ? { months } : {}),
   }
 }
@@ -1055,6 +1349,8 @@ export async function getAllTimeAttendance(
   options: { includeAvailableUsers?: boolean } = {},
 ) {
   const year = requireYear(yearInput)
+  const yearStart = `${year}-01-01`
+  const yearEnd = `${year}-12-31`
   const supabase = getAttendanceServiceClient()
   const [
     peopleResult,
@@ -1065,6 +1361,10 @@ export async function getAllTimeAttendance(
     overrideResult,
     leaveResult,
     teamAssignmentResult,
+    workModePolicyResult,
+    workModeOverrideResult,
+    calendarContext,
+    availableYears,
     managed,
   ] = await Promise.all([
     supabase.from("attendance_people").select("*").order("staff_code"),
@@ -1079,13 +1379,39 @@ export async function getAllTimeAttendance(
       .select("*")
       .order("started_at", { ascending: false })
       .limit(20),
-    loadAttendancePunchRows(supabase),
-    supabase.from("attendance_manual_overrides").select("*").order("work_date"),
-    supabase.from("attendance_leave_entries").select("*").order("leave_date"),
+    loadAttendancePunchRows(supabase, yearStart, yearEnd),
+    supabase
+      .from("attendance_manual_overrides")
+      .select("*")
+      .gte("work_date", yearStart)
+      .lte("work_date", yearEnd)
+      .order("work_date"),
+    supabase
+      .from("attendance_leave_entries")
+      .select("*")
+      .gte("leave_date", yearStart)
+      .lte("leave_date", yearEnd)
+      .order("leave_date"),
     supabase
       .from("attendance_team_assignments")
       .select("*")
+      .lte("effective_from", yearEnd)
+      .or(`effective_to.is.null,effective_to.gte.${yearStart}`)
       .order("effective_from"),
+    supabase
+      .from("attendance_work_mode_policies")
+      .select("*")
+      .lte("effective_from", yearEnd)
+      .or(`effective_to.is.null,effective_to.gte.${yearStart}`)
+      .order("effective_from"),
+    supabase
+      .from("attendance_work_mode_overrides")
+      .select("*")
+      .gte("work_date", yearStart)
+      .lte("work_date", yearEnd)
+      .order("work_date"),
+    loadAttendanceCalendarContext(supabase),
+    loadAttendanceAvailableYears(supabase),
     managedAdminUsersById(),
   ])
   throwIfError(peopleResult.error, "Could not load attendance people.")
@@ -1098,11 +1424,22 @@ export async function getAllTimeAttendance(
     teamAssignmentResult.error,
     "Could not load attendance group history.",
   )
+  throwIfError(
+    workModePolicyResult.error,
+    "Could not load attendance work-mode policies.",
+  )
+  throwIfError(
+    workModeOverrideResult.error,
+    "Could not load attendance work-mode overrides.",
+  )
   const allPeople = mapPeopleWithManagedUsers(
     peopleResult.data || [],
     managed.byId,
   )
-  const activePeople = allPeople.filter((person) => person.isActive)
+  const activePeople = sortAttendancePeople(
+    allPeople.filter((person) => person.isActive),
+    calendarContext.staffOrder,
+  )
   const activeAdminUserIds = new Set(
     activePeople.flatMap((person) =>
       person.adminUserId ? [person.adminUserId] : [],
@@ -1142,6 +1479,14 @@ export async function getAllTimeAttendance(
   const teamAssignments = (teamAssignmentResult.data || []).map(
     mapTeamAssignment,
   )
+  const workModePolicies = (workModePolicyResult.data || []).map(
+    mapWorkModePolicy,
+  )
+  const workModeOverrides = (workModeOverrideResult.data || []).map(
+    mapWorkModeOverride,
+  )
+  const entitlements = (entitlementResult.data || []).map(mapEntitlement)
+  const monthlyAdjustments = (adjustmentResult.data || []).map(mapAdjustment)
   const allTimeSummaries = activePeople.map((person) => {
     const dates = [
       ...new Set([
@@ -1161,6 +1506,9 @@ export async function getAllTimeAttendance(
         overrides,
         leaves,
         teamAssignments,
+        workModePolicies,
+        workModeOverrides,
+        calendarContext.holidaysByDate.get(date) || null,
       ),
     )
     return {
@@ -1171,16 +1519,103 @@ export async function getAllTimeAttendance(
       lateDays: records.filter((record) => record.required && record.late).length,
     }
   })
+  const today = hktDateFromTimestamp(new Date())
+  const annualThrough =
+    year < Number(today.slice(0, 4))
+      ? yearEnd
+      : year === Number(today.slice(0, 4))
+        ? today
+        : null
+  const annualDates = annualThrough
+    ? calendarDates(yearStart, annualThrough).filter(
+        (date) => !calendarDay(date, today).isWeekend,
+      )
+    : []
+  const annualSummaries = activePeople.map((person) => {
+    const codeTotals = emptyCodeTotals()
+    const personAdjustments = monthlyAdjustments.filter(
+      (entry) => entry.personId === person.id,
+    )
+    personAdjustments.forEach((entry) =>
+      addCodeTotal(codeTotals, entry.code, entry.units),
+    )
+    leaves
+      .filter(
+        (entry) =>
+          entry.personId === person.id &&
+          entry.leaveDate >= yearStart &&
+          entry.leaveDate <= yearEnd,
+      )
+      .forEach((entry) => addCodeTotal(codeTotals, entry.code, entry.units))
+    const hasLegacyMonthlyCode = (
+      targetCode: AttendanceMonthlyCode,
+      targetMonth: number,
+    ) =>
+      personAdjustments.some(
+        (entry) =>
+          entry.month === targetMonth &&
+          entry.code === targetCode &&
+          entry.source.startsWith("legacy-monthly:"),
+      )
+    const records = annualDates.map((date) =>
+      buildAttendanceRecord(
+        person,
+        date,
+        punches,
+        overrides,
+        leaves,
+        teamAssignments,
+        workModePolicies,
+        workModeOverrides,
+        calendarContext.holidaysByDate.get(date) || null,
+      ),
+    )
+    records.forEach((record) => {
+      const targetMonth = Number(record.date.slice(5, 7))
+      if (
+        record.holidayAttendance &&
+        !hasLegacyMonthlyCode("HOL", targetMonth)
+      ) {
+        addCodeTotal(codeTotals, "HOL", 1)
+      }
+      if (
+        record.derivedHomeOfficeUnits > 0 &&
+        !hasLegacyMonthlyCode("HO", targetMonth)
+      ) {
+        addCodeTotal(codeTotals, "HO", record.derivedHomeOfficeUnits)
+      }
+      if (
+        record.derivedBusinessTripUnits > 0 &&
+        !hasLegacyMonthlyCode("OS", targetMonth)
+      ) {
+        addCodeTotal(codeTotals, "OS", record.derivedBusinessTripUnits)
+      }
+    })
+    const entitlement = entitlements.find(
+      (entry) => entry.personId === person.id,
+    )
+    return {
+      personId: person.id,
+      allowanceUnits: entitlement?.allowanceUnits || 0,
+      openingCarryForwardUnits:
+        entitlement?.openingCarryForwardUnits || 0,
+      leavePaidUnits: null,
+      codeTotals,
+    }
+  })
   return {
     view: "all-time" as const,
     year,
     people: activePeople,
     availableUsers,
     allTimeSummaries,
-    entitlements: (entitlementResult.data || []).map(mapEntitlement),
-    monthlyAdjustments: (adjustmentResult.data || []).map(mapAdjustment),
+    annualSummaries,
+    entitlements,
+    monthlyAdjustments,
     syncRuns: (syncResult.data || []).map(mapSyncRun),
     schedules: Object.values(ATTENDANCE_SCHEDULES),
+    staffOrder: calendarContext.staffOrder,
+    availableYears,
   }
 }
 
@@ -1365,6 +1800,164 @@ export async function deleteAttendanceLeave(
     .delete()
     .eq("entry_group_id", String(asRow(target).entry_group_id))
   throwIfError(error, "Could not delete the leave entry.")
+}
+
+export async function saveAttendanceDayEdit(
+  client: SupabaseClient,
+  input: unknown,
+  actor: string,
+) {
+  const row = asRow(input)
+  const personId = requireUuid(row.personId, "Person id")
+  const workDate = requireDate(row.workDate, "Work date")
+  const workMode = row.workMode
+  if (
+    workMode !== "default" &&
+    workMode !== "office" &&
+    workMode !== "home-office" &&
+    workMode !== "business-trip"
+  ) {
+    throw new AttendanceValidationError(
+      "Work mode must be default, office, home-office, or business-trip.",
+    )
+  }
+  if (!enumerateWeekdays(workDate, workDate)?.length) {
+    throw new AttendanceValidationError(
+      "An attendance day edit must use a weekday.",
+    )
+  }
+  if (typeof row.leaveEnabled !== "boolean") {
+    throw new AttendanceValidationError("Leave selection is required.")
+  }
+
+  const existingLeaveEntryId = optionalUuid(
+    row.existingLeaveEntryId ?? row.entryId,
+    "Leave entry id",
+  )
+  const workModeNote = optionalText(row.workModeNote ?? row.note, 1000)
+  const leaveNote = optionalText(row.leaveNote ?? row.note, 2000)
+  let leavePortion: AttendanceLeavePortion | null = null
+  let leaveCode: AttendanceLeaveCode | null = null
+  if (row.leaveEnabled) {
+    const requestedLeavePortion = row.leavePortion ?? row.portion
+    if (!isAttendanceLeavePortion(requestedLeavePortion)) {
+      throw new AttendanceValidationError("Leave portion must be full, am, or pm.")
+    }
+    leavePortion = requestedLeavePortion
+    const requestedLeaveCode = row.leaveCode ?? row.code
+    if (
+      !isAttendanceLeaveCode(requestedLeaveCode) ||
+      requestedLeaveCode === "HO" ||
+      requestedLeaveCode === "OS"
+    ) {
+      throw new AttendanceValidationError(
+        "HO and OS are work modes and cannot be saved as leave.",
+      )
+    }
+    leaveCode = requestedLeaveCode
+  }
+
+  const { data, error } = await client.rpc("save_attendance_day_edit", {
+    p_person_id: personId,
+    p_work_date: workDate,
+    p_work_mode: workMode,
+    p_work_mode_note: workModeNote,
+    p_leave_enabled: row.leaveEnabled,
+    p_existing_leave_entry_id: existingLeaveEntryId,
+    p_leave_portion: leavePortion,
+    p_leave_code: leaveCode,
+    p_leave_note: leaveNote,
+    p_actor: actor,
+  })
+  throwIfError(error, "Could not save the attendance day.")
+
+  const result = asRow(data)
+  const workModeOverride = result.work_mode_override
+  const leaveEntries = Array.isArray(result.leave_entries)
+    ? result.leave_entries.map(mapLeave)
+    : []
+  return {
+    workModeOverride:
+      workModeOverride &&
+      typeof workModeOverride === "object" &&
+      !Array.isArray(workModeOverride)
+        ? mapWorkModeOverride(workModeOverride)
+        : null,
+    leaveEntries,
+  }
+}
+
+export async function saveAttendanceWorkMode(
+  client: SupabaseClient,
+  input: unknown,
+  actor: string,
+) {
+  const row = asRow(input)
+  const id = optionalUuid(row.id, "Work-mode override id")
+  const personId = requireUuid(row.personId, "Person id")
+  const workDate = requireDate(row.workDate, "Work date")
+  const mode = row.mode
+  if (
+    mode !== "default" &&
+    mode !== "office" &&
+    mode !== "home-office" &&
+    mode !== "business-trip"
+  ) {
+    throw new AttendanceValidationError(
+      "Work mode must be default, office, home-office, or business-trip.",
+    )
+  }
+  if (!enumerateWeekdays(workDate, workDate)?.length) {
+    throw new AttendanceValidationError(
+      "A work-mode override must use a weekday.",
+    )
+  }
+  const { data: person, error: personError } = await client
+    .from("attendance_people")
+    .select("id,is_active,employment_start_date,employment_end_date")
+    .eq("id", personId)
+    .maybeSingle()
+  throwIfError(personError, "Could not load the attendance person.")
+  if (!person) {
+    throw new AttendanceValidationError("Attendance person was not found.")
+  }
+  const personRow = asRow(person)
+  if (
+    (stringOrNull(personRow.employment_start_date) || "0000-01-01") > workDate ||
+    (stringOrNull(personRow.employment_end_date) || "9999-12-31") < workDate
+  ) {
+    throw new AttendanceValidationError(
+      "The work date is outside this person's attendance period.",
+    )
+  }
+
+  if (mode === "default") {
+    let query = client
+      .from("attendance_work_mode_overrides")
+      .delete()
+      .eq("person_id", personId)
+      .eq("work_date", workDate)
+    if (id) query = query.eq("id", id)
+    const { error } = await query
+    throwIfError(error, "Could not clear the work-mode override.")
+    return null
+  }
+
+  const values = {
+    person_id: personId,
+    work_date: workDate,
+    mode,
+    note: optionalText(row.note, 1000),
+    created_by: actor,
+    updated_by: actor,
+  }
+  const { data, error } = await client
+    .from("attendance_work_mode_overrides")
+    .upsert(values, { onConflict: "person_id,work_date" })
+    .select("*")
+    .single()
+  throwIfError(error, "Could not save the work-mode override.")
+  return mapWorkModeOverride(data)
 }
 
 export async function saveAttendanceOverride(

@@ -14,6 +14,7 @@ const OUTLOOK_TEMPLATE_TRUTH_MIGRATION_HEAD = "20260723124045"
 const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
 const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
+const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -115,6 +116,18 @@ const TABLE_SECTIONS = [
     table: "attendance_manual_overrides",
     primaryKey: ["id"],
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceWorkModePolicies",
+    table: "attendance_work_mode_policies",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_WORK_MODE_MIGRATION_HEAD,
+  },
+  {
+    key: "attendanceWorkModeOverrides",
+    table: "attendance_work_mode_overrides",
+    primaryKey: ["id"],
+    introducedAt: ATTENDANCE_WORK_MODE_MIGRATION_HEAD,
   },
   {
     key: "attendanceEntitlements",
@@ -1571,6 +1584,8 @@ function validateSections(backup, errors, warnings) {
     ["attendanceRawPunches", "attendanceRawPunches.person_id"],
     ["attendanceLeaveEntries", "attendanceLeaveEntries.person_id"],
     ["attendanceManualOverrides", "attendanceManualOverrides.person_id"],
+    ["attendanceWorkModePolicies", "attendanceWorkModePolicies.person_id"],
+    ["attendanceWorkModeOverrides", "attendanceWorkModeOverrides.person_id"],
     ["attendanceEntitlements", "attendanceEntitlements.person_id"],
     ["attendanceMonthlyAdjustments", "attendanceMonthlyAdjustments.person_id"],
     ["attendanceMonthlyConfirmations", "attendanceMonthlyConfirmations.person_id"],

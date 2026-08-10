@@ -8,8 +8,12 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./attendanceRecord.module.css"
 import type {
   ApiAllTimeSummary,
+  ApiAttendanceAnnualSummary,
   ApiAttendanceCalendarDay,
   ApiAttendanceDailyItem,
+  ApiAttendanceEntitlement,
+  ApiAttendanceHoliday,
+  ApiAttendanceMonthlyAdjustment,
   ApiAttendanceMonthlySummary,
   ApiAttendancePerson,
   ApiMonthlyResponse,
@@ -17,6 +21,7 @@ import type {
   AttendanceGroup,
   AttendanceLeaveCode,
   AttendanceMonthData,
+  AttendanceWorkMode,
   ManagedAttendanceUser,
 } from "./types"
 
@@ -36,11 +41,14 @@ type LeaveDraft = {
   personId: string
   staffLabel: string
   date: string
+  leaveEnabled: boolean
   portion: "full" | "am" | "pm"
   code: AttendanceLeaveCode
   note: string
+  workMode: "default" | "office" | "home-office" | "business-trip"
+  defaultWorkMode: AttendanceWorkMode
+  workModeOverrideId?: string
   entryId?: string
-  groupId?: string
 }
 
 const TABS: Array<{ id: TabId; label: string }> = [
@@ -65,6 +73,18 @@ const MONTH_NAMES = [
 ] as const
 
 const EXCLUDED_STAFF_CODES = new Set(["SY", "CD", "HC"])
+const DEFAULT_EVENT_CALENDAR_STAFF_ORDER = [
+  "VL",
+  "SC",
+  "OL",
+  "DT",
+  "KZ",
+  "CY",
+  "MY",
+  "LC",
+  "LL",
+  "JZ",
+] as const
 const SUMMARY_CODES = ["ALS", "ALU", "SLM", "SLR", "SLX", "SPL", "MTL", "NPL", "HO", "OS"] as const
 const LEAVE_CODES: Array<{ value: AttendanceLeaveCode; label: string }> = [
   { value: "ALS", label: "ALS · Annual leave with advance notice" },
@@ -75,8 +95,6 @@ const LEAVE_CODES: Array<{ value: AttendanceLeaveCode; label: string }> = [
   { value: "SPL", label: "SPL · Special leave" },
   { value: "MTL", label: "MTL · Maternity leave" },
   { value: "NPL", label: "NPL · No-pay leave" },
-  { value: "HO", label: "HO · Home office" },
-  { value: "OS", label: "OS · Business trip" },
 ]
 
 const EMPTY_MONTH: AttendanceMonthData = {
@@ -96,6 +114,11 @@ const EMPTY_SETTINGS: ApiSettingsResponse = {
   syncRuns: [],
   availableUsers: [],
   allTimeSummaries: [],
+  annualSummaries: [],
+  entitlements: [],
+  monthlyAdjustments: [],
+  staffOrder: [],
+  availableYears: [],
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -116,6 +139,92 @@ function objectArray<T>(value: unknown): T[] {
   return isObject(value) ? (Object.values(value) as T[]) : []
 }
 
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(
+    value
+      .map((item) => String(item || "").trim().toUpperCase())
+      .filter(Boolean),
+  ))
+}
+
+function yearArray(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(
+    value
+      .map(Number)
+      .filter((year) => Number.isInteger(year) && year >= 2000 && year <= 2200),
+  )).sort((left, right) => right - left)
+}
+
+function parseHoliday(value: unknown): ApiAttendanceHoliday | null {
+  if (!isObject(value)) return null
+  const title = String(value.title || value.name || "Hong Kong holiday").trim()
+  return {
+    eventId: typeof value.eventId === "string"
+      ? value.eventId
+      : typeof value.event_id === "string"
+        ? value.event_id
+        : null,
+    title,
+    name: typeof value.name === "string" ? value.name : null,
+    attendeeStaffCodes: stringArray(
+      value.attendeeStaffCodes ?? value.attendee_staff_codes ?? value.people,
+    ),
+    people: stringArray(value.people),
+  }
+}
+
+function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
+  if (!isObject(value)) return null
+  const personId = String(value.personId || value.person_id || "").trim()
+  if (!personId) return null
+  const codeTotalsSource = isObject(value.codeTotals)
+    ? value.codeTotals
+    : isObject(value.code_totals)
+      ? value.code_totals
+      : {}
+  const codeTotals = Object.fromEntries(
+    Object.entries(codeTotalsSource).map(([code, units]) => [code.toUpperCase(), Number(units) || 0]),
+  )
+  const leavePaidRaw = value.leavePaidUnits ?? value.leave_paid_units
+  return {
+    personId,
+    allowanceUnits: Number(value.allowanceUnits ?? value.allowance_units) || 0,
+    openingCarryForwardUnits:
+      Number(value.openingCarryForwardUnits ?? value.opening_carry_forward_units) || 0,
+    codeTotals,
+    leavePaidUnits:
+      leavePaidRaw === null || leavePaidRaw === undefined || leavePaidRaw === ""
+        ? null
+        : Number(leavePaidRaw),
+  }
+}
+
+function parseEntitlement(value: unknown): ApiAttendanceEntitlement | null {
+  if (!isObject(value)) return null
+  const personId = String(value.personId || value.person_id || "").trim()
+  const year = Number(value.year)
+  if (!personId || !Number.isInteger(year)) return null
+  return {
+    personId,
+    year,
+    allowanceUnits: Number(value.allowanceUnits ?? value.allowance_units) || 0,
+    openingCarryForwardUnits:
+      Number(value.openingCarryForwardUnits ?? value.opening_carry_forward_units) || 0,
+  }
+}
+
+function parseMonthlyAdjustment(value: unknown): ApiAttendanceMonthlyAdjustment | null {
+  if (!isObject(value)) return null
+  const personId = String(value.personId || value.person_id || "").trim()
+  const year = Number(value.year)
+  const month = Number(value.month)
+  const code = String(value.code || "").trim().toUpperCase()
+  if (!personId || !Number.isInteger(year) || !Number.isInteger(month) || !code) return null
+  return { personId, year, month, code, units: Number(value.units) || 0 }
+}
+
 function itemDate(item: ApiAttendanceDailyItem) {
   return item.workDate || item.date || ""
 }
@@ -134,7 +243,15 @@ function parseCalendarDays(source: Record<string, unknown>) {
     const records = objectArray<ApiAttendanceDailyItem>(
       rawDay.records ?? rawDay.items ?? rawDay.peopleRecords,
     )
-    days.set(date, { date, records })
+    days.set(date, {
+      date,
+      records,
+      day: Number(rawDay.day) || undefined,
+      weekday: typeof rawDay.weekday === "string" ? rawDay.weekday : undefined,
+      isWeekend: rawDay.isWeekend === true || rawDay.is_weekend === true,
+      isFuture: rawDay.isFuture === true || rawDay.is_future === true,
+      holiday: parseHoliday(rawDay.holiday ?? rawDay.hongKongHoliday ?? rawDay.hkHoliday),
+    })
   }
 
   const flatRecords = objectArray<ApiAttendanceDailyItem>(
@@ -169,13 +286,17 @@ function parseMonthlyResponse(value: unknown, fallbackYear: number, fallbackMont
     people: [...peopleById.values()],
     summaries,
     calendarDays,
+    staffOrder: stringArray(source.staffOrder ?? source.staff_order ?? source.peopleOrder),
+    availableYears: yearArray(source.availableYears ?? source.available_years),
   }
 }
 
 function parseYearResponse(value: unknown, fallbackYear: number) {
   const source = responseSource(value)
   const year = Number(source.year) || fallbackYear
-  return Object.fromEntries(
+  const staffOrder = stringArray(source.staffOrder ?? source.staff_order ?? source.peopleOrder)
+  const availableYears = yearArray(source.availableYears ?? source.available_years)
+  const months = Object.fromEntries(
     arrayValue<Record<string, unknown>>(source.months).flatMap((rawMonth) => {
       const month = Number(rawMonth.month)
       if (!Number.isInteger(month) || month < 1 || month > 12) return []
@@ -192,14 +313,26 @@ function parseYearResponse(value: unknown, fallbackYear: number) {
           people,
           summaries,
           calendarDays: [],
+          staffOrder,
+          availableYears,
         } satisfies AttendanceMonthData,
       ]]
     }),
   ) as Record<number, AttendanceMonthData>
+  return { year, months, staffOrder, availableYears }
 }
 
 function parseSettingsResponse(value: unknown, year: number): ApiSettingsResponse {
   const source = responseSource(value)
+  const annualSummaries = arrayValue<unknown>(source.annualSummaries ?? source.annual_summaries)
+    .map(parseAnnualSummary)
+    .filter((item): item is ApiAttendanceAnnualSummary => Boolean(item))
+  const entitlements = arrayValue<unknown>(source.entitlements)
+    .map(parseEntitlement)
+    .filter((item): item is ApiAttendanceEntitlement => Boolean(item))
+  const monthlyAdjustments = arrayValue<unknown>(source.monthlyAdjustments ?? source.monthly_adjustments)
+    .map(parseMonthlyAdjustment)
+    .filter((item): item is ApiAttendanceMonthlyAdjustment => Boolean(item))
   return {
     view: "settings",
     year: Number(source.year) || year,
@@ -212,6 +345,11 @@ function parseSettingsResponse(value: unknown, year: number): ApiSettingsRespons
     allTimeSummaries: arrayValue<ApiAllTimeSummary>(
       source.allTimeSummaries ?? source.allTime,
     ),
+    annualSummaries,
+    entitlements,
+    monthlyAdjustments,
+    staffOrder: stringArray(source.staffOrder ?? source.staff_order ?? source.peopleOrder),
+    availableYears: yearArray(source.availableYears ?? source.available_years),
   }
 }
 
@@ -247,12 +385,6 @@ function hongKongDateKey(date = new Date()) {
 
 function monthKey(year: number, month: number) {
   return `${year}-${String(month).padStart(2, "0")}`
-}
-
-function displayDate(value: string | null) {
-  if (!value) return "—"
-  const [year, month, day] = value.slice(0, 10).split("-")
-  return year && month && day ? `${day}/${month}/${year}` : value
 }
 
 function displayShortDate(value: string) {
@@ -304,6 +436,59 @@ function isReminderEligiblePerson(person: ApiAttendancePerson) {
   )
 }
 
+function staffOrderRank(staffOrder: readonly string[]) {
+  return new Map(
+    staffOrder.map((code, index) => [code.trim().toUpperCase(), index]),
+  )
+}
+
+function sortAttendancePeople(
+  people: ApiAttendancePerson[],
+  staffOrder: readonly string[],
+) {
+  const rank = staffOrderRank(staffOrder)
+  return people
+    .map((person, index) => ({ person, index }))
+    .sort((left, right) => {
+      const leftCode = left.person.staffCode.trim().toUpperCase()
+      const rightCode = right.person.staffCode.trim().toUpperCase()
+      const leftRank = rank.get(leftCode)
+      const rightRank = rank.get(rightCode)
+      if (leftRank !== undefined || rightRank !== undefined) {
+        if (leftRank === undefined) return 1
+        if (rightRank === undefined) return -1
+        if (leftRank !== rightRank) return leftRank - rightRank
+      }
+      return leftCode.localeCompare(rightCode) || left.index - right.index
+    })
+    .map(({ person }) => person)
+}
+
+function sortManagedAttendanceUsers(
+  users: ManagedAttendanceUser[],
+  staffOrder: readonly string[],
+) {
+  const rank = staffOrderRank(staffOrder)
+  return users
+    .map((user, index) => ({ user, index, code: userStaffCode(user) }))
+    .sort((left, right) => {
+      const leftRank = rank.get(left.code)
+      const rightRank = rank.get(right.code)
+      if (leftRank !== undefined || rightRank !== undefined) {
+        if (leftRank === undefined) return 1
+        if (rightRank === undefined) return -1
+        if (leftRank !== rightRank) return leftRank - rightRank
+      }
+      return left.code.localeCompare(right.code) || left.index - right.index
+    })
+    .map(({ user }) => user)
+}
+
+function holidayTitle(holiday: ApiAttendanceHoliday | null | undefined) {
+  if (!holiday) return ""
+  return holiday.title || holiday.name || "Hong Kong holiday"
+}
+
 function leaveEntries(item: ApiAttendanceDailyItem) {
   return Array.isArray(item.leave) ? item.leave : item.leave ? [item.leave] : []
 }
@@ -319,26 +504,46 @@ function leaveEntryForDirection(
   return entries.find((entry) => entry.portion === matchingPortion)
 }
 
-function recordCellValue(item: ApiAttendanceDailyItem | undefined, direction: "in" | "out") {
-  if (!item) return ""
+function recordCellValue(
+  item: ApiAttendanceDailyItem | undefined,
+  direction: "in" | "out",
+  holiday?: ApiAttendanceHoliday | null,
+) {
+  if (!item) return holiday ? "PH" : ""
   const entry = leaveEntryForDirection(item, direction)
   if (entry) return entry.code
   const punch = direction === "in" ? item.effectiveSignIn : item.effectiveSignOut
   if (punch) return displayTime(punch)
   const status = String(item.status || "").toUpperCase()
-  if (status.includes("HOLIDAY")) return "HOL"
+  if (item.holidayAttendance || status.includes("HOLIDAY-ATTENDANCE")) return "HOL"
+  if (status.includes("HOLIDAY") || holiday) return "PH"
+  if (item.workMode === "home-office") return "HO"
+  if (item.workMode === "business-trip") return "OS"
   return ""
 }
 
-function recordCellTone(item: ApiAttendanceDailyItem | undefined, direction: "in" | "out") {
-  if (!item) return ""
+function recordCellTone(
+  item: ApiAttendanceDailyItem | undefined,
+  direction: "in" | "out",
+  holiday?: ApiAttendanceHoliday | null,
+) {
+  if (!item) return holiday ? styles.holidayCell : ""
   if (leaveEntryForDirection(item, direction)) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "out" && item.early) return styles.earlyCell
+  if (item.holidayAttendance || holiday) return styles.holidayCell
+  if (item.workMode === "home-office") return styles.homeOfficeCell
+  if (item.workMode === "business-trip") return styles.businessTripCell
   return ""
 }
 
 function codeTotal(summary: ApiAttendanceMonthlySummary | null, code: string) {
+  if (!summary) return 0
+  const value = Number(summary.codeTotals?.[code] ?? summary.codeTotals?.[code.toLowerCase()] ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
+function annualCodeTotal(summary: ApiAttendanceAnnualSummary | undefined, code: string) {
   if (!summary) return 0
   const value = Number(summary.codeTotals?.[code] ?? summary.codeTotals?.[code.toLowerCase()] ?? 0)
   return Number.isFinite(value) ? value : 0
@@ -395,12 +600,17 @@ export default function AttendanceRecordClient() {
   const today = useMemo(() => hongKongDateKey(), [])
   const currentYear = Number(today.slice(0, 4))
   const currentMonth = Number(today.slice(5, 7))
-  const lastClosedMonth = currentMonth - 1
   const [activeTab, setActiveTab] = useState<TabId>("monthly-record")
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
+  const [selectedSummaryYear, setSelectedSummaryYear] = useState(currentYear)
+  const [selectedAllTimeYear, setSelectedAllTimeYear] = useState(currentYear)
   const [monthData, setMonthData] = useState<AttendanceMonthData>(EMPTY_MONTH)
   const [yearData, setYearData] = useState<Record<number, AttendanceMonthData>>({})
   const [settings, setSettings] = useState<ApiSettingsResponse>(EMPTY_SETTINGS)
+  const [staffOrder, setStaffOrder] = useState<string[]>([
+    ...DEFAULT_EVENT_CALENDAR_STAFF_ORDER,
+  ])
+  const [availableYears, setAvailableYears] = useState<number[]>([currentYear])
   const [monthLoading, setMonthLoading] = useState(true)
   const [yearLoading, setYearLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -410,7 +620,7 @@ export default function AttendanceRecordClient() {
   const [notice, setNotice] = useState("")
   const [pendingAction, setPendingAction] = useState("")
   const [reminderOpen, setReminderOpen] = useState(false)
-  const [reminderMonth, setReminderMonth] = useState(Math.max(1, lastClosedMonth))
+  const [reminderMonth, setReminderMonth] = useState(Math.max(1, currentMonth - 1))
   const [reminderSelection, setReminderSelection] = useState<Set<string>>(new Set())
   const [addUsersOpen, setAddUsersOpen] = useState(false)
   const [addUserSelection, setAddUserSelection] = useState<Set<string>>(new Set())
@@ -438,7 +648,11 @@ export default function AttendanceRecordClient() {
         include: "calendar",
       })
       const parsed = parseMonthlyResponse(payload, currentYear, selectedMonth)
-      if (monthRequestRef.current === requestId) setMonthData(parsed)
+      if (monthRequestRef.current === requestId) {
+        setMonthData(parsed)
+        if (parsed.staffOrder?.length) setStaffOrder(parsed.staffOrder)
+        if (parsed.availableYears?.length) setAvailableYears(parsed.availableYears)
+      }
     } catch (error) {
       if (monthRequestRef.current === requestId) {
         setMonthError(error instanceof Error ? error.message : "Attendance records could not be loaded.")
@@ -448,7 +662,7 @@ export default function AttendanceRecordClient() {
     }
   }, [authenticated, currentYear, selectedMonth])
 
-  const loadCurrentYear = useCallback(async () => {
+  const loadSelectedYear = useCallback(async () => {
     if (!authenticated) return
     const requestId = yearRequestRef.current + 1
     yearRequestRef.current = requestId
@@ -457,12 +671,16 @@ export default function AttendanceRecordClient() {
     try {
       const payload = await fetchAttendance({
         view: "monthly",
-        year: String(currentYear),
-        month: String(currentMonth),
+        year: String(selectedSummaryYear),
+        month: String(selectedSummaryYear < currentYear ? 12 : currentMonth),
         scope: "year",
       })
-      const next = parseYearResponse(payload, currentYear)
-      if (yearRequestRef.current === requestId) setYearData(next)
+      const next = parseYearResponse(payload, selectedSummaryYear)
+      if (yearRequestRef.current === requestId) {
+        setYearData(next.months)
+        if (next.staffOrder.length) setStaffOrder(next.staffOrder)
+        if (next.availableYears.length) setAvailableYears(next.availableYears)
+      }
     } catch (error) {
       if (yearRequestRef.current === requestId) {
         setYearError(error instanceof Error ? error.message : "Monthly attendance could not be loaded.")
@@ -470,7 +688,7 @@ export default function AttendanceRecordClient() {
     } finally {
       if (yearRequestRef.current === requestId) setYearLoading(false)
     }
-  }, [authenticated, currentMonth, currentYear])
+  }, [authenticated, currentMonth, currentYear, selectedSummaryYear])
 
   const loadAllTime = useCallback(async () => {
     if (!authenticated) return
@@ -481,10 +699,13 @@ export default function AttendanceRecordClient() {
     try {
       const payload = await fetchAttendance({
         view: "all-time",
-        year: String(currentYear),
+        year: String(selectedAllTimeYear),
       })
       if (settingsRequestRef.current === requestId) {
-        setSettings(parseSettingsResponse(payload, currentYear))
+        const parsed = parseSettingsResponse(payload, selectedAllTimeYear)
+        setSettings(parsed)
+        if (parsed.staffOrder.length) setStaffOrder(parsed.staffOrder)
+        if (parsed.availableYears.length) setAvailableYears(parsed.availableYears)
       }
     } catch (error) {
       if (settingsRequestRef.current === requestId) {
@@ -493,7 +714,7 @@ export default function AttendanceRecordClient() {
     } finally {
       if (settingsRequestRef.current === requestId) setSettingsLoading(false)
     }
-  }, [authenticated, currentYear])
+  }, [authenticated, selectedAllTimeYear])
 
   useEffect(() => {
     if (authLoading || !authenticated || activeTab !== "monthly-record") return
@@ -503,9 +724,9 @@ export default function AttendanceRecordClient() {
 
   useEffect(() => {
     if (authLoading || !authenticated || activeTab !== "monthly") return
-    const timer = window.setTimeout(() => void loadCurrentYear(), 0)
+    const timer = window.setTimeout(() => void loadSelectedYear(), 0)
     return () => window.clearTimeout(timer)
-  }, [activeTab, authLoading, authenticated, loadCurrentYear])
+  }, [activeTab, authLoading, authenticated, loadSelectedYear])
 
   useEffect(() => {
     if (authLoading || !authenticated || activeTab !== "all-time") return
@@ -572,8 +793,11 @@ export default function AttendanceRecordClient() {
   )
 
   const monthPeople = useMemo(
-    () => monthData.people.filter(isHistoricalPersonVisible),
-    [monthData.people],
+    () => sortAttendancePeople(
+      monthData.people.filter(isHistoricalPersonVisible),
+      monthData.staffOrder?.length ? monthData.staffOrder : staffOrder,
+    ),
+    [monthData.people, monthData.staffOrder, staffOrder],
   )
 
   const monthDays = useMemo(() => {
@@ -606,7 +830,8 @@ export default function AttendanceRecordClient() {
 
   const monthSections = useMemo<MonthSection[]>(() => {
     const sections: MonthSection[] = []
-    for (let month = 1; month <= currentMonth; month += 1) {
+    const lastMonth = selectedSummaryYear < currentYear ? 12 : currentMonth
+    for (let month = 1; month <= lastMonth; month += 1) {
       const data = yearData[month]
       if (!data) continue
       const summaryByPerson = new Map(data.summaries.map((summary) => [summary.person.id, summary]))
@@ -617,7 +842,10 @@ export default function AttendanceRecordClient() {
       sections.push({
         month,
         label: MONTH_NAMES[month - 1],
-        rows: [...peopleById.values()].map((person) => ({
+        rows: sortAttendancePeople(
+          [...peopleById.values()],
+          data.staffOrder?.length ? data.staffOrder : staffOrder,
+        ).map((person) => ({
           person,
           summary: summaryByPerson.get(person.id) || null,
           ...calculatedMonthlyStats(data, person.id),
@@ -625,7 +853,25 @@ export default function AttendanceRecordClient() {
       })
     }
     return sections
-  }, [currentMonth, yearData])
+  }, [currentMonth, currentYear, selectedSummaryYear, staffOrder, yearData])
+
+  const closedMonthSections = useMemo(
+    () => monthSections.filter((section) => yearData[section.month]?.periodClosed),
+    [monthSections, yearData],
+  )
+
+  const yearOptions = useMemo(
+    () => [...new Set([
+      currentYear,
+      2026,
+      selectedSummaryYear,
+      selectedAllTimeYear,
+      ...availableYears,
+    ])]
+      .filter((year) => year <= currentYear)
+      .sort((left, right) => right - left),
+    [availableYears, currentYear, selectedAllTimeYear, selectedSummaryYear],
+  )
 
   const reminderRecipients = useMemo(() => {
     const section = monthSections.find((item) => item.month === reminderMonth)
@@ -659,26 +905,71 @@ export default function AttendanceRecordClient() {
   }, [settings.people])
 
   const availableUsers = useMemo(() => {
-    return settings.availableUsers.filter((user) => {
+    return sortManagedAttendanceUsers(settings.availableUsers.filter((user) => {
       if (user.eligible === false || !(user.attendanceTeam || user.attendanceGroup)) return false
       if (EXCLUDED_STAFF_CODES.has(userStaffCode(user))) return false
       return !linkedUsernames.has(user.id) && !linkedUsernames.has(user.username.trim().toLowerCase())
-    })
-  }, [linkedUsernames, settings.availableUsers])
+    }), staffOrder)
+  }, [linkedUsernames, settings.availableUsers, staffOrder])
 
-  const allTimeByPerson = useMemo(
-    () => new Map(settings.allTimeSummaries.map((summary) => [summary.personId, summary])),
-    [settings.allTimeSummaries],
-  )
+  const annualByPerson = useMemo(() => {
+    const summaries = new Map(
+      settings.annualSummaries.map((summary) => [summary.personId, summary]),
+    )
+    for (const person of settings.people) {
+      if (summaries.has(person.id)) continue
+      const entitlement = settings.entitlements.find(
+        (entry) => entry.personId === person.id && entry.year === selectedAllTimeYear,
+      )
+      const codeTotals: Record<string, number> = {}
+      for (const adjustment of settings.monthlyAdjustments) {
+        if (adjustment.personId !== person.id || adjustment.year !== selectedAllTimeYear) continue
+        codeTotals[adjustment.code] = (codeTotals[adjustment.code] || 0) + adjustment.units
+      }
+      summaries.set(person.id, {
+        personId: person.id,
+        allowanceUnits: entitlement?.allowanceUnits || 0,
+        openingCarryForwardUnits: entitlement?.openingCarryForwardUnits || 0,
+        codeTotals,
+        leavePaidUnits: null,
+      })
+    }
+    return summaries
+  }, [selectedAllTimeYear, settings.annualSummaries, settings.entitlements, settings.monthlyAdjustments, settings.people])
 
   const rosterPeople = useMemo(() => {
     const search = rosterSearch.trim().toLowerCase()
-    return settings.people.filter((person) => {
+    const filtered = settings.people.filter((person) => {
       if (!isActiveRosterPerson(person)) return false
       if (!search) return true
       return `${person.staffCode} ${person.displayName} ${person.adminUsername || person.username || ""}`.toLowerCase().includes(search)
     })
-  }, [rosterSearch, settings.people])
+    return sortAttendancePeople(filtered, staffOrder)
+  }, [rosterSearch, settings.people, staffOrder])
+
+  const annualTotals = useMemo(() => {
+    const totals = {
+      allowanceUnits: 0,
+      openingCarryForwardUnits: 0,
+      codeTotals: {} as Record<string, number>,
+      leavePaidUnits: 0,
+      hasLeavePaid: false,
+    }
+    for (const person of rosterPeople) {
+      const annual = annualByPerson.get(person.id)
+      if (!annual) continue
+      totals.allowanceUnits += annual.allowanceUnits || 0
+      totals.openingCarryForwardUnits += annual.openingCarryForwardUnits || 0
+      for (const code of [...SUMMARY_CODES, "HOL"] as const) {
+        totals.codeTotals[code] = (totals.codeTotals[code] || 0) + annualCodeTotal(annual, code)
+      }
+      if (annual.leavePaidUnits !== null && annual.leavePaidUnits !== undefined) {
+        totals.hasLeavePaid = true
+        totals.leavePaidUnits += annual.leavePaidUnits
+      }
+    }
+    return totals
+  }, [annualByPerson, rosterPeople])
 
   function moveSelectedMonth(offset: number) {
     setSelectedMonth((month) => Math.min(12, Math.max(1, month + offset)))
@@ -692,48 +983,92 @@ export default function AttendanceRecordClient() {
   ) {
     if (!canEdit) return
     const matching = record ? leaveEntryForDirection(record, direction) : undefined
+    const manualWorkMode = record?.workModeOverride?.mode ||
+      (record?.workModeSource === "manual" ? record.workMode : undefined)
+    const defaultWorkMode = record?.defaultWorkMode ||
+      (!manualWorkMode && record?.workMode
+        ? record.workMode
+        : "office")
     setLeaveDraft({
       personId: person.id,
       staffLabel: `${person.staffCode} · ${person.displayName}`,
       date,
+      leaveEnabled: Boolean(matching),
       portion: matching?.portion || (direction === "in" ? "am" : "pm"),
       code: matching?.code || "ALS",
       note: matching?.note || "",
+      workMode:
+        manualWorkMode === "home-office" ||
+        manualWorkMode === "office" ||
+        manualWorkMode === "business-trip"
+          ? manualWorkMode
+          : "default",
+      defaultWorkMode,
+      workModeOverrideId: record?.workModeOverride?.id || undefined,
       entryId: matching?.id,
-      groupId: matching?.groupId,
     })
   }
 
-  async function saveLeave() {
+  async function saveDayEdit() {
     if (!leaveDraft) return
-    const saved = await runMutation(
-      "save-leave",
-      {
-        leave: {
-          groupId: leaveDraft.groupId,
+    if (!canEdit) {
+      setNotice("You have view-only access. Ask an administrator for Edit permission in User Management.")
+      return
+    }
+    setPendingAction("save-day-edit")
+    setNotice("")
+    try {
+      await postAttendance("save-day-edit", {
+        dayEdit: {
           personId: leaveDraft.personId,
-          fromDate: leaveDraft.date,
-          toDate: leaveDraft.date,
-          portion: leaveDraft.portion,
-          code: leaveDraft.code,
-          note: leaveDraft.note.trim() || undefined,
+          workDate: leaveDraft.date,
+          workMode: leaveDraft.workMode,
+          workModeNote: leaveDraft.note.trim() || undefined,
+          leaveEnabled: leaveDraft.leaveEnabled,
+          existingLeaveEntryId: leaveDraft.entryId,
+          leavePortion: leaveDraft.leaveEnabled ? leaveDraft.portion : undefined,
+          leaveCode: leaveDraft.leaveEnabled ? leaveDraft.code : undefined,
+          leaveNote: leaveDraft.note.trim() || undefined,
         },
-      },
-      leaveDraft.entryId ? "Leave record updated." : "Leave record added.",
-      loadSelectedMonth,
-    )
-    if (saved) setLeaveDraft(null)
+      })
+
+      setNotice("Attendance day updated.")
+      setLeaveDraft(null)
+      await loadSelectedMonth()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The attendance day could not be updated.")
+    } finally {
+      setPendingAction("")
+    }
   }
 
   async function deleteLeave() {
     if (!leaveDraft?.entryId) return
-    const deleted = await runMutation(
-      "delete-leave",
-      { id: leaveDraft.entryId },
-      "Leave record deleted.",
-      loadSelectedMonth,
-    )
-    if (deleted) setLeaveDraft(null)
+    if (!canEdit) {
+      setNotice("You have view-only access. Ask an administrator for Edit permission in User Management.")
+      return
+    }
+    setPendingAction("delete-leave")
+    setNotice("")
+    try {
+      await postAttendance("save-day-edit", {
+        dayEdit: {
+          personId: leaveDraft.personId,
+          workDate: leaveDraft.date,
+          workMode: leaveDraft.workMode,
+          workModeNote: leaveDraft.note.trim() || undefined,
+          leaveEnabled: false,
+          existingLeaveEntryId: leaveDraft.entryId,
+        },
+      })
+      setNotice("Leave record deleted.")
+      setLeaveDraft(null)
+      await loadSelectedMonth()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The leave record could not be deleted.")
+    } finally {
+      setPendingAction("")
+    }
   }
 
   async function confirmMonth(personId: string, month: number) {
@@ -743,13 +1078,13 @@ export default function AttendanceRecordClient() {
       const payload = await postAttendance("save-confirmation", {
         confirmation: {
           personId,
-          year: currentYear,
+          year: selectedSummaryYear,
           month,
           status: "confirmed",
         },
       })
       setNotice(getErrorMessage(payload, `${MONTH_NAMES[month - 1]} attendance confirmed.`))
-      await loadCurrentYear()
+      await loadSelectedYear()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Attendance confirmation could not be saved.")
     } finally {
@@ -758,7 +1093,7 @@ export default function AttendanceRecordClient() {
   }
 
   function openReminder() {
-    setReminderMonth(Math.max(1, lastClosedMonth))
+    setReminderMonth(closedMonthSections.at(-1)?.month || 1)
     setReminderSelection(new Set())
     setReminderOpen(true)
   }
@@ -771,7 +1106,7 @@ export default function AttendanceRecordClient() {
     const sent = await runMutation(
       "send-reminder",
       {
-        year: currentYear,
+        year: selectedSummaryYear,
         month: reminderMonth,
         personIds: selectedReminderPersonIds,
       },
@@ -869,7 +1204,7 @@ export default function AttendanceRecordClient() {
               className={styles.secondaryButton}
               onClick={() => {
                 if (activeTab === "monthly-record") void loadSelectedMonth()
-                else if (activeTab === "monthly") void loadCurrentYear()
+                else if (activeTab === "monthly") void loadSelectedYear()
                 else void loadAllTime()
               }}
             >
@@ -954,35 +1289,38 @@ export default function AttendanceRecordClient() {
                 </thead>
                 <tbody>
                   {monthDays.map((day) => (
-                    <tr key={day.date}>
-                      <th scope="row">{displayShortDate(day.date)}</th>
+                    <tr key={day.date} className={day.holiday ? styles.holidayRow : undefined}>
+                      <th scope="row" title={holidayTitle(day.holiday)}>
+                        <span>{displayShortDate(day.date)}</span>
+                        {day.holiday ? <em>HK HOLIDAY</em> : null}
+                      </th>
                       {monthPeople.map((person) => {
                         const record = monthRecordMap.get(`${day.date}:${person.id}`)
                         return (
                           <Fragment key={`${day.date}:${person.id}`}>
-                            <td className={recordCellTone(record, "in")}>
+                            <td className={recordCellTone(record, "in", day.holiday)}>
                               {canEdit ? (
                                 <button
                                   type="button"
                                   className={styles.cellButton}
                                   onClick={() => openLeave(person, day.date, "in", record)}
-                                  aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} IN leave`}
+                                  aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} IN attendance`}
                                 >
-                                  {recordCellValue(record, "in") || " "}
+                                  {recordCellValue(record, "in", day.holiday) || " "}
                                 </button>
-                              ) : recordCellValue(record, "in")}
+                              ) : recordCellValue(record, "in", day.holiday)}
                             </td>
-                            <td className={recordCellTone(record, "out")}>
+                            <td className={recordCellTone(record, "out", day.holiday)}>
                               {canEdit ? (
                                 <button
                                   type="button"
                                   className={styles.cellButton}
                                   onClick={() => openLeave(person, day.date, "out", record)}
-                                  aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} OUT leave`}
+                                  aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} OUT attendance`}
                                 >
-                                  {recordCellValue(record, "out") || " "}
+                                  {recordCellValue(record, "out", day.holiday) || " "}
                                 </button>
-                              ) : recordCellValue(record, "out")}
+                              ) : recordCellValue(record, "out", day.holiday)}
                             </td>
                           </Fragment>
                         )
@@ -1010,17 +1348,28 @@ export default function AttendanceRecordClient() {
         ) : null}
 
         {activeTab === "monthly" ? (
-          <section className={styles.tabContent} aria-labelledby="monthly-heading">
+          <section className={styles.tabContent} aria-label="Monthly attendance">
             <div className={styles.yearToolbar}>
-              <div>
-                <span>CURRENT YEAR</span>
-                <h1 id="monthly-heading">{currentYear}</h1>
-              </div>
+              <label className={styles.yearSelector}>
+                <span>YEAR</span>
+                <select
+                  value={selectedSummaryYear}
+                  onChange={(event) => {
+                    setSelectedSummaryYear(Number(event.target.value))
+                    setYearData({})
+                    setReminderSelection(new Set())
+                  }}
+                  disabled={yearLoading}
+                  aria-label="Monthly attendance year"
+                >
+                  {yearOptions.map((year) => <option value={year} key={year}>{year}</option>)}
+                </select>
+              </label>
               <button
                 type="button"
                 className={styles.primaryButton}
                 onClick={openReminder}
-                disabled={!canEdit || yearLoading || !monthSections.length || lastClosedMonth < 1}
+                disabled={!canEdit || yearLoading || !closedMonthSections.length}
                 title={canEdit ? "Remind selected staff to confirm a month" : "Edit permission required"}
               >
                 SEND REMINDER
@@ -1028,7 +1377,7 @@ export default function AttendanceRecordClient() {
             </div>
 
             {yearLoading && !monthSections.length ? (
-              <div className={styles.inlineLoading}><span className={styles.spinner} aria-hidden="true" />Loading {currentYear}…</div>
+              <div className={styles.inlineLoading}><span className={styles.spinner} aria-hidden="true" />Loading {selectedSummaryYear}…</div>
             ) : (
               <div className={styles.excelPanel}>
                 <table className={styles.yearSummaryTable}>
@@ -1057,7 +1406,7 @@ export default function AttendanceRecordClient() {
                     {monthSections.map((section) =>
                       section.rows.map((row, rowIndex) => {
                         const confirmed = row.summary?.confirmation?.status === "confirmed"
-                        const open = section.month > lastClosedMonth
+                        const open = !yearData[section.month]?.periodClosed
                         return (
                           <tr key={`${section.month}:${row.person.id}`}>
                             {rowIndex === 0 ? (
@@ -1078,7 +1427,7 @@ export default function AttendanceRecordClient() {
                             ))}
                             <td className={styles.attendedCell}>{displayDays(row.attendedDays)}</td>
                             <td className={row.lateDays ? styles.lateTotalCell : undefined}>{displayDays(row.lateDays)}</td>
-                            <td>{displayDays(codeTotal(row.summary, "ALS") + codeTotal(row.summary, "ALU"))}</td>
+                            <td>—</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
@@ -1103,7 +1452,7 @@ export default function AttendanceRecordClient() {
                       }),
                     )}
                     {!monthSections.length ? (
-                      <tr><td colSpan={17}><div className={styles.emptyState}>No monthly records were found for {currentYear}.</div></td></tr>
+                      <tr><td colSpan={17}><div className={styles.emptyState}>No monthly records were found for {selectedSummaryYear}.</div></td></tr>
                     ) : null}
                   </tbody>
                 </table>
@@ -1115,15 +1464,31 @@ export default function AttendanceRecordClient() {
         {activeTab === "all-time" ? (
           <section className={styles.tabContent} aria-label="All-time attendance users">
             <div className={styles.rosterControls}>
-              <label>
-                <span>SEARCH STAFF</span>
-                <input
-                  type="search"
-                  value={rosterSearch}
-                  onChange={(event) => setRosterSearch(event.target.value)}
-                  placeholder="Name, initials or username"
-                />
-              </label>
+              <div className={styles.rosterFilters}>
+                <label className={styles.compactYearSelector}>
+                  <span>YEAR</span>
+                  <select
+                    value={selectedAllTimeYear}
+                    onChange={(event) => {
+                      setSelectedAllTimeYear(Number(event.target.value))
+                      setSettings(EMPTY_SETTINGS)
+                    }}
+                    disabled={settingsLoading}
+                    aria-label="Annual attendance totals year"
+                  >
+                    {yearOptions.map((year) => <option value={year} key={year}>{year}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>SEARCH STAFF</span>
+                  <input
+                    type="search"
+                    value={rosterSearch}
+                    onChange={(event) => setRosterSearch(event.target.value)}
+                    placeholder="Name or initials"
+                  />
+                </label>
+              </div>
               <button
                 type="button"
                 className={styles.primaryButton}
@@ -1142,31 +1507,52 @@ export default function AttendanceRecordClient() {
                 <table className={styles.allTimeTable}>
                   <thead>
                     <tr>
+                      <th>CURRENT YEAR<br />ALLOWANCE</th>
                       <th>STAFF</th>
-                      <th>USERNAME</th>
-                      <th>GROUP</th>
-                      <th>FIRST RECORD</th>
-                      <th>LATEST RECORD</th>
-                      <th>ATTENDED DAYS</th>
-                      <th>LATE DAYS</th>
-                      <th>DINGTALK</th>
+                      <th>ABSENT<br />ALS</th>
+                      <th>ABSENT<br />ALU</th>
+                      <th>ABSENT<br />SLM</th>
+                      <th>ABSENT<br />SLR</th>
+                      <th>ABSENT<br />SLX</th>
+                      <th>ATTEND<br />HOL</th>
+                      <th>SPECIAL<br />LEAVE</th>
+                      <th>MATERNITY<br />LEAVE</th>
+                      <th>NO PAY<br />LEAVE</th>
+                      <th>ATTEND<br />HO</th>
+                      <th>ATTEND<br />OS</th>
+                      <th>LAST YEAR BAL B/F<br />({selectedAllTimeYear - 1})</th>
+                      <th>LEAVE<br />PAID</th>
                       <th aria-label="Attendance user actions" />
                     </tr>
                   </thead>
                   <tbody>
                     {rosterPeople.map((person) => {
                       const linkedUser = person.adminUserId ? linkedUsersById.get(person.adminUserId) : undefined
-                      const allTime = allTimeByPerson.get(person.id)
+                      const annual = annualByPerson.get(person.id)
                       return (
                         <tr key={person.id}>
-                          <td><strong>{person.staffCode}</strong><span>{person.displayName}</span></td>
-                          <td>{linkedUser?.username || person.adminUsername || person.username || "—"}</td>
-                          <td><span className={styles.groupBadge}>{groupFromUser(linkedUser, person.team)}</span></td>
-                          <td>{displayDate(allTime?.firstAttendanceDate || null)}</td>
-                          <td>{displayDate(allTime?.lastAttendanceDate || null)}</td>
-                          <td>{displayDays(allTime?.attendedDays || 0)}</td>
-                          <td>{displayDays(allTime?.lateDays || 0)}</td>
-                          <td>{person.dingTalkUserId ? <span className={styles.mappedBadge}>MAPPED</span> : <span className={styles.unmappedBadge}>NOT MAPPED</span>}</td>
+                          <td>{displayDays(annual?.allowanceUnits || 0)}</td>
+                          <td className={styles.annualStaffCell}>
+                            <strong>{person.staffCode}</strong>
+                            <span>{person.displayName}</span>
+                            <small>
+                              <span className={styles.groupBadge}>{groupFromUser(linkedUser, person.team)}</span>
+                              {person.dingTalkUserId
+                                ? <span className={styles.mappedBadge}>MAPPED</span>
+                                : <span className={styles.unmappedBadge}>NOT MAPPED</span>}
+                            </small>
+                          </td>
+                          {SUMMARY_CODES.slice(0, 5).map((code) => (
+                            <td key={code}>{displayDays(annualCodeTotal(annual, code))}</td>
+                          ))}
+                          <td>{displayDays(annualCodeTotal(annual, "HOL"))}</td>
+                          {SUMMARY_CODES.slice(5).map((code) => (
+                            <td key={code}>{displayDays(annualCodeTotal(annual, code))}</td>
+                          ))}
+                          <td>{displayDays(annual?.openingCarryForwardUnits || 0)}</td>
+                          <td>{annual?.leavePaidUnits === null || annual?.leavePaidUnits === undefined
+                            ? "—"
+                            : displayDays(annual.leavePaidUnits)}</td>
                           <td>
                             <button
                               type="button"
@@ -1181,9 +1567,27 @@ export default function AttendanceRecordClient() {
                       )
                     })}
                     {!rosterPeople.length ? (
-                      <tr><td colSpan={9}><div className={styles.emptyState}>No attendance users match this search.</div></td></tr>
+                      <tr><td colSpan={16}><div className={styles.emptyState}>No attendance users match this search.</div></td></tr>
                     ) : null}
                   </tbody>
+                  {rosterPeople.length ? (
+                    <tfoot>
+                      <tr>
+                        <td>{displayDays(annualTotals.allowanceUnits)}</td>
+                        <th scope="row">TOTAL</th>
+                        {SUMMARY_CODES.slice(0, 5).map((code) => (
+                          <td key={code}>{displayDays(annualTotals.codeTotals[code] || 0)}</td>
+                        ))}
+                        <td>{displayDays(annualTotals.codeTotals.HOL || 0)}</td>
+                        {SUMMARY_CODES.slice(5).map((code) => (
+                          <td key={code}>{displayDays(annualTotals.codeTotals[code] || 0)}</td>
+                        ))}
+                        <td>{displayDays(annualTotals.openingCarryForwardUnits)}</td>
+                        <td>{annualTotals.hasLeavePaid ? displayDays(annualTotals.leavePaidUnits) : "—"}</td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  ) : null}
                 </table>
               </div>
             )}
@@ -1197,23 +1601,52 @@ export default function AttendanceRecordClient() {
             <div className={styles.modalHeader}>
               <div>
                 <span>{leaveDraft.staffLabel} · {displayShortDate(leaveDraft.date)}</span>
-                <h2 id="leave-title">Manual leave</h2>
+                <h2 id="leave-title">Edit attendance day</h2>
               </div>
-              <button type="button" aria-label="Close leave form" onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>×</button>
+              <button type="button" aria-label="Close attendance day editor" onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>×</button>
             </div>
             <div className={styles.formGrid}>
               <label>
-                Portion
-                <select value={leaveDraft.portion} onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, portion: event.target.value as LeaveDraft["portion"] } : draft)}>
-                  <option value="full">Full day</option>
-                  <option value="am">AM half-day</option>
-                  <option value="pm">PM half-day</option>
+                Work mode
+                <select
+                  value={leaveDraft.workMode}
+                  onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, workMode: event.target.value as LeaveDraft["workMode"] } : draft)}
+                >
+                  <option value="default">Default ({leaveDraft.defaultWorkMode === "home-office" ? "Home Office" : "Office"})</option>
+                  <option value="office">Office</option>
+                  <option value="home-office">Home Office</option>
+                  <option value="business-trip">Business Trip</option>
                 </select>
               </label>
               <label>
-                Leave code
-                <select value={leaveDraft.code} onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, code: event.target.value as AttendanceLeaveCode } : draft)}>
+                Leave
+                <select
+                  value={leaveDraft.leaveEnabled ? leaveDraft.code : "NONE"}
+                  onChange={(event) => setLeaveDraft((draft) => draft ? {
+                    ...draft,
+                    leaveEnabled: event.target.value !== "NONE",
+                    code: event.target.value === "NONE" ? draft.code : event.target.value as AttendanceLeaveCode,
+                  } : draft)}
+                >
+                  <option value="NONE">No leave</option>
+                  {leaveDraft.leaveEnabled && (leaveDraft.code === "HO" || leaveDraft.code === "OS") ? (
+                    <option value={leaveDraft.code} disabled>
+                      {leaveDraft.code} · Legacy work-mode record (remove to replace)
+                    </option>
+                  ) : null}
                   {LEAVE_CODES.map((code) => <option value={code.value} key={code.value}>{code.label}</option>)}
+                </select>
+              </label>
+              <label>
+                Leave portion
+                <select
+                  value={leaveDraft.portion}
+                  disabled={!leaveDraft.leaveEnabled}
+                  onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, portion: event.target.value as LeaveDraft["portion"] } : draft)}
+                >
+                  <option value="full">Full day</option>
+                  <option value="am">AM half-day</option>
+                  <option value="pm">PM half-day</option>
                 </select>
               </label>
               <label className={styles.fullField}>
@@ -1231,8 +1664,8 @@ export default function AttendanceRecordClient() {
               </span>
               <div>
                 <button type="button" className={styles.secondaryButton} onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>Cancel</button>
-                <button type="button" className={styles.primaryButton} onClick={() => void saveLeave()} disabled={pendingAction === "save-leave"}>
-                  {pendingAction === "save-leave" ? "Saving…" : "Save leave"}
+                <button type="button" className={styles.primaryButton} onClick={() => void saveDayEdit()} disabled={pendingAction === "save-day-edit"}>
+                  {pendingAction === "save-day-edit" ? "Saving…" : "Save changes"}
                 </button>
               </div>
             </div>
@@ -1259,8 +1692,8 @@ export default function AttendanceRecordClient() {
                   setReminderSelection(new Set())
                 }}
               >
-                {Array.from({ length: Math.max(0, lastClosedMonth) }, (_, index) => index + 1).map((month) => (
-                  <option value={month} key={month}>{MONTH_NAMES[month - 1]} {currentYear}</option>
+                {closedMonthSections.map(({ month }) => (
+                  <option value={month} key={month}>{MONTH_NAMES[month - 1]} {selectedSummaryYear}</option>
                 ))}
               </select>
             </label>

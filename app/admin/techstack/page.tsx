@@ -124,6 +124,8 @@ const DATABASE_GROUPS = [
       "attendance_raw_punches (immutable source)",
       "attendance_leave_entries",
       "attendance_manual_overrides",
+      "attendance_work_mode_policies (effective-dated default work location)",
+      "attendance_work_mode_overrides (manual per-day work location)",
       "attendance_entitlements",
       "attendance_monthly_adjustments (legacy opening records)",
       "attendance_monthly_confirmations",

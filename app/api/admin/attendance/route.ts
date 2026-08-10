@@ -15,12 +15,14 @@ import {
   getAttendanceSettings,
   getDailyAttendance,
   getMonthlyAttendance,
+  saveAttendanceDayEdit,
   saveAttendanceEntitlement,
   saveAttendanceLeaveRange,
   saveAttendanceMonthlyAdjustment,
   saveAttendanceMonthlyConfirmation,
   saveAttendanceOverride,
   saveAttendancePerson,
+  saveAttendanceWorkMode,
   removeAttendancePerson,
   sendAttendanceConfirmationReminders,
 } from "@/lib/attendanceData"
@@ -189,6 +191,18 @@ export async function POST(request: Request) {
     if (action === "delete-leave") {
       await deleteAttendanceLeave(client, payload.id)
       return privateJson({ success: true })
+    }
+    if (action === "save-day-edit") {
+      const dayEdit = await saveAttendanceDayEdit(client, payload.dayEdit, actor)
+      return privateJson({ success: true, ...dayEdit })
+    }
+    if (action === "save-work-mode") {
+      const workModeOverride = await saveAttendanceWorkMode(
+        client,
+        payload.workMode,
+        actor,
+      )
+      return privateJson({ success: true, workModeOverride })
     }
     if (action === "save-override") {
       const requested = Array.isArray(payload.overrides)
