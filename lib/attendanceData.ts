@@ -7,6 +7,7 @@ import {
   type ManagedAdminUser,
 } from "@/lib/adminUsers"
 import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
+import { isLastHongKongWorkingDay } from "@/lib/attendanceMonthEnd"
 import {
   loadAttendanceCalendarContext,
   sortAttendancePeople,
@@ -2232,6 +2233,149 @@ export function buildAttendanceReminderEmail(input: {
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>
     `,
+  }
+}
+
+export function buildAttendanceMonthEndReviewEmail(input: {
+  displayName: string
+  year: number
+  month: number
+}) {
+  const monthLabel = attendanceMonthLabel(input.year, input.month)
+  return {
+    subject: `***** Attendance Review Reminder - ${monthLabel}`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
+        <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
+        <p style="margin:0 0 10px">Today is the last Hong Kong working day of <strong>${escapeHtml(monthLabel)}</strong>. Please review your current sign-in, sign-out, leave and work-mode record.</p>
+        <p style="margin:0 0 10px">The month is still in progress. Please confirm the monthly record after the month has closed and the final punches have synchronized.</p>
+        <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
+      </div>
+    `,
+  }
+}
+
+export async function sendAttendanceMonthEndReviewReminders(
+  client: SupabaseClient,
+  now = new Date(),
+) {
+  const calendar = await loadAttendanceCalendarContext(client)
+  const holidayDates = new Set(calendar.holidaysByDate.keys())
+  const today = hktDateFromTimestamp(now)
+  const period = hktYearMonth(now)
+  if (!isLastHongKongWorkingDay(now, holidayDates)) {
+    return {
+      skipped: true,
+      reason: "Today is not the last Hong Kong working day of the month.",
+      date: today,
+      year: period.year,
+      month: period.month,
+      eligible: 0,
+      sent: 0,
+      failed: 0,
+      alreadySent: 0,
+      unavailable: 0,
+    }
+  }
+
+  const [{ data: peopleData, error: peopleError }, managedUsers] = await Promise.all([
+    client
+      .from("attendance_people")
+      .select("id,admin_user_id,display_name")
+      .eq("is_active", true),
+    listManagedAdminUsers(),
+  ])
+  throwIfError(peopleError, "Could not load month-end attendance recipients.")
+
+  const usersById = new Map(managedUsers.map((user) => [user.id, user]))
+  const targets = (peopleData || []).flatMap((value) => {
+    const person = asRow(value)
+    const adminUserId = stringOrNull(person.admin_user_id)
+    const user = adminUserId ? usersById.get(adminUserId) : undefined
+    const emails = normalizeEmailList(user?.username || "")
+    if (!user?.isActive || emails.length !== 1) return []
+    return [{
+      personId: String(person.id),
+      displayName: user.displayName || String(person.display_name || "Staff member"),
+      email: emails[0],
+    }]
+  })
+
+  const results: Array<{ personId: string; status: "sent" | "failed" | "already-sent" }> = []
+  for (const target of targets) {
+    const pending = await client
+      .from("attendance_reminder_dispatches")
+      .insert({
+        person_id: target.personId,
+        year: period.year,
+        month: period.month,
+        status: "pending",
+        dispatch_kind: "month_end_review",
+        requested_by: "system:attendance-month-end-cron",
+      })
+      .select("id")
+      .single()
+    if (pending.error?.code === "23505") {
+      results.push({ personId: target.personId, status: "already-sent" })
+      continue
+    }
+    throwIfError(pending.error, "Could not record a month-end attendance reminder.")
+    const dispatchId = String(asRow(pending.data).id || "")
+    if (!dispatchId) throw new Error("Month-end attendance reminder was not recorded.")
+
+    const email = buildAttendanceMonthEndReviewEmail({
+      displayName: target.displayName,
+      year: period.year,
+      month: period.month,
+    })
+    let messageId: string
+    try {
+      const sent = await sendNoticeEmail({
+        to: [target.email],
+        subject: email.subject,
+        html: email.html,
+      })
+      messageId = String(sent.id || "sent").slice(0, 1000)
+    } catch {
+      const { error } = await client
+        .from("attendance_reminder_dispatches")
+        .update({
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          message_id: null,
+          error_code: "EMAIL_SEND_FAILED",
+        })
+        .eq("id", dispatchId)
+      throwIfError(error, "Could not complete failed month-end reminder audit.")
+      results.push({ personId: target.personId, status: "failed" })
+      continue
+    }
+    const { error } = await client
+      .from("attendance_reminder_dispatches")
+      .update({
+        status: "sent",
+        completed_at: new Date().toISOString(),
+        message_id: messageId,
+        error_code: null,
+      })
+      .eq("id", dispatchId)
+    throwIfError(error, "Could not complete month-end attendance reminder audit.")
+    results.push({ personId: target.personId, status: "sent" })
+  }
+
+  const sent = results.filter((result) => result.status === "sent").length
+  const failed = results.filter((result) => result.status === "failed").length
+  const alreadySent = results.filter((result) => result.status === "already-sent").length
+  return {
+    skipped: false,
+    date: today,
+    year: period.year,
+    month: period.month,
+    eligible: targets.length,
+    sent,
+    failed,
+    alreadySent,
+    unavailable: Math.max(0, (peopleData || []).length - targets.length),
   }
 }
 

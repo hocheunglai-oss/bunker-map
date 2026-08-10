@@ -52,7 +52,7 @@ type LeaveDraft = {
 }
 
 const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "monthly-record", label: "MONTHLY RECORD" },
+  { id: "monthly-record", label: "ATTENDANCE (CURRENT MONTH)" },
   { id: "monthly", label: "MONTHLY" },
   { id: "all-time", label: "ALL TIME" },
 ]

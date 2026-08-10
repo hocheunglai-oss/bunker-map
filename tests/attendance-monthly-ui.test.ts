@@ -14,7 +14,7 @@ const userManagement = source("../app/admin/usermanagement/page.tsx")
 test("Attendance Record exposes only the requested three compact views", () => {
   assert.match(
     client,
-    /const TABS[\s\S]*?MONTHLY RECORD[\s\S]*?MONTHLY[\s\S]*?ALL TIME/,
+    /const TABS[\s\S]*?ATTENDANCE \(CURRENT MONTH\)[\s\S]*?MONTHLY[\s\S]*?ALL TIME/,
   )
   assert.doesNotMatch(client, /\{ id: "daily"/)
   assert.doesNotMatch(client, /\{ id: "leave"/)
