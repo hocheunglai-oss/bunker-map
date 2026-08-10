@@ -158,6 +158,8 @@ export function isSpcWhatsappLoginMfaConfigured() {
   const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || ""
   const phoneNumberId =
     process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || ""
+  const testPhoneNumberId =
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
   let validSupabaseUrl = false
   try {
     validSupabaseUrl = new URL(supabaseUrl).protocol === "https:"
@@ -171,7 +173,8 @@ export function isSpcWhatsappLoginMfaConfigured() {
     secret.length >= 32 &&
     accessToken &&
     GRAPH_VERSION_PATTERN.test(graphVersion) &&
-    GRAPH_ID_PATTERN.test(phoneNumberId),
+    GRAPH_ID_PATTERN.test(phoneNumberId) &&
+    phoneNumberId !== testPhoneNumberId,
   )
 }
 
@@ -364,11 +367,18 @@ export async function sendSpcWhatsappLoginMfaCode(
   },
   fetchImpl: typeof fetch = fetch,
 ) {
+  const phoneNumberId =
+    process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || ""
+  const testPhoneNumberId =
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
+  if (phoneNumberId === testPhoneNumberId) {
+    throw new SpcMfaTestDeliveryError("configuration")
+  }
+
   return sendSpcMfaAuthenticationCode(
     input,
     {
-      phoneNumberId:
-        process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || "",
+      phoneNumberId,
       templateName: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME,
       templateLanguage: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE,
     },

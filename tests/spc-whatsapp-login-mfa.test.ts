@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
+  SpcWhatsappLoginMfaDeliveryError,
   SPC_WHATSAPP_LOGIN_MFA_PILOT_USERNAME,
   SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE,
   SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME,
@@ -70,6 +71,14 @@ test("WhatsApp login MFA configuration requires a separate strong secret and sen
     { ...base, SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID: undefined },
     () => assert.equal(isSpcWhatsappLoginMfaConfigured(), false),
   )
+  withEnvironment(
+    {
+      ...base,
+      SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID:
+        base.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID,
+    },
+    () => assert.equal(isSpcWhatsappLoginMfaConfigured(), false),
+  )
 })
 
 test("WhatsApp login MFA uses the dedicated HK sender and approved login template", async () => {
@@ -133,6 +142,25 @@ test("WhatsApp login MFA uses the dedicated HK sender and approved login templat
         ],
       },
     })
+
+    process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID =
+      process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID
+    let collapsedSenderCalled = false
+    await assert.rejects(
+      () => sendSpcWhatsappLoginMfaCode(
+        { to: "85291234567", code: "004219" },
+        (async () => {
+          collapsedSenderCalled = true
+          return new Response()
+        }) as typeof fetch,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SpcWhatsappLoginMfaDeliveryError)
+        assert.equal(error.category, "configuration")
+        return true
+      },
+    )
+    assert.equal(collapsedSenderCalled, false)
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]
