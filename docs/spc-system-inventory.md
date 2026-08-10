@@ -58,7 +58,7 @@ not evidence that its contract, data location or security approval is complete.
 | ICE | Brent market-data dependency with contract/freshness/range validation and fail-closed behavior | Licence and permitted internal use |
 | TradingView | Embedded chart/widget origins are configured | Current business use, widget terms, privacy impact and exit |
 | Hong Kong Observatory | Weather content origin is configured for supported presentation/embedding | Current use, terms and owner confirmation |
-| Meta / WhatsApp | SPC browser-extension and company-number WhatsApp workflows are documented | Approved service model, data handling, extension distribution and provider/contract review |
+| Meta / WhatsApp | SPC browser-extension/company-number workflows and an ADMIN-only Cloud API OTP delivery/verification pilot for the inactive `MFA_TEST` account are documented; the pilot does not enforce login MFA | Approved service model, recipient-number verification, delivery-metadata retention, extension distribution, privacy role, DPA and provider/contract review |
 
 ## Data categories and exposure
 

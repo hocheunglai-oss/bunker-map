@@ -50,6 +50,7 @@ const SPC_PAGE_LABELS: Record<string, string> = {
   "spc-statistics": "SPC STATISTICS",
   "spc-suppliers": "SPC SUPPLIER DATABASE",
   "spc-user-management": "SPC USER MANAGEMENT",
+  "spc-mfa-test": "SPC MFA TEST",
   "spc-audit-log": "SPC AUDIT LOG",
   "spc-system-health": "SPC SYSTEM HEALTH",
   "spc-tech-stack": "SPC TECH STACK",

@@ -189,6 +189,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   email_templates: "email-templates",
   outlook_template_insertion_attempts: "email-templates",
   spc_user_management_events: "spc-user-management",
+  spc_mfa_test_events: "spc-mfa-test",
   admin_users: "user-management",
   admin_role_defaults: "user-management",
   spc_users: "spc-user-management",
@@ -213,6 +214,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "hongkong-price-history": "HONG KONG PRICE HISTORY",
   "taiwan-price-history": "TAIWAN PRICE HISTORY",
   "spc-user-management": "SPC USER MANAGEMENT",
+  "spc-mfa-test": "SPC MFA TEST",
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
   "spc-readme": "SPC INTRODUCTION",
@@ -246,6 +248,7 @@ const ENTITY_NAMES: Record<string, string> = {
   email_templates: "email template",
   outlook_template_insertion_attempts: "Outlook template insertion attempt",
   spc_user_management_events: "SPC user-management action",
+  spc_mfa_test_events: "SPC WhatsApp MFA test",
   admin_users: "user",
   admin_role_defaults: "role defaults",
   spc_users: "SPC user",
@@ -380,6 +383,7 @@ const SPC_TABLE_NAMES = new Set([
   "spc_suppliers",
   "spc_speedboard_notices",
   "spc_user_management_events",
+  "spc_mfa_test_events",
 ])
 
 const NON_UNDOABLE_TABLES = new Set([
@@ -388,6 +392,7 @@ const NON_UNDOABLE_TABLES = new Set([
   "outlook_template_insertion_attempts",
   "spc_users",
   "spc_user_management_events",
+  "spc_mfa_test_events",
   "spc_suppliers",
   "spc_speedboard_notices",
 ])
@@ -1447,6 +1452,36 @@ function getDeletedFixtureDetails(record: AuditLogRecord, recordLabel: string) {
   return details.slice(0, 12)
 }
 
+function getSpcMfaTestPresentation(record: AuditLogRecord) {
+  if (record.tableName !== "spc_mfa_test_events") return null
+
+  const row = record.afterRow || {}
+  const status = auditText(row.status)
+  const target = auditText(row.target_username) || "MFA_TEST"
+  const statusSummaries: Record<string, string> = {
+    challenge_created: `Created a WhatsApp MFA test challenge for ${target}.`,
+    delivery_accepted: `WhatsApp accepted the MFA test code for ${target}.`,
+    delivery_failed: `SPC could not confirm WhatsApp accepted the MFA test code for ${target}.`,
+    activation_failed: `SPC could not activate the WhatsApp MFA test challenge for ${target}.`,
+    verification_requested: `Started WhatsApp MFA test verification for ${target}.`,
+    verified: `Verified the WhatsApp MFA test code for ${target}.`,
+    mismatch: `Rejected an incorrect WhatsApp MFA test code for ${target}.`,
+    locked: `Locked the WhatsApp MFA test challenge for ${target}.`,
+    expired: `Rejected an expired WhatsApp MFA test code for ${target}.`,
+    already_used: `Rejected a reused WhatsApp MFA test code for ${target}.`,
+    unavailable: `Rejected an unavailable WhatsApp MFA test challenge for ${target}.`,
+  }
+  const summary = statusSummaries[status] || `Recorded a WhatsApp MFA test event for ${target}.`
+  const details = [summary]
+  const phoneHint = auditText(row.phone_hint)
+  if (/^\+[0-9]{1,2}•+[0-9]{4}$/.test(phoneHint)) {
+    details.push(`Masked WhatsApp destination: ${phoneHint}.`)
+  }
+  const messageId = auditText(row.whatsapp_message_id)
+  if (messageId) details.push(`WhatsApp message ID: ${messageId}.`)
+  return { summary, details }
+}
+
 function buildSummary(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
@@ -1455,6 +1490,8 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  const mfaTestPresentation = getSpcMfaTestPresentation(record)
+  if (mfaTestPresentation) return mfaTestPresentation.summary
   if (record.tableName === "spc_user_management_events") {
     const investigation = getAuditInvestigationFields(record)
     const outcome = investigation.auditOutcome === "denied" ? "Denied" : "Failed"
@@ -1521,6 +1558,9 @@ function buildDetails(
       insertionCorrelation?.events,
     ).details
   }
+
+  const mfaTestPresentation = getSpcMfaTestPresentation(record)
+  if (mfaTestPresentation) return finish(mfaTestPresentation.details)
 
   const userManagementChanges = getSpcUserManagementChanges(record)
   if (userManagementChanges) return finish(userManagementChanges.details)
@@ -1719,7 +1759,7 @@ export async function listAuditLogs(options: {
     .from("audit_logs")
     .select(options.includeRows === false ? AUDIT_INDEX_SELECT : AUDIT_SELECT)
     .or(
-      "table_schema.eq.public,and(table_schema.eq.app,table_name.in.(outlook_template_insertion_attempts,spc_user_management_events))"
+      "table_schema.eq.public,and(table_schema.eq.app,table_name.in.(outlook_template_insertion_attempts,spc_user_management_events,spc_mfa_test_events))"
     )
     .in("actor_source", ["app", "header"])
     .order("occurred_at", { ascending: false })
@@ -1729,7 +1769,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices,spc_user_management_events)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices,spc_user_management_events,spc_mfa_test_events)",
     )
   }
 

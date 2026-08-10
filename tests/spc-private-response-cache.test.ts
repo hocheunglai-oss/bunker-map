@@ -32,6 +32,9 @@ test("sensitive SPC routes use the private response boundary on success and erro
     "../app/api/spc/audit-logs/route.ts",
     "../app/api/spc/users/route.ts",
     "../app/api/spc/chrome-extension/download/route.ts",
+    "../app/api/spc/mfa-test/route.ts",
+    "../app/api/spc/mfa-test/send/route.ts",
+    "../app/api/spc/mfa-test/verify/route.ts",
   ]
   const [serverTiming, ...routes] = await Promise.all([
     readFile(new URL("../lib/serverTiming.ts", import.meta.url), "utf8"),

@@ -10,6 +10,7 @@ import { SPC_PAGE_DEFINITIONS } from "../lib/spcPages"
 
 function auditRecord(input: {
   tableName: string
+  tableSchema?: string
   operation: AuditOperation
   recordPk?: Record<string, unknown>
   changedFields?: string[]
@@ -24,7 +25,7 @@ function auditRecord(input: {
     actorId: "spc:otto@cosulich.com.hk",
     actorName: "OTTO LAI",
     actorSource: "app",
-    tableSchema: "public",
+    tableSchema: input.tableSchema || "public",
     tableName: input.tableName,
     operation: input.operation,
     recordPk: input.recordPk || {},
@@ -316,4 +317,127 @@ test("SPC user-management investigation identifiers are visible only to administ
   )
   assert.equal(adminView.platformRequestId, "hkg1::restricted-request")
   assert.ok(adminView.details.includes("Source IP: 203.0.113.21."))
+})
+
+test("WhatsApp MFA audit presents the outcome without OTP or full-phone data", async () => {
+  const [presented] = await presentAuditLogs(
+    [
+      auditRecord({
+        tableSchema: "app",
+        tableName: "spc_mfa_test_events",
+        operation: "INSERT",
+        recordPk: {
+          requestId: "11111111-1111-4111-8111-111111111111",
+          challengeId: "44444444-4444-4444-8444-444444444444",
+          status: "delivery_accepted",
+        },
+        changedFields: ["status", "outcome"],
+        afterRow: {
+          schema: "fcuno.spc-whatsapp-mfa-test-audit/v1",
+          title: "WhatsApp MFA test",
+          action: "send-whatsapp-mfa-test-code",
+          status: "delivery_accepted",
+          outcome: "success",
+          target_id: "22222222-2222-4222-8222-222222222222",
+          target_username: "MFA_TEST",
+          phone_hint: "+85•••••4567",
+          whatsapp_message_id: "wamid.test-123",
+        },
+        requestContext: {
+          pageId: "spc-mfa-test",
+          pageLabel: "SPC MFA TEST",
+          pagePath: "/spc/mfa-test",
+          actorRole: "ADMIN",
+          action: "send-whatsapp-mfa-test-code",
+          outcome: "success",
+          targetType: "spc-user",
+          targetId: "22222222-2222-4222-8222-222222222222",
+          targetUsername: "MFA_TEST",
+        },
+      }),
+    ],
+    SPC_PAGE_DEFINITIONS,
+  )
+
+  assert.equal(presented.pageId, "spc-mfa-test")
+  assert.equal(presented.pageLabel, "SPC MFA TEST")
+  assert.equal(
+    presented.summary,
+    "WhatsApp accepted the MFA test code for MFA_TEST.",
+  )
+  assert.equal(presented.undoable, false)
+  assert.ok(presented.details.includes("Masked WhatsApp destination: +85•••••4567."))
+  assert.ok(presented.details.includes("WhatsApp message ID: wamid.test-123."))
+  assert.doesNotMatch(
+    JSON.stringify(presented),
+    /85291234567|004219|code_hash|access_token/i,
+  )
+})
+
+test("every WhatsApp MFA lifecycle status keeps the ADMIN page and masked-only details", async () => {
+  const cases = [
+    ["challenge_created", "success", /Created a WhatsApp MFA test challenge/],
+    ["delivery_accepted", "success", /WhatsApp accepted the MFA test code/],
+    ["delivery_failed", "failed", /could not confirm WhatsApp accepted/],
+    ["activation_failed", "failed", /could not activate/],
+    ["verification_requested", "success", /Started WhatsApp MFA test verification/],
+    ["verified", "success", /Verified the WhatsApp MFA test code/],
+    ["mismatch", "failed", /incorrect WhatsApp MFA test code/],
+    ["locked", "failed", /Locked the WhatsApp MFA test challenge/],
+    ["expired", "failed", /expired WhatsApp MFA test code/],
+    ["already_used", "failed", /reused WhatsApp MFA test code/],
+    ["unavailable", "failed", /unavailable WhatsApp MFA test challenge/],
+  ] as const
+
+  for (const [status, outcome, expectedSummary] of cases) {
+    const [presented] = await presentAuditLogs(
+      [
+        auditRecord({
+          tableSchema: "app",
+          tableName: "spc_mfa_test_events",
+          operation: "INSERT",
+          recordPk: {
+            requestId: "11111111-1111-4111-8111-111111111111",
+            challengeId: "44444444-4444-4444-8444-444444444444",
+            status,
+          },
+          changedFields: ["status", "outcome"],
+          afterRow: {
+            schema: "fcuno.spc-whatsapp-mfa-test-audit/v1",
+            title: "WhatsApp MFA test",
+            action: status === "verification_requested" || [
+              "verified",
+              "mismatch",
+              "locked",
+              "expired",
+              "already_used",
+              "unavailable",
+            ].includes(status)
+              ? "verify-whatsapp-mfa-test-code"
+              : "send-whatsapp-mfa-test-code",
+            status,
+            outcome,
+            target_id: "22222222-2222-4222-8222-222222222222",
+            target_username: "MFA_TEST",
+            phone_hint: "+85•••••4567",
+          },
+          requestContext: {
+            pageId: "spc-mfa-test",
+            pageLabel: "SPC MFA TEST",
+            pagePath: "/spc/mfa-test",
+            actorRole: "ADMIN",
+            outcome,
+          },
+        }),
+      ],
+      SPC_PAGE_DEFINITIONS,
+    )
+
+    assert.equal(presented.pageId, "spc-mfa-test")
+    assert.equal(presented.pageLabel, "SPC MFA TEST")
+    assert.equal(presented.undoable, false)
+    assert.match(presented.summary, expectedSummary)
+    assert.ok(presented.details.includes("Masked WhatsApp destination: +85•••••4567."))
+    assert.doesNotMatch(JSON.stringify(presented), /85291234567|004219|code_hash/i)
+  }
 })

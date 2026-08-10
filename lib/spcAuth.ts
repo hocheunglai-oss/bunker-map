@@ -190,10 +190,11 @@ export function hasSpcPagePermission(
 export function hasSpcAdminPagePermission(
   session: SpcSession,
   access: "view" | "edit" = "view",
+  pageId: "spc-user-management" | "spc-mfa-test" = "spc-user-management",
 ) {
   return (
     hasSpcRole(session, "ADMIN") &&
-    hasSpcPagePermission(session, "spc-user-management", access)
+    hasSpcPagePermission(session, pageId, access)
   )
 }
 
@@ -207,13 +208,12 @@ export async function requireSpcPagePermission(
 }
 
 export async function requireSpcAdminPagePermission(
-  pageId: "spc-user-management",
+  pageId: "spc-user-management" | "spc-mfa-test",
   access: "view" | "edit" = "view",
 ) {
   const session = await requireSpcSession()
   if (
-    pageId !== "spc-user-management" ||
-    !hasSpcAdminPagePermission(session, access)
+    !hasSpcAdminPagePermission(session, access, pageId)
   ) {
     throw new Error("Forbidden")
   }

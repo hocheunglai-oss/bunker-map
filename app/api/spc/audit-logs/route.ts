@@ -36,6 +36,7 @@ const PAGE_TABLES: Record<string, string[]> = {
     "spc_user_management_events",
     "office_calendar_store",
   ],
+  "spc-mfa-test": ["spc_mfa_test_events"],
   "spc-buyer-enquiries": ["spc_enquiries", "office_calendar_store"],
   "spc-fixtures": ["spc_enquiries", "spc_fixtures"],
   "spc-lost-record": ["spc_enquiries"],
@@ -202,6 +203,9 @@ export async function GET(request: Request) {
       if (!presented?.pageId.startsWith("spc-")) {
         return spcPrivateJson({ message: "Audit log not found." }, { status: 404 })
       }
+      if (!viewerIsAdmin && presented.pageId === "spc-mfa-test") {
+        return spcPrivateJson({ message: "Audit log not found." }, { status: 404 })
+      }
 
       return timedJson(
         "/api/spc/audit-logs",
@@ -234,7 +238,10 @@ export async function GET(request: Request) {
       await presentAuditLogs(records, SPC_PAGE_DEFINITIONS),
       usersByUsername,
     )
-    const logs = presented
+    const visiblePresented = presented.filter(
+      (record) => viewerIsAdmin || record.pageId !== "spc-mfa-test",
+    )
+    const logs = visiblePresented
       .filter((record) => record.pageId.startsWith("spc-"))
       .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
       .filter((record) => !operation || operation === "ALL" || record.displayOperation === operation)
@@ -249,8 +256,10 @@ export async function GET(request: Request) {
       startedAt,
       {
         logs,
-        pages: SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
-        users: buildAuditUserFilters(session, usersByUsername, presented),
+        pages: SPC_PAGE_DEFINITIONS
+          .filter(({ id }) => viewerIsAdmin || id !== "spc-mfa-test")
+          .map(({ id, label }) => ({ id, label })),
+        users: buildAuditUserFilters(session, usersByUsername, visiblePresented),
       },
       undefined,
       { mode: "index", returned: logs.length, candidateLimit },
