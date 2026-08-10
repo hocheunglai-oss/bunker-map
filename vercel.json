@@ -28,6 +28,10 @@
       "schedule": "0 0 * * *"
     },
     {
+      "path": "/api/cron/attendance-auto-confirm",
+      "schedule": "0 10 * * *"
+    },
+    {
       "path": "/api/spc/security-maintenance",
       "schedule": "17 18 * * *"
     }

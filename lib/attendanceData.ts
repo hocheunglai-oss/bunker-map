@@ -7,7 +7,11 @@ import {
   type ManagedAdminUser,
 } from "@/lib/adminUsers"
 import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
-import { isLastHongKongWorkingDay } from "@/lib/attendanceMonthEnd"
+import {
+  hongKongWorkingDayNumber,
+  isLastHongKongWorkingDay,
+  previousMonthPeriod,
+} from "@/lib/attendanceMonthEnd"
 import {
   loadAttendanceCalendarContext,
   sortAttendancePeople,
@@ -2249,10 +2253,138 @@ export function buildAttendanceMonthEndReviewEmail(input: {
         <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
         <p style="margin:0 0 10px">Today is the last Hong Kong working day of <strong>${escapeHtml(monthLabel)}</strong>. Please review your current sign-in, sign-out, leave and work-mode record.</p>
         <p style="margin:0 0 10px">The month is still in progress. Please confirm the monthly record after the month has closed and the final punches have synchronized.</p>
+        <p style="margin:0 0 10px"><strong>Workflow:</strong> A second reminder will be sent on the first Hong Kong working day of the next month. If the record remains unconfirmed, it will be marked <strong>SYSTEM CONFIRMED</strong> at 18:00 HKT on the third Hong Kong working day.</p>
+        <p style="margin:0 0 10px">System confirmation does not remove your right to dispute the record. After system confirmation, please contact an administrator directly if any correction is required.</p>
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>
     `,
   }
+}
+
+export function buildAttendanceSecondReminderEmail(input: {
+  displayName: string
+  year: number
+  month: number
+}) {
+  const monthLabel = attendanceMonthLabel(input.year, input.month)
+  return {
+    subject: `***** Final Attendance Confirmation Reminder - ${monthLabel}`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
+        <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
+        <p style="margin:0 0 10px">This is the second and final reminder to review and confirm your attendance record for <strong>${escapeHtml(monthLabel)}</strong>.</p>
+        <p style="margin:0 0 10px"><strong>Workflow:</strong> Please confirm the record before 18:00 HKT on the third Hong Kong working day of this month. If it remains unconfirmed, the system will mark it <strong>SYSTEM CONFIRMED</strong>.</p>
+        <p style="margin:0 0 10px">System confirmation does not mean that you personally approved every entry and does not remove your right to dispute the record. After system confirmation, please contact an administrator directly if any correction is required.</p>
+        <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
+      </div>
+    `,
+  }
+}
+
+export async function sendAttendanceSecondReminders(
+  client: SupabaseClient,
+  now = new Date(),
+) {
+  const calendar = await loadAttendanceCalendarContext(client)
+  const holidayDates = new Set(calendar.holidaysByDate.keys())
+  const today = hktDateFromTimestamp(now)
+  const period = previousMonthPeriod(now)
+  if (hongKongWorkingDayNumber(now, holidayDates) !== 1) {
+    return { skipped: true, date: today, ...period, sent: 0, failed: 0, alreadySent: 0, unavailable: 0 }
+  }
+
+  const [{ data: peopleData, error: peopleError }, { data: confirmedData, error: confirmedError }, managedUsers] = await Promise.all([
+    client.from("attendance_people").select("id,admin_user_id,display_name").eq("is_active", true),
+    client.from("attendance_monthly_confirmations").select("person_id").eq("year", period.year).eq("month", period.month).eq("status", "confirmed"),
+    listManagedAdminUsers(),
+  ])
+  throwIfError(peopleError, "Could not load second-reminder recipients.")
+  throwIfError(confirmedError, "Could not load attendance confirmations.")
+  const confirmedIds = new Set((confirmedData || []).map((value) => String(asRow(value).person_id)))
+  const usersById = new Map(managedUsers.map((user) => [user.id, user]))
+  const targets = (peopleData || []).flatMap((value) => {
+    const person = asRow(value)
+    const personId = String(person.id)
+    const user = usersById.get(String(person.admin_user_id || ""))
+    const emails = normalizeEmailList(user?.username || "")
+    if (confirmedIds.has(personId) || !user?.isActive || emails.length !== 1) return []
+    return [{ personId, displayName: user.displayName || String(person.display_name || "Staff member"), email: emails[0] }]
+  })
+
+  const results: Array<"sent" | "failed" | "already-sent"> = []
+  for (const target of targets) {
+    const pending = await client.from("attendance_reminder_dispatches").insert({
+      person_id: target.personId, year: period.year, month: period.month,
+      status: "pending", dispatch_kind: "second_reminder",
+      requested_by: "system:attendance-second-reminder-cron",
+    }).select("id").single()
+    if (pending.error?.code === "23505") { results.push("already-sent"); continue }
+    throwIfError(pending.error, "Could not record a second attendance reminder.")
+    const dispatchId = String(asRow(pending.data).id || "")
+    const email = buildAttendanceSecondReminderEmail({ displayName: target.displayName, ...period })
+    let messageId: string
+    try {
+      const sent = await sendNoticeEmail({ to: [target.email], subject: email.subject, html: email.html })
+      messageId = String(sent.id || "sent").slice(0, 1000)
+    } catch {
+      const { error } = await client.from("attendance_reminder_dispatches").update({
+        status: "failed", completed_at: new Date().toISOString(), message_id: null, error_code: "EMAIL_SEND_FAILED",
+      }).eq("id", dispatchId)
+      throwIfError(error, "Could not audit a failed second attendance reminder.")
+      results.push("failed"); continue
+    }
+    const { error } = await client.from("attendance_reminder_dispatches").update({
+      status: "sent", completed_at: new Date().toISOString(), message_id: messageId, error_code: null,
+    }).eq("id", dispatchId)
+    throwIfError(error, "Could not audit the second attendance reminder.")
+    results.push("sent")
+  }
+  return {
+    skipped: false, date: today, ...period,
+    sent: results.filter((value) => value === "sent").length,
+    failed: results.filter((value) => value === "failed").length,
+    alreadySent: results.filter((value) => value === "already-sent").length,
+    unavailable: Math.max(0, (peopleData || []).length - targets.length - confirmedIds.size),
+  }
+}
+
+export async function autoConfirmOverdueAttendance(
+  client: SupabaseClient,
+  now = new Date(),
+) {
+  const calendar = await loadAttendanceCalendarContext(client)
+  const holidayDates = new Set(calendar.holidaysByDate.keys())
+  const period = previousMonthPeriod(now)
+  if (hongKongWorkingDayNumber(now, holidayDates) !== 3) {
+    return { skipped: true, ...period, systemConfirmed: 0 }
+  }
+  const [{ data: reminded, error: reminderError }, { data: confirmations, error: confirmationError }] = await Promise.all([
+    client.from("attendance_reminder_dispatches").select("person_id").eq("year", period.year).eq("month", period.month).eq("dispatch_kind", "second_reminder").eq("status", "sent"),
+    client.from("attendance_monthly_confirmations").select("id,person_id,status").eq("year", period.year).eq("month", period.month),
+  ])
+  throwIfError(reminderError, "Could not load final attendance reminders.")
+  throwIfError(confirmationError, "Could not load pending attendance confirmations.")
+  const byPerson = new Map((confirmations || []).map((value) => [String(asRow(value).person_id), asRow(value)]))
+  let systemConfirmed = 0
+  for (const value of reminded || []) {
+    const personId = String(asRow(value).person_id)
+    const existing = byPerson.get(personId)
+    if (existing?.status === "confirmed") continue
+    const values = {
+      person_id: personId, year: period.year, month: period.month, status: "confirmed",
+      confirmed_at: now.toISOString(), confirmed_by: "system:attendance-auto-confirm",
+      note: "System confirmed after the second reminder. The employee may dispute the record directly with an administrator.",
+      created_by: "system:attendance-auto-confirm", updated_by: "system:attendance-auto-confirm",
+    }
+    const query = existing
+      ? client.from("attendance_monthly_confirmations").update({ ...values, created_by: undefined }).eq("id", String(existing.id)).eq("status", "pending")
+      : client.from("attendance_monthly_confirmations").insert(values)
+    const { data, error } = await query.select("id")
+    if (error?.code === "23505") continue
+    throwIfError(error, "Could not system-confirm attendance.")
+    if (data?.length) systemConfirmed += 1
+  }
+  return { skipped: false, ...period, systemConfirmed }
 }
 
 export async function sendAttendanceMonthEndReviewReminders(

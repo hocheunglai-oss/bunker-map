@@ -1406,6 +1406,7 @@ export default function AttendanceRecordClient() {
                     {monthSections.map((section) =>
                       section.rows.map((row, rowIndex) => {
                         const confirmed = row.summary?.confirmation?.status === "confirmed"
+                        const systemConfirmed = confirmed && row.summary?.confirmation?.confirmedBy === "system:attendance-auto-confirm"
                         const open = !yearData[section.month]?.periodClosed
                         return (
                           <tr key={`${section.month}:${row.person.id}`}>
@@ -1431,7 +1432,7 @@ export default function AttendanceRecordClient() {
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
-                                  CONFIRMED
+                                  {systemConfirmed ? "SYSTEM CONFIRMED" : "CONFIRMED"}
                                 </span>
                               ) : open ? (
                                 <span className={styles.openBadge}>OPEN</span>

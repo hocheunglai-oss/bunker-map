@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import {
   getAttendanceServiceClient,
   sendAttendanceMonthEndReviewReminders,
+  sendAttendanceSecondReminders,
 } from "@/lib/attendanceData"
 
 export const dynamic = "force-dynamic"
@@ -38,11 +39,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await sendAttendanceMonthEndReviewReminders(
-      getAttendanceServiceClient(),
-    )
-    return privateJson({ success: result.failed === 0, ...result }, {
-      status: result.failed > 0 ? 502 : 200,
+    const client = getAttendanceServiceClient()
+    const [monthEndReview, secondReminder] = await Promise.all([
+      sendAttendanceMonthEndReviewReminders(client),
+      sendAttendanceSecondReminders(client),
+    ])
+    const failed = monthEndReview.failed + secondReminder.failed
+    return privateJson({ success: failed === 0, monthEndReview, secondReminder }, {
+      status: failed > 0 ? 502 : 200,
     })
   } catch (error) {
     console.error("Attendance month-end reminder failed", error)

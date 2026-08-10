@@ -1,7 +1,11 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { isLastHongKongWorkingDay } from "../lib/attendanceMonthEnd"
+import {
+  hongKongWorkingDayNumber,
+  isLastHongKongWorkingDay,
+  previousMonthPeriod,
+} from "../lib/attendanceMonthEnd"
 
 function source(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8")
@@ -13,6 +17,9 @@ const migration = source(
   "../supabase/migrations/20260810092214_add_attendance_month_end_reminder_idempotency.sql",
 )
 const vercel = source("../vercel.json")
+const client = source("../app/admin/attendancerecord/AttendanceRecordClient.tsx")
+const autoRoute = source("../app/api/cron/attendance-auto-confirm/route.ts")
+const workflowMigration = source("../supabase/migrations/20260810101816_extend_attendance_confirmation_workflow.sql")
 
 test("last Hong Kong working day excludes later weekdays, weekends, and persisted holidays", () => {
   assert.equal(
@@ -39,6 +46,12 @@ test("last Hong Kong working day excludes later weekdays, weekends, and persiste
   )
 })
 
+test("working-day workflow respects Hong Kong holidays and crosses the year boundary", () => {
+  assert.equal(hongKongWorkingDayNumber(new Date("2026-10-01T00:00:00Z"), new Set(["2026-10-01"])), 0)
+  assert.equal(hongKongWorkingDayNumber(new Date("2026-10-02T00:00:00Z"), new Set(["2026-10-01"])), 1)
+  assert.deepEqual(previousMonthPeriod(new Date("2027-01-04T00:00:00Z")), { year: 2026, month: 12 })
+})
+
 test("month-end reminder is authenticated, daily scheduled at 08:00 HKT, and retry-safe", () => {
   assert.match(route, /timingSafeEqual/)
   assert.match(route, /CRON_SECRET/)
@@ -59,4 +72,19 @@ test("automatic email asks for review now and confirmation only after close", ()
   assert.match(data, /month is still in progress/)
   assert.match(data, /confirm the monthly record after the month has closed/)
   assert.match(data, /Open Attendance Record/)
+  assert.match(data, /second and final reminder/)
+  assert.match(data, /SYSTEM CONFIRMED/)
+  assert.match(data, /contact an administrator directly/)
+})
+
+test("second reminder and system confirmation are scheduled, audited, and visibly distinct", () => {
+  assert.match(vercel, /attendance-auto-confirm[\s\S]*?"schedule": "0 10 \* \* \*"/)
+  assert.match(autoRoute, /timingSafeEqual/)
+  assert.match(autoRoute, /CRON_SECRET/)
+  assert.match(data, /dispatch_kind: "second_reminder"/)
+  assert.match(data, /confirmed_by: "system:attendance-auto-confirm"/)
+  assert.match(data, /The employee may dispute the record directly with an administrator/)
+  assert.match(client, /SYSTEM CONFIRMED/)
+  assert.match(workflowMigration, /'second_reminder'/)
+  assert.match(workflowMigration, /attendance_reminder_dispatches_second_once/)
 })
