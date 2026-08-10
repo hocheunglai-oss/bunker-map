@@ -67,8 +67,8 @@ The ADMIN-only WhatsApp MFA test records challenge creation, Meta send-request
 acceptance or failure, activation state, and verification outcome. It stores a
 masked destination and Meta message ID where available, never the OTP, keyed
 hash, access token, or full phone number. These records use the same append-only
-database boundary and are hidden from non-ADMIN SPC audit viewers. The pilot
-does not change or prove the production login MFA control.
+database boundary and are hidden from non-ADMIN SPC audit viewers. This ADMIN
+test does not change or prove the separate Otto-only login MFA control.
 
 This protection does not establish an approved audit-retention period or a
 central SIEM/SOC alerting process. Those remain pending Group Information

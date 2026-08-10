@@ -10,7 +10,7 @@ import { createClient } from "@supabase/supabase-js"
 import {
   SpcMfaTestDeliveryError,
   maskSpcWhatsappPhone,
-  sendSpcMfaTestCode,
+  sendSpcMfaAuthenticationCode,
 } from "@/lib/spcMfaTest"
 import {
   createSpcSessionToken,
@@ -24,6 +24,8 @@ export const SPC_WHATSAPP_LOGIN_MFA_CODE_LENGTH = 6
 export const SPC_WHATSAPP_LOGIN_MFA_EXPIRY_SECONDS = 5 * 60
 export const SPC_WHATSAPP_LOGIN_MFA_MAX_ATTEMPTS = 5
 export const SPC_WHATSAPP_LOGIN_MFA_MAX_RETRY_SECONDS = 24 * 60 * 60
+export const SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME = "spc_login_mfa_code"
+export const SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE = "en_US"
 
 const PENDING_TOKEN_BYTES = 32
 const UUID_PATTERN =
@@ -155,7 +157,7 @@ export function isSpcWhatsappLoginMfaConfigured() {
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || ""
   const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || ""
   const phoneNumberId =
-    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
+    process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || ""
   let validSupabaseUrl = false
   try {
     validSupabaseUrl = new URL(supabaseUrl).protocol === "https:"
@@ -355,11 +357,23 @@ export async function beginSpcWhatsappLoginMfaChallenge(input: {
   }
 }
 
-export async function sendSpcWhatsappLoginMfaCode(input: {
-  to: string
-  code: string
-}) {
-  return sendSpcMfaTestCode(input)
+export async function sendSpcWhatsappLoginMfaCode(
+  input: {
+    to: string
+    code: string
+  },
+  fetchImpl: typeof fetch = fetch,
+) {
+  return sendSpcMfaAuthenticationCode(
+    input,
+    {
+      phoneNumberId:
+        process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || "",
+      templateName: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME,
+      templateLanguage: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE,
+    },
+    fetchImpl,
+  )
 }
 
 export { SpcMfaTestDeliveryError as SpcWhatsappLoginMfaDeliveryError }

@@ -38,6 +38,8 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/
 const PHONE_PATTERN = /^[1-9][0-9]{7,14}$/
 const GRAPH_VERSION_PATTERN = /^v[0-9]{1,3}\.[0-9]{1,2}$/
 const GRAPH_ID_PATTERN = /^[0-9]{5,30}$/
+const TEMPLATE_NAME_PATTERN = /^[a-z0-9_]{1,512}$/
+const TEMPLATE_LANGUAGE_PATTERN = /^[a-z]{2,3}(?:_[A-Z]{2})?$/
 
 type SpcMfaTestUserRow = {
   id: string
@@ -289,10 +291,26 @@ export async function getSpcMfaTestTarget(userId: string): Promise<SpcMfaTestTar
   return mapSpcMfaTestTarget(data as SpcMfaTestUserRow)
 }
 
-export function buildSpcMfaAuthenticationMessage(to: string, code: string) {
+export function buildSpcMfaAuthenticationMessage(
+  to: string,
+  code: string,
+  template: {
+    name: string
+    language: string
+  } = {
+    name: SPC_MFA_TEST_TEMPLATE_NAME,
+    language: SPC_MFA_TEST_TEMPLATE_LANGUAGE,
+  },
+) {
   if (!PHONE_PATTERN.test(to)) throw new Error("The WhatsApp recipient is invalid.")
   if (!new RegExp(`^[0-9]{${SPC_MFA_TEST_CODE_LENGTH}}$`).test(code)) {
     throw new Error("The WhatsApp MFA test code is invalid.")
+  }
+  if (
+    !TEMPLATE_NAME_PATTERN.test(template.name) ||
+    !TEMPLATE_LANGUAGE_PATTERN.test(template.language)
+  ) {
+    throw new Error("The WhatsApp authentication template is invalid.")
   }
 
   return {
@@ -301,8 +319,8 @@ export function buildSpcMfaAuthenticationMessage(to: string, code: string) {
     to,
     type: "template",
     template: {
-      name: SPC_MFA_TEST_TEMPLATE_NAME,
-      language: { code: SPC_MFA_TEST_TEMPLATE_LANGUAGE },
+      name: template.name,
+      language: { code: template.language },
       components: [
         {
           type: "body",
@@ -319,14 +337,26 @@ export function buildSpcMfaAuthenticationMessage(to: string, code: string) {
   }
 }
 
-export async function sendSpcMfaTestCode(
+export async function sendSpcMfaAuthenticationCode(
   input: { to: string; code: string },
+  configuration: {
+    phoneNumberId: string
+    templateName: string
+    templateLanguage: string
+  },
   fetchImpl: typeof fetch = fetch,
 ) {
   const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN")
   const graphVersion = requireEnv("WHATSAPP_GRAPH_API_VERSION")
-  const phoneNumberId = requireEnv("SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID")
-  if (!GRAPH_VERSION_PATTERN.test(graphVersion) || !GRAPH_ID_PATTERN.test(phoneNumberId)) {
+  const phoneNumberId = configuration.phoneNumberId.trim()
+  const templateName = configuration.templateName.trim()
+  const templateLanguage = configuration.templateLanguage.trim()
+  if (
+    !GRAPH_VERSION_PATTERN.test(graphVersion) ||
+    !GRAPH_ID_PATTERN.test(phoneNumberId) ||
+    !TEMPLATE_NAME_PATTERN.test(templateName) ||
+    !TEMPLATE_LANGUAGE_PATTERN.test(templateLanguage)
+  ) {
     throw new SpcMfaTestDeliveryError("configuration")
   }
 
@@ -340,7 +370,12 @@ export async function sendSpcMfaTestCode(
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(buildSpcMfaAuthenticationMessage(input.to, input.code)),
+        body: JSON.stringify(
+          buildSpcMfaAuthenticationMessage(input.to, input.code, {
+            name: templateName,
+            language: templateLanguage,
+          }),
+        ),
         cache: "no-store",
         signal: AbortSignal.timeout(META_REQUEST_TIMEOUT_MS),
       },
@@ -370,6 +405,21 @@ export async function sendSpcMfaTestCode(
   const messageId = safeMessageId(payload)
   if (!messageId) throw new SpcMfaTestDeliveryError("invalid-response")
   return { messageId }
+}
+
+export async function sendSpcMfaTestCode(
+  input: { to: string; code: string },
+  fetchImpl: typeof fetch = fetch,
+) {
+  return sendSpcMfaAuthenticationCode(
+    input,
+    {
+      phoneNumberId: requireEnv("SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID"),
+      templateName: SPC_MFA_TEST_TEMPLATE_NAME,
+      templateLanguage: SPC_MFA_TEST_TEMPLATE_LANGUAGE,
+    },
+    fetchImpl,
+  )
 }
 
 export async function beginSpcMfaTestChallenge(input: {

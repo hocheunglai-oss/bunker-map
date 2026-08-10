@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
   SPC_WHATSAPP_LOGIN_MFA_PILOT_USERNAME,
+  SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE,
+  SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME,
   createSpcWhatsappLoginMfaPendingToken,
   generateSpcWhatsappLoginMfaCode,
   hashSpcWhatsappLoginMfaCode,
@@ -10,6 +12,7 @@ import {
   isPlausibleSpcWhatsappLoginMfaPendingToken,
   isSpcWhatsappLoginMfaConfigured,
   requiresSpcWhatsappLoginMfa,
+  sendSpcWhatsappLoginMfaCode,
 } from "../lib/spcWhatsappLoginMfa"
 
 const USER_ID = "11111111-1111-4111-8111-111111111111"
@@ -48,14 +51,15 @@ test("WhatsApp login MFA is fail-closed and hard-bound to Otto", () => {
   })
 })
 
-test("WhatsApp login MFA configuration requires a separate strong secret", () => {
+test("WhatsApp login MFA configuration requires a separate strong secret and sender", () => {
   const base = {
     NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "service-role",
     SPC_WHATSAPP_LOGIN_MFA_SECRET: "l".repeat(32),
     WHATSAPP_ACCESS_TOKEN: "token",
     WHATSAPP_GRAPH_API_VERSION: "v23.0",
-    SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID: "1137471446122498",
+    SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID: "1137471446122498",
+    SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID: "999999999999999",
   }
   withEnvironment(base, () => assert.equal(isSpcWhatsappLoginMfaConfigured(), true))
   withEnvironment(
@@ -63,9 +67,78 @@ test("WhatsApp login MFA configuration requires a separate strong secret", () =>
     () => assert.equal(isSpcWhatsappLoginMfaConfigured(), false),
   )
   withEnvironment(
-    { ...base, SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID: undefined },
+    { ...base, SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID: undefined },
     () => assert.equal(isSpcWhatsappLoginMfaConfigured(), false),
   )
+})
+
+test("WhatsApp login MFA uses the dedicated HK sender and approved login template", async () => {
+  const keys = [
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_GRAPH_API_VERSION",
+    "SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID",
+    "SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID",
+  ]
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  try {
+    process.env.WHATSAPP_ACCESS_TOKEN = "meta-token"
+    process.env.WHATSAPP_GRAPH_API_VERSION = "v23.0"
+    process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID = "123456789012345"
+    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID = "999999999999999"
+    let capturedUrl = ""
+    let capturedInit: RequestInit | undefined
+    const acceptedFetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedInit = init
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.login-mfa" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }) as typeof fetch
+
+    assert.deepEqual(
+      await sendSpcWhatsappLoginMfaCode(
+        { to: "85291234567", code: "004219" },
+        acceptedFetch,
+      ),
+      { messageId: "wamid.login-mfa" },
+    )
+    assert.equal(
+      capturedUrl,
+      "https://graph.facebook.com/v23.0/123456789012345/messages",
+    )
+    assert.equal(
+      new Headers(capturedInit?.headers).get("authorization"),
+      "Bearer meta-token",
+    )
+    assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "85291234567",
+      type: "template",
+      template: {
+        name: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_NAME,
+        language: { code: SPC_WHATSAPP_LOGIN_MFA_TEMPLATE_LANGUAGE },
+        components: [
+          {
+            type: "body",
+            parameters: [{ type: "text", text: "004219" }],
+          },
+          {
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: "004219" }],
+          },
+        ],
+      },
+    })
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 })
 
 test("login MFA codes and pre-authentication tokens use bounded secure formats", () => {
