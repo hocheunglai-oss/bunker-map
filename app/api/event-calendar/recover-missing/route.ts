@@ -5,6 +5,7 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { mutateEventCalendarStore } from "@/lib/eventCalendarStore"
 
 type CalendarEvent = {
   id: string
@@ -187,22 +188,15 @@ export async function POST(request: Request) {
 
     const existingIds = new Set(result.currentEvents.map((event) => event.id))
     const restoredEvents = restoreEvents.filter((event) => !existingIds.has(event.id))
-    const nextPayload = {
-      ...result.currentPayload,
-      events: [...result.currentEvents, ...restoredEvents],
-    }
 
     const supabase = createAdminAuditedSupabaseClient(
       createAdminAuditContext(session, request, "event-calendar"),
       { useServiceRole: true }
     )
-    const { error } = await supabase.from("office_calendar_store").upsert({
-      key: "event-calendar",
-      payload: nextPayload,
-      updated_at: new Date().toISOString(),
+    await mutateEventCalendarStore(supabase, {
+      operation: "insert",
+      events: restoredEvents,
     })
-
-    if (error) throw error
 
     return NextResponse.json({
       restoredEvents,

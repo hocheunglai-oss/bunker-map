@@ -9,6 +9,7 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { mutateEventCalendarStore } from "@/lib/eventCalendarStore"
 
 const allowedKeys = new Set(["event-calendar", "task-calendar", "enquiry-worksheet"])
 
@@ -91,21 +92,6 @@ function mergeCollectionById(
   }
 }
 
-function mergeEventCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
-  const current = asRecord(currentPayload)
-  const incoming = asRecord(incomingPayload)
-  const deletedRequiredSeedIds = new Set([
-    ...normalizeStringList(current.deletedRequiredSeedIds),
-    ...normalizeStringList(incoming.deletedRequiredSeedIds),
-  ])
-  const merged = mergeCollectionById(current, incoming, "events", "deletedEventIds")
-
-  return {
-    ...merged,
-    deletedRequiredSeedIds: Array.from(deletedRequiredSeedIds),
-  }
-}
-
 function mergeTaskCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
   return mergeCollectionById(asRecord(currentPayload), asRecord(incomingPayload), "tasks", "deletedTaskIds")
 }
@@ -162,9 +148,30 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
           { useServiceRole: true }
         )
       : getSupabaseClient()
+
+    // Older Event Calendar tabs PUT their entire in-memory snapshot. Convert
+    // those requests to a settings-only atomic mutation so obsolete event data
+    // can never race with or overwrite a newer edit.
+    if (storeKey === "event-calendar") {
+      const incoming = asRecord(payload)
+      const data = await mutateEventCalendarStore(supabase, {
+        operation: "settings",
+        settings: {
+          ...(Array.isArray(incoming.people) ? { people: normalizeStringList(incoming.people) } : {}),
+          ...(typeof incoming.emailRecipientsText === "string"
+            ? { emailRecipientsText: incoming.emailRecipientsText }
+            : {}),
+          ...(Array.isArray(incoming.deletedRequiredSeedIds)
+            ? { deletedRequiredSeedIds: normalizeStringList(incoming.deletedRequiredSeedIds) }
+            : {}),
+        },
+      })
+      return NextResponse.json({ success: true, payload: data })
+    }
+
     let nextPayload = payload
 
-    if (storeKey === "event-calendar" || storeKey === "task-calendar") {
+    if (storeKey === "task-calendar") {
       const { data: currentRow, error: currentError } = await supabase
         .from("office_calendar_store")
         .select("payload")
@@ -172,9 +179,7 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
         .maybeSingle()
 
       if (currentError) throw currentError
-      nextPayload = storeKey === "event-calendar"
-        ? mergeEventCalendarPayload(currentRow?.payload || null, payload)
-        : mergeTaskCalendarPayload(currentRow?.payload || null, payload)
+      nextPayload = mergeTaskCalendarPayload(currentRow?.payload || null, payload)
     }
 
     const { error } = await supabase.from("office_calendar_store").upsert({
@@ -189,6 +194,47 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not save shared calendar data." },
       { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ key: string }> }) {
+  const session = await getAccessSession(request)
+  if (session === false) return NextResponse.json({ message: "Not authorized." }, { status: 401 })
+
+  const { key } = await context.params
+  const storeKey = normalizeKey(key)
+  if (storeKey !== "event-calendar") {
+    return NextResponse.json({ message: "Atomic mutations are only available for Event Calendar." }, { status: 405 })
+  }
+  if (session && !hasAdminPagePermission(session, "event-calendar", "edit")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+  }
+
+  try {
+    const body = asRecord(await request.json())
+    const operation = typeof body.operation === "string" ? body.operation : ""
+    if (!['upsert', 'insert', 'delete', 'people', 'settings'].includes(operation)) {
+      return NextResponse.json({ message: "Unknown Event Calendar mutation." }, { status: 400 })
+    }
+
+    const supabase = session
+      ? createAdminAuditedSupabaseClient(
+          createAdminAuditContext(session, request, storeKey),
+          { useServiceRole: true },
+        )
+      : getSupabaseClient()
+    const data = await mutateEventCalendarStore(supabase, {
+      operation: operation as "upsert" | "insert" | "delete" | "people" | "settings",
+      events: Array.isArray(body.events) ? body.events : [],
+      eventIds: normalizeStringList(body.eventIds),
+      settings: asRecord(body.settings),
+    })
+    return NextResponse.json({ success: true, payload: data })
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Could not mutate Event Calendar." },
+      { status: 500 },
     )
   }
 }

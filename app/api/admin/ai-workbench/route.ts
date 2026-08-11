@@ -10,6 +10,7 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { mutateEventCalendarStore } from "@/lib/eventCalendarStore"
 import { recordOpenAiUsage } from "@/lib/openAiUsage"
 
 export const maxDuration = 60
@@ -598,7 +599,7 @@ async function applyCalendarEvents(
   const payload = data?.payload && typeof data.payload === "object" ? data.payload as Record<string, unknown> : {}
   const existingEvents = normalizeStoredEvents(payload.events)
   const seen = new Set(existingEvents.map(eventKey))
-  const nextEvents = [...existingEvents]
+  const insertedEvents: OfficeCalendarEvent[] = []
   let inserted = 0
   let skipped = 0
 
@@ -619,7 +620,7 @@ async function applyCalendarEvents(
     }
 
     seen.add(key)
-    nextEvents.unshift(nextEvent)
+    insertedEvents.push(nextEvent)
     inserted += 1
   }
 
@@ -627,18 +628,11 @@ async function applyCalendarEvents(
     ...(Array.isArray(payload.people) ? payload.people : DEFAULT_PEOPLE),
     ...calendarEvents.flatMap((event) => event.people),
   ])
-  const nextPayload = {
-    ...payload,
-    events: nextEvents,
-    people,
-  }
-
-  const { error: saveError } = await supabase.from("office_calendar_store").upsert({
-    key: "event-calendar",
-    payload: nextPayload,
-    updated_at: new Date().toISOString(),
+  await mutateEventCalendarStore(supabase, {
+    operation: "insert",
+    events: insertedEvents,
+    settings: { people },
   })
-  if (saveError) throw saveError
 
   return { inserted, skipped }
 }

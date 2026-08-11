@@ -517,6 +517,7 @@ export default function EventCalendarPage() {
   const [recoveryStatus, setRecoveryStatus] = useState("")
   const [recoveringEvents, setRecoveringEvents] = useState(false)
   const loadedRef = useRef(false)
+  const eventsRef = useRef<ManagedEvent[]>([])
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -575,6 +576,7 @@ export default function EventCalendarPage() {
       fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, [...fallbackDeletedRequiredSeedIds, ...fallbackDeletedEventIds])
 
       if (cancelled) return
+      eventsRef.current = fallbackEvents
       setEvents(fallbackEvents)
       setPeople(fallbackPeople)
       setEmailRecipientsText(fallbackEmailRecipients)
@@ -595,6 +597,7 @@ export default function EventCalendarPage() {
 
   useEffect(() => {
     if (!loadedRef.current) return
+    eventsRef.current = events
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events))
   }, [events])
 
@@ -625,9 +628,12 @@ export default function EventCalendarPage() {
     remoteSaveTimerRef.current = setTimeout(() => {
       setSaveStatus("Saving shared calendar")
       void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ events, people, emailRecipientsText, deletedEventIds, deletedRequiredSeedIds }),
+        body: JSON.stringify({
+          operation: "settings",
+          settings: { people, emailRecipientsText, deletedRequiredSeedIds },
+        }),
       })
         .then(async (response) => {
           if (!response.ok) {
@@ -644,7 +650,7 @@ export default function EventCalendarPage() {
     return () => {
       if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
     }
-  }, [authenticated, deletedEventIds, deletedRequiredSeedIds, emailRecipientsText, events, people])
+  }, [authenticated, deletedRequiredSeedIds, emailRecipientsText, people])
 
   useEffect(() => {
     if (!authenticated || !calendarLoaded || !loadedRef.current) return
@@ -665,7 +671,7 @@ export default function EventCalendarPage() {
         }
 
         if (cancelled) return
-        setEvents((current) => mergeImportedEvents(current, normalizeStoredEvents(payload.events)))
+        await persistImportedEvents(normalizeStoredEvents(payload.events))
         setHolidayImportStatus(`Holidays ready ${years.replace(",", "-")}`)
       } catch {
         if (!cancelled) setHolidayImportStatus("Holiday import pending")
@@ -767,6 +773,41 @@ export default function EventCalendarPage() {
       const payload = await response.json().catch(() => null)
       throw new Error(payload?.message || "Email notification failed.")
     }
+  }
+
+  async function mutateCalendar(
+    operation: "upsert" | "insert" | "delete" | "people" | "settings",
+    mutationEvents: ManagedEvent[] = [],
+    eventIds: string[] = [],
+    settings: Record<string, unknown> = {},
+  ) {
+    setSaveStatus("Saving shared calendar")
+    const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation, events: mutationEvents, eventIds, settings }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.payload) {
+      const message = payload?.message || "Shared calendar save failed"
+      setSaveStatus(message)
+      throw new Error(message)
+    }
+
+    const persistedEvents = normalizeStoredEvents(payload.payload.events)
+    eventsRef.current = persistedEvents
+    setEvents(persistedEvents)
+    setDeletedEventIds(normalizeStringList(payload.payload.deletedEventIds))
+    setSaveStatus("Shared calendar saved")
+    return payload.payload
+  }
+
+  async function persistImportedEvents(importedEvents: ManagedEvent[]) {
+    const merged = mergeImportedEvents(eventsRef.current, importedEvents)
+    const currentIds = new Set(eventsRef.current.map((event) => event.id))
+    const additions = merged.filter((event) => !currentIds.has(event.id))
+    if (!additions.length) return
+    await mutateCalendar("insert", additions)
   }
 
   const visibleEvents = useMemo(() => {
@@ -871,12 +912,12 @@ export default function EventCalendarPage() {
       if (!proceed) return
     }
 
-    setEvents((current) => {
-      if (eventModalMode === "edit") {
-        return current.map((event) => (event.id === nextEvent.id ? nextEvent : event))
-      }
-      return [nextEvent, ...current]
-    })
+    try {
+      await mutateCalendar("upsert", [nextEvent])
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The event was not saved. Please try again.")
+      return
+    }
     setEmailPrompt({
       event: nextEvent,
       action: eventModalMode === "edit" ? "updated" : "created",
@@ -898,7 +939,7 @@ export default function EventCalendarPage() {
     }
   }
 
-  function saveRecurrentEvents() {
+  async function saveRecurrentEvents() {
     if (!window.confirm("Are you sure you want to create these recurrent events?")) return
 
     const rangeStart = parseLocalDate(draftRecurrentEvent.startDate)
@@ -943,7 +984,12 @@ export default function EventCalendarPage() {
       eventType: draftRecurrentEvent.eventType || "Unclassified",
     }))
 
-    setEvents((current) => [...nextEvents, ...current])
+    try {
+      await mutateCalendar("upsert", nextEvents)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The recurrent events were not saved. Please try again.")
+      return
+    }
     setRecurrentModalOpen(false)
   }
 
@@ -1053,16 +1099,15 @@ export default function EventCalendarPage() {
     }, 650)
   }
 
-  function savePeople() {
+  async function savePeople() {
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
+    try {
+      await mutateCalendar("people", [], [], { people: nextPeople })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The people list was not saved. Please try again.")
+      return
+    }
     setPeople(nextPeople)
-    setEvents((current) =>
-      current.map((event) => ({
-        ...event,
-        people: event.people.filter((person) => nextPeople.includes(person)),
-        uncertainPeople: (event.uncertainPeople || []).filter((person) => nextPeople.includes(person)),
-      }))
-    )
     setSelectedPeople((current) => current.filter((person) => nextPeople.includes(person)))
     setPeopleModalOpen(false)
   }
@@ -1088,7 +1133,7 @@ export default function EventCalendarPage() {
         return
       }
 
-      setEvents((current) => mergeImportedEvents(current, normalizeStoredEvents(payload.events)))
+      await persistImportedEvents(normalizeStoredEvents(payload.events))
       setHolidayImportStatus(`${nextYear} holidays added`)
     } catch {
       setHolidayImportStatus(`${nextYear} holiday import pending`)
@@ -1115,7 +1160,7 @@ export default function EventCalendarPage() {
         return
       }
 
-      setEvents((current) => mergeImportedEvents(current, normalizeStoredEvents(payload.events)))
+      await persistImportedEvents(normalizeStoredEvents(payload.events))
       setHolidayImportStatus(`${nextYear} Hong Kong holidays added`)
     } catch {
       setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
@@ -1157,26 +1202,23 @@ export default function EventCalendarPage() {
     }
   }
 
-  function deleteDraftEvent() {
+  async function deleteDraftEvent() {
     if (eventModalMode !== "edit") return
     if (!window.confirm("Are you sure you want to delete this event?")) return
 
-    setEvents((current) => {
-      const nextEvents = current.filter((event) => event.id !== draftEvent.id)
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEvents))
-      return nextEvents
-    })
-    setDeletedEventIds((current) => {
-      const nextDeletedIds = current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
-      window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
-      return nextDeletedIds
-    })
-    if (requiredSeedEventIds.includes(draftEvent.id)) {
-      setDeletedRequiredSeedIds((current) => {
-        const nextDeletedIds = current.includes(draftEvent.id) ? current : [...current, draftEvent.id]
-        window.localStorage.setItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
-        return nextDeletedIds
+    const nextDeletedRequiredSeedIds = requiredSeedEventIds.includes(draftEvent.id)
+      ? Array.from(new Set([...deletedRequiredSeedIds, draftEvent.id]))
+      : deletedRequiredSeedIds
+    try {
+      await mutateCalendar("delete", [], [draftEvent.id], {
+        deletedRequiredSeedIds: nextDeletedRequiredSeedIds,
       })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The event was not deleted. Please try again.")
+      return
+    }
+    if (requiredSeedEventIds.includes(draftEvent.id)) {
+      setDeletedRequiredSeedIds(nextDeletedRequiredSeedIds)
     }
     setEventModalMode(null)
   }
