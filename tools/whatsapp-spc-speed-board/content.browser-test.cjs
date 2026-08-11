@@ -34,6 +34,10 @@ const html = `<!doctype html>
       body { font-family: Arial, sans-serif; margin: 0; }
       #side { width: 360px; float: left; min-height: 540px; border-right: 1px solid #ddd; }
       #search { width: 300px; margin: 16px; padding: 10px; }
+      #newChatControl { margin: 8px 16px 0; }
+      #newChatDrawer, #phoneDialer { display: none; margin: 8px 16px; padding: 10px; border: 1px solid #ddd; }
+      #phoneNumberInput { min-height: 24px; padding: 6px; border: 1px solid #ccc; }
+      #phoneDialerResult { display: none; padding: 12px; cursor: pointer; border-top: 1px solid #eee; }
       #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #senderRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
@@ -50,6 +54,21 @@ const html = `<!doctype html>
   </head>
   <body>
     <div id="side">
+      <button id="newChatControl" type="button" aria-label="New chat" onclick="document.getElementById('newChatDrawer').style.display='block'">
+        <span data-icon="new-chat-outline"><svg><title>new-chat-outline</title></svg></span>
+      </button>
+      <div id="newChatDrawer">
+        <button id="newChatBack" type="button" onclick="this.parentElement.style.display='none'"><svg><title>ic-arrow-back</title></svg></button>
+        <button id="phoneDialpad" type="button" onclick="document.getElementById('newChatDrawer').style.display='none';document.getElementById('phoneDialer').style.display='block'">
+          <svg><title>ic-dialpad</title></svg>
+        </button>
+      </div>
+      <div id="phoneDialer">
+        <button id="phoneDialerBack" type="button" onclick="document.getElementById('phoneDialer').style.display='none';document.getElementById('newChatDrawer').style.display='block'"><svg><title>ic-arrow-back</title></svg></button>
+        <div id="phoneNumberInput" data-testid="phone-number-input" contenteditable="true" role="textbox"></div>
+        <div id="phoneDialerResult" data-testid="cell-frame-container" role="button" tabindex="0" onclick="window.openDialerContact()"></div>
+        <div data-testid="dialer-pad-1" role="button">1</div>
+      </div>
       <input id="search" type="text" aria-label="Search input textbox" />
       <div id="renamedRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')">
         <span title="Otto Tone">Otto Tone</span>
@@ -92,6 +111,7 @@ const html = `<!doctype html>
       window.nativeEnterCount = 0;
       window.nativeClickCount = 0;
       window.nativeInsertCount = 0;
+      window.dialerOpenCount = 0;
       window.nativeEnterShouldSend = false;
       window.promptResponse = null;
       window.enquiryOverrides = {};
@@ -109,6 +129,22 @@ const html = `<!doctype html>
         const title = document.getElementById("chatTitle");
         title.textContent = name;
         title.setAttribute("title", name);
+      };
+      document.getElementById("phoneNumberInput").addEventListener("input", (event) => {
+        const digits = String(event.target.innerText || event.target.textContent || "").replace(/\\D/g, "");
+        const result = document.getElementById("phoneDialerResult");
+        result.dataset.phone = digits;
+        result.textContent = digits === "6590000001" ? "Saved Barry Alias" : digits ? "+" + digits : "";
+        result.style.display = digits ? "block" : "none";
+      });
+      window.openDialerContact = () => {
+        const digits = document.getElementById("phoneDialerResult").dataset.phone || "";
+        if (!digits) return;
+        window.dialerOpenCount += 1;
+        document.getElementById("phoneDialer").style.display = "none";
+        document.getElementById("newChatDrawer").style.display = "none";
+        window.setChatTitle(digits === "6590000001" ? "Barry Local Alias" : digits === "85290000002" ? "+852 9000 0002" : "+" + digits);
+        document.getElementById("composer").focus();
       };
       document.getElementById("search").addEventListener("input", (event) => {
         const value = String(event.target.value || "").toLowerCase();
@@ -369,11 +405,11 @@ async function main() {
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
       await page.waitForFunction(() => (
-        document.getElementById("chatTitle")?.getAttribute("title") === "BARRY KHOO" &&
+        document.getElementById("chatTitle")?.getAttribute("title") === "Barry Local Alias" &&
         window.editorModel === "Re: Taisei Maru No.15, " &&
         document.getElementById("search")?.value === "" &&
         document.activeElement === document.getElementById("composer")
-      ), { timeout: 3000 })
+      ), { timeout: 5000 })
       const senderOpenResult = await page.evaluate(() => ({
         sameDocument: window.senderOpenDocument === document.documentElement,
         chatTitle: document.getElementById("chatTitle")?.getAttribute("title") || "",
@@ -381,15 +417,17 @@ async function main() {
         composerText: window.editorModel,
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
+        dialerOpenCount: window.dialerOpenCount,
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
         sameDocument: true,
-        chatTitle: "BARRY KHOO",
+        chatTitle: "Barry Local Alias",
         searchText: "",
         composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
+        dialerOpenCount: 1,
       })
 
       await page.evaluate(() => {
@@ -408,6 +446,33 @@ async function main() {
         composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
+      })
+
+      await page.evaluate(() => {
+        window.editorModel = ""
+        document.getElementById("composer").replaceChildren()
+        document.getElementById("composer").blur()
+        window.setChatTitle("Other Chat")
+      })
+      await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-2']", { force: true })
+      await page.waitForFunction(() => (
+        document.getElementById("chatTitle")?.getAttribute("title") === "+852 9000 0002" &&
+        window.editorModel === "Re: Shan Ren, " &&
+        document.activeElement === document.getElementById("composer")
+      ), { timeout: 5000 })
+      const unsavedSenderOpenResult = await page.evaluate(() => ({
+        chatTitle: document.getElementById("chatTitle")?.getAttribute("title") || "",
+        composerText: window.editorModel,
+        composerFocused: document.activeElement === document.getElementById("composer"),
+        sentCount: window.sentMessages.length,
+        dialerOpenCount: window.dialerOpenCount,
+      }))
+      assert.deepEqual(unsavedSenderOpenResult, {
+        chatTitle: "+852 9000 0002",
+        composerText: "Re: Shan Ren, ",
+        composerFocused: true,
+        sentCount: 0,
+        dialerOpenCount: 2,
       })
 
       await page.evaluate(() => {

@@ -68,6 +68,7 @@
   let renderPending = false
   let resolvingContactPhones = false
   let capturingCurrentContact = false
+  let verifiedPhoneRoute = { phone: "", chatName: "", expiresAt: 0 }
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -802,6 +803,25 @@
     return document.querySelector("#pane-side") || document.querySelector("#side")
   }
 
+  function clearVerifiedPhoneRoute() {
+    verifiedPhoneRoute = { phone: "", chatName: "", expiresAt: 0 }
+  }
+
+  function markVerifiedPhoneRoute(contact) {
+    const phone = phoneDigits(contact?.phone)
+    const chatName = cleanText(getCurrentChat()?.name).toLowerCase()
+    verifiedPhoneRoute = phone && chatName
+      ? { phone, chatName, expiresAt: Date.now() + 10000 }
+      : { phone: "", chatName: "", expiresAt: 0 }
+  }
+
+  function verifiedPhoneRouteMatches(contact) {
+    const phone = phoneDigits(contact?.phone)
+    if (!phone || verifiedPhoneRoute.phone !== phone || verifiedPhoneRoute.expiresAt < Date.now()) return false
+    const chatName = cleanText(getCurrentChat()?.name).toLowerCase()
+    return Boolean(chatName && chatName === verifiedPhoneRoute.chatName)
+  }
+
   function textMatchesContact(contact, value) {
     const text = cleanText(value).toLowerCase()
     if (!text) return false
@@ -836,6 +856,7 @@
   }
 
   function activateChatRow(row) {
+    clearVerifiedPhoneRoute()
     row.scrollIntoView({ block: "center", inline: "nearest" })
     row.focus?.()
     ;["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
@@ -930,6 +951,111 @@
     return false
   }
 
+  function findVisibleControlBySvgTitle(title) {
+    const expected = cleanText(title).toLowerCase()
+    if (!expected) return null
+    const controls = Array.from(document.querySelectorAll("button, [role='button']")).filter(isVisible)
+    return controls.find((control) =>
+      Array.from(control.querySelectorAll("svg title")).some((node) => cleanText(node.textContent).toLowerCase() === expected),
+    ) || null
+  }
+
+  function findNewChatButton() {
+    const icon = Array.from(document.querySelectorAll("[data-icon='new-chat-outline'], [data-testid='new-chat-outline']"))
+      .find((element) => {
+        const control = element.closest("button, [role='button']")
+        return control && isVisible(control) && !control.disabled && control.getAttribute("aria-disabled") !== "true"
+      })
+    return icon?.closest("button, [role='button']") || null
+  }
+
+  function findPhoneDialerInput() {
+    return Array.from(document.querySelectorAll("[data-testid='phone-number-input'][role='textbox'], [data-testid='phone-number-input'][contenteditable='true']"))
+      .find(isVisible) || null
+  }
+
+  function findPhoneDialerRoot() {
+    const input = findPhoneDialerInput()
+    const keypad = Array.from(document.querySelectorAll("[data-testid='dialer-pad-1']")).find(isVisible)
+    if (!input || !keypad) return null
+    let root = input.parentElement
+    while (root && !root.contains(keypad)) root = root.parentElement
+    return root
+  }
+
+  function findPhoneDialerRow(phone) {
+    const expected = phoneDigits(phone)
+    const root = findPhoneDialerRoot()
+    if (!expected || !root) return null
+    const rows = Array.from(root.querySelectorAll("[data-testid='cell-frame-container'][role='button'], [data-testid='cell-frame-container']"))
+      .filter(isVisible)
+    const exactPhoneRow = rows.find((row) => phoneDigits(row.innerText || row.textContent) === expected)
+    return exactPhoneRow || (rows.length === 1 ? rows[0] : null)
+  }
+
+  async function closePhoneDialer() {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const back = findVisibleControlBySvgTitle("ic-arrow-back")
+      if (!back) return
+      activateControl(back)
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    }
+  }
+
+  async function openPhoneContact(contact) {
+    const phone = phoneDigits(contact?.phone)
+    if (!phone || contact?.kind === "group") return false
+
+    const newChat = findNewChatButton()
+    if (!newChat || !activateControl(newChat)) return false
+
+    let dialpad = null
+    for (const delay of [80, 120, 180, 260]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      dialpad = findVisibleControlBySvgTitle("ic-dialpad")
+      if (dialpad) break
+    }
+    if (!dialpad || !activateControl(dialpad)) {
+      await closePhoneDialer()
+      return false
+    }
+
+    let input = null
+    for (const delay of [60, 100, 160, 240]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      input = findPhoneDialerInput()
+      if (input) break
+    }
+    if (!input) {
+      await closePhoneDialer()
+      return false
+    }
+
+    setEditableText(input, `+${phone}`)
+    let row = null
+    for (const delay of [100, 160, 240, 360, 520]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      row = findPhoneDialerRow(phone)
+      if (row) break
+    }
+    if (!row) {
+      await closePhoneDialer()
+      return false
+    }
+
+    activateChatRow(row)
+    for (const delay of [100, 160, 240, 360, 520]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      if (!findPhoneDialerInput() && findComposer() && getCurrentChat()) {
+        markVerifiedPhoneRoute(contact)
+        return true
+      }
+    }
+
+    await closePhoneDialer()
+    return false
+  }
+
   function normalizedContactLookupName(value) {
     return cleanText(value).normalize("NFKC").toLowerCase()
   }
@@ -980,7 +1106,9 @@
       activateChatRow(row)
       return true
     }
+    if (contact?.preferPhoneSearch && await openPhoneContact(contact)) return true
     if (await searchAndOpenContact(contact)) return true
+    if (contact?.kind !== "group" && phoneDigits(contact?.phone) && await openPhoneContact(contact)) return true
 
     const directUrl = allowNavigation && canUseDirectUrl(contact)
       ? getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
@@ -1197,6 +1325,7 @@
       chatName: contact.displayName,
       phone: contact.phone,
       directUrl: "",
+      kind: "contact",
       preferPhoneSearch: true,
     }
   }
@@ -1630,7 +1759,8 @@
     const contactPhone = phoneDigits(contact.phone)
     if (contactPhone && phoneDigits(chat.phone) === contactPhone) return true
     const chatName = cleanText(chat.name).toLowerCase()
-    return contactLookupNames(contact).some((name) => chatName && chatName === name.toLowerCase())
+    if (contactLookupNames(contact).some((name) => chatName && chatName === name.toLowerCase())) return true
+    return verifiedPhoneRouteMatches(contact)
   }
 
   function clearPendingSend() {

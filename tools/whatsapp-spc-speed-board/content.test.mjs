@@ -554,6 +554,7 @@ assert.deepEqual(
     chatName: "BARRY KHOO",
     phone: "6590000001",
     directUrl: "",
+    kind: "contact",
     preferPhoneSearch: true,
   },
 )
