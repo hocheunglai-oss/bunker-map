@@ -164,7 +164,7 @@ function unauthenticatedSession(): SpcSession {
   }
 }
 
-export async function getSpcSession(): Promise<SpcSession> {
+async function resolveSpcSession(refreshCookie: boolean): Promise<SpcSession> {
   const cookieStore = await cookies()
   const token = cookieStore.get(SPC_COOKIE_NAME)?.value
   if (!token) {
@@ -199,6 +199,14 @@ export async function getSpcSession(): Promise<SpcSession> {
       return unauthenticatedSession()
     }
 
+    if (refreshCookie) {
+      cookieStore.set(
+        SPC_COOKIE_NAME,
+        token,
+        cookieOptions(databaseSession.expiresAt),
+      )
+    }
+
     return {
       authenticated: true,
       userId: databaseUser.id,
@@ -214,6 +222,14 @@ export async function getSpcSession(): Promise<SpcSession> {
     clearSpcCookies(cookieStore)
     return unauthenticatedSession()
   }
+}
+
+export async function getSpcSession(): Promise<SpcSession> {
+  return resolveSpcSession(false)
+}
+
+export async function getRefreshedSpcSession(): Promise<SpcSession> {
+  return resolveSpcSession(true)
 }
 
 export async function requireSpcSession() {

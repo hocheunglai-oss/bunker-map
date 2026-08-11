@@ -637,13 +637,14 @@ export default function SpcUserManagementPage() {
                 />
               </label>
               <label>
-                <span>WhatsApp Phone</span>
+                <span>WhatsApp Phone{userDraft.isActive ? " *" : ""}</span>
                 <input
                   type="tel"
                   value={userDraft.whatsappPhone}
                   onChange={(event) => updateDraft("whatsappPhone", event.target.value)}
                   placeholder="+65 9145 6766"
                   autoComplete="tel"
+                  required={userDraft.isActive}
                 />
               </label>
               <label>

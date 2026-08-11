@@ -36,6 +36,8 @@ let sharedSessionVersion = 0
 const SPC_ACTOR_STORAGE_KEY = "spc_actor"
 const SPC_SESSION_CHANGED_EVENT = "spc-session-changed"
 const SPC_SESSION_CACHE_MS = 30_000
+const SPC_SESSION_ACTIVITY_REFRESH_MS = 60 * 60 * 1000
+const SPC_SESSION_BACKGROUND_REFRESH_MS = 12 * 60 * 60 * 1000
 
 function emitSpcSessionChanged() {
   if (typeof window === "undefined") return
@@ -83,8 +85,8 @@ export function primeSpcClientSessionCache(data: SpcSessionPayload) {
   emitSpcSessionChanged()
 }
 
-function loadSpcSession() {
-  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < SPC_SESSION_CACHE_MS) {
+function loadSpcSession(cacheMs = SPC_SESSION_CACHE_MS) {
+  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < cacheMs) {
     return Promise.resolve(sharedSessionResult.data)
   }
   if (sharedSessionPromise) return sharedSessionPromise
@@ -191,11 +193,11 @@ function useSpcAuthState(): SpcAuthState {
       applySignedOutSession()
     }
 
-    async function checkSession() {
+    async function checkSession(cacheMs = SPC_SESSION_CACHE_MS) {
       const cachedActor = readCachedSpcActor()
 
       try {
-        const data = await loadSpcSession()
+        const data = await loadSpcSession(cacheMs)
         applySession(data)
       } catch {
         if (cachedActor) return
@@ -205,7 +207,21 @@ function useSpcAuthState(): SpcAuthState {
       }
     }
 
+    function refreshActiveSession() {
+      void checkSession(SPC_SESSION_ACTIVITY_REFRESH_MS)
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") refreshActiveSession()
+    }
+
     window.addEventListener(SPC_SESSION_CHANGED_EVENT, handleSessionChanged)
+    window.addEventListener("focus", refreshActiveSession)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    const refreshInterval = window.setInterval(
+      refreshActiveSession,
+      SPC_SESSION_BACKGROUND_REFRESH_MS,
+    )
 
     const cachedActor = readCachedSpcActor()
     if (cachedActor) applySession(cachedActor)
@@ -213,6 +229,9 @@ function useSpcAuthState(): SpcAuthState {
 
     return () => {
       window.removeEventListener(SPC_SESSION_CHANGED_EVENT, handleSessionChanged)
+      window.removeEventListener("focus", refreshActiveSession)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.clearInterval(refreshInterval)
     }
   }, [])
 

@@ -8,17 +8,16 @@ import {
 import { cookies } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
 import {
-  SpcMfaTestDeliveryError,
+  SpcWhatsappAuthenticationDeliveryError,
   maskSpcWhatsappPhone,
-  sendSpcMfaAuthenticationCode,
-} from "@/lib/spcMfaTest"
+  sendSpcWhatsappAuthenticationCode,
+} from "@/lib/spcWhatsappAuthentication"
 import {
   createSpcSessionToken,
   hashSpcSessionToken,
 } from "@/lib/spcSessions"
 import { normaliseSpcWhatsappPhone } from "@/lib/spcUsers"
 
-export const SPC_WHATSAPP_LOGIN_MFA_PILOT_USERNAME = "otto@cosulich.com.hk"
 export const SPC_WHATSAPP_LOGIN_MFA_COOKIE_NAME = "spc_mfa_pending"
 export const SPC_WHATSAPP_LOGIN_MFA_CODE_LENGTH = 6
 export const SPC_WHATSAPP_LOGIN_MFA_EXPIRY_SECONDS = 5 * 60
@@ -140,14 +139,13 @@ export function normalizeSpcWhatsappLoginMfaUsername(username: string | null | u
   return String(username || "").trim().toLowerCase()
 }
 
-export function isSpcWhatsappLoginMfaPilotEnabled() {
-  return process.env.SPC_WHATSAPP_LOGIN_MFA_OTTO_ENABLED?.trim() === "1"
+export function isSpcWhatsappLoginMfaEnabled() {
+  return process.env.SPC_WHATSAPP_LOGIN_MFA_ALL_ENABLED?.trim() === "1"
 }
 
 export function requiresSpcWhatsappLoginMfa(username: string | null | undefined) {
-  return isSpcWhatsappLoginMfaPilotEnabled() &&
-    normalizeSpcWhatsappLoginMfaUsername(username) ===
-      SPC_WHATSAPP_LOGIN_MFA_PILOT_USERNAME
+  return isSpcWhatsappLoginMfaEnabled() &&
+    normalizeSpcWhatsappLoginMfaUsername(username).length > 0
 }
 
 export function isSpcWhatsappLoginMfaConfigured() {
@@ -158,8 +156,8 @@ export function isSpcWhatsappLoginMfaConfigured() {
   const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || ""
   const phoneNumberId =
     process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || ""
-  const testPhoneNumberId =
-    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
+  const disallowedPhoneNumberId =
+    process.env.SPC_WHATSAPP_LOGIN_MFA_DISALLOWED_PHONE_NUMBER_ID?.trim() || ""
   let validSupabaseUrl = false
   try {
     validSupabaseUrl = new URL(supabaseUrl).protocol === "https:"
@@ -174,7 +172,8 @@ export function isSpcWhatsappLoginMfaConfigured() {
     accessToken &&
     GRAPH_VERSION_PATTERN.test(graphVersion) &&
     GRAPH_ID_PATTERN.test(phoneNumberId) &&
-    phoneNumberId !== testPhoneNumberId,
+    GRAPH_ID_PATTERN.test(disallowedPhoneNumberId) &&
+    phoneNumberId !== disallowedPhoneNumberId,
   )
 }
 
@@ -249,7 +248,6 @@ async function getLoginMfaUser(
     .from("spc_users")
     .select("id,username,whatsapp_phone,updated_at,is_active")
     .eq("id", spcUserId)
-    .eq("username", SPC_WHATSAPP_LOGIN_MFA_PILOT_USERNAME)
     .eq("is_active", true)
     .maybeSingle()
 
@@ -369,13 +367,16 @@ export async function sendSpcWhatsappLoginMfaCode(
 ) {
   const phoneNumberId =
     process.env.SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID?.trim() || ""
-  const testPhoneNumberId =
-    process.env.SPC_WHATSAPP_MFA_TEST_PHONE_NUMBER_ID?.trim() || ""
-  if (phoneNumberId === testPhoneNumberId) {
-    throw new SpcMfaTestDeliveryError("configuration")
+  const disallowedPhoneNumberId =
+    process.env.SPC_WHATSAPP_LOGIN_MFA_DISALLOWED_PHONE_NUMBER_ID?.trim() || ""
+  if (
+    !GRAPH_ID_PATTERN.test(disallowedPhoneNumberId) ||
+    phoneNumberId === disallowedPhoneNumberId
+  ) {
+    throw new SpcWhatsappAuthenticationDeliveryError("configuration")
   }
 
-  return sendSpcMfaAuthenticationCode(
+  return sendSpcWhatsappAuthenticationCode(
     input,
     {
       phoneNumberId,
@@ -386,7 +387,9 @@ export async function sendSpcWhatsappLoginMfaCode(
   )
 }
 
-export { SpcMfaTestDeliveryError as SpcWhatsappLoginMfaDeliveryError }
+export {
+  SpcWhatsappAuthenticationDeliveryError as SpcWhatsappLoginMfaDeliveryError,
+}
 
 export async function completeSpcWhatsappLoginMfaDelivery(input: {
   challengeId: string

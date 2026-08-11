@@ -35,7 +35,7 @@ test("SPC operations runbook preserves technical facts and leaves policy decisio
 
   for (const fact of [
     "Automatic 30-day retention",
-    "Fixed 12-hour validity",
+    "400-day sliding validity",
     "35-day managed window",
     "fewer than 90 days remain",
     "targeted authenticated retest",

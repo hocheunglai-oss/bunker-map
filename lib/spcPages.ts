@@ -86,13 +86,6 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/usermanagement", "/spc/usermanagement"],
   },
   {
-    id: "spc-mfa-test",
-    label: "MFA TEST",
-    group: "management",
-    path: "/spc/mfa-test",
-    matchPrefixes: ["/mfa-test", "/spc/mfa-test"],
-  },
-  {
     id: "spc-system-health",
     label: "SYSTEM HEALTH",
     group: "management",
@@ -159,7 +152,7 @@ export function constrainSpcPermissionForRole(
 ) {
   const roleId = normaliseSpcRole(role)
 
-  if (pageId === "spc-user-management" || pageId === "spc-mfa-test") {
+  if (pageId === "spc-user-management") {
     return roleId === "ADMIN" ? "edit" : "none"
   }
 
@@ -283,7 +276,6 @@ export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | nul
     "spc-statistics",
     "spc-suppliers",
     "spc-user-management",
-    "spc-mfa-test",
     "spc-audit-log",
     "spc-system-health",
     "spc-tech-stack",

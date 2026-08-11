@@ -266,6 +266,17 @@ export function normaliseSpcWhatsappPhoneInput(value: string | null | undefined)
   return normaliseSpcWhatsappPhone(raw)
 }
 
+export function normaliseSpcWhatsappPhoneForAccount(
+  value: string | null | undefined,
+  isActive: boolean,
+) {
+  const phone = normaliseSpcWhatsappPhoneInput(value)
+  if (isActive && !phone) {
+    throw new Error("WhatsApp phone is required for an active SPC account.")
+  }
+  return phone
+}
+
 function normaliseOffice(value: string | null | undefined) {
   return (value || "")
     .trim()
@@ -1149,6 +1160,11 @@ export async function saveManagedSpcUser(
   const role = normaliseSpcRole(input.role)
   const roleDefault = getRoleDefaultMap(roleDefaults)[role]
   if (!roleDefault) throw new Error("Select a valid permission group.")
+  const isActive = input.isActive !== false
+  const whatsappPhone = normaliseSpcWhatsappPhoneForAccount(
+    input.whatsappPhone,
+    isActive,
+  )
   const passwordInput = input.password || ""
   const auditActor = withSpcAuditAction(actor, {
     action: input.id ? "update-user" : "create-user",
@@ -1173,7 +1189,7 @@ export async function saveManagedSpcUser(
         p_user_id: input.id || null,
         p_username: username,
         p_display_name: input.displayName?.trim() || username,
-        p_whatsapp_phone: normaliseSpcWhatsappPhoneInput(input.whatsappPhone) || null,
+        p_whatsapp_phone: whatsappPhone || null,
         p_database_role: getDatabaseRole(role),
         p_effective_role: role,
         p_office: normaliseOffice(input.office) || null,
@@ -1186,7 +1202,7 @@ export async function saveManagedSpcUser(
             ? input.isSupplierTrader
             : null,
         p_password_hash: passwordHash,
-        p_is_active: input.isActive !== false,
+        p_is_active: isActive,
       })
       .single()
     if (error) throw error

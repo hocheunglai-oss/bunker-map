@@ -45,6 +45,10 @@ const PAGE_TABLES: Record<string, string[]> = {
   "spc-readme": ["spc_presentation_chunks"],
 }
 
+const RETIRED_ADMIN_AUDIT_PAGES = [
+  { id: "spc-mfa-test", label: "SPC MFA TEST (RETIRED)" },
+] as const
+
 const AUDIT_USER_CACHE_MS = 30_000
 let auditUserMapCache: { value: Map<string, string>; expiresAt: number } | null = null
 let auditUserMapPromise: Promise<Map<string, string>> | null = null
@@ -256,9 +260,10 @@ export async function GET(request: Request) {
       startedAt,
       {
         logs,
-        pages: SPC_PAGE_DEFINITIONS
-          .filter(({ id }) => viewerIsAdmin || id !== "spc-mfa-test")
-          .map(({ id, label }) => ({ id, label })),
+        pages: [
+          ...SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
+          ...(viewerIsAdmin ? RETIRED_ADMIN_AUDIT_PAGES : []),
+        ],
         users: buildAuditUserFilters(session, usersByUsername, visiblePresented),
       },
       undefined,

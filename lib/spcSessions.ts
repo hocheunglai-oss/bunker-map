@@ -1,9 +1,13 @@
 import { createHash, randomBytes } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 
-export const SPC_SESSION_DURATION_SECONDS = 12 * 60 * 60
+// Chromium-based browsers cap persistent cookies at 400 days. Renew active
+// SPC sessions before that browser limit so normal use stays signed in, while
+// explicit logout and user-version changes remain immediately enforceable.
+export const SPC_SESSION_DURATION_SECONDS = 400 * 24 * 60 * 60
 
 const SPC_SESSION_TOKEN_BYTES = 32
+const SPC_SESSION_RENEWAL_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 type SpcSessionRow = {
   id: string
@@ -66,6 +70,18 @@ export function getSpcSessionExpiry(now = new Date()) {
   return new Date(
     now.getTime() + SPC_SESSION_DURATION_SECONDS * 1000,
   ).toISOString()
+}
+
+export function shouldRenewSpcSession(now: Date, expiresAt: string) {
+  const expiryTime = Date.parse(expiresAt)
+  const renewalThresholdMs =
+    SPC_SESSION_DURATION_SECONDS * 1000 - SPC_SESSION_RENEWAL_INTERVAL_MS
+
+  return (
+    Number.isFinite(expiryTime) &&
+    expiryTime > now.getTime() &&
+    expiryTime - now.getTime() < renewalThresholdMs
+  )
 }
 
 export async function createDatabaseSpcSession(
@@ -146,14 +162,17 @@ export async function getDatabaseSpcSession(
 ): Promise<DatabaseSpcSession | null> {
   if (!isPlausibleSpcSessionToken(token)) return null
 
-  const { data, error } = await getServiceClient()
+  const now = new Date()
+  const tokenHash = hashSpcSessionToken(token)
+  const supabase = getServiceClient()
+  const { data, error } = await supabase
     .from("spc_sessions")
     .select(
       "id,spc_user_id,user_updated_at,expires_at,revoked_at,mfa_verified_at,spc_users!inner(updated_at,is_active)",
     )
-    .eq("token_hash", hashSpcSessionToken(token))
+    .eq("token_hash", tokenHash)
     .is("revoked_at", null)
-    .gt("expires_at", new Date().toISOString())
+    .gt("expires_at", now.toISOString())
     .eq("spc_users.is_active", true)
     .maybeSingle()
 
@@ -172,11 +191,30 @@ export async function getDatabaseSpcSession(
     return null
   }
 
+  let expiresAt = row.expires_at
+  if (shouldRenewSpcSession(now, row.expires_at)) {
+    const renewedExpiry = getSpcSessionExpiry(now)
+    const { data: renewedSession, error: renewalError } = await supabase
+      .from("spc_sessions")
+      .update({ expires_at: renewedExpiry })
+      .eq("id", row.id)
+      .eq("token_hash", tokenHash)
+      .eq("user_updated_at", row.user_updated_at)
+      .is("revoked_at", null)
+      .gt("expires_at", now.toISOString())
+      .select("expires_at")
+      .maybeSingle()
+
+    if (renewalError) throw renewalError
+    if (!renewedSession) return null
+    expiresAt = String(renewedSession.expires_at)
+  }
+
   return {
     id: row.id,
     spcUserId: row.spc_user_id,
     userUpdatedAt: row.user_updated_at,
-    expiresAt: row.expires_at,
+    expiresAt,
     mfaVerifiedAt: row.mfa_verified_at || null,
   }
 }

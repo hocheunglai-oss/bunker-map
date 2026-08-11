@@ -13,6 +13,7 @@ import {
   type SpcPageDefinition,
   type SpcPagePermission,
 } from "@/lib/spcPages"
+import { getSpcSessionPresentationLabel } from "@/lib/spcSessionPresentation"
 
 type SpcPageGroup = SpcPageDefinition["group"]
 type VisiblePermission = Exclude<SpcPagePermission, "none">
@@ -45,12 +46,17 @@ function readStoredGroups() {
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { loading, authenticated, displayName, permissions, pages } = useSpcAuth()
+  const { loading, authenticated, username, displayName, role, permissions, pages } = useSpcAuth()
   const [query, setQuery] = useState("")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const sessionPresentationLabel = getSpcSessionPresentationLabel({
+    role,
+    displayName,
+    username,
+  })
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
@@ -315,8 +321,14 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
 
         <div className="fc-admin-sidebar-footer">
           <div className="fc-admin-sidebar-footer-meta">
-            <div className="fc-admin-sidebar-user">
-              <span>{(displayName || "SPC").trim().slice(0, 2).toUpperCase()}</span>
+            <div
+              className="fc-admin-sidebar-user"
+              title={sessionPresentationLabel || "SPC"}
+              aria-label={`Signed in as ${sessionPresentationLabel || "SPC"}`}
+            >
+              <span aria-hidden="true">
+                {(sessionPresentationLabel || "SPC").slice(0, 2).toUpperCase()}
+              </span>
             </div>
             <div className="fc-admin-sidebar-footer-actions">
               <button type="button" onClick={handleLogout}>

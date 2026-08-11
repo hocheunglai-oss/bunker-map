@@ -1,9 +1,9 @@
-import { getSpcSession } from "@/lib/spcAuth"
+import { getRefreshedSpcSession } from "@/lib/spcAuth"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { spcPrivateJson } from "@/lib/spcResponse"
 
 export async function GET() {
-  const session = await getSpcSession()
+  const session = await getRefreshedSpcSession()
 
   return spcPrivateJson({
     authenticated: session.authenticated,

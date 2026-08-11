@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import { SpcShell } from "@/components/SpcShell"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
+import { getSpcSessionPresentationLabel } from "@/lib/spcSessionPresentation"
 import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
 
 const LOGIN_UNAVAILABLE_MESSAGE = "Sign-in is temporarily unavailable. Please try again."
@@ -78,6 +79,11 @@ export default function SpcLoginPage() {
   const mfaCodeInputRef = useRef<HTMLInputElement>(null)
   const usePasswordButtonRef = useRef<HTMLButtonElement>(null)
   const focusUsernameAfterCancel = useRef(false)
+  const sessionPresentationLabel = getSpcSessionPresentationLabel({
+    role,
+    displayName,
+    username: sessionUsername,
+  })
 
   useEffect(() => {
     document.title = "Singapore Purchasing Center"
@@ -336,7 +342,7 @@ export default function SpcLoginPage() {
       <SpcShell title="SPC Welcome">
         <section className="fc-admin-welcome-page spc-welcome-page" aria-label="SPC welcome">
           <div className="fc-admin-welcome-content spc-welcome-content">
-            <h1>WELCOME{displayName || sessionUsername ? `, ${displayName || sessionUsername}` : ""}</h1>
+            <h1>WELCOME{sessionPresentationLabel ? `, ${sessionPresentationLabel}` : ""}</h1>
             <p className="spc-welcome-introduction">
               YOU ARE INVITED TO THE <Link href="/spc/readme">INTRODUCTION</Link>
             </p>

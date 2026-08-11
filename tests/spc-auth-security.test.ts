@@ -20,6 +20,7 @@ import {
   getDatabaseSpcSession,
   hashSpcSessionToken,
   isPlausibleSpcSessionToken,
+  shouldRenewSpcSession,
 } from "../lib/spcSessions"
 
 function session(input: Partial<SpcSession> = {}): SpcSession {
@@ -52,15 +53,29 @@ test("SPC sessions use random 32-byte bearer tokens and stable hashes", () => {
   assert.notEqual(hashSpcSessionToken(first), hashSpcSessionToken(second))
 })
 
-test("SPC sessions have a fixed 12-hour expiry", () => {
+test("SPC sessions use the browser-maximum persistent lifetime", () => {
   const now = new Date("2026-08-06T03:00:00.000Z")
   const expiresAt = new Date(getSpcSessionExpiry(now))
 
-  assert.equal(SPC_SESSION_DURATION_SECONDS, 12 * 60 * 60)
+  assert.equal(SPC_SESSION_DURATION_SECONDS, 400 * 24 * 60 * 60)
   assert.equal(
     expiresAt.getTime() - now.getTime(),
     SPC_SESSION_DURATION_SECONDS * 1000,
   )
+})
+
+test("SPC sessions renew legacy and day-old expiries without touching fresh sessions", () => {
+  const now = new Date("2026-08-11T03:00:00.000Z")
+  const twelveHours = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString()
+  const fresh = getSpcSessionExpiry(now)
+  const oneDayOld = new Date(
+    Date.parse(fresh) - 24 * 60 * 60 * 1000 - 1,
+  ).toISOString()
+
+  assert.equal(shouldRenewSpcSession(now, twelveHours), true)
+  assert.equal(shouldRenewSpcSession(now, oneDayOld), true)
+  assert.equal(shouldRenewSpcSession(now, fresh), false)
+  assert.equal(shouldRenewSpcSession(now, "invalid"), false)
 })
 
 test("legacy marker and username-cookie values fail closed without a database lookup", async () => {
@@ -191,6 +206,27 @@ test("SPC authentication trusts only the opaque database session token", () => {
   assert.doesNotMatch(authSource, /cookieStore\.set\(SPC_COOKIE_NAME,\s*"1"/)
   assert.match(sessionSource, /\.is\("revoked_at", null\)/)
   assert.match(sessionSource, /revokeDatabaseSpcSession/)
+})
+
+test("SPC sliding renewal preserves revocation, expiry, and user-version guards", () => {
+  const sessionSource = readFileSync(
+    new URL("../lib/spcSessions.ts", import.meta.url),
+    "utf8",
+  )
+  const renewalStart = sessionSource.indexOf(
+    "if (shouldRenewSpcSession(now, row.expires_at))",
+  )
+  const renewalEnd = sessionSource.indexOf("\n\n  return {", renewalStart)
+
+  assert.ok(renewalStart > 0)
+  assert.ok(renewalEnd > renewalStart)
+  const renewal = sessionSource.slice(renewalStart, renewalEnd)
+  assert.match(renewal, /\.update\(\{ expires_at: renewedExpiry \}\)/)
+  assert.match(renewal, /\.eq\("token_hash", tokenHash\)/)
+  assert.match(renewal, /\.eq\("user_updated_at", row\.user_updated_at\)/)
+  assert.match(renewal, /\.is\("revoked_at", null\)/)
+  assert.match(renewal, /\.gt\("expires_at", now\.toISOString\(\)\)/)
+  assert.doesNotMatch(renewal, /mfa_verified_at/)
 })
 
 test("SPC stable user id stays server-side while audit context receives it", () => {

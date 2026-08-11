@@ -51,7 +51,7 @@ test("SPC session cookies retain browser security protections", () => {
 test("SPC cookie lifetime and clear paths remain complete", () => {
   const now = new Date("2026-08-07T04:00:00.000Z")
   const expiresAt = getSpcSessionExpiry(now)
-  assert.equal(SPC_SESSION_DURATION_SECONDS, 12 * 60 * 60)
+  assert.equal(SPC_SESSION_DURATION_SECONDS, 400 * 24 * 60 * 60)
   assert.equal(
     Date.parse(expiresAt) - now.getTime(),
     SPC_SESSION_DURATION_SECONDS * 1000,
@@ -73,6 +73,10 @@ test("SPC cookie lifetime and clear paths remain complete", () => {
     "export async function clearSpcSession",
     "function unauthenticatedSession",
   )
+  const refreshedSession = sourceBetween(
+    "export async function getRefreshedSpcSession",
+    "export async function requireSpcSession",
+  )
 
   assert.match(expiredOptions, /maxAge:\s*0/)
   assert.match(
@@ -92,4 +96,37 @@ test("SPC cookie lifetime and clear paths remain complete", () => {
     /cookieStore\.set\(SPC_USER_COOKIE_NAME,\s*"",\s*expiredCookieOptions\(\)\)/,
   )
   assert.match(clearSession, /finally\s*\{\s*clearSpcCookies\(cookieStore\)/)
+  assert.match(refreshedSession, /resolveSpcSession\(true\)/)
+})
+
+test("the SPC session endpoint refreshes the persistent cookie", () => {
+  const route = readFileSync(
+    new URL("../app/api/spc/session/route.ts", import.meta.url),
+    "utf8",
+  )
+  const resolver = sourceBetween(
+    "async function resolveSpcSession",
+    "export async function getSpcSession",
+  )
+
+  assert.match(route, /getRefreshedSpcSession/)
+  assert.match(route, /await getRefreshedSpcSession\(\)/)
+  assert.match(
+    resolver,
+    /if \(refreshCookie\)[\s\S]*?cookieStore\.set\([\s\S]*?SPC_COOKIE_NAME,[\s\S]*?token,[\s\S]*?cookieOptions\(databaseSession\.expiresAt\)/,
+  )
+})
+
+test("active SPC browser sessions periodically revisit the cookie-refresh endpoint", () => {
+  const clientAuth = readFileSync(
+    new URL("../lib/useSpcAuth.ts", import.meta.url),
+    "utf8",
+  )
+
+  assert.match(clientAuth, /SPC_SESSION_BACKGROUND_REFRESH_MS = 12 \* 60 \* 60 \* 1000/)
+  assert.match(clientAuth, /window\.addEventListener\("focus", refreshActiveSession\)/)
+  assert.match(clientAuth, /document\.addEventListener\("visibilitychange", handleVisibilityChange\)/)
+  assert.match(clientAuth, /window\.setInterval\([\s\S]*?refreshActiveSession,[\s\S]*?SPC_SESSION_BACKGROUND_REFRESH_MS/)
+  assert.match(clientAuth, /window\.clearInterval\(refreshInterval\)/)
+  assert.match(clientAuth, /fetch\("\/api\/spc\/session", \{ cache: "no-store" \}\)/)
 })

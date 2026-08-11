@@ -63,12 +63,15 @@ and truncate operations are blocked. Permission/profile changes cannot be
 partially restored through generic audit undo because that could desynchronise
 the permission store from `spc_users`.
 
-The ADMIN-only WhatsApp MFA test records challenge creation, Meta send-request
-acceptance or failure, activation state, and verification outcome. It stores a
-masked destination and Meta message ID where available, never the OTP, keyed
-hash, access token, or full phone number. These records use the same append-only
-database boundary and are hidden from non-ADMIN SPC audit viewers. This ADMIN
-test does not change or prove the separate Otto-only login MFA control.
+The retired ADMIN-only WhatsApp MFA test recorded challenge creation, Meta
+send-request acceptance or failure, activation state, and verification outcome.
+Its historical records store a masked destination and Meta message ID where
+available, never the OTP, keyed hash, access token, or full phone number. These
+records retain the same append-only database boundary and remain hidden from
+non-ADMIN SPC audit viewers. The test page, routes and inactive test account are
+not part of production login MFA; production MFA separately protects every
+active SPC account enrolled with a verified WhatsApp number when the global
+feature flag is enabled.
 
 This protection does not establish an approved audit-retention period or a
 central SIEM/SOC alerting process. Those remain pending Group Information

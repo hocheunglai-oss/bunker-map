@@ -9,7 +9,7 @@ import {
   clearSpcWhatsappLoginMfaPendingCookie,
   isSameOriginSpcWhatsappLoginMfaRequest,
   isSpcWhatsappLoginMfaConfigured,
-  isSpcWhatsappLoginMfaPilotEnabled,
+  isSpcWhatsappLoginMfaEnabled,
   requiresSpcWhatsappLoginMfa,
   verifySpcWhatsappLoginMfaCode,
   type SpcWhatsappLoginMfaResult,
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   if (!isSameOriginSpcWhatsappLoginMfaRequest(request)) {
     return spcPrivateJson({ success: false, message: "Forbidden" }, { status: 403 })
   }
-  if (!isSpcWhatsappLoginMfaPilotEnabled() || !isSpcWhatsappLoginMfaConfigured()) {
+  if (!isSpcWhatsappLoginMfaEnabled() || !isSpcWhatsappLoginMfaConfigured()) {
     await clearSpcWhatsappLoginMfaPendingCookie().catch(() => undefined)
     return unavailableResponse()
   }

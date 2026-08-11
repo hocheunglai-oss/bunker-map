@@ -2580,6 +2580,27 @@ body {
   text-align: center;
 }
 
+@media (max-height: 520px) {
+  .spc-login-page {
+    align-items: flex-start;
+    overflow-y: auto;
+  }
+
+  .spc-login-card {
+    width: min(300px, calc(100vw - 28px));
+  }
+
+  .spc-login-card.is-mfa::before {
+    top: 49.5%;
+    bottom: 2%;
+  }
+
+  .spc-login-form.spc-login-mfa-form {
+    top: 51%;
+    gap: 0.8cqw;
+  }
+}
+
 .spc-loading {
   min-height: 100vh;
   display: flex;
@@ -2880,147 +2901,6 @@ body {
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.spc-mfa-test-badge {
-  border: 1px solid #a7c7ef;
-  border-radius: 999px;
-  background: #eef6ff;
-  color: #1557a0;
-  padding: 5px 9px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-}
-
-.spc-mfa-test-panel {
-  width: 100%;
-}
-
-.spc-mfa-test-scope {
-  margin: 0;
-  border-bottom: 1px solid var(--fc-admin-border-soft);
-  color: var(--fc-admin-muted);
-  padding: 14px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.55;
-}
-
-.spc-mfa-test-panel > .spc-alert {
-  margin: 14px 16px 0;
-}
-
-.spc-mfa-test-account-field {
-  display: grid;
-  gap: 7px;
-  padding: 16px 16px 0;
-}
-
-.spc-mfa-test-account-field label {
-  color: var(--fc-admin-muted);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spc-mfa-test-account-field select {
-  width: min(100%, 440px);
-  min-height: 40px;
-  border: 1px solid var(--fc-input-border);
-  border-radius: 8px;
-  background: var(--fc-tool-input-bg);
-  color: var(--fc-tool-input-text);
-  padding: 7px 10px;
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.spc-mfa-test-account-field select:focus {
-  border-color: var(--fc-admin-primary-button-bg);
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
-  outline: none;
-}
-
-.spc-mfa-test-actions {
-  display: flex;
-  padding: 16px 16px 0;
-}
-
-.spc-mfa-test-actions button,
-.spc-mfa-test-form button {
-  min-height: 36px;
-  border: 1px solid var(--fc-admin-button-border);
-  border-radius: 999px;
-  background: var(--fc-admin-button-bg);
-  color: var(--fc-admin-button-text);
-  cursor: pointer;
-  padding: 8px 14px;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.spc-mfa-test-actions button.spc-blue-action,
-.spc-mfa-test-form button {
-  border-color: var(--fc-admin-primary-button-bg);
-  background: var(--fc-admin-primary-button-bg);
-  color: var(--fc-admin-primary-button-text);
-}
-
-.spc-mfa-test-actions button:disabled,
-.spc-mfa-test-form button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.spc-mfa-test-form {
-  display: grid;
-  gap: 7px;
-  padding: 16px;
-}
-
-.spc-mfa-test-form > label {
-  color: var(--fc-admin-muted);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spc-mfa-test-form > div {
-  display: flex;
-  gap: 8px;
-}
-
-.spc-mfa-test-form input {
-  width: min(100%, 220px);
-  min-height: 40px;
-  border: 1px solid var(--fc-input-border);
-  border-radius: 8px;
-  background: var(--fc-tool-input-bg);
-  color: var(--fc-tool-input-text);
-  outline: none;
-  padding: 7px 12px;
-  font-size: 20px;
-  font-weight: 850;
-  letter-spacing: 0.28em;
-}
-
-.spc-mfa-test-form input:focus {
-  border-color: var(--fc-admin-primary-button-bg);
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
-}
-
-@media (max-width: 640px) {
-  .spc-mfa-test-form > div {
-    flex-direction: column;
-  }
-
-  .spc-mfa-test-form input,
-  .spc-mfa-test-form button {
-    width: 100%;
-  }
 }
 
 .spc-chrome-download {

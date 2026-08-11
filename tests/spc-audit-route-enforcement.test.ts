@@ -49,3 +49,12 @@ test("SPC audit responses gate user-management investigation identifiers on ADMI
     /presentAuditLogForClient\(presented, true, viewerIsAdmin\)/,
   )
 })
+
+test("retired WhatsApp test history remains discoverable only to ADMIN audit viewers", () => {
+  assert.match(auditRoute, /"spc-mfa-test": \["spc_mfa_test_events"\]/)
+  assert.match(auditRoute, /record\.pageId !== "spc-mfa-test"/)
+  assert.match(
+    auditRoute,
+    /viewerIsAdmin \? RETIRED_ADMIN_AUDIT_PAGES : \[\]/,
+  )
+})

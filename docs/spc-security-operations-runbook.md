@@ -80,7 +80,7 @@ hashes, phone numbers, session tokens or unrelated user data.
 | Evidence or data | Implemented technical position | Approval still required |
 | --- | --- | --- |
 | SPC login-attempt evidence | Automatic 30-day retention and daily bounded purge | Confirm legal/security suitability and access to the retained evidence |
-| SPC sessions | Fixed 12-hour validity; expired or revoked rows are pruned after 30 days | Confirm whether the operational history is sufficient |
+| SPC sessions | Opaque 400-day sliding validity, renewed through normal use after one day; logout, revocation and relevant account changes remain immediately enforceable; expired or revoked rows are pruned after 30 days | Confirm whether the operational history is sufficient |
 | SPC user-management audit | Credential-redacted and append-only for protected events | Deletion/retention period is not approved; do not invent or apply one |
 | Vercel and application logs | Live logs, a default all-type alert rule and one-year production deployment retention were verified; no project drain is configured | Runtime-log retention, central destination, alert recipients/escalation and access approval remain open |
 | Verified logical Drive backups | 35-day managed window with verification evidence | Confirm authorised access, encryption assurance, restore coverage and disposal |
