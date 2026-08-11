@@ -50,6 +50,7 @@ import {
   isAttendanceMonthlyCode,
   isAttendanceTeam,
   isAfterAttendanceAmCutoff,
+  isOfficialAttendanceSignOut,
   isPersonEmployedOnDate,
   isPersonExpectedOnDate,
   parseIsoDate,
@@ -616,9 +617,20 @@ function buildAttendanceRecord(
     const replacement = personOverrides.find(
       (entry) => entry.action === "replace" && entry.checkType === checkType,
     )
-    if (replacement?.punchTime) return replacement.punchTime
+    if (
+      replacement?.punchTime &&
+      (checkType !== "OffDuty" ||
+        isOfficialAttendanceSignOut(workDate, replacement.punchTime))
+    ) {
+      return replacement.punchTime
+    }
     const matching = punches
-      .filter((punch) => punch.checkType === checkType)
+      .filter(
+        (punch) =>
+          punch.checkType === checkType &&
+          (checkType !== "OffDuty" ||
+            isOfficialAttendanceSignOut(workDate, punch.punchTime)),
+      )
       .sort((left, right) => Date.parse(left.punchTime) - Date.parse(right.punchTime))
     if (checkType === "OnDuty") return matching[0]?.punchTime || null
     return matching.at(-1)?.punchTime || null

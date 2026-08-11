@@ -256,6 +256,17 @@ export function isAfterAttendanceAmCutoff(
   return Boolean(cutoff && Date.parse(signInTimestamp) > cutoff.getTime())
 }
 
+export function isOfficialAttendanceSignOut(
+  workDate: string,
+  signOutTimestamp: string | null,
+) {
+  if (!signOutTimestamp) return false
+  const earliestSignOut = hktTimestampForDateAndTime(workDate, "17:00")
+  return Boolean(
+    earliestSignOut && Date.parse(signOutTimestamp) >= earliestSignOut.getTime(),
+  )
+}
+
 export function enumerateWeekdays(fromDate: string, toDate: string) {
   const from = parseIsoDate(fromDate)
   const to = parseIsoDate(toDate)
