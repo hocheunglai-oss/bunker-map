@@ -3101,9 +3101,9 @@ async function checkCronConfig(): Promise<HealthCheckResult> {
     status: missing ? "warning" : "ok",
     message: missing ? "CRON_SECRET is not configured" : "Cron secret configured",
     details: {
-      dailyBackupSchedule: "0 19 * * * UTC",
+      dailyBackupSchedule: "2 19 * * * UTC",
       attendanceSyncSchedule: "Every 15 minutes",
-      hongKongTime: "Daily 03:00",
+      hongKongTime: "Daily 03:02",
     },
   }
 }

@@ -37,8 +37,9 @@ external anchors below are part of the recovery contract.
 
 ## Daily off-site artifact
 
-Vercel calls `/api/backups/bunker-map-drive` every day at `19:00` UTC
-(`03:00` the following day in Hong Kong). It stores backup-format-v2 JSON files
+Vercel calls `/api/backups/bunker-map-drive` every day at `19:02` UTC
+(`03:02` the following day in Hong Kong), after the 03:00 attendance sync has
+finished. It stores backup-format-v2 JSON files
 in Google Drive under:
 
 ```text
