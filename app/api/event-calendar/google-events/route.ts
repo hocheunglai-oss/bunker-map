@@ -68,7 +68,9 @@ export async function GET(request: Request) {
   try {
     await requireAdminPagePermission("event-calendar", "view")
     const { searchParams } = new URL(request.url)
-    const calendarId = searchParams.get("calendarId")?.trim() || process.env.GOOGLE_MEETING_CALENDAR_ID || DEFAULT_CALENDAR_ID
+    // Use the same server-owned destination as the sync worker. A browser may
+    // choose a time window, but it cannot redirect reads to another calendar.
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
     const now = new Date()
     const defaultTimeMin = new Date(now)
     const defaultTimeMax = new Date(now)

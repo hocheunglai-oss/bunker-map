@@ -115,7 +115,13 @@ const DATABASE_GROUPS = [
   },
   {
     title: "OPERATIONS",
-    tables: ["office_calendar_store (non-template settings only)", "ports", "remarks", "price_history"],
+    tables: [
+      "office_calendar_store (versioned shared calendar records and settings)",
+      "event_calendar_google_sync_jobs (durable meeting-room outbox)",
+      "ports",
+      "remarks",
+      "price_history",
+    ],
   },
   {
     title: "ATTENDANCE",

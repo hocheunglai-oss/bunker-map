@@ -1,0 +1,1 @@
+export const EVENT_CALENDAR_PROTOCOL_VERSION = 2

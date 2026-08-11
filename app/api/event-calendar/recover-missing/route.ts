@@ -5,7 +5,13 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
-import { mutateEventCalendarStore } from "@/lib/eventCalendarStore"
+import {
+  getEventCalendarEventVersions,
+  getEventCalendarRecordVersion,
+  getEventCalendarSettingVersions,
+  mutateEventCalendarStore,
+} from "@/lib/eventCalendarStore"
+import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
 
 type CalendarEvent = {
   id: string
@@ -183,24 +189,45 @@ export async function POST(request: Request) {
       : result.candidates
 
     if (!restoreEvents.length) {
-      return NextResponse.json({ restoredEvents: [], restoredCount: 0 })
+      return NextResponse.json({
+        restoredEvents: [],
+        restoredCount: 0,
+        payload: result.currentPayload,
+        eventVersions: getEventCalendarEventVersions(result.currentPayload),
+        settingVersions: getEventCalendarSettingVersions(result.currentPayload),
+        protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
+      })
     }
 
     const existingIds = new Set(result.currentEvents.map((event) => event.id))
-    const restoredEvents = restoreEvents.filter((event) => !existingIds.has(event.id))
+    const restoredEvents = restoreEvents
+      .filter((event) => !existingIds.has(event.id))
+      .map(normalizeEvent)
+      .filter((event): event is CalendarEvent => Boolean(event))
 
     const supabase = createAdminAuditedSupabaseClient(
       createAdminAuditContext(session, request, "event-calendar"),
       { useServiceRole: true }
     )
-    await mutateEventCalendarStore(supabase, {
+    const payload = await mutateEventCalendarStore(supabase, {
       operation: "insert",
       events: restoredEvents,
     })
+    const canonicalEvents = new Map(eventsFromPayload(payload).map((event) => [event.id, event]))
+    const confirmedRestoredEvents = restoredEvents.filter((event) => {
+      const canonicalEvent = canonicalEvents.get(event.id)
+      return canonicalEvent && (
+        getEventCalendarRecordVersion(canonicalEvent) === getEventCalendarRecordVersion(event)
+      )
+    })
 
     return NextResponse.json({
-      restoredEvents,
-      restoredCount: restoredEvents.length,
+      restoredEvents: confirmedRestoredEvents,
+      restoredCount: confirmedRestoredEvents.length,
+      payload,
+      eventVersions: getEventCalendarEventVersions(payload),
+      settingVersions: getEventCalendarSettingVersions(payload),
+      protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
     })
   } catch (error) {
     return NextResponse.json(

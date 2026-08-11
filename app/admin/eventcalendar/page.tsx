@@ -6,6 +6,7 @@ import {
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
 import { mergeImportedEvents } from "@/lib/eventCalendarImport"
+import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
@@ -26,8 +27,10 @@ type GoogleCalendarEvent = {
 }
 type EmailPromptState = {
   event: ManagedEvent
+  eventVersion: string
   action: "created" | "updated"
   status: "idle" | "sending" | "sent" | "failed"
+  error: string
 } | null
 type LeaveRequestDraft = {
   from: string
@@ -54,7 +57,6 @@ const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipient
 const DELETED_EVENT_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-event-ids"
 const DELETED_REQUIRED_SEED_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-required-seed-ids"
 const SHARED_STORE_KEY = "event-calendar"
-const CALENDAR_ID = "fcb.bunker@gmail.com"
 const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const leaveTypes: LeaveType[] = [
   "Annual Leave",
@@ -333,6 +335,21 @@ function normalizeStringList(value: string[]) {
   return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)))
 }
 
+function normalizeEventVersions(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  return Object.entries(value).reduce<Record<string, string>>((versions, [id, version]) => {
+    if (id.trim() && typeof version === "string" && /^[0-9a-f]{64}$/.test(version)) {
+      versions[id.trim()] = version
+    }
+    return versions
+  }, {})
+}
+
+function createEventId(prefix: string) {
+  const randomId = globalThis.crypto?.randomUUID?.()
+  return `${prefix}-${randomId || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+}
+
 function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventCategory {
   const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
   if (storedEventType === "Meeting") return "Meeting Room"
@@ -365,18 +382,26 @@ function extractEventTimeRange(title: string) {
 
   const end = match[3] && match[4] ? `${match[3].padStart(2, "0")}:${match[4]}` : ""
   const endMinutes = end ? parseTimeToMinutes(end) : startMinutes + 60
+  const normalizedEndMinutes = endMinutes === null
+    ? startMinutes + 60
+    : endMinutes <= startMinutes
+      ? endMinutes + (24 * 60)
+      : endMinutes
 
   return {
     start,
     end: end || `${String(Math.floor((startMinutes + 60) / 60)).padStart(2, "0")}:${String((startMinutes + 60) % 60).padStart(2, "0")}`,
     startMinutes,
-    endMinutes: endMinutes === null ? startMinutes + 60 : endMinutes,
+    endMinutes: normalizedEndMinutes,
   }
 }
 
 function getGoogleEventMinutes(event: GoogleCalendarEvent) {
   const startMinutes = event.startTime ? parseTimeToMinutes(event.startTime) : 0
-  const endMinutes = event.endTime ? parseTimeToMinutes(event.endTime) : 24 * 60
+  const rawEndMinutes = event.endTime ? parseTimeToMinutes(event.endTime) : 24 * 60
+  const endMinutes = rawEndMinutes !== null && event.endDate > event.startDate
+    ? rawEndMinutes + (24 * 60)
+    : rawEndMinutes
 
   return {
     startMinutes: startMinutes ?? 0,
@@ -418,7 +443,7 @@ function eventHasSelectedPeople(event: ManagedEvent, selectedPeople: string[]) {
 
 function buildBlankEvent(todayKey: string): ManagedEvent {
   return {
-    id: `office-${Date.now()}`,
+    id: createEventId("office"),
     startDate: todayKey,
     endDate: todayKey,
     title: "",
@@ -433,7 +458,7 @@ function buildBlankRecurrentEvent(todayKey: string): RecurrentDraft {
   const today = parseLocalDate(todayKey)
   return {
     ...buildBlankEvent(todayKey),
-    id: `recurrent-${Date.now()}`,
+    id: createEventId("recurrent"),
     frequency: "weekly",
     weeklyDays: [today.getDay()],
     monthlyDay: today.getDate(),
@@ -506,6 +531,7 @@ export default function EventCalendarPage() {
   const [draftPeopleText, setDraftPeopleText] = useState(defaultPeople.join("\n"))
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
+  const [draftEmailRecipientsText, setDraftEmailRecipientsText] = useState("")
   const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
   const [syncStatus, setSyncStatus] = useState("Sync ready")
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([])
@@ -516,12 +542,57 @@ export default function EventCalendarPage() {
   const [holidayImporting, setHolidayImporting] = useState(false)
   const [recoveryStatus, setRecoveryStatus] = useState("")
   const [recoveringEvents, setRecoveringEvents] = useState(false)
+  const [calendarMutationPending, setCalendarMutationPending] = useState(false)
+  const [eventSubmissionPending, setEventSubmissionPending] = useState(false)
+  const [draftEventVersion, setDraftEventVersion] = useState("")
+  const [draftEventChangedElsewhere, setDraftEventChangedElsewhere] = useState(false)
+  const [eventVersions, setEventVersions] = useState<Record<string, string>>({})
+  const [settingVersions, setSettingVersions] = useState<Record<string, string>>({})
+  const [draftPeopleVersion, setDraftPeopleVersion] = useState("")
+  const [draftEmailRecipientsVersion, setDraftEmailRecipientsVersion] = useState("")
+  const [googleRefreshKey, setGoogleRefreshKey] = useState(0)
   const loadedRef = useRef(false)
   const eventsRef = useRef<ManagedEvent[]>([])
-  const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const calendarMutationPendingRef = useRef(false)
+  const eventSubmissionPendingRef = useRef(false)
+  const eventSubmissionTokenRef = useRef(0)
+  const draftEventIdRef = useRef("")
+  const draftEventVersionRef = useRef("")
+  const calendarStateSequenceRef = useRef(0)
+  const refreshRequestSequenceRef = useRef(0)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function applyCanonicalCalendarPayload(
+    rawPayload: unknown,
+    rawEventVersions: unknown,
+    rawSettingVersions: unknown,
+  ) {
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) return false
+    const payload = rawPayload as Record<string, unknown>
+    if (!Array.isArray(payload.events)) return false
+
+    const nextEvents = normalizeStoredEvents(payload.events)
+    const nextEventVersions = normalizeEventVersions(rawEventVersions)
+    eventsRef.current = nextEvents
+    setEventVersions(nextEventVersions)
+    setSettingVersions(normalizeEventVersions(rawSettingVersions))
+    if (
+      draftEventIdRef.current &&
+      draftEventVersionRef.current &&
+      nextEventVersions[draftEventIdRef.current] !== draftEventVersionRef.current
+    ) {
+      setDraftEventChangedElsewhere(true)
+    }
+    setEvents(nextEvents)
+    setDeletedEventIds(normalizeStringList(Array.isArray(payload.deletedEventIds) ? payload.deletedEventIds.map(String) : []))
+    if (Array.isArray(payload.people)) setPeople(normalizePeople(payload.people.map(String)))
+    if (typeof payload.emailRecipientsText === "string") setEmailRecipientsText(payload.emailRecipientsText)
+    if (Array.isArray(payload.deletedRequiredSeedIds)) {
+      setDeletedRequiredSeedIds(normalizeStringList(payload.deletedRequiredSeedIds.map(String)))
+    }
+    return true
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -532,6 +603,8 @@ export default function EventCalendarPage() {
       let fallbackEmailRecipients = ""
       let fallbackDeletedEventIds: string[] = []
       let fallbackDeletedRequiredSeedIds: string[] = []
+      let fallbackEventVersions: Record<string, string> = {}
+      let fallbackSettingVersions: Record<string, string> = {}
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
         const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
@@ -553,6 +626,12 @@ export default function EventCalendarPage() {
         if (!response.ok) throw new Error("Could not load shared calendar data.")
         const data = await response.json()
         const payload = data?.payload
+
+        if (data?.protocolVersion !== EVENT_CALENDAR_PROTOCOL_VERSION) {
+          throw new Error("This Event Calendar tab is outdated. Refresh the page before making calendar changes.")
+        }
+        fallbackEventVersions = normalizeEventVersions(data.eventVersions)
+        fallbackSettingVersions = normalizeEventVersions(data.settingVersions)
 
         if (response.ok && payload && typeof payload === "object") {
           if (Array.isArray(payload.events)) fallbackEvents = normalizeStoredEvents(payload.events)
@@ -577,6 +656,8 @@ export default function EventCalendarPage() {
 
       if (cancelled) return
       eventsRef.current = fallbackEvents
+      setEventVersions(fallbackEventVersions)
+      setSettingVersions(fallbackSettingVersions)
       setEvents(fallbackEvents)
       setPeople(fallbackPeople)
       setEmailRecipientsText(fallbackEmailRecipients)
@@ -622,35 +703,54 @@ export default function EventCalendarPage() {
   }, [deletedRequiredSeedIds])
 
   useEffect(() => {
-    if (!authenticated || !loadedRef.current) return
-    if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+    if (!authenticated || !calendarLoaded || !loadedRef.current) return
+    let cancelled = false
 
-    remoteSaveTimerRef.current = setTimeout(() => {
-      setSaveStatus("Saving shared calendar")
-      void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: "settings",
-          settings: { people, emailRecipientsText, deletedRequiredSeedIds },
-        }),
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            const payload = await response.json().catch(() => null)
-            throw new Error(payload?.message || "Shared calendar save failed")
-          }
-          setSaveStatus("Shared calendar saved")
-        })
-        .catch((error) => {
-          setSaveStatus(error instanceof Error ? error.message : "Shared calendar save failed")
-        })
-    }, 700)
+    async function refreshCanonicalCalendar() {
+      if (calendarMutationPendingRef.current) return
+      const requestSequence = ++refreshRequestSequenceRef.current
+      const stateSequence = calendarStateSequenceRef.current
+
+      try {
+        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, { cache: "no-store" })
+        const data = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(data?.message || "Could not refresh the shared calendar.")
+        if (data?.protocolVersion !== EVENT_CALENDAR_PROTOCOL_VERSION) {
+          setCalendarLoadError("This Event Calendar tab is outdated. Refresh the page before making calendar changes.")
+          setSaveStatus("Calendar tab outdated - refresh required")
+          return
+        }
+        if (
+          cancelled ||
+          requestSequence !== refreshRequestSequenceRef.current ||
+          stateSequence !== calendarStateSequenceRef.current ||
+          calendarMutationPendingRef.current
+        ) return
+
+        if (applyCanonicalCalendarPayload(data.payload, data.eventVersions, data.settingVersions)) {
+          setCalendarLoadError("")
+          setSaveStatus("Shared calendar refreshed")
+        }
+      } catch {
+        if (!cancelled) setSaveStatus("Shared calendar refresh pending")
+      }
+    }
+
+    const handleFocus = () => void refreshCanonicalCalendar()
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refreshCanonicalCalendar()
+    }
+    window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibility)
+    const refreshTimer = window.setInterval(() => void refreshCanonicalCalendar(), 60_000)
 
     return () => {
-      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+      cancelled = true
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.clearInterval(refreshTimer)
     }
-  }, [authenticated, deletedRequiredSeedIds, emailRecipientsText, people])
+  }, [authenticated, calendarLoaded])
 
   useEffect(() => {
     if (!authenticated || !calendarLoaded || !loadedRef.current) return
@@ -685,43 +785,30 @@ export default function EventCalendarPage() {
     }
   }, [authenticated, calendarLoaded])
 
-  useEffect(() => {
-    if (!authenticated || !loadedRef.current) return
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
-
-    syncTimerRef.current = setTimeout(async () => {
-      const meetingEvents = events.filter((event) => isMeetingRoomBooked(event))
-
-      setSyncStatus("Syncing Google")
-
-      try {
-        const response = await fetch("/api/event-calendar/google-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendarId: CALENDAR_ID, events: meetingEvents, activeEventIds: meetingEvents.map((event) => event.id) }),
-        })
-        const payload = await response.json()
-
-        if (!response.ok) {
-          setSyncStatus(payload.message || "Google sync pending")
-          return
-        }
-
-        setSyncStatus(`Synced ${payload.updated + payload.inserted} events${payload.deleted ? `, removed ${payload.deleted}` : ""}`)
-        if (viewMode === "google") {
-          setGoogleCalendarEvents((current) =>
-            current.filter((event) => !event.sourceEventId || meetingEvents.some((item) => item.id === event.sourceEventId))
-          )
-        }
-      } catch {
-        setSyncStatus("Google sync pending")
+  async function syncCanonicalGoogleCalendar(eventIds: string[]) {
+    if (!eventIds.length) return
+    setSyncStatus("Syncing Google")
+    try {
+      const response = await fetch("/api/event-calendar/google-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventIds }),
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.success !== true) {
+        setSyncStatus(payload.message || "Google sync pending")
+        return
       }
-    }, 1200)
-
-    return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
+      setSyncStatus(
+        payload.queued
+          ? `Meeting Room sync queued (${payload.queued})`
+          : `Synced ${payload.updated + payload.inserted} events${payload.deleted ? `, removed ${payload.deleted}` : ""}`,
+      )
+      setGoogleRefreshKey((current) => current + 1)
+    } catch {
+      setSyncStatus("Google sync pending")
     }
-  }, [authenticated, events, viewMode])
+  }
 
   useEffect(() => {
     if (!authenticated || viewMode !== "google") return
@@ -731,7 +818,7 @@ export default function EventCalendarPage() {
       setGoogleCalendarStatus("Loading Meeting Room")
 
       try {
-        const response = await fetch(`/api/event-calendar/google-events?calendarId=${encodeURIComponent(CALENDAR_ID)}`)
+        const response = await fetch("/api/event-calendar/google-events")
         const payload = await response.json()
 
         if (!response.ok || !Array.isArray(payload.events)) {
@@ -752,21 +839,20 @@ export default function EventCalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [authenticated, viewMode])
+  }, [authenticated, googleRefreshKey, viewMode])
 
   useEffect(() => {
     return () => {
-      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
       if (toolsMenuCloseTimerRef.current) clearTimeout(toolsMenuCloseTimerRef.current)
       if (addMenuCloseTimerRef.current) clearTimeout(addMenuCloseTimerRef.current)
     }
   }, [])
 
-  async function sendEventEmail(event: ManagedEvent, action: "created" | "updated") {
+  async function sendEventEmail(event: ManagedEvent, eventVersion: string, action: "created" | "updated") {
     const response = await fetch("/api/event-calendar/email-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, event, recipients: emailRecipientsText }),
+        body: JSON.stringify({ action, event, eventVersion }),
       })
 
     if (!response.ok) {
@@ -776,30 +862,63 @@ export default function EventCalendarPage() {
   }
 
   async function mutateCalendar(
-    operation: "upsert" | "insert" | "delete" | "people" | "settings",
+    operation: "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings",
     mutationEvents: ManagedEvent[] = [],
     eventIds: string[] = [],
     settings: Record<string, unknown> = {},
+    expectedEventVersions: Record<string, string> = {},
+    expectedSettingVersions: Record<string, string> = {},
   ) {
-    setSaveStatus("Saving shared calendar")
-    const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operation, events: mutationEvents, eventIds, settings }),
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok || !payload?.payload) {
-      const message = payload?.message || "Shared calendar save failed"
-      setSaveStatus(message)
-      throw new Error(message)
+    if (calendarMutationPendingRef.current) {
+      throw new Error("Another calendar change is still saving. Wait for it to finish, then try again.")
     }
 
-    const persistedEvents = normalizeStoredEvents(payload.payload.events)
-    eventsRef.current = persistedEvents
-    setEvents(persistedEvents)
-    setDeletedEventIds(normalizeStringList(payload.payload.deletedEventIds))
-    setSaveStatus("Shared calendar saved")
-    return payload.payload
+    calendarMutationPendingRef.current = true
+    calendarStateSequenceRef.current += 1
+    setCalendarMutationPending(true)
+    setSaveStatus("Saving shared calendar")
+    try {
+      const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
+          operation,
+          events: mutationEvents,
+          eventIds,
+          settings,
+          expectedEventVersions,
+          expectedSettingVersions,
+        }),
+      })
+      const payload = await response.json().catch(() => null)
+
+      if (payload?.payload) {
+        applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)
+      }
+      if (!response.ok || !payload?.payload) {
+        const message = payload?.message || "Shared calendar save failed"
+        setSaveStatus(message)
+        if (payload?.reloadRequired) {
+          setCalendarLoadError(message)
+        }
+        throw new Error(message)
+      }
+
+      setCalendarLoadError("")
+      setSaveStatus("Shared calendar saved")
+      if (["create", "update", "delete"].includes(operation)) {
+        const affectedEventIds = operation === "delete"
+          ? eventIds
+          : mutationEvents.map((event) => event.id)
+        void syncCanonicalGoogleCalendar(affectedEventIds)
+      }
+      return payload
+    } finally {
+      calendarMutationPendingRef.current = false
+      calendarStateSequenceRef.current += 1
+      setCalendarMutationPending(false)
+    }
   }
 
   async function persistImportedEvents(importedEvents: ManagedEvent[]) {
@@ -832,7 +951,12 @@ export default function EventCalendarPage() {
   }, [selectedPeople, visibleEvents])
 
   function openAddModal() {
+    eventSubmissionTokenRef.current += 1
+    draftEventIdRef.current = ""
+    draftEventVersionRef.current = ""
     setDraftEvent(buildBlankEvent(todayKey))
+    setDraftEventVersion("")
+    setDraftEventChangedElsewhere(false)
     setAddMenuOpen(false)
     setToolsMenuOpen(false)
     setEventModalMode("add")
@@ -853,6 +977,12 @@ export default function EventCalendarPage() {
   }
 
   function openEditModal(event: ManagedEvent) {
+    const version = eventVersions[event.id] || ""
+    eventSubmissionTokenRef.current += 1
+    draftEventIdRef.current = event.id
+    draftEventVersionRef.current = version
+    setDraftEventVersion(version)
+    setDraftEventChangedElsewhere(false)
     setDraftEvent({
       ...event,
       people: normalizePeople(event.people),
@@ -862,84 +992,128 @@ export default function EventCalendarPage() {
     setEventModalMode("edit")
   }
 
+  function closeEventModal() {
+    if (eventSubmissionPendingRef.current || calendarMutationPendingRef.current) return
+    eventSubmissionTokenRef.current += 1
+    draftEventIdRef.current = ""
+    draftEventVersionRef.current = ""
+    setDraftEventChangedElsewhere(false)
+    setEventModalMode(null)
+  }
+
   async function findMeetingRoomConflicts(event: ManagedEvent) {
     if (!isMeetingRoomBooked(event)) return []
 
     const bookingTime = extractEventTimeRange(event.title)
-    if (!bookingTime) return []
 
     try {
       const response = await fetch(
-        `/api/event-calendar/google-events?calendarId=${encodeURIComponent(CALENDAR_ID)}&timeMin=${encodeURIComponent(`${event.startDate}T00:00:00+08:00`)}&timeMax=${encodeURIComponent(`${event.startDate}T23:59:59+08:00`)}`
+        `/api/event-calendar/google-events?timeMin=${encodeURIComponent(`${event.startDate}T00:00:00+08:00`)}&timeMax=${encodeURIComponent(`${event.startDate}T23:59:59+08:00`)}`
       )
       const payload = await response.json()
-      if (!response.ok || !Array.isArray(payload.events)) return []
+      if (!response.ok || !Array.isArray(payload.events)) {
+        throw new Error(payload?.message || "Meeting-room availability could not be verified. Nothing was saved; try again.")
+      }
 
       return (payload.events as GoogleCalendarEvent[]).filter((googleEvent) => {
         if (googleEvent.sourceEventId && googleEvent.sourceEventId === event.id) return false
         if (googleEvent.startDate !== event.startDate) return false
+        if (!bookingTime) return true
 
         const googleTime = getGoogleEventMinutes(googleEvent)
         return bookingTime.startMinutes < googleTime.endMinutes && bookingTime.endMinutes > googleTime.startMinutes
       })
-    } catch {
-      return []
+    } catch (error) {
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Meeting-room availability could not be verified. Nothing was saved; try again.",
+      )
     }
   }
 
   async function saveDraftEvent() {
+    if (calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode) return
+    const wasEdit = eventModalMode === "edit"
     const action = eventModalMode === "edit" ? "save these changes" : "create this event"
     if (!window.confirm(`Are you sure you want to ${action}?`)) return
-
-    const nextEvent: ManagedEvent = {
-      ...draftEvent,
-      title: draftEvent.title.trim().toUpperCase() || "NEW EVENT",
-      people: normalizePeople(draftEvent.people),
-      uncertainPeople: normalizePeople(draftEvent.uncertainPeople || []),
-      endDate: draftEvent.endDate >= draftEvent.startDate ? draftEvent.endDate : draftEvent.startDate,
-      eventType: draftEvent.eventType || "Unclassified",
-    }
-
-    const conflicts = await findMeetingRoomConflicts(nextEvent)
-    if (conflicts.length) {
-      const conflictText = conflicts
-        .slice(0, 3)
-        .map((event) => `${formatGoogleEventTime(event)} ${event.title}`)
-        .join("\n")
-      const proceed = window.confirm(
-        `Meeting room booking conflict found:\n\n${conflictText}\n\nDo you still want to save this event?`
-      )
-      if (!proceed) return
-    }
+    const submissionToken = ++eventSubmissionTokenRef.current
+    eventSubmissionPendingRef.current = true
+    setEventSubmissionPending(true)
 
     try {
-      await mutateCalendar("upsert", [nextEvent])
+      const nextEvent: ManagedEvent = {
+        ...draftEvent,
+        title: draftEvent.title.trim().toUpperCase() || "NEW EVENT",
+        people: normalizePeople(draftEvent.people),
+        uncertainPeople: normalizePeople(draftEvent.uncertainPeople || []),
+        endDate: draftEvent.endDate >= draftEvent.startDate ? draftEvent.endDate : draftEvent.startDate,
+        eventType: draftEvent.eventType || "Unclassified",
+      }
+
+      const conflicts = await findMeetingRoomConflicts(nextEvent)
+      if (submissionToken !== eventSubmissionTokenRef.current) return
+      if (conflicts.length) {
+        const conflictText = conflicts
+          .slice(0, 3)
+          .map((event) => `${formatGoogleEventTime(event)} ${event.title}`)
+          .join("\n")
+        const proceed = window.confirm(
+          `Meeting room booking conflict found:\n\n${conflictText}\n\nDo you still want to save this event?`
+        )
+        if (!proceed || submissionToken !== eventSubmissionTokenRef.current) return
+      }
+
+      const result = await mutateCalendar(
+        wasEdit ? "update" : "create",
+        [nextEvent],
+        [],
+        {},
+        wasEdit ? { [nextEvent.id]: draftEventVersion } : {},
+      )
+      const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
+      setEmailPrompt({
+        event: committedEvent,
+        eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
+        action: wasEdit ? "updated" : "created",
+        status: "idle",
+        error: "",
+      })
+      if (submissionToken === eventSubmissionTokenRef.current) {
+        draftEventIdRef.current = ""
+        draftEventVersionRef.current = ""
+        setDraftEventChangedElsewhere(false)
+        setEventModalMode(null)
+      }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The event was not saved. Please try again.")
-      return
+    } finally {
+      if (submissionToken === eventSubmissionTokenRef.current) {
+        eventSubmissionPendingRef.current = false
+        setEventSubmissionPending(false)
+      }
     }
-    setEmailPrompt({
-      event: nextEvent,
-      action: eventModalMode === "edit" ? "updated" : "created",
-      status: "idle",
-    })
-    setEventModalMode(null)
   }
 
   async function confirmEventEmailSend() {
     if (!emailPrompt || emailPrompt.status === "sending") return
-    setEmailPrompt((current) => current && { ...current, status: "sending" })
+    setEmailPrompt((current) => current && { ...current, status: "sending", error: "" })
 
     try {
-      await sendEventEmail(emailPrompt.event, emailPrompt.action)
-      setEmailPrompt((current) => current && { ...current, status: "sent" })
+      await sendEventEmail(emailPrompt.event, emailPrompt.eventVersion, emailPrompt.action)
+      setEmailPrompt((current) => current && { ...current, status: "sent", error: "" })
       window.setTimeout(() => setEmailPrompt(null), 900)
-    } catch {
-      setEmailPrompt((current) => current && { ...current, status: "failed" })
+    } catch (error) {
+      setEmailPrompt((current) => current && {
+        ...current,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Email notification failed.",
+      })
     }
   }
 
   async function saveRecurrentEvents() {
+    if (calendarMutationPendingRef.current) return
     if (!window.confirm("Are you sure you want to create these recurrent events?")) return
 
     const rangeStart = parseLocalDate(draftRecurrentEvent.startDate)
@@ -973,9 +1147,9 @@ export default function EventCalendarPage() {
       }
     }
 
-    const nextEvents = occurrenceDates.map((dateKey, index) => ({
+    const nextEvents = occurrenceDates.map((dateKey) => ({
       ...draftRecurrentEvent,
-      id: `recurrent-${Date.now()}-${index}`,
+      id: `${draftRecurrentEvent.id}-${dateKey}`,
       title: draftRecurrentEvent.title.trim().toUpperCase() || "NEW EVENT",
       people: normalizePeople(draftRecurrentEvent.people),
       uncertainPeople: normalizePeople(draftRecurrentEvent.uncertainPeople || []),
@@ -985,7 +1159,7 @@ export default function EventCalendarPage() {
     }))
 
     try {
-      await mutateCalendar("upsert", nextEvents)
+      await mutateCalendar("create", nextEvents)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The recurrent events were not saved. Please try again.")
       return
@@ -1067,6 +1241,7 @@ export default function EventCalendarPage() {
 
   function openPeopleModal() {
     setDraftPeopleText(people.join("\n"))
+    setDraftPeopleVersion(settingVersions.people || "")
     setToolsMenuOpen(false)
     setPeopleModalOpen(true)
   }
@@ -1100,9 +1275,17 @@ export default function EventCalendarPage() {
   }
 
   async function savePeople() {
+    if (calendarMutationPendingRef.current) return
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
     try {
-      await mutateCalendar("people", [], [], { people: nextPeople })
+      await mutateCalendar(
+        "people",
+        [],
+        [],
+        { people: nextPeople },
+        {},
+        { people: draftPeopleVersion },
+      )
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The people list was not saved. Please try again.")
       return
@@ -1113,8 +1296,28 @@ export default function EventCalendarPage() {
   }
 
   function openEmailModal() {
+    setDraftEmailRecipientsText(emailRecipientsText)
+    setDraftEmailRecipientsVersion(settingVersions.emailRecipientsText || "")
     setToolsMenuOpen(false)
     setEmailModalOpen(true)
+  }
+
+  async function saveEmailRecipients() {
+    if (calendarMutationPendingRef.current) return
+    try {
+      await mutateCalendar(
+        "settings",
+        [],
+        [],
+        { emailRecipientsText: draftEmailRecipientsText },
+        {},
+        { emailRecipientsText: draftEmailRecipientsVersion },
+      )
+      setEmailRecipientsText(draftEmailRecipientsText)
+      setEmailModalOpen(false)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The email reminder list was not saved. Please try again.")
+    }
   }
 
   async function importNextYearPublicHolidays() {
@@ -1170,9 +1373,12 @@ export default function EventCalendarPage() {
   }
 
   async function recoverMissingEvents() {
-    if (recoveringEvents) return
+    if (recoveringEvents || calendarMutationPendingRef.current) return
     if (!window.confirm("Restore missing future events found in audit history?")) return
 
+    calendarMutationPendingRef.current = true
+    calendarStateSequenceRef.current += 1
+    setCalendarMutationPending(true)
     setToolsMenuOpen(false)
     setRecoveringEvents(true)
     setRecoveryStatus("Inspecting audit history")
@@ -1188,8 +1394,11 @@ export default function EventCalendarPage() {
         throw new Error(payload?.message || "Could not recover missing events.")
       }
 
-      const restoredEvents = normalizeStoredEvents(payload.restoredEvents)
-      setEvents((current) => mergeImportedEvents(current, restoredEvents))
+      if (!applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)) {
+        throw new Error("The recovery response did not include the canonical calendar.")
+      }
+      const restoredIds = normalizeStoredEvents(payload.restoredEvents).map((event) => event.id)
+      if (restoredIds.length) void syncCanonicalGoogleCalendar(restoredIds)
       setRecoveryStatus(
         payload.restoredCount
           ? `Recovered ${payload.restoredCount} missing events`
@@ -1198,12 +1407,16 @@ export default function EventCalendarPage() {
     } catch (error) {
       setRecoveryStatus(error instanceof Error ? error.message : "Could not recover missing events.")
     } finally {
+      calendarMutationPendingRef.current = false
+      calendarStateSequenceRef.current += 1
+      setCalendarMutationPending(false)
       setRecoveringEvents(false)
     }
   }
 
   async function deleteDraftEvent() {
     if (eventModalMode !== "edit") return
+    if (calendarMutationPendingRef.current || eventSubmissionPendingRef.current) return
     if (!window.confirm("Are you sure you want to delete this event?")) return
 
     const nextDeletedRequiredSeedIds = requiredSeedEventIds.includes(draftEvent.id)
@@ -1212,7 +1425,7 @@ export default function EventCalendarPage() {
     try {
       await mutateCalendar("delete", [], [draftEvent.id], {
         deletedRequiredSeedIds: nextDeletedRequiredSeedIds,
-      })
+      }, { [draftEvent.id]: draftEventVersion })
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The event was not deleted. Please try again.")
       return
@@ -1220,8 +1433,10 @@ export default function EventCalendarPage() {
     if (requiredSeedEventIds.includes(draftEvent.id)) {
       setDeletedRequiredSeedIds(nextDeletedRequiredSeedIds)
     }
-    setEventModalMode(null)
+    closeEventModal()
   }
+
+  const eventActionPending = calendarMutationPending || eventSubmissionPending
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
@@ -1351,10 +1566,10 @@ export default function EventCalendarPage() {
               style={{
                 border: "1px solid var(--fc-admin-border-soft)",
                 borderRadius: "999px",
-                background: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                background: /fail|unavailable|outdated|changed|conflict|refresh required/i.test(saveStatus)
                   ? "var(--fc-admin-danger-bg)"
                   : "var(--fc-admin-panel-bg)",
-                color: saveStatus.toLowerCase().includes("fail") || saveStatus.toLowerCase().includes("unavailable")
+                color: /fail|unavailable|outdated|changed|conflict|refresh required/i.test(saveStatus)
                   ? "var(--fc-admin-danger-text)"
                   : "var(--fc-admin-muted)",
                 fontSize: "11px",
@@ -1366,6 +1581,27 @@ export default function EventCalendarPage() {
             >
               {saveStatus}
             </span>
+            {syncStatus !== "Sync ready" && (
+              <span
+                style={{
+                  border: "1px solid var(--fc-admin-border-soft)",
+                  borderRadius: "999px",
+                  background: /pending|incomplete|failed/i.test(syncStatus)
+                    ? "var(--fc-admin-danger-bg)"
+                    : "var(--fc-admin-panel-bg)",
+                  color: /pending|incomplete|failed/i.test(syncStatus)
+                    ? "var(--fc-admin-danger-text)"
+                    : "var(--fc-admin-muted)",
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  padding: "8px 10px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {syncStatus}
+              </span>
+            )}
             <div
               style={{ position: "relative" }}
               onMouseEnter={cancelToolsMenuClose}
@@ -1798,11 +2034,28 @@ export default function EventCalendarPage() {
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>
               {eventModalMode === "add" ? "New Event" : "Edit Event"}
             </h2>
+            {draftEventChangedElsewhere && (
+              <div
+                style={{
+                  marginBottom: "12px",
+                  border: "1px solid var(--fc-admin-danger-border)",
+                  borderRadius: "12px",
+                  background: "var(--fc-admin-danger-bg)",
+                  color: "var(--fc-admin-danger-text)",
+                  fontSize: "12px",
+                  fontWeight: 900,
+                  padding: "10px 11px",
+                }}
+              >
+                This event changed in another tab. Your draft is preserved, but it cannot overwrite the newer record. Cancel and reopen the event before saving.
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
                   type="date"
+                  disabled={eventActionPending}
                   value={draftEvent.startDate}
                   onChange={(event) =>
                     setDraftEvent((current) => ({
@@ -1818,6 +2071,7 @@ export default function EventCalendarPage() {
                 To
                 <input
                   type="date"
+                  disabled={eventActionPending}
                   value={draftEvent.endDate}
                   onChange={(event) => setDraftEvent((current) => ({ ...current, endDate: event.target.value }))}
                   style={inputStyle}
@@ -1828,6 +2082,7 @@ export default function EventCalendarPage() {
               Event
               <input
                 value={draftEvent.title}
+                disabled={eventActionPending}
                 onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value }))}
                 style={{ ...inputStyle, textTransform: "uppercase" }}
               />
@@ -1845,6 +2100,7 @@ export default function EventCalendarPage() {
             >
               <input
                 type="checkbox"
+                disabled={eventActionPending}
                 checked={isMeetingRoomBooked(draftEvent)}
                 onChange={(event) =>
                   setDraftEvent((current) => ({
@@ -1869,6 +2125,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
+                    disabled={eventActionPending}
                     aria-pressed={attending || uncertain}
                     onClick={() => cycleDraftPerson(person)}
                     style={{
@@ -1892,17 +2149,28 @@ export default function EventCalendarPage() {
                 <button
                   type="button"
                   onClick={deleteDraftEvent}
-                  style={dangerActionButtonStyle}
+                  disabled={eventActionPending || draftEventChangedElsewhere}
+                  style={{ ...dangerActionButtonStyle, opacity: eventActionPending || draftEventChangedElsewhere ? 0.65 : 1 }}
                 >
                   Delete Event
                 </button>
               )}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
-                <button type="button" onClick={() => setEventModalMode(null)} style={buttonStyle}>
+                <button
+                  type="button"
+                  onClick={closeEventModal}
+                  disabled={eventActionPending}
+                  style={{ ...buttonStyle, opacity: eventActionPending ? 0.65 : 1 }}
+                >
                   Cancel
                 </button>
-                <button type="button" onClick={saveDraftEvent} style={primaryActionButtonStyle}>
-                  Save
+                <button
+                  type="button"
+                  onClick={saveDraftEvent}
+                  disabled={eventActionPending || draftEventChangedElsewhere}
+                  style={{ ...primaryActionButtonStyle, opacity: eventActionPending || draftEventChangedElsewhere ? 0.65 : 1 }}
+                >
+                  {eventActionPending ? "Saving" : "Save"}
                 </button>
               </div>
             </div>
@@ -2055,8 +2323,13 @@ export default function EventCalendarPage() {
               <button type="button" onClick={() => setRecurrentModalOpen(false)} style={buttonStyle}>
                 Cancel
               </button>
-              <button type="button" onClick={saveRecurrentEvents} style={primaryActionButtonStyle}>
-                Save
+              <button
+                type="button"
+                onClick={saveRecurrentEvents}
+                disabled={calendarMutationPending}
+                style={{ ...primaryActionButtonStyle, opacity: calendarMutationPending ? 0.65 : 1 }}
+              >
+                {calendarMutationPending ? "Saving" : "Save"}
               </button>
             </div>
           </div>
@@ -2252,7 +2525,7 @@ export default function EventCalendarPage() {
                   padding: "11px 12px",
                 }}
               >
-                Could not send. Please check the email settings and try again.
+                {emailPrompt.error || "Could not send. Please check the email settings and try again."}
               </div>
             )}
 
@@ -2317,8 +2590,13 @@ export default function EventCalendarPage() {
               <button type="button" onClick={() => setPeopleModalOpen(false)} style={buttonStyle}>
                 Cancel
               </button>
-              <button type="button" onClick={savePeople} style={buttonStyle}>
-                Save People
+              <button
+                type="button"
+                onClick={savePeople}
+                disabled={calendarMutationPending}
+                style={{ ...buttonStyle, opacity: calendarMutationPending ? 0.65 : 1 }}
+              >
+                {calendarMutationPending ? "Saving" : "Save People"}
               </button>
             </div>
           </div>
@@ -2333,8 +2611,8 @@ export default function EventCalendarPage() {
               One email per line. New and edited events will be emailed to this list from info@cosulich.com.hk.
             </p>
             <textarea
-              value={emailRecipientsText}
-              onChange={(event) => setEmailRecipientsText(event.target.value)}
+              value={draftEmailRecipientsText}
+              onChange={(event) => setDraftEmailRecipientsText(event.target.value)}
               placeholder="name@company.com"
               style={{
                 ...inputStyle,
@@ -2345,7 +2623,15 @@ export default function EventCalendarPage() {
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "14px" }}>
               <button type="button" onClick={() => setEmailModalOpen(false)} style={buttonStyle}>
-                Done
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEmailRecipients}
+                disabled={calendarMutationPending}
+                style={{ ...primaryActionButtonStyle, opacity: calendarMutationPending ? 0.65 : 1 }}
+              >
+                {calendarMutationPending ? "Saving" : "Save"}
               </button>
             </div>
           </div>

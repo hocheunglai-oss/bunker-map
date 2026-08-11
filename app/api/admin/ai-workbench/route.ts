@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
 import { officeCalendarSeedEvents, type OfficeCalendarEvent } from "@/data/eventCalendar"
 import {
@@ -604,8 +604,9 @@ async function applyCalendarEvents(
   let skipped = 0
 
   for (const draft of calendarEvents) {
+    const semanticKey = eventKey(draft)
     const nextEvent: OfficeCalendarEvent = {
-      id: `ai-${Date.now()}-${randomUUID().slice(0, 8)}`,
+      id: `ai-${createHash("sha256").update(semanticKey).digest("hex").slice(0, 24)}`,
       startDate: draft.startDate,
       endDate: draft.endDate,
       title: draft.title,
@@ -613,7 +614,7 @@ async function applyCalendarEvents(
       tags: draft.tags,
       eventType: draft.eventType,
     }
-    const key = eventKey(nextEvent)
+    const key = semanticKey
     if (seen.has(key)) {
       skipped += 1
       continue

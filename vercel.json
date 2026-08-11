@@ -24,6 +24,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/event-calendar/google-sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/attendance-month-end-reminder",
       "schedule": "0 0 * * *"
     },
