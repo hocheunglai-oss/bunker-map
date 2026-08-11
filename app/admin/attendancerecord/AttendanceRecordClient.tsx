@@ -383,6 +383,16 @@ function hongKongDateKey(date = new Date()) {
   return `${lookup.year}-${lookup.month}-${lookup.day}`
 }
 
+function hongKongDateTimeKey(date = new Date()) {
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date)
+  return `${hongKongDateKey(date)} ${time}`
+}
+
 function monthKey(year: number, month: number) {
   return `${year}-${String(month).padStart(2, "0")}`
 }
@@ -508,6 +518,7 @@ function recordCellValue(
   item: ApiAttendanceDailyItem | undefined,
   direction: "in" | "out",
   holiday?: ApiAttendanceHoliday | null,
+  now = new Date(),
 ) {
   if (!item) return holiday ? "PH" : ""
   const entry = leaveEntryForDirection(item, direction)
@@ -517,7 +528,11 @@ function recordCellValue(
   const status = String(item.status || "").toUpperCase()
   if (item.holidayAttendance || status.includes("HOLIDAY-ATTENDANCE")) return "HOL"
   if (status.includes("HOLIDAY") || holiday) return "PH"
-  if (item.workMode === "home-office") return "HO"
+  if (item.workMode === "home-office") {
+    const workDate = item.date || item.workDate
+    if (workDate && hongKongDateTimeKey(now) < `${workDate} ${direction === "in" ? "10:30" : "19:30"}`) return ""
+    return "HO"
+  }
   if (item.workMode === "business-trip") return "OS"
   return ""
 }
@@ -526,13 +541,18 @@ function recordCellTone(
   item: ApiAttendanceDailyItem | undefined,
   direction: "in" | "out",
   holiday?: ApiAttendanceHoliday | null,
+  now = new Date(),
 ) {
   if (!item) return holiday ? styles.holidayCell : ""
   if (leaveEntryForDirection(item, direction)) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "out" && item.early) return styles.earlyCell
   if (item.holidayAttendance || holiday) return styles.holidayCell
-  if (item.workMode === "home-office") return styles.homeOfficeCell
+  if (item.workMode === "home-office") {
+    const workDate = item.date || item.workDate
+    if (workDate && hongKongDateTimeKey(now) < `${workDate} ${direction === "in" ? "10:30" : "19:30"}`) return ""
+    return styles.homeOfficeCell
+  }
   if (item.workMode === "business-trip") return styles.businessTripCell
   return ""
 }
@@ -601,6 +621,7 @@ export default function AttendanceRecordClient() {
   const currentYear = Number(today.slice(0, 4))
   const currentMonth = Number(today.slice(5, 7))
   const [activeTab, setActiveTab] = useState<TabId>("monthly-record")
+  const [viewNow, setViewNow] = useState(() => new Date())
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
   const [selectedSummaryYear, setSelectedSummaryYear] = useState(currentYear)
   const [selectedAllTimeYear, setSelectedAllTimeYear] = useState(currentYear)
@@ -1244,6 +1265,17 @@ export default function AttendanceRecordClient() {
               <div className={styles.toolbarActions}>
                 <button
                   type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => {
+                    setViewNow(new Date())
+                    void loadSelectedMonth()
+                  }}
+                  disabled={monthLoading}
+                >
+                  {monthLoading ? "REFRESHING…" : "REFRESH"}
+                </button>
+                <button
+                  type="button"
                   className={styles.monthArrow}
                   aria-label="Previous month"
                   onClick={() => moveSelectedMonth(-1)}
@@ -1298,7 +1330,7 @@ export default function AttendanceRecordClient() {
                         const record = monthRecordMap.get(`${day.date}:${person.id}`)
                         return (
                           <Fragment key={`${day.date}:${person.id}`}>
-                            <td className={recordCellTone(record, "in", day.holiday)}>
+                            <td className={recordCellTone(record, "in", day.holiday, viewNow)}>
                               {canEdit ? (
                                 <button
                                   type="button"
@@ -1306,11 +1338,11 @@ export default function AttendanceRecordClient() {
                                   onClick={() => openLeave(person, day.date, "in", record)}
                                   aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} IN attendance`}
                                 >
-                                  {recordCellValue(record, "in", day.holiday) || " "}
+                                  {recordCellValue(record, "in", day.holiday, viewNow) || " "}
                                 </button>
-                              ) : recordCellValue(record, "in", day.holiday)}
+                              ) : recordCellValue(record, "in", day.holiday, viewNow)}
                             </td>
-                            <td className={recordCellTone(record, "out", day.holiday)}>
+                            <td className={recordCellTone(record, "out", day.holiday, viewNow)}>
                               {canEdit ? (
                                 <button
                                   type="button"
@@ -1318,9 +1350,9 @@ export default function AttendanceRecordClient() {
                                   onClick={() => openLeave(person, day.date, "out", record)}
                                   aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} OUT attendance`}
                                 >
-                                  {recordCellValue(record, "out", day.holiday) || " "}
+                                  {recordCellValue(record, "out", day.holiday, viewNow) || " "}
                                 </button>
-                              ) : recordCellValue(record, "out", day.holiday)}
+                              ) : recordCellValue(record, "out", day.holiday, viewNow)}
                             </td>
                           </Fragment>
                         )

@@ -1024,7 +1024,7 @@
 
   .toolbarActions {
     display: grid;
-    grid-template-columns: 36px 36px;
+    grid-template-columns: auto 36px 36px;
     align-self: flex-end;
   }
 

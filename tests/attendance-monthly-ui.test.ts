@@ -85,9 +85,13 @@ test("Monthly view includes required Excel totals, confirmation, and reminders",
 test("Monthly Record renders Hong Kong holidays and supports explicit work-mode overrides", () => {
   assert.match(client, /HK HOLIDAY/)
   assert.match(client, /holidayTitle\(day\.holiday\)/)
-  assert.match(client, /recordCellValue\(record, "in", day\.holiday\)/)
+  assert.match(client, /recordCellValue\(record, "in", day\.holiday, viewNow\)/)
   assert.match(client, /item\.workMode === "home-office"/)
   assert.match(client, /Default \(\{leaveDraft\.defaultWorkMode/)
+  assert.match(client, /direction === "in" \? "10:30" : "19:30"/)
+  assert.match(client, /hongKongDateTimeKey\(now\)/)
+  assert.match(client, /REFRESHING…[\s\S]*?REFRESH/)
+  assert.match(client, /void loadSelectedMonth\(\)/)
   const dayEdit = client.slice(
     client.indexOf("async function saveDayEdit()"),
     client.indexOf("async function deleteLeave()"),
