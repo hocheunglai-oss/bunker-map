@@ -548,6 +548,30 @@ body {
   white-space: nowrap;
 }
 
+.fc-admin-sidebar-count {
+  min-width: 22px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8dce2;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #5f6670;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.fc-admin-sidebar-count.has-items {
+  border-color: #d9424f;
+  background: #c92030;
+  color: #ffffff;
+}
+
 .fc-admin-sidebar-page-icon {
   width: 17px;
   height: 17px;

@@ -12,6 +12,7 @@ import {
   parseEnquiryWorksheetGuess,
   type EnquiryWorksheetGuess,
 } from "@/lib/enquiryWorksheetParser"
+import { notifyParserReportCountChanged } from "@/lib/parserReportClient"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./enquiryWorksheet.module.css"
 
@@ -860,6 +861,7 @@ export default function EnquiryWorksheetPage() {
       setCopyStatus("idle")
       setWhatsappStatus("idle")
       await loadParserReportCount()
+      notifyParserReportCountChanged("enquiryworksheet")
       setParserReportStatus("saved")
       window.setTimeout(() => {
         setParserReportDraft((current) => ({ ...current, open: false }))

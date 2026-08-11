@@ -1,5 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { ADMIN_PAGE_DEFINITIONS, getAdminPageByPath } from "../lib/adminPages"
+import { parserReportAccessPage } from "../lib/parserReportAccess"
 import { parserReportWithState, type ParserReportRecord } from "../lib/parserReports"
 import { SPC_PAGE_DEFINITIONS, getDefaultSpcPermissionsForRole } from "../lib/spcPages"
 
@@ -35,4 +37,22 @@ test("Parser Report is a management page restricted to admins by default", () =>
   assert.equal(getDefaultSpcPermissionsForRole("ADMIN")["spc-parser-reports"], "edit")
   assert.equal(getDefaultSpcPermissionsForRole("BUYER TRADER")["spc-parser-reports"], "none")
   assert.equal(getDefaultSpcPermissionsForRole("SUPPLIER TRADER")["spc-parser-reports"], "none")
+})
+
+test("FCUNO exposes its own Parser Report management page", () => {
+  const page = ADMIN_PAGE_DEFINITIONS.find((item) => item.id === "parser-reports")
+  assert.deepEqual(page, {
+    id: "parser-reports",
+    label: "PARSER REPORT",
+    group: "management",
+    path: "/admin/parser-reports",
+  })
+  assert.equal(getAdminPageByPath("/admin/parser-reports")?.id, "parser-reports")
+})
+
+test("review queues use source-specific permissions without changing report submission access", () => {
+  assert.equal(parserReportAccessPage("enquiryworksheet", true), "parser-reports")
+  assert.equal(parserReportAccessPage("enquiryworksheet", false), "enquiry-worksheet")
+  assert.equal(parserReportAccessPage("spc", true), "spc-parser-reports")
+  assert.equal(parserReportAccessPage("spc", false), "spc-buyer-enquiries")
 })

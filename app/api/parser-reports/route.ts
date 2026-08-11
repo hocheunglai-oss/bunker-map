@@ -5,6 +5,7 @@ import {
   createAdminAuditContext,
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
+import { parserReportAccessPage } from "@/lib/parserReportAccess"
 import {
   asParserReportMetadata,
   parserReportCounts,
@@ -18,6 +19,7 @@ import {
   createSpcAuditContext,
   createSpcAuditedSupabaseClient,
 } from "@/lib/spcAudit"
+import { timedJson } from "@/lib/serverTiming"
 
 const MAX_REPORTS = 500
 const MAX_TEXT_LENGTH = 20_000
@@ -76,25 +78,26 @@ async function getSessionAndClient(
   source: ParserReportSource,
   request: Request,
   access: "view" | "edit",
-  spcPageId = "spc-buyer-enquiries",
+  reviewQueue = false,
 ) {
+  const pageId = parserReportAccessPage(source, reviewQueue)
   if (source === "spc") {
-    const session = await requireSpcPagePermission(spcPageId, access)
+    const session = await requireSpcPagePermission(pageId, access)
     return {
       username: session.username || "spc",
       displayName: session.displayName || session.username || "SPC",
       supabase: createSpcAuditedSupabaseClient(
-        createSpcAuditContext(session, request, spcPageId),
+        createSpcAuditContext(session, request, pageId),
       ),
     }
   }
 
-  const session = await requireAdminPagePermission("enquiry-worksheet", access)
+  const session = await requireAdminPagePermission(pageId, access)
   return {
     username: session.username || "admin",
     displayName: session.displayName || session.username || "Admin",
     supabase: createAdminAuditedSupabaseClient(
-      createAdminAuditContext(session, request, "enquiry-worksheet"),
+      createAdminAuditContext(session, request, pageId),
       { useServiceRole: true },
     ),
   }
@@ -107,10 +110,12 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now()
   try {
     const { searchParams } = new URL(request.url)
     const source = sourceFrom(searchParams.get("source"))
     const summaryOnly = searchParams.get("summary") === "1"
+    const reviewQueue = !summaryOnly || searchParams.get("queue") === "1"
     if (!source) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
@@ -119,12 +124,13 @@ export async function GET(request: Request) {
       source,
       request,
       "view",
-      source === "spc" && !summaryOnly ? "spc-parser-reports" : "spc-buyer-enquiries",
+      reviewQueue,
     )
     const { data, error } = await supabase
       .from("parser_reports")
       .select("*")
       .eq("source", source)
+      .eq("status", "new")
       .order("last_reported_at", { ascending: false })
       .limit(MAX_REPORTS)
 
@@ -136,16 +142,35 @@ export async function GET(request: Request) {
     const unresolvedReports = reportsWithState.filter((report) => report.status === "new" && !report.resolved)
     const counts = parserReportCounts(reportsWithState)
 
-    return NextResponse.json({
-      source,
-      ...(summaryOnly ? {} : { reports: unresolvedReports }),
-      unresolvedReports: counts.unresolved,
-      totalReports: counts.total,
-      resolvedReports: counts.resolved,
-      reviewedReports: counts.reviewed,
-      updatedAt: reportsWithState[0]?.updatedAt || null,
-    })
+    return timedJson(
+      "/api/parser-reports",
+      startedAt,
+      {
+        source,
+        ...(summaryOnly ? {} : { reports: unresolvedReports }),
+        unresolvedReports: counts.unresolved,
+        totalReports: counts.total,
+        resolvedReports: counts.resolved,
+        reviewedReports: counts.reviewed,
+        updatedAt: reportsWithState[0]?.updatedAt || null,
+      },
+      undefined,
+      {
+        source,
+        summaryOnly,
+        reviewQueue,
+        candidates: reportsWithState.length,
+        unresolved: counts.unresolved,
+      },
+    )
   } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      message: "request_failed",
+      route: "/api/parser-reports",
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : "Unknown error",
+    }))
     return errorResponse(error)
   }
 }
@@ -158,18 +183,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
 
-    if (source === "spc" && payload.action === "review") {
+    if (payload.action === "review") {
       const id = asString(payload.id, 100)
       const correctedOutput = asString(payload.correctedOutput)
       if (!id || !correctedOutput) {
         return NextResponse.json({ message: "Report and corrected output are required." }, { status: 400 })
       }
-      const { supabase } = await getSessionAndClient(source, request, "edit", "spc-parser-reports")
+      const { supabase } = await getSessionAndClient(source, request, "edit", true)
       const { data: existing, error: existingError } = await supabase
         .from("parser_reports")
         .select("metadata")
         .eq("id", id)
-        .eq("source", "spc")
+        .eq("source", source)
         .maybeSingle()
       if (existingError) throw existingError
       if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
@@ -183,7 +208,7 @@ export async function POST(request: Request) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
-        .eq("source", "spc")
+        .eq("source", source)
         .select("*")
         .single()
       if (error) throw error

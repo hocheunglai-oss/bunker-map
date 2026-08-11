@@ -4,6 +4,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
+import { ParserReportSidebarBadge } from "@/components/ParserReportSidebarBadge"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { clearSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import {
@@ -190,6 +191,9 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
               <span className="fc-admin-sidebar-link-main">
                 <span>{page.label}</span>
               </span>
+              {page.id === "spc-parser-reports" ? (
+                <ParserReportSidebarBadge source="spc" />
+              ) : null}
             </Link>
           ))}
         </div>

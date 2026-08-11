@@ -4,6 +4,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
+import { ParserReportSidebarBadge } from "@/components/ParserReportSidebarBadge"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import {
   clearAdminClientCache,
@@ -369,12 +370,17 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
                   (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
                 ))
             const content = (
-              <span className="fc-admin-sidebar-link-main">
-                <span className="fc-admin-sidebar-page-icon">
-                  <AdminPageIcon page={page} />
+              <>
+                <span className="fc-admin-sidebar-link-main">
+                  <span className="fc-admin-sidebar-page-icon">
+                    <AdminPageIcon page={page} />
+                  </span>
+                  <span>{page.label}</span>
                 </span>
-                <span>{page.label}</span>
-              </span>
+                {page.id === "parser-reports" ? (
+                  <ParserReportSidebarBadge source="enquiryworksheet" />
+                ) : null}
+              </>
             )
             const title = `${page.label} (${permission === "edit" ? "Edit access" : "View access"})`
 

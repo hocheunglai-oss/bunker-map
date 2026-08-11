@@ -104,6 +104,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     path: "/admin/auditlog",
   },
   {
+    id: "parser-reports",
+    label: "PARSER REPORT",
+    group: "management",
+    path: "/admin/parser-reports",
+  },
+  {
     id: "user-management",
     label: "USER MANAGEMENT",
     group: "management",

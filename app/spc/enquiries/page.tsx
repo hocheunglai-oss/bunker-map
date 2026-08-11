@@ -24,6 +24,7 @@ import {
   replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
+import { notifyParserReportCountChanged } from "@/lib/parserReportClient"
 
 type SpcEnquiry = {
   id: string
@@ -635,6 +636,7 @@ export default function SpcEnquiriesPage() {
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to send report.")
       await loadParserReportCount()
+      notifyParserReportCountChanged("spc")
       window.setTimeout(() => setReportButtonState(""), 5_000)
     } catch (error) {
       setReportButtonState("")
@@ -795,6 +797,7 @@ export default function SpcEnquiriesPage() {
 
       applyCorrectedParserReport(parserReportDialog, correctedOutput)
       await loadParserReportCount()
+      notifyParserReportCountChanged("spc")
       setParserReportStatus("saved")
       window.setTimeout(() => {
         setParserReportDialog(null)
