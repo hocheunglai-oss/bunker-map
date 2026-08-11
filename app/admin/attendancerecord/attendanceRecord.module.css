@@ -479,7 +479,8 @@
 }
 
 .confirmationCell {
-  width: auto;
+  width: 7.5%;
+  padding-inline: 4px !important;
 }
 
 .confirmButton,
@@ -516,6 +517,10 @@
   border-color: #d0d5dd;
   background: #f2f4f7;
   color: #667085;
+  width: 100%;
+  max-width: 72px;
+  box-sizing: border-box;
+  padding-inline: 5px;
 }
 
 .rosterControls label,
@@ -696,19 +701,42 @@
   font-weight: 650;
 }
 
-.allTimeTable .openingGroup,
-.allTimeTable .closingGroup {
-  background: color-mix(in srgb, var(--fc-admin-selected-bg) 68%, var(--fc-table-head-bg));
-  color: var(--fc-admin-link);
+.allTimeTable .openingGroup {
+  background: #eaf3ff;
+  color: #175cd3;
 }
 
 .allTimeTable .activityGroup {
-  background: var(--fc-table-head-bg);
+  background: #f1efff;
+  color: #5b4ab8;
+}
+
+.allTimeTable .closingGroup,
+.allTimeTable .closingSubhead {
+  background: #eaf8f0;
+  color: #067647;
+}
+
+.allTimeTable thead tr:nth-child(2) th:first-child {
+  background: #f3f7fd;
+}
+
+.allTimeTable thead tr:nth-child(2) th:nth-child(n + 2):nth-child(-n + 13) {
+  background: #f8f7ff;
+}
+
+.allTimeTable tbody td:nth-child(2),
+.allTimeTable tfoot td:nth-child(2) {
+  background: #f3f7fd;
+}
+
+.allTimeTable tbody td:nth-child(15),
+.allTimeTable tfoot td:nth-child(15) {
+  background: #f0f9f4;
 }
 
 .allTimeTable .balanceCell,
 .allTimeTable .closingBalanceCell {
-  background: color-mix(in srgb, var(--fc-admin-selected-bg) 45%, var(--fc-row-bg));
   color: var(--fc-admin-heading);
   font-size: 12px;
   font-weight: 900;
@@ -727,6 +755,7 @@
 }
 
 .allTimeTable .closingBalanceCell {
+  background: #f0f9f4;
   color: #067647;
 }
 

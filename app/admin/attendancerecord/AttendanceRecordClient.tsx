@@ -1618,7 +1618,9 @@ export default function AttendanceRecordClient() {
                       <th rowSpan={2}>STAFF</th>
                       <th colSpan={1} className={styles.openingGroup}>OPENING POSITION</th>
                       <th colSpan={12} className={styles.activityGroup}>{selectedAllTimeYear} ATTENDANCE &amp; LEAVE ACTIVITY</th>
-                      <th colSpan={1} className={styles.closingGroup}>CLOSING POSITION</th>
+                      <th colSpan={1} className={styles.closingGroup}>
+                        {selectedAllTimeYear < currentYear ? "CLOSING POSITION" : "CURRENT BALANCE"}
+                      </th>
                       <th rowSpan={2}>YEAR-END<br />CONFIRMATION</th>
                     </tr>
                     <tr>
@@ -1635,7 +1637,13 @@ export default function AttendanceRecordClient() {
                       <th>NO PAY</th>
                       <th>HO</th>
                       <th>OS</th>
-                      <th>BALANCE C/F<br />31 DEC {selectedAllTimeYear}</th>
+                      <th className={styles.closingSubhead}>
+                        {selectedAllTimeYear < currentYear ? (
+                          <>BALANCE C/F<br />31 DEC {selectedAllTimeYear}</>
+                        ) : (
+                          <>BALANCE<br />TO DATE</>
+                        )}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1682,7 +1690,7 @@ export default function AttendanceRecordClient() {
                                 {pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}` ? "SAVING…" : "CONFIRM YEAR"}
                               </button>
                             ) : (
-                              <span className={styles.openBadge}>YEAR IN PROGRESS</span>
+                              <span className={styles.openBadge} title={`${selectedAllTimeYear} year in progress`}>IN PROGRESS</span>
                             )}
                           </td>
                         </tr>
