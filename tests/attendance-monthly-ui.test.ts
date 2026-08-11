@@ -89,6 +89,27 @@ test("Monthly view includes required Excel totals, confirmation, and reminders",
   assert.match(client, /action, \.\.\.body/)
 })
 
+test("Monthly summary fits the page and emphasizes only applicable figures", () => {
+  assert.match(
+    client,
+    /function displaySummaryDays[\s\S]*?return Math\.abs\(value\) < 0\.00001 \? "–"/,
+  )
+  assert.match(client, /summaryNumberClass/)
+  assert.match(client, /staffSecondaryLabel/)
+  assert.match(
+    styles,
+    /\.excelPanel[\s\S]*?max-height: none;[\s\S]*?overflow: visible;/,
+  )
+  assert.match(
+    styles,
+    /\.yearSummaryTable[\s\S]*?min-width: 0;[\s\S]*?width: 100%;/,
+  )
+  assert.doesNotMatch(
+    styles,
+    /\.yearSummaryTable\s*\{[^}]*min-width:\s*1690px/,
+  )
+})
+
 test("Monthly Record renders Hong Kong holidays and supports explicit work-mode overrides", () => {
   assert.match(client, /HK HOLIDAY/)
   assert.match(client, /holidayTitle\(day\.holiday\)/)
@@ -170,7 +191,7 @@ test("All Time uses User Management roster membership and group metadata", () =>
   assert.match(client, /annualSummaries/)
   assert.match(client, /annual\?\.leavePaidUnits === null[\s\S]*?"—"/)
   assert.doesNotMatch(client, /codeTotal\(row\.summary, "ALS"\) \+ codeTotal\(row\.summary, "ALU"\)/)
-  assert.match(client, /<th>LEAVE<br \/>PAID<\/th>[\s\S]*?<td>—<\/td>/)
+  assert.match(client, /<th>LEAVE<br \/>PAID<\/th>[\s\S]*?<td[^>]*>—<\/td>/)
   assert.match(client, /selectedAllTimeYear/)
   assert.match(client, /<th scope="row">TOTAL<\/th>/)
 })

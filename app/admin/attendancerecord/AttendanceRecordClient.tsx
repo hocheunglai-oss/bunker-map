@@ -430,6 +430,23 @@ function displayDays(value: number) {
   return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1")
 }
 
+function displaySummaryDays(value: number) {
+  return Math.abs(value) < 0.00001 ? "–" : displayDays(value)
+}
+
+function summaryNumberClass(value: number, emphasis?: "attended" | "late") {
+  if (Math.abs(value) < 0.00001) return styles.summaryZero
+  if (emphasis === "attended") return styles.attendedCell
+  if (emphasis === "late") return styles.lateTotalCell
+  return styles.summaryValue
+}
+
+function staffSecondaryLabel(person: ApiAttendancePerson) {
+  const code = person.staffCode.trim().toUpperCase()
+  const name = person.displayName.trim()
+  return name && name.toUpperCase() !== code ? name : ""
+}
+
 function isHistoricalPersonVisible(person: ApiAttendancePerson) {
   return !EXCLUDED_STAFF_CODES.has(person.staffCode.trim().toUpperCase())
 }
@@ -1455,18 +1472,24 @@ export default function AttendanceRecordClient() {
                             ) : null}
                             <th scope="row" className={styles.summaryStaffCell}>
                               <strong>{row.person.staffCode}</strong>
-                              <span>{row.person.displayName}</span>
+                              {staffSecondaryLabel(row.person) ? (
+                                <span>{staffSecondaryLabel(row.person)}</span>
+                              ) : null}
                             </th>
-                            {SUMMARY_CODES.slice(0, 5).map((code) => (
-                              <td key={code}>{displayDays(codeTotal(row.summary, code))}</td>
-                            ))}
-                            <td>{displayDays(codeTotal(row.summary, "HOL"))}</td>
-                            {SUMMARY_CODES.slice(5).map((code) => (
-                              <td key={code}>{displayDays(codeTotal(row.summary, code))}</td>
-                            ))}
-                            <td className={styles.attendedCell}>{displayDays(row.attendedDays)}</td>
-                            <td className={row.lateDays ? styles.lateTotalCell : undefined}>{displayDays(row.lateDays)}</td>
-                            <td>—</td>
+                            {SUMMARY_CODES.slice(0, 5).map((code) => {
+                              const value = codeTotal(row.summary, code)
+                              return <td key={code} className={summaryNumberClass(value)}>{displaySummaryDays(value)}</td>
+                            })}
+                            <td className={summaryNumberClass(codeTotal(row.summary, "HOL"))}>
+                              {displaySummaryDays(codeTotal(row.summary, "HOL"))}
+                            </td>
+                            {SUMMARY_CODES.slice(5).map((code) => {
+                              const value = codeTotal(row.summary, code)
+                              return <td key={code} className={summaryNumberClass(value)}>{displaySummaryDays(value)}</td>
+                            })}
+                            <td className={summaryNumberClass(row.attendedDays, "attended")}>{displaySummaryDays(row.attendedDays)}</td>
+                            <td className={summaryNumberClass(row.lateDays, "late")}>{displaySummaryDays(row.lateDays)}</td>
+                            <td className={styles.summaryZero}>—</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>

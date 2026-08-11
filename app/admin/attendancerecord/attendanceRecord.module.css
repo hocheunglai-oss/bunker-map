@@ -162,6 +162,11 @@
   background: var(--fc-admin-panel-bg);
 }
 
+.excelPanel {
+  max-height: none;
+  overflow: visible;
+}
+
 .monthRecordTable,
 .yearSummaryTable {
   width: 100%;
@@ -364,7 +369,8 @@
 }
 
 .yearSummaryTable {
-  min-width: 1690px;
+  min-width: 0;
+  width: 100%;
 }
 
 .yearSummaryTable thead th {
@@ -372,28 +378,37 @@
   z-index: 4;
   top: 0;
   height: 44px;
-  padding: 5px 6px;
+  padding: 6px 3px;
   line-height: 1.1;
+  white-space: normal;
 }
 
 .yearSummaryTable thead th:nth-child(1) {
   left: 0;
   z-index: 7;
-  width: 94px;
+  width: 5%;
 }
 
 .yearSummaryTable thead th:nth-child(2) {
-  left: 94px;
+  left: 5%;
   z-index: 7;
-  width: 150px;
+  width: 6.5%;
+}
+
+.yearSummaryTable thead th:nth-child(n + 3):nth-child(-n + 16) {
+  width: 5.55%;
+}
+
+.yearSummaryTable thead th:nth-child(17) {
+  width: 10.8%;
 }
 
 .yearSummaryTable tbody th,
 .yearSummaryTable tbody td {
-  height: 35px;
-  padding: 5px 7px;
+  height: 32px;
+  padding: 4px 3px;
   background: var(--fc-row-bg);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .yearSummaryTable tbody tr:hover td,
@@ -405,7 +420,7 @@
   position: sticky;
   z-index: 2;
   left: 0;
-  width: 94px;
+  width: 5%;
   background: var(--fc-table-head-bg);
   color: var(--fc-table-head-text);
   font-size: 9px;
@@ -415,8 +430,8 @@
 .yearSummaryTable .summaryStaffCell {
   position: sticky;
   z-index: 2;
-  left: 94px;
-  width: 150px;
+  left: 5%;
+  width: 6.5%;
   background: var(--fc-row-bg);
   text-align: left;
 }
@@ -429,6 +444,19 @@
   white-space: nowrap;
 }
 
+.yearSummaryTable .summaryValue {
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 28%, var(--fc-row-bg));
+  color: var(--fc-admin-heading);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.yearSummaryTable .summaryZero {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .summaryStaffCell span {
   margin-top: 2px;
   color: #666;
@@ -439,17 +467,19 @@
 .yearSummaryTable .attendedCell {
   background: #f0f9f3;
   color: #067647;
+  font-size: 11px;
   font-weight: 900;
 }
 
 .yearSummaryTable .lateTotalCell {
   background: #fff0ee;
   color: #b42318;
+  font-size: 11px;
   font-weight: 900;
 }
 
 .confirmationCell {
-  width: 120px;
+  width: auto;
 }
 
 .confirmButton,
