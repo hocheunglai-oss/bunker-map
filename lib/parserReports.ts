@@ -56,12 +56,46 @@ export type ParserReportWithState = ParserReportRecord & {
   currentParserOutput: string
   resolved: boolean
   reviewed: boolean
+  pendingAiReview: boolean
+  readyForUserReview: boolean
 }
 
 export function asParserReportMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+export function pendingParserReportMetadata(value: unknown) {
+  return {
+    ...asParserReportMetadata(value),
+    pendingReview: true,
+    pendingUserReview: false,
+    aiReviewState: "pending",
+    aiReviewedAt: null,
+    userReviewedAt: null,
+  }
+}
+
+export function readyParserReportMetadata(value: unknown, reviewedAt: string) {
+  return {
+    ...asParserReportMetadata(value),
+    pendingReview: false,
+    pendingUserReview: true,
+    aiReviewState: "ready",
+    aiReviewedAt: reviewedAt,
+    userReviewedAt: null,
+  }
+}
+
+export function acknowledgedParserReportMetadata(value: unknown, reviewedAt: string) {
+  return {
+    ...asParserReportMetadata(value),
+    pendingReview: false,
+    pendingUserReview: false,
+    aiReviewState: "acknowledged",
+    userReviewedAt: reviewedAt,
+  }
 }
 
 export function parserReportFromRow(row: ParserReportRow): ParserReportRecord {
@@ -138,21 +172,27 @@ export function parserReportWithState(report: ParserReportRecord): ParserReportW
   }
 
   const pendingReview = report.metadata.pendingReview === true
+  const readyForUserReview = report.metadata.pendingUserReview === true
   const resolved = !pendingReview && Boolean(currentParserOutput.trim()) &&
     normalizeParserReportOutput(currentParserOutput) === normalizeParserReportOutput(report.correctedOutput)
+  const pendingAiReview = report.status === "new" && !resolved && !readyForUserReview
 
   return {
     ...report,
     currentParserOutput,
     resolved,
     reviewed: report.status === "reviewed" && !resolved,
+    pendingAiReview,
+    readyForUserReview,
   }
 }
 
 export function parserReportCounts(reports: ParserReportWithState[]) {
   return {
     total: reports.length,
-    unresolved: reports.filter((report) => report.status === "new" && !report.resolved).length,
+    unresolved: reports.filter((report) => report.pendingAiReview).length,
+    pendingAiReview: reports.filter((report) => report.pendingAiReview).length,
+    readyForUserReview: reports.filter((report) => report.readyForUserReview).length,
     resolved: reports.filter((report) => report.resolved).length,
     reviewed: reports.filter((report) => report.reviewed).length,
   }

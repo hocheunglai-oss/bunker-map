@@ -19,10 +19,12 @@ type ParserReport = {
 }
 
 type AiSource = { title?: string; url: string }
+type ReviewQueue = "pending-ai" | "ready-user"
 
 type ReportDraft = ParserReport & {
   aiOutput: string
   aiSources: AiSource[]
+  queue: ReviewQueue
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -78,7 +80,8 @@ export function ParserReportReviewPanel({
   source: ParserReportClientSource
   canEdit: boolean
 }) {
-  const [reports, setReports] = useState<ParserReport[]>([])
+  const [pendingAiReports, setPendingAiReports] = useState<ParserReport[]>([])
+  const [readyForUserReports, setReadyForUserReports] = useState<ParserReport[]>([])
   const [draft, setDraft] = useState<ReportDraft | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -97,11 +100,13 @@ export function ParserReportReviewPanel({
         { cache: "no-store" },
       )
       const data = (await response.json().catch(() => ({}))) as {
-        reports?: ParserReport[]
+        pendingAiReports?: ParserReport[]
+        readyForUserReports?: ParserReport[]
         message?: string
       }
       if (!response.ok) throw new Error(data.message || "Failed to load parser reports.")
-      setReports(data.reports || [])
+      setPendingAiReports(data.pendingAiReports || [])
+      setReadyForUserReports(data.readyForUserReports || [])
     } catch (error) {
       setLoadFailed(true)
       setMessageType("error")
@@ -120,7 +125,7 @@ export function ParserReportReviewPanel({
     return () => window.clearTimeout(initialLoad)
   }, [loadReports])
 
-  function openReport(report: ParserReport) {
+  function openReport(report: ParserReport, queue: ReviewQueue) {
     const aiOutput = typeof report.metadata.aiFixOutput === "string"
       ? report.metadata.aiFixOutput.trim()
       : ""
@@ -129,6 +134,7 @@ export function ParserReportReviewPanel({
       correctedOutput: report.correctedOutput.trim() || report.parserOutput,
       aiOutput,
       aiSources: storedAiSources(report.metadata),
+      queue,
     })
     setMessage("")
   }
@@ -184,7 +190,7 @@ export function ParserReportReviewPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "review",
+          action: draft.queue === "ready-user" ? "acknowledge" : "review",
           source,
           id: draft.id,
           correctedOutput: draft.correctedOutput,
@@ -193,10 +199,27 @@ export function ParserReportReviewPanel({
       }, 20_000)
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to save parser review.")
-      setReports((current) => current.filter((report) => report.id !== draft.id))
+      const completedQueue = draft.queue
+      if (completedQueue === "ready-user") {
+        setReadyForUserReports((current) => current.filter((report) => report.id !== draft.id))
+      } else {
+        setPendingAiReports((current) => current.filter((report) => report.id !== draft.id))
+        setReadyForUserReports((current) => [{
+          ...draft,
+          correctedOutput: draft.correctedOutput.trim(),
+          metadata: {
+            ...draft.metadata,
+            pendingReview: false,
+            pendingUserReview: true,
+            aiReviewState: "ready",
+          },
+        }, ...current.filter((report) => report.id !== draft.id)])
+      }
       setDraft(null)
       setMessageType("success")
-      setMessage("Review saved.")
+      setMessage(completedQueue === "ready-user"
+        ? "Review confirmed."
+        : "AI review completed and is ready for your confirmation.")
       notifyParserReportCountChanged(source)
     } catch (error) {
       setMessageType("error")
@@ -220,18 +243,44 @@ export function ParserReportReviewPanel({
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
-        <div className="spc-parser-report-list">
+        <div className="spc-parser-report-queues">
           {loading ? <p className="spc-empty">Loading reports...</p> : null}
-          {!loading && !loadFailed ? reports.map((report) => (
-            <button key={report.id} type="button" onClick={() => openReport(report)}>
-              {vesselName(report)}
-            </button>
-          )) : null}
-          {!loading && !loadFailed && reports.length === 0 ? (
-            <p className="spc-empty">No parser reports awaiting review.</p>
+          {!loading && !loadFailed ? (
+            <>
+              <section className="spc-parser-report-queue" aria-labelledby="ready-parser-reports">
+                <div className="spc-parser-report-queue-header">
+                  <h3 id="ready-parser-reports">Ready For Your Review</h3>
+                  <span>{readyForUserReports.length}</span>
+                </div>
+                <div className="spc-parser-report-list">
+                  {readyForUserReports.map((report) => (
+                    <button key={report.id} type="button" onClick={() => openReport(report, "ready-user")}>
+                      {vesselName(report)}
+                    </button>
+                  ))}
+                  {readyForUserReports.length === 0 ? <p className="spc-empty">No completed AI reviews.</p> : null}
+                </div>
+              </section>
+              <section className="spc-parser-report-queue" aria-labelledby="pending-parser-reports">
+                <div className="spc-parser-report-queue-header">
+                  <h3 id="pending-parser-reports">Pending AI Review</h3>
+                  <span>{pendingAiReports.length}</span>
+                </div>
+                <div className="spc-parser-report-list">
+                  {pendingAiReports.map((report) => (
+                    <button key={report.id} type="button" onClick={() => openReport(report, "pending-ai")}>
+                      {vesselName(report)}
+                    </button>
+                  ))}
+                  {pendingAiReports.length === 0 ? <p className="spc-empty">No reports pending AI review.</p> : null}
+                </div>
+              </section>
+            </>
           ) : null}
           {!loading && loadFailed ? (
-            <button type="button" onClick={() => void loadReports()}>Retry loading reports</button>
+            <div className="spc-parser-report-list">
+              <button type="button" onClick={() => void loadReports()}>Retry loading reports</button>
+            </div>
           ) : null}
         </div>
       </section>
@@ -240,7 +289,9 @@ export function ParserReportReviewPanel({
         <div className="spc-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="parser-review-title">
           <div className="spc-dialog spc-parser-report-dialog">
             <div className="spc-dialog-header">
-              <h2 id="parser-review-title">Report Parser Output</h2>
+              <h2 id="parser-review-title">
+                {draft.queue === "ready-user" ? "Review Completed Parser Fix" : "Complete AI Parser Review"}
+              </h2>
               <button type="button" onClick={() => setDraft(null)} disabled={saving} aria-label="Close report dialog">×</button>
             </div>
             <div className="spc-parser-report-body">
@@ -258,7 +309,13 @@ export function ParserReportReviewPanel({
             <div className="spc-dialog-actions">
               <button type="button" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
               <button type="button" className="is-primary" onClick={() => void runAiReview()} disabled={aiLoading || saving}>{aiLoading ? "Reviewing..." : "AI Fix"}</button>
-              <button type="button" className="is-primary" onClick={() => void saveReview()} disabled={!canEdit || !draft.correctedOutput.trim() || saving}>{saving ? "Saving..." : "Submit Report"}</button>
+              <button type="button" className="is-primary" onClick={() => void saveReview()} disabled={!canEdit || !draft.correctedOutput.trim() || saving}>
+                {saving
+                  ? "Saving..."
+                  : draft.queue === "ready-user"
+                    ? "Confirm Reviewed"
+                    : "Mark Ready For Review"}
+              </button>
             </div>
           </div>
         </div>

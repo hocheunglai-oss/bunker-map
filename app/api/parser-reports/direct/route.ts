@@ -44,15 +44,19 @@ export async function GET(request: Request) {
     const sourceReports = source === "all"
       ? reportsWithState
       : reportsWithState.filter((report) => report.source === source)
+    const pendingAiReports = sourceReports.filter((report) => report.pendingAiReview)
+    const readyForUserReports = sourceReports.filter((report) => report.readyForUserReview)
     const reports = includeResolved
       ? sourceReports
-      : sourceReports.filter((report) => report.status === "new" && !report.resolved)
+      : pendingAiReports
     const enquiryworksheet = reportsWithState.filter((report) => report.source === "enquiryworksheet")
     const spc = reportsWithState.filter((report) => report.source === "spc")
 
     return NextResponse.json({
       source,
       reports,
+      pendingAiReports,
+      readyForUserReports,
       counts: {
         all: parserReportCounts(reportsWithState),
         enquiryworksheet: parserReportCounts(enquiryworksheet),

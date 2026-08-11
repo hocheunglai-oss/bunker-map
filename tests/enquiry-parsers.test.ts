@@ -114,6 +114,18 @@ test("preserves preferred port aliases and labelled alternatives", () => {
   )
 })
 
+test("normalises Port Louis anchorage to the preferred port name", () => {
+  const raw = [
+    "hi Stanley, price for me",
+    "HTK Symphony (9668271) / Port Louis anchorage, Mauritius 14 - 16 Aug / LSFO 150 - 200mts",
+  ].join("\n")
+
+  assert.equal(
+    worksheetOutput(raw),
+    "htk symphony / 9668271 / port louis 14 - 16 aug / vlsfo 150-200mts",
+  )
+})
+
 test("does not turn voyage numbers or address floors into products and dates", () => {
   const raw = [
     "船名 MV. TOYO HOPE（IMO：9330147)",

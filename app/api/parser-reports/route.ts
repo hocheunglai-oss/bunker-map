@@ -7,10 +7,12 @@ import {
 } from "@/lib/adminAudit"
 import { parserReportAccessPage } from "@/lib/parserReportAccess"
 import {
-  asParserReportMetadata,
+  acknowledgedParserReportMetadata,
+  pendingParserReportMetadata,
   parserReportCounts,
   parserReportFromRow,
   parserReportWithState,
+  readyParserReportMetadata,
   type ParserReportRow,
   type ParserReportSource,
 } from "@/lib/parserReports"
@@ -130,7 +132,6 @@ export async function GET(request: Request) {
       .from("parser_reports")
       .select("*")
       .eq("source", source)
-      .eq("status", "new")
       .order("last_reported_at", { ascending: false })
       .limit(MAX_REPORTS)
 
@@ -139,7 +140,8 @@ export async function GET(request: Request) {
     const reportsWithState = ((data || []) as ParserReportRow[])
       .map(parserReportFromRow)
       .map(parserReportWithState)
-    const unresolvedReports = reportsWithState.filter((report) => report.status === "new" && !report.resolved)
+    const pendingAiReports = reportsWithState.filter((report) => report.pendingAiReview)
+    const readyForUserReports = reportsWithState.filter((report) => report.readyForUserReview)
     const counts = parserReportCounts(reportsWithState)
 
     return timedJson(
@@ -147,8 +149,14 @@ export async function GET(request: Request) {
       startedAt,
       {
         source,
-        ...(summaryOnly ? {} : { reports: unresolvedReports }),
+        ...(summaryOnly ? {} : {
+          reports: [...readyForUserReports, ...pendingAiReports],
+          pendingAiReports,
+          readyForUserReports,
+        }),
         unresolvedReports: counts.unresolved,
+        pendingAiReview: counts.pendingAiReview,
+        readyForUserReview: counts.readyForUserReview,
         totalReports: counts.total,
         resolvedReports: counts.resolved,
         reviewedReports: counts.reviewed,
@@ -160,7 +168,8 @@ export async function GET(request: Request) {
         summaryOnly,
         reviewQueue,
         candidates: reportsWithState.length,
-        unresolved: counts.unresolved,
+        pendingAiReview: counts.pendingAiReview,
+        readyForUserReview: counts.readyForUserReview,
       },
     )
   } catch (error) {
@@ -183,7 +192,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
 
-    if (payload.action === "review") {
+    if (payload.action === "review" || payload.action === "acknowledge") {
       const id = asString(payload.id, 100)
       const correctedOutput = asString(payload.correctedOutput)
       if (!id || !correctedOutput) {
@@ -198,14 +207,18 @@ export async function POST(request: Request) {
         .maybeSingle()
       if (existingError) throw existingError
       if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
+      const now = new Date().toISOString()
+      const acknowledging = payload.action === "acknowledge"
       const { data, error } = await supabase
         .from("parser_reports")
         .update({
           corrected_output: correctedOutput,
           note: asString(payload.note, MAX_NOTE_LENGTH),
-          metadata: { ...asParserReportMetadata(existing.metadata), pendingReview: false },
+          metadata: acknowledging
+            ? acknowledgedParserReportMetadata(existing.metadata, now)
+            : readyParserReportMetadata(existing.metadata, now),
           status: "reviewed",
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
         .eq("id", id)
         .eq("source", source)
@@ -228,6 +241,7 @@ export async function POST(request: Request) {
     const { username, displayName, supabase } = await getSessionAndClient(source, request, "edit")
     const now = new Date().toISOString()
     const fingerprint = fingerprintFor({ source, rawText, parserOutput, correctedOutput })
+    const metadata = pendingParserReportMetadata(payload.metadata)
     const { data, error } = await supabase.rpc("upsert_parser_report", {
       p_fingerprint: fingerprint,
       p_source: source,
@@ -238,7 +252,7 @@ export async function POST(request: Request) {
       p_corrected_output: correctedOutput,
       p_note: asString(payload.note, MAX_NOTE_LENGTH),
       p_page_url: asString(payload.pageUrl, 1_000),
-      p_metadata: asParserReportMetadata(payload.metadata),
+      p_metadata: metadata,
       p_created_by_username: username,
       p_created_by_display_name: displayName,
       p_app_commit: appCommit(),

@@ -10,6 +10,8 @@ import {
 
 type ParserReportCountResponse = {
   unresolvedReports?: number
+  pendingAiReview?: number
+  readyForUserReview?: number
 }
 
 export function ParserReportSidebarBadge({
@@ -18,7 +20,10 @@ export function ParserReportSidebarBadge({
   source: ParserReportClientSource
 }) {
   const pathname = usePathname()
-  const [count, setCount] = useState<number | null>(null)
+  const [counts, setCounts] = useState<{
+    pendingAi: number
+    readyForUser: number
+  } | null>(null)
 
   const loadCount = useCallback(async () => {
     try {
@@ -28,9 +33,12 @@ export function ParserReportSidebarBadge({
       )
       const payload = (await response.json().catch(() => ({}))) as ParserReportCountResponse
       if (!response.ok) throw new Error("Unable to load parser reports.")
-      setCount(Math.max(0, Number(payload.unresolvedReports) || 0))
+      setCounts({
+        pendingAi: Math.max(0, Number(payload.pendingAiReview ?? payload.unresolvedReports) || 0),
+        readyForUser: Math.max(0, Number(payload.readyForUserReview) || 0),
+      })
     } catch {
-      setCount(null)
+      setCounts(null)
     }
   }, [source])
 
@@ -56,14 +64,24 @@ export function ParserReportSidebarBadge({
     }
   }, [loadCount, pathname, source])
 
-  if (count === null) return null
+  if (counts === null) return null
 
   return (
-    <span
-      className={`fc-admin-sidebar-count${count > 0 ? " has-items" : ""}`}
-      aria-label={`${count} parser ${count === 1 ? "report" : "reports"} awaiting review`}
-    >
-      {count > 99 ? "99+" : count}
+    <span className="fc-admin-sidebar-counts">
+      <span
+        className={`fc-admin-sidebar-count is-ready${counts.readyForUser > 0 ? " has-items" : ""}`}
+        aria-label={`${counts.readyForUser} parser ${counts.readyForUser === 1 ? "report" : "reports"} ready for your review`}
+        title="Ready for your review"
+      >
+        YOU {counts.readyForUser > 99 ? "99+" : counts.readyForUser}
+      </span>
+      <span
+        className={`fc-admin-sidebar-count is-pending${counts.pendingAi > 0 ? " has-items" : ""}`}
+        aria-label={`${counts.pendingAi} parser ${counts.pendingAi === 1 ? "report" : "reports"} pending AI review`}
+        title="Pending AI review"
+      >
+        AI {counts.pendingAi > 99 ? "99+" : counts.pendingAi}
+      </span>
     </span>
   )
 }

@@ -2,7 +2,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { ADMIN_PAGE_DEFINITIONS, getAdminPageByPath } from "../lib/adminPages"
 import { parserReportAccessPage } from "../lib/parserReportAccess"
-import { parserReportWithState, type ParserReportRecord } from "../lib/parserReports"
+import {
+  acknowledgedParserReportMetadata,
+  pendingParserReportMetadata,
+  parserReportCounts,
+  parserReportWithState,
+  readyParserReportMetadata,
+  type ParserReportRecord,
+} from "../lib/parserReports"
 import { SPC_PAGE_DEFINITIONS, getDefaultSpcPermissionsForRole } from "../lib/spcPages"
 
 const pendingReport: ParserReportRecord = {
@@ -28,7 +35,46 @@ const pendingReport: ParserReportRecord = {
 }
 
 test("a queued parser report remains unresolved until manual review", () => {
-  assert.equal(parserReportWithState(pendingReport).resolved, false)
+  const report = parserReportWithState(pendingReport)
+  assert.equal(report.resolved, false)
+  assert.equal(report.pendingAiReview, true)
+  assert.equal(report.readyForUserReview, false)
+})
+
+test("an AI-completed report remains visible until the user confirms it", () => {
+  const readyReport = parserReportWithState({
+    ...pendingReport,
+    metadata: { pendingReview: false, pendingUserReview: true },
+    status: "reviewed",
+  })
+  const counts = parserReportCounts([readyReport])
+
+  assert.equal(readyReport.pendingAiReview, false)
+  assert.equal(readyReport.readyForUserReview, true)
+  assert.equal(counts.pendingAiReview, 0)
+  assert.equal(counts.readyForUserReview, 1)
+})
+
+test("report workflow metadata moves through pending, ready, and acknowledged states", () => {
+  const pending = pendingParserReportMetadata({ draft: { vesselName: "TEST" } })
+  const ready = readyParserReportMetadata(pending, "2026-08-11T01:00:00.000Z")
+  const acknowledged = acknowledgedParserReportMetadata(ready, "2026-08-11T02:00:00.000Z")
+
+  assert.deepEqual(pending, {
+    draft: { vesselName: "TEST" },
+    pendingReview: true,
+    pendingUserReview: false,
+    aiReviewState: "pending",
+    aiReviewedAt: null,
+    userReviewedAt: null,
+  })
+  assert.equal(ready.pendingReview, false)
+  assert.equal(ready.pendingUserReview, true)
+  assert.equal(ready.aiReviewState, "ready")
+  assert.equal(ready.aiReviewedAt, "2026-08-11T01:00:00.000Z")
+  assert.equal(acknowledged.pendingUserReview, false)
+  assert.equal(acknowledged.aiReviewState, "acknowledged")
+  assert.equal(acknowledged.userReviewedAt, "2026-08-11T02:00:00.000Z")
 })
 
 test("Parser Report is a management page restricted to admins by default", () => {
