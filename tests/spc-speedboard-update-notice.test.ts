@@ -54,3 +54,10 @@ test("builds beginner update instructions for the current SPC Speed Board versio
   assert.match(email.html, /Refresh .*WhatsApp Web/)
   assert.match(email.html, /Please report any issues you notice while updating or using the Speed Board\./)
 })
+
+test("the SPC download page explains how to update the loaded unpacked folder", () => {
+  const page = readFileSync(join(process.cwd(), "app/spc/chrome/page.tsx"), "utf8")
+
+  assert.match(page, /replace the files inside the same fcuno-spc-whatsapp-board folder that Chrome already uses/)
+  assert.match(page, /confirm the new version is shown, then refresh WhatsApp Web/)
+})

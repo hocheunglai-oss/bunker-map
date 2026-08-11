@@ -48,8 +48,8 @@ const STEPS: readonly Step[] = [
   {
     title: "Update",
     details: [
-      "When there is an update, go to chrome://extensions.",
-      "Click reload and then refresh WhatsApp Web.",
+      "Download and extract the new ZIP, then replace the files inside the same fcuno-spc-whatsapp-board folder that Chrome already uses.",
+      "Go to chrome://extensions, click Reload on FCUNO SPC WhatsApp Board, confirm the new version is shown, then refresh WhatsApp Web.",
     ],
   },
 ]
