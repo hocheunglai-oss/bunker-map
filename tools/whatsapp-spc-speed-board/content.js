@@ -10,7 +10,7 @@
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
-  const SEND_LOCK_TTL_MS = 30000
+  const SEND_LOCK_TTL_MS = 2500
   const ENQUIRY_OPEN_LOCK_ATTRIBUTE = "data-fcuno-wa-spc-enquiry-open-lock"
   const ENQUIRY_OPEN_LOCK_TTL_MS = 12000
   const ENQUIRY_OPEN_RELEASE_DELAY_MS = 700

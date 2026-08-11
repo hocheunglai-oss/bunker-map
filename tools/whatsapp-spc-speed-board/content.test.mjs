@@ -267,7 +267,15 @@ const window = {
   },
 }
 
+let fakeNow = 1_000_000
+class FakeDate extends Date {
+  static now() {
+    return fakeNow
+  }
+}
+
 const context = vm.createContext({
+  Date: FakeDate,
   Element: FakeElement,
   InputEvent: class InputEvent {},
   KeyboardEvent: class KeyboardEvent {},
@@ -535,6 +543,10 @@ assert.equal(api.findSendButton(), iconSendButton, "send button should be found 
 
 assert.equal(api.acquireSendLock("same-contact", "same message"), true)
 assert.equal(api.acquireSendLock("same-contact", "same message"), false)
+fakeNow += 2499
+assert.equal(api.acquireSendLock("same-contact", "same message"), false)
+fakeNow += 2
+assert.equal(api.acquireSendLock("same-contact", "same message"), true, "a deliberate retry should be allowed after 2.5 seconds")
 
 api.state.templateEnabled = false
 api.state.enquiries = [

@@ -756,6 +756,19 @@ async function main() {
       assert.equal(renamedResult.savedName, "OTTO")
       assert.equal(renamedResult.savedChatName, "Otto Tone")
 
+      await page.waitForTimeout(2600)
+      await page.evaluate((message) => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const contact = api.state.contacts.find((item) => item.id === "renamed-contact")
+        api.sendTextToContact(contact, message)
+      }, enquiry)
+      await page.waitForFunction(() => window.sentMessages.length === 2, { timeout: 5000 })
+      assert.equal(
+        await page.evaluate(() => window.sentMessages[1]),
+        enquiry,
+        "the same enquiry/contact should be sendable again after the short duplicate-event guard",
+      )
+
       const firstRunPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await firstRunPage.goto(`${url}?firstRun=1`, { waitUntil: "domcontentloaded" })
       await firstRunPage.waitForFunction(() => Boolean(window.__FCUNO_WA_SPC_TEST_API__?.state.feedStartedAt))

@@ -19,6 +19,7 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Shows the supplied green paper-plane button on each enquiry. It enters the sender's full verified WhatsApp number once in WhatsApp's normal left search, opens the single matching result, rejects repeat clicks while routing, never refreshes the page, prefills `Re: <Vessel Name>, ` exactly once, and leaves the composer focused without sending.
 - Uses checkbox-free enquiry rows and sends all currently blue-selected enquiries into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
+- Suppresses only immediate duplicate drag/send events; a deliberate retry is available after 2.5 seconds instead of being silently blocked for 30 seconds.
 - Lets each trader locally remove one enquiry or clear the visible list without affecting other traders.
 - The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and reliably rearranges saved chats when dragged.
 - All authenticated traders share enquiries created after the controlled feed start on 23 July 2026, while Remove and Clear All remain local to each Chrome profile.
