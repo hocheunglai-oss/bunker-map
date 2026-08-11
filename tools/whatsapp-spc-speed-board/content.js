@@ -492,7 +492,7 @@
     const usePhone = contact?.kind !== "group" && Boolean(phone)
     const searchName = contactSearchText(contact)
     const candidates = usePhone
-      ? [searchName, `+${phone}`]
+      ? [`+${phone}`, searchName]
       : [searchName || contactDisplayName(contact)]
     return Array.from(new Set(candidates.map(cleanText).filter(Boolean)))
   }
@@ -913,8 +913,8 @@
         window.setTimeout(() => clearEditableText(searchBox), 80)
         return true
       }
-      const isFastNameAttempt = index === 0 && searchCandidates.length > 1
-      const delays = isFastNameAttempt ? [60, 140, 220] : [100, 220, 420]
+      const isPhoneAttempt = Boolean(phoneDigits(contact?.phone)) && phoneDigits(searchText) === phoneDigits(contact.phone)
+      const delays = isPhoneAttempt ? [100, 220, 420] : [60, 140, 220]
       for (const delay of delays) {
         await new Promise((resolve) => window.setTimeout(resolve, delay))
         const row = findVisibleChatRow(contact)

@@ -23,7 +23,7 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and reliably rearranges saved chats when dragged.
 - All authenticated traders share enquiries created after the controlled feed start on 23 July 2026, while Remove and Clear All remain local to each Chrome profile.
 - `Rename` changes only the local display label. The original WhatsApp contact or group name remains hidden as the routing identity, so renaming cannot redirect the shortcut.
-- Individual saved chats capture their WhatsApp number from Contact Info without displaying it on the board. Opening a saved chat tries the locally stored WhatsApp chat name first for speed, then falls back to the normalized phone number for reliable routing. The FCUNO phonebook remains a legacy fallback; groups continue to use their original WhatsApp group name.
+- Individual saved chats capture their WhatsApp number from Contact Info without displaying it on the board. Opening a saved contact searches by the normalized phone number first, then uses the original WhatsApp chat name only as a fallback. The FCUNO phonebook remains a legacy fallback; groups continue to use their original WhatsApp group name.
 - Enquiry-sender buttons use the verified WhatsApp number stored on the SPC user account, so they work across traders with different private phonebooks. A unique FCUNO phonebook email match remains a fallback for older accounts without a stored number.
 - After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
 
