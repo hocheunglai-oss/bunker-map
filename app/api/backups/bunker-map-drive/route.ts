@@ -33,6 +33,8 @@ const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
+const SUPABASE_TRUTH_RPC_ATTEMPTS = 3
+const SUPABASE_TRUTH_RPC_RETRY_DELAY_MS = 1_000
 const MAX_COMPRESSED_STAGING_BYTES = 400 * 1024 * 1024
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
@@ -598,9 +600,26 @@ async function callTruthRpc(
     | "get_outlook_exchange_truth_checkpoint"
     | "verify_outlook_template_recipient_truth"
 ) {
-  const { data, error } = await supabase.rpc(functionName)
-  if (error) throw error
-  return asRecord(data, functionName)
+  let lastError: unknown
+  for (let attempt = 1; attempt <= SUPABASE_TRUTH_RPC_ATTEMPTS; attempt += 1) {
+    const { data, error } = await supabase.rpc(functionName)
+    if (!error) return asRecord(data, functionName)
+
+    lastError = error
+    const message = getErrorMessage(error).toLowerCase()
+    const retryable =
+      /\b(408|425|429|500|502|503|504|520|521|522|523|524)\b/.test(message) ||
+      message.includes("fetch failed") ||
+      message.includes("network") ||
+      message.includes("web server is down")
+    if (!retryable || attempt === SUPABASE_TRUTH_RPC_ATTEMPTS) throw error
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, SUPABASE_TRUTH_RPC_RETRY_DELAY_MS * attempt)
+    )
+  }
+
+  throw lastError
 }
 
 async function getBackupExportEpoch(

@@ -14,6 +14,10 @@ const noticeRouteSource = readFileSync(
   new URL("../app/api/admin/system-health/notify/route.ts", import.meta.url),
   "utf8"
 )
+const backupRouteSource = readFileSync(
+  new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url),
+  "utf8"
+)
 
 function numericConstant(source: string, name: string) {
   const match = source.match(new RegExp(`const ${name} = (\\d[\\d_]*)`))
@@ -46,5 +50,20 @@ test("Attendance Sync remains visible in System Health without sending email not
   assert.match(
     noticeRouteSource,
     /check\.status !== "ok" && !isNonAlertingCheck\(check\)/,
+  )
+})
+
+test("backup truth rechecks retry transient Supabase edge failures", () => {
+  const attempts = numericConstant(
+    backupRouteSource,
+    "SUPABASE_TRUTH_RPC_ATTEMPTS",
+  )
+
+  assert.ok(attempts >= 3)
+  assert.match(backupRouteSource, /\b521\b/)
+  assert.match(backupRouteSource, /message\.includes\("web server is down"\)/)
+  assert.match(
+    backupRouteSource,
+    /setTimeout\(resolve, SUPABASE_TRUTH_RPC_RETRY_DELAY_MS \* attempt\)/,
   )
 })
