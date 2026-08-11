@@ -594,4 +594,42 @@ assert.deepEqual(
 )
 assert.equal(api.enquirySenderContact({ createdByUsername: "missing@cosulich.com.sg" }), null)
 
+api.state.contacts = [
+  {
+    id: "saved-otto",
+    name: "Otto Lai (黎善恩 Anna)",
+    chatName: "Otto Lai (黎善恩 Anna)",
+    phone: "",
+    kind: "contact",
+    list: "buyer",
+    order: 1000,
+  },
+]
+api.state.senderContacts = api.sanitizeSenderContacts({
+  "otto@cosulich.com.hk": {
+    username: "otto@cosulich.com.hk",
+    displayName: "OTTO LAI",
+    phone: "+852 6688 5575",
+  },
+})
+assert.equal(api.repairSavedContactPhonesFromSenderContacts(), true)
+assert.equal(api.state.contacts[0].phone, "85266885575")
+assert.equal(api.state.contacts[0].directUrl, "")
+
+api.state.contacts[0].phone = ""
+api.state.senderContacts = api.sanitizeSenderContacts({
+  "otto@cosulich.com.hk": {
+    username: "otto@cosulich.com.hk",
+    displayName: "OTTO LAI",
+    phone: "+852 6688 5575",
+  },
+  "otto.alt@cosulich.com.hk": {
+    username: "otto.alt@cosulich.com.hk",
+    displayName: "OTTO LAI",
+    phone: "+852 6123 4567",
+  },
+})
+assert.equal(api.repairSavedContactPhonesFromSenderContacts(), false)
+assert.equal(api.state.contacts[0].phone, "")
+
 console.log("SPC WhatsApp content tests passed")

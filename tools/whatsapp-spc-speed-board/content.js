@@ -501,6 +501,16 @@
     return cleanText(contact?.name) || contactChatName(contact) || cleanText(contact?.phone) || "Unnamed chat"
   }
 
+  function canonicalPersonName(value) {
+    return cleanText(value)
+      .normalize("NFKC")
+      .replace(/\([^)]*\)|（[^）]*）/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+  }
+
   function contactSearchText(contact) {
     return contactChatName(contact) || cleanText(contact?.phone) || cleanText(contact?.name)
   }
@@ -666,7 +676,7 @@
   function visibleContactInfoPhone(expectedName) {
     const panels = Array.from(document.querySelectorAll("aside, section, div"))
       .filter(isVisible)
-      .filter((element) => /^\s*(?:contact info|聯絡人資料|联系人信息)\b/i.test(element.innerText || element.textContent || ""))
+      .filter((element) => /^\s*(?:contact info\b|聯絡人資料|联系人信息)/i.test(element.innerText || element.textContent || ""))
     for (const panel of panels) {
       const phone = contactInfoPhoneFromText(panel.innerText || panel.textContent, expectedName)
       if (phone) return phone
@@ -675,7 +685,7 @@
   }
 
   function closeContactInfo() {
-    const close = findVisibleControl(document.body, /^(?:close|關閉|关闭)$/i)
+    const close = findVisibleControl(document.body, /^(?:close|關閉|关闭|閂)$/i)
     return activateControl(close)
   }
 
@@ -865,15 +875,29 @@
   function visibleChatRows() {
     const pane = getSidePane()
     if (!pane) return []
-    const seen = new Set()
-    return Array.from(pane.querySelectorAll("[data-testid='cell-frame-container'], [role='listitem'], [role='row']"))
+    const roleRows = Array.from(pane.querySelectorAll("[role='row']"))
       .filter(isVisible)
       .filter((row) => !row.closest("[role='search']") && !row.closest(`#${BOARD_ID}`))
-      .filter((row) => {
-        if (seen.has(row)) return false
-        seen.add(row)
-        return true
-      })
+    if (roleRows.length) return roleRows
+    return Array.from(pane.querySelectorAll("[data-testid='cell-frame-container'], [role='listitem']"))
+      .filter(isVisible)
+      .filter((row) => !row.closest("[role='search']") && !row.closest(`#${BOARD_ID}`))
+  }
+
+  function primarySearchResultRows() {
+    const rows = visibleChatRows()
+    const directRows = []
+    let insideFirstSection = false
+    for (const row of rows) {
+      const isHeading = Boolean(row.querySelector("h1, h2, h3, [role='heading']")) && !row.querySelector("[role='gridcell']")
+      if (isHeading) {
+        if (insideFirstSection && directRows.length) break
+        insideFirstSection = true
+        continue
+      }
+      if (insideFirstSection && row.querySelector("[role='gridcell']")) directRows.push(row)
+    }
+    return directRows.length ? directRows : rows.filter((row) => !row.querySelector("h1, h2, h3, [role='heading']"))
   }
 
   function chatRowMatchesCurrentChat(row) {
@@ -897,11 +921,14 @@
 
   function activateChatRow(row) {
     clearVerifiedPhoneRoute()
-    row.scrollIntoView({ block: "center", inline: "nearest" })
-    row.focus?.()
+    const target = row.querySelector?.("[data-testid='cell-frame-container']") ||
+      row.querySelector?.("[role='gridcell'][tabindex='0']") ||
+      row
+    target.scrollIntoView({ block: "center", inline: "nearest" })
+    target.focus?.()
     ;["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
       const EventCtor = type.startsWith("pointer") && typeof PointerEvent !== "undefined" ? PointerEvent : MouseEvent
-      row.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, view: window, button: 0 }))
+      target.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, view: window, button: 0 }))
     })
   }
 
@@ -972,7 +999,7 @@
       const searchText = searchCandidates[index]
       setEditableText(searchBox, searchText)
       const isPhoneAttempt = contact?.kind !== "group" && Boolean(phoneDigits(contact?.phone))
-      const immediateRows = visibleChatRows()
+      const immediateRows = isPhoneAttempt ? primarySearchResultRows() : visibleChatRows()
       const immediateRow = findVisibleChatRow(contact) || (isPhoneAttempt && immediateRows.length === 1 ? immediateRows[0] : null)
       if (immediateRow) {
         if (await activateSearchResult(immediateRow, contact, searchBox)) return true
@@ -980,7 +1007,7 @@
       const delays = [60, 140, 240]
       for (const delay of delays) {
         await new Promise((resolve) => window.setTimeout(resolve, delay))
-        const rows = visibleChatRows()
+        const rows = isPhoneAttempt ? primarySearchResultRows() : visibleChatRows()
         const row = findVisibleChatRow(contact) || (isPhoneAttempt && rows.length === 1 ? rows[0] : null)
         if (row) {
           if (await activateSearchResult(row, contact, searchBox)) return true
@@ -1096,9 +1123,11 @@
       const nextSenderContacts = sanitizeSenderContacts(response.senderContacts)
       const nextFingerprint = enquiriesFingerprint(nextEnquiries)
       const contactsChanged = JSON.stringify(nextSenderContacts) !== JSON.stringify(state.senderContacts)
-      const changed = nextFingerprint !== lastEnquiryFingerprint || contactsChanged
       state.enquiries = nextEnquiries
       state.senderContacts = nextSenderContacts
+      const repairedContacts = repairSavedContactPhonesFromSenderContacts()
+      const changed = nextFingerprint !== lastEnquiryFingerprint || contactsChanged || repairedContacts
+      if (repairedContacts) saveState()
       lastEnquiryFingerprint = nextFingerprint
       const initializedFeed = initializeFeedBaseline()
       pruneEnquiryUiState()
@@ -1233,6 +1262,32 @@
         phonebookContactId: cleanText(contact.phonebookContactId),
       }]]
     }))
+  }
+
+  function repairSavedContactPhonesFromSenderContacts() {
+    const phonesByName = new Map()
+    Object.values(state.senderContacts).forEach((sender) => {
+      const name = canonicalPersonName(sender?.displayName)
+      const phone = phoneDigits(sender?.phone)
+      if (!name || phone.length < 8 || phone.length > 15) return
+      const phones = phonesByName.get(name) || new Set()
+      phones.add(phone)
+      phonesByName.set(name, phones)
+    })
+
+    let changed = false
+    state.contacts.forEach((contact) => {
+      if (contact.kind === "group" || phoneDigits(contact.phone)) return
+      const name = canonicalPersonName(contactChatName(contact) || contact.name)
+      const phones = phonesByName.get(name)
+      if (!phones || phones.size !== 1) return
+      contact.phone = Array.from(phones)[0]
+      contact.kind = "contact"
+      contact.directUrl = ""
+      contact.updatedAt = new Date().toISOString()
+      changed = true
+    })
+    return changed
   }
 
   function enquirySenderContact(enquiry) {
@@ -2386,6 +2441,7 @@
       phoneDigits,
       prepareComposerDraftText,
       prepareComposerTextForSend,
+      repairSavedContactPhonesFromSenderContacts,
       refreshUnreadIndicators,
       renameContact,
       resolveSavedContactPhones,

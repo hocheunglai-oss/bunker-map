@@ -38,8 +38,9 @@ const html = `<!doctype html>
       #newChatDrawer, #phoneDialer { display: none; margin: 8px 16px; padding: 10px; border: 1px solid #ddd; }
       #phoneNumberInput { min-height: 24px; padding: 6px; border: 1px solid #ccc; }
       #phoneDialerResult { display: none; padding: 12px; cursor: pointer; border-top: 1px solid #eee; }
-      #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
-      #senderRow, #ottoSenderRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
+      #chatHeading, #commonHeading, #commonGroupRow, #renamedRow, #senderRow, #ottoSenderRow { display: none; }
+      #chatHeading, #commonHeading { padding: 8px 16px; }
+      #renamedRow, #senderRow, #ottoSenderRow, #commonGroupRow { padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 360px; background: #f6efe5; }
@@ -70,15 +71,18 @@ const html = `<!doctype html>
         <div data-testid="dialer-pad-1" role="button">1</div>
       </div>
       <input id="search" type="text" aria-label="Search input textbox" />
-      <div id="renamedRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')">
-        <span title="Otto Tone">Otto Tone</span>
+      <div id="chatHeading" role="row"><h2>Chats</h2></div>
+      <div id="renamedRow" role="row" data-testid="list-item-renamed">
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')"><span title="Otto Tone">Otto Tone</span></div></div>
       </div>
-      <div id="senderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Barry Local Alias')">
-        <span title="Barry Local Alias">Barry Local Alias</span>
+      <div id="senderRow" role="row" data-testid="list-item-sender">
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('Barry Local Alias')"><span title="Barry Local Alias">Barry Local Alias</span></div></div>
       </div>
-      <div id="ottoSenderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('+852 9000 0002')">
-        <span title="+852 9000 0002">+852 9000 0002</span>
+      <div id="ottoSenderRow" role="row" data-testid="list-item-otto-sender">
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('+852 9000 0002')"><span title="+852 9000 0002">+852 9000 0002</span></div></div>
       </div>
+      <div id="commonHeading" role="row"><h2>Groups in common</h2></div>
+      <div id="commonGroupRow" role="row" data-testid="list-item-common-group"><div role="gridcell"><div data-testid="cell-frame-container"><span title="Shared group">Shared group</span></div></div></div>
     </div>
     <div id="main">
       <header>
@@ -102,8 +106,8 @@ const html = `<!doctype html>
       </div>
     </div>
     <aside id="contactInfo">
-      <div>Contact info</div><div>Otto Tone</div><div>+852 6688 5575</div><div>Voice</div><div>Video</div><div>Search</div>
-      <button type="button" aria-label="Close" onclick="this.parentElement.style.display='none'">Close</button>
+      <div>聯絡人資料</div><div>Otto Tone</div><div>+852 6688 5575</div><div>語音</div><div>視像</div><div>搜尋</div>
+      <button type="button" aria-label="閂" onclick="this.parentElement.style.display='none'">閂</button>
     </aside>
     <pre id="sent"></pre>
     <script>
@@ -155,9 +159,16 @@ const html = `<!doctype html>
       document.getElementById("search").addEventListener("input", (event) => {
         const value = String(event.target.value || "").toLowerCase();
         window.searchValues.push(value);
-        document.getElementById("renamedRow").style.display = value.includes("otto tone") ? "block" : "none";
-        document.getElementById("senderRow").style.display = value.includes("+6590000001") ? "block" : "none";
-        document.getElementById("ottoSenderRow").style.display = value.includes("+85290000002") ? "block" : "none";
+        const showRenamed = value.includes("otto tone");
+        const showSender = value.includes("+6590000001");
+        const showOttoSender = value.includes("+85290000002");
+        const showDirect = showRenamed || showSender || showOttoSender;
+        document.getElementById("chatHeading").style.display = showDirect ? "block" : "none";
+        document.getElementById("renamedRow").style.display = showRenamed ? "block" : "none";
+        document.getElementById("senderRow").style.display = showSender ? "block" : "none";
+        document.getElementById("ottoSenderRow").style.display = showOttoSender ? "block" : "none";
+        document.getElementById("commonHeading").style.display = showSender || showOttoSender ? "block" : "none";
+        document.getElementById("commonGroupRow").style.display = showSender || showOttoSender ? "block" : "none";
       });
       window.chrome = {
         runtime: {
@@ -326,6 +337,25 @@ async function main() {
       assert.equal(capturedContactLabel.trim(), "Otto Tone")
       assert.notEqual(capturedContactLabel.trim(), "個人檔案詳情")
       assert.doesNotMatch(capturedContactLabel, /85266885575/)
+      await page.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.contacts = [{
+          id: "saved-otto-alias",
+          name: "Otto Lai (黎善恩 Anna)",
+          chatName: "Otto Lai (黎善恩 Anna)",
+          phone: "",
+          kind: "contact",
+          list: "buyer",
+          order: 1000,
+        }]
+        api.render()
+      })
+
+      await page.evaluate(() => window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries())
+      await page.waitForFunction(() => window.__FCUNO_WA_SPC_TEST_API__.state.contacts[0]?.phone === "85290000002")
+      const repairedSavedContact = await page.evaluate(() => window.__FCUNO_WA_SPC_TEST_API__.state.contacts[0])
+      assert.equal(repairedSavedContact.phone, "85290000002")
+      assert.equal(repairedSavedContact.directUrl, "")
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
         api.state.contacts = []
