@@ -6,6 +6,7 @@ import {
   hktTimeFromTimestamp,
   hktTimestampForDateAndTime,
   hktYearMonth,
+  isAfterAttendanceAmCutoff,
   isPersonEmployedOnDate,
   isPersonExpectedOnDate,
 } from "../lib/attendanceRules"
@@ -32,6 +33,13 @@ test("uses the agreed BT, BS, and AC schedules", () => {
     amCutoff: "11:00",
     pmCutoff: "15:45",
   })
+})
+
+test("AM cutoffs convert only later punches to automatic AM leave", () => {
+  assert.equal(isAfterAttendanceAmCutoff("2026-09-01", "BT", "2026-09-01T03:30:00.000Z"), false)
+  assert.equal(isAfterAttendanceAmCutoff("2026-09-01", "BT", "2026-09-01T03:31:00.000Z"), true)
+  assert.equal(isAfterAttendanceAmCutoff("2026-09-01", "AC", "2026-09-01T03:00:00.000Z"), false)
+  assert.equal(isAfterAttendanceAmCutoff("2026-09-01", "AC", "2026-09-01T03:01:00.000Z"), true)
 })
 
 test("a PM leave day requires sign-out at or after the team AM cutoff", () => {

@@ -97,7 +97,9 @@ export type ApiAttendanceDailyItem = {
     id?: string | null
     mode: AttendanceWorkMode
   } | null
+  holiday?: boolean
   holidayAttendance?: boolean
+  automaticAmLeave?: boolean
   derivedHomeOfficeUnits?: number
   derivedBusinessTripUnits?: number
   date?: string

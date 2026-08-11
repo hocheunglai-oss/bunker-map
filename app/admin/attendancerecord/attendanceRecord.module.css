@@ -318,6 +318,12 @@
   font-weight: 900;
 }
 
+.monthRecordTable td.onTimeCell {
+  background: color-mix(in srgb, var(--fc-admin-success-bg) 9%, var(--fc-admin-panel-bg));
+  color: #067647;
+  font-weight: 900;
+}
+
 .monthRecordTable td.businessTripCell,
 .monthRecordTable td.holidayCell {
   background: var(--fc-admin-selected-bg);

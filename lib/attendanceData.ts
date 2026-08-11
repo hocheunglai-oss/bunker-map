@@ -49,6 +49,7 @@ import {
   isAttendanceLeavePortion,
   isAttendanceMonthlyCode,
   isAttendanceTeam,
+  isAfterAttendanceAmCutoff,
   isPersonEmployedOnDate,
   isPersonExpectedOnDate,
   parseIsoDate,
@@ -641,12 +642,27 @@ function buildAttendanceRecord(
   const normallyRequired =
     isPersonExpectedOnDate(workDate, person) &&
     (!hasTeamHistory || Boolean(datedAssignment))
+  const automaticAmLeave = Boolean(
+    normallyRequired &&
+      !holiday &&
+      effectiveSignIn &&
+      isAfterAttendanceAmCutoff(workDate, team, effectiveSignIn) &&
+      !absenceLeaves.some((entry) => entry.portion === "full" || entry.portion === "am"),
+  )
+  const explicitHolidayAttendance = Boolean(
+    holiday && workModeOverride?.mode === "office",
+  )
   const attendanceHoliday =
-    workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE ? holiday : null
+    workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE || explicitHolidayAttendance
+      ? holiday
+      : null
   const expectation = deriveAttendanceExpectation({
     workDate,
     team,
-    leavePortions: absenceLeaves.map((entry) => entry.portion),
+    leavePortions: [
+      ...absenceLeaves.map((entry) => entry.portion),
+      ...(automaticAmLeave ? (["am"] as const) : []),
+    ],
     effectiveSignIn,
     effectiveSignOut,
     required: normallyRequired && !attendanceHoliday,
@@ -659,6 +675,7 @@ function buildAttendanceRecord(
       : expectation
   const fullDayAbsent = absenceLeaves.some((entry) => entry.portion === "full")
   const hasManualWorkEvidence = Boolean(
+    workModeOverride?.mode === "office" ||
     workModeOverride?.mode === "home-office" ||
       workModeOverride?.mode === "business-trip" ||
       recordedWorkMode?.code === "HO" ||
@@ -740,6 +757,7 @@ function buildAttendanceRecord(
       : null,
     holiday,
     holidayAttendance,
+    automaticAmLeave,
     derivedHomeOfficeUnits: homeOfficeUnits,
     derivedBusinessTripUnits: businessTripUnits,
     ...effectiveExpectation,
@@ -943,13 +961,14 @@ function personOverlapsPeriod(
 
 function countsAsAttended(record: ReturnType<typeof buildAttendanceRecord>) {
   return Boolean(
-    record.required &&
+    record.holidayAttendance ||
+    (record.required &&
       record.status !== "leave" &&
       record.status !== "pending" &&
       record.date <= hktDateFromTimestamp(new Date()) &&
       (record.effectiveSignIn ||
         record.workMode === "home-office" ||
-        record.workMode === "business-trip"),
+        record.workMode === "business-trip")),
   )
 }
 
@@ -960,6 +979,7 @@ export async function getMonthlyAttendance(
     adminUserId?: string | null
     canEdit?: boolean
     includeYearSummary?: boolean
+    monthOnly?: boolean
   } = {},
 ) {
   const year = requireYear(yearInput)
@@ -967,11 +987,12 @@ export async function getMonthlyAttendance(
   const periodClosed = isClosedAttendanceMonth(year, month)
   const monthRange = dateRangeForMonth(year, month)
   const yearStart = `${year}-01-01`
+  const dataStart = viewer.monthOnly ? monthRange.start : yearStart
   const today = hktDateFromTimestamp(new Date())
   const calendarDays = calendarDates(monthRange.start, monthRange.end)
     .map((date) => calendarDay(date, today))
     .filter((day) => !day.isWeekend)
-  const yearToDateDates = calendarDates(yearStart, monthRange.end).filter(
+  const yearToDateDates = calendarDates(dataStart, monthRange.end).filter(
     (date) => {
       const day = calendarDay(date, today)
       return !day.isWeekend
@@ -997,26 +1018,22 @@ export async function getMonthlyAttendance(
     await Promise.all([
       supabase.from("attendance_people").select("*").order("staff_code"),
       supabase.from("attendance_entitlements").select("*").eq("year", year),
-      supabase
-        .from("attendance_monthly_adjustments")
-        .select("*")
-        .eq("year", year)
-        .lte("month", month),
+      viewer.monthOnly
+        ? supabase.from("attendance_monthly_adjustments").select("*").eq("year", year).eq("month", month)
+        : supabase.from("attendance_monthly_adjustments").select("*").eq("year", year).lte("month", month),
       supabase
         .from("attendance_leave_entries")
         .select("*")
-        .gte("leave_date", yearStart)
+        .gte("leave_date", dataStart)
         .lte("leave_date", monthRange.end),
-      supabase
-        .from("attendance_monthly_confirmations")
-        .select("*")
-        .eq("year", year)
-        .order("month"),
-      loadAttendancePunchRows(supabase, yearStart, monthRange.end),
+      viewer.monthOnly
+        ? supabase.from("attendance_monthly_confirmations").select("*").eq("year", year).eq("month", month)
+        : supabase.from("attendance_monthly_confirmations").select("*").eq("year", year).order("month"),
+      loadAttendancePunchRows(supabase, dataStart, monthRange.end),
       supabase
         .from("attendance_manual_overrides")
         .select("*")
-        .gte("work_date", yearStart)
+        .gte("work_date", dataStart)
         .lte("work_date", monthRange.end)
         .order("created_at"),
       supabase
@@ -1034,12 +1051,12 @@ export async function getMonthlyAttendance(
         .from("attendance_work_mode_policies")
         .select("*")
         .lte("effective_from", monthRange.end)
-        .or(`effective_to.is.null,effective_to.gte.${yearStart}`)
+        .or(`effective_to.is.null,effective_to.gte.${dataStart}`)
         .order("effective_from"),
       supabase
         .from("attendance_work_mode_overrides")
         .select("*")
-        .gte("work_date", yearStart)
+        .gte("work_date", dataStart)
         .lte("work_date", monthRange.end),
       loadAttendanceCalendarContext(supabase),
       loadAttendanceAvailableYears(supabase),
@@ -1094,7 +1111,7 @@ export async function getMonthlyAttendance(
   )
   const yearPeople = sortAttendancePeople(
     allPeople.filter((person) =>
-      personOverlapsPeriod(person, yearStart, monthRange.end, teamAssignments),
+      personOverlapsPeriod(person, dataStart, monthRange.end, teamAssignments),
     ),
     calendarContext.staffOrder,
   )

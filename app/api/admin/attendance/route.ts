@@ -90,7 +90,7 @@ export async function GET(request: Request) {
       response = await getAttendanceLeave(url.searchParams.get("year"))
     } else if (view === "monthly") {
       const scope = url.searchParams.get("scope")
-      if (scope && scope !== "year") {
+      if (scope && scope !== "year" && scope !== "month") {
         throw new AttendanceValidationError("Attendance scope is unsupported.")
       }
       response = await getMonthlyAttendance(
@@ -100,6 +100,7 @@ export async function GET(request: Request) {
           adminUserId: session.adminUserId,
           canEdit,
           includeYearSummary: scope === "year",
+          monthOnly: scope === "month",
         },
       )
     } else if (view === "all-time") {

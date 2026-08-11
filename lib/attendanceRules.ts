@@ -246,6 +246,16 @@ export function deriveAttendanceExpectation(input: {
   }
 }
 
+export function isAfterAttendanceAmCutoff(
+  workDate: string,
+  team: AttendanceTeam,
+  signInTimestamp: string | null,
+) {
+  if (!signInTimestamp) return false
+  const cutoff = hktTimestampForDateAndTime(workDate, ATTENDANCE_SCHEDULES[team].amCutoff)
+  return Boolean(cutoff && Date.parse(signInTimestamp) > cutoff.getTime())
+}
+
 export function enumerateWeekdays(fromDate: string, toDate: string) {
   const from = parseIsoDate(fromDate)
   const to = parseIsoDate(toDate)

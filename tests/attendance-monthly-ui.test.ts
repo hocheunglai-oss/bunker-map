@@ -29,8 +29,8 @@ test("Monthly Record follows the legacy weekday IN and OUT matrix", () => {
   assert.match(client, /<th>IN<\/th>/)
   assert.match(client, /<th>OUT<\/th>/)
   assert.match(client, /hktTimeFromTimestamp/)
-  assert.match(client, /openLeave\(person, day\.date, "in", record\)/)
-  assert.match(client, /openLeave\(person, day\.date, "out", record\)/)
+  assert.match(client, /openLeave\(person, day\.date, "in", record, day\.holiday\)/)
+  assert.match(client, /openLeave\(person, day\.date, "out", record, day\.holiday\)/)
   assert.doesNotMatch(client, /Correct/)
   assert.match(client, /staffOrder/)
   assert.match(client, /DEFAULT_EVENT_CALENDAR_STAFF_ORDER/)
@@ -47,6 +47,13 @@ test("Monthly Record edits only the leave portion represented by the clicked cel
     /const matching = record \? leaveEntryForDirection\(record, direction\) : undefined/,
   )
   assert.doesNotMatch(client, /\|\| entries\[0\]/)
+})
+
+test("sign-in cells distinguish on-time, late, and automatic AM leave", () => {
+  assert.match(client, /item\.automaticAmLeave\) return "AM LEAVE"/)
+  assert.match(client, /item\.late\) return styles\.lateCell/)
+  assert.match(client, /item\.effectiveSignIn\) return styles\.onTimeCell/)
+  assert.match(styles, /td\.onTimeCell[\s\S]*?#067647/)
 })
 
 test("Monthly view includes required Excel totals, confirmation, and reminders", () => {
@@ -100,6 +107,11 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.equal(dayEdit.match(/postAttendance\(/g)?.length, 1)
   assert.doesNotMatch(dayEdit, /save-work-mode|save-leave|delete-leave/)
   assert.match(client, /value="office"/)
+  assert.match(client, /Holiday Attendance \(Office\)/)
+  assert.match(client, /<h2 id="leave-title">EDIT ATTENDANCE<\/h2>/)
+  assert.match(client, /<option value="full">Full day<\/option>/)
+  assert.doesNotMatch(client, />\s*Note\s*<textarea/)
+  assert.match(client, /scope: "month"/)
   assert.match(client, /value="home-office"/)
   assert.match(client, /<option value="business-trip">Business Trip<\/option>/)
   assert.match(client, /existingLeaveEntryId: leaveDraft\.entryId/)

@@ -227,6 +227,11 @@ test("API contract keeps August visible and prevents legacy HO or HOL double-cou
   assert.match(attendanceData, /availableYears/)
   assert.match(attendanceData, /annualSummaries/)
   assert.match(attendanceData, /record\.status !== "pending"/)
+  assert.match(attendanceData, /explicitHolidayAttendance/)
+  assert.match(attendanceData, /workModeOverride\?\.mode === "office"/)
+  assert.match(attendanceData, /record\.holidayAttendance \|\|/)
+  assert.match(attendanceRoute, /scope !== "year" && scope !== "month"/)
+  assert.match(attendanceRoute, /monthOnly: scope === "month"/)
   assert.match(
     attendanceData,
     /const derivedWorkModeSource = recordedWorkMode \? "leave" : workModeSource/,
@@ -265,7 +270,7 @@ test("Event Calendar holiday semantics start on the official 1 September date", 
   )
   assert.match(
     attendanceData,
-    /const attendanceHoliday =[\s\S]*?workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE \? holiday : null/,
+    /const attendanceHoliday =[\s\S]*?workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE \|\| explicitHolidayAttendance[\s\S]*?\? holiday[\s\S]*?: null/,
   )
   assert.match(attendanceData, /required: normallyRequired && !attendanceHoliday/)
   assert.match(attendanceData, /if \(attendanceHoliday\)/)

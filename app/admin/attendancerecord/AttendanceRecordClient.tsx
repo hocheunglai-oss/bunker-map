@@ -49,6 +49,7 @@ type LeaveDraft = {
   defaultWorkMode: AttendanceWorkMode
   workModeOverrideId?: string
   entryId?: string
+  holiday: boolean
 }
 
 const TABS: Array<{ id: TabId; label: string }> = [
@@ -523,6 +524,7 @@ function recordCellValue(
   if (!item) return holiday ? "PH" : ""
   const entry = leaveEntryForDirection(item, direction)
   if (entry) return entry.code
+  if (direction === "in" && item.automaticAmLeave) return "AM LEAVE"
   const punch = direction === "in" ? item.effectiveSignIn : item.effectiveSignOut
   if (punch) return displayTime(punch)
   const status = String(item.status || "").toUpperCase()
@@ -545,7 +547,9 @@ function recordCellTone(
 ) {
   if (!item) return holiday ? styles.holidayCell : ""
   if (leaveEntryForDirection(item, direction)) return styles.leaveCell
+  if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
+  if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
   if (direction === "out" && item.early) return styles.earlyCell
   if (item.holidayAttendance || holiday) return styles.holidayCell
   if (item.workMode === "home-office") {
@@ -666,7 +670,7 @@ export default function AttendanceRecordClient() {
         view: "monthly",
         year: String(currentYear),
         month: String(selectedMonth),
-        include: "calendar",
+        scope: "month",
       })
       const parsed = parseMonthlyResponse(payload, currentYear, selectedMonth)
       if (monthRequestRef.current === requestId) {
@@ -1001,6 +1005,7 @@ export default function AttendanceRecordClient() {
     date: string,
     direction: "in" | "out",
     record: ApiAttendanceDailyItem | undefined,
+    holiday: ApiAttendanceHoliday | null | undefined,
   ) {
     if (!canEdit) return
     const matching = record ? leaveEntryForDirection(record, direction) : undefined
@@ -1027,6 +1032,7 @@ export default function AttendanceRecordClient() {
       defaultWorkMode,
       workModeOverrideId: record?.workModeOverride?.id || undefined,
       entryId: matching?.id,
+      holiday: Boolean(holiday || record?.holiday),
     })
   }
 
@@ -1335,7 +1341,7 @@ export default function AttendanceRecordClient() {
                                 <button
                                   type="button"
                                   className={styles.cellButton}
-                                  onClick={() => openLeave(person, day.date, "in", record)}
+                                  onClick={() => openLeave(person, day.date, "in", record, day.holiday)}
                                   aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} IN attendance`}
                                 >
                                   {recordCellValue(record, "in", day.holiday, viewNow) || " "}
@@ -1347,7 +1353,7 @@ export default function AttendanceRecordClient() {
                                 <button
                                   type="button"
                                   className={styles.cellButton}
-                                  onClick={() => openLeave(person, day.date, "out", record)}
+                                  onClick={() => openLeave(person, day.date, "out", record, day.holiday)}
                                   aria-label={`Edit ${person.displayName} ${displayShortDate(day.date)} OUT attendance`}
                                 >
                                   {recordCellValue(record, "out", day.holiday, viewNow) || " "}
@@ -1634,9 +1640,9 @@ export default function AttendanceRecordClient() {
             <div className={styles.modalHeader}>
               <div>
                 <span>{leaveDraft.staffLabel} · {displayShortDate(leaveDraft.date)}</span>
-                <h2 id="leave-title">Edit attendance day</h2>
+                <h2 id="leave-title">EDIT ATTENDANCE</h2>
               </div>
-              <button type="button" aria-label="Close attendance day editor" onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>×</button>
+              <button type="button" aria-label="Close attendance editor" onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>×</button>
             </div>
             <div className={styles.formGrid}>
               <label>
@@ -1646,7 +1652,7 @@ export default function AttendanceRecordClient() {
                   onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, workMode: event.target.value as LeaveDraft["workMode"] } : draft)}
                 >
                   <option value="default">Default ({leaveDraft.defaultWorkMode === "home-office" ? "Home Office" : "Office"})</option>
-                  <option value="office">Office</option>
+                  <option value="office">{leaveDraft.holiday ? "Holiday Attendance (Office)" : "Office"}</option>
                   <option value="home-office">Home Office</option>
                   <option value="business-trip">Business Trip</option>
                 </select>
@@ -1681,10 +1687,6 @@ export default function AttendanceRecordClient() {
                   <option value="am">AM half-day</option>
                   <option value="pm">PM half-day</option>
                 </select>
-              </label>
-              <label className={styles.fullField}>
-                Note
-                <textarea rows={3} maxLength={500} value={leaveDraft.note} onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, note: event.target.value } : draft)} placeholder="Optional note" />
               </label>
             </div>
             <div className={styles.modalFooter}>
