@@ -192,7 +192,10 @@ export type ApiAttendanceAnnualSummary = {
   personId: string
   allowanceUnits: number
   openingCarryForwardUnits: number
+  closingBalanceUnits: number
   codeTotals: Record<string, number>
+  confirmation?: ApiAttendanceConfirmation | null
+  canConfirm?: boolean
   leavePaidUnits?: number | null
 }
 

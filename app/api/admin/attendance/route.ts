@@ -106,6 +106,8 @@ export async function GET(request: Request) {
     } else if (view === "all-time") {
       response = await getAllTimeAttendance(url.searchParams.get("year"), {
         includeAvailableUsers: canEdit,
+        adminUserId: session.adminUserId,
+        canEdit,
       })
     } else if (view === "settings") {
       response = await getAttendanceSettings(url.searchParams.get("year"), {

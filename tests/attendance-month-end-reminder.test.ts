@@ -20,6 +20,7 @@ const vercel = source("../vercel.json")
 const client = source("../app/admin/attendancerecord/AttendanceRecordClient.tsx")
 const autoRoute = source("../app/api/cron/attendance-auto-confirm/route.ts")
 const workflowMigration = source("../supabase/migrations/20260810101816_extend_attendance_confirmation_workflow.sql")
+const annualMigration = source("../supabase/migrations/20260811102410_add_attendance_annual_summary_reminders.sql")
 
 test("last Hong Kong working day excludes later weekdays, weekends, and persisted holidays", () => {
   assert.equal(
@@ -87,4 +88,17 @@ test("second reminder and system confirmation are scheduled, audited, and visibl
   assert.match(client, /SYSTEM CONFIRMED/)
   assert.match(workflowMigration, /'second_reminder'/)
   assert.match(workflowMigration, /attendance_reminder_dispatches_second_once/)
+})
+
+test("first working day of January sends an idempotent year-end balance summary", () => {
+  assert.match(route, /sendAttendanceAnnualSummaryReminders/)
+  assert.match(data, /period\.month !== 1/)
+  assert.match(data, /hongKongWorkingDayNumber\(now, holidayDates\) !== 1/)
+  assert.match(data, /dispatch_kind: "annual_summary"/)
+  assert.match(data, /Balance B\/F at 31 Dec/)
+  assert.match(data, /Balance C\/F at 31 Dec/)
+  assert.match(data, /CONFIRM YEAR/)
+  assert.match(data, /contacting an administrator directly/)
+  assert.match(annualMigration, /'annual_summary'/)
+  assert.match(annualMigration, /attendance_reminder_dispatches_annual_summary_once/)
 })

@@ -231,6 +231,14 @@ test("API contract keeps August visible and prevents legacy HO or HOL double-cou
   assert.match(attendanceData, /workModeOverride\?\.mode === "office"/)
   assert.match(attendanceData, /record\.holidayAttendance \|\|/)
   assert.match(attendanceData, /isOfficialAttendanceSignOut/)
+  assert.match(
+    attendanceData,
+    /const holidayExpectation = holidayAttendance[\s\S]*?required: true/,
+  )
+  assert.match(
+    attendanceData,
+    /openingCarryForwardUnits[\s\S]*?allowanceUnits[\s\S]*?codeTotals\.HOL[\s\S]*?codeTotals\.ALS[\s\S]*?codeTotals\.ALU[\s\S]*?codeTotals\.SLX/,
+  )
   assert.match(attendanceRoute, /scope !== "year" && scope !== "month"/)
   assert.match(attendanceRoute, /monthOnly: scope === "month"/)
   assert.match(

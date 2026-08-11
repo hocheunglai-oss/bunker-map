@@ -395,11 +395,11 @@
   width: 6.5%;
 }
 
-.yearSummaryTable thead th:nth-child(n + 3):nth-child(-n + 16) {
-  width: 5.55%;
+.yearSummaryTable thead th:nth-child(n + 3):nth-child(-n + 15) {
+  width: 5.96%;
 }
 
-.yearSummaryTable thead th:nth-child(17) {
+.yearSummaryTable thead th:nth-child(16) {
   width: 10.8%;
 }
 
@@ -582,8 +582,14 @@
 
 .allTimeTable {
   width: 100%;
-  min-width: 1540px;
+  min-width: 0;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.allTimePanel {
+  max-height: none;
+  overflow: visible;
 }
 
 .allTimeTable th {
@@ -591,20 +597,21 @@
   z-index: 2;
   top: 0;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-  padding: 9px 8px;
+  padding: 7px 3px;
   background: var(--fc-table-head-bg);
   color: var(--fc-table-head-text);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.045em;
   text-align: center;
-  white-space: nowrap;
+  line-height: 1.15;
+  white-space: normal;
 }
 
 .allTimeTable td {
   height: 39px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-  padding: 6px 8px;
+  padding: 6px 3px;
   background: var(--fc-row-bg);
   font-size: 11px;
   vertical-align: middle;
@@ -631,7 +638,7 @@
 }
 
 .annualStaffCell {
-  min-width: 138px;
+  width: 7%;
   text-align: left !important;
 }
 
@@ -650,40 +657,77 @@
 .annualStaffCell small {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.groupBadge,
-.mappedBadge,
-.unmappedBadge {
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--fc-admin-border);
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 8px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.groupBadge {
-  min-width: 30px;
-  background: var(--fc-admin-button-bg);
-}
-
-.mappedBadge {
-  border-color: #b7dfc6;
-  background: #edf9f1;
-  color: #067647;
-}
-
-.unmappedBadge {
-  border-color: var(--fc-admin-border-soft);
-  background: var(--fc-row-bg);
+  gap: 6px;
+  margin-top: 3px;
   color: var(--fc-admin-muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.annualStaffCell small .removeButton {
+  font-size: 8px;
+}
+
+.balanceExplanation {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  border: 1px solid var(--fc-admin-selected-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 55%, var(--fc-admin-panel-bg));
+  color: var(--fc-admin-panel-text);
+}
+
+.balanceExplanation strong {
+  color: var(--fc-admin-link);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.balanceExplanation span {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.balanceExplanation small {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.allTimeTable .openingGroup,
+.allTimeTable .closingGroup {
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 68%, var(--fc-table-head-bg));
+  color: var(--fc-admin-link);
+}
+
+.allTimeTable .activityGroup {
+  background: var(--fc-table-head-bg);
+}
+
+.allTimeTable .balanceCell,
+.allTimeTable .closingBalanceCell {
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 45%, var(--fc-row-bg));
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.allTimeTable .summaryValue {
+  background: color-mix(in srgb, var(--fc-admin-selected-bg) 25%, var(--fc-row-bg));
+  color: var(--fc-admin-heading);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.allTimeTable .summaryZero {
+  color: var(--fc-admin-muted);
+  font-weight: 600;
+}
+
+.allTimeTable .closingBalanceCell {
+  color: #067647;
 }
 
 .removeButton {

@@ -702,14 +702,24 @@ function buildAttendanceRecord(
         hasManualWorkEvidence),
   )
   if (attendanceHoliday) {
+    const holidayExpectation = holidayAttendance
+      ? deriveAttendanceExpectation({
+          workDate,
+          team,
+          leavePortions: absenceLeaves.map((entry) => entry.portion),
+          effectiveSignIn,
+          effectiveSignOut,
+          required: true,
+        })
+      : expectation
     effectiveExpectation = {
-      ...expectation,
-      required: false,
-      signInDeadline: null,
-      signOutDeadline: null,
-      late: false,
-      early: false,
-      status: holidayAttendance ? "holiday-attendance" : "holiday",
+      ...holidayExpectation,
+      required: holidayAttendance,
+      status: holidayAttendance
+        ? holidayExpectation.status === "present"
+          ? "holiday-attendance"
+          : `holiday-attendance-${holidayExpectation.status}`
+        : "holiday",
     }
   } else if (
     normallyRequired &&
@@ -1380,7 +1390,11 @@ function suggestedStaffCode(user: ManagedAdminUser) {
 
 export async function getAllTimeAttendance(
   yearInput: unknown,
-  options: { includeAvailableUsers?: boolean } = {},
+  options: {
+    includeAvailableUsers?: boolean
+    adminUserId?: string | null
+    canEdit?: boolean
+  } = {},
 ) {
   const year = requireYear(yearInput)
   const yearStart = `${year}-01-01`
@@ -1400,6 +1414,7 @@ export async function getAllTimeAttendance(
     calendarContext,
     availableYears,
     managed,
+    confirmationResult,
   ] = await Promise.all([
     supabase.from("attendance_people").select("*").order("staff_code"),
     supabase.from("attendance_entitlements").select("*").eq("year", year),
@@ -1447,6 +1462,11 @@ export async function getAllTimeAttendance(
     loadAttendanceCalendarContext(supabase),
     loadAttendanceAvailableYears(supabase),
     managedAdminUsersById(),
+    supabase
+      .from("attendance_monthly_confirmations")
+      .select("*")
+      .eq("year", year)
+      .eq("month", 12),
   ])
   throwIfError(peopleResult.error, "Could not load attendance people.")
   throwIfError(entitlementResult.error, "Could not load entitlements.")
@@ -1465,6 +1485,10 @@ export async function getAllTimeAttendance(
   throwIfError(
     workModeOverrideResult.error,
     "Could not load attendance work-mode overrides.",
+  )
+  throwIfError(
+    confirmationResult.error,
+    "Could not load annual attendance confirmations.",
   )
   const allPeople = mapPeopleWithManagedUsers(
     peopleResult.data || [],
@@ -1521,6 +1545,8 @@ export async function getAllTimeAttendance(
   )
   const entitlements = (entitlementResult.data || []).map(mapEntitlement)
   const monthlyAdjustments = (adjustmentResult.data || []).map(mapAdjustment)
+  const yearEndConfirmations = (confirmationResult.data || []).map(mapConfirmation)
+  const currentHktYear = Number(hktDateFromTimestamp(new Date()).slice(0, 4))
   const allTimeSummaries = activePeople.map((person) => {
     const dates = [
       ...new Set([
@@ -1628,11 +1654,32 @@ export async function getAllTimeAttendance(
     const entitlement = entitlements.find(
       (entry) => entry.personId === person.id,
     )
+    const allowanceUnits = entitlement?.allowanceUnits || 0
+    const openingCarryForwardUnits =
+      entitlement?.openingCarryForwardUnits || 0
+    const closingBalanceUnits =
+      openingCarryForwardUnits +
+      allowanceUnits +
+      codeTotals.HOL -
+      codeTotals.ALS -
+      codeTotals.ALU -
+      codeTotals.SLX
+    const confirmation =
+      yearEndConfirmations.find(
+        (entry) =>
+          entry.personId === person.id &&
+          entry.status === "confirmed" &&
+          entry.note === "annual-summary",
+      ) || null
     return {
       personId: person.id,
-      allowanceUnits: entitlement?.allowanceUnits || 0,
-      openingCarryForwardUnits:
-        entitlement?.openingCarryForwardUnits || 0,
+      allowanceUnits,
+      openingCarryForwardUnits,
+      closingBalanceUnits,
+      confirmation,
+      canConfirm:
+        year < currentHktYear &&
+        (Boolean(options.canEdit) || person.adminUserId === options.adminUserId),
       leavePaidUnits: null,
       codeTotals,
     }
@@ -2307,6 +2354,127 @@ export function buildAttendanceSecondReminderEmail(input: {
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>
     `,
+  }
+}
+
+export function buildAttendanceAnnualSummaryEmail(input: {
+  displayName: string
+  year: number
+  openingBalance: number
+  allowance: number
+  hol: number
+  als: number
+  alu: number
+  slx: number
+  closingBalance: number
+}) {
+  const number = (value: number) => escapeHtml(String(Number(value.toFixed(2))))
+  return {
+    subject: `***** ${input.year} Attendance Year-End Summary Confirmation`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
+        <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
+        <p style="margin:0 0 10px">Your <strong>${input.year} attendance year-end summary</strong> is ready for review and confirmation.</p>
+        <p style="margin:0 0 10px"><strong>Balance B/F at 31 Dec ${input.year - 1}:</strong> ${number(input.openingBalance)}<br />
+        <strong>${input.year} allowance:</strong> ${number(input.allowance)}<br />
+        <strong>HOL added:</strong> ${number(input.hol)}<br />
+        <strong>ALS deducted:</strong> ${number(input.als)}<br />
+        <strong>ALU deducted:</strong> ${number(input.alu)}<br />
+        <strong>SLX deducted:</strong> ${number(input.slx)}<br />
+        <strong>Balance C/F at 31 Dec ${input.year}:</strong> ${number(input.closingBalance)}</p>
+        <p style="margin:0 0 10px">SLM, SLR, special leave, maternity leave and no-pay leave do not change this balance. HO and OS count as attended days only.</p>
+        <p style="margin:0 0 10px">Please open <strong>ALL TIME</strong>, select ${input.year}, review the summary and choose <strong>CONFIRM YEAR</strong>.</p>
+        <p style="margin:0 0 10px">After confirmation, you may still dispute the record by contacting an administrator directly.</p>
+        <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
+      </div>
+    `,
+  }
+}
+
+export async function sendAttendanceAnnualSummaryReminders(
+  client: SupabaseClient,
+  now = new Date(),
+) {
+  const calendar = await loadAttendanceCalendarContext(client)
+  const holidayDates = new Set(calendar.holidaysByDate.keys())
+  const period = hktYearMonth(now)
+  const today = hktDateFromTimestamp(now)
+  const summaryYear = period.year - 1
+  if (period.month !== 1 || hongKongWorkingDayNumber(now, holidayDates) !== 1) {
+    return { skipped: true, date: today, year: summaryYear, sent: 0, failed: 0, alreadySent: 0 }
+  }
+
+  const [summary, managedUsers] = await Promise.all([
+    getAllTimeAttendance(summaryYear),
+    listManagedAdminUsers(),
+  ])
+  const usersById = new Map(managedUsers.map((user) => [user.id, user]))
+  const annualByPerson = new Map(
+    summary.annualSummaries.map((annual) => [annual.personId, annual]),
+  )
+  const targets = summary.people.flatMap((person) => {
+    const user = person.adminUserId ? usersById.get(person.adminUserId) : undefined
+    const annual = annualByPerson.get(person.id)
+    const emails = normalizeEmailList(user?.username || "")
+    if (!annual || annual.confirmation || !user?.isActive || emails.length !== 1) return []
+    return [{ person, annual, displayName: user.displayName || person.displayName, email: emails[0] }]
+  })
+
+  const results: Array<"sent" | "failed" | "already-sent"> = []
+  for (const target of targets) {
+    const pending = await client.from("attendance_reminder_dispatches").insert({
+      person_id: target.person.id,
+      year: summaryYear,
+      month: 12,
+      status: "pending",
+      dispatch_kind: "annual_summary",
+      requested_by: "system:attendance-annual-summary-cron",
+    }).select("id").single()
+    if (pending.error?.code === "23505") {
+      results.push("already-sent")
+      continue
+    }
+    throwIfError(pending.error, "Could not record an annual attendance summary reminder.")
+    const dispatchId = String(asRow(pending.data).id || "")
+    const email = buildAttendanceAnnualSummaryEmail({
+      displayName: target.displayName,
+      year: summaryYear,
+      openingBalance: target.annual.openingCarryForwardUnits,
+      allowance: target.annual.allowanceUnits,
+      hol: target.annual.codeTotals.HOL || 0,
+      als: target.annual.codeTotals.ALS || 0,
+      alu: target.annual.codeTotals.ALU || 0,
+      slx: target.annual.codeTotals.SLX || 0,
+      closingBalance: target.annual.closingBalanceUnits,
+    })
+    try {
+      const sent = await sendNoticeEmail({ to: [target.email], subject: email.subject, html: email.html })
+      const { error } = await client.from("attendance_reminder_dispatches").update({
+        status: "sent",
+        completed_at: new Date().toISOString(),
+        message_id: String(sent.id || "sent").slice(0, 1000),
+        error_code: null,
+      }).eq("id", dispatchId)
+      throwIfError(error, "Could not audit the annual attendance summary reminder.")
+      results.push("sent")
+    } catch {
+      const { error } = await client.from("attendance_reminder_dispatches").update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        message_id: null,
+        error_code: "EMAIL_SEND_FAILED",
+      }).eq("id", dispatchId)
+      throwIfError(error, "Could not audit a failed annual attendance summary reminder.")
+      results.push("failed")
+    }
+  }
+  return {
+    skipped: false,
+    date: today,
+    year: summaryYear,
+    sent: results.filter((value) => value === "sent").length,
+    failed: results.filter((value) => value === "failed").length,
+    alreadySent: results.filter((value) => value === "already-sent").length,
   }
 }
 

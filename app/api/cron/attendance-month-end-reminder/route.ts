@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
 import {
   getAttendanceServiceClient,
+  sendAttendanceAnnualSummaryReminders,
   sendAttendanceMonthEndReviewReminders,
   sendAttendanceSecondReminders,
 } from "@/lib/attendanceData"
@@ -40,12 +41,13 @@ export async function GET(request: Request) {
 
   try {
     const client = getAttendanceServiceClient()
-    const [monthEndReview, secondReminder] = await Promise.all([
+    const [monthEndReview, secondReminder, annualSummary] = await Promise.all([
       sendAttendanceMonthEndReviewReminders(client),
       sendAttendanceSecondReminders(client),
+      sendAttendanceAnnualSummaryReminders(client),
     ])
-    const failed = monthEndReview.failed + secondReminder.failed
-    return privateJson({ success: failed === 0, monthEndReview, secondReminder }, {
+    const failed = monthEndReview.failed + secondReminder.failed + annualSummary.failed
+    return privateJson({ success: failed === 0, monthEndReview, secondReminder, annualSummary }, {
       status: failed > 0 ? 502 : 200,
     })
   } catch (error) {

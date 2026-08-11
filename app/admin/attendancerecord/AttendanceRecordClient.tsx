@@ -10,6 +10,7 @@ import type {
   ApiAllTimeSummary,
   ApiAttendanceAnnualSummary,
   ApiAttendanceCalendarDay,
+  ApiAttendanceConfirmation,
   ApiAttendanceDailyItem,
   ApiAttendanceEntitlement,
   ApiAttendanceHoliday,
@@ -194,7 +195,13 @@ function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
     allowanceUnits: Number(value.allowanceUnits ?? value.allowance_units) || 0,
     openingCarryForwardUnits:
       Number(value.openingCarryForwardUnits ?? value.opening_carry_forward_units) || 0,
+    closingBalanceUnits:
+      Number(value.closingBalanceUnits ?? value.closing_balance_units) || 0,
     codeTotals,
+    confirmation: isObject(value.confirmation)
+      ? (value.confirmation as ApiAttendanceConfirmation)
+      : null,
+    canConfirm: value.canConfirm === true,
     leavePaidUnits:
       leavePaidRaw === null || leavePaidRaw === undefined || leavePaidRaw === ""
         ? null
@@ -972,6 +979,13 @@ export default function AttendanceRecordClient() {
         personId: person.id,
         allowanceUnits: entitlement?.allowanceUnits || 0,
         openingCarryForwardUnits: entitlement?.openingCarryForwardUnits || 0,
+        closingBalanceUnits:
+          (entitlement?.openingCarryForwardUnits || 0) +
+          (entitlement?.allowanceUnits || 0) +
+          (codeTotals.HOL || 0) -
+          (codeTotals.ALS || 0) -
+          (codeTotals.ALU || 0) -
+          (codeTotals.SLX || 0),
         codeTotals,
         leavePaidUnits: null,
       })
@@ -993,6 +1007,7 @@ export default function AttendanceRecordClient() {
     const totals = {
       allowanceUnits: 0,
       openingCarryForwardUnits: 0,
+      closingBalanceUnits: 0,
       codeTotals: {} as Record<string, number>,
       leavePaidUnits: 0,
       hasLeavePaid: false,
@@ -1002,6 +1017,7 @@ export default function AttendanceRecordClient() {
       if (!annual) continue
       totals.allowanceUnits += annual.allowanceUnits || 0
       totals.openingCarryForwardUnits += annual.openingCarryForwardUnits || 0
+      totals.closingBalanceUnits += annual.closingBalanceUnits || 0
       for (const code of [...SUMMARY_CODES, "HOL"] as const) {
         totals.codeTotals[code] = (totals.codeTotals[code] || 0) + annualCodeTotal(annual, code)
       }
@@ -1131,6 +1147,28 @@ export default function AttendanceRecordClient() {
       await loadSelectedYear()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Attendance confirmation could not be saved.")
+    } finally {
+      setPendingAction("")
+    }
+  }
+
+  async function confirmAnnualSummary(personId: string) {
+    setPendingAction(`save-annual-confirmation:${personId}:${selectedAllTimeYear}`)
+    setNotice("")
+    try {
+      const payload = await postAttendance("save-confirmation", {
+        confirmation: {
+          personId,
+          year: selectedAllTimeYear,
+          month: 12,
+          status: "confirmed",
+          note: "annual-summary",
+        },
+      })
+      setNotice(getErrorMessage(payload, `${selectedAllTimeYear} year-end summary confirmed.`))
+      await loadAllTime()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Year-end summary confirmation could not be saved.")
     } finally {
       setPendingAction("")
     }
@@ -1453,7 +1491,6 @@ export default function AttendanceRecordClient() {
                       <th>ATTEND<br />OS</th>
                       <th>ATTENDED<br />DAYS</th>
                       <th>LATE<br />DAYS</th>
-                      <th>LEAVE<br />PAID</th>
                       <th>CONFIRMATION</th>
                     </tr>
                   </thead>
@@ -1489,7 +1526,6 @@ export default function AttendanceRecordClient() {
                             })}
                             <td className={summaryNumberClass(row.attendedDays, "attended")}>{displaySummaryDays(row.attendedDays)}</td>
                             <td className={summaryNumberClass(row.lateDays, "late")}>{displaySummaryDays(row.lateDays)}</td>
-                            <td className={styles.summaryZero}>—</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
@@ -1514,7 +1550,7 @@ export default function AttendanceRecordClient() {
                       }),
                     )}
                     {!monthSections.length ? (
-                      <tr><td colSpan={17}><div className={styles.emptyState}>No monthly records were found for {selectedSummaryYear}.</div></td></tr>
+                      <tr><td colSpan={16}><div className={styles.emptyState}>No monthly records were found for {selectedSummaryYear}.</div></td></tr>
                     ) : null}
                   </tbody>
                 </table>
@@ -1565,26 +1601,41 @@ export default function AttendanceRecordClient() {
             {settingsLoading && !settings.people.length ? (
               <div className={styles.inlineLoading}><span className={styles.spinner} aria-hidden="true" />Loading attendance users…</div>
             ) : (
-              <div className={styles.tablePanel}>
+              <>
+              <div className={styles.balanceExplanation}>
+                <strong>{selectedAllTimeYear} BALANCE</strong>
+                <span>
+                  Balance B/F at 31 Dec {selectedAllTimeYear - 1} + {selectedAllTimeYear} allowance + HOL − ALS − ALU − SLX
+                </span>
+                <small>
+                  SLM, SLR, special leave, maternity leave and no-pay leave do not change the balance. HO and OS count as attended days only.
+                </small>
+              </div>
+              <div className={`${styles.tablePanel} ${styles.allTimePanel}`}>
                 <table className={styles.allTimeTable}>
                   <thead>
                     <tr>
-                      <th>CURRENT YEAR<br />ALLOWANCE</th>
-                      <th>STAFF</th>
-                      <th>ABSENT<br />ALS</th>
-                      <th>ABSENT<br />ALU</th>
-                      <th>ABSENT<br />SLM</th>
-                      <th>ABSENT<br />SLR</th>
-                      <th>ABSENT<br />SLX</th>
-                      <th>ATTEND<br />HOL</th>
-                      <th>SPECIAL<br />LEAVE</th>
-                      <th>MATERNITY<br />LEAVE</th>
-                      <th>NO PAY<br />LEAVE</th>
-                      <th>ATTEND<br />HO</th>
-                      <th>ATTEND<br />OS</th>
-                      <th>LAST YEAR BAL B/F<br />({selectedAllTimeYear - 1})</th>
-                      <th>LEAVE<br />PAID</th>
-                      <th aria-label="Attendance user actions" />
+                      <th rowSpan={2}>STAFF</th>
+                      <th colSpan={1} className={styles.openingGroup}>OPENING POSITION</th>
+                      <th colSpan={12} className={styles.activityGroup}>{selectedAllTimeYear} ATTENDANCE &amp; LEAVE ACTIVITY</th>
+                      <th colSpan={1} className={styles.closingGroup}>CLOSING POSITION</th>
+                      <th rowSpan={2}>YEAR-END<br />CONFIRMATION</th>
+                    </tr>
+                    <tr>
+                      <th>BALANCE B/F<br />31 DEC {selectedAllTimeYear - 1}</th>
+                      <th>{selectedAllTimeYear}<br />ALLOWANCE</th>
+                      <th>ALS</th>
+                      <th>ALU</th>
+                      <th>SLM</th>
+                      <th>SLR</th>
+                      <th>SLX</th>
+                      <th>HOL</th>
+                      <th>SPECIAL</th>
+                      <th>MATERNITY</th>
+                      <th>NO PAY</th>
+                      <th>HO</th>
+                      <th>OS</th>
+                      <th>BALANCE C/F<br />31 DEC {selectedAllTimeYear}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1593,37 +1644,46 @@ export default function AttendanceRecordClient() {
                       const annual = annualByPerson.get(person.id)
                       return (
                         <tr key={person.id}>
-                          <td>{displayDays(annual?.allowanceUnits || 0)}</td>
                           <td className={styles.annualStaffCell}>
                             <strong>{person.staffCode}</strong>
-                            <span>{person.displayName}</span>
+                            {staffSecondaryLabel(person) ? <span>{staffSecondaryLabel(person)}</span> : null}
                             <small>
-                              <span className={styles.groupBadge}>{groupFromUser(linkedUser, person.team)}</span>
-                              {person.dingTalkUserId
-                                ? <span className={styles.mappedBadge}>MAPPED</span>
-                                : <span className={styles.unmappedBadge}>NOT MAPPED</span>}
+                              <span>{groupFromUser(linkedUser, person.team)}</span>
+                              <button
+                                type="button"
+                                className={styles.removeButton}
+                                onClick={() => void removeAttendanceUser(person)}
+                                disabled={!canEdit || Boolean(pendingAction)}
+                              >
+                                REMOVE
+                              </button>
                             </small>
                           </td>
+                          <td className={styles.balanceCell}>{displaySummaryDays(annual?.openingCarryForwardUnits || 0)}</td>
+                          <td className={summaryNumberClass(annual?.allowanceUnits || 0)}>{displaySummaryDays(annual?.allowanceUnits || 0)}</td>
                           {SUMMARY_CODES.slice(0, 5).map((code) => (
-                            <td key={code}>{displayDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
                           ))}
-                          <td>{displayDays(annualCodeTotal(annual, "HOL"))}</td>
+                          <td className={summaryNumberClass(annualCodeTotal(annual, "HOL"))}>{displaySummaryDays(annualCodeTotal(annual, "HOL"))}</td>
                           {SUMMARY_CODES.slice(5).map((code) => (
-                            <td key={code}>{displayDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
                           ))}
-                          <td>{displayDays(annual?.openingCarryForwardUnits || 0)}</td>
-                          <td>{annual?.leavePaidUnits === null || annual?.leavePaidUnits === undefined
-                            ? "—"
-                            : displayDays(annual.leavePaidUnits)}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className={styles.removeButton}
-                              onClick={() => void removeAttendanceUser(person)}
-                              disabled={!canEdit || Boolean(pendingAction)}
-                            >
-                              REMOVE
-                            </button>
+                          <td className={styles.closingBalanceCell}>{displaySummaryDays(annual?.closingBalanceUnits || 0)}</td>
+                          <td className={styles.confirmationCell}>
+                            {annual?.confirmation?.status === "confirmed" ? (
+                              <span className={styles.confirmedBadge}>CONFIRMED</span>
+                            ) : annual?.canConfirm ? (
+                              <button
+                                type="button"
+                                className={styles.confirmButton}
+                                onClick={() => void confirmAnnualSummary(person.id)}
+                                disabled={pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}`}
+                              >
+                                {pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}` ? "SAVING…" : "CONFIRM YEAR"}
+                              </button>
+                            ) : (
+                              <span className={styles.openBadge}>YEAR IN PROGRESS</span>
+                            )}
                           </td>
                         </tr>
                       )
@@ -1635,23 +1695,24 @@ export default function AttendanceRecordClient() {
                   {rosterPeople.length ? (
                     <tfoot>
                       <tr>
-                        <td>{displayDays(annualTotals.allowanceUnits)}</td>
                         <th scope="row">TOTAL</th>
+                        <td>{displaySummaryDays(annualTotals.openingCarryForwardUnits)}</td>
+                        <td>{displaySummaryDays(annualTotals.allowanceUnits)}</td>
                         {SUMMARY_CODES.slice(0, 5).map((code) => (
-                          <td key={code}>{displayDays(annualTotals.codeTotals[code] || 0)}</td>
+                          <td key={code}>{displaySummaryDays(annualTotals.codeTotals[code] || 0)}</td>
                         ))}
-                        <td>{displayDays(annualTotals.codeTotals.HOL || 0)}</td>
+                        <td>{displaySummaryDays(annualTotals.codeTotals.HOL || 0)}</td>
                         {SUMMARY_CODES.slice(5).map((code) => (
-                          <td key={code}>{displayDays(annualTotals.codeTotals[code] || 0)}</td>
+                          <td key={code}>{displaySummaryDays(annualTotals.codeTotals[code] || 0)}</td>
                         ))}
-                        <td>{displayDays(annualTotals.openingCarryForwardUnits)}</td>
-                        <td>{annualTotals.hasLeavePaid ? displayDays(annualTotals.leavePaidUnits) : "—"}</td>
+                        <td>{displaySummaryDays(annualTotals.closingBalanceUnits)}</td>
                         <td />
                       </tr>
                     </tfoot>
                   ) : null}
                 </table>
               </div>
+              </>
             )}
           </section>
         ) : null}

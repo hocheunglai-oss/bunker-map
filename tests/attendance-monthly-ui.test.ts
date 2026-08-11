@@ -71,7 +71,6 @@ test("Monthly view includes required Excel totals, confirmation, and reminders",
     "OS",
     "ATTENDED",
     "LATE",
-    "LEAVE",
     "CONFIRMATION",
   ]) {
     assert.match(client, new RegExp(`>${label}(?:<br \/>)?`))
@@ -186,12 +185,21 @@ test("All Time uses User Management roster membership and group metadata", () =>
   assert.doesNotMatch(client, /<th>LATEST RECORD<\/th>/)
   assert.doesNotMatch(client, /<th>ATTENDED DAYS<\/th>/)
   assert.doesNotMatch(client, /<th>LATE DAYS<\/th>/)
-  assert.match(client, /CURRENT YEAR<br \/>ALLOWANCE/)
-  assert.match(client, /LAST YEAR BAL B\/F/)
+  assert.match(client, /BALANCE B\/F<br \/>31 DEC \{selectedAllTimeYear - 1\}/)
+  assert.match(client, /ATTENDANCE &amp; LEAVE ACTIVITY/)
+  assert.match(client, /BALANCE C\/F<br \/>31 DEC \{selectedAllTimeYear\}/)
   assert.match(client, /annualSummaries/)
-  assert.match(client, /annual\?\.leavePaidUnits === null[\s\S]*?"—"/)
+  assert.match(client, /closingBalanceUnits/)
+  assert.match(client, /codeTotals\.HOL[\s\S]*?codeTotals\.ALS[\s\S]*?codeTotals\.ALU[\s\S]*?codeTotals\.SLX/)
   assert.doesNotMatch(client, /codeTotal\(row\.summary, "ALS"\) \+ codeTotal\(row\.summary, "ALU"\)/)
-  assert.match(client, /<th>LEAVE<br \/>PAID<\/th>[\s\S]*?<td[^>]*>—<\/td>/)
+  assert.doesNotMatch(client, /<th>LEAVE<br \/>PAID<\/th>/)
+  assert.doesNotMatch(client, />MAPPED<|>NOT MAPPED</)
+  assert.match(client, /Balance B\/F at 31 Dec/)
+  assert.match(client, /HO and OS count as attended days only/)
+  assert.match(client, /CONFIRM YEAR/)
+  assert.match(client, /note: "annual-summary"/)
+  assert.match(styles, /\.allTimePanel[\s\S]*?max-height: none;[\s\S]*?overflow: visible;/)
+  assert.match(styles, /\.allTimeTable[\s\S]*?min-width: 0;[\s\S]*?table-layout: fixed;/)
   assert.match(client, /selectedAllTimeYear/)
   assert.match(client, /<th scope="row">TOTAL<\/th>/)
 })
