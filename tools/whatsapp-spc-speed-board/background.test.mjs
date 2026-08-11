@@ -9,6 +9,7 @@ const listeners = []
 const fetchedUrls = []
 const fetchedOptions = []
 const enquiryResponses = []
+const debuggerCommands = []
 const context = {
   console,
   fetch: async (url, options = {}) => {
@@ -34,6 +35,18 @@ const context = {
       },
     },
     notifications: {},
+    debugger: {
+      attach(_target, _version, callback) {
+        callback()
+      },
+      sendCommand(_target, method, params, callback) {
+        debuggerCommands.push({ method, params })
+        callback()
+      },
+      detach(_target, callback) {
+        callback()
+      },
+    },
   },
   setTimeout,
   clearTimeout,
@@ -178,32 +191,6 @@ const senderFetchCount = fetchedUrls.length
 await context.fetchSpcEnquiryChatContacts(["barry@cosulich.com.sg"], "trader-b")
 assert.equal(fetchedUrls.length, senderFetchCount)
 
-enquiryResponses.push({
-  contacts: [
-    {
-      name: "MICHELLE ANTHONEY",
-      phone: "6596791141",
-      phonebookContactId: "phonebook-michelle",
-    },
-  ],
-})
-const savedChatContacts = await context.fetchSpcSavedChatContacts([" MICHELLE  ANTHONEY ", "KOREA"])
-assert.deepEqual(JSON.parse(JSON.stringify(savedChatContacts)), [
-  {
-    name: "MICHELLE ANTHONEY",
-    phone: "6596791141",
-    phonebookContactId: "phonebook-michelle",
-  },
-])
-assert.equal(
-  fetchedUrls.at(-1),
-  "https://spc.fcuno.com/api/spc/whatsapp-chat-contacts?name=MICHELLE%20ANTHONEY&name=KOREA",
-)
-assert.equal(fetchedOptions.at(-1).method, undefined)
-const savedChatFetchCount = fetchedUrls.length
-await context.fetchSpcSavedChatContacts(["michelle anthoney"])
-assert.equal(fetchedUrls.length, savedChatFetchCount)
-
 const debuggerOrder = []
 let releaseDebugger
 const debuggerGate = new Promise((resolve) => {
@@ -223,5 +210,41 @@ assert.deepEqual(debuggerOrder, ["first-start"])
 releaseDebugger()
 await Promise.all([firstDebuggerAction, secondDebuggerAction])
 assert.deepEqual(debuggerOrder, ["first-start", "first-end", "second-start", "second-end"])
+
+await context.nativeReplaceText(7, "+85266885575")
+assert.deepEqual(JSON.parse(JSON.stringify(debuggerCommands)), [
+  {
+    method: "Input.dispatchKeyEvent",
+    params: { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 4, commands: ["SelectAll"] },
+  },
+  {
+    method: "Input.dispatchKeyEvent",
+    params: { type: "keyUp", key: "a", code: "KeyA", modifiers: 4 },
+  },
+  {
+    method: "Input.dispatchKeyEvent",
+    params: {
+      type: "rawKeyDown",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    },
+  },
+  {
+    method: "Input.dispatchKeyEvent",
+    params: {
+      type: "keyUp",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    },
+  },
+  {
+    method: "Input.insertText",
+    params: { text: "+85266885575" },
+  },
+])
 
 console.log("SPC WhatsApp background tests passed")

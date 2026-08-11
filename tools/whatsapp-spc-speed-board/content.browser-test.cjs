@@ -73,20 +73,20 @@ const html = `<!doctype html>
       <input id="search" type="text" aria-label="Search input textbox" />
       <div id="chatHeading" role="row"><h2>Chats</h2></div>
       <div id="renamedRow" role="row" data-testid="list-item-renamed">
-        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')"><span title="Otto Tone">Otto Tone</span></div></div>
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="if (event.isTrusted || window.nativeClickInProgress) window.setChatTitle('Otto Tone')"><span title="Otto Tone">Otto Tone</span></div></div>
       </div>
       <div id="senderRow" role="row" data-testid="list-item-sender">
-        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('Barry Local Alias')"><span title="Barry Local Alias">Barry Local Alias</span></div></div>
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="if (event.isTrusted || window.nativeClickInProgress) window.setChatTitle('Barry Local Alias')"><span title="Barry Local Alias">Barry Local Alias</span></div></div>
       </div>
       <div id="ottoSenderRow" role="row" data-testid="list-item-otto-sender">
-        <div role="gridcell"><div data-testid="cell-frame-container" onclick="window.setChatTitle('+852 9000 0002')"><span title="+852 9000 0002">+852 9000 0002</span></div></div>
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="if (event.isTrusted || window.nativeClickInProgress) window.setChatTitle('+852 9000 0002')"><span title="+852 9000 0002">+852 9000 0002</span></div></div>
       </div>
       <div id="commonHeading" role="row"><h2>Groups in common</h2></div>
       <div id="commonGroupRow" role="row" data-testid="list-item-common-group"><div role="gridcell"><div data-testid="cell-frame-container"><span title="Shared group">Shared group</span></div></div></div>
     </div>
     <div id="main">
       <header>
-        <button id="profileDetails" type="button" aria-label="個人檔案詳情" onclick="document.getElementById('contactInfo').style.display='block'">
+        <button id="profileDetails" type="button" aria-label="個人檔案詳情" onclick="window.profileOpenCount += 1;document.getElementById('contactInfo').style.display='block'">
           <span id="chatTitle" title="Otto Tone">Otto Tone</span>
         </button>
       </header>
@@ -117,7 +117,10 @@ const html = `<!doctype html>
       window.nativeEnterCount = 0;
       window.nativeClickCount = 0;
       window.nativeInsertCount = 0;
+      window.nativeReplaceCount = 0;
       window.dialerOpenCount = 0;
+      window.profileOpenCount = 0;
+      window.nativeClickInProgress = false;
       window.searchValues = [];
       window.nativeEnterShouldSend = false;
       window.promptResponse = null;
@@ -156,8 +159,10 @@ const html = `<!doctype html>
         window.setChatTitle(digits === "6590000001" ? "Barry Local Alias" : digits === "85290000002" ? "+852 9000 0002" : "+" + digits);
         document.getElementById("composer").focus();
       };
-      document.getElementById("search").addEventListener("input", (event) => {
-        const value = String(event.target.value || "").toLowerCase();
+      window.applySearchValue = (nextValue) => {
+        const search = document.getElementById("search");
+        search.value = String(nextValue || "");
+        const value = search.value.toLowerCase();
         window.searchValues.push(value);
         const showRenamed = value.includes("otto tone");
         const showSender = value.includes("+6590000001");
@@ -169,6 +174,9 @@ const html = `<!doctype html>
         document.getElementById("ottoSenderRow").style.display = showOttoSender ? "block" : "none";
         document.getElementById("commonHeading").style.display = showSender || showOttoSender ? "block" : "none";
         document.getElementById("commonGroupRow").style.display = showSender || showOttoSender ? "block" : "none";
+      };
+      document.getElementById("search").addEventListener("input", (event) => {
+        if (event.isTrusted) window.applySearchValue(event.target.value);
       });
       window.chrome = {
         runtime: {
@@ -236,9 +244,21 @@ const html = `<!doctype html>
             if (message && message.type === "spc-native-click") {
               window.nativeClickCount += 1;
               const target = document.elementFromPoint(Number(message.x), Number(message.y));
-              const clickable = target && target.closest("button,[role='button']");
+              const clickable = target && target.closest("button,[role='button'],[data-testid='cell-frame-container']");
+              window.nativeClickInProgress = true;
               if (clickable) clickable.click();
+              window.nativeClickInProgress = false;
               callback({ ok: Boolean(clickable) });
+              return;
+            }
+            if (message && message.type === "spc-native-replace-text") {
+              window.nativeReplaceCount += 1;
+              if (document.activeElement === document.getElementById("search")) {
+                window.applySearchValue(message.text || "");
+                callback({ ok: true });
+                return;
+              }
+              callback({ ok: false });
               return;
             }
             if (message && message.type === "spc-native-insert-text") {
@@ -327,35 +347,17 @@ async function main() {
       await page.locator("#fcuno-wa-spc-board [data-action='add-current'][data-list='buyer']").click()
       await page.waitForFunction(() => {
         const contact = window.storageData["fcuno-wa-spc-board-v1"]?.contacts?.[0]
-        return contact?.chatName === "Otto Tone" && contact?.phone === "85266885575"
+        return contact?.chatName === "Otto Tone"
       })
       const capturedContact = await page.evaluate(() => window.storageData["fcuno-wa-spc-board-v1"].contacts[0])
-      assert.equal(capturedContact.phone, "85266885575")
+      assert.equal(capturedContact.phone, "")
       assert.equal(capturedContact.kind, "contact")
       assert.equal(await page.locator("#contactInfo").isVisible(), false)
+      assert.equal(await page.evaluate(() => window.profileOpenCount), 0)
       const capturedContactLabel = await page.locator(".fcuno-wa-spc-contact-list[data-list='buyer'] .fcuno-wa-spc-list-button").innerText()
       assert.equal(capturedContactLabel.trim(), "Otto Tone")
       assert.notEqual(capturedContactLabel.trim(), "個人檔案詳情")
       assert.doesNotMatch(capturedContactLabel, /85266885575/)
-      await page.evaluate(() => {
-        const api = window.__FCUNO_WA_SPC_TEST_API__
-        api.state.contacts = [{
-          id: "saved-otto-alias",
-          name: "Otto Lai (黎善恩 Anna)",
-          chatName: "Otto Lai (黎善恩 Anna)",
-          phone: "",
-          kind: "contact",
-          list: "buyer",
-          order: 1000,
-        }]
-        api.render()
-      })
-
-      await page.evaluate(() => window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries())
-      await page.waitForFunction(() => window.__FCUNO_WA_SPC_TEST_API__.state.contacts[0]?.phone === "85290000002")
-      const repairedSavedContact = await page.evaluate(() => window.__FCUNO_WA_SPC_TEST_API__.state.contacts[0])
-      assert.equal(repairedSavedContact.phone, "85290000002")
-      assert.equal(repairedSavedContact.directUrl, "")
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
         api.state.contacts = []
@@ -459,6 +461,8 @@ async function main() {
         dialerOpenCount: window.dialerOpenCount,
         dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
         searchedPhone: window.searchValues.includes("+6590000001"),
+        nativeReplaceCount: window.nativeReplaceCount,
+        nativeClickCount: window.nativeClickCount,
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
@@ -471,6 +475,8 @@ async function main() {
         dialerOpenCount: 0,
         dialerValue: "",
         searchedPhone: true,
+        nativeReplaceCount: 2,
+        nativeClickCount: 1,
       })
 
       await page.waitForTimeout(750)

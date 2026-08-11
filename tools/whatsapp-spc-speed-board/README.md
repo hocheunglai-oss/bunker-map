@@ -23,8 +23,8 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and reliably rearranges saved chats when dragged.
 - All authenticated traders share enquiries created after the controlled feed start on 23 July 2026, while Remove and Clear All remain local to each Chrome profile.
 - `Rename` changes only the local display label. The original WhatsApp contact or group name remains hidden as the routing identity, so renaming cannot redirect the shortcut.
-- Individual saved chats capture their WhatsApp number from Contact Info without displaying it on the board. Opening an individual uses only that full number in WhatsApp's normal left search; there is no name, dialler, direct-link, or FCUNO phonebook fallback. Groups use only their original WhatsApp group name.
-- Enquiry-sender buttons receive one normalized WhatsApp number from SPC, so they work across traders with different private phonebooks or no saved sender contact. The browser performs no secondary lookup or routing fallback.
+- Saved Supplier/Buyer shortcuts keep the exact local WhatsApp chat or group name seen by that trader. Adding a shortcut never opens Contact Info, reads a phone number, or consults the FCUNO phonebook.
+- Enquiry-sender buttons receive one normalized WhatsApp number from SPC. They use native keyboard input in WhatsApp's normal left search, require one direct-chat result, open it with a native click, verify the opened header, and only then prefill the reply. There is no sender-name or direct-link fallback.
 - After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
 
 ## Install
@@ -50,5 +50,5 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 - The board data is stored locally in Chrome extension storage under `fcuno-wa-spc-board-v1`.
 - Locally removed enquiry IDs remain hidden only for that Chrome profile, even
   when another trader changes the shared enquiry status.
-- The extension uses Chrome's debugger permission only to dispatch the WhatsApp send action from the background worker when DOM events are ignored.
+- The extension uses Chrome's debugger permission for native text input, result clicks, and send actions when WhatsApp ignores synthetic DOM events.
 - Background refreshes update only changed data and preserve active template editing and dragging. The enquiry cache is reset automatically when the SPC login changes.

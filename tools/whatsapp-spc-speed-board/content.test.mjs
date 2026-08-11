@@ -394,27 +394,6 @@ setHeaderWithLocalizedProfileLabel("OTTO LAI")
 const localizedProfileChat = api.getCurrentChat()
 assert.equal(localizedProfileChat.name, "OTTO LAI")
 assert.notEqual(localizedProfileChat.name, "個人檔案詳情")
-assert.equal(
-  api.contactInfoPhoneFromText(
-    "Contact info\nMICHELLE ANTHONEY\n+65 9679 1141\nVoice\nVideo\nSearch",
-    "MICHELLE ANTHONEY",
-  ),
-  "6596791141",
-)
-assert.equal(
-  api.contactInfoPhoneFromText(
-    "Contact info\nMICHELLE ANTHONEY\nAbout\nNo phone shown\n4 groups in common\n+65 9000 0000",
-    "MICHELLE ANTHONEY",
-  ),
-  "",
-)
-assert.equal(
-  api.contactInfoPhoneFromText(
-    "聯絡人資料\nOTTO LAI\n+852 6688 5575\n語音\n視像\n搜尋",
-    "OTTO LAI",
-  ),
-  "85266885575",
-)
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
     name: "MICHELLE ANTHONEY",
@@ -422,7 +401,7 @@ assert.deepEqual(
     phone: "+65 9679 1141",
     kind: "contact",
   }))),
-  ["+6596791141"],
+  ["MICHELLE ANTHONEY"],
 )
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
@@ -431,7 +410,7 @@ assert.deepEqual(
     phone: "+65 9679 1141",
     kind: "contact",
   }))),
-  ["+6596791141"],
+  ["MICHELLE ANTHONEY"],
 )
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
@@ -449,7 +428,7 @@ assert.deepEqual(
     phone: "",
     kind: "contact",
   }))),
-  [],
+  ["MICHELLE ANTHONEY"],
 )
 
 setHeaderTitles("SUMITOMO KOREA TAIWAN")
@@ -593,43 +572,5 @@ assert.deepEqual(
   },
 )
 assert.equal(api.enquirySenderContact({ createdByUsername: "missing@cosulich.com.sg" }), null)
-
-api.state.contacts = [
-  {
-    id: "saved-otto",
-    name: "Otto Lai (黎善恩 Anna)",
-    chatName: "Otto Lai (黎善恩 Anna)",
-    phone: "",
-    kind: "contact",
-    list: "buyer",
-    order: 1000,
-  },
-]
-api.state.senderContacts = api.sanitizeSenderContacts({
-  "otto@cosulich.com.hk": {
-    username: "otto@cosulich.com.hk",
-    displayName: "OTTO LAI",
-    phone: "+852 6688 5575",
-  },
-})
-assert.equal(api.repairSavedContactPhonesFromSenderContacts(), true)
-assert.equal(api.state.contacts[0].phone, "85266885575")
-assert.equal(api.state.contacts[0].directUrl, "")
-
-api.state.contacts[0].phone = ""
-api.state.senderContacts = api.sanitizeSenderContacts({
-  "otto@cosulich.com.hk": {
-    username: "otto@cosulich.com.hk",
-    displayName: "OTTO LAI",
-    phone: "+852 6688 5575",
-  },
-  "otto.alt@cosulich.com.hk": {
-    username: "otto.alt@cosulich.com.hk",
-    displayName: "OTTO LAI",
-    phone: "+852 6123 4567",
-  },
-})
-assert.equal(api.repairSavedContactPhonesFromSenderContacts(), false)
-assert.equal(api.state.contacts[0].phone, "")
 
 console.log("SPC WhatsApp content tests passed")

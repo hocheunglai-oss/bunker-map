@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FCUNO SPC WhatsApp Board",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "SPC Supplier/Buyer board plus sent enquiry sender for WhatsApp Web.",
   "permissions": ["storage", "notifications", "debugger"],
   "background": {
