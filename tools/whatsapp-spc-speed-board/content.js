@@ -16,6 +16,18 @@
   const ENQUIRY_OPEN_RELEASE_DELAY_MS = 700
   const CRUDE_REFRESH_MS = 15000
   const CONTACT_MENU_AUTO_HIDE_MS = 1800
+  const GENERIC_CHAT_CONTROL_TEXTS = new Set([
+    "profile details",
+    "contact info",
+    "group info",
+    "open chat details",
+    "個人檔案詳情",
+    "聯絡人資料",
+    "群組資訊",
+    "个人资料详情",
+    "联系人信息",
+    "群组信息",
+  ])
   const LOGO_SRC =
     typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
       ? chrome.runtime.getURL("spc-sidebar-logo.png")
@@ -423,6 +435,7 @@
                 updatedAt: contact.updatedAt || new Date().toISOString(),
               }
             })
+            .filter((contact) => !isGenericChatControlText(contact.name) && !isGenericChatControlText(contact.chatName))
         : [],
     }
   }
@@ -494,32 +507,22 @@
 
   function contactSearchCandidates(contact) {
     const phone = phoneDigits(contact?.phone)
-    const usePhone = contact?.kind !== "group" && Boolean(phone)
-    const searchName = contactSearchText(contact)
-    const candidates = usePhone
-      ? [`+${phone}`, searchName]
-      : [searchName || contactDisplayName(contact)]
+    const candidates = contact?.kind === "group"
+      ? [contactSearchText(contact) || contactDisplayName(contact)]
+      : phone
+        ? [`+${phone}`]
+        : []
     return Array.from(new Set(candidates.map(cleanText).filter(Boolean)))
+  }
+
+  function isGenericChatControlText(value) {
+    const text = cleanText(value).normalize("NFKC").toLowerCase()
+    return GENERIC_CHAT_CONTROL_TEXTS.has(text)
   }
 
   function contactLookupNames(contact) {
     const name = contactChatName(contact) || cleanText(contact?.name)
     return name ? [name] : []
-  }
-
-  function canUseDirectUrl(contact) {
-    const digits = phoneDigits(contact?.phone)
-    return Boolean(digits && (!cleanText(contact?.name) || contactNameIsPhone(contact)))
-  }
-
-  function sanitizeDirectUrl(value) {
-    try {
-      const url = new URL(value, window.location.origin)
-      if (url.hostname !== "web.whatsapp.com" || !url.pathname.startsWith("/send")) return ""
-      return getDirectUrl(url.searchParams.get("phone") || "")
-    } catch {
-      return ""
-    }
   }
 
   function isVisible(element) {
@@ -537,9 +540,9 @@
     const seen = new Set()
     let elements = []
     try {
-      elements = Array.from(root.querySelectorAll("span[title], div[title], [dir='auto'], [aria-label]"))
+      elements = Array.from(root.querySelectorAll("span[title], div[title], [dir='auto']"))
     } catch {
-      elements = ["span[title]", "div[title]", "[dir='auto']", "[aria-label]"].flatMap((selector) => {
+      elements = ["span[title]", "div[title]", "[dir='auto']"].flatMap((selector) => {
         try {
           return Array.from(root.querySelectorAll(selector))
         } catch {
@@ -552,14 +555,13 @@
       .map((element) =>
         cleanText(
           element.getAttribute("title") ||
-            element.getAttribute("aria-label") ||
             element.textContent,
         ),
       )
       .filter((text) => {
         const key = text.toLowerCase()
         if (!text || seen.has(key)) return false
-        if ([
+        if (isGenericChatControlText(text) || [
           "search",
           "menu",
           "message",
@@ -570,11 +572,7 @@
           "video call",
           "voice call",
           "audio call",
-          "profile details",
-          "contact info",
-          "group info",
           "click to see",
-          "open chat details",
         ].some((item) => key.includes(item))) return false
         seen.add(key)
         return true
@@ -590,7 +588,7 @@
     } catch {
     }
     const subtitle = candidates.slice(1).join(" ")
-    return /[,，]/.test(subtitle) && /\byou\b/i.test(subtitle) ? "group" : "contact"
+    return /[,，]/.test(subtitle) && /(?:\byou\b|你)/i.test(subtitle) ? "group" : "contact"
   }
 
   function getCurrentChat() {
@@ -616,7 +614,7 @@
       .split("\n")
       .map(cleanText)
       .filter(Boolean)
-    const headingIndex = lines.findIndex((line) => /^contact info$/i.test(line))
+    const headingIndex = lines.findIndex((line) => /^(?:contact info|聯絡人資料|联系人信息)$/i.test(line))
     if (headingIndex < 0) return ""
 
     const normalizedName = cleanText(expectedName).toLowerCase()
@@ -668,7 +666,7 @@
   function visibleContactInfoPhone(expectedName) {
     const panels = Array.from(document.querySelectorAll("aside, section, div"))
       .filter(isVisible)
-      .filter((element) => /^\s*contact info\b/i.test(element.innerText || element.textContent || ""))
+      .filter((element) => /^\s*(?:contact info|聯絡人資料|联系人信息)\b/i.test(element.innerText || element.textContent || ""))
     for (const panel of panels) {
       const phone = contactInfoPhoneFromText(panel.innerText || panel.textContent, expectedName)
       if (phone) return phone
@@ -677,14 +675,19 @@
   }
 
   function closeContactInfo() {
-    const close = findVisibleControl(document.body, /^close$/i)
+    const close = findVisibleControl(document.body, /^(?:close|關閉|关闭)$/i)
     return activateControl(close)
   }
 
   async function captureCurrentContactPhone(expectedName) {
     const main = document.querySelector("#main") || document.querySelector("[role='main']")
     const header = main?.querySelector("header")
-    const profile = findVisibleControl(header, /^(?:profile details|contact info|open chat details)$/i)
+    const expected = cleanText(expectedName).toLowerCase()
+    const titleElement = Array.from(header?.querySelectorAll?.("span[title], div[title], [dir='auto']") || [])
+      .filter(isVisible)
+      .find((element) => cleanText(element.getAttribute("title") || element.textContent).toLowerCase() === expected)
+    const profile = titleElement?.closest?.("button, [role='button']") ||
+      findVisibleControl(header, /^(?:profile details|contact info|open chat details)$/i)
     if (!profile || !activateControl(profile)) return ""
 
     try {
@@ -859,6 +862,39 @@
     return null
   }
 
+  function visibleChatRows() {
+    const pane = getSidePane()
+    if (!pane) return []
+    const seen = new Set()
+    return Array.from(pane.querySelectorAll("[data-testid='cell-frame-container'], [role='listitem'], [role='row']"))
+      .filter(isVisible)
+      .filter((row) => !row.closest("[role='search']") && !row.closest(`#${BOARD_ID}`))
+      .filter((row) => {
+        if (seen.has(row)) return false
+        seen.add(row)
+        return true
+      })
+  }
+
+  function chatRowMatchesCurrentChat(row) {
+    const chatName = cleanText(getCurrentChat()?.name).toLowerCase()
+    if (!chatName) return false
+    return textCandidates(row).some((text) => cleanText(text).toLowerCase() === chatName)
+  }
+
+  async function activateSearchResult(row, contact, searchBox) {
+    activateChatRow(row)
+    for (const delay of [20, 60, 120, 220]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      if (!findComposer() || !getCurrentChat()) continue
+      if (!chatRowMatchesCurrentChat(row) && contact?.kind === "group" && !currentChatMatchesContact(contact)) continue
+      if (contact?.kind !== "group" && phoneDigits(contact?.phone)) markVerifiedPhoneRoute(contact)
+      window.setTimeout(() => clearEditableText(searchBox), 80)
+      return true
+    }
+    return false
+  }
+
   function activateChatRow(row) {
     clearVerifiedPhoneRoute()
     row.scrollIntoView({ block: "center", inline: "nearest" })
@@ -935,131 +971,24 @@
     for (let index = 0; index < searchCandidates.length; index += 1) {
       const searchText = searchCandidates[index]
       setEditableText(searchBox, searchText)
-      const immediateRow = findVisibleChatRow(contact)
+      const isPhoneAttempt = contact?.kind !== "group" && Boolean(phoneDigits(contact?.phone))
+      const immediateRows = visibleChatRows()
+      const immediateRow = findVisibleChatRow(contact) || (isPhoneAttempt && immediateRows.length === 1 ? immediateRows[0] : null)
       if (immediateRow) {
-        activateChatRow(immediateRow)
-        window.setTimeout(() => clearEditableText(searchBox), 80)
-        return true
+        if (await activateSearchResult(immediateRow, contact, searchBox)) return true
       }
-      const isPhoneAttempt = Boolean(phoneDigits(contact?.phone)) && phoneDigits(searchText) === phoneDigits(contact.phone)
-      const delays = isPhoneAttempt ? [100, 220, 420] : [60, 140, 220]
+      const delays = [60, 140, 240]
       for (const delay of delays) {
         await new Promise((resolve) => window.setTimeout(resolve, delay))
-        const row = findVisibleChatRow(contact)
+        const rows = visibleChatRows()
+        const row = findVisibleChatRow(contact) || (isPhoneAttempt && rows.length === 1 ? rows[0] : null)
         if (row) {
-          activateChatRow(row)
-          window.setTimeout(() => clearEditableText(searchBox), 80)
-          return true
+          if (await activateSearchResult(row, contact, searchBox)) return true
         }
       }
     }
 
     clearEditableText(searchBox)
-    return false
-  }
-
-  function findVisibleControlBySvgTitle(title) {
-    const expected = cleanText(title).toLowerCase()
-    if (!expected) return null
-    const controls = Array.from(document.querySelectorAll("button, [role='button']")).filter(isVisible)
-    return controls.find((control) =>
-      Array.from(control.querySelectorAll("svg title")).some((node) => cleanText(node.textContent).toLowerCase() === expected),
-    ) || null
-  }
-
-  function findNewChatButton() {
-    const icon = Array.from(document.querySelectorAll("[data-icon='new-chat-outline'], [data-testid='new-chat-outline']"))
-      .find((element) => {
-        const control = element.closest("button, [role='button']")
-        return control && isVisible(control) && !control.disabled && control.getAttribute("aria-disabled") !== "true"
-      })
-    return icon?.closest("button, [role='button']") || null
-  }
-
-  function findPhoneDialerInput() {
-    return Array.from(document.querySelectorAll("[data-testid='phone-number-input'][role='textbox'], [data-testid='phone-number-input'][contenteditable='true']"))
-      .find(isVisible) || null
-  }
-
-  function findPhoneDialerRoot() {
-    const input = findPhoneDialerInput()
-    const keypad = Array.from(document.querySelectorAll("[data-testid='dialer-pad-1']")).find(isVisible)
-    if (!input || !keypad) return null
-    let root = input.parentElement
-    while (root && !root.contains(keypad)) root = root.parentElement
-    return root
-  }
-
-  function findPhoneDialerRow(phone) {
-    const expected = phoneDigits(phone)
-    const root = findPhoneDialerRoot()
-    if (!expected || !root) return null
-    const rows = Array.from(root.querySelectorAll("[data-testid='cell-frame-container'][role='button'], [data-testid='cell-frame-container']"))
-      .filter(isVisible)
-    const exactPhoneRow = rows.find((row) => phoneDigits(row.innerText || row.textContent) === expected)
-    return exactPhoneRow || (rows.length === 1 ? rows[0] : null)
-  }
-
-  async function closePhoneDialer() {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const back = findVisibleControlBySvgTitle("ic-arrow-back")
-      if (!back) return
-      activateControl(back)
-      await new Promise((resolve) => window.setTimeout(resolve, 100))
-    }
-  }
-
-  async function openPhoneContact(contact) {
-    const phone = phoneDigits(contact?.phone)
-    if (!phone || contact?.kind === "group") return false
-
-    const newChat = findNewChatButton()
-    if (!newChat || !activateControl(newChat)) return false
-
-    let dialpad = null
-    for (const delay of [80, 120, 180, 260]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-      dialpad = findVisibleControlBySvgTitle("ic-dialpad")
-      if (dialpad) break
-    }
-    if (!dialpad || !activateControl(dialpad)) {
-      await closePhoneDialer()
-      return false
-    }
-
-    let input = null
-    for (const delay of [60, 100, 160, 240]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-      input = findPhoneDialerInput()
-      if (input) break
-    }
-    if (!input) {
-      await closePhoneDialer()
-      return false
-    }
-
-    setEditableText(input, `+${phone}`)
-    let row = null
-    for (const delay of [100, 160, 240, 360, 520]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-      row = findPhoneDialerRow(phone)
-      if (row) break
-    }
-    if (!row) {
-      await closePhoneDialer()
-      return false
-    }
-
-    activateChatRow(row)
-    for (const delay of [100, 160, 240, 360, 520]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-      if (!findPhoneDialerInput() && findComposer() && getCurrentChat()) {
-        markVerifiedPhoneRoute(contact)
-        return true
-      }
-    }
-
-    await closePhoneDialer()
     return false
   }
 
@@ -1106,25 +1035,9 @@
     return sent
   }
 
-  async function openContact(contact, { allowNavigation = true } = {}) {
+  async function openContact(contact) {
     if (currentChatMatchesContact(contact)) return true
-    const row = findVisibleChatRow(contact)
-    if (row) {
-      activateChatRow(row)
-      return true
-    }
-    if (contact?.preferPhoneSearch && await openPhoneContact(contact)) return true
-    if (await searchAndOpenContact(contact)) return true
-    if (contact?.kind !== "group" && phoneDigits(contact?.phone) && await openPhoneContact(contact)) return true
-
-    const directUrl = allowNavigation && canUseDirectUrl(contact)
-      ? getDirectUrl(contact.phone) || sanitizeDirectUrl(contact.directUrl)
-      : ""
-    if (directUrl) {
-      window.location.assign(directUrl)
-      return true
-    }
-    return false
+    return searchAndOpenContact(contact)
   }
 
   function unreadCount(row) {
@@ -1333,7 +1246,6 @@
       phone: contact.phone,
       directUrl: "",
       kind: "contact",
-      preferPhoneSearch: true,
     }
   }
 
@@ -1355,7 +1267,7 @@
     const contact = enquirySenderContact(enquiry)
     const replyText = enquiryReplyText(enquiry)
     if (!contact || !replyText) return false
-    if (!(await openContact(contact, { allowNavigation: false }))) return false
+    if (!(await openContact(contact))) return false
 
     for (let attempt = 0; attempt < 40; attempt += 1) {
       if (currentChatMatchesContact(contact) && prepareComposerDraftText(replyText)) {
@@ -2452,7 +2364,6 @@
     window.__FCUNO_WA_SPC_TEST_API__ = {
       state,
       activeDragEnquiryIds,
-      canUseDirectUrl,
       cleanText,
       composerText,
       contactNameIsPhone,

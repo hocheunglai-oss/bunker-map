@@ -308,6 +308,20 @@ function setHeaderTitleAndSubtitle(title, subtitle) {
   main = new FakeElement({ children: [header] })
 }
 
+function setHeaderWithLocalizedProfileLabel(title) {
+  const header = new FakeElement({
+    tag: "header",
+    children: [
+      new FakeElement({
+        tag: "button",
+        attrs: { "aria-label": "個人檔案詳情" },
+        children: [new FakeElement({ text: title, tag: "span", attrs: { title } })],
+      }),
+    ],
+  })
+  main = new FakeElement({ children: [header] })
+}
+
 function setComposer(text = "") {
   const composer = new FakeElement({
     text,
@@ -365,8 +379,6 @@ assert.equal(groupChat.name, "KOREA")
 assert.equal(groupChat.phone, "")
 assert.equal(groupChat.kind, "group")
 assert.equal(groupChat.directUrl, "")
-assert.equal(api.canUseDirectUrl({ name: "KOREA", phone: "+60126994488" }), false)
-assert.equal(api.canUseDirectUrl({ name: "+85266885575", phone: "+85266885575" }), true)
 
 setHeaderTitleAndSubtitle("Cosulich - Sumitomo (South Korea/Taiwan)", "ATSUSHI, MASATO, SHUGO, You")
 const renamedGroupChat = api.getCurrentChat()
@@ -378,6 +390,10 @@ setHeaderTitleAndSubtitle("MICHELLE ANTHONEY", "online")
 const individualChat = api.getCurrentChat()
 assert.equal(individualChat.name, "MICHELLE ANTHONEY")
 assert.equal(individualChat.kind, "contact")
+setHeaderWithLocalizedProfileLabel("OTTO LAI")
+const localizedProfileChat = api.getCurrentChat()
+assert.equal(localizedProfileChat.name, "OTTO LAI")
+assert.notEqual(localizedProfileChat.name, "個人檔案詳情")
 assert.equal(
   api.contactInfoPhoneFromText(
     "Contact info\nMICHELLE ANTHONEY\n+65 9679 1141\nVoice\nVideo\nSearch",
@@ -392,6 +408,13 @@ assert.equal(
   ),
   "",
 )
+assert.equal(
+  api.contactInfoPhoneFromText(
+    "聯絡人資料\nOTTO LAI\n+852 6688 5575\n語音\n視像\n搜尋",
+    "OTTO LAI",
+  ),
+  "85266885575",
+)
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
     name: "MICHELLE ANTHONEY",
@@ -399,7 +422,7 @@ assert.deepEqual(
     phone: "+65 9679 1141",
     kind: "contact",
   }))),
-  ["+6596791141", "MICHELLE ANTHONEY"],
+  ["+6596791141"],
 )
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
@@ -408,7 +431,7 @@ assert.deepEqual(
     phone: "+65 9679 1141",
     kind: "contact",
   }))),
-  ["+6596791141", "MICHELLE ANTHONEY"],
+  ["+6596791141"],
 )
 assert.deepEqual(
   JSON.parse(JSON.stringify(api.contactSearchCandidates({
@@ -418,6 +441,15 @@ assert.deepEqual(
     kind: "group",
   }))),
   ["KOREA"],
+)
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.contactSearchCandidates({
+    name: "MICHELLE ANTHONEY",
+    chatName: "MICHELLE ANTHONEY",
+    phone: "",
+    kind: "contact",
+  }))),
+  [],
 )
 
 setHeaderTitles("SUMITOMO KOREA TAIWAN")
@@ -456,6 +488,9 @@ assert.equal(renameSafeContact.chatName, "Cosulich - Sumitomo (South Korea/Taiwa
 const restoredRename = api.sanitizeSavedState({ contacts: [renameSafeContact] }).contacts[0]
 assert.equal(restoredRename.name, "SUMITOMO DESK")
 assert.equal(restoredRename.chatName, "Cosulich - Sumitomo (South Korea/Taiwan)")
+assert.equal(api.sanitizeSavedState({
+  contacts: [{ id: "bad", name: "個人檔案詳情", chatName: "個人檔案詳情", list: "buyer" }],
+}).contacts.length, 0)
 assert.equal(api.contactSearchText(renameSafeContact), "Cosulich - Sumitomo (South Korea/Taiwan)")
 setHeaderTitles("Cosulich - Sumitomo (South Korea/Taiwan)")
 assert.equal(api.currentChatMatchesContact(renameSafeContact), true)
@@ -555,7 +590,6 @@ assert.deepEqual(
     phone: "6590000001",
     directUrl: "",
     kind: "contact",
-    preferPhoneSearch: true,
   },
 )
 assert.equal(api.enquirySenderContact({ createdByUsername: "missing@cosulich.com.sg" }), null)

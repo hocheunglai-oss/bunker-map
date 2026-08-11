@@ -39,7 +39,7 @@ const html = `<!doctype html>
       #phoneNumberInput { min-height: 24px; padding: 6px; border: 1px solid #ccc; }
       #phoneDialerResult { display: none; padding: 12px; cursor: pointer; border-top: 1px solid #eee; }
       #renamedRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
-      #senderRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
+      #senderRow, #ottoSenderRow { display: none; padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 360px; background: #f6efe5; }
@@ -73,14 +73,16 @@ const html = `<!doctype html>
       <div id="renamedRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Otto Tone')">
         <span title="Otto Tone">Otto Tone</span>
       </div>
-      <div id="senderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('BARRY KHOO')">
-        <span title="BARRY KHOO">BARRY KHOO</span>
-        <span>+65 9000 0001</span>
+      <div id="senderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('Barry Local Alias')">
+        <span title="Barry Local Alias">Barry Local Alias</span>
+      </div>
+      <div id="ottoSenderRow" data-testid="cell-frame-container" onclick="window.setChatTitle('+852 9000 0002')">
+        <span title="+852 9000 0002">+852 9000 0002</span>
       </div>
     </div>
     <div id="main">
       <header>
-        <button id="profileDetails" type="button" aria-label="Profile details" onclick="document.getElementById('contactInfo').style.display='block'">
+        <button id="profileDetails" type="button" aria-label="個人檔案詳情" onclick="document.getElementById('contactInfo').style.display='block'">
           <span id="chatTitle" title="Otto Tone">Otto Tone</span>
         </button>
       </header>
@@ -112,6 +114,7 @@ const html = `<!doctype html>
       window.nativeClickCount = 0;
       window.nativeInsertCount = 0;
       window.dialerOpenCount = 0;
+      window.searchValues = [];
       window.nativeEnterShouldSend = false;
       window.promptResponse = null;
       window.enquiryOverrides = {};
@@ -151,8 +154,10 @@ const html = `<!doctype html>
       };
       document.getElementById("search").addEventListener("input", (event) => {
         const value = String(event.target.value || "").toLowerCase();
+        window.searchValues.push(value);
         document.getElementById("renamedRow").style.display = value.includes("otto tone") ? "block" : "none";
-        document.getElementById("senderRow").style.display = value.includes("barry khoo") || value.includes("6590000001") ? "block" : "none";
+        document.getElementById("senderRow").style.display = value.includes("+6590000001") ? "block" : "none";
+        document.getElementById("ottoSenderRow").style.display = value.includes("+85290000002") ? "block" : "none";
       });
       window.chrome = {
         runtime: {
@@ -308,7 +313,7 @@ async function main() {
         /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
       )
 
-      await page.locator("#fcuno-wa-spc-board [data-action='add-current'][data-list='supplier']").click()
+      await page.locator("#fcuno-wa-spc-board [data-action='add-current'][data-list='buyer']").click()
       await page.waitForFunction(() => {
         const contact = window.storageData["fcuno-wa-spc-board-v1"]?.contacts?.[0]
         return contact?.chatName === "Otto Tone" && contact?.phone === "85266885575"
@@ -317,8 +322,9 @@ async function main() {
       assert.equal(capturedContact.phone, "85266885575")
       assert.equal(capturedContact.kind, "contact")
       assert.equal(await page.locator("#contactInfo").isVisible(), false)
-      const capturedContactLabel = await page.locator(".fcuno-wa-spc-contact-list[data-list='supplier'] .fcuno-wa-spc-list-button").innerText()
+      const capturedContactLabel = await page.locator(".fcuno-wa-spc-contact-list[data-list='buyer'] .fcuno-wa-spc-list-button").innerText()
       assert.equal(capturedContactLabel.trim(), "Otto Tone")
+      assert.notEqual(capturedContactLabel.trim(), "個人檔案詳情")
       assert.doesNotMatch(capturedContactLabel, /85266885575/)
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
@@ -422,6 +428,7 @@ async function main() {
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
         dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
+        searchedPhone: window.searchValues.includes("+6590000001"),
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
@@ -431,8 +438,9 @@ async function main() {
         composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
-        dialerOpenCount: 1,
-        dialerValue: "+6590000001",
+        dialerOpenCount: 0,
+        dialerValue: "",
+        searchedPhone: true,
       })
 
       await page.waitForTimeout(750)
@@ -498,14 +506,16 @@ async function main() {
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
         dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
+        searchedPhone: window.searchValues.includes("+85290000002"),
       }))
       assert.deepEqual(unsavedSenderOpenResult, {
         chatTitle: "+852 9000 0002",
         composerText: "Re: Shan Ren, ",
         composerFocused: true,
         sentCount: 0,
-        dialerOpenCount: 3,
-        dialerValue: "+85290000002",
+        dialerOpenCount: 0,
+        dialerValue: "",
+        searchedPhone: true,
       })
 
       await page.evaluate(() => {
@@ -665,7 +675,7 @@ async function main() {
 
       await page.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
-        const contact = { id: "renamed-contact", name: "Otto Tone", chatName: "Otto Tone", phone: "", list: "buyer", order: 1000 }
+        const contact = { id: "renamed-contact", name: "Otto Tone", chatName: "Otto Tone", phone: "", kind: "group", list: "buyer", order: 1000 }
         api.state.contacts = [contact]
         api.state.contactMenuId = contact.id
         window.promptResponse = "OTTO"

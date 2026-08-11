@@ -16,15 +16,15 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user click an enquiry row to select it with a blue highlight, then click it again to cancel selection.
 - Shows the Send command and effective selection inside the fixed button, including whether the opening template will be included.
-- Shows the supplied green paper-plane button on each enquiry. It opens the sender's individual chat by the verified SPC WhatsApp number, inserting that number exactly once in WhatsApp's in-page phone dialer even when WhatsApp Web is not in English or the chat is not saved locally. It rejects repeat clicks while routing, never refreshes the page, prefills `Re: <Vessel Name>, ` exactly once, and leaves the composer focused without sending.
+- Shows the supplied green paper-plane button on each enquiry. It enters the sender's full verified WhatsApp number once in WhatsApp's normal left search, opens the single matching result, rejects repeat clicks while routing, never refreshes the page, prefills `Re: <Vessel Name>, ` exactly once, and leaves the composer focused without sending.
 - Uses checkbox-free enquiry rows and sends all currently blue-selected enquiries into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
 - Lets each trader locally remove one enquiry or clear the visible list without affecting other traders.
 - The handle beside each saved chat opens Rename/Send Selected/Remove on click, hides shortly after you move away, and reliably rearranges saved chats when dragged.
 - All authenticated traders share enquiries created after the controlled feed start on 23 July 2026, while Remove and Clear All remain local to each Chrome profile.
 - `Rename` changes only the local display label. The original WhatsApp contact or group name remains hidden as the routing identity, so renaming cannot redirect the shortcut.
-- Individual saved chats capture their WhatsApp number from Contact Info without displaying it on the board. Opening a saved contact searches by the normalized phone number first, then uses the original WhatsApp chat name only as a fallback. The FCUNO phonebook remains a legacy fallback; groups continue to use their original WhatsApp group name.
-- Enquiry-sender buttons use the verified WhatsApp number stored on the SPC user account, so they work across traders with different private phonebooks or no saved sender contact. A unique FCUNO phonebook email match remains a fallback for older accounts without a stored number.
+- Individual saved chats capture their WhatsApp number from Contact Info without displaying it on the board. Opening an individual uses only that full number in WhatsApp's normal left search; there is no name, dialler, direct-link, or FCUNO phonebook fallback. Groups use only their original WhatsApp group name.
+- Enquiry-sender buttons receive one normalized WhatsApp number from SPC, so they work across traders with different private phonebooks or no saved sender contact. The browser performs no secondary lookup or routing fallback.
 - After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
 
 ## Install
