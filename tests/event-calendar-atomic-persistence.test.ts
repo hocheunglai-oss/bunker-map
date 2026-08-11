@@ -27,6 +27,16 @@ test("event edits use the atomic mutation endpoint before updating the UI", () =
   assert.match(page, /await mutateCalendar\("upsert", nextEvents\)/)
 })
 
+test("event title inputs preserve the caret while keeping saved titles uppercase", () => {
+  const page = source("../app/admin/eventcalendar/page.tsx")
+
+  assert.match(page, /title: event\.target\.value \}\)\)/)
+  assert.doesNotMatch(page, /title: event\.target\.value\.toUpperCase\(\)/)
+  assert.match(page, /title: draftEvent\.title\.trim\(\)\.toUpperCase\(\) \|\| "NEW EVENT"/)
+  assert.match(page, /title: draftRecurrentEvent\.title\.trim\(\)\.toUpperCase\(\) \|\| "NEW EVENT"/)
+  assert.match(page, /style=\{\{ \.\.\.inputStyle, textTransform: "uppercase" \}\}/)
+})
+
 test("per-event mutations preserve unrelated concurrent records", () => {
   const original = {
     events: [

@@ -893,7 +893,7 @@ export default function EventCalendarPage() {
 
     const nextEvent: ManagedEvent = {
       ...draftEvent,
-      title: draftEvent.title.trim() || "NEW EVENT",
+      title: draftEvent.title.trim().toUpperCase() || "NEW EVENT",
       people: normalizePeople(draftEvent.people),
       uncertainPeople: normalizePeople(draftEvent.uncertainPeople || []),
       endDate: draftEvent.endDate >= draftEvent.startDate ? draftEvent.endDate : draftEvent.startDate,
@@ -976,7 +976,7 @@ export default function EventCalendarPage() {
     const nextEvents = occurrenceDates.map((dateKey, index) => ({
       ...draftRecurrentEvent,
       id: `recurrent-${Date.now()}-${index}`,
-      title: draftRecurrentEvent.title.trim() || "NEW EVENT",
+      title: draftRecurrentEvent.title.trim().toUpperCase() || "NEW EVENT",
       people: normalizePeople(draftRecurrentEvent.people),
       uncertainPeople: normalizePeople(draftRecurrentEvent.uncertainPeople || []),
       startDate: dateKey,
@@ -1828,8 +1828,8 @@ export default function EventCalendarPage() {
               Event
               <input
                 value={draftEvent.title}
-                onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value.toUpperCase() }))}
-                style={inputStyle}
+                onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value }))}
+                style={{ ...inputStyle, textTransform: "uppercase" }}
               />
             </label>
             <label
@@ -1944,8 +1944,8 @@ export default function EventCalendarPage() {
               Event
               <input
                 value={draftRecurrentEvent.title}
-                onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, title: event.target.value.toUpperCase() }))}
-                style={inputStyle}
+                onChange={(event) => setDraftRecurrentEvent((current) => ({ ...current, title: event.target.value }))}
+                style={{ ...inputStyle, textTransform: "uppercase" }}
               />
             </label>
             <div style={{ marginBottom: "10px" }}>
