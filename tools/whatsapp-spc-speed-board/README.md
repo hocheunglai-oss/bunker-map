@@ -16,7 +16,7 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user click an enquiry row to select it with a blue highlight, then click it again to cancel selection.
 - Shows the Send command and effective selection inside the fixed button, including whether the opening template will be included.
-- Shows the supplied green paper-plane button on each enquiry. It opens the sender's individual chat by the verified SPC WhatsApp number, using WhatsApp's in-page phone dialer when the chat is saved under a different local name or is not saved at all. It never refreshes the page, prefills `Re: <Vessel Name>, `, and leaves the composer focused without sending.
+- Shows the supplied green paper-plane button on each enquiry. It opens the sender's individual chat by the verified SPC WhatsApp number, inserting that number exactly once in WhatsApp's in-page phone dialer even when WhatsApp Web is not in English or the chat is not saved locally. It rejects repeat clicks while routing, never refreshes the page, prefills `Re: <Vessel Name>, ` exactly once, and leaves the composer focused without sending.
 - Uses checkbox-free enquiry rows and sends all currently blue-selected enquiries into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
 - Lets each trader locally remove one enquiry or clear the visible list without affecting other traders.

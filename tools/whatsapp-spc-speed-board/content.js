@@ -11,6 +11,9 @@
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
   const SEND_LOCK_TTL_MS = 30000
+  const ENQUIRY_OPEN_LOCK_ATTRIBUTE = "data-fcuno-wa-spc-enquiry-open-lock"
+  const ENQUIRY_OPEN_LOCK_TTL_MS = 12000
+  const ENQUIRY_OPEN_RELEASE_DELAY_MS = 700
   const CRUDE_REFRESH_MS = 15000
   const CONTACT_MENU_AUTO_HIDE_MS = 1800
   const LOGO_SRC =
@@ -69,6 +72,7 @@
   let resolvingContactPhones = false
   let capturingCurrentContact = false
   let verifiedPhoneRoute = { phone: "", chatName: "", expiresAt: 0 }
+  let enquiryChatOpenPromise = null
 
   function uid() {
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -903,8 +907,11 @@
       return
     }
     document.execCommand("selectAll", false)
-    document.execCommand("insertText", false, text)
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+    const inserted = document.execCommand("insertText", false, text)
+    if (!inserted) {
+      element.textContent = text
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: null }))
+    }
   }
 
   function clearEditableText(element) {
@@ -1330,7 +1337,21 @@
     }
   }
 
-  async function openEnquirySenderChat(enquiry) {
+  function acquireEnquiryOpenLock() {
+    const now = Date.now()
+    const currentExpiry = Number(document.documentElement?.getAttribute(ENQUIRY_OPEN_LOCK_ATTRIBUTE) || 0)
+    if (Number.isFinite(currentExpiry) && currentExpiry > now) return false
+    document.documentElement?.setAttribute(ENQUIRY_OPEN_LOCK_ATTRIBUTE, String(now + ENQUIRY_OPEN_LOCK_TTL_MS))
+    return true
+  }
+
+  function scheduleEnquiryOpenLockRelease() {
+    window.setTimeout(() => {
+      document.documentElement?.removeAttribute(ENQUIRY_OPEN_LOCK_ATTRIBUTE)
+    }, ENQUIRY_OPEN_RELEASE_DELAY_MS)
+  }
+
+  async function performOpenEnquirySenderChat(enquiry) {
     const contact = enquirySenderContact(enquiry)
     const replyText = enquiryReplyText(enquiry)
     if (!contact || !replyText) return false
@@ -1349,6 +1370,18 @@
       await new Promise((resolve) => window.setTimeout(resolve, 100))
     }
     return false
+  }
+
+  function openEnquirySenderChat(enquiry) {
+    if (enquiryChatOpenPromise || !acquireEnquiryOpenLock()) return enquiryChatOpenPromise || Promise.resolve(false)
+    const openPromise = performOpenEnquirySenderChat(enquiry)
+    enquiryChatOpenPromise = openPromise
+    const release = () => {
+      if (enquiryChatOpenPromise === openPromise) enquiryChatOpenPromise = null
+      scheduleEnquiryOpenLockRelease()
+    }
+    openPromise.then(release, release)
+    return openPromise
   }
 
   function recordEnquirySeen(enquiry) {

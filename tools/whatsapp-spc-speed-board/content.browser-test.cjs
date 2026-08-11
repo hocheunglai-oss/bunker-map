@@ -131,6 +131,9 @@ const html = `<!doctype html>
         title.setAttribute("title", name);
       };
       document.getElementById("phoneNumberInput").addEventListener("input", (event) => {
+        if (!event.isTrusted && event.inputType === "insertText" && event.data) {
+          event.target.appendChild(document.createTextNode(String(event.data)));
+        }
         const digits = String(event.target.innerText || event.target.textContent || "").replace(/\\D/g, "");
         const result = document.getElementById("phoneDialerResult");
         result.dataset.phone = digits;
@@ -224,15 +227,15 @@ const html = `<!doctype html>
             }
             if (message && message.type === "spc-native-insert-text") {
               window.nativeInsertCount += 1;
-              window.editorModel = String(message.text || "");
               const composer = document.getElementById("composer");
-              composer.replaceChildren();
+              if (!String(composer.innerText || "").trim()) composer.replaceChildren();
               String(message.text || "").split("\\n").forEach((line, index) => {
-                if (index > 0) composer.appendChild(document.createElement("br"));
+                if (index > 0 || composer.childNodes.length > 0) composer.appendChild(document.createElement("br"));
                 composer.appendChild(document.createTextNode(line));
               });
+              window.editorModel = composer.innerText;
               composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(message.text || "") }));
-              callback({ ok: true });
+              window.setTimeout(() => callback({ ok: true }), 40);
               return;
             }
             if (message && message.type === "spc-native-enter") {
@@ -418,6 +421,7 @@ async function main() {
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
+        dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
@@ -428,8 +432,34 @@ async function main() {
         composerFocused: true,
         sentCount: 0,
         dialerOpenCount: 1,
+        dialerValue: "+6590000001",
       })
 
+      await page.waitForTimeout(750)
+      await page.evaluate(() => {
+        window.editorModel = ""
+        window.nativeInsertCount = 0
+        document.getElementById("composer").replaceChildren()
+        document.getElementById("composer").blur()
+        window.setChatTitle("Other Chat")
+        const button = document.querySelector("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']")
+        button.click()
+        button.click()
+      })
+      await page.waitForFunction(() => (
+        document.getElementById("chatTitle")?.getAttribute("title") === "Barry Local Alias" &&
+        window.editorModel === "Re: Taisei Maru No.15, " &&
+        window.nativeInsertCount === 1
+      ), { timeout: 5000 })
+      assert.deepEqual(await page.evaluate(() => ({
+        composerText: window.editorModel,
+        nativeInsertCount: window.nativeInsertCount,
+      })), {
+        composerText: "Re: Taisei Maru No.15, ",
+        nativeInsertCount: 1,
+      })
+
+      await page.waitForTimeout(750)
       await page.evaluate(() => {
         window.editorModel = ""
         document.getElementById("composer").replaceChildren()
@@ -448,6 +478,7 @@ async function main() {
         sentCount: 0,
       })
 
+      await page.waitForTimeout(750)
       await page.evaluate(() => {
         window.editorModel = ""
         document.getElementById("composer").replaceChildren()
@@ -466,13 +497,15 @@ async function main() {
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
+        dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
       }))
       assert.deepEqual(unsavedSenderOpenResult, {
         chatTitle: "+852 9000 0002",
         composerText: "Re: Shan Ren, ",
         composerFocused: true,
         sentCount: 0,
-        dialerOpenCount: 2,
+        dialerOpenCount: 3,
+        dialerValue: "+85290000002",
       })
 
       await page.evaluate(() => {
