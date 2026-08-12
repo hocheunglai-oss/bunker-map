@@ -1,6 +1,6 @@
 const SPC_SHARED_FEED_STARTED_AT = "2026-07-23T09:20:00.000Z"
 const SPC_ENQUIRIES_URL =
-  `https://spc.fcuno.com/api/spc/enquiries?limit=250&createdAfter=${encodeURIComponent(SPC_SHARED_FEED_STARTED_AT)}`
+  `https://spc.fcuno.com/api/spc/enquiries?limit=250&scope=shared&createdAfter=${encodeURIComponent(SPC_SHARED_FEED_STARTED_AT)}`
 const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
 const BRENT_API_URL = "https://spc.fcuno.com/api/market/brent"
 const CRUDE_CACHE_TTL_MS = 30000

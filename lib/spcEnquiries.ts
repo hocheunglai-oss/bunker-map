@@ -45,6 +45,7 @@ export type SpcEnquiryListOptions = {
   createdAfter?: string
   updatedAfter?: string
   updatedAfterId?: string
+  createdByUsername?: string
 }
 
 export type SpcEnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
@@ -121,6 +122,15 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
   return mapped
 }
 
+function requireEnquiryOwner(row: SpcEnquiryRow, session: SpcSession) {
+  if (
+    !session.username ||
+    row.created_by_username.toLowerCase() !== session.username.toLowerCase()
+  ) {
+    throw new Error("Forbidden")
+  }
+}
+
 async function loadSpcEnquiryRow(
   supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
   enquiryId: string,
@@ -155,6 +165,9 @@ export async function listSpcEnquiries(session: SpcSession, options: SpcEnquiryL
   if (options.createdAfter) {
     query = query.gt("created_at", options.createdAfter)
   }
+  if (options.createdByUsername) {
+    query = query.eq("created_by_username", options.createdByUsername)
+  }
 
   if (options.updatedAfter) {
     query = options.updatedAfterId
@@ -183,6 +196,7 @@ export async function listSpcEnquiryIds(session: SpcSession, options: SpcEnquiry
 
   if (options.status) query = query.eq("status", options.status)
   if (options.createdAfter) query = query.gt("created_at", options.createdAfter)
+  if (options.createdByUsername) query = query.eq("created_by_username", options.createdByUsername)
 
   const { data, error } = await query
   if (error) throw error
@@ -262,6 +276,7 @@ export async function updateSpcEnquiryOutcome(
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  requireEnquiryOwner(existing, session)
   if (outcome === "cancel") {
     const { error } = await supabase
       .from("spc_enquiries")
@@ -335,6 +350,7 @@ export async function reofferSpcEnquiry(
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  requireEnquiryOwner(existing, session)
   const currentText = formatSpcEnquiry(existing)
   const providedNotes = cleanText(input.notes)
   const now = new Date().toISOString()

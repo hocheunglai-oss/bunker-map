@@ -1,5 +1,7 @@
 # FCUNO SPC WhatsApp Board
 
+Current version: `0.6.0`.
+
 Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 
 ## What It Does

@@ -1,6 +1,6 @@
 import { normalizeEmailList } from "@/lib/emailAddress"
 
-export const SPC_SPEED_BOARD_VERSION = "0.5.9"
+export const SPC_SPEED_BOARD_VERSION = "0.6.0"
 export const SPC_SPEED_BOARD_PAGE_URL = "https://spc.fcuno.com/chrome"
 export const SPC_SPEED_BOARD_ROLE = "SUPPLIER TRADER"
 export const SPC_SPEED_BOARD_NOTICE_CC = ["otto@cosulich.com.hk"] as const

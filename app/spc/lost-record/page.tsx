@@ -55,7 +55,7 @@ export default function SpcLostRecordPage() {
     setLoading(true)
     setMessage("")
     try {
-      const response = await fetch("/api/spc/enquiries?status=cancelled&limit=250", { cache: "no-store" })
+      const response = await fetch("/api/spc/enquiries?status=cancelled&limit=250&scope=records", { cache: "no-store" })
       const data = (await response.json()) as { enquiries?: SpcEnquiry[]; message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to load lost record.")
       setEnquiries(data.enquiries || [])

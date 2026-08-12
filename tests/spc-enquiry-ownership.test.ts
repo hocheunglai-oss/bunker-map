@@ -1,0 +1,51 @@
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import test from "node:test"
+
+const route = readFileSync(
+  new URL("../app/api/spc/enquiries/route.ts", import.meta.url),
+  "utf8",
+)
+const enquiriesPage = readFileSync(
+  new URL("../app/spc/enquiries/page.tsx", import.meta.url),
+  "utf8",
+)
+const enquiriesStore = readFileSync(
+  new URL("../lib/spcEnquiries.ts", import.meta.url),
+  "utf8",
+)
+const lostRecordPage = readFileSync(
+  new URL("../app/spc/lost-record/page.tsx", import.meta.url),
+  "utf8",
+)
+const speedBoard = readFileSync(
+  new URL("../tools/whatsapp-spc-speed-board/background.js", import.meta.url),
+  "utf8",
+)
+
+test("SPC web enquiry history requests only the authenticated user's rows", () => {
+  assert.match(enquiriesPage, /api\/spc\/enquiries\?limit=200&bootstrap=1/)
+  assert.match(enquiriesPage, /data\.sessionKey\?\.toLowerCase\(\) !== username\.toLowerCase\(\)/)
+  assert.match(enquiriesPage, /setEnquiries\(\[\]\)/)
+  assert.match(route, /requestedScope = searchParams\.get\("scope"\)\?\.trim\(\) \|\| "mine"/)
+  assert.match(route, /createdByUsername = sharedScope \|\| recordsScope \? undefined : session\.username/)
+  assert.match(enquiriesStore, /query = query\.eq\("created_by_username", options\.createdByUsername\)/)
+})
+
+test("SPC Speed Board continues to use the shared enquiry feed", () => {
+  assert.match(speedBoard, /api\/spc\/enquiries\?limit=250&scope=shared&createdAfter=/)
+  assert.match(route, /hasSpcPagePermission\(session, "spc-chrome-extension", "view"\)/)
+})
+
+test("SPC Lost Record retains a separately authorized shared record scope", () => {
+  assert.match(lostRecordPage, /scope=records/)
+  assert.match(route, /hasSpcPagePermission\(session, "spc-lost-record", "view"\)/)
+})
+
+test("SPC web outcome and reoffer mutations enforce enquiry ownership", () => {
+  assert.match(enquiriesStore, /function requireEnquiryOwner\(row: SpcEnquiryRow, session: SpcSession\)/)
+  assert.equal(
+    (enquiriesStore.match(/requireEnquiryOwner\(existing, session\)/g) || []).length,
+    2,
+  )
+})

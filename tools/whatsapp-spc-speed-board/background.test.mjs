@@ -4,7 +4,7 @@ import vm from "node:vm"
 
 const code = fs.readFileSync(new URL("./background.js", import.meta.url), "utf8")
 const sharedFeedUrl =
-  "https://spc.fcuno.com/api/spc/enquiries?limit=250&createdAfter=2026-07-23T09%3A20%3A00.000Z"
+  "https://spc.fcuno.com/api/spc/enquiries?limit=250&scope=shared&createdAfter=2026-07-23T09%3A20%3A00.000Z"
 const listeners = []
 const fetchedUrls = []
 const fetchedOptions = []

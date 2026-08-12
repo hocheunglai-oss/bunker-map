@@ -14,6 +14,7 @@ import {
 } from "@/lib/spcPages"
 import { isSpcUserInCategory } from "@/lib/spcUserCategories"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
+import { SPC_DEFAULT_PASSWORD } from "@/lib/spcUserDefaults"
 
 type ManagedSpcUser = {
   id: string
@@ -91,7 +92,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
     whatsappPhone: "",
     role,
     office,
-    password: "",
+    password: SPC_DEFAULT_PASSWORD,
     mustChangePassword: true,
     isSupplierTrader: role === "SUPPLIER TRADER",
     isActive: true,

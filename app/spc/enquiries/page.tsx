@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
@@ -53,6 +53,7 @@ type SupplierTrader = {
 type EnquiriesResponse = {
   enquiries?: SpcEnquiry[]
   supplierTraders?: SupplierTrader[]
+  sessionKey?: string
   message?: string
 }
 
@@ -357,7 +358,7 @@ function draftFromEnquiry(enquiry: SpcEnquiry): ReofferDraft {
 
 export default function SpcEnquiriesPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
+  const { loading: authLoading, authenticated, username, permissions } = useSpcAuth()
   const [draft, setDraft] = useState<DraftEnquiry>(emptyDraft)
   const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
   const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
@@ -380,6 +381,7 @@ export default function SpcEnquiriesPage() {
   const [parserAiTarget, setParserAiTarget] = useState<ParserReportDialog["context"] | "">("")
   const [parserAiMessage, setParserAiMessage] = useState("")
   const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
+  const enquiryLoadSequence = useRef(0)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
@@ -423,20 +425,25 @@ export default function SpcEnquiriesPage() {
   }
 
   const loadEnquiries = useCallback(async () => {
-    if (!canView) return
+    if (!canView || !username) return
+    const sequence = ++enquiryLoadSequence.current
     setLoading(true)
     try {
       const response = await fetch("/api/spc/enquiries?limit=200&bootstrap=1", { cache: "no-store" })
       const data = (await response.json()) as EnquiriesResponse
       if (!response.ok) throw new Error(data.message || "Failed to load enquiries.")
+      if (sequence !== enquiryLoadSequence.current) return
+      if (data.sessionKey?.toLowerCase() !== username.toLowerCase()) {
+        throw new Error("The enquiry response does not match the authenticated SPC user.")
+      }
       setEnquiries(data.enquiries || [])
       if (Array.isArray(data.supplierTraders)) setSupplierTraders(data.supplierTraders)
     } catch (error) {
       reportEnquiryError(error, "Failed to load enquiries.")
     } finally {
-      setLoading(false)
+      if (sequence === enquiryLoadSequence.current) setLoading(false)
     }
-  }, [canView])
+  }, [canView, username])
 
   const loadParserReportCount = useCallback(async () => {
     if (!canView) {
@@ -468,6 +475,12 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     if (!authLoading && !canView) router.replace("/spc")
   }, [authLoading, canView, router])
+
+  useEffect(() => {
+    enquiryLoadSequence.current += 1
+    setEnquiries([])
+    setSupplierTraders([])
+  }, [username])
 
   useEffect(() => {
     void loadEnquiries()

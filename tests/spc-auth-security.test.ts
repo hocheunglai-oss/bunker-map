@@ -13,6 +13,7 @@ import {
   getSpcPasswordValidationError,
   wouldRemoveFinalActiveSpcAdmin,
 } from "../lib/spcUsers"
+import { SPC_DEFAULT_PASSWORD } from "../lib/spcUserDefaults"
 import {
   SPC_SESSION_DURATION_SECONDS,
   createSpcSessionToken,
@@ -157,6 +158,7 @@ test("the final active SPC ADMIN cannot be demoted, deactivated, or deleted", ()
 })
 
 test("new and changed SPC passwords must contain 8 to 256 characters", () => {
+  assert.equal(SPC_DEFAULT_PASSWORD, "Since1857")
   assert.match(getSpcPasswordValidationError("") || "", /required/i)
   assert.match(getSpcPasswordValidationError("1234567") || "", /at least 8/i)
   assert.equal(getSpcPasswordValidationError("12345678"), null)

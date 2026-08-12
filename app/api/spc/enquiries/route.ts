@@ -77,10 +77,27 @@ export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
     const session = await requireSpcPagePermission("spc-buyer-enquiries", "view")
+    if (!session.username) throw new Error("Unauthorized")
     const searchParams = new URL(request.url).searchParams
     const status = searchParams.get("status")?.trim() || undefined
     const limit = Number(searchParams.get("limit") || 250)
     const bootstrap = searchParams.get("bootstrap") === "1"
+    const requestedScope = searchParams.get("scope")?.trim() || "mine"
+    const sharedScope = requestedScope === "shared"
+    const recordsScope = requestedScope === "records"
+    if (sharedScope && !hasSpcPagePermission(session, "spc-chrome-extension", "view")) {
+      throw new Error("Forbidden")
+    }
+    if (recordsScope && !hasSpcPagePermission(session, "spc-lost-record", "view")) {
+      throw new Error("Forbidden")
+    }
+    if (!sharedScope && !recordsScope && requestedScope !== "mine") {
+      return NextResponse.json(
+        { message: "Unsupported enquiry scope." },
+        { status: 400, headers: { "Cache-Control": "private, no-store" } },
+      )
+    }
+    const createdByUsername = sharedScope || recordsScope ? undefined : session.username
     const createdAfterValue = searchParams.get("createdAfter")?.trim() || ""
     const parsedCreatedAfter = createdAfterValue ? parseIsoTimestamp(createdAfterValue) : null
     if (createdAfterValue && !parsedCreatedAfter) {
@@ -102,12 +119,18 @@ export async function GET(request: Request) {
       createdAfter,
       updatedAfter,
       updatedAfterId: updatedAfterCursor?.id,
+      createdByUsername,
     })
     // Read the compact snapshot after the change page so inserts cannot be skipped by cursor advancement.
     const [supplierTraders, activeIds] = await Promise.all([
       supplierTradersPromise,
       updatedAfter
-        ? listSpcEnquiryIds(session, { status, limit, createdAfter })
+        ? listSpcEnquiryIds(session, {
+            status,
+            limit,
+            createdAfter,
+            createdByUsername,
+          })
         : Promise.resolve(undefined),
     ])
     const cursor = latestEnquiryCursor(enquiries, updatedAfterValue)
@@ -129,7 +152,7 @@ export async function GET(request: Request) {
       {
         bootstrap,
         incremental: Boolean(updatedAfter),
-        sharedFeed: Boolean(createdAfter),
+        sharedFeed: sharedScope,
         returned: enquiries.length,
       },
     )

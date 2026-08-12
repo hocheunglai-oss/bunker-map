@@ -21,6 +21,7 @@ import {
   type SpcRoleId,
 } from "@/lib/spcPages"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
+import { SPC_DEFAULT_PASSWORD } from "@/lib/spcUserDefaults"
 
 const scryptAsync = promisify(scrypt)
 const SPC_PERMISSION_GROUPS_STORE_KEY = "spc-permission-groups"
@@ -1165,7 +1166,7 @@ export async function saveManagedSpcUser(
     input.whatsappPhone,
     isActive,
   )
-  const passwordInput = input.password || ""
+  const passwordInput = input.password || (input.id ? "" : SPC_DEFAULT_PASSWORD)
   const auditActor = withSpcAuditAction(actor, {
     action: input.id ? "update-user" : "create-user",
     targetType: "spc-user",
