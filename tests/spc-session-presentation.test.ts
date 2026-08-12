@@ -3,14 +3,14 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { getSpcSessionPresentationLabel } from "../lib/spcSessionPresentation"
 
-test("SPC administrators use the role presentation without replacing their identity", () => {
+test("SPC administrators use their profile identity", () => {
   assert.equal(
     getSpcSessionPresentationLabel({
       role: "ADMIN",
       displayName: "OTTO LAI",
       username: "otto@cosulich.com.hk",
     }),
-    "ADMINISTRATOR",
+    "OTTO LAI",
   )
   assert.equal(
     getSpcSessionPresentationLabel({
@@ -18,7 +18,7 @@ test("SPC administrators use the role presentation without replacing their ident
       displayName: "Another Admin",
       username: "admin@example.com",
     }),
-    "ADMINISTRATOR",
+    "Another Admin",
   )
 })
 
