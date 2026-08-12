@@ -44,6 +44,7 @@ import {
   formatIsoDate,
   hktYearMonth,
   hktDateFromTimestamp,
+  hktTimestampForDateAndTime,
   isAttendanceCheckType,
   isAttendanceLeaveCode,
   isAttendanceLeavePortion,
@@ -87,6 +88,7 @@ export type AttendancePunch = {
   deviceSn: string | null
   timeResult: string | null
   locationResult: string | null
+  legacyAssumedOnTime: boolean
 }
 
 export type AttendanceLeaveEntry = {
@@ -272,6 +274,7 @@ function mapTeamAssignment(value: unknown): AttendanceTeamAssignment {
 
 function mapPunch(value: unknown): AttendancePunch {
   const row = asRow(value)
+  const rawPayload = asRow(row.raw_payload)
   return {
     id: String(row.id),
     checkType: String(row.check_type) as AttendanceCheckType,
@@ -280,6 +283,8 @@ function mapPunch(value: unknown): AttendancePunch {
     deviceSn: stringOrNull(row.device_sn),
     timeResult: stringOrNull(row.time_result),
     locationResult: stringOrNull(row.location_result),
+    legacyAssumedOnTime:
+      row.source_type === "LEGACY_XLS" && rawPayload.originalMark === "blank",
   }
 }
 
@@ -427,7 +432,7 @@ async function loadAttendancePunchRows(
     let query = client
       .from("attendance_raw_punches")
       .select(
-        "id,person_id,check_type,punch_time,work_date,source_type,device_sn,time_result,location_result",
+        "id,person_id,check_type,punch_time,work_date,source_type,device_sn,time_result,location_result,raw_payload",
       )
       .order("punch_time")
       .order("id")
@@ -651,6 +656,19 @@ function buildAttendanceRecord(
     teamAssignments,
   )
   const schedule = ATTENDANCE_SCHEDULES[team]
+  // Empty legacy cells were explicitly certified as on-time by the source
+  // workbook. Keep the requested display time (09:30), but evaluate that
+  // synthetic punch at the applicable schedule start so AC staff are not
+  // incorrectly counted late.
+  const expectationSignIn = punches.some(
+    (punch) =>
+      punch.checkType === "OnDuty" &&
+      punch.punchTime === effectiveSignIn &&
+      punch.legacyAssumedOnTime,
+  )
+    ? hktTimestampForDateAndTime(workDate, schedule.workStart)?.toISOString() ||
+      effectiveSignIn
+    : effectiveSignIn
   const normallyRequired =
     isPersonExpectedOnDate(workDate, person) &&
     (!hasTeamHistory || Boolean(datedAssignment))
@@ -675,7 +693,7 @@ function buildAttendanceRecord(
       ...absenceLeaves.map((entry) => entry.portion),
       ...(automaticAmLeave ? (["am"] as const) : []),
     ],
-    effectiveSignIn,
+    effectiveSignIn: expectationSignIn,
     effectiveSignOut,
     required: normallyRequired && !attendanceHoliday,
   })
@@ -707,7 +725,7 @@ function buildAttendanceRecord(
           workDate,
           team,
           leavePortions: absenceLeaves.map((entry) => entry.portion),
-          effectiveSignIn,
+          effectiveSignIn: expectationSignIn,
           effectiveSignOut,
           required: true,
         })
