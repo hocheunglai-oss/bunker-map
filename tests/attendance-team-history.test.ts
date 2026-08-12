@@ -16,6 +16,9 @@ function source(path: string) {
 const migration = source(
   "../supabase/migrations/20260810034059_attendance_monthly_roster_and_reminders.sql",
 )
+const serviceRoleGrantMigration = source(
+  "../supabase/migrations/20260812083825_grant_attendance_group_helper_to_service_role.sql",
+)
 const attendanceData = source("../lib/attendanceData.ts")
 const backupRoute = source("../app/api/backups/bunker-map-drive/route.ts")
 const backupValidator = source("../scripts/validate-backup.mjs")
@@ -42,6 +45,15 @@ const assignments: AttendanceTeamAssignment[] = [
     sourceAdminUserId: "user-1",
   },
 ]
+
+test("User Management can resolve attendance groups without exposing the helper to browser roles", () => {
+  assert.match(serviceRoleGrantMigration, /grant usage on schema private to service_role/i)
+  assert.match(
+    serviceRoleGrantMigration,
+    /grant execute on function private\.admin_attendance_group\(jsonb, text\)[\s\S]*to service_role/i,
+  )
+  assert.match(serviceRoleGrantMigration, /revoke all[\s\S]*from public, anon, authenticated/i)
+})
 
 test("attendance group resolution preserves the schedule used on each work date", () => {
   assert.equal(
