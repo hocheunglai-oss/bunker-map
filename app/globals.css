@@ -122,7 +122,9 @@
 
 .spc-feedback-submit .spc-page-action,
 .spc-feedback-review .spc-page-action {
-  border: 0;
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
 }
 
 .spc-feedback-list-panel .spc-panel-header > select {
