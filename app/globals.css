@@ -548,15 +548,8 @@ body {
   white-space: nowrap;
 }
 
-.fc-admin-sidebar-counts {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .fc-admin-sidebar-count {
-  min-width: 34px;
+  min-width: 22px;
   height: 20px;
   flex: 0 0 auto;
   display: inline-flex;

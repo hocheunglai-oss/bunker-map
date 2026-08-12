@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import { ADMIN_PAGE_DEFINITIONS, getAdminPageByPath } from "../lib/adminPages"
 import { parserReportAccessPage } from "../lib/parserReportAccess"
@@ -41,7 +42,7 @@ test("a queued parser report remains unresolved until manual review", () => {
   assert.equal(report.readyForUserReview, false)
 })
 
-test("an AI-completed report remains visible until the user confirms it", () => {
+test("an AI-completed report remains visible until the user opens it", () => {
   const readyReport = parserReportWithState({
     ...pendingReport,
     metadata: { pendingReview: false, pendingUserReview: true },
@@ -75,6 +76,31 @@ test("report workflow metadata moves through pending, ready, and acknowledged st
   assert.equal(acknowledged.pendingUserReview, false)
   assert.equal(acknowledged.aiReviewState, "acknowledged")
   assert.equal(acknowledged.userReviewedAt, "2026-08-11T02:00:00.000Z")
+})
+
+test("review UI shows AI queue left, user queue right, and needs no confirmation button", () => {
+  const panelSource = readFileSync(
+    new URL("../components/ParserReportReviewPanel.tsx", import.meta.url),
+    "utf8",
+  )
+  const pendingAiPosition = panelSource.indexOf(">Pending AI Review<")
+  const pendingUserPosition = panelSource.indexOf(">Pending Your Review<")
+
+  assert.ok(pendingAiPosition >= 0)
+  assert.ok(pendingUserPosition > pendingAiPosition)
+  assert.doesNotMatch(panelSource, /Confirm Reviewed/)
+  assert.match(panelSource, /if \(queue === "ready-user"\) void acknowledgeReadyReport\(report\)/)
+})
+
+test("sidebar displays only the number of reports pending user review", () => {
+  const badgeSource = readFileSync(
+    new URL("../components/ParserReportSidebarBadge.tsx", import.meta.url),
+    "utf8",
+  )
+
+  assert.match(badgeSource, /Number\(payload\.readyForUserReview\)/)
+  assert.doesNotMatch(badgeSource, />\s*YOU\s/)
+  assert.doesNotMatch(badgeSource, />\s*AI\s/)
 })
 
 test("Parser Report is a management page restricted to admins by default", () => {
