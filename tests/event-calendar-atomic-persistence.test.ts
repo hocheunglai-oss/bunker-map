@@ -414,6 +414,7 @@ test("concurrent same-ID creates store exactly one winner and never merge record
 })
 
 test("Google reconciliation and event email use committed server-side calendar state", () => {
+  const eventCalendarPage = source("../app/admin/eventcalendar/page.tsx")
   const googleSync = source("../app/api/event-calendar/google-sync/route.ts")
   const emailNotify = source("../app/api/event-calendar/email-notify/route.ts")
 
@@ -425,6 +426,7 @@ test("Google reconciliation and event email use committed server-side calendar s
   assert.doesNotMatch(googleSync, /body\.calendarId/)
   assert.match(emailNotify, /loadCanonicalEvent\(body\.event\.id\)/)
   assert.match(emailNotify, /latest\.payload\.emailRecipientsText/)
+  assert.match(eventCalendarPage, /normalizeEmailList\(emailRecipientsText\)\.length/)
 })
 
 test("calendar commits enqueue Google sync atomically and snapshot audit undo is blocked", () => {

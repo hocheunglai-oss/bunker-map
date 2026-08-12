@@ -7,6 +7,7 @@ import {
 } from "@/data/eventCalendar"
 import { mergeImportedEvents } from "@/lib/eventCalendarImport"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { normalizeEmailList } from "@/lib/emailAddress"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
@@ -1072,13 +1073,17 @@ export default function EventCalendarPage() {
         wasEdit ? { [nextEvent.id]: draftEventVersion } : {},
       )
       const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
-      setEmailPrompt({
-        event: committedEvent,
-        eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
-        action: wasEdit ? "updated" : "created",
-        status: "idle",
-        error: "",
-      })
+      if (normalizeEmailList(emailRecipientsText).length) {
+        setEmailPrompt({
+          event: committedEvent,
+          eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
+          action: wasEdit ? "updated" : "created",
+          status: "idle",
+          error: "",
+        })
+      } else {
+        setEmailPrompt(null)
+      }
       if (submissionToken === eventSubmissionTokenRef.current) {
         draftEventIdRef.current = ""
         draftEventVersionRef.current = ""
