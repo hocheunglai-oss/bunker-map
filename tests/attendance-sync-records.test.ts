@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { normalizeDingTalkPunch } from "../lib/attendanceSyncRecords"
+import {
+  DINGTALK_ATTENDANCE_IMPORT_CUTOFF,
+  isImportableDingTalkPunch,
+  normalizeDingTalkPunch,
+} from "../lib/attendanceSyncRecords"
 
 const PERSON_ID = "11111111-1111-4111-8111-111111111111"
 
@@ -68,4 +72,14 @@ test("rejects invalid or unmapped DingTalk punches", () => {
     ),
     null,
   )
+})
+
+test("internal DingTalk imports start cleanly on 13 August 2026 HKT", () => {
+  assert.equal(
+    DINGTALK_ATTENDANCE_IMPORT_CUTOFF.toISOString(),
+    "2026-08-12T16:00:00.000Z",
+  )
+  assert.equal(isImportableDingTalkPunch("2026-08-12T15:59:59.999Z"), false)
+  assert.equal(isImportableDingTalkPunch("2026-08-12T16:00:00.000Z"), true)
+  assert.equal(isImportableDingTalkPunch("invalid"), false)
 })

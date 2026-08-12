@@ -8,6 +8,7 @@ import {
 } from "@/lib/dingTalkAttendance"
 import { getAttendanceServiceClient } from "@/lib/attendanceData"
 import {
+  isImportableDingTalkPunch,
   type AttendanceSyncPerson,
   normalizeDingTalkPunch,
 } from "@/lib/attendanceSyncRecords"
@@ -115,9 +116,11 @@ export async function runAttendanceSync(options: AttendanceSyncOptions = {}) {
         recordsFetched += result.records.length
         const normalized = result.records.flatMap((record) => {
           const punch = normalizeDingTalkPunch(record, personByDingTalkId)
-          return punch ? [punch] : []
+          return punch && isImportableDingTalkPunch(punch.punch_time) ? [punch] : []
         })
-        const invalidCount = result.records.length - normalized.length
+        const invalidCount = result.records.filter(
+          (record) => !normalizeDingTalkPunch(record, personByDingTalkId),
+        ).length
         if (invalidCount) {
           errors.push(`${invalidCount} DingTalk record(s) had invalid or unmapped fields.`)
         }

@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto"
 import type { DingTalkAttendanceRecord } from "@/lib/dingTalkAttendance"
+
+// The DingTalk API always returns a rolling window. Keep historical test
+// punches out of the internal system even after they have been deleted here.
+export const DINGTALK_ATTENDANCE_IMPORT_CUTOFF = new Date(
+  "2026-08-13T00:00:00+08:00",
+)
+
+export function isImportableDingTalkPunch(punchTime: string) {
+  const value = Date.parse(punchTime)
+  return Number.isFinite(value) && value >= DINGTALK_ATTENDANCE_IMPORT_CUTOFF.getTime()
+}
 import { hktDateFromTimestamp } from "@/lib/attendanceRules"
 
 export type AttendanceSyncPerson = {
