@@ -22,6 +22,7 @@ import {
   saveAttendanceMonthlyConfirmation,
   saveAttendanceOverride,
   saveAttendancePerson,
+  saveAttendanceRoster,
   saveAttendanceWorkMode,
   removeAttendancePerson,
   sendAttendanceConfirmationReminders,
@@ -186,6 +187,10 @@ export async function POST(request: Request) {
     if (action === "remove-person") {
       const person = await removeAttendancePerson(client, payload.id)
       return privateJson({ success: true, person })
+    }
+    if (action === "save-roster") {
+      const people = await saveAttendanceRoster(client, payload.items)
+      return privateJson({ success: true, people })
     }
     if (action === "save-leave") {
       const leaveEntries = await saveAttendanceLeaveRange(client, payload.leave, actor)

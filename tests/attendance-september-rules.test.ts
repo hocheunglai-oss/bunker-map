@@ -223,7 +223,7 @@ test("API contract keeps August visible and prevents legacy HO or HOL double-cou
   assert.match(attendanceData, /entry\.source\.startsWith\("legacy-monthly:"\)/)
   assert.match(attendanceData, /hasLegacyMonthlyCode\("HOL"/)
   assert.match(attendanceData, /hasLegacyMonthlyCode\("HO"/)
-  assert.match(attendanceData, /staffOrder: calendarContext\.staffOrder/)
+  assert.match(attendanceData, /staffOrder: rosterOrder/)
   assert.match(attendanceData, /availableYears/)
   assert.match(attendanceData, /annualSummaries/)
   assert.match(attendanceData, /record\.status !== "pending"/)

@@ -76,6 +76,7 @@ export type AttendancePerson = {
   isActive: boolean
   employmentStartDate: string | null
   employmentEndDate: string | null
+  rosterOrder: number
   createdAt: string
   updatedAt: string
 }
@@ -233,9 +234,25 @@ function mapPerson(
       (managedUser ? managedUser.isActive && Boolean(managedTeam) : true),
     employmentStartDate: stringOrNull(row.employment_start_date),
     employmentEndDate: stringOrNull(row.employment_end_date),
+    rosterOrder: numberValue(row.roster_order) || 1000,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   }
+}
+
+function attendanceRosterOrder(
+  people: AttendancePerson[],
+  fallback: string[],
+) {
+  const active = people
+    .filter((person) => person.isActive)
+    .sort(
+      (left, right) =>
+        left.rosterOrder - right.rosterOrder ||
+        left.staffCode.localeCompare(right.staffCode),
+    )
+    .map((person) => person.staffCode)
+  return active.length ? active : fallback
 }
 
 async function managedAdminUsersById() {
@@ -713,6 +730,7 @@ function buildAttendanceRecord(
   )
   const holidayAttendance = Boolean(
     attendanceHoliday &&
+      team !== "AC" &&
       !fullDayAbsent &&
       (attendanceHoliday.attendeeStaffCodes.includes(person.staffCode.toUpperCase()) ||
         effectiveSignIn ||
@@ -858,6 +876,7 @@ export async function getDailyAttendance(date: string) {
   )
 
   const allPeople = mapPeopleWithManagedUsers(peopleResult.data || [], managed.byId)
+  const rosterOrder = attendanceRosterOrder(allPeople, calendarContext.staffOrder)
   const rawPunchRows = (punchResult.data || []).map((value) => {
     const row = asRow(value)
     return {
@@ -889,7 +908,7 @@ export async function getDailyAttendance(date: string) {
           )
         : isPersonEmployedOnDate(workDate, person),
     ),
-    calendarContext.staffOrder,
+    rosterOrder,
   )
 
   const records = people.map((person) =>
@@ -911,7 +930,7 @@ export async function getDailyAttendance(date: string) {
     date: workDate,
     people,
     records,
-    staffOrder: calendarContext.staffOrder,
+    staffOrder: rosterOrder,
     holiday: calendarContext.holidaysByDate.get(workDate) || null,
   }
 }
@@ -943,6 +962,20 @@ function emptyCodeTotals() {
   return Object.fromEntries(
     ATTENDANCE_MONTHLY_CODES.map((code) => [code, 0]),
   ) as Record<AttendanceMonthlyCode, number>
+}
+
+function emptyCodeDates() {
+  return Object.fromEntries(
+    ATTENDANCE_MONTHLY_CODES.map((code) => [code, [] as string[]]),
+  ) as Record<AttendanceMonthlyCode, string[]>
+}
+
+function addCodeDate(
+  dates: Record<AttendanceMonthlyCode, string[]>,
+  code: AttendanceMonthlyCode,
+  date: string,
+) {
+  if (!dates[code].includes(date)) dates[code].push(date)
 }
 
 function addCodeTotal(
@@ -1126,6 +1159,7 @@ export async function getMonthlyAttendance(
     peopleResult.data || [],
     managed.byId,
   )
+  const rosterOrder = attendanceRosterOrder(allPeople, calendarContext.staffOrder)
   const entitlements = (entitlementResult.data || []).map(mapEntitlement)
   const adjustments = (adjustmentResult.data || []).map(mapAdjustment)
   const leaveEntries = (leaveResult.data || []).map(mapLeave)
@@ -1153,7 +1187,7 @@ export async function getMonthlyAttendance(
     allPeople.filter((person) =>
       personOverlapsPeriod(person, dataStart, monthRange.end, teamAssignments),
     ),
-    calendarContext.staffOrder,
+    rosterOrder,
   )
   const people = sortAttendancePeople(
     yearPeople.filter((person) =>
@@ -1164,7 +1198,7 @@ export async function getMonthlyAttendance(
         teamAssignments,
       ),
     ),
-    calendarContext.staffOrder,
+    rosterOrder,
   )
 
   const personContexts = new Map(
@@ -1209,6 +1243,7 @@ export async function getMonthlyAttendance(
     const entitlement = entitlements.find((entry) => entry.personId === person.id) || null
     const selectedTotals = emptyCodeTotals()
     const ytdTotals = emptyCodeTotals()
+    const codeDates = emptyCodeDates()
 
     context.personAdjustments.forEach((entry) => {
       if (entry.month <= targetMonth) addCodeTotal(ytdTotals, entry.code, entry.units)
@@ -1222,6 +1257,7 @@ export async function getMonthlyAttendance(
       }
       if (entry.leaveDate >= targetRange.start && entry.leaveDate <= targetRange.end) {
         addCodeTotal(selectedTotals, entry.code, entry.units)
+        addCodeDate(codeDates, entry.code, entry.leaveDate)
       }
     })
     const hasLegacyMonthlyCode = (
@@ -1243,7 +1279,10 @@ export async function getMonthlyAttendance(
         !hasLegacyMonthlyCode("HOL", recordMonth)
       ) {
         addCodeTotal(ytdTotals, "HOL", 1)
-        if (selected) addCodeTotal(selectedTotals, "HOL", 1)
+        if (selected) {
+          addCodeTotal(selectedTotals, "HOL", 1)
+          addCodeDate(codeDates, "HOL", record.date)
+        }
       }
       if (
         record.derivedHomeOfficeUnits > 0 &&
@@ -1256,6 +1295,7 @@ export async function getMonthlyAttendance(
             "HO",
             record.derivedHomeOfficeUnits,
           )
+          addCodeDate(codeDates, "HO", record.date)
         }
       }
       if (
@@ -1269,6 +1309,7 @@ export async function getMonthlyAttendance(
             "OS",
             record.derivedBusinessTripUnits,
           )
+          addCodeDate(codeDates, "OS", record.date)
         }
       }
     })
@@ -1307,6 +1348,10 @@ export async function getMonthlyAttendance(
       person,
       entitlement,
       codeTotals: selectedTotals,
+      codeDates,
+      lateDates: records
+        .filter((record) => record.required && record.late)
+        .map((record) => record.date),
       yearToDateCodeTotals: ytdTotals,
       balance,
       records,
@@ -1352,7 +1397,7 @@ export async function getMonthlyAttendance(
               teamAssignments,
             ),
           ),
-          calendarContext.staffOrder,
+          rosterOrder,
         )
         return {
           month: targetMonth,
@@ -1362,6 +1407,8 @@ export async function getMonthlyAttendance(
             return {
               person: summary.person,
               codeTotals: summary.codeTotals,
+              codeDates: summary.codeDates,
+              lateDates: summary.lateDates,
               attendedDays: summary.attendedDays,
               lateDays: summary.lateDays,
               confirmation: summary.confirmation,
@@ -1386,7 +1433,7 @@ export async function getMonthlyAttendance(
     dailyRecords: summaries.flatMap((summary) => summary.records),
     people,
     summaries,
-    staffOrder: calendarContext.staffOrder,
+    staffOrder: rosterOrder,
     availableYears,
     ...(months ? { months } : {}),
   }
@@ -1512,9 +1559,10 @@ export async function getAllTimeAttendance(
     peopleResult.data || [],
     managed.byId,
   )
+  const rosterOrder = attendanceRosterOrder(allPeople, calendarContext.staffOrder)
   const activePeople = sortAttendancePeople(
     allPeople.filter((person) => person.isActive),
-    calendarContext.staffOrder,
+    rosterOrder,
   )
   const activeAdminUserIds = new Set(
     activePeople.flatMap((person) =>
@@ -1611,6 +1659,7 @@ export async function getAllTimeAttendance(
     : []
   const annualSummaries = activePeople.map((person) => {
     const codeTotals = emptyCodeTotals()
+    const codeDates = emptyCodeDates()
     const personAdjustments = monthlyAdjustments.filter(
       (entry) => entry.personId === person.id,
     )
@@ -1624,7 +1673,10 @@ export async function getAllTimeAttendance(
           entry.leaveDate >= yearStart &&
           entry.leaveDate <= yearEnd,
       )
-      .forEach((entry) => addCodeTotal(codeTotals, entry.code, entry.units))
+      .forEach((entry) => {
+        addCodeTotal(codeTotals, entry.code, entry.units)
+        addCodeDate(codeDates, entry.code, entry.leaveDate)
+      })
     const hasLegacyMonthlyCode = (
       targetCode: AttendanceMonthlyCode,
       targetMonth: number,
@@ -1655,18 +1707,21 @@ export async function getAllTimeAttendance(
         !hasLegacyMonthlyCode("HOL", targetMonth)
       ) {
         addCodeTotal(codeTotals, "HOL", 1)
+        addCodeDate(codeDates, "HOL", record.date)
       }
       if (
         record.derivedHomeOfficeUnits > 0 &&
         !hasLegacyMonthlyCode("HO", targetMonth)
       ) {
         addCodeTotal(codeTotals, "HO", record.derivedHomeOfficeUnits)
+        addCodeDate(codeDates, "HO", record.date)
       }
       if (
         record.derivedBusinessTripUnits > 0 &&
         !hasLegacyMonthlyCode("OS", targetMonth)
       ) {
         addCodeTotal(codeTotals, "OS", record.derivedBusinessTripUnits)
+        addCodeDate(codeDates, "OS", record.date)
       }
     })
     const entitlement = entitlements.find(
@@ -1700,6 +1755,7 @@ export async function getAllTimeAttendance(
         (Boolean(options.canEdit) || person.adminUserId === options.adminUserId),
       leavePaidUnits: null,
       codeTotals,
+      codeDates,
     }
   })
   return {
@@ -1713,7 +1769,7 @@ export async function getAllTimeAttendance(
     monthlyAdjustments,
     syncRuns: (syncResult.data || []).map(mapSyncRun),
     schedules: Object.values(ATTENDANCE_SCHEDULES),
-    staffOrder: calendarContext.staffOrder,
+    staffOrder: rosterOrder,
     availableYears,
   }
 }
@@ -1841,6 +1897,70 @@ export async function removeAttendancePerson(
     throw new AttendanceValidationError("Active attendance person was not found.")
   }
   return mapPerson(data)
+}
+
+export async function saveAttendanceRoster(
+  client: SupabaseClient,
+  itemsInput: unknown,
+) {
+  if (!Array.isArray(itemsInput)) {
+    throw new AttendanceValidationError("An ordered attendance user list is required.")
+  }
+  const items = itemsInput.map((value) => {
+    const row = asRow(value)
+    const personId = optionalUuid(row.personId, "Attendance person id")
+    const adminUserId = optionalUuid(row.adminUserId, "User Management user id")
+    if (Boolean(personId) === Boolean(adminUserId)) {
+      throw new AttendanceValidationError(
+        "Each roster entry must identify one attendance person or one User Management user.",
+      )
+    }
+    return { personId, adminUserId }
+  })
+  if (!items.length || items.length > 100) {
+    throw new AttendanceValidationError("Choose one to one hundred attendance users.")
+  }
+  const itemKeys = items.map((item) => item.personId || item.adminUserId!)
+  if (new Set(itemKeys).size !== itemKeys.length) {
+    throw new AttendanceValidationError("Attendance users cannot be duplicated.")
+  }
+
+  const existing = await listAttendancePeople(false)
+  const requestedPersonIds = new Set(
+    items.flatMap((item) => (item.personId ? [item.personId] : [])),
+  )
+  const requestedAdminUserIds = new Set(
+    items.flatMap((item) => (item.adminUserId ? [item.adminUserId] : [])),
+  )
+  for (const person of existing) {
+    if (
+      !requestedPersonIds.has(person.id) &&
+      (!person.adminUserId || !requestedAdminUserIds.has(person.adminUserId))
+    ) {
+      await removeAttendancePerson(client, person.id)
+    }
+  }
+  for (const item of items) {
+    if (
+      item.adminUserId &&
+      !existing.some((person) => person.adminUserId === item.adminUserId)
+    ) {
+      await saveAttendancePerson(client, { adminUserId: item.adminUserId })
+    }
+  }
+
+  for (const [index, item] of items.entries()) {
+    let query = client
+      .from("attendance_people")
+      .update({ roster_order: index + 1 })
+      .eq("is_active", true)
+    query = item.personId
+      ? query.eq("id", item.personId)
+      : query.eq("admin_user_id", item.adminUserId!)
+    const { error } = await query
+    throwIfError(error, "Could not arrange attendance users.")
+  }
+  return listAttendancePeople(false)
 }
 
 export async function saveAttendanceLeaveRange(

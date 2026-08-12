@@ -451,6 +451,12 @@
   font-weight: 900;
 }
 
+.yearSummaryTable td[title]:not([title=""]) {
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 3px;
+}
+
 .yearSummaryTable .summaryZero {
   color: var(--fc-admin-muted);
   font-size: 10px;
@@ -498,6 +504,110 @@
   font-weight: 900;
   letter-spacing: 0.025em;
   white-space: nowrap;
+}
+
+.legend {
+  margin-top: 12px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--fc-admin-panel-soft-bg, #fbfbfd);
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.legend > strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fc-admin-heading);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.legend p {
+  margin: 2px 0;
+}
+
+.legend b {
+  color: var(--fc-admin-panel-text);
+}
+
+.rosterEditorList {
+  display: grid;
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 12px;
+}
+
+.rosterEditorRow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 36px auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  padding: 5px 8px;
+}
+
+.rosterEditorRow:last-child {
+  border-bottom: 0;
+}
+
+.rosterEditorRow > span:nth-child(2) strong,
+.rosterEditorRow > span:nth-child(2) small {
+  display: block;
+}
+
+.rosterEditorRow > span:nth-child(2) small,
+.availableRosterUsers small {
+  color: var(--fc-admin-muted);
+}
+
+.rosterEditorRow em {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.rosterEditorRow > div {
+  display: flex;
+  gap: 4px;
+}
+
+.rosterEditorRow button,
+.availableRosterUsers button {
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font: 800 10px/1 var(--fc-admin-font), Roboto, Arial, sans-serif;
+}
+
+.rosterEditorRow button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.rosterEditorRow .rosterRemoveButton {
+  color: #b42318;
+}
+
+.rosterPosition {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.availableRosterUsers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .confirmButton {

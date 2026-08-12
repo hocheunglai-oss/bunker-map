@@ -23,6 +23,7 @@ export type ApiAttendancePerson = {
   isActive: boolean
   employmentStartDate: string | null
   employmentEndDate: string | null
+  rosterOrder?: number
   adminUserId?: string | null
   adminUsername?: string | null
   username?: string | null
@@ -117,6 +118,8 @@ export type ApiAttendanceHoliday = {
 export type ApiAttendanceMonthlySummary = {
   person: ApiAttendancePerson
   codeTotals: Record<string, number>
+  codeDates?: Record<string, string[]>
+  lateDates?: string[]
   confirmation: ApiAttendanceConfirmation | null
   attendedDays?: number
   lateDays?: number
@@ -194,6 +197,7 @@ export type ApiAttendanceAnnualSummary = {
   openingCarryForwardUnits: number
   closingBalanceUnits: number
   codeTotals: Record<string, number>
+  codeDates?: Record<string, string[]>
   confirmation?: ApiAttendanceConfirmation | null
   canConfirm?: boolean
   leavePaidUnits?: number | null

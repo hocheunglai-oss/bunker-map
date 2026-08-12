@@ -53,6 +53,15 @@ type LeaveDraft = {
   holiday: boolean
 }
 
+type RosterDraftItem = {
+  key: string
+  personId?: string
+  adminUserId?: string
+  staffCode: string
+  displayName: string
+  team: AttendanceGroup
+}
+
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "monthly-record", label: "ATTENDANCE (CURRENT MONTH)" },
   { id: "monthly", label: "MONTHLY" },
@@ -189,6 +198,17 @@ function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
   const codeTotals = Object.fromEntries(
     Object.entries(codeTotalsSource).map(([code, units]) => [code.toUpperCase(), Number(units) || 0]),
   )
+  const codeDatesSource = isObject(value.codeDates)
+    ? value.codeDates
+    : isObject(value.code_dates)
+      ? value.code_dates
+      : {}
+  const codeDates = Object.fromEntries(
+    Object.entries(codeDatesSource).map(([code, dates]) => [
+      code.toUpperCase(),
+      stringArray(dates),
+    ]),
+  )
   const leavePaidRaw = value.leavePaidUnits ?? value.leave_paid_units
   return {
     personId,
@@ -198,6 +218,7 @@ function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
     closingBalanceUnits:
       Number(value.closingBalanceUnits ?? value.closing_balance_units) || 0,
     codeTotals,
+    codeDates,
     confirmation: isObject(value.confirmation)
       ? (value.confirmation as ApiAttendanceConfirmation)
       : null,
@@ -441,6 +462,26 @@ function displaySummaryDays(value: number) {
   return Math.abs(value) < 0.00001 ? "–" : displayDays(value)
 }
 
+function dateTraceTitle(dates: string[] | undefined) {
+  if (!dates?.length) return ""
+  return dates
+    .slice()
+    .sort()
+    .map((date) => displayShortDate(date))
+    .join(" · ")
+}
+
+function AttendanceLegend() {
+  return (
+    <aside className={styles.legend} aria-label="Attendance abbreviations and rules">
+      <strong>LEGEND &amp; RULES</strong>
+      <p><b>ALS</b> annual leave with advance notice · <b>ALU</b> annual leave informed on the day · <b>SLM</b> sick leave with medical certificate · <b>SLR</b> sick leave without medical certificate · <b>SLX</b> sick leave outside policy.</p>
+      <p><b>SPL</b> special leave · <b>MTL</b> maternity leave · <b>NPL</b> no-pay leave · <b>HOME</b> home-office attendance · <b>OS</b> overseas/business-trip attendance · <b>HOL</b> holiday attendance.</p>
+      <p>BT/BS: 10:00–19:00, AM cutoff 11:30, PM return cutoff 16:30. AC: 09:00–17:30, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 is not official. AC does not receive holiday-attendance credit.</p>
+    </aside>
+  )
+}
+
 function summaryNumberClass(value: number, emphasis?: "attended" | "late") {
   if (Math.abs(value) < 0.00001) return styles.summaryZero
   if (emphasis === "attended") return styles.attendedCell
@@ -672,7 +713,7 @@ export default function AttendanceRecordClient() {
   const [reminderMonth, setReminderMonth] = useState(Math.max(1, currentMonth - 1))
   const [reminderSelection, setReminderSelection] = useState<Set<string>>(new Set())
   const [addUsersOpen, setAddUsersOpen] = useState(false)
-  const [addUserSelection, setAddUserSelection] = useState<Set<string>>(new Set())
+  const [rosterDraft, setRosterDraft] = useState<RosterDraftItem[]>([])
   const [leaveDraft, setLeaveDraft] = useState<LeaveDraft | null>(null)
   const [rosterSearch, setRosterSearch] = useState("")
   const monthRequestRef = useRef(0)
@@ -1198,49 +1239,42 @@ export default function AttendanceRecordClient() {
   }
 
   function openAddUsers() {
-    setAddUserSelection(new Set())
+    setRosterDraft(
+      rosterPeople.map((person) => ({
+        key: `person:${person.id}`,
+        personId: person.id,
+        staffCode: person.staffCode,
+        displayName: person.displayName,
+        team: person.team,
+      })),
+    )
     setAddUsersOpen(true)
   }
 
-  async function addSelectedUsers() {
-    const users = availableUsers.filter((user) => addUserSelection.has(user.id))
-    if (!users.length) {
-      setNotice("Select at least one User Management account to add.")
-      return
-    }
-    if (!canEdit) {
-      setNotice("You have view-only access. Ask an administrator for Edit permission in User Management.")
-      return
-    }
-    setPendingAction("add-attendance-users")
-    setNotice("")
-    try {
-      for (const user of users) {
-        await postAttendance("save-person", {
-          person: {
-            adminUserId: user.id,
-          },
-        })
-      }
-      setNotice(`${users.length} User Management account${users.length === 1 ? "" : "s"} added to attendance.`)
-      setAddUsersOpen(false)
-      await loadAllTime()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Attendance users could not be added.")
-    } finally {
-      setPendingAction("")
-    }
+  function moveRosterItem(index: number, direction: -1 | 1) {
+    setRosterDraft((current) => {
+      const target = index + direction
+      if (target < 0 || target >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
   }
 
-  async function removeAttendanceUser(person: ApiAttendancePerson) {
-    if (!window.confirm(`Remove ${person.displayName} from current attendance users? Historical records will be retained.`)) return
-    const removed = await runMutation(
-      "remove-person",
-      { id: person.id },
-      `${person.displayName} removed from current attendance users. Historical records were retained.`,
-      loadAllTime,
+  async function saveRoster() {
+    const saved = await runMutation(
+      "save-roster",
+      {
+        items: rosterDraft.map((item) => ({
+          personId: item.personId,
+          adminUserId: item.adminUserId,
+        })),
+      },
+      "Attendance users and display order updated.",
     )
-    if (removed) {
+    if (saved) {
+      setAddUsersOpen(false)
+      await loadAllTime()
       setMonthData(EMPTY_MONTH)
       setYearData({})
     }
@@ -1437,6 +1471,7 @@ export default function AttendanceRecordClient() {
                 </tfoot>
               </table>
             </div>
+            <AttendanceLegend />
           </section>
         ) : null}
 
@@ -1487,7 +1522,7 @@ export default function AttendanceRecordClient() {
                       <th>SPECIAL<br />LEAVE</th>
                       <th>MATERNITY<br />LEAVE</th>
                       <th>NO PAY<br />LEAVE</th>
-                      <th>ATTEND<br />HO</th>
+                      <th>ATTEND<br />HOME</th>
                       <th>ATTEND<br />OS</th>
                       <th>ATTENDED<br />DAYS</th>
                       <th>LATE<br />DAYS</th>
@@ -1515,17 +1550,17 @@ export default function AttendanceRecordClient() {
                             </th>
                             {SUMMARY_CODES.slice(0, 5).map((code) => {
                               const value = codeTotal(row.summary, code)
-                              return <td key={code} className={summaryNumberClass(value)}>{displaySummaryDays(value)}</td>
+                              return <td key={code} className={summaryNumberClass(value)} title={dateTraceTitle(row.summary?.codeDates?.[code])}>{displaySummaryDays(value)}</td>
                             })}
-                            <td className={summaryNumberClass(codeTotal(row.summary, "HOL"))}>
+                            <td className={summaryNumberClass(codeTotal(row.summary, "HOL"))} title={dateTraceTitle(row.summary?.codeDates?.HOL)}>
                               {displaySummaryDays(codeTotal(row.summary, "HOL"))}
                             </td>
                             {SUMMARY_CODES.slice(5).map((code) => {
                               const value = codeTotal(row.summary, code)
-                              return <td key={code} className={summaryNumberClass(value)}>{displaySummaryDays(value)}</td>
+                              return <td key={code} className={summaryNumberClass(value)} title={code === "HO" ? "" : dateTraceTitle(row.summary?.codeDates?.[code])}>{displaySummaryDays(value)}</td>
                             })}
                             <td className={summaryNumberClass(row.attendedDays, "attended")}>{displaySummaryDays(row.attendedDays)}</td>
-                            <td className={summaryNumberClass(row.lateDays, "late")}>{displaySummaryDays(row.lateDays)}</td>
+                            <td className={summaryNumberClass(row.lateDays, "late")} title={dateTraceTitle(row.summary?.lateDates)}>{displaySummaryDays(row.lateDays)}</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
@@ -1556,6 +1591,7 @@ export default function AttendanceRecordClient() {
                 </table>
               </div>
             )}
+            <AttendanceLegend />
           </section>
         ) : null}
 
@@ -1592,9 +1628,9 @@ export default function AttendanceRecordClient() {
                 className={styles.primaryButton}
                 onClick={openAddUsers}
                 disabled={!canEdit || settingsLoading}
-                title={canEdit ? "Add accounts from User Management" : "Edit permission required"}
+                title={canEdit ? "Add, remove, or arrange attendance users" : "Edit permission required"}
               >
-                ADD USERS
+                EDIT
               </button>
             </div>
 
@@ -1602,15 +1638,6 @@ export default function AttendanceRecordClient() {
               <div className={styles.inlineLoading}><span className={styles.spinner} aria-hidden="true" />Loading attendance users…</div>
             ) : (
               <>
-              <div className={styles.balanceExplanation}>
-                <strong>{selectedAllTimeYear} BALANCE</strong>
-                <span>
-                  Balance B/F at 31 Dec {selectedAllTimeYear - 1} + {selectedAllTimeYear} allowance + HOL − ALS − ALU − SLX
-                </span>
-                <small>
-                  SLM, SLR, special leave, maternity leave and no-pay leave do not change the balance. HO and OS count as attended days only.
-                </small>
-              </div>
               <div className={`${styles.tablePanel} ${styles.allTimePanel}`}>
                 <table className={styles.allTimeTable}>
                   <thead>
@@ -1635,7 +1662,7 @@ export default function AttendanceRecordClient() {
                       <th>SPECIAL</th>
                       <th>MATERNITY</th>
                       <th>NO PAY</th>
-                      <th>HO</th>
+                      <th>HOME</th>
                       <th>OS</th>
                       <th className={styles.closingSubhead}>
                         {selectedAllTimeYear < currentYear ? (
@@ -1655,26 +1682,16 @@ export default function AttendanceRecordClient() {
                           <td className={styles.annualStaffCell}>
                             <strong>{person.staffCode}</strong>
                             {staffSecondaryLabel(person) ? <span>{staffSecondaryLabel(person)}</span> : null}
-                            <small>
-                              <span>{groupFromUser(linkedUser, person.team)}</span>
-                              <button
-                                type="button"
-                                className={styles.removeButton}
-                                onClick={() => void removeAttendanceUser(person)}
-                                disabled={!canEdit || Boolean(pendingAction)}
-                              >
-                                REMOVE
-                              </button>
-                            </small>
+                            <small><span>{groupFromUser(linkedUser, person.team)}</span></small>
                           </td>
                           <td className={styles.balanceCell}>{displaySummaryDays(annual?.openingCarryForwardUnits || 0)}</td>
                           <td className={summaryNumberClass(annual?.allowanceUnits || 0)}>{displaySummaryDays(annual?.allowanceUnits || 0)}</td>
                           {SUMMARY_CODES.slice(0, 5).map((code) => (
-                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))} title={dateTraceTitle(annual?.codeDates?.[code])}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
                           ))}
-                          <td className={summaryNumberClass(annualCodeTotal(annual, "HOL"))}>{displaySummaryDays(annualCodeTotal(annual, "HOL"))}</td>
+                          <td className={summaryNumberClass(annualCodeTotal(annual, "HOL"))} title={dateTraceTitle(annual?.codeDates?.HOL)}>{displaySummaryDays(annualCodeTotal(annual, "HOL"))}</td>
                           {SUMMARY_CODES.slice(5).map((code) => (
-                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))} title={code === "HO" ? "" : dateTraceTitle(annual?.codeDates?.[code])}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
                           ))}
                           <td className={styles.closingBalanceCell}>{displaySummaryDays(annual?.closingBalanceUnits || 0)}</td>
                           <td className={styles.confirmationCell}>
@@ -1720,6 +1737,7 @@ export default function AttendanceRecordClient() {
                   ) : null}
                 </table>
               </div>
+              <AttendanceLegend />
               </>
             )}
           </section>
@@ -1868,43 +1886,52 @@ export default function AttendanceRecordClient() {
             <div className={styles.modalHeader}>
               <div>
                 <span>USER MANAGEMENT</span>
-                <h2 id="add-users-title">Add attendance users</h2>
+                <h2 id="add-users-title">EDIT ATTENDANCE USERS</h2>
               </div>
-              <button type="button" aria-label="Close add users" onClick={() => setAddUsersOpen(false)} disabled={Boolean(pendingAction)}>×</button>
+              <button type="button" aria-label="Close attendance users editor" onClick={() => setAddUsersOpen(false)} disabled={Boolean(pendingAction)}>×</button>
             </div>
-            <p className={styles.modalNote}>Only User Management accounts in the BT, BS or AC group can be added. Their group is controlled in User Management.</p>
+            <p className={styles.modalNote}>Add eligible User Management accounts, remove current users, and use the arrows to set their display order. Historical records remain preserved.</p>
             <div className={styles.selectionHeader}>
-              <strong>Available accounts</strong>
-              <div>
-                <button type="button" onClick={() => setAddUserSelection(new Set(availableUsers.map((user) => user.id)))}>Select all</button>
-                <button type="button" onClick={() => setAddUserSelection(new Set())}>Clear</button>
-              </div>
+              <strong>Current attendance users</strong>
             </div>
-            <div className={styles.selectionList}>
-              {availableUsers.map((user) => (
-                <label key={user.id}>
-                  <input
-                    type="checkbox"
-                    checked={addUserSelection.has(user.id)}
-                    onChange={(event) => setAddUserSelection((current) => {
-                      const next = new Set(current)
-                      if (event.target.checked) next.add(user.id)
-                      else next.delete(user.id)
-                      return next
-                    })}
-                  />
-                  <span><strong>{userStaffCode(user)}</strong>{user.displayName || user.username}</span>
-                  <em>{user.attendanceTeam || user.attendanceGroup}</em>
-                </label>
+            <div className={styles.rosterEditorList}>
+              {rosterDraft.map((item, index) => (
+                <div key={item.key} className={styles.rosterEditorRow}>
+                  <span className={styles.rosterPosition}>{index + 1}</span>
+                  <span><strong>{item.staffCode}</strong><small>{item.displayName}</small></span>
+                  <em>{item.team}</em>
+                  <div>
+                    <button type="button" onClick={() => moveRosterItem(index, -1)} disabled={index === 0} aria-label={`Move ${item.staffCode} up`}>↑</button>
+                    <button type="button" onClick={() => moveRosterItem(index, 1)} disabled={index === rosterDraft.length - 1} aria-label={`Move ${item.staffCode} down`}>↓</button>
+                    <button type="button" className={styles.rosterRemoveButton} onClick={() => setRosterDraft((current) => current.filter((entry) => entry.key !== item.key))}>Remove</button>
+                  </div>
+                </div>
               ))}
-              {!availableUsers.length ? <div className={styles.selectionEmpty}>All eligible User Management accounts are already included.</div> : null}
             </div>
+            {availableUsers.length ? (
+              <>
+                <div className={styles.selectionHeader}><strong>Available accounts</strong></div>
+                <div className={styles.availableRosterUsers}>
+                  {availableUsers.filter((user) => !rosterDraft.some((item) => item.adminUserId === user.id)).map((user) => (
+                    <button type="button" key={user.id} onClick={() => setRosterDraft((current) => [...current, {
+                      key: `user:${user.id}`,
+                      adminUserId: user.id,
+                      staffCode: userStaffCode(user),
+                      displayName: user.displayName || user.username,
+                      team: (user.attendanceTeam || user.attendanceGroup) as AttendanceGroup,
+                    }])}>
+                      + {userStaffCode(user)} <small>{user.displayName || user.username}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
             <div className={styles.modalFooter}>
-              <span>{addUserSelection.size} selected</span>
+              <span>{rosterDraft.length} attendance users</span>
               <div>
                 <button type="button" className={styles.secondaryButton} onClick={() => setAddUsersOpen(false)} disabled={Boolean(pendingAction)}>Cancel</button>
-                <button type="button" className={styles.primaryButton} onClick={() => void addSelectedUsers()} disabled={!addUserSelection.size || pendingAction === "add-attendance-users"}>
-                  {pendingAction === "add-attendance-users" ? "Adding…" : "Add selected"}
+                <button type="button" className={styles.primaryButton} onClick={() => void saveRoster()} disabled={!rosterDraft.length || pendingAction === "save-roster"}>
+                  {pendingAction === "save-roster" ? "Saving…" : "Save users"}
                 </button>
               </div>
             </div>
