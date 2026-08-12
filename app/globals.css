@@ -44,6 +44,190 @@
   --fc-table-head-text: #b9d6ed;
 }
 
+/* SPC feedback */
+.spc-feedback-compose .spc-panel-header > div,
+.spc-feedback-list-panel .spc-panel-header > div {
+  min-width: 0;
+}
+
+.spc-feedback-compose .spc-panel-header p,
+.spc-feedback-list-panel .spc-panel-header p {
+  margin: 4px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+}
+
+.spc-feedback-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.55fr) minmax(170px, 0.65fr) minmax(280px, 1.8fr);
+  gap: 12px;
+  padding: 16px;
+}
+
+.spc-feedback-form label,
+.spc-feedback-review label {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.spc-feedback-form label > span,
+.spc-feedback-review label > span,
+.spc-feedback-response > span {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.spc-feedback-form input,
+.spc-feedback-form select,
+.spc-feedback-form textarea,
+.spc-feedback-review select,
+.spc-feedback-review textarea,
+.spc-feedback-list-panel .spc-panel-header > select {
+  width: 100%;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--fc-admin-panel-text);
+  font: inherit;
+  font-size: 12px;
+  padding: 9px 10px;
+}
+
+.spc-feedback-form textarea,
+.spc-feedback-review textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.spc-feedback-message {
+  grid-column: 1 / -1;
+}
+
+.spc-feedback-submit {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spc-feedback-submit small {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+}
+
+.spc-feedback-submit .spc-page-action,
+.spc-feedback-review .spc-page-action {
+  border: 0;
+}
+
+.spc-feedback-list-panel .spc-panel-header > select {
+  width: auto;
+  min-width: 132px;
+  padding: 7px 9px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.spc-feedback-records {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.spc-feedback-record {
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.spc-feedback-record > header,
+.spc-feedback-record > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.spc-feedback-record > header span,
+.spc-feedback-record > footer {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.spc-feedback-record h3 {
+  margin: 4px 0 0;
+  color: var(--fc-admin-panel-text);
+  font-size: 14px;
+}
+
+.spc-feedback-record > header > strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #536072;
+  padding: 5px 8px;
+  font-size: 8px;
+  letter-spacing: 0.03em;
+}
+
+.spc-feedback-record > header > strong.is-new { background: #e8f2ff; color: #0063c6; }
+.spc-feedback-record > header > strong.is-reviewing { background: #fff2d7; color: #7b5400; }
+.spc-feedback-record > header > strong.is-planned { background: #eee9ff; color: #5a36a6; }
+.spc-feedback-record > header > strong.is-completed { background: #e4f7ec; color: #167243; }
+
+.spc-feedback-record > p,
+.spc-feedback-response p {
+  margin: 12px 0;
+  color: #344154;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.spc-feedback-review,
+.spc-feedback-response {
+  margin-top: 12px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  padding-top: 12px;
+}
+
+.spc-feedback-review {
+  display: grid;
+  grid-template-columns: 150px minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.spc-feedback-response p {
+  margin-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .spc-feedback-form,
+  .spc-feedback-review {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-feedback-title,
+  .spc-feedback-message,
+  .spc-feedback-submit {
+    grid-column: auto;
+  }
+
+  .spc-feedback-submit,
+  .spc-feedback-record > footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

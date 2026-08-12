@@ -199,6 +199,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_suppliers: "spc-suppliers",
   spc_speedboard_notices: "spc-chrome-extension",
   spc_presentation_chunks: "spc-readme",
+  spc_feedback: "spc-feedback",
   openai_usage_events: "openai-usage",
   attendance_people: "attendance-record",
   attendance_team_assignments: "attendance-record",
@@ -220,6 +221,7 @@ const AUDIT_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC ENQUIRIES",
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
   "spc-readme": "SPC INTRODUCTION",
+  "spc-feedback": "SPC FEEDBACK",
   "spc-fixtures": "SPC FIXTURES",
   "spc-lost-record": "SPC LOST RECORD",
   "spc-statistics": "SPC STATISTICS",
@@ -259,6 +261,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
   spc_speedboard_notices: "SPC Speed Board update notice",
+  spc_feedback: "SPC feedback",
   parser_reports: "parser report",
   openai_usage_events: "OpenAI usage event",
   attendance_people: "attendance person",
@@ -311,6 +314,11 @@ const FIELD_LABELS: Record<string, string> = {
   direction: "direction",
   message_type: "message type",
   status: "status",
+  category: "type",
+  message: "details",
+  area: "area",
+  admin_response: "response",
+  reviewed_by_display_name: "reviewed by",
   unread_count: "unread count",
   assigned_to: "assigned to",
   enquiry_number: "enquiry number",
@@ -386,6 +394,7 @@ const SPC_TABLE_NAMES = new Set([
   "spc_role_defaults",
   "spc_suppliers",
   "spc_speedboard_notices",
+  "spc_feedback",
   "spc_user_management_events",
   "spc_mfa_test_events",
 ])
@@ -399,6 +408,7 @@ const NON_UNDOABLE_TABLES = new Set([
   "spc_mfa_test_events",
   "spc_suppliers",
   "spc_speedboard_notices",
+  "spc_feedback",
 ])
 
 function isSpcAuditRecord(record: AuditLogRecord) {

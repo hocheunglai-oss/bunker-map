@@ -37,6 +37,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/readme", "/spc/readme"],
   },
   {
+    id: "spc-feedback",
+    label: "FEEDBACK",
+    group: "trading",
+    path: "/spc/feedback",
+    matchPrefixes: ["/feedback", "/spc/feedback"],
+  },
+  {
     id: "spc-fixtures",
     label: "FIXTURES",
     group: "records",
@@ -222,14 +229,16 @@ export function getDefaultSpcPermissionsForRole(
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
       const permission =
-        page.id === "spc-buyer-enquiries" ||
-        page.id === "spc-chrome-extension" ||
-        page.id === "spc-readme" ||
-        page.id === "spc-fixtures" ||
-        page.id === "spc-lost-record" ||
-        page.id === "spc-statistics"
-          ? "view"
-          : "none"
+        page.id === "spc-feedback"
+          ? "edit"
+          : page.id === "spc-buyer-enquiries" ||
+              page.id === "spc-chrome-extension" ||
+              page.id === "spc-readme" ||
+              page.id === "spc-fixtures" ||
+              page.id === "spc-lost-record" ||
+              page.id === "spc-statistics"
+            ? "view"
+            : "none"
       permissions[page.id] = constrainSpcPermissionForRole(
         roleId,
         page.id,
@@ -243,7 +252,7 @@ export function getDefaultSpcPermissionsForRole(
     permissions[page.id] = constrainSpcPermissionForRole(
       roleId,
       page.id,
-      "view",
+      page.id === "spc-feedback" ? "edit" : "view",
     )
     return permissions
   }, {})
@@ -271,6 +280,7 @@ export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | nul
   const priority = [
     "spc-buyer-enquiries",
     "spc-chrome-extension",
+    "spc-feedback",
     "spc-fixtures",
     "spc-lost-record",
     "spc-statistics",
