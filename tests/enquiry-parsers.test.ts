@@ -5,6 +5,7 @@ import {
   buildShortenedEnquiry,
   detectAttentionTerms,
   detectSpcCautionTerms,
+  detectVlsfoMaxRemarks,
   formatSpcCautionWarning,
   normalizeEnquiryQuantityNumber,
   normalizeEnquiryQuantityText,
@@ -187,6 +188,8 @@ test("does not use specification or viscosity numbers as quantities", () => {
 })
 
 test("flags all requested caution terms", () => {
+  assert.deepEqual(detectVlsfoMaxRemarks("VLSFO 180CST"), ["180cst max"])
+  assert.deepEqual(detectVlsfoMaxRemarks("VLSFO 80CST"), ["80cst max"])
   assert.deepEqual(detectAttentionTerms("RMK: 200 CBM / 250 KL"), ["RMK", "CBM", "KL"])
   assert.deepEqual(
     detectSpcCautionTerms("VLSFO 80CST / 120CST / 180CST / RMK"),
@@ -719,5 +722,24 @@ test("uses sg only for Singapore enquiries on SPC", () => {
   assert.equal(
     parseSpcEnquiryText("SHAN REN / 9474606 / TAICHUNG / 16 - 18 AUG / VLSFO 110MT").standardText,
     "shan ren / 9474606 / 16 - 18 aug / vlsfo 110mts",
+  )
+})
+
+test("pairs labelled grade and quantity lists in order", () => {
+  const raw = [
+    "Vessel: JOSCO LUCKY",
+    "Port: PORT KLANG",
+    "Date: 25th Aug. 2026",
+    "Grade: VLSFO VIS＜180CST / LSMGO",
+    "Quantity: 650-790 MT / 90-100 MT",
+  ].join("\n")
+
+  assert.equal(
+    worksheetOutput(raw, ["180cst max"]),
+    "josco lucky / port klang 25 aug / vlsfo 180CST MAX 650-790mts / lsmgo 90-100mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText(raw, ["180cst max"]).standardText,
+    "josco lucky / 25 aug / vlsfo 180CST MAX 650-790mts / lsmgo 90-100mts",
   )
 })

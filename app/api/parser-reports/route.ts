@@ -8,6 +8,7 @@ import {
 import { parserReportAccessPage } from "@/lib/parserReportAccess"
 import {
   acknowledgedParserReportMetadata,
+  asParserReportMetadata,
   pendingParserReportMetadata,
   parserReportCounts,
   parserReportFromRow,
@@ -30,6 +31,8 @@ const MAX_NOTE_LENGTH = 2_000
 type ParserReportPayload = {
   id?: unknown
   action?: unknown
+  aiOutput?: unknown
+  aiSources?: unknown
   source?: unknown
   context?: unknown
   rawText?: unknown
@@ -39,6 +42,19 @@ type ParserReportPayload = {
   note?: unknown
   pageUrl?: unknown
   metadata?: unknown
+}
+
+function parserAiSources(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value.slice(0, 3).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return []
+    const source = item as Record<string, unknown>
+    const url = asString(source.url, 1_000)
+    if (!/^https:\/\//i.test(url)) return []
+    const title = asString(source.title, 500)
+    return [{ url, ...(title ? { title } : {}) }]
+  })
 }
 
 function asString(value: unknown, maxLength = MAX_TEXT_LENGTH) {
@@ -209,6 +225,14 @@ export async function POST(request: Request) {
       if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
       const now = new Date().toISOString()
       const acknowledging = payload.action === "acknowledge"
+      const aiOutput = asString(payload.aiOutput)
+      const reviewMetadata = aiOutput
+        ? {
+            ...asParserReportMetadata(existing.metadata),
+            aiFixOutput: aiOutput,
+            aiSources: parserAiSources(payload.aiSources),
+          }
+        : existing.metadata
       const { data, error } = await supabase
         .from("parser_reports")
         .update({
@@ -216,7 +240,7 @@ export async function POST(request: Request) {
           note: asString(payload.note, MAX_NOTE_LENGTH),
           metadata: acknowledging
             ? acknowledgedParserReportMetadata(existing.metadata, now)
-            : readyParserReportMetadata(existing.metadata, now),
+            : readyParserReportMetadata(reviewMetadata, now, correctedOutput),
           status: "reviewed",
           updated_at: now,
         })

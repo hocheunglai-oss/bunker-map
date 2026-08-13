@@ -505,13 +505,13 @@ function isNonRequestProductReference(value: string) {
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
   const normalized = normalizeInput(value)
   const remarks: VlsfoMaxRemark[] = []
-  if (/(?:rmg\s*)?80\s*cst\b/i.test(normalized) || /\brmg\s*80\b/i.test(normalized)) {
+  if (/(?:^|[^0-9])(?:rmg\s*)?80\s*cst\b/i.test(normalized) || /\brmg\s*80\b/i.test(normalized)) {
     remarks.push("80cst max")
   }
-  if (/(?:rmg\s*)?180\s*cst\b/i.test(normalized) || /\brmg\s*180\b/i.test(normalized)) {
+  if (/(?:^|[^0-9])(?:rmg\s*)?180\s*cst\b/i.test(normalized) || /\brmg\s*180\b/i.test(normalized)) {
     remarks.push("180cst max")
   }
-  if (/(?:rmg\s*)?120\s*cst\b/i.test(normalized) || /\brmg\s*120\b/i.test(normalized)) {
+  if (/(?:^|[^0-9])(?:rmg\s*)?120\s*cst\b/i.test(normalized) || /\brmg\s*120\b/i.test(normalized)) {
     remarks.push("120cst max")
   }
   return remarks
@@ -657,6 +657,59 @@ function extractQuantityFromBlock(lines: string[]) {
   return numericLine ? `${normalizeEnquiryQuantityNumber(numericLine)}mts` : ""
 }
 
+function extractExplicitQuantityList(value: string) {
+  const pattern = new RegExp(
+    String.raw`\b\d+(?:[,.]\d+)?(?:\s*(?:-|~|/|to)\s*\d+(?:[,.]\d+)?)?\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`,
+    "gi",
+  )
+
+  return Array.from(value.matchAll(pattern)).flatMap((match) => {
+    const quantity = extractQuantityFromInlineUnit(match[0])
+    return quantity ? [quantity] : []
+  })
+}
+
+function extractPairedProductQuantityLines(lines: string[], autoDetectVlsfoRemarks: boolean) {
+  const products: ProductSegment[] = []
+  const consumedLineIndexes = new Set<number>()
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const gradeMatch = lines[index].match(/^\s*(?:grades?|products?)\s*[:#-]?\s*(.+)$/i)
+    if (!gradeMatch) continue
+
+    const gradeSegments = gradeMatch[1]
+      .split(/\s*(?:\/|;|\|)\s*/)
+      .map((segment) => ({ segment, product: classifyProduct(segment) }))
+      .filter((item): item is { segment: string; product: ProductSegment["product"] } => Boolean(item.product))
+    if (gradeSegments.length < 2) continue
+
+    let quantityLineIndex = -1
+    let quantities: string[] = []
+    for (let offset = index + 1; offset < Math.min(lines.length, index + 4); offset += 1) {
+      const quantityMatch = lines[offset].match(/^\s*(?:qty|quantity|quantities)\s*[:#-]?\s*(.+)$/i)
+      if (!quantityMatch) continue
+      quantities = extractExplicitQuantityList(quantityMatch[1])
+      quantityLineIndex = offset
+      break
+    }
+
+    if (quantities.length !== gradeSegments.length || quantityLineIndex < 0) continue
+
+    products.push(...gradeSegments.map((item, productIndex) => ({
+      product: item.product,
+      quantity: quantities[productIndex],
+      detectedRemarks:
+        item.product === "vlsfo" && autoDetectVlsfoRemarks
+          ? detectVlsfoMaxRemarks(item.segment)
+          : [],
+    })))
+    consumedLineIndexes.add(index)
+    consumedLineIndexes.add(quantityLineIndex)
+  }
+
+  return { products, consumedLineIndexes }
+}
+
 function productMatches(line: string) {
   return Array.from(
     line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
@@ -734,9 +787,11 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
     .map(cleanSpaces)
     .filter(Boolean)
 
-  const products: ProductSegment[] = []
+  const paired = extractPairedProductQuantityLines(lines, autoDetectVlsfoRemarks)
+  const products: ProductSegment[] = [...paired.products]
 
   for (let index = 0; index < lines.length; index += 1) {
+    if (paired.consumedLineIndexes.has(index)) continue
     const line = lines[index]
     if (isNonRequestProductReference(line)) continue
     const inlineSegments = extractInlineProductSegments(line, autoDetectVlsfoRemarks)

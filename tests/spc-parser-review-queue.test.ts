@@ -58,7 +58,11 @@ test("an AI-completed report remains visible until the user opens it", () => {
 
 test("report workflow metadata moves through pending, ready, and acknowledged states", () => {
   const pending = pendingParserReportMetadata({ draft: { vesselName: "TEST" } })
-  const ready = readyParserReportMetadata(pending, "2026-08-11T01:00:00.000Z")
+  const ready = readyParserReportMetadata(
+    { ...pending, manualVlsfoMaxRemarks: ["80cst max", "180cst max"] },
+    "2026-08-11T01:00:00.000Z",
+    "test / vlsfo 180CST MAX 100mts",
+  )
   const acknowledged = acknowledgedParserReportMetadata(ready, "2026-08-11T02:00:00.000Z")
 
   assert.deepEqual(pending, {
@@ -73,12 +77,13 @@ test("report workflow metadata moves through pending, ready, and acknowledged st
   assert.equal(ready.pendingUserReview, true)
   assert.equal(ready.aiReviewState, "ready")
   assert.equal(ready.aiReviewedAt, "2026-08-11T01:00:00.000Z")
+  assert.deepEqual(ready.manualVlsfoMaxRemarks, ["180cst max"])
   assert.equal(acknowledged.pendingUserReview, false)
   assert.equal(acknowledged.aiReviewState, "acknowledged")
   assert.equal(acknowledged.userReviewedAt, "2026-08-11T02:00:00.000Z")
 })
 
-test("review UI shows AI queue left, user queue right, and needs no confirmation button", () => {
+test("review UI shows user queue left, AI queue right, and needs no confirmation button", () => {
   const panelSource = readFileSync(
     new URL("../components/ParserReportReviewPanel.tsx", import.meta.url),
     "utf8",
@@ -86,10 +91,12 @@ test("review UI shows AI queue left, user queue right, and needs no confirmation
   const pendingAiPosition = panelSource.indexOf(">Pending AI Review<")
   const pendingUserPosition = panelSource.indexOf(">Pending Your Review<")
 
-  assert.ok(pendingAiPosition >= 0)
-  assert.ok(pendingUserPosition > pendingAiPosition)
+  assert.ok(pendingUserPosition >= 0)
+  assert.ok(pendingAiPosition > pendingUserPosition)
   assert.doesNotMatch(panelSource, /Confirm Reviewed/)
   assert.match(panelSource, /if \(queue === "ready-user"\) void acknowledgeReadyReport\(report\)/)
+  assert.match(panelSource, /aiOutput: draft\.aiOutput/)
+  assert.match(panelSource, /aiSources: draft\.aiSources/)
 })
 
 test("sidebar displays only the number of reports pending user review", () => {

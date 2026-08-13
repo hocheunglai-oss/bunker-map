@@ -224,6 +224,8 @@ export function ParserReportReviewPanel({
           action: "review",
           source,
           id: draft.id,
+          aiOutput: draft.aiOutput,
+          aiSources: draft.aiSources,
           correctedOutput: draft.correctedOutput,
           note: draft.note,
         }),
@@ -271,20 +273,6 @@ export function ParserReportReviewPanel({
           {loading ? <p className="spc-empty">Loading reports...</p> : null}
           {!loading && !loadFailed ? (
             <>
-              <section className="spc-parser-report-queue" aria-labelledby="pending-parser-reports">
-                <div className="spc-parser-report-queue-header">
-                  <h3 id="pending-parser-reports">Pending AI Review</h3>
-                  <span>{pendingAiReports.length}</span>
-                </div>
-                <div className="spc-parser-report-list">
-                  {pendingAiReports.map((report) => (
-                    <button key={report.id} type="button" onClick={() => openReport(report, "pending-ai")}>
-                      {vesselName(report)}
-                    </button>
-                  ))}
-                  {pendingAiReports.length === 0 ? <p className="spc-empty">No reports pending AI review.</p> : null}
-                </div>
-              </section>
               <section className="spc-parser-report-queue" aria-labelledby="ready-parser-reports">
                 <div className="spc-parser-report-queue-header">
                   <h3 id="ready-parser-reports">Pending Your Review</h3>
@@ -302,6 +290,20 @@ export function ParserReportReviewPanel({
                     </button>
                   ))}
                   {readyForUserReports.length === 0 ? <p className="spc-empty">No reports pending your review.</p> : null}
+                </div>
+              </section>
+              <section className="spc-parser-report-queue" aria-labelledby="pending-parser-reports">
+                <div className="spc-parser-report-queue-header">
+                  <h3 id="pending-parser-reports">Pending AI Review</h3>
+                  <span>{pendingAiReports.length}</span>
+                </div>
+                <div className="spc-parser-report-list">
+                  {pendingAiReports.map((report) => (
+                    <button key={report.id} type="button" onClick={() => openReport(report, "pending-ai")}>
+                      {vesselName(report)}
+                    </button>
+                  ))}
+                  {pendingAiReports.length === 0 ? <p className="spc-empty">No reports pending AI review.</p> : null}
                 </div>
               </section>
             </>

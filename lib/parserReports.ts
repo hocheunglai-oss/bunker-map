@@ -1,5 +1,6 @@
 import {
   buildShortenedEnquiry,
+  detectVlsfoMaxRemarks,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
@@ -77,9 +78,16 @@ export function pendingParserReportMetadata(value: unknown) {
   }
 }
 
-export function readyParserReportMetadata(value: unknown, reviewedAt: string) {
+export function readyParserReportMetadata(
+  value: unknown,
+  reviewedAt: string,
+  correctedOutput?: string,
+) {
   return {
     ...asParserReportMetadata(value),
+    ...(correctedOutput === undefined
+      ? {}
+      : { manualVlsfoMaxRemarks: detectVlsfoMaxRemarks(correctedOutput) }),
     pendingReview: false,
     pendingUserReview: true,
     aiReviewState: "ready",
