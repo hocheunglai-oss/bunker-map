@@ -29,7 +29,9 @@ export async function POST(request: Request) {
         const message = item as { from?: unknown; text?: { body?: unknown }; button?: { payload?: unknown }; interactive?: { button_reply?: { id?: unknown } } }
         const from = String(message.from || "").replace(/\D/g, "")
         const payloadValue = String(message.button?.payload || message.interactive?.button_reply?.id || "")
-        const token = payloadValue.startsWith("RECEIVE_") ? payloadValue.slice(8) : undefined
+        const token = payloadValue.startsWith("MOBILE_RECEIVE_")
+          ? payloadValue.slice(15)
+          : payloadValue.startsWith("RECEIVE_") ? payloadValue.slice(8) : undefined
         const plainOk = /^ok$/i.test(String(message.text?.body || "").trim())
         if (from && (token || plainOk)) await acknowledgeSpcMobileDelivery(from, token)
       }

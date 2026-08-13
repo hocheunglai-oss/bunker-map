@@ -7,6 +7,8 @@ type MobileMode = {
   enabled: boolean
   expiresAt: string | null
   maskedPhone: string
+  conversationOpen?: boolean
+  activationStatus?: string
   message?: string
 }
 
@@ -55,7 +57,7 @@ export function SpcMobileModeControl() {
     <div className={`spc-mobile-mode${mode.enabled ? " is-active" : ""}`}>
       <div>
         <strong>MOBILE MODE</strong>
-        <span>{mode.enabled ? "ON UNTIL SWITCHED OFF" : "OFF"}</span>
+        <span>{mode.enabled ? (mode.conversationOpen ? "ON · READY" : "ON · CHECK WHATSAPP") : "OFF"}</span>
       </div>
       <button type="button" role="switch" aria-checked={mode.enabled} onClick={toggle} disabled={saving}>
         <span aria-hidden="true" />

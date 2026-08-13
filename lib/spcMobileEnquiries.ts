@@ -7,7 +7,7 @@ import type { SpcEnquiry } from "@/lib/spcEnquiries"
 
 const MAX_ATTEMPTS = 20
 const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 21600]
-const TEMPLATE_NAME = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_NAME?.trim() || "spc_mobile_enquiry_ready"
+const TEMPLATE_NAME = process.env.SPC_MOBILE_MODE_TEMPLATE_NAME?.trim() || "spc_mobile_mode_on"
 const TEMPLATE_LANGUAGE = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_LANGUAGE?.trim() || "en_US"
 
 type DeliveryRow = {
@@ -21,6 +21,16 @@ type DeliveryRow = {
   content_message_id: string | null
   trader_message_id: string | null
   attempt_count: number
+}
+
+type MobileModeRow = {
+  spc_user_id: string
+  recipient_phone: string
+  activation_token: string
+  activation_status: string
+  activation_message_id: string | null
+  activation_attempt_count: number
+  conversation_open_until: string | null
 }
 
 type EnquiryRow = {
@@ -91,13 +101,15 @@ async function eligibleTrader(session: SpcSession) {
 export async function getSpcMobileMode(session: SpcSession) {
   const trader = await eligibleTrader(session)
   if (!trader) return { eligible: false, enabled: false, expiresAt: null, maskedPhone: "" }
-  const { data, error } = await serviceClient().from("spc_mobile_modes").select("enabled,expires_at").eq("spc_user_id", trader.id).maybeSingle()
+  const { data, error } = await serviceClient().from("spc_mobile_modes").select("enabled,conversation_open_until,activation_status").eq("spc_user_id", trader.id).maybeSingle()
   if (error) throw error
   const enabled = data?.enabled === true
   return {
     eligible: true,
     enabled,
-    expiresAt: enabled ? String(data?.expires_at || "") : null,
+    expiresAt: null,
+    conversationOpen: enabled && Date.parse(String(data?.conversation_open_until || "")) > Date.now(),
+    activationStatus: enabled ? String(data?.activation_status || "queued") : "idle",
     maskedPhone: `+${trader.whatsappPhone.slice(0, 2)}${"•".repeat(Math.max(1, trader.whatsappPhone.length - 6))}${trader.whatsappPhone.slice(-4)}`,
   }
 }
@@ -107,6 +119,7 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
   if (!trader) throw new Error("Only an active supplier trader with a verified WhatsApp number can use Mobile Mode.")
   const now = new Date()
   const expiresAt = null
+  const activationToken = randomBytes(24).toString("base64url")
   const { error } = await serviceClient().from("spc_mobile_modes").upsert({
     spc_user_id: trader.id,
     username: trader.username,
@@ -116,6 +129,14 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
     expires_at: expiresAt,
     activated_at: enabled ? now.toISOString() : null,
     deactivated_at: enabled ? null : now.toISOString(),
+    conversation_open_until: null,
+    activation_token: enabled ? activationToken : null,
+    activation_status: enabled ? "queued" : "idle",
+    activation_message_id: null,
+    activation_delivery_status: null,
+    activation_attempt_count: 0,
+    activation_next_attempt_at: now.toISOString(),
+    activation_last_error: null,
     updated_at: now.toISOString(),
   }, { onConflict: "spc_user_id" })
   if (error) throw error
@@ -146,7 +167,7 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
 export async function enqueueSpcMobileEnquiry(enquiry: SpcEnquiry) {
   const supabase = serviceClient()
   const { data: modes, error } = await supabase.from("spc_mobile_modes")
-    .select("spc_user_id,recipient_phone,display_name")
+    .select("spc_user_id,recipient_phone,display_name,conversation_open_until")
     .eq("enabled", true)
   if (error) throw error
   if (!modes?.length) return 0
@@ -156,6 +177,7 @@ export async function enqueueSpcMobileEnquiry(enquiry: SpcEnquiry) {
     recipient_phone: mode.recipient_phone,
     recipient_display_name: mode.display_name,
     acknowledgement_token: randomBytes(24).toString("base64url"),
+    status: Date.parse(String(mode.conversation_open_until || "")) > Date.now() ? "acknowledged" : "queued",
   }))
   const { error: insertError } = await supabase.from("spc_mobile_enquiry_deliveries")
     .upsert(rows, { onConflict: "enquiry_id,spc_user_id", ignoreDuplicates: true })
@@ -163,7 +185,7 @@ export async function enqueueSpcMobileEnquiry(enquiry: SpcEnquiry) {
   return rows.length
 }
 
-async function sendPrompt(row: DeliveryRow, enquiryNumber: string) {
+async function sendModePrompt(row: MobileModeRow) {
   return sendWhatsapp({
     to: row.recipient_phone,
     type: "template",
@@ -171,8 +193,7 @@ async function sendPrompt(row: DeliveryRow, enquiryNumber: string) {
       name: TEMPLATE_NAME,
       language: { code: TEMPLATE_LANGUAGE },
       components: [
-        { type: "body", parameters: [{ type: "text", text: enquiryNumber }] },
-        { type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: `RECEIVE_${row.acknowledgement_token}` }] },
+        { type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: `MOBILE_RECEIVE_${row.activation_token}` }] },
       ],
     },
   })
@@ -180,6 +201,30 @@ async function sendPrompt(row: DeliveryRow, enquiryNumber: string) {
 
 export async function processPendingSpcMobileDeliveries(limit = 20) {
   const supabase = serviceClient()
+  const now = new Date().toISOString()
+  const { data: pendingModes, error: modeError } = await supabase.from("spc_mobile_modes")
+    .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until")
+    .eq("enabled", true).in("activation_status", ["queued", "failed"])
+    .lte("activation_next_attempt_at", now).limit(limit)
+  if (modeError) throw modeError
+  for (const mode of (pendingModes || []) as MobileModeRow[]) {
+    try {
+      const messageId = await sendModePrompt(mode)
+      await supabase.from("spc_mobile_modes").update({
+        activation_status: "prompt_sent", activation_message_id: messageId,
+        activation_delivery_status: "accepted", activation_attempt_count: mode.activation_attempt_count + 1,
+        activation_last_error: null, updated_at: new Date().toISOString(),
+      }).eq("spc_user_id", mode.spc_user_id).in("activation_status", ["queued", "failed"])
+    } catch (modeSendError) {
+      const attempts = mode.activation_attempt_count + 1
+      await supabase.from("spc_mobile_modes").update({
+        activation_status: "failed", activation_attempt_count: attempts,
+        activation_next_attempt_at: new Date(Date.now() + RETRY_SECONDS[Math.min(attempts - 1, RETRY_SECONDS.length - 1)] * 1000).toISOString(),
+        activation_last_error: (modeSendError instanceof Error ? modeSendError.message : "activation_failed").slice(0, 160),
+        updated_at: new Date().toISOString(),
+      }).eq("spc_user_id", mode.spc_user_id)
+    }
+  }
   const { data, error } = await supabase.from("spc_mobile_enquiry_deliveries")
     .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
     .in("status", ["queued", "failed", "acknowledged"])
@@ -191,20 +236,30 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
   let processed = 0
   for (const delivery of (data || []) as DeliveryRow[]) {
     try {
+      const { data: mode, error: currentModeError } = await supabase.from("spc_mobile_modes")
+        .select("enabled,conversation_open_until,activation_status").eq("spc_user_id", delivery.spc_user_id).maybeSingle()
+      if (currentModeError) throw currentModeError
+      const windowOpen = mode?.enabled === true && Date.parse(String(mode.conversation_open_until || "")) > Date.now()
+      if (!windowOpen) {
+        if (mode?.enabled === true && mode.activation_status === "acknowledged") {
+          await supabase.from("spc_mobile_modes").update({
+            activation_token: randomBytes(24).toString("base64url"), activation_status: "queued",
+            activation_message_id: null, activation_delivery_status: null, activation_attempt_count: 0,
+            activation_next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          }).eq("spc_user_id", delivery.spc_user_id)
+        }
+        continue
+      }
       if (delivery.status === "acknowledged") {
         await releaseDelivery(delivery)
         processed += 1
         continue
       }
-      const { data: enquiry, error: enquiryError } = await supabase.from("spc_enquiries")
-        .select("id,enquiry_number,title,notes,created_by_display_name").eq("id", delivery.enquiry_id).single()
-      if (enquiryError) throw enquiryError
-      const messageId = await sendPrompt(delivery, String(enquiry.enquiry_number || "SPC enquiry"))
       const { error: updateError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
-        status: "prompt_sent", prompt_message_id: messageId, prompt_delivery_status: "accepted",
-        attempt_count: delivery.attempt_count + 1, last_error_code: null, updated_at: new Date().toISOString(),
-      }).eq("id", delivery.id).in("status", ["queued", "failed"])
+        status: "acknowledged", acknowledged_at: new Date().toISOString(), last_error_code: null, updated_at: new Date().toISOString(),
+      }).eq("id", delivery.id).in("status", ["queued", "failed", "prompt_sent"])
       if (updateError) throw updateError
+      await releaseDelivery({ ...delivery, status: "acknowledged" })
       processed += 1
     } catch (error) {
       const attempts = delivery.attempt_count + 1
@@ -246,6 +301,28 @@ async function releaseDelivery(delivery: DeliveryRow) {
 
 export async function acknowledgeSpcMobileDelivery(from: string, token?: string) {
   const supabase = serviceClient()
+  const modeQuery = supabase.from("spc_mobile_modes")
+    .select("spc_user_id,activation_token,activation_status").eq("recipient_phone", from).eq("enabled", true)
+  const { data: modes, error: modeError } = token
+    ? await modeQuery.eq("activation_token", token).limit(1)
+    : await modeQuery.in("activation_status", ["prompt_sent", "failed"]).limit(2)
+  if (modeError) throw modeError
+  if (modes?.length === 1) {
+    const mode = modes[0]
+    const inboundAt = new Date()
+    const openUntil = new Date(inboundAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
+    await supabase.from("spc_mobile_modes").update({
+      activation_status: "acknowledged", last_inbound_at: inboundAt.toISOString(),
+      conversation_open_until: openUntil, activation_last_error: null, updated_at: inboundAt.toISOString(),
+    }).eq("spc_user_id", mode.spc_user_id)
+    await supabase.from("spc_mobile_enquiry_deliveries").update({
+      status: "acknowledged", acknowledged_at: inboundAt.toISOString(), next_attempt_at: inboundAt.toISOString(), updated_at: inboundAt.toISOString(),
+    }).eq("spc_user_id", mode.spc_user_id).in("status", ["queued", "failed", "prompt_sent"])
+    await processPendingSpcMobileDeliveries()
+    return true
+  }
+
+  // Backward compatibility for enquiry-specific RECEIVE prompts already delivered before this change.
   let query = supabase.from("spc_mobile_enquiry_deliveries")
     .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
     .eq("recipient_phone", from).in("status", ["prompt_sent", "acknowledged"])
@@ -254,6 +331,11 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
   if (error) throw error
   if (!data?.length || (!token && data.length !== 1)) return false
   const delivery = data[0] as DeliveryRow
+  const inboundAt = new Date()
+  await supabase.from("spc_mobile_modes").update({
+    activation_status: "acknowledged", last_inbound_at: inboundAt.toISOString(),
+    conversation_open_until: new Date(inboundAt.getTime() + 24 * 60 * 60 * 1000).toISOString(), updated_at: inboundAt.toISOString(),
+  }).eq("spc_user_id", delivery.spc_user_id)
   await supabase.from("spc_mobile_enquiry_deliveries").update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id).in("status", ["prompt_sent", "acknowledged"])
   await releaseDelivery(delivery)
   return true
@@ -262,6 +344,8 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
 export async function recordSpcMobileMessageStatus(messageId: string, status: string) {
   if (!messageId || !["sent", "delivered", "read", "failed"].includes(status)) return
   const supabase = serviceClient()
+  const { data: modeRows } = await supabase.from("spc_mobile_modes").update({ activation_delivery_status: status, updated_at: new Date().toISOString() }).eq("activation_message_id", messageId).select("spc_user_id").limit(1)
+  if (modeRows?.length) return
   for (const [idColumn, statusColumn] of [
     ["prompt_message_id", "prompt_delivery_status"],
     ["content_message_id", "content_delivery_status"],
