@@ -57,13 +57,6 @@ type EnquiriesResponse = {
   message?: string
 }
 
-type ParserReportsResponse = {
-  reports?: unknown[]
-  unresolvedReports?: number
-  totalReports?: number
-  resolvedReports?: number
-}
-
 type EnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
 
 type DraftEnquiry = ParsedSpcEnquiry & {
@@ -377,7 +370,6 @@ export default function SpcEnquiriesPage() {
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const [reportButtonState, setReportButtonState] = useState<"" | "new-enquiry" | "reoffer">("")
-  const [parserReportCount, setParserReportCount] = useState(0)
   const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
   const [parserAiTarget, setParserAiTarget] = useState<ParserReportDialog["context"] | "">("")
   const [parserAiMessage, setParserAiMessage] = useState("")
@@ -446,29 +438,6 @@ export default function SpcEnquiriesPage() {
     }
   }, [canView, username])
 
-  const loadParserReportCount = useCallback(async () => {
-    if (!canView) {
-      setParserReportCount(0)
-      return
-    }
-
-    try {
-      const response = await fetch("/api/parser-reports?source=spc&summary=1", { cache: "no-store" })
-      const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
-      if (!response.ok) throw new Error("Unable to load parser reports.")
-      setParserReportCount(
-        typeof payload.unresolvedReports === "number"
-          ? payload.unresolvedReports
-          : Array.isArray(payload.reports)
-            ? payload.reports.length
-            : 0,
-      )
-    } catch (error) {
-      reportEnquiryError(error, "Failed to load parser report count.")
-      setParserReportCount(0)
-    }
-  }, [canView])
-
   useEffect(() => {
     document.title = "SPC Enquiries"
   }, [])
@@ -486,10 +455,6 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     void loadEnquiries()
   }, [loadEnquiries])
-
-  useEffect(() => {
-    void loadParserReportCount()
-  }, [loadParserReportCount])
 
   function dismissDraftMissingField(field: DraftFieldKey) {
     setDismissedDraftMissingFields((current) => new Set(current).add(field))
@@ -649,7 +614,6 @@ export default function SpcEnquiriesPage() {
       })
       const data = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(data.message || "Failed to send report.")
-      await loadParserReportCount()
       notifyParserReportCountChanged("spc")
       window.setTimeout(() => setReportButtonState(""), 5_000)
     } catch (error) {
@@ -810,7 +774,6 @@ export default function SpcEnquiriesPage() {
       if (!response.ok) throw new Error(data.message || "Failed to save report.")
 
       applyCorrectedParserReport(parserReportDialog, correctedOutput)
-      await loadParserReportCount()
       notifyParserReportCountChanged("spc")
       setParserReportStatus("saved")
       window.setTimeout(() => {
@@ -1103,11 +1066,9 @@ export default function SpcEnquiriesPage() {
                 {parserAiMessage && parserAiTarget === "new-enquiry" ? <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>{parserAiMessage}</p> : null}
                 {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.warnings.length > 0 ? <p className="spc-parser-report-error">AI warning: {parserAiSuggestion.warnings.join(" / ")}</p> : null}
                 {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.imoSources.length > 0 ? <p className="spc-parser-report-status">IMO source: <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">{parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}</a></p> : null}
-                <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               </div>
 
               <div className="spc-enquiry-details-pane">
-                <div className="spc-enquiry-section-title"><span>02</span><strong>Enquiry Details</strong></div>
                 <div className="spc-enquiry-fields">
                   <label className={shouldShowDraftMissing("vesselName") ? "is-missing" : ""}><span>Vessel</span><input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} /></label>
                   <div className={`spc-field-block${shouldShowDraftMissing("imo") ? " is-missing" : ""}`}><div className="spc-field-label-row"><label htmlFor="spc-enquiry-imo">IMO</label>{!draft.imo.trim() && imoSearchUrl ? <a className="spc-imo-lookup" href={imoSearchUrl} target="_blank" rel="noreferrer">Google search</a> : null}</div><input id="spc-enquiry-imo" value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} inputMode="numeric" maxLength={7} /></div>
@@ -1315,7 +1276,6 @@ export default function SpcEnquiriesPage() {
                   </a>
                 </p>
               ) : null}
-              <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
               <div className="spc-dialog-actions">
                 <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
                 <button type="submit" className="is-primary" disabled={saving || updatingId === reofferDraft.id}>
