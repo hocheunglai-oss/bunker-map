@@ -18,6 +18,10 @@ const backupRouteSource = readFileSync(
   new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url),
   "utf8"
 )
+const systemHealthPageSource = readFileSync(
+  new URL("../app/admin/systemhealth/page.tsx", import.meta.url),
+  "utf8",
+)
 
 function numericConstant(source: string, name: string) {
   const match = source.match(new RegExp(`const ${name} = (\\d[\\d_]*)`))
@@ -92,4 +96,8 @@ test("daily backup keeps only the latest verified artifact and its predecessor",
     /verifiedBackups\.slice\(RETAINED_VERIFIED_BACKUP_COUNT\)/,
   )
   assert.match(backupRouteSource, /await drive\.files\.delete\(/)
+  assert.match(
+    systemHealthPageSource,
+    /OLDER VERIFIED FILES PERMANENTLY DELETED/,
+  )
 })
