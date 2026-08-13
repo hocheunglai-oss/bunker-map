@@ -23,11 +23,15 @@ async function setup() {
   let stage = "authorization"
   try {
     await requireSpcPagePermission("spc-user-management", "edit")
-    stage = "resolve-phone"
-    const phoneId = requireEnv("SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID")
-    const phone = await graph(`${phoneId}?fields=whatsapp_business_account`)
-    const account = phone.whatsapp_business_account as { id?: unknown } | undefined
-    const wabaId = String(account?.id || "")
+    stage = "resolve-application"
+    const token = requireEnv("WHATSAPP_ACCESS_TOKEN")
+    const debug = await graph(`debug_token?input_token=${encodeURIComponent(token)}`)
+    const debugData = debug.data as { app_id?: unknown; granular_scopes?: Array<{ scope?: unknown; target_ids?: unknown[] }> } | undefined
+    const configuredWabaId = process.env.WHATSAPP_TEMPLATE_BUSINESS_ACCOUNT_ID?.trim() || ""
+    const scopeWabaId = debugData?.granular_scopes
+      ?.find((scope) => String(scope.scope || "").includes("whatsapp_business"))
+      ?.target_ids?.map(String).find((id) => /^\d{5,30}$/.test(id)) || ""
+    const wabaId = /^\d{5,30}$/.test(configuredWabaId) ? configuredWabaId : scopeWabaId
     if (!/^\d{5,30}$/.test(wabaId)) throw new Error("WhatsApp Business account could not be resolved.")
 
     stage = "check-template"
@@ -53,10 +57,7 @@ async function setup() {
 
     stage = "subscribe-business-account"
     await graph(`${wabaId}/subscribed_apps`, { method: "POST", body: JSON.stringify({}) })
-    const token = requireEnv("WHATSAPP_ACCESS_TOKEN")
-    stage = "resolve-application"
-    const debug = await graph(`debug_token?input_token=${encodeURIComponent(token)}`)
-    const appId = String((debug.data as { app_id?: unknown } | undefined)?.app_id || "")
+    const appId = String(debugData?.app_id || "")
     if (!/^\d{5,30}$/.test(appId)) throw new Error("Meta application could not be resolved.")
     const appToken = `${appId}|${requireEnv("WHATSAPP_APP_SECRET")}`
     stage = "register-callback"
