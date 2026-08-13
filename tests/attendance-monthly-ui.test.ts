@@ -53,6 +53,8 @@ test("sign-in cells distinguish on-time, late, and automatic AM leave", () => {
   assert.match(client, /item\.automaticAmLeave\) return "AM LEAVE"/)
   assert.match(client, /item\.late\) return styles\.lateCell/)
   assert.match(client, /item\.effectiveSignIn\) return styles\.onTimeCell/)
+  assert.match(client, /item\.early\) return styles\.earlyCell/)
+  assert.match(client, /item\.effectiveSignOut\) return styles\.onTimeCell/)
   assert.match(styles, /td\.onTimeCell[\s\S]*?#067647/)
 })
 

@@ -616,6 +616,7 @@ function recordCellTone(
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
   if (direction === "out" && item.early) return styles.earlyCell
+  if (direction === "out" && item.effectiveSignOut) return styles.onTimeCell
   if (item.holidayAttendance || holiday) return styles.holidayCell
   if (item.workMode === "home-office") {
     const workDate = item.date || item.workDate
