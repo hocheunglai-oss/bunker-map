@@ -3414,7 +3414,8 @@ body {
 }
 
 .spc-enquiry-command-row .spc-send-enquiry-button {
-  background: linear-gradient(135deg, #0071e3, #005ec5);
+  background: linear-gradient(135deg, #0071e3, #005ec5) !important;
+  color: #ffffff !important;
   box-shadow: 0 5px 14px rgba(0, 113, 227, 0.23);
 }
 
