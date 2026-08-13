@@ -39,7 +39,7 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   {
     id: "spc-feedback",
     label: "FEEDBACK",
-    group: "trading",
+    group: "management",
     path: "/spc/feedback",
     matchPrefixes: ["/feedback", "/spc/feedback"],
   },

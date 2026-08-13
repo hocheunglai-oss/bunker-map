@@ -8,7 +8,7 @@ test("SPC feedback is available for submission to every built-in role", () => {
   assert.deepEqual(feedback, {
     id: "spc-feedback",
     label: "FEEDBACK",
-    group: "trading",
+    group: "management",
     path: "/spc/feedback",
     matchPrefixes: ["/feedback", "/spc/feedback"],
   })
