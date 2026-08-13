@@ -27,7 +27,7 @@ test("SPC web enquiry history requests only the authenticated user's rows", () =
   assert.match(enquiriesPage, /api\/spc\/enquiries\?limit=200&bootstrap=1/)
   assert.match(enquiriesPage, /data\.sessionKey\?\.toLowerCase\(\) !== username\.toLowerCase\(\)/)
   assert.match(enquiriesPage, /setEnquiries\(\[\]\)/)
-  assert.match(route, /requestedScope = searchParams\.get\("scope"\)\?\.trim\(\) \|\| "mine"/)
+  assert.match(route, /resolveSpcEnquiryScope\([\s\S]*?searchParams\.get\("scope"\)/)
   assert.match(route, /createdByUsername = sharedScope \|\| recordsScope \? undefined : session\.username/)
   assert.match(enquiriesStore, /query = query\.eq\("created_by_username", options\.createdByUsername\)/)
 })
@@ -35,6 +35,20 @@ test("SPC web enquiry history requests only the authenticated user's rows", () =
 test("SPC Speed Board continues to use the shared enquiry feed", () => {
   assert.match(speedBoard, /api\/spc\/enquiries\?limit=250&scope=shared&createdAfter=/)
   assert.match(route, /hasSpcPagePermission\(session, "spc-chrome-extension", "view"\)/)
+})
+
+test("SPC forced-password sessions cannot remain on a protected page", () => {
+  const navigationShell = readFileSync(
+    new URL("../components/SpcNavigationShell.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(navigationShell, /mustChangePassword/)
+  assert.match(navigationShell, /router\.replace\("\/spc"\)/)
+})
+
+test("SPC enquiry send failures are visible to the user", () => {
+  assert.match(enquiriesPage, /setSendError\(error instanceof Error \? error\.message/)
+  assert.match(enquiriesPage, /role="alert"/)
 })
 
 test("SPC Lost Record retains a separately authorized shared record scope", () => {

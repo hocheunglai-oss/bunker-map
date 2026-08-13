@@ -46,7 +46,16 @@ function readStoredGroups() {
 export function SpcNavigationShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { loading, authenticated, username, displayName, role, permissions, pages } = useSpcAuth()
+  const {
+    loading,
+    authenticated,
+    username,
+    displayName,
+    role,
+    mustChangePassword,
+    permissions,
+    pages,
+  } = useSpcAuth()
   const [query, setQuery] = useState("")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -66,6 +75,19 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
+
+  useEffect(() => {
+    if (
+      loading ||
+      !authenticated ||
+      !mustChangePassword ||
+      pathname === "/spc"
+    ) {
+      return
+    }
+
+    router.replace("/spc")
+  }, [authenticated, loading, mustChangePassword, pathname, router])
 
   useEffect(() => {
     if (!mobileOpen) return
@@ -140,7 +162,12 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
     )
   }, [pages, permissions, query])
 
-  if (loading || !authenticated) return <>{children}</>
+  if (loading || !authenticated || mustChangePassword) {
+    if (!loading && authenticated && mustChangePassword && pathname !== "/spc") {
+      return <div className="spc-loading">Loading password change...</div>
+    }
+    return <>{children}</>
+  }
 
   function toggleCollapsed() {
     setCollapsed((current) => {

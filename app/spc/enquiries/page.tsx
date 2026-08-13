@@ -371,6 +371,7 @@ export default function SpcEnquiriesPage() {
   const [dismissedReofferMissingFields, setDismissedReofferMissingFields] = useState<Set<DraftFieldKey>>(() => new Set())
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [sendError, setSendError] = useState("")
   const [rmkMode, setRmkMode] = useState(false)
   const [updatingId, setUpdatingId] = useState("")
   const [parserReportDialog, setParserReportDialog] = useState<ParserReportDialog | null>(null)
@@ -825,6 +826,7 @@ export default function SpcEnquiriesPage() {
   async function sendEnquiry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canEdit || saving) return
+    setSendError("")
     setValidationAttempted(true)
     setDismissedDraftMissingFields(new Set())
     setSaving(true)
@@ -868,6 +870,7 @@ export default function SpcEnquiriesPage() {
       setRmkMode(false)
     } catch (error) {
       reportEnquiryError(error, "Failed to send enquiry.")
+      setSendError(error instanceof Error ? error.message : "Failed to send enquiry.")
     } finally {
       setSaving(false)
     }
@@ -1096,6 +1099,7 @@ export default function SpcEnquiriesPage() {
                   </button>
                   <button type="submit" className="spc-send-enquiry-button" disabled={saving || !canEdit}>{saving ? "Sending..." : "SEND"}</button>
                 </div>
+                {sendError ? <p className="spc-parser-report-error" role="alert">{sendError}</p> : null}
                 {parserAiMessage && parserAiTarget === "new-enquiry" ? <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>{parserAiMessage}</p> : null}
                 {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.warnings.length > 0 ? <p className="spc-parser-report-error">AI warning: {parserAiSuggestion.warnings.join(" / ")}</p> : null}
                 {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.imoSources.length > 0 ? <p className="spc-parser-report-status">IMO source: <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">{parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}</a></p> : null}

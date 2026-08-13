@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { hasSpcPagePermission, requireSpcPagePermission } from "@/lib/spcAuth"
 import { timedJson } from "@/lib/serverTiming"
 import { listSupplierTraderOptions } from "@/lib/spcUsers"
+import { resolveSpcEnquiryScope } from "@/lib/spcEnquiryScope"
 import {
   createSpcEnquiry,
   listSpcEnquiryIds,
@@ -82,7 +83,17 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")?.trim() || undefined
     const limit = Number(searchParams.get("limit") || 250)
     const bootstrap = searchParams.get("bootstrap") === "1"
-    const requestedScope = searchParams.get("scope")?.trim() || "mine"
+    const createdAfterValue = searchParams.get("createdAfter")?.trim() || ""
+    const requestedScope = resolveSpcEnquiryScope(
+      searchParams.get("scope"),
+      createdAfterValue,
+    )
+    if (!requestedScope) {
+      return NextResponse.json(
+        { message: "Unsupported enquiry scope." },
+        { status: 400, headers: { "Cache-Control": "private, no-store" } },
+      )
+    }
     const sharedScope = requestedScope === "shared"
     const recordsScope = requestedScope === "records"
     if (sharedScope && !hasSpcPagePermission(session, "spc-chrome-extension", "view")) {
@@ -91,14 +102,7 @@ export async function GET(request: Request) {
     if (recordsScope && !hasSpcPagePermission(session, "spc-lost-record", "view")) {
       throw new Error("Forbidden")
     }
-    if (!sharedScope && !recordsScope && requestedScope !== "mine") {
-      return NextResponse.json(
-        { message: "Unsupported enquiry scope." },
-        { status: 400, headers: { "Cache-Control": "private, no-store" } },
-      )
-    }
     const createdByUsername = sharedScope || recordsScope ? undefined : session.username
-    const createdAfterValue = searchParams.get("createdAfter")?.trim() || ""
     const parsedCreatedAfter = createdAfterValue ? parseIsoTimestamp(createdAfterValue) : null
     if (createdAfterValue && !parsedCreatedAfter) {
       return NextResponse.json(
