@@ -611,6 +611,9 @@ test("admin template index keeps recipient truth internal without list diagnosti
   assert.doesNotMatch(page, /"Truth not loaded"/)
   assert.doesNotMatch(page, /visibleRecipientTruthSummary/)
   assert.doesNotMatch(page, /recipientTruthBadgeStyle/)
+  assert.doesNotMatch(page, /OUTLOOK RECIPIENT TRUTH: SENDABLE \/ CURRENT/)
+  assert.doesNotMatch(page, /OUTLOOK RECIPIENT TRUTH: CHECK PENDING/)
+  assert.match(page, /OUTLOOK RECIPIENT TRUTH: BLOCKED/)
 })
 
 test("admin template body sync does not replace matching editable HTML", async () => {

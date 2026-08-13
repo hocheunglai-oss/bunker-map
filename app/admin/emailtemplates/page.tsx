@@ -530,16 +530,6 @@ function getRecipientTruthStatus(value: unknown): RecipientTruthStatus {
   }
 }
 
-function formatRecipientCertificationTime(value: string) {
-  const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp)) return ""
-  return new Intl.DateTimeFormat("en-HK", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Hong_Kong",
-  }).format(new Date(timestamp))
-}
-
 function createBlankTemplate(folder: string): EmailTemplate {
   const now = new Date().toISOString()
   const id = `manual-${Date.now()}`
@@ -1925,57 +1915,7 @@ export default function EmailTemplatesAdminPage() {
                     ))}
                   </ul>
                 </div>
-              ) : selectedRecipientTruth.kind === "sendable" ? (
-                <div
-                  role="status"
-                  style={{
-                    display: "grid",
-                    gap: "4px",
-                    border: "1px solid #b9dfc6",
-                    borderRadius: "10px",
-                    background: "#eef8f1",
-                    color: "#1d6338",
-                    padding: "10px 12px",
-                  }}
-                >
-                  <strong style={{ fontSize: "11px", letterSpacing: "0.03em" }}>
-                    OUTLOOK RECIPIENT TRUTH: SENDABLE / CURRENT
-                  </strong>
-                  <span style={{ fontSize: "12px", lineHeight: 1.4 }}>
-                    All {selectedRecipientTruth.total} stored recipient literal
-                    {selectedRecipientTruth.total === 1 ? "" : "s"} have current
-                    certified evidence: {selectedRecipientTruth.resolved} FCUNO /
-                    Exchange and {selectedRecipientTruth.external} explicit external.
-                  </span>
-                  <span style={{ fontSize: "10px", fontWeight: 800 }}>
-                    Certified{" "}
-                    {formatRecipientCertificationTime(
-                      selectedRecipientTruth.certifiedAt,
-                    )}
-                  </span>
-                </div>
-              ) : (
-                <div
-                  role="status"
-                  style={{
-                    display: "grid",
-                    gap: "4px",
-                    border: "1px solid var(--fc-admin-border-soft)",
-                    borderRadius: "10px",
-                    background: "var(--fc-admin-panel-soft-bg)",
-                    color: "var(--fc-muted)",
-                    padding: "10px 12px",
-                  }}
-                >
-                  <strong style={{ fontSize: "11px", letterSpacing: "0.03em" }}>
-                    OUTLOOK RECIPIENT TRUTH: CHECK PENDING
-                  </strong>
-                  <span style={{ fontSize: "12px", lineHeight: 1.4 }}>
-                    Saving checks the exact To, Cc, and Bcc literals against the
-                    certified address book. No recipient is guessed or replaced.
-                  </span>
-                </div>
-              )}
+              ) : null}
 
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "10px" }}>
                 <label>
