@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { ParserReportSidebarBadge } from "@/components/ParserReportSidebarBadge"
+import { SpcMobileModeControl } from "@/components/SpcMobileModeControl"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { clearSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import {
@@ -347,6 +348,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
         </div>
 
         <div className="fc-admin-sidebar-footer">
+          <SpcMobileModeControl />
           <div className="fc-admin-sidebar-footer-meta">
             <div
               className="fc-admin-sidebar-user"

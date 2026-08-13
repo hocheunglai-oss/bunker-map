@@ -38,6 +38,10 @@
     {
       "path": "/api/spc/security-maintenance",
       "schedule": "17 18 * * *"
+    },
+    {
+      "path": "/api/cron/spc-mobile-deliveries",
+      "schedule": "* * * * *"
     }
   ]
 }

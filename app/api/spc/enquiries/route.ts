@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { after, NextResponse } from "next/server"
 import { hasSpcPagePermission, requireSpcPagePermission } from "@/lib/spcAuth"
 import { timedJson } from "@/lib/serverTiming"
 import { listSupplierTraderOptions } from "@/lib/spcUsers"
@@ -12,6 +12,7 @@ import {
   updateSpcEnquiryOutcome,
   type SpcEnquiryOutcome,
 } from "@/lib/spcEnquiries"
+import { enqueueSpcMobileEnquiry, processPendingSpcMobileDeliveries } from "@/lib/spcMobileEnquiries"
 
 type EnquiryPayload = {
   title?: string
@@ -170,7 +171,17 @@ export async function POST(request: Request) {
     const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
     const payload = (await request.json()) as EnquiryPayload
     const enquiry = await createSpcEnquiry(payload, session, request)
-    return NextResponse.json({ success: true, enquiry })
+    const mobileRecipientCount = await enqueueSpcMobileEnquiry(enquiry)
+    if (mobileRecipientCount > 0) {
+      after(async () => {
+        try {
+          await processPendingSpcMobileDeliveries()
+        } catch (error) {
+          console.error("Immediate SPC mobile delivery failed", error)
+        }
+      })
+    }
+    return NextResponse.json({ success: true, enquiry, mobileRecipientCount })
   } catch (error) {
     return errorResponse(error, "Failed to save SPC enquiry.")
   }

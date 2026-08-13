@@ -822,6 +822,48 @@ body {
   padding: 12px;
 }
 
+.spc-mobile-mode {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #d6dde8;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #ffffff, #f5f8fc);
+}
+
+.spc-mobile-mode > div { display: grid; gap: 2px; }
+.spc-mobile-mode strong { font-size: 10px; letter-spacing: .06em; }
+.spc-mobile-mode > div span { color: #657080; font-size: 9px; font-weight: 800; }
+.spc-mobile-mode > button {
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: #c9d0da;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.spc-mobile-mode > button > span:first-child {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 5px rgba(20, 35, 55, .24);
+  transition: transform .18s ease;
+}
+.spc-mobile-mode.is-active {
+  border-color: #80c9a5;
+  background: linear-gradient(145deg, #f7fffa, #eaf9f1);
+}
+.spc-mobile-mode.is-active > button { background: #168653; }
+.spc-mobile-mode.is-active > button > span:first-child { transform: translateX(16px); }
+.spc-mobile-mode small { grid-column: 1 / -1; color: #b42318; font-size: 9px; }
+
 .fc-admin-sidebar-footer-meta {
   display: flex;
   align-items: center;
