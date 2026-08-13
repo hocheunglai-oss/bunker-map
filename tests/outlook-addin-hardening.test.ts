@@ -596,7 +596,7 @@ test("network response lifetime is clock-independent while stored envelopes expi
   assert.equal(validCacheTime(localNow - 120_001, localNow - 1, 120_000), false)
 })
 
-test("admin template index labels unloaded truth without claiming it is pending", async () => {
+test("admin template index keeps recipient truth internal without list diagnostics", async () => {
   const page = await readFile(adminTemplatePageFile, "utf8")
 
   assert.match(
@@ -608,9 +608,18 @@ test("admin template index labels unloaded truth without claiming it is pending"
     page,
     /hasOwnProperty\.call\(value, "reconciliationRequired"\)[\s\S]*?value\.reconciliationRequired !== false/,
   )
-  assert.match(page, /"Truth not loaded"/)
-  assert.match(page, /visibleRecipientTruthSummary\.unloaded/)
-  assert.match(page, /not loaded/)
+  assert.doesNotMatch(page, /"Truth not loaded"/)
+  assert.doesNotMatch(page, /visibleRecipientTruthSummary/)
+  assert.doesNotMatch(page, /recipientTruthBadgeStyle/)
+})
+
+test("admin template body sync does not replace matching editable HTML", async () => {
+  const page = await readFile(adminTemplatePageFile, "utf8")
+
+  assert.match(
+    page,
+    /const nextEditorHtml = selectedTemplateBodyLoaded[\s\S]*?if \(editorRef\.current\.innerHTML === nextEditorHtml\) return[\s\S]*?editorRef\.current\.innerHTML = nextEditorHtml/,
+  )
 })
 
 test("generated inline taskpane JavaScript remains syntactically valid", async () => {

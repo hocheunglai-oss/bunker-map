@@ -661,21 +661,21 @@ export default function SpcFixturesPage() {
       ...current,
       [id]: {
         ...(current[id] || emptyDraft),
-        [key]: key === "hsfo" || key === "vlsfo" || key === "lsmgo" ? formatQuantityString(value) : value,
+        [key]: value,
       },
     }))
   }
 
   function updateGradeDraft(id: string, key: "supplierName" | "price" | "barging", fuelKey: FuelKey | null, value: string) {
     if (!fuelKey) {
-      updateDraft(id, key, key === "supplierName" ? value : formatIntegerString(value))
+      updateDraft(id, key, value)
       return
     }
     setDrafts((current) => {
       const draft = current[id] || emptyDraft
       const parsed = parseGradeValues(draft[key])
       const nextMap = parsed.encoded ? { ...parsed.map } : {}
-      nextMap[fuelKey] = key === "supplierName" ? value : formatIntegerString(value)
+      nextMap[fuelKey] = value
       return {
         ...current,
         [id]: {
@@ -1011,7 +1011,7 @@ export default function SpcFixturesPage() {
       return (
         <input
           inputMode="decimal"
-          value={formatIntegerString(value)}
+          value={value}
           onChange={(event) => updateGradeDraft(fixture.id, field, key, event.target.value)}
           disabled={!canEdit}
         />

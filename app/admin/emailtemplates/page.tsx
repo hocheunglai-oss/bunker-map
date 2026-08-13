@@ -234,19 +234,6 @@ const inputStyle: React.CSSProperties = {
   padding: "0 10px",
 }
 
-const recipientTruthBadgeStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  borderRadius: "999px",
-  border: "1px solid var(--fc-admin-border-soft)",
-  padding: "3px 7px",
-  fontSize: "9px",
-  fontWeight: 900,
-  lineHeight: 1.2,
-  letterSpacing: "0.02em",
-  textTransform: "uppercase",
-  whiteSpace: "nowrap",
-}
-
 const pendingRecipientTruth: RecipientTruthStatus = {
   kind: "pending",
   issues: [],
@@ -734,30 +721,6 @@ export default function EmailTemplatesAdminPage() {
       ),
     [templates],
   )
-  const visibleRecipientTruthSummary = useMemo(() => {
-    let blocked = 0
-    let blockedRecipients = 0
-    let sendable = 0
-    let pending = 0
-    let unloaded = 0
-
-    visibleTemplates.forEach((template) => {
-      const status =
-        recipientTruthByTemplateId.get(template.id) || unloadedRecipientTruth
-      if (status.kind === "blocked") {
-        blocked += 1
-        blockedRecipients += status.issues.length
-      } else if (status.kind === "sendable") {
-        sendable += 1
-      } else if (status.kind === "unloaded") {
-        unloaded += 1
-      } else {
-        pending += 1
-      }
-    })
-
-    return { blocked, blockedRecipients, sendable, pending, unloaded }
-  }, [recipientTruthByTemplateId, visibleTemplates])
   const selectedRecipientTruth = selectedTemplate
     ? recipientTruthByTemplateId.get(selectedTemplate.id) ||
       unloadedRecipientTruth
@@ -863,11 +826,11 @@ export default function EmailTemplatesAdminPage() {
 
   useEffect(() => {
     if (!editorRef.current || !selectedId) return
-    if (!selectedTemplateBodyLoaded) {
-      editorRef.current.innerHTML = ""
-      return
-    }
-    editorRef.current.innerHTML = selectedTemplateBodyHtml || "<p></p>"
+    const nextEditorHtml = selectedTemplateBodyLoaded
+      ? selectedTemplateBodyHtml || "<p></p>"
+      : ""
+    if (editorRef.current.innerHTML === nextEditorHtml) return
+    editorRef.current.innerHTML = nextEditorHtml
   }, [selectedId, selectedTemplateBodyHtml, selectedTemplateBodyLoaded])
 
   function expandFolderPath(folderPath: string, current: Record<string, boolean> = {}) {
@@ -1771,59 +1734,10 @@ export default function EmailTemplatesAdminPage() {
         <section style={panelStyle}>
           <div style={sectionHeaderStyle}>
             <div style={sectionTitleStyle}>{search ? "Search Results" : selectedFolder || "All Templates"}</div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "flex-end",
-                gap: "5px",
-                flexWrap: "wrap",
-                color: "var(--fc-muted)",
-                fontSize: "10px",
-                fontWeight: 800,
-              }}
-            >
-              <span>{visibleTemplates.length}</span>
-              <span
-                title={`${visibleRecipientTruthSummary.blockedRecipients} blocked recipient literal${
-                  visibleRecipientTruthSummary.blockedRecipients === 1 ? "" : "s"
-                }`}
-                style={{
-                  color:
-                    visibleRecipientTruthSummary.blocked > 0
-                      ? "var(--fc-admin-danger-text)"
-                      : "var(--fc-muted)",
-                }}
-              >
-                {visibleRecipientTruthSummary.blocked} blocked
-              </span>
-              {visibleRecipientTruthSummary.sendable > 0 ? (
-                <span style={{ color: "#1d6338" }}>
-                  {visibleRecipientTruthSummary.sendable} sendable
-                </span>
-              ) : null}
-              {visibleRecipientTruthSummary.pending > 0 ? (
-                <span>{visibleRecipientTruthSummary.pending} pending</span>
-              ) : null}
-              {visibleRecipientTruthSummary.unloaded > 0 ? (
-                <span>{visibleRecipientTruthSummary.unloaded} not loaded</span>
-              ) : null}
-            </div>
           </div>
           <div style={{ maxHeight: isMobile ? "360px" : "calc(100vh - 88px)", overflow: "auto", padding: "6px" }}>
             {visibleTemplates.map((template) => {
               const active = template.id === selectedId
-              const recipientTruth =
-                recipientTruthByTemplateId.get(template.id) ||
-                unloadedRecipientTruth
-              const recipientTruthLabel =
-                recipientTruth.kind === "blocked"
-                  ? `Blocked ${recipientTruth.issues.length}`
-                  : recipientTruth.kind === "sendable"
-                    ? "Sendable / Current"
-                    : recipientTruth.kind === "unloaded"
-                      ? "Truth not loaded"
-                      : "Truth pending"
               return (
                 <button
                   key={template.id}
@@ -1863,41 +1777,6 @@ export default function EmailTemplatesAdminPage() {
                   >
                     <span style={{ minWidth: 0, fontSize: "13px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {template.title || "Untitled template"}
-                    </span>
-                    <span
-                      aria-label={`Outlook recipient truth: ${recipientTruthLabel}`}
-                      title={
-                        recipientTruth.kind === "blocked"
-                          ? `${recipientTruth.missing} missing, ${recipientTruth.ambiguous} ambiguous`
-                          : recipientTruth.kind === "sendable"
-                            ? "Recipient evidence is sendable and current."
-                            : recipientTruth.kind === "unloaded"
-                              ? "Recipient evidence has not been loaded for this template."
-                              : "Recipient evidence requires a fresh save check."
-                      }
-                      style={{
-                        ...recipientTruthBadgeStyle,
-                        borderColor:
-                          recipientTruth.kind === "blocked"
-                            ? "var(--fc-admin-danger-border)"
-                            : recipientTruth.kind === "sendable"
-                              ? "#b9dfc6"
-                              : "var(--fc-admin-border-soft)",
-                        background:
-                          recipientTruth.kind === "blocked"
-                            ? "var(--fc-admin-danger-bg)"
-                            : recipientTruth.kind === "sendable"
-                              ? "#eef8f1"
-                              : "var(--fc-admin-panel-soft-bg)",
-                        color:
-                          recipientTruth.kind === "blocked"
-                            ? "var(--fc-admin-danger-text)"
-                            : recipientTruth.kind === "sendable"
-                              ? "#1d6338"
-                              : "var(--fc-muted)",
-                      }}
-                    >
-                      {recipientTruthLabel}
                     </span>
                   </span>
                 </button>

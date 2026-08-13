@@ -180,6 +180,7 @@ export default function TaskCalendarPage() {
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [draftTask, setDraftTask] = useState<TaskCalendarTask>(buildBlankTask)
+  const [daysOfMonthText, setDaysOfMonthText] = useState("1")
   const loadedRef = useRef(false)
   const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -282,20 +283,24 @@ export default function TaskCalendarPage() {
   }, [])
 
   function openAddModal() {
-    setDraftTask(buildBlankTask())
+    const blankTask = buildBlankTask()
+    setDraftTask(blankTask)
+    setDaysOfMonthText(blankTask.daysOfMonth.join(", "))
     setModalOpen(true)
   }
 
   function openEditModal(task: TaskCalendarTask) {
     setDraftTask({ ...task, months: task.months || [] })
+    setDaysOfMonthText(task.daysOfMonth.join(", "))
     setModalOpen(true)
   }
 
   function saveDraftTask() {
+    const parsedDaysOfMonth = parseNumberList(daysOfMonthText, 1, 31)
     const nextTask = {
       ...draftTask,
       task: draftTask.task.trim() || "NEW TASK",
-      daysOfMonth: draftTask.scheduleType === "Weekly" ? [] : draftTask.daysOfMonth.length ? draftTask.daysOfMonth : [1],
+      daysOfMonth: draftTask.scheduleType === "Weekly" ? [] : parsedDaysOfMonth.length ? parsedDaysOfMonth : [1],
       months: draftTask.scheduleType === "Yearly" ? draftTask.months || [] : [],
     }
     setTasks((current) =>
@@ -599,8 +604,13 @@ export default function TaskCalendarPage() {
               <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "12px" }}>
                 Day Of Month
                 <input
-                  value={draftTask.daysOfMonth.join(", ")}
-                  onChange={(event) => setDraftTask((current) => ({ ...current, daysOfMonth: parseNumberList(event.target.value, 1, 31) }))}
+                  value={daysOfMonthText}
+                  onChange={(event) => setDaysOfMonthText(event.target.value)}
+                  onBlur={() => {
+                    const days = parseNumberList(daysOfMonthText, 1, 31)
+                    setDraftTask((current) => ({ ...current, daysOfMonth: days }))
+                    setDaysOfMonthText(days.join(", "))
+                  }}
                   style={inputStyle}
                 />
               </label>
