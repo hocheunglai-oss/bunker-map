@@ -450,6 +450,25 @@ test("calendar commits enqueue Google sync atomically and snapshot audit undo is
   assert.match(auditLog, /\["event-calendar", "spc-permission-groups"\]/)
 })
 
+test("the durable Google sync outbox is included in every daily-backup contract consumer", () => {
+  for (const path of [
+    "../app/api/backups/bunker-map-drive/route.ts",
+    "../lib/systemHealth.ts",
+    "../scripts/validate-backup.mjs",
+  ]) {
+    const contract = source(path)
+    assert.match(
+      contract,
+      /key: "eventCalendarGoogleSyncJobs"[\s\S]*table: "event_calendar_google_sync_jobs"/,
+    )
+  }
+  const fenceMigration = source("../supabase/migrations/20260813070422_fence_new_backup_tables.sql")
+  assert.match(
+    fenceMigration,
+    /create trigger bunker_map_backup_epoch_fence[\s\S]*on public\.event_calendar_google_sync_jobs/,
+  )
+})
+
 test("recovery and AI imports retain additive-only atomic mutations", () => {
   const recovery = source("../app/api/event-calendar/recover-missing/route.ts")
   const aiWorkbench = source("../app/api/admin/ai-workbench/route.ts")

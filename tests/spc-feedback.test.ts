@@ -30,3 +30,22 @@ test("SPC feedback page, API, audit map, and schema remain connected", () => {
   assert.match(migration, /enable row level security/)
   assert.match(migration, /audit_enable_table\('public\.spc_feedback'/)
 })
+
+test("SPC feedback is included in every daily-backup contract consumer", () => {
+  for (const path of [
+    "../app/api/backups/bunker-map-drive/route.ts",
+    "../lib/systemHealth.ts",
+    "../scripts/validate-backup.mjs",
+  ]) {
+    const contract = readFileSync(new URL(path, import.meta.url), "utf8")
+    assert.match(contract, /key: "spcFeedback"[\s\S]*table: "spc_feedback"/)
+  }
+  const fenceMigration = readFileSync(
+    new URL("../supabase/migrations/20260813070422_fence_new_backup_tables.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(
+    fenceMigration,
+    /create trigger bunker_map_backup_epoch_fence[\s\S]*on public\.spc_feedback/,
+  )
+})

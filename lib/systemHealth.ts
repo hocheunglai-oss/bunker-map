@@ -50,6 +50,8 @@ const OUTLOOK_TEMPLATE_STABLE_MISSING_MIGRATION_HEAD = "20260723125759"
 const ATTENDANCE_RECORD_MIGRATION_HEAD = "20260807094108"
 const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
 const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
+const EVENT_CALENDAR_GOOGLE_SYNC_JOBS_MIGRATION_HEAD = "20260811125141"
+const SPC_FEEDBACK_MIGRATION_HEAD = "20260812095000"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -68,6 +70,11 @@ const BACKUP_TABLE_SECTIONS = [
   { key: "adminRoleDefaults", table: "admin_role_defaults", optional: true },
   { key: "auditLogs", table: "audit_logs" },
   { key: "officeCalendarStore", table: "office_calendar_store" },
+  {
+    key: "eventCalendarGoogleSyncJobs",
+    table: "event_calendar_google_sync_jobs",
+    introducedAt: EVENT_CALENDAR_GOOGLE_SYNC_JOBS_MIGRATION_HEAD,
+  },
   { key: "emailTemplates", table: "email_templates" },
   { key: "sharedAddressbookContacts", table: "shared_addressbook_contacts" },
   { key: "sharedAddressbookGroups", table: "shared_addressbook_groups" },
@@ -101,6 +108,11 @@ const BACKUP_TABLE_SECTIONS = [
     introducedAt: OPENAI_USAGE_MIGRATION_HEAD,
   },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks" },
+  {
+    key: "spcFeedback",
+    table: "spc_feedback",
+    introducedAt: SPC_FEEDBACK_MIGRATION_HEAD,
+  },
   {
     key: "attendancePeople",
     table: "attendance_people",
