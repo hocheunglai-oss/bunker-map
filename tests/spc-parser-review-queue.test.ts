@@ -83,7 +83,7 @@ test("report workflow metadata moves through pending, ready, and acknowledged st
   assert.equal(acknowledged.userReviewedAt, "2026-08-11T02:00:00.000Z")
 })
 
-test("review UI shows user queue left, AI queue right, and needs no confirmation button", () => {
+test("review UI shows user queue left, AI queue right, and acknowledges without a completed-fix dialog", () => {
   const panelSource = readFileSync(
     new URL("../components/ParserReportReviewPanel.tsx", import.meta.url),
     "utf8",
@@ -94,7 +94,9 @@ test("review UI shows user queue left, AI queue right, and needs no confirmation
   assert.ok(pendingUserPosition >= 0)
   assert.ok(pendingAiPosition > pendingUserPosition)
   assert.doesNotMatch(panelSource, /Confirm Reviewed/)
-  assert.match(panelSource, /if \(queue === "ready-user"\) void acknowledgeReadyReport\(report\)/)
+  assert.doesNotMatch(panelSource, /Completed Parser Fix/)
+  assert.doesNotMatch(panelSource, /ready-user/)
+  assert.match(panelSource, /onClick=\{\(\) => void acknowledgeReadyReport\(report\)\}/)
   assert.match(panelSource, /aiOutput: draft\.aiOutput/)
   assert.match(panelSource, /aiSources: draft\.aiSources/)
 })

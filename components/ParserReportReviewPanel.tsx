@@ -19,12 +19,10 @@ type ParserReport = {
 }
 
 type AiSource = { title?: string; url: string }
-type ReviewQueue = "pending-ai" | "ready-user"
 
 type ReportDraft = ParserReport & {
   aiOutput: string
   aiSources: AiSource[]
-  queue: ReviewQueue
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -155,7 +153,7 @@ export function ParserReportReviewPanel({
     }
   }
 
-  function openReport(report: ParserReport, queue: ReviewQueue) {
+  function openAiReport(report: ParserReport) {
     const aiOutput = typeof report.metadata.aiFixOutput === "string"
       ? report.metadata.aiFixOutput.trim()
       : ""
@@ -164,14 +162,12 @@ export function ParserReportReviewPanel({
       correctedOutput: report.correctedOutput.trim() || report.parserOutput,
       aiOutput,
       aiSources: storedAiSources(report.metadata),
-      queue,
     })
     setMessage("")
-    if (queue === "ready-user") void acknowledgeReadyReport(report)
   }
 
   async function runAiReview() {
-    if (!draft || draft.queue !== "pending-ai" || aiLoading) return
+    if (!draft || aiLoading) return
     setAiLoading(true)
     setMessage("")
     try {
@@ -213,7 +209,7 @@ export function ParserReportReviewPanel({
   }
 
   async function saveReview() {
-    if (!draft || draft.queue !== "pending-ai" || !draft.correctedOutput.trim() || saving || !canEdit) return
+    if (!draft || !draft.correctedOutput.trim() || saving || !canEdit) return
     setSaving(true)
     setMessage("")
     try {
@@ -283,7 +279,7 @@ export function ParserReportReviewPanel({
                     <button
                       key={report.id}
                       type="button"
-                      onClick={() => openReport(report, "ready-user")}
+                      onClick={() => void acknowledgeReadyReport(report)}
                       disabled={Boolean(acknowledgingId)}
                     >
                       {vesselName(report)}
@@ -299,7 +295,7 @@ export function ParserReportReviewPanel({
                 </div>
                 <div className="spc-parser-report-list">
                   {pendingAiReports.map((report) => (
-                    <button key={report.id} type="button" onClick={() => openReport(report, "pending-ai")}>
+                    <button key={report.id} type="button" onClick={() => openAiReport(report)}>
                       {vesselName(report)}
                     </button>
                   ))}
@@ -320,9 +316,7 @@ export function ParserReportReviewPanel({
         <div className="spc-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="parser-review-title">
           <div className="spc-dialog spc-parser-report-dialog">
             <div className="spc-dialog-header">
-              <h2 id="parser-review-title">
-                {draft.queue === "ready-user" ? "Completed Parser Fix" : "Complete AI Parser Review"}
-              </h2>
+              <h2 id="parser-review-title">Complete AI Parser Review</h2>
               <button type="button" onClick={() => setDraft(null)} disabled={saving} aria-label="Close report dialog">×</button>
             </div>
             <div className="spc-parser-report-body">
@@ -334,21 +328,15 @@ export function ParserReportReviewPanel({
                   IMO source: <a href={draft.aiSources[0].url} target="_blank" rel="noreferrer">{draft.aiSources[0].title || draft.aiSources[0].url}</a>
                 </p>
               ) : null}
-              <label><span>Correct Version</span><textarea value={draft.correctedOutput} readOnly={draft.queue === "ready-user"} onChange={(event) => setDraft((current) => current ? { ...current, correctedOutput: event.target.value } : current)} /></label>
-              <label><span>Note</span><input value={draft.note} readOnly={draft.queue === "ready-user"} onChange={(event) => setDraft((current) => current ? { ...current, note: event.target.value } : current)} placeholder="Optional" /></label>
+              <label><span>Correct Version</span><textarea value={draft.correctedOutput} onChange={(event) => setDraft((current) => current ? { ...current, correctedOutput: event.target.value } : current)} /></label>
+              <label><span>Note</span><input value={draft.note} onChange={(event) => setDraft((current) => current ? { ...current, note: event.target.value } : current)} placeholder="Optional" /></label>
             </div>
             <div className="spc-dialog-actions">
-              {draft.queue === "ready-user" ? (
-                <button type="button" onClick={() => setDraft(null)}>Close</button>
-              ) : (
-                <>
-                  <button type="button" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
-                  <button type="button" className="is-primary" onClick={() => void runAiReview()} disabled={aiLoading || saving}>{aiLoading ? "Reviewing..." : "AI Fix"}</button>
-                  <button type="button" className="is-primary" onClick={() => void saveReview()} disabled={!canEdit || !draft.correctedOutput.trim() || saving}>
-                    {saving ? "Saving..." : "Mark Ready For Review"}
-                  </button>
-                </>
-              )}
+              <button type="button" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
+              <button type="button" className="is-primary" onClick={() => void runAiReview()} disabled={aiLoading || saving}>{aiLoading ? "Reviewing..." : "AI Fix"}</button>
+              <button type="button" className="is-primary" onClick={() => void saveReview()} disabled={!canEdit || !draft.correctedOutput.trim() || saving}>
+                {saving ? "Saving..." : "Mark Ready For Review"}
+              </button>
             </div>
           </div>
         </div>
