@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { ParserReportSidebarBadge } from "@/components/ParserReportSidebarBadge"
+import { SpcForcedPasswordChange } from "@/components/SpcForcedPasswordChange"
 import { SpcMobileModeControl } from "@/components/SpcMobileModeControl"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import { clearSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
@@ -76,19 +77,6 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
-
-  useEffect(() => {
-    if (
-      loading ||
-      !authenticated ||
-      !mustChangePassword ||
-      pathname === "/spc"
-    ) {
-      return
-    }
-
-    router.replace("/spc")
-  }, [authenticated, loading, mustChangePassword, pathname, router])
 
   useEffect(() => {
     if (!mobileOpen) return
@@ -163,12 +151,8 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
     )
   }, [pages, permissions, query])
 
-  if (loading || !authenticated || mustChangePassword) {
-    if (!loading && authenticated && mustChangePassword && pathname !== "/spc") {
-      return <div className="spc-loading">Loading password change...</div>
-    }
-    return <>{children}</>
-  }
+  if (loading || !authenticated) return <>{children}</>
+  if (mustChangePassword) return <SpcForcedPasswordChange />
 
   function toggleCollapsed() {
     setCollapsed((current) => {

@@ -37,13 +37,20 @@ test("SPC Speed Board continues to use the shared enquiry feed", () => {
   assert.match(route, /hasSpcPagePermission\(session, "spc-chrome-extension", "view"\)/)
 })
 
-test("SPC forced-password sessions cannot remain on a protected page", () => {
+test("SPC forced-password sessions render the password form without a route transition", () => {
   const navigationShell = readFileSync(
     new URL("../components/SpcNavigationShell.tsx", import.meta.url),
     "utf8",
   )
-  assert.match(navigationShell, /mustChangePassword/)
-  assert.match(navigationShell, /router\.replace\("\/spc"\)/)
+  const passwordChange = readFileSync(
+    new URL("../components/SpcForcedPasswordChange.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(navigationShell, /if \(mustChangePassword\) return <SpcForcedPasswordChange \/>/)
+  assert.doesNotMatch(navigationShell, /Loading password change/)
+  assert.match(passwordChange, /fetch\("\/api\/spc\/password"/)
+  assert.match(passwordChange, /mustChangePassword: false/)
+  assert.match(passwordChange, /router\.replace\("\/spc"\)/)
 })
 
 test("SPC enquiry send failures are visible to the user", () => {
