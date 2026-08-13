@@ -5,7 +5,6 @@ import { createSpcAuditContext } from "@/lib/spcAudit"
 import { listManagedSpcUsers } from "@/lib/spcUsers"
 import type { SpcEnquiry } from "@/lib/spcEnquiries"
 
-const MOBILE_MODE_HOURS = 12
 const MAX_ATTEMPTS = 20
 const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 21600]
 const TEMPLATE_NAME = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_NAME?.trim() || "spc_mobile_enquiry_ready"
@@ -81,9 +80,12 @@ export function formatSpcMobileEnquiryText(row: Pick<EnquiryRow, "title" | "note
 
 async function eligibleTrader(session: SpcSession) {
   const users = await listManagedSpcUsers()
-  return users.find((user) =>
-    user.id === session.userId && user.isActive && user.isSupplierTrader && /^[1-9][0-9]{7,14}$/.test(user.whatsappPhone),
-  ) || null
+  const user = users.find((candidate) => candidate.id === session.userId)
+  if (!user) return null
+  const whatsappPhone = user.whatsappPhone.replace(/\D/g, "")
+  return user.isActive && user.isSupplierTrader && /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
+    ? { ...user, whatsappPhone }
+    : null
 }
 
 export async function getSpcMobileMode(session: SpcSession) {
@@ -91,7 +93,7 @@ export async function getSpcMobileMode(session: SpcSession) {
   if (!trader) return { eligible: false, enabled: false, expiresAt: null, maskedPhone: "" }
   const { data, error } = await serviceClient().from("spc_mobile_modes").select("enabled,expires_at").eq("spc_user_id", trader.id).maybeSingle()
   if (error) throw error
-  const enabled = data?.enabled === true && Date.parse(String(data.expires_at || "")) > Date.now()
+  const enabled = data?.enabled === true
   return {
     eligible: true,
     enabled,
@@ -104,7 +106,7 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
   const trader = await eligibleTrader(session)
   if (!trader) throw new Error("Only an active supplier trader with a verified WhatsApp number can use Mobile Mode.")
   const now = new Date()
-  const expiresAt = enabled ? new Date(now.getTime() + MOBILE_MODE_HOURS * 3600_000).toISOString() : null
+  const expiresAt = null
   const { error } = await serviceClient().from("spc_mobile_modes").upsert({
     spc_user_id: trader.id,
     username: trader.username,
@@ -146,7 +148,6 @@ export async function enqueueSpcMobileEnquiry(enquiry: SpcEnquiry) {
   const { data: modes, error } = await supabase.from("spc_mobile_modes")
     .select("spc_user_id,recipient_phone,display_name")
     .eq("enabled", true)
-    .gt("expires_at", new Date().toISOString())
   if (error) throw error
   if (!modes?.length) return 0
   const rows = modes.map((mode) => ({

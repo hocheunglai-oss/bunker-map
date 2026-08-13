@@ -10,13 +10,6 @@ type MobileMode = {
   message?: string
 }
 
-function expiryLabel(value: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date)
-}
-
 export function SpcMobileModeControl() {
   const [mode, setMode] = useState<MobileMode | null>(null)
   const [saving, setSaving] = useState(false)
@@ -62,7 +55,7 @@ export function SpcMobileModeControl() {
     <div className={`spc-mobile-mode${mode.enabled ? " is-active" : ""}`}>
       <div>
         <strong>MOBILE MODE</strong>
-        <span>{mode.enabled ? `ON UNTIL ${expiryLabel(mode.expiresAt)}` : "OFF"}</span>
+        <span>{mode.enabled ? "ON UNTIL SWITCHED OFF" : "OFF"}</span>
       </div>
       <button type="button" role="switch" aria-checked={mode.enabled} onClick={toggle} disabled={saving}>
         <span aria-hidden="true" />
