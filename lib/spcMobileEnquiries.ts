@@ -6,8 +6,8 @@ import { listManagedSpcUsers } from "@/lib/spcUsers"
 import type { SpcEnquiry } from "@/lib/spcEnquiries"
 
 const MOBILE_MODE_HOURS = 12
-const MAX_ATTEMPTS = 8
-const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 28800]
+const MAX_ATTEMPTS = 20
+const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 21600]
 const TEMPLATE_NAME = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_NAME?.trim() || "spc_mobile_enquiry_ready"
 const TEMPLATE_LANGUAGE = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_LANGUAGE?.trim() || "en_US"
 
@@ -181,7 +181,7 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
   const supabase = serviceClient()
   const { data, error } = await supabase.from("spc_mobile_enquiry_deliveries")
     .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
-    .in("status", ["queued", "failed"])
+    .in("status", ["queued", "failed", "acknowledged"])
     .lte("next_attempt_at", new Date().toISOString())
     .lt("attempt_count", MAX_ATTEMPTS)
     .order("created_at", { ascending: true })
@@ -190,6 +190,11 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
   let processed = 0
   for (const delivery of (data || []) as DeliveryRow[]) {
     try {
+      if (delivery.status === "acknowledged") {
+        await releaseDelivery(delivery)
+        processed += 1
+        continue
+      }
       const { data: enquiry, error: enquiryError } = await supabase.from("spc_enquiries")
         .select("id,enquiry_number,title,notes,created_by_display_name").eq("id", delivery.enquiry_id).single()
       if (enquiryError) throw enquiryError
@@ -203,7 +208,7 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
     } catch (error) {
       const attempts = delivery.attempt_count + 1
       await supabase.from("spc_mobile_enquiry_deliveries").update({
-        status: "failed", attempt_count: attempts,
+        status: delivery.status === "acknowledged" ? "acknowledged" : "failed", attempt_count: attempts,
         next_attempt_at: new Date(Date.now() + RETRY_SECONDS[Math.min(attempts - 1, RETRY_SECONDS.length - 1)] * 1000).toISOString(),
         last_error_code: (error instanceof Error ? error.message : "delivery_failed").slice(0, 160),
         updated_at: new Date().toISOString(),
@@ -220,7 +225,13 @@ async function releaseDelivery(delivery: DeliveryRow) {
   if (error) throw error
   const row = enquiry as EnquiryRow
   let contentId = delivery.content_message_id
-  if (!contentId) contentId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: formatSpcMobileEnquiryText(row) } })
+  if (!contentId) {
+    contentId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: formatSpcMobileEnquiryText(row) } })
+    const { error: checkpointError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+      content_message_id: contentId, content_delivery_status: "accepted", updated_at: new Date().toISOString(),
+    }).eq("id", delivery.id)
+    if (checkpointError) throw checkpointError
+  }
   let traderId = delivery.trader_message_id
   if (!traderId) traderId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: row.created_by_display_name.trim() || "SPC BUYER TRADER" } })
   const now = new Date().toISOString()
@@ -236,13 +247,13 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
   const supabase = serviceClient()
   let query = supabase.from("spc_mobile_enquiry_deliveries")
     .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
-    .eq("recipient_phone", from).eq("status", "prompt_sent")
+    .eq("recipient_phone", from).in("status", ["prompt_sent", "acknowledged"])
   query = token ? query.eq("acknowledgement_token", token) : query.order("created_at", { ascending: false }).limit(2)
   const { data, error } = await query
   if (error) throw error
   if (!data?.length || (!token && data.length !== 1)) return false
   const delivery = data[0] as DeliveryRow
-  await supabase.from("spc_mobile_enquiry_deliveries").update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id).eq("status", "prompt_sent")
+  await supabase.from("spc_mobile_enquiry_deliveries").update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id).in("status", ["prompt_sent", "acknowledged"])
   await releaseDelivery(delivery)
   return true
 }
