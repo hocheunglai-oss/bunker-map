@@ -19,7 +19,7 @@ async function graph(path: string, init?: RequestInit, token = requireEnv("WHATS
   return payload as Record<string, unknown>
 }
 
-export async function POST() {
+async function setup() {
   try {
     await requireSpcPagePermission("spc-user-management", "edit")
     const phoneId = requireEnv("SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID")
@@ -70,3 +70,6 @@ export async function POST() {
     return NextResponse.json({ message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 })
   }
 }
+
+export const GET = setup
+export const POST = setup
