@@ -299,6 +299,16 @@ export function buildSpcStandardEnquiry(input: {
   ].filter(Boolean).join(" / ")
 }
 
+export function ensureSpcSingaporeEta(value: string | null | undefined) {
+  const eta = lowerText(value)
+  if (!eta || !/\d/.test(eta)) return eta
+
+  const withoutSingapore = eta
+    .replace(/^(?:singapore\b\s*|(?:sgp|sin|sg)(?=\s*\d)\s*|新加坡\s*)/i, "")
+    .trim()
+  return withoutSingapore ? `sg ${withoutSingapore}` : ""
+}
+
 export function formatSpcEnquiry(input: SpcEnquiryTextInput) {
   const notes = cleanSpcEnquiryText(splitSpcEnquiryNotes(input.notes).text)
   if (notes) return notes
@@ -406,6 +416,8 @@ export function parseSpcEnquiryText(
   const guess = parseEnquiryWorksheetGuess(rawText, { detectBuyer: false })
   const vesselName = lowerText(guess.vesselName || delimited.vesselName)
   const imo = guess.imo || delimited.imo
+  const isSingaporeEnquiry = guess.port.trim().toLowerCase() === "singapore" ||
+    /(?:^|[^a-z0-9])(?:sgp|sin|sg)(?=\s*\d{1,2})/i.test(rawText)
   const shortened = buildShortenedEnquiry(
     rawText,
     guess.vesselName || delimited.vesselName,
@@ -414,7 +426,8 @@ export function parseSpcEnquiryText(
     { autoDetectVlsfoRemarks: false, includePort: false },
   )
   const shortenedParts = shortened ? parseDelimitedSpcEnquiryText(shortened, manualVlsfoRemarks) : null
-  const eta = shortenedParts?.eta || delimited.eta
+  const parsedEta = shortenedParts?.eta || delimited.eta
+  const eta = isSingaporeEnquiry ? ensureSpcSingaporeEta(parsedEta) : parsedEta
   const hsfo = shortenedParts?.hsfo || delimited.hsfo
   const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
   const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo

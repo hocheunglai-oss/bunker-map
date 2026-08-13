@@ -11,7 +11,11 @@ import {
   replaceHsfoWithRmk,
 } from "../lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
-import { extractExplicitSpcFuelFields, parseSpcEnquiryText } from "../lib/spcEnquiryText"
+import {
+  ensureSpcSingaporeEta,
+  extractExplicitSpcFuelFields,
+  parseSpcEnquiryText,
+} from "../lib/spcEnquiryText"
 
 mock.timers.enable({ apis: ["Date"], now: new Date("2026-07-30T00:00:00.000Z") })
 test.after(() => mock.timers.reset())
@@ -142,16 +146,16 @@ test("does not turn voyage numbers or address floors into products and dates", (
   )
 })
 
-test("shows Singapore on FCUNO but omits it on SPC", () => {
+test("shows Singapore on FCUNO and abbreviates it as sg on SPC", () => {
   const raw = "GUANG MAO 8-9日到达新加坡，lsfo 700吨"
   assert.equal(worksheetOutput(raw), "guang mao / singapore 8 - 9 jul / vlsfo 700mts")
-  assert.equal(parseSpcEnquiryText(raw).standardText, "guang mao / 8 - 9 jul / vlsfo 700mts")
+  assert.equal(parseSpcEnquiryText(raw).standardText, "guang mao / sg 8 - 9 jul / vlsfo 700mts")
 })
 
 test("normalises compact SPC dates, vessel types, and concatenated fuels", () => {
   assert.equal(
     parseSpcEnquiryText("OCEAN LEADER General Cargo. IMO 9260976/SGP12JUL/HSFO500mts/lsmgo100mts").standardText,
-    "ocean leader / 9260976 / 12 jul / HSFO 500mts / lsmgo 100mts",
+    "ocean leader / 9260976 / sg 12 jul / HSFO 500mts / lsmgo 100mts",
   )
 })
 
@@ -174,7 +178,7 @@ test("requires manual viscosity confirmation in the deterministic parser", () =>
 test("does not infer HSFO or a quantity from an ambiguous RMG 380 grade", () => {
   const raw = "VESSEL: TEST SHIP\nPORT: SINGAPORE\nETA: 12 JUL\nPRODUCT: RMG 380"
   assert.equal(worksheetOutput(raw), "test ship / singapore 12 jul")
-  assert.equal(parseSpcEnquiryText(raw).standardText, "test ship / 12 jul")
+  assert.equal(parseSpcEnquiryText(raw).standardText, "test ship / sg 12 jul")
 })
 
 test("does not use specification or viscosity numbers as quantities", () => {
@@ -274,7 +278,7 @@ test("replays the remaining distinct historical report formats", () => {
     },
     {
       raw: "OCEAN LEADER General Cargo. IMO 9260976 / SGP 12 jul / HSFO 100mts, lsfo 500mts, lsmgo 30mts",
-      expected: "ocean leader / 9260976 / 12 jul / HSFO 100mts / vlsfo 500mts / lsmgo 30mts",
+      expected: "ocean leader / 9260976 / sg 12 jul / HSFO 100mts / vlsfo 500mts / lsmgo 30mts",
     },
   ]
 
@@ -338,7 +342,7 @@ test("replays the July 14 reported parser formats", () => {
 
   assert.equal(
     parseSpcEnquiryText("pacific hornbill / sg 17 - 22 jul / vlsfo 500mts / lsmgo 40mts").standardText,
-    "pacific hornbill / 17 - 22 jul / vlsfo 500mts / lsmgo 40mts",
+    "pacific hornbill / sg 17 - 22 jul / vlsfo 500mts / lsmgo 40mts",
   )
 })
 
@@ -619,7 +623,7 @@ test("replays the August 3 reports with slash windows and structured SPC specifi
   })
   assert.equal(
     parseSpcEnquiryText(harmony).standardText,
-    "harmony / 9402017 / 22 aug - 6 sep / vlsfo 700mts / lsmgo 30mts",
+    "harmony / 9402017 / sg 22 aug - 6 sep / vlsfo 700mts / lsmgo 30mts",
   )
 })
 
@@ -650,7 +654,7 @@ test("ignores narrative dates beneath an operational notes heading", () => {
 
   assert.equal(
     parseSpcEnquiryText(ravenArrow).standardText,
-    "raven arrow / 9574858 / 1 sep / vlsfo 1,000mts",
+    "raven arrow / 9574858 / sg 1 sep / vlsfo 1,000mts",
   )
 })
 
@@ -697,6 +701,23 @@ test("replays the August 7 compact IMO, separated port, KL, and gas oil reports"
   })
   assert.equal(
     parseSpcEnquiryText(barbaraLeeBattler).standardText,
-    "barbara lee battler / 8738328 / 1 sep / vlsfo 500mts / lsmgo 100mts",
+    "barbara lee battler / 8738328 / sg 1 sep / vlsfo 500mts / lsmgo 100mts",
+  )
+})
+
+test("uses sg only for Singapore enquiries on SPC", () => {
+  assert.equal(ensureSpcSingaporeEta("Singapore 16 - 18 Aug"), "sg 16 - 18 aug")
+  assert.equal(ensureSpcSingaporeEta("SGP12 Jul"), "sg 12 jul")
+  assert.equal(
+    parseSpcEnquiryText("SHAN REN / 9474606 / SINGAPORE / 16 - 18 AUG / VLSFO 110MT").standardText,
+    "shan ren / 9474606 / sg 16 - 18 aug / vlsfo 110mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText("SHAN REN / 9474606 / SIN 16 - 18 AUG / VLSFO 110MT").standardText,
+    "shan ren / 9474606 / sg 16 - 18 aug / vlsfo 110mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText("SHAN REN / 9474606 / TAICHUNG / 16 - 18 AUG / VLSFO 110MT").standardText,
+    "shan ren / 9474606 / 16 - 18 aug / vlsfo 110mts",
   )
 })

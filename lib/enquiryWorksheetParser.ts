@@ -38,7 +38,7 @@ const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 const PORT_LABEL_PATTERN =
-  /^\s*(?:[-•*=]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:[-•*=]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|refuell?ing\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i

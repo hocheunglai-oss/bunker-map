@@ -16,6 +16,7 @@ import {
 import {
   buildSpcStandardEnquiry,
   cleanSpcEnquiryText,
+  ensureSpcSingaporeEta,
   extractExplicitSpcFuelFields,
   parseSpcEnquiryText,
 } from "@/lib/spcEnquiryText"
@@ -421,7 +422,7 @@ function getHongKongDateKey() {
 function buildInstructions(source: ParserAiSource) {
   const today = getHongKongDateKey()
   const sourceRule = source === "spc"
-    ? "SPC output must not include port. Singapore is assumed. Leave buyer and remarks empty. Do not auto-detect SPC remarks."
+    ? "SPC correctedOutput and eta must include sg immediately before the delivery date when the raw enquiry port is Singapore, including SG, SGP, SIN, and 新加坡, e.g. vessel / imo / sg 16 - 18 aug / vlsfo 110mts. Omit every non-Singapore port from SPC output. Leave the port field, buyer, and remarks empty. Do not auto-detect SPC remarks."
     : "Enquiryworksheet output must include port when known, including Singapore. Combine port and date into one slash segment, e.g. vessel / imo / taichung 10 - 14 jul / vlsfo 80mts, never vessel / imo / taichung / 10 - 14 jul / vlsfo 80mts. Return buyer only in the buyer field, not inside correctedOutput."
 
   return [
@@ -434,8 +435,8 @@ function buildInstructions(source: ParserAiSource) {
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Remove generic MV, M/V, MT, and M/T prefixes from the vessel name in correctedOutput.",
-    "Use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
-    "The Chinese place name 新加坡 explicitly means Singapore; do not warn that the port is missing when it appears.",
+    "For enquiryworksheet, use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
+    "The Chinese place name 新加坡 explicitly means Singapore. For SPC, render it as sg before the date; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
     "Normalize mass quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts. Preserve explicit KL as kl and CBM as cbm; never convert a volume unit into mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
@@ -555,9 +556,21 @@ function normalizeOutputForSource(
   draft: ParserAiDraft,
 ) {
   const sourceText = cleanedText || rawText
-  const reconciledDraft = source === "spc"
+  let reconciledDraft = source === "spc"
     ? reconcileExplicitSpcFuels(sourceText, draft)
     : draft
+  if (source === "spc") {
+    const sourceEta = parseSpcEnquiryText(
+      rawText || cleanedText,
+      reconciledDraft.vlsfoMaxRemarks,
+    ).eta
+    if (/^sg\b/i.test(sourceEta)) {
+      reconciledDraft = {
+        ...reconciledDraft,
+        eta: ensureSpcSingaporeEta(reconciledDraft.eta || sourceEta),
+      }
+    }
+  }
   const correctedOutput = buildFallbackOutput(source, rawText, cleanedText, reconciledDraft)
   const vlsfoMaxRemarks = reconciledDraft.vlsfoMaxRemarks.length
     ? reconciledDraft.vlsfoMaxRemarks
