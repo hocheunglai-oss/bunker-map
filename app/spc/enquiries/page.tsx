@@ -1014,128 +1014,78 @@ export default function SpcEnquiriesPage() {
   return (
     <SpcShell title="SPC Enquiries">
       <div className="spc-enquiries-layout">
-        <div className="spc-enquiry-left-column">
-          <section className="spc-panel spc-enquiry-entry-panel">
+        <section className="spc-panel spc-enquiry-entry-panel">
             <div className="spc-panel-header">
-              <h2>New Enquiry</h2>
+              <div className="spc-enquiry-heading-copy">
+                <span>ENQUIRY WORKSPACE</span>
+                <h2>New Enquiry</h2>
+              </div>
               <button type="button" className="spc-blue-action" onClick={clearDraft} disabled={!canEdit || saving}>
                 Clear
               </button>
             </div>
             <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form" noValidate>
-              <label className="spc-enquiry-raw">
-                <span>AUTO FORMAT (DOUBLE CHECK BEFORE SENDING)</span>
-                <textarea
-                  value={draft.rawText}
-                  onChange={(event) => updateDraft("rawText", event.target.value)}
-                  placeholder="PASTE YOUR ENQUIRY HERE"
-                  rows={4}
-                  disabled={!canEdit}
-                />
-              </label>
-              {cautionTerms.length > 0 ? (
-                <div className="spc-enquiry-warning">
-                  {formatSpcCautionWarning(cautionTerms)}
-                </div>
-              ) : null}
-              {attentionTerms.length > 0 ? (
-                <div className="spc-enquiry-warning">
-                  WARNING: {attentionTerms.join(" / ")} spotted. Check remarks and quantity unit before sending.
-                </div>
-              ) : null}
-              <div className="spc-enquiry-fields">
-                <label className={shouldShowDraftMissing("vesselName") ? "is-missing" : ""}>
-                  <span>Vessel</span>
-                  <input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} />
+              <div className="spc-enquiry-parser-pane">
+                <label className="spc-enquiry-raw">
+                  <span>Parser</span>
+                  <textarea
+                    value={draft.rawText}
+                    onChange={(event) => updateDraft("rawText", event.target.value)}
+                    placeholder="PASTE YOUR ENQUIRY HERE"
+                    rows={12}
+                    disabled={!canEdit}
+                  />
                 </label>
-                <div className={`spc-field-block${shouldShowDraftMissing("imo") ? " is-missing" : ""}`}>
-                  <div className="spc-field-label-row">
-                    <label htmlFor="spc-enquiry-imo">IMO</label>
-                    {!draft.imo.trim() && imoSearchUrl ? (
-                      <a className="spc-imo-lookup" href={imoSearchUrl} target="_blank" rel="noreferrer">
-                        Google search
-                      </a>
-                    ) : null}
+                {cautionTerms.length > 0 ? (
+                  <div className="spc-enquiry-warning">
+                    {formatSpcCautionWarning(cautionTerms)}
                   </div>
-                  <input id="spc-enquiry-imo" value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} inputMode="numeric" maxLength={7} />
-                </div>
-                <label className={shouldShowDraftMissing("eta") ? "is-missing" : ""}>
-                  <span>ETA</span>
-                  <input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} />
+                ) : null}
+                {attentionTerms.length > 0 ? (
+                  <div className="spc-enquiry-warning">
+                    WARNING: {attentionTerms.join(" / ")} spotted. Check remarks and quantity unit before sending.
+                  </div>
+                ) : null}
+                <label className="spc-enquiry-preview-field">
+                  <span>Standard Format</span>
+                  <textarea
+                    value={draft.standardText}
+                    onChange={(event) => updateDraft("standardText", event.target.value)}
+                    placeholder="Standard enquiry preview"
+                    rows={3}
+                    disabled={!canEdit}
+                  />
                 </label>
-                <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}>
-                  <span>HSFO</span>
-                  <input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" />
-                </label>
-                <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}>
-                  <span>VLSFO</span>
-                  <input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" />
-                </label>
-                <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}>
-                  <span>LSMGO</span>
-                  <input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" />
-                </label>
-                <label className="spc-enquiry-remarks">
-                  <span>Remarks</span>
-                  <input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} />
-                </label>
-              </div>
-              <div className="spc-vlsfo-remark-row" aria-label="VLSFO max viscosity controls">
-                <button
-                  type="button"
-                  className={rmkMode ? "is-active" : ""}
-                  aria-pressed={rmkMode}
-                  onClick={() => {
-                    const next = !rmkMode
-                    setRmkMode(next)
-                    setDraft((draftCurrent) => ({
-                      ...draftCurrent,
-                      standardText: next
-                        ? rmkStandardText(standardTextForDraft(draftCurrent, vlsfoMaxRemarks))
-                        : standardTextForDraft(draftCurrent, vlsfoMaxRemarks),
-                    }))
-                  }}
-                  disabled={!canEdit || !draft.hsfo}
-                >
-                  RMK
-                </button>
-                {vlsfoRemarkOptions.map((remark) => {
-                  const active = vlsfoMaxRemarks.includes(remark)
-                  return (
-                    <button
-                      key={remark}
-                      type="button"
-                      className={active ? "is-active" : ""}
-                      aria-pressed={active}
-                      onClick={() => toggleVlsfoMaxRemark(remark)}
-                      disabled={!canEdit || !draft.vlsfo}
-                    >
-                      Add {formatVlsfoMaxRemark(remark)}
-                    </button>
-                  )
-                })}
-              </div>
-              {draftPreviousMatches.length > 0 ? (
-                <div className="spc-enquiry-match is-new-panel">
-                  <strong>RECORD</strong>
-                  {draftPreviousMatches.slice(0, 3).map((match) => (
-                    <span key={match.id}>
-                      {recordLine(match)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <label className="spc-enquiry-preview-field">
-                <span className="spc-preview-label-row">
-                  <span>Standard Format Preview</span>
+                <div className="spc-vlsfo-remark-row" aria-label="VLSFO max viscosity controls">
                   <button
                     type="button"
-                    className="spc-ai-parser-button spc-blue-action"
-                    onClick={() => void runParserAi("new-enquiry")}
-                    disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}
+                    className={rmkMode ? "is-active" : ""}
+                    aria-pressed={rmkMode}
+                    onClick={() => {
+                      const next = !rmkMode
+                      setRmkMode(next)
+                      setDraft((draftCurrent) => ({
+                        ...draftCurrent,
+                        standardText: next
+                          ? rmkStandardText(standardTextForDraft(draftCurrent, vlsfoMaxRemarks))
+                          : standardTextForDraft(draftCurrent, vlsfoMaxRemarks),
+                      }))
+                    }}
+                    disabled={!canEdit || !draft.hsfo}
                   >
-                    AI FIX
+                    RMK
                   </button>
+                  {vlsfoRemarkOptions.map((remark) => {
+                    const active = vlsfoMaxRemarks.includes(remark)
+                    return (
+                      <button key={remark} type="button" className={active ? "is-active" : ""} aria-pressed={active} onClick={() => toggleVlsfoMaxRemark(remark)} disabled={!canEdit || !draft.vlsfo}>
+                        {formatVlsfoMaxRemark(remark)}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="spc-enquiry-command-row">
+                  <button type="button" className="spc-blue-action" onClick={() => void runParserAi("new-enquiry")} disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}>AI FIX</button>
                   <button
                     type="button"
                     className="spc-blue-action"
@@ -1144,42 +1094,53 @@ export default function SpcEnquiriesPage() {
                   >
                     {reportButtonState === "new-enquiry" ? "SENT" : "REPORT"}
                   </button>
-                </span>
-                <textarea
-                  value={draft.standardText}
-                  onChange={(event) => updateDraft("standardText", event.target.value)}
-                  placeholder="Standard enquiry preview"
-                  rows={2}
-                  disabled={!canEdit}
-                />
-              </label>
-              {parserAiMessage && parserAiTarget === "new-enquiry" ? (
-                <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>
-                  {parserAiMessage}
-                </p>
-              ) : null}
-              {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.warnings.length > 0 ? (
-                <p className="spc-parser-report-error">
-                  AI warning: {parserAiSuggestion.warnings.join(" / ")}
-                </p>
-              ) : null}
-              {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.imoSources.length > 0 ? (
-                <p className="spc-parser-report-status">
-                  IMO source:{" "}
-                  <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">
-                    {parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}
-                  </a>
-                </p>
-              ) : null}
-              <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
-              <div className="spc-form-actions">
-                <button type="submit" disabled={saving || !canEdit}>
-                  {saving ? "Sending..." : "Send Enquiry"}
-                </button>
+                  <button type="submit" className="spc-send-enquiry-button" disabled={saving || !canEdit}>{saving ? "Sending..." : "SEND"}</button>
+                </div>
+                {parserAiMessage && parserAiTarget === "new-enquiry" ? <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>{parserAiMessage}</p> : null}
+                {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.warnings.length > 0 ? <p className="spc-parser-report-error">AI warning: {parserAiSuggestion.warnings.join(" / ")}</p> : null}
+                {parserAiSuggestion?.context === "new-enquiry" && parserAiSuggestion.imoSources.length > 0 ? <p className="spc-parser-report-status">IMO source: <a href={parserAiSuggestion.imoSources[0].url} target="_blank" rel="noreferrer">{parserAiSuggestion.imoSources[0].title || parserAiSuggestion.imoSources[0].url}</a></p> : null}
+                <p className="spc-parser-reported-count">REPORTED ({parserReportCount})</p>
+              </div>
+
+              <div className="spc-enquiry-details-pane">
+                <div className="spc-enquiry-section-title"><span>02</span><strong>Enquiry Details</strong></div>
+                <div className="spc-enquiry-fields">
+                  <label className={shouldShowDraftMissing("vesselName") ? "is-missing" : ""}><span>Vessel</span><input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} /></label>
+                  <div className={`spc-field-block${shouldShowDraftMissing("imo") ? " is-missing" : ""}`}><div className="spc-field-label-row"><label htmlFor="spc-enquiry-imo">IMO</label>{!draft.imo.trim() && imoSearchUrl ? <a className="spc-imo-lookup" href={imoSearchUrl} target="_blank" rel="noreferrer">Google search</a> : null}</div><input id="spc-enquiry-imo" value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} inputMode="numeric" maxLength={7} /></div>
+                  <label className={shouldShowDraftMissing("eta") ? "is-missing" : ""}><span>ETA</span><input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} /></label>
+                  <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>HSFO</span><input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
+                  <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>VLSFO</span><input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
+                  <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>LSMGO</span><input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
+                  <label className="spc-enquiry-remarks"><span>Remarks</span><input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} /></label>
+                </div>
+                {draftPreviousMatches.length > 0 ? <div className="spc-enquiry-match is-new-panel"><strong>RECORD</strong>{draftPreviousMatches.slice(0, 3).map((match) => <span key={match.id}>{recordLine(match)}</span>)}</div> : null}
               </div>
             </form>
           </section>
 
+        <div className="spc-enquiry-activity-column">
+          <section className="spc-panel spc-sent-enquiries-panel">
+            <div className="spc-panel-header">
+              <div className="spc-enquiry-heading-copy"><span>LIVE BOARD</span><h2>Sent Enquiries</h2></div>
+              <strong className="spc-enquiry-count">{activeEnquiries.length}</strong>
+            </div>
+            <div className="spc-sent-enquiries-list">
+              {activeEnquiries.map((enquiry) => {
+                const matches = matchesFor(enquiry)
+                return (
+                  <article key={enquiry.id} className="spc-sent-enquiry-card">
+                    <div className="spc-sent-enquiry-summary"><p>{enquiry.formattedText || enquiry.title}</p><span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>{enquiryStatusLabel(enquiry)}</span></div>
+                    {enquiry.status === "quoted" && enquiry.meta?.stemSupplierTraderDisplayName ? <div className="spc-outcome-note">Stemmed to {enquiry.meta.stemSupplierTraderDisplayName}</div> : null}
+                    {enquiry.status === "cancelled" && enquiry.meta?.lostReason ? <div className="spc-outcome-note is-lost">Lost: {enquiry.meta.lostReason}</div> : null}
+                    {matches.length > 0 ? <div className="spc-enquiry-match"><strong>RECORD</strong>{matches.slice(0, 3).map((match) => <span key={match.id}>{recordLine(match)}</span>)}</div> : null}
+                    <div className="spc-sent-enquiry-meta"><span>{displayTime(enquiry.createdAt)}</span></div>
+                    {enquiry.status === "sent" ? <div className="spc-sent-enquiry-actions"><button type="button" onClick={() => openOutcome(enquiry, "stem")} disabled={!canEdit || updatingId === enquiry.id}>STEM</button><button type="button" className="is-lost" onClick={() => openOutcome(enquiry, "lost")} disabled={!canEdit || updatingId === enquiry.id}>LOST</button><button type="button" className="is-postpone" onClick={() => void quickOutcome(enquiry, "postpone")} disabled={!canEdit || updatingId === enquiry.id}>POSTPONE</button><button type="button" className="is-cancel" onClick={() => void quickOutcome(enquiry, "cancel")} disabled={!canEdit || updatingId === enquiry.id}>CANCEL</button></div> : null}
+                  </article>
+                )
+              })}
+              {!loading && activeEnquiries.length === 0 ? <div className="spc-empty">No enquiries yet.</div> : null}
+            </div>
+          </section>
           {postponedEnquiries.length > 0 ? (
             <section className="spc-postponed-enquiries-panel">
               <div className="spc-postponed-enquiries-header">
@@ -1203,84 +1164,6 @@ export default function SpcEnquiriesPage() {
             </section>
           ) : null}
         </div>
-
-        <section className="spc-panel spc-sent-enquiries-panel">
-          <div className="spc-panel-header">
-            <h2>Sent Enquiries</h2>
-          </div>
-          <div className="spc-sent-enquiries-list">
-            {activeEnquiries.map((enquiry) => {
-              const matches = matchesFor(enquiry)
-              return (
-                <article key={enquiry.id} className="spc-sent-enquiry-card">
-                  <div className="spc-sent-enquiry-summary">
-                    <p>{enquiry.formattedText || enquiry.title}</p>
-                    <span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>
-                      {enquiryStatusLabel(enquiry)}
-                    </span>
-                  </div>
-                  {enquiry.status === "quoted" && enquiry.meta?.stemSupplierTraderDisplayName ? (
-                    <div className="spc-outcome-note">Stemmed to {enquiry.meta.stemSupplierTraderDisplayName}</div>
-                  ) : null}
-                  {enquiry.status === "cancelled" && enquiry.meta?.lostReason ? (
-                    <div className="spc-outcome-note is-lost">Lost: {enquiry.meta.lostReason}</div>
-                  ) : null}
-                  {matches.length > 0 ? (
-                    <div className="spc-enquiry-match">
-                      <strong>RECORD</strong>
-                      {matches.slice(0, 3).map((match) => (
-                        <span key={match.id}>
-                          {recordLine(match)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="spc-sent-enquiry-meta">
-                    <span>{displayTime(enquiry.createdAt)}</span>
-                  </div>
-                  {enquiry.status === "sent" ? (
-                    <div className="spc-sent-enquiry-actions">
-                      <button
-                        type="button"
-                        onClick={() => openOutcome(enquiry, "stem")}
-                        disabled={!canEdit || updatingId === enquiry.id}
-                      >
-                        STEM
-                      </button>
-                      <button
-                        type="button"
-                        className="is-lost"
-                        onClick={() => openOutcome(enquiry, "lost")}
-                        disabled={!canEdit || updatingId === enquiry.id}
-                      >
-                        LOST
-                      </button>
-                      <button
-                        type="button"
-                        className="is-postpone"
-                        onClick={() => void quickOutcome(enquiry, "postpone")}
-                        disabled={!canEdit || updatingId === enquiry.id}
-                      >
-                        POSTPONE
-                      </button>
-                      <button
-                        type="button"
-                        className="is-cancel"
-                        onClick={() => void quickOutcome(enquiry, "cancel")}
-                        disabled={!canEdit || updatingId === enquiry.id}
-                      >
-                        CANCEL
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              )
-            })}
-            {!loading && activeEnquiries.length === 0 ? (
-              <div className="spc-empty">No enquiries yet.</div>
-            ) : null}
-          </div>
-        </section>
       </div>
 
       {outcomeDraft ? (

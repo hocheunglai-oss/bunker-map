@@ -3242,24 +3242,112 @@ body {
 .spc-enquiries-layout {
   min-height: calc(100vh - 72px);
   display: grid;
-  grid-template-columns: minmax(470px, 0.95fr) minmax(330px, 414px);
-  gap: 10px;
+  grid-template-columns: minmax(650px, 1.55fr) minmax(330px, 0.85fr);
+  gap: 12px;
   align-items: start;
 }
 
-.spc-enquiry-left-column {
+.spc-enquiry-activity-column {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .spc-sent-enquiries-panel {
-  height: calc(100vh - 72px);
+  height: min(68vh, 720px);
+  min-height: 430px;
+  overflow: hidden;
 }
 
 .spc-enquiry-entry-form {
   display: grid;
-  gap: 7px;
-  padding: 9px 10px 10px;
+  grid-template-columns: minmax(340px, 1.2fr) minmax(260px, 0.8fr);
+  gap: 0;
+  padding: 0;
+}
+
+.spc-enquiry-entry-panel,
+.spc-sent-enquiries-panel,
+.spc-postponed-enquiries-panel {
+  box-shadow: 0 16px 36px rgba(22, 42, 66, 0.08);
+}
+
+.spc-enquiry-entry-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.spc-enquiry-entry-panel::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: -90px;
+  left: -70px;
+  width: 230px;
+  height: 230px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(0, 113, 227, 0.09), rgba(0, 113, 227, 0));
+  pointer-events: none;
+}
+
+.spc-enquiry-entry-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.spc-enquiry-heading-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.spc-enquiry-heading-copy > span {
+  color: #0071e3;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.spc-enquiry-heading-copy h2 {
+  margin: 0;
+}
+
+.spc-enquiry-parser-pane,
+.spc-enquiry-details-pane {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.spc-enquiry-parser-pane {
+  border-right: 1px solid var(--fc-admin-border-soft);
+  background: linear-gradient(145deg, rgba(249, 252, 255, 0.86), rgba(255, 255, 255, 0.98));
+}
+
+.spc-enquiry-details-pane {
+  background: rgba(251, 251, 253, 0.72);
+}
+
+.spc-enquiry-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fc-admin-heading);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.spc-enquiry-section-title span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #eaf4ff;
+  color: #0067cf;
+  font-size: 8px;
+  font-weight: 900;
 }
 
 .spc-enquiry-entry-form label,
@@ -3293,11 +3381,41 @@ body {
 }
 
 .spc-enquiry-raw textarea {
-  min-height: 86px;
+  min-height: clamp(230px, 33vh, 390px);
+  border-color: #c5d3e2;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .spc-enquiry-preview-field textarea {
-  min-height: 54px;
+  min-height: 72px;
+  background: #f8fbff;
+}
+
+.spc-enquiry-command-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.spc-enquiry-command-row button {
+  min-height: 34px;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 7px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.spc-enquiry-command-row button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.spc-enquiry-command-row .spc-send-enquiry-button {
+  background: linear-gradient(135deg, #0071e3, #005ec5);
+  box-shadow: 0 5px 14px rgba(0, 113, 227, 0.23);
 }
 
 .spc-preview-label-row {
@@ -3346,12 +3464,23 @@ body {
 
 .spc-enquiry-fields {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .spc-enquiry-remarks {
-  grid-column: 1 / -1;
+  grid-column: auto;
+}
+
+.spc-enquiry-count {
+  min-width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #eaf4ff;
+  color: #0067cf;
+  font-size: 10px;
 }
 
 .spc-imo-lookup {
@@ -7975,6 +8104,20 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 @media (max-width: 1040px) {
+  .spc-enquiries-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-sent-enquiries-panel {
+    height: auto;
+    min-height: 0;
+  }
+
+  .spc-sent-enquiries-list {
+    height: auto;
+    max-height: 62vh;
+  }
+
   .spc-topbar {
     grid-template-columns: 1fr;
     justify-items: stretch;
@@ -8030,8 +8173,14 @@ body:has(.spc-statistics-page) .spc-main {
 
   .spc-enquiry-entry-form {
     height: auto;
+    grid-template-columns: 1fr;
     grid-template-rows: auto;
     overflow: visible;
+  }
+
+  .spc-enquiry-parser-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--fc-admin-border-soft);
   }
 
   .spc-enquiry-entry-form textarea {
