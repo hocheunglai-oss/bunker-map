@@ -52,6 +52,7 @@ const ATTENDANCE_MONTHLY_ROSTER_MIGRATION_HEAD = "20260810041413"
 const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
 const EVENT_CALENDAR_GOOGLE_SYNC_JOBS_MIGRATION_HEAD = "20260811125141"
 const SPC_FEEDBACK_MIGRATION_HEAD = "20260812095000"
+const SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD = "20260813070206"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -112,6 +113,16 @@ const BACKUP_TABLE_SECTIONS = [
     key: "spcFeedback",
     table: "spc_feedback",
     introducedAt: SPC_FEEDBACK_MIGRATION_HEAD,
+  },
+  {
+    key: "spcMobileModes",
+    table: "spc_mobile_modes",
+    introducedAt: SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD,
+  },
+  {
+    key: "spcMobileEnquiryDeliveries",
+    table: "spc_mobile_enquiry_deliveries",
+    introducedAt: SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD,
   },
   {
     key: "attendancePeople",

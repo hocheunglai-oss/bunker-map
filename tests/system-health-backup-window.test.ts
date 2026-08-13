@@ -67,3 +67,20 @@ test("backup truth rechecks retry transient Supabase edge failures", () => {
     /setTimeout\(resolve, SUPABASE_TRUTH_RPC_RETRY_DELAY_MS \* attempt\)/,
   )
 })
+
+test("SPC mobile delivery state is registered and mutation-fenced for daily backup", () => {
+  const contractSources = [backupRouteSource, healthSource]
+  for (const source of contractSources) {
+    assert.match(source, /table: "spc_mobile_modes"/)
+    assert.match(source, /table: "spc_mobile_enquiry_deliveries"/)
+  }
+  const validator = readFileSync(new URL("../scripts/validate-backup.mjs", import.meta.url), "utf8")
+  assert.match(validator, /table: "spc_mobile_modes"/)
+  assert.match(validator, /table: "spc_mobile_enquiry_deliveries"/)
+  const fenceMigration = readFileSync(
+    new URL("../supabase/migrations/20260813070942_fence_spc_mobile_backup_tables.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(fenceMigration, /on public\.spc_mobile_modes/)
+  assert.match(fenceMigration, /on public\.spc_mobile_enquiry_deliveries/)
+})

@@ -159,6 +159,8 @@ const TABLES: TableConfig[] = [
   { key: "openAiUsageEvents", table: "openai_usage_events", order: [{ column: "id", ascending: true }] },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks", order: [{ column: "id", ascending: true }] },
   { key: "spcFeedback", table: "spc_feedback", order: [{ column: "id", ascending: true }] },
+  { key: "spcMobileModes", table: "spc_mobile_modes", order: [{ column: "spc_user_id", ascending: true }] },
+  { key: "spcMobileEnquiryDeliveries", table: "spc_mobile_enquiry_deliveries", order: [{ column: "id", ascending: true }] },
   { key: "attendancePeople", table: "attendance_people", order: [{ column: "id", ascending: true }] },
   { key: "attendanceTeamAssignments", table: "attendance_team_assignments", order: [{ column: "person_id", ascending: true }, { column: "effective_from", ascending: true }] },
   { key: "attendanceRawPunches", table: "attendance_raw_punches", order: [{ column: "id", ascending: true }] },

@@ -98,7 +98,8 @@ modified row in the middle.
 The backup includes the application tables used by the map, price history,
 remarks, legacy and current admin settings, email templates, FCUNO address book
 and phonebook, CCINFO metadata, Audit Log, Exchange delivery/certification
-evidence, SPC users/enquiries/fixtures/suppliers/presentation content/feedback,
+evidence, SPC users/enquiries/fixtures/suppliers/presentation content/feedback
+and mobile-delivery state,
 the durable Event Calendar Google-sync outbox, WhatsApp conversations/messages,
 parser reports, plus point-in-time exports from Google
 Contacts and Google Calendar. `admin_users.password_hash` and
