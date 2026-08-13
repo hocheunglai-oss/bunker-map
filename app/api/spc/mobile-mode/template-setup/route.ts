@@ -17,9 +17,14 @@ export async function POST() {
     const debug = await meta(`debug_token?input_token=${encodeURIComponent(token)}`)
     const data = debug.data as { granular_scopes?: Array<{ scope?: unknown; target_ids?: unknown[] }> } | undefined
     const configuredWabaId = process.env.WHATSAPP_TEMPLATE_BUSINESS_ACCOUNT_ID?.trim() || ""
-    const wabaId = /^\d{5,30}$/.test(configuredWabaId) ? configuredWabaId :
+    let wabaId = /^\d{5,30}$/.test(configuredWabaId) ? configuredWabaId :
       data?.granular_scopes?.filter((scope) => String(scope.scope || "").includes("whatsapp_business"))
         .flatMap((scope) => scope.target_ids || []).map(String).find((id) => /^\d{5,30}$/.test(id)) || ""
+    if (!wabaId) {
+      const phoneId = env("SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID")
+      const phone = await meta(`${phoneId}?fields=whatsapp_business_account`)
+      wabaId = String((phone.whatsapp_business_account as { id?: unknown } | undefined)?.id || "")
+    }
     if (!wabaId) throw new Error("WhatsApp Business account unavailable")
     const existing = await meta(`${wabaId}/message_templates?name=spc_mobile_mode_on&fields=id,name,status`)
     const templates = Array.isArray(existing.data) ? existing.data as Array<Record<string, unknown>> : []
