@@ -84,3 +84,12 @@ test("SPC mobile delivery state is registered and mutation-fenced for daily back
   assert.match(fenceMigration, /on public\.spc_mobile_modes/)
   assert.match(fenceMigration, /on public\.spc_mobile_enquiry_deliveries/)
 })
+
+test("daily backup keeps only the latest verified artifact and its predecessor", () => {
+  assert.match(backupRouteSource, /const RETAINED_VERIFIED_BACKUP_COUNT = 2/)
+  assert.match(
+    backupRouteSource,
+    /verifiedBackups\.slice\(RETAINED_VERIFIED_BACKUP_COUNT\)/,
+  )
+  assert.match(backupRouteSource, /await drive\.files\.delete\(/)
+})

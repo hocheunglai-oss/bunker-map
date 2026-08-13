@@ -47,10 +47,10 @@ Bunker Map Backups / Daily Supabase Backups
 ```
 
 Only files named
-`bunker-map-backup-*.json` are retention-managed. Verified files less than 35
-days old are retained; older verified files are moved to Google Drive trash,
-where they remain recoverable according to the Drive account's trash policy.
-Retention is time-based, not a promise that exactly 35 files exist. An
+`bunker-map-backup-*.json` are retention-managed. The newest two verified
+files are retained, preserving the latest artifact and its immediate
+verification predecessor. Older verified files are permanently deleted only
+after the new artifact completes every verification. An
 authorized administrator can also create a copy immediately from System Health
 using `BACK UP NOW`.
 
@@ -357,9 +357,9 @@ Drive artifact.
 At least quarterly:
 
 - validate the newest and one older Drive artifact;
-- confirm the retained verified files cover the expected 35-day date window,
+- confirm exactly the newest two verified files are retained,
   their predecessor anchors are continuous, older managed files were moved only
-  to recoverable Drive trash, and no unrelated Drive files were touched;
+  by permanent deletion, and no unrelated Drive files were touched;
 - confirm the Supabase managed-backup/PITR status in the dashboard;
 - perform an isolated owner-level restore rehearsal;
 - verify the ledger and independent anchors;

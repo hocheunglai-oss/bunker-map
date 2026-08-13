@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-const RETENTION_DAYS = 35
+const RETAINED_VERIFIED_BACKUP_COUNT = 2
 const BACKUP_FOLDER_NAME = "Bunker Map Backups"
 const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const BACKUP_SCHEMA_VERSION = 2
@@ -1756,19 +1756,15 @@ async function pruneOldDriveBackups(
     folderId,
     sharedDriveId
   )
-  const retentionCutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000
   // The newest artifact and its immediate predecessor are the minimum
-  // independently verifiable chain. Keep both even after a long backup outage.
-  const stale = verifiedBackups.slice(2).filter((file) => {
-    const createdAt = new Date(String(file.createdTime || "")).getTime()
-    return Number.isFinite(createdAt) && createdAt < retentionCutoff
-  })
+  // independently verifiable chain. Permanently remove older verified
+  // artifacts only after the new artifact has completed every verification.
+  const stale = verifiedBackups.slice(RETAINED_VERIFIED_BACKUP_COUNT)
   let deleted = 0
   for (const file of stale) {
     if (!file.id) continue
-    await drive.files.update({
+    await drive.files.delete({
       fileId: file.id,
-      requestBody: { trashed: true },
       supportsAllDrives: true,
     })
     deleted += 1
@@ -1961,7 +1957,7 @@ async function createBackup(provenance: BackupProvenance) {
         stagingSourceByteLength: prepared.stagingSourceByteLength,
         stagingFileByteLength: prepared.stagingFileByteLength,
         verificationStatus: "complete",
-        retentionDays: RETENTION_DAYS,
+        retainedVerifiedBackups: RETAINED_VERIFIED_BACKUP_COUNT,
       },
       recoveredOrphanedUploads: orphanedUploads.length,
       pruned,

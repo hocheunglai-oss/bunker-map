@@ -36,7 +36,7 @@ test("SPC operations runbook preserves technical facts and leaves policy decisio
   for (const fact of [
     "Automatic 30-day retention",
     "400-day sliding validity",
-    "35-day managed window",
+    "Latest two verified artifacts",
     "fewer than 90 days remain",
     "targeted authenticated retest",
   ]) {
@@ -200,7 +200,7 @@ test("sanitized SPC system inventory records confirmed boundaries and pending ow
     "ap-south-1",
     "ADMIN",
     "spc-user-management",
-    "35-day managed window",
+    "latest two verified artifacts",
     "no project log drain was observed",
   ]) {
     assert.ok(inventory.toLowerCase().includes(fact.toLowerCase()))
