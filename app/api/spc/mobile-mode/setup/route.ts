@@ -20,18 +20,22 @@ async function graph(path: string, init?: RequestInit, token = requireEnv("WHATS
 }
 
 async function setup() {
+  let stage = "authorization"
   try {
     await requireSpcPagePermission("spc-user-management", "edit")
+    stage = "resolve-phone"
     const phoneId = requireEnv("SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID")
     const phone = await graph(`${phoneId}?fields=whatsapp_business_account`)
     const account = phone.whatsapp_business_account as { id?: unknown } | undefined
     const wabaId = String(account?.id || "")
     if (!/^\d{5,30}$/.test(wabaId)) throw new Error("WhatsApp Business account could not be resolved.")
 
+    stage = "check-template"
     const existing = await graph(`${wabaId}/message_templates?name=spc_mobile_enquiry_ready&fields=id,name,status`)
     const templates = Array.isArray(existing.data) ? existing.data : []
     let template = templates[0] as Record<string, unknown> | undefined
     if (!template) {
+      stage = "create-template"
       template = await graph(`${wabaId}/message_templates`, {
         method: "POST",
         body: JSON.stringify({
@@ -47,12 +51,15 @@ async function setup() {
       })
     }
 
+    stage = "subscribe-business-account"
     await graph(`${wabaId}/subscribed_apps`, { method: "POST", body: JSON.stringify({}) })
     const token = requireEnv("WHATSAPP_ACCESS_TOKEN")
+    stage = "resolve-application"
     const debug = await graph(`debug_token?input_token=${encodeURIComponent(token)}`)
     const appId = String((debug.data as { app_id?: unknown } | undefined)?.app_id || "")
     if (!/^\d{5,30}$/.test(appId)) throw new Error("Meta application could not be resolved.")
     const appToken = `${appId}|${requireEnv("WHATSAPP_APP_SECRET")}`
+    stage = "register-callback"
     await graph(`${appId}/subscriptions`, {
       method: "POST",
       body: JSON.stringify({
@@ -67,7 +74,7 @@ async function setup() {
     return NextResponse.json({ success: true, templateStatus: String(template.status || "PENDING") })
   } catch (error) {
     const message = error instanceof Error ? error.message : "WhatsApp mobile setup failed."
-    return NextResponse.json({ message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 })
+    return NextResponse.json({ message: `${stage}: ${message}` }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 })
   }
 }
 
