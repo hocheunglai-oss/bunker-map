@@ -163,7 +163,7 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
 
 test("manual IN and OUT corrections are atomic, audited replacements", () => {
   const attendanceData = source("../lib/attendanceData.ts")
-  const migration = source("../supabase/migrations/20260814104623_add_attendance_time_corrections_to_day_editor.sql")
+  const migration = source("../supabase/migrations/20260814104914_add_attendance_time_corrections_to_day_editor.sql")
   assert.match(attendanceData, /p_update_sign_in: updateSignIn/)
   assert.match(attendanceData, /p_update_sign_out: updateSignOut/)
   assert.match(migration, /insert into public\.attendance_manual_overrides/)
