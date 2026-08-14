@@ -70,3 +70,13 @@ test("SPC web outcome and reoffer mutations enforce enquiry ownership", () => {
     2,
   )
 })
+
+test("SPC cancellation preserves the shared record for Speed Board status updates", () => {
+  const outcomeStart = enquiriesStore.indexOf("export async function updateSpcEnquiryOutcome")
+  const outcomeEnd = enquiriesStore.indexOf("export async function reofferSpcEnquiry", outcomeStart)
+  const outcomeSource = enquiriesStore.slice(outcomeStart, outcomeEnd)
+
+  assert.match(outcomeSource, /outcome === "cancel"[\s\S]*?\? "closed"/)
+  assert.match(outcomeSource, /nextMeta\.cancelledAt = now/)
+  assert.doesNotMatch(outcomeSource, /\.delete\(\)/)
+})

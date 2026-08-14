@@ -212,7 +212,10 @@ export async function createSpcEnquiry(
   if (!title) throw new Error("Enquiry title is required.")
   if (!session.username) throw new Error("Authenticated username is required.")
 
-  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries", {
+    action: "create-enquiry",
+    targetType: "spc-enquiry",
+  })
   const supabase = createSpcAuditedSupabaseClient(context)
   const notes = cleanText(input.notes)
   const duplicateWindow = new Date(Date.now() - 120000).toISOString()
@@ -273,25 +276,22 @@ export async function updateSpcEnquiryOutcome(
     throw new Error("Supplier trader is required.")
   }
 
-  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries", {
+    action: `set-enquiry-${outcome}`,
+    targetType: "spc-enquiry",
+    targetId: enquiryId,
+  })
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
   requireEnquiryOwner(existing, session)
-  if (outcome === "cancel") {
-    const { error } = await supabase
-      .from("spc_enquiries")
-      .delete()
-      .eq("id", enquiryId)
-
-    if (error) throw error
-    return { ...mapEnquiry(existing), status: "closed" }
-  }
   const status =
     outcome === "stem"
       ? "quoted"
       : outcome === "lost"
         ? "cancelled"
-        : existing.status || "sent"
+        : outcome === "cancel"
+          ? "closed"
+          : existing.status || "sent"
   const now = new Date().toISOString()
   const currentText = formatSpcEnquiry(existing)
   const nextMeta: SpcEnquiryMeta = {
@@ -313,8 +313,16 @@ export async function updateSpcEnquiryOutcome(
       cleanText(input.supplierTraderDisplayName) || cleanText(input.supplierTraderUsername) || undefined
     nextMeta.postponedAt = undefined
     nextMeta.cancelledAt = undefined
-  } else {
+  } else if (outcome === "postpone") {
     nextMeta.postponedAt = now
+    nextMeta.cancelledAt = undefined
+  } else {
+    nextMeta.outcomeAt = now
+    nextMeta.lostReason = undefined
+    nextMeta.stemSupplierTraderUsername = undefined
+    nextMeta.stemSupplierTraderDisplayName = undefined
+    nextMeta.postponedAt = undefined
+    nextMeta.cancelledAt = now
   }
 
   const { data, error } = await supabase
