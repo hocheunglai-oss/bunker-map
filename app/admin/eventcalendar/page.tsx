@@ -7,7 +7,6 @@ import {
 } from "@/data/eventCalendar"
 import { mergeImportedEvents } from "@/lib/eventCalendarImport"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
-import { normalizeEmailList } from "@/lib/emailAddress"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
@@ -534,10 +533,10 @@ export default function EventCalendarPage() {
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
   const [draftEmailRecipientsText, setDraftEmailRecipientsText] = useState("")
   const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
-  const [syncStatus, setSyncStatus] = useState("Sync ready")
+  const [, setSyncStatus] = useState("Sync ready")
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([])
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState("Calendar ready")
-  const [saveStatus, setSaveStatus] = useState("Loading shared calendar")
+  const [, setSaveStatus] = useState("Loading shared calendar")
   const [calendarLoadError, setCalendarLoadError] = useState("")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
@@ -1073,17 +1072,13 @@ export default function EventCalendarPage() {
         wasEdit ? { [nextEvent.id]: draftEventVersion } : {},
       )
       const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
-      if (normalizeEmailList(emailRecipientsText).length) {
-        setEmailPrompt({
-          event: committedEvent,
-          eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
-          action: wasEdit ? "updated" : "created",
-          status: "idle",
-          error: "",
-        })
-      } else {
-        setEmailPrompt(null)
-      }
+      setEmailPrompt({
+        event: committedEvent,
+        eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
+        action: wasEdit ? "updated" : "created",
+        status: "idle",
+        error: "",
+      })
       if (submissionToken === eventSubmissionTokenRef.current) {
         draftEventIdRef.current = ""
         draftEventVersionRef.current = ""
@@ -1567,46 +1562,6 @@ export default function EventCalendarPage() {
               marginLeft: "auto",
             }}
           >
-            <span
-              style={{
-                border: "1px solid var(--fc-admin-border-soft)",
-                borderRadius: "999px",
-                background: /fail|unavailable|outdated|changed|conflict|refresh required/i.test(saveStatus)
-                  ? "var(--fc-admin-danger-bg)"
-                  : "var(--fc-admin-panel-bg)",
-                color: /fail|unavailable|outdated|changed|conflict|refresh required/i.test(saveStatus)
-                  ? "var(--fc-admin-danger-text)"
-                  : "var(--fc-admin-muted)",
-                fontSize: "11px",
-                fontWeight: 800,
-                lineHeight: 1,
-                padding: "8px 10px",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {saveStatus}
-            </span>
-            {syncStatus !== "Sync ready" && (
-              <span
-                style={{
-                  border: "1px solid var(--fc-admin-border-soft)",
-                  borderRadius: "999px",
-                  background: /pending|incomplete|failed/i.test(syncStatus)
-                    ? "var(--fc-admin-danger-bg)"
-                    : "var(--fc-admin-panel-bg)",
-                  color: /pending|incomplete|failed/i.test(syncStatus)
-                    ? "var(--fc-admin-danger-text)"
-                    : "var(--fc-admin-muted)",
-                  fontSize: "11px",
-                  fontWeight: 800,
-                  lineHeight: 1,
-                  padding: "8px 10px",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {syncStatus}
-              </span>
-            )}
             <div
               style={{ position: "relative" }}
               onMouseEnter={cancelToolsMenuClose}

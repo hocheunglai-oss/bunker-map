@@ -87,11 +87,12 @@ export async function POST(request: Request) {
       }, { status: 409 })
     }
 
-    const recipients = normalizeEmailList(
-      typeof latest.payload.emailRecipientsText === "string"
-        ? latest.payload.emailRecipientsText
-        : process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS,
+    const savedRecipients = normalizeEmailList(
+      latest.payload.emailRecipientsText,
     )
+    const recipients = savedRecipients.length
+      ? savedRecipients
+      : normalizeEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS)
 
     if (!recipients.length) {
       return NextResponse.json({ message: "No valid email recipients supplied." }, { status: 400 })

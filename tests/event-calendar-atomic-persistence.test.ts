@@ -425,8 +425,12 @@ test("Google reconciliation and event email use committed server-side calendar s
   assert.doesNotMatch(googleSync, /body\.activeEventIds/)
   assert.doesNotMatch(googleSync, /body\.calendarId/)
   assert.match(emailNotify, /loadCanonicalEvent\(body\.event\.id\)/)
-  assert.match(emailNotify, /latest\.payload\.emailRecipientsText/)
-  assert.match(eventCalendarPage, /normalizeEmailList\(emailRecipientsText\)\.length/)
+  assert.match(emailNotify, /savedRecipients = normalizeEmailList\([\s\S]*latest\.payload\.emailRecipientsText/)
+  assert.match(emailNotify, /savedRecipients\.length[\s\S]*process\.env\.EVENT_CALENDAR_EMAIL_RECIPIENTS/)
+  assert.match(eventCalendarPage, /setEmailPrompt\(\{[\s\S]*action: wasEdit \? "updated" : "created"/)
+  assert.doesNotMatch(eventCalendarPage, /normalizeEmailList\(emailRecipientsText\)\.length/)
+  assert.doesNotMatch(eventCalendarPage, /\{saveStatus\}/)
+  assert.doesNotMatch(eventCalendarPage, /\{syncStatus\}/)
 })
 
 test("calendar commits enqueue Google sync atomically and snapshot audit undo is blocked", () => {
