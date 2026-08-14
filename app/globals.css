@@ -5630,6 +5630,19 @@ body:has(.spc-statistics-page) .spc-main {
   height: 100%;
   display: block;
   object-fit: contain;
+  background: #06172d;
+}
+
+/* Embedded chapter videos are authored at 16:9. Fill the matching stage so
+   Chromium cannot expose its native video backing surface during scene cuts. */
+.spc-readme-stage .spc-readme-media > video {
+  object-fit: cover;
+}
+
+.spc-readme-media:fullscreen > video,
+.spc-readme-media.is-expanded > video,
+.spc-readme-presenter .spc-readme-media > video {
+  object-fit: contain;
 }
 
 .spc-readme-narration-control,
