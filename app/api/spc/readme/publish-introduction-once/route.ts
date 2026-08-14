@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
-const TOKEN_DIGEST = "f590b0fb84990e168755cec30a524abae26814e50d8b9962653665cb91596fa4"
+const TOKEN_DIGEST = "fbac625da15565fcc12d573d5fc4e3f5250a552db3ec9e3e582d7b6e40a661ef"
 const EXPIRES_AT = Date.parse("2026-08-14T04:30:00Z")
 const INTRODUCTION_ID = "8ea38dc3-2ba9-4da3-9bf4-d8875b7e09c9"
 const publisherSession: SpcSession = {
