@@ -57,6 +57,24 @@ test("Attendance Sync remains visible in System Health without sending email not
   )
 })
 
+test("recent schema drift remains visible without sending a daily warning email", () => {
+  assert.match(
+    noticeRouteSource,
+    /check\.id === "backup"[\s\S]*check\.status === "warning"[\s\S]*predates the live database schema[\s\S]*ageHours <= 36[\s\S]*unverifiedBackupFiles === 0/,
+  )
+})
+
+test("daily backup has bounded retries that skip after a recent schema-current success", () => {
+  const vercelConfig = readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+  assert.match(vercelConfig, /"schedule": "2 19 \* \* \*"/)
+  assert.match(vercelConfig, /"schedule": "2 20 \* \* \*"/)
+  assert.match(vercelConfig, /"schedule": "2 21 \* \* \*"/)
+  assert.match(backupRouteSource, /const CRON_RETRY_COVERAGE_HOURS = 6/)
+  assert.match(backupRouteSource, /provenance\.source === "vercel-cron"/)
+  assert.match(backupRouteSource, /previousAgeHours <= CRON_RETRY_COVERAGE_HOURS/)
+  assert.match(backupRouteSource, /skipped: true/)
+})
+
 test("backup truth rechecks retry transient Supabase edge failures", () => {
   const attempts = numericConstant(
     backupRouteSource,

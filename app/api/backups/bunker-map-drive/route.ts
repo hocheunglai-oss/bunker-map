@@ -21,6 +21,7 @@ export const runtime = "nodejs"
 export const maxDuration = 300
 
 const RETAINED_VERIFIED_BACKUP_COUNT = 2
+const CRON_RETRY_COVERAGE_HOURS = 6
 const BACKUP_FOLDER_NAME = "Bunker Map Backups"
 const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const BACKUP_SCHEMA_VERSION = 2
@@ -1877,6 +1878,38 @@ async function createBackup(provenance: BackupProvenance) {
       throw new Error(
         "Existing backup files were found but none has a valid verified-v2 marker; refusing to reset the trusted backup chain."
       )
+    }
+
+    const previousCreatedAt = Date.parse(String(previousFile?.createdTime || ""))
+    const previousAgeHours = Number.isFinite(previousCreatedAt)
+      ? (Date.now() - previousCreatedAt) / 3_600_000
+      : Number.POSITIVE_INFINITY
+    const currentInventorySha256 = sha256(
+      JSON.stringify([...inventory.liveTables].sort())
+    )
+    const retryAlreadyCovered =
+      provenance.source === "vercel-cron" &&
+      previousAgeHours >= 0 &&
+      previousAgeHours <= CRON_RETRY_COVERAGE_HOURS &&
+      previousFile?.appProperties?.migrationHead === inventory.migrationHead &&
+      previousFile?.appProperties?.inventorySha256 === currentInventorySha256 &&
+      previousFile?.appProperties?.catalogSha256 === inventory.catalogSha256 &&
+      previousFile?.appProperties?.liveTableCount ===
+        String(inventory.liveTables.size)
+
+    if (retryAlreadyCovered) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason:
+          "A recent verified cron backup already covers the live database schema.",
+        file: {
+          id: previousFile?.id,
+          name: previousFile?.name,
+          createdTime: previousFile?.createdTime,
+          webViewLink: previousFile?.webViewLink,
+        },
+      })
     }
 
     let previousHashes: Awaited<

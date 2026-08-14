@@ -74,6 +74,17 @@ function buildAlertHtml(unhealthyChecks: HealthCheck[], checkedAt: string) {
 
 function isNonAlertingCheck(check: HealthCheck) {
   if (NON_ALERTING_CHECK_IDS.has(check.id)) return true
+  if (
+    check.id === "backup" &&
+    check.status === "warning" &&
+    check.message ===
+      "Latest verified daily backup predates the live database schema" &&
+    typeof check.details?.ageHours === "number" &&
+    check.details.ageHours <= 36 &&
+    check.details?.unverifiedBackupFiles === 0
+  ) {
+    return true
+  }
   return check.id === "drive-file-content-backup" && check.details?.firstBackupMissing === true
 }
 
