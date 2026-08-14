@@ -15,10 +15,10 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
-const TOKEN_DIGEST = "0435cde2213b4ba6b41bea631d669e8034b7758e9837a6b0572fd25421ddf097"
-const EXPIRES_AT = Date.parse("2026-08-14T09:21:03Z")
-const INTRODUCTION_ID = "8ea38dc3-2ba9-4da3-9bf4-d8875b7e09c9"
-const EXPECTED_VIDEO_BYTES = 13_492_624
+const TOKEN_DIGEST = "cc91b4b12c64eebd170423a7787f2ce7db7f09f6d548704942e28e3be741b55e"
+const EXPIRES_AT = Date.parse("2026-08-14T10:11:34Z")
+const CHAPTER_THREE_ID = "cfbdd69f-e8a2-469e-993a-c5aac540e2ee"
+const EXPECTED_VIDEO_BYTES = 27_962_778
 const publisherSession: SpcSession = {
   authenticated: true,
   userId: "f345a8d9-384d-4134-b89d-f909505b4b36",
@@ -59,32 +59,32 @@ export async function POST(request: Request) {
 
     if (payload.action === "load") {
       const chunk = (await listSpcPresentationChunks(true)).find(
-        (item) => item.id === INTRODUCTION_ID,
+        (item) => item.id === CHAPTER_THREE_ID,
       )
       return NextResponse.json({ chunks: chunk ? [chunk] : [] })
     }
     if (payload.action === "save") {
-      if (payload.chunk?.id !== INTRODUCTION_ID) throw new Error("Invalid chapter.")
+      if (payload.chunk?.id !== CHAPTER_THREE_ID) throw new Error("Invalid chapter.")
       return NextResponse.json({
         chunk: await saveSpcPresentationChunk(payload.chunk, context),
       })
     }
     if (payload.action === "prepare-upload") {
-      if (payload.id !== INTRODUCTION_ID) throw new Error("Invalid chapter.")
+      if (payload.id !== CHAPTER_THREE_ID) throw new Error("Invalid chapter.")
       if (Number(payload.fileBytes || 0) !== EXPECTED_VIDEO_BYTES) {
         throw new Error("Unexpected video file.")
       }
       const upload = await prepareSpcPresentationUpload(
         payload.id,
         "video",
-        payload.fileName || "incorporate-ai-trading-introduction.mp4",
+        payload.fileName || "chapter-3-complete-synced.mp4",
         "video/mp4",
         EXPECTED_VIDEO_BYTES,
       )
       return NextResponse.json({ upload })
     }
     if (payload.action === "complete-upload") {
-      if (payload.id !== INTRODUCTION_ID) throw new Error("Invalid chapter.")
+      if (payload.id !== CHAPTER_THREE_ID) throw new Error("Invalid chapter.")
       const chunk = await completeSpcPresentationUpload(
         payload.id,
         Math.max(Number(payload.revision || 0), 1),
