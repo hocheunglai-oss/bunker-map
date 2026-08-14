@@ -1090,6 +1090,12 @@ export default function AttendanceRecordClient() {
       (!manualWorkMode && record?.workMode
         ? record.workMode
         : "office")
+    const displayedWorkMode = manualWorkMode ||
+      (record?.holidayAttendance
+        ? "office"
+        : record?.workMode && record.workMode !== defaultWorkMode
+          ? record.workMode
+          : undefined)
     setLeaveDraft({
       personId: person.id,
       staffLabel: `${person.staffCode} · ${person.displayName}`,
@@ -1099,10 +1105,10 @@ export default function AttendanceRecordClient() {
       code: matching?.code || "ALS",
       note: matching?.note || "",
       workMode:
-        manualWorkMode === "home-office" ||
-        manualWorkMode === "office" ||
-        manualWorkMode === "business-trip"
-          ? manualWorkMode
+        displayedWorkMode === "home-office" ||
+        displayedWorkMode === "office" ||
+        displayedWorkMode === "business-trip"
+          ? displayedWorkMode
           : "default",
       defaultWorkMode,
       workModeOverrideId: record?.workModeOverride?.id || undefined,

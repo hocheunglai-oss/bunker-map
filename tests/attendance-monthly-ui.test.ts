@@ -164,6 +164,8 @@ test("day editor combines attendance status and uses direct portion buttons", ()
   assert.match(client, /styles\.portionButtons/)
   assert.match(client, /aria-pressed=\{leaveDraft\.portion === value\}/)
   assert.doesNotMatch(client, /<option value="default">Default/)
+  assert.match(client, /record\?\.workMode && record\.workMode !== defaultWorkMode/)
+  assert.match(client, /record\?\.holidayAttendance[\s\S]*?"office"/)
 })
 
 test("Reminder selection excludes historical, unlinked, and invalid-email staff", () => {
