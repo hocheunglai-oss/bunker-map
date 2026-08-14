@@ -81,3 +81,19 @@ test("blank legacy punches retain 09:30 display while being treated as on-time",
     /effectiveSignIn: expectationSignIn/,
   )
 })
+
+test("legacy Y punches remain traceable holiday-attendance evidence", () => {
+  const attendanceData = fs.readFileSync(
+    path.join(root, "lib/attendanceData.ts"),
+    "utf8",
+  )
+  assert.match(attendanceData, /legacyHolidayAttendance: boolean/)
+  assert.match(
+    attendanceData,
+    /row\.source_type === "LEGACY_XLS"[\s\S]*?originalMark[\s\S]*?toUpperCase\(\) === "Y"/,
+  )
+  assert.match(
+    attendanceData,
+    /legacyHolidayAttendance[\s\S]*?punches\.some\(\(punch\) => punch\.legacyHolidayAttendance\)/,
+  )
+})

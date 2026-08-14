@@ -91,6 +91,7 @@ export type AttendancePunch = {
   timeResult: string | null
   locationResult: string | null
   legacyAssumedOnTime: boolean
+  legacyHolidayAttendance: boolean
 }
 
 export type AttendanceLeaveEntry = {
@@ -303,6 +304,9 @@ function mapPunch(value: unknown): AttendancePunch {
     locationResult: stringOrNull(row.location_result),
     legacyAssumedOnTime:
       row.source_type === "LEGACY_XLS" && rawPayload.originalMark === "blank",
+    legacyHolidayAttendance:
+      row.source_type === "LEGACY_XLS" &&
+      String(rawPayload.originalMark || "").trim().toUpperCase() === "Y",
   }
 }
 
@@ -705,8 +709,13 @@ function buildAttendanceRecord(
   const explicitHolidayAttendance = Boolean(
     holiday && workModeOverride?.mode === "office",
   )
+  const legacyHolidayAttendance = Boolean(
+    holiday && punches.some((punch) => punch.legacyHolidayAttendance),
+  )
   const attendanceHoliday =
-    workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE || explicitHolidayAttendance
+    workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE ||
+    explicitHolidayAttendance ||
+    legacyHolidayAttendance
       ? holiday
       : null
   const expectation = deriveAttendanceExpectation({
@@ -2070,14 +2079,8 @@ export async function saveAttendanceDayEdit(
     }
     leavePortion = requestedLeavePortion
     const requestedLeaveCode = row.leaveCode ?? row.code
-    if (
-      !isAttendanceLeaveCode(requestedLeaveCode) ||
-      requestedLeaveCode === "HO" ||
-      requestedLeaveCode === "OS"
-    ) {
-      throw new AttendanceValidationError(
-        "HO and OS are work modes and cannot be saved as leave.",
-      )
+    if (!isAttendanceLeaveCode(requestedLeaveCode)) {
+      throw new AttendanceValidationError("A valid attendance status is required.")
     }
     leaveCode = requestedLeaveCode
   }

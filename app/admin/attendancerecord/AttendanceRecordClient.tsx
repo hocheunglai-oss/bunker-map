@@ -589,6 +589,10 @@ function recordCellValue(
   if (!item) return holiday ? "PH" : ""
   const entry = leaveEntryForDirection(item, direction)
   if (entry) return entry.code
+  if (
+    item.workModeSource === "leave" &&
+    (item.workMode === "home-office" || item.workMode === "business-trip")
+  ) return ""
   if (direction === "in" && item.automaticAmLeave) return "AM LEAVE"
   const punch = direction === "in" ? item.effectiveSignIn : item.effectiveSignOut
   if (punch) return displayTime(punch)
@@ -611,7 +615,16 @@ function recordCellTone(
   now = new Date(),
 ) {
   if (!item) return holiday ? styles.holidayCell : ""
-  if (leaveEntryForDirection(item, direction)) return styles.leaveCell
+  const entry = leaveEntryForDirection(item, direction)
+  if (entry) {
+    return entry.code === "HO" || entry.code === "OS"
+      ? styles.homeOfficeCell
+      : styles.leaveCell
+  }
+  if (
+    item.workModeSource === "leave" &&
+    (item.workMode === "home-office" || item.workMode === "business-trip")
+  ) return ""
   if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
@@ -1096,18 +1109,24 @@ export default function AttendanceRecordClient() {
         : record?.workMode && record.workMode !== defaultWorkMode
           ? record.workMode
           : undefined)
+    const attendanceModeCode = !matching && record?.workMode === "home-office"
+      ? "HO"
+      : !matching && record?.workMode === "business-trip"
+        ? "OS"
+        : undefined
     setLeaveDraft({
       personId: person.id,
       staffLabel: `${person.staffCode} · ${person.displayName}`,
       date,
-      leaveEnabled: Boolean(matching),
-      portion: matching?.portion || (direction === "in" ? "am" : "pm"),
-      code: matching?.code || "ALS",
+      leaveEnabled: Boolean(matching || attendanceModeCode),
+      portion: matching?.portion || (attendanceModeCode ? "full" : direction === "in" ? "am" : "pm"),
+      code: matching?.code || attendanceModeCode || "ALS",
       note: matching?.note || "",
-      workMode:
-        displayedWorkMode === "home-office" ||
-        displayedWorkMode === "office" ||
-        displayedWorkMode === "business-trip"
+      workMode: attendanceModeCode
+        ? "default"
+        : displayedWorkMode === "home-office" ||
+            displayedWorkMode === "office" ||
+            displayedWorkMode === "business-trip"
           ? displayedWorkMode
           : "default",
       defaultWorkMode,
@@ -1765,7 +1784,13 @@ export default function AttendanceRecordClient() {
               <label className={styles.fullField}>
                 Attendance status
                 <select
-                  value={leaveDraft.leaveEnabled ? `leave:${leaveDraft.code}` : `mode:${leaveDraft.workMode === "default" && !leaveDraft.holiday ? leaveDraft.defaultWorkMode : leaveDraft.workMode}`}
+                  value={leaveDraft.leaveEnabled
+                    ? leaveDraft.code === "HO"
+                      ? "mode:home-office"
+                      : leaveDraft.code === "OS"
+                        ? "mode:business-trip"
+                        : `leave:${leaveDraft.code}`
+                    : `mode:${leaveDraft.workMode === "default" && !leaveDraft.holiday ? leaveDraft.defaultWorkMode : leaveDraft.workMode}`}
                   onChange={(event) => setLeaveDraft((draft) => {
                     if (!draft) return draft
                     const [kind, value] = event.target.value.split(":")
@@ -1779,6 +1804,15 @@ export default function AttendanceRecordClient() {
                     }
                     if (value === "default") {
                       return { ...draft, leaveEnabled: false, workMode: "default" }
+                    }
+                    if (value === "home-office" || value === "business-trip") {
+                      return {
+                        ...draft,
+                        leaveEnabled: true,
+                        code: value === "home-office" ? "HO" : "OS",
+                        portion: "full",
+                        workMode: "default",
+                      }
                     }
                     const selectedMode = value as AttendanceWorkMode
                     return {
@@ -1795,11 +1829,6 @@ export default function AttendanceRecordClient() {
                   <option value="mode:office">{leaveDraft.holiday ? "Holiday attendance" : "Office"}</option>
                   <option value="mode:home-office">Home office</option>
                   <option value="mode:business-trip">Business trip</option>
-                  {leaveDraft.leaveEnabled && (leaveDraft.code === "HO" || leaveDraft.code === "OS") ? (
-                    <option value={`leave:${leaveDraft.code}`} disabled>
-                      {leaveDraft.code} · Legacy work-mode record (remove to replace)
-                    </option>
-                  ) : null}
                   {LEAVE_CODES.map((code) => <option value={`leave:${code.value}`} key={code.value}>{code.label}</option>)}
                 </select>
               </label>
@@ -1830,7 +1859,7 @@ export default function AttendanceRecordClient() {
               <span>
                 {leaveDraft.entryId ? (
                   <button type="button" className={styles.dangerButton} onClick={() => void deleteLeave()} disabled={pendingAction === "delete-leave"}>
-                    {pendingAction === "delete-leave" ? "Deleting…" : "Delete leave"}
+                    {pendingAction === "delete-leave" ? "Deleting…" : "Delete entry"}
                   </button>
                 ) : null}
               </span>

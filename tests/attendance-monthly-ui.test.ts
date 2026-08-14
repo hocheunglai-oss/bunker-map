@@ -147,14 +147,21 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.doesNotMatch(deleteDayEntry, /postAttendance\("delete-leave"/)
 })
 
-test("day editor treats HO and OS as legacy work modes, not new leave", () => {
+test("day editor gives HOME and OS auditable AM, PM, and full-day portions", () => {
   const leaveCodes = client.slice(
     client.indexOf("const LEAVE_CODES"),
     client.indexOf("const EMPTY_MONTH"),
   )
   assert.doesNotMatch(leaveCodes, /value: "HO"|value: "OS"/)
-  assert.match(client, /Legacy work-mode record \(remove to replace\)/)
+  assert.match(client, /value === "home-office" \|\| value === "business-trip"/)
+  assert.match(client, /code: value === "home-office" \? "HO" : "OS"/)
+  assert.match(client, /attendanceModeCode \? "full"/)
   assert.match(client, /leaveDraft\.entryId[\s\S]*?deleteLeave\(\)/)
+})
+
+test("HOME and OS cells use the same green attendance treatment", () => {
+  assert.match(styles, /td\.homeOfficeCell,\s*\n\.monthRecordTable td\.businessTripCell[\s\S]*?#067647/)
+  assert.match(client, /entry\.code === "HO" \|\| entry\.code === "OS"[\s\S]*?styles\.homeOfficeCell/)
 })
 
 test("day editor combines attendance status and uses direct portion buttons", () => {

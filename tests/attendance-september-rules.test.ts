@@ -47,6 +47,9 @@ function source(path: string) {
 const migration = source(
   "../supabase/migrations/20260810082031_attendance_work_modes_and_calendar.sql",
 )
+const portionedAttendanceMigration = source(
+  "../supabase/migrations/20260814045719_allow_portioned_attendance_modes.sql",
+)
 const attendanceData = source("../lib/attendanceData.ts")
 const attendanceRoute = source("../app/api/admin/attendance/route.ts")
 
@@ -278,10 +281,7 @@ test("API contract keeps August visible and prevents legacy HO or HOL double-cou
   assert.match(attendanceRoute, /action === "save-day-edit"/)
   assert.match(attendanceRoute, /payload\.dayEdit/)
   assert.match(attendanceData, /client\.rpc\("save_attendance_day_edit"/)
-  assert.match(
-    attendanceData,
-    /requestedLeaveCode === "HO" \|\|[\s\S]*?requestedLeaveCode === "OS"[\s\S]*?cannot be saved as leave/,
-  )
+  assert.doesNotMatch(attendanceData, /HO and OS are work modes and cannot be saved as leave/)
   assert.match(attendanceData, /derivedBusinessTripUnits/)
   assert.match(attendanceData, /hasLegacyMonthlyCode\("OS"/)
   assert.match(
@@ -307,7 +307,7 @@ test("Event Calendar holiday semantics start on the official 1 September date", 
   )
   assert.match(
     attendanceData,
-    /const attendanceHoliday =[\s\S]*?workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE \|\| explicitHolidayAttendance[\s\S]*?\? holiday[\s\S]*?: null/,
+    /const attendanceHoliday =[\s\S]*?workDate >= ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE \|\|[\s\S]*?explicitHolidayAttendance \|\|[\s\S]*?legacyHolidayAttendance[\s\S]*?\? holiday[\s\S]*?: null/,
   )
   assert.match(attendanceData, /required: normallyRequired && !attendanceHoliday/)
   assert.match(attendanceData, /if \(attendanceHoliday\)/)
@@ -319,6 +319,21 @@ test("Event Calendar holiday semantics start on the official 1 September date", 
   assert.match(
     migration,
     /where projection\.event_date >= date '2026-09-01'/,
+  )
+})
+
+test("portion-aware HOME and OS writes stay service-role only", () => {
+  assert.match(
+    portionedAttendanceMigration,
+    /p_leave_code not in \([\s\S]*?'HO', 'OS'[\s\S]*?valid attendance status and portion/,
+  )
+  assert.match(
+    portionedAttendanceMigration,
+    /security definer[\s\S]*?set search_path = pg_catalog, pg_temp/,
+  )
+  assert.match(
+    portionedAttendanceMigration,
+    /revoke all on function public\.save_attendance_day_edit\([\s\S]*?from public, anon, authenticated, service_role;[\s\S]*?grant execute on function public\.save_attendance_day_edit\([\s\S]*?to service_role;/,
   )
 })
 
