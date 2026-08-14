@@ -1,5 +1,6 @@
 export const HONG_KONG_TIME_ZONE = "Asia/Hong_Kong"
 export const ATTENDANCE_PAGE_ID = "attendance-record"
+export const ATTENDANCE_START_GRACE_MINUTES = 1
 
 export type AttendanceTeam = "BT" | "BS" | "AC"
 export type AttendanceCheckType = "OnDuty" | "OffDuty"
@@ -214,10 +215,19 @@ export function deriveAttendanceExpectation(input: {
           input.workDate,
           afternoonLeave ? schedule.amCutoff : schedule.workEnd,
         )
+  const signInLateFrom =
+    signInDeadline && !morningLeave
+      ? new Date(
+          signInDeadline.getTime() +
+            ATTENDANCE_START_GRACE_MINUTES * 60 * 1000,
+        )
+      : signInDeadline
   const late = Boolean(
     input.effectiveSignIn &&
-      signInDeadline &&
-      Date.parse(input.effectiveSignIn) > signInDeadline.getTime(),
+      signInLateFrom &&
+      (morningLeave
+        ? Date.parse(input.effectiveSignIn) > signInLateFrom.getTime()
+        : Date.parse(input.effectiveSignIn) >= signInLateFrom.getTime()),
   )
   const early = Boolean(
     input.effectiveSignOut &&
@@ -238,7 +248,7 @@ export function deriveAttendanceExpectation(input: {
 
   return {
     required: input.required,
-    signInDeadline: signInDeadline?.toISOString() || null,
+    signInDeadline: signInLateFrom?.toISOString() || null,
     signOutDeadline: signOutDeadline?.toISOString() || null,
     late,
     early,

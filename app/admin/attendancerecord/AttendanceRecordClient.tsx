@@ -477,7 +477,7 @@ function AttendanceLegend() {
       <strong>LEGEND &amp; RULES</strong>
       <p><b>ALS</b> annual leave with advance notice · <b>ALU</b> annual leave informed on the day · <b>SLM</b> sick leave with medical certificate · <b>SLR</b> sick leave without medical certificate · <b>SLX</b> sick leave outside policy.</p>
       <p><b>SPL</b> special leave · <b>MTL</b> maternity leave · <b>NPL</b> no-pay leave · <b>HOME</b> home-office attendance · <b>OS</b> overseas/business-trip attendance · <b>HOL</b> holiday attendance.</p>
-      <p>BT/BS: 10:00–19:00, AM cutoff 11:30, PM return cutoff 16:30. AC: 09:00–17:30, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 is not official. AC does not receive holiday-attendance credit.</p>
+      <p>BT/BS: before 10:01 is on time, 19:00 finish, AM cutoff 11:30, PM return cutoff 16:30. AC: before 09:01 is on time, 17:30 finish, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 is not official. AC does not receive holiday-attendance credit.</p>
     </aside>
   )
 }
@@ -1756,49 +1756,69 @@ export default function AttendanceRecordClient() {
               <button type="button" aria-label="Close attendance editor" onClick={() => setLeaveDraft(null)} disabled={Boolean(pendingAction)}>×</button>
             </div>
             <div className={styles.formGrid}>
-              <label>
-                Work mode
+              <label className={styles.fullField}>
+                Attendance status
                 <select
-                  value={leaveDraft.workMode}
-                  onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, workMode: event.target.value as LeaveDraft["workMode"] } : draft)}
+                  value={leaveDraft.leaveEnabled ? `leave:${leaveDraft.code}` : `mode:${leaveDraft.workMode === "default" && !leaveDraft.holiday ? leaveDraft.defaultWorkMode : leaveDraft.workMode}`}
+                  onChange={(event) => setLeaveDraft((draft) => {
+                    if (!draft) return draft
+                    const [kind, value] = event.target.value.split(":")
+                    if (kind === "leave") {
+                      return {
+                        ...draft,
+                        leaveEnabled: true,
+                        code: value as AttendanceLeaveCode,
+                        workMode: "default",
+                      }
+                    }
+                    if (value === "default") {
+                      return { ...draft, leaveEnabled: false, workMode: "default" }
+                    }
+                    const selectedMode = value as AttendanceWorkMode
+                    return {
+                      ...draft,
+                      leaveEnabled: false,
+                      workMode:
+                        selectedMode === draft.defaultWorkMode && !draft.holiday
+                          ? "default"
+                          : selectedMode,
+                    }
+                  })}
                 >
-                  <option value="default">Default ({leaveDraft.defaultWorkMode === "home-office" ? "Home Office" : "Office"})</option>
-                  <option value="office">{leaveDraft.holiday ? "Holiday Attendance (Office)" : "Office"}</option>
-                  <option value="home-office">Home Office</option>
-                  <option value="business-trip">Business Trip</option>
-                </select>
-              </label>
-              <label>
-                Leave
-                <select
-                  value={leaveDraft.leaveEnabled ? leaveDraft.code : "NONE"}
-                  onChange={(event) => setLeaveDraft((draft) => draft ? {
-                    ...draft,
-                    leaveEnabled: event.target.value !== "NONE",
-                    code: event.target.value === "NONE" ? draft.code : event.target.value as AttendanceLeaveCode,
-                  } : draft)}
-                >
-                  <option value="NONE">No leave</option>
+                  {leaveDraft.holiday ? <option value="mode:default">Not attending holiday</option> : null}
+                  <option value="mode:office">{leaveDraft.holiday ? "Holiday attendance" : "Office"}</option>
+                  <option value="mode:home-office">Home office</option>
+                  <option value="mode:business-trip">Business trip</option>
                   {leaveDraft.leaveEnabled && (leaveDraft.code === "HO" || leaveDraft.code === "OS") ? (
-                    <option value={leaveDraft.code} disabled>
+                    <option value={`leave:${leaveDraft.code}`} disabled>
                       {leaveDraft.code} · Legacy work-mode record (remove to replace)
                     </option>
                   ) : null}
-                  {LEAVE_CODES.map((code) => <option value={code.value} key={code.value}>{code.label}</option>)}
+                  {LEAVE_CODES.map((code) => <option value={`leave:${code.value}`} key={code.value}>{code.label}</option>)}
                 </select>
               </label>
-              <label>
-                Leave portion
-                <select
-                  value={leaveDraft.portion}
-                  disabled={!leaveDraft.leaveEnabled}
-                  onChange={(event) => setLeaveDraft((draft) => draft ? { ...draft, portion: event.target.value as LeaveDraft["portion"] } : draft)}
-                >
-                  <option value="full">Full day</option>
-                  <option value="am">AM half-day</option>
-                  <option value="pm">PM half-day</option>
-                </select>
-              </label>
+              {leaveDraft.leaveEnabled ? (
+                <fieldset className={styles.portionField}>
+                  <legend>Portion</legend>
+                  <div className={styles.portionButtons}>
+                    {([
+                      ["am", "AM"],
+                      ["pm", "PM"],
+                      ["full", "Full day"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        type="button"
+                        key={value}
+                        className={leaveDraft.portion === value ? styles.portionButtonActive : styles.portionButton}
+                        aria-pressed={leaveDraft.portion === value}
+                        onClick={() => setLeaveDraft((draft) => draft ? { ...draft, portion: value } : draft)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : null}
             </div>
             <div className={styles.modalFooter}>
               <span>

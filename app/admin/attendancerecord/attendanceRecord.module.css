@@ -1086,6 +1086,47 @@
   grid-column: 1 / -1;
 }
 
+.portionField {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.portionField legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.portionButtons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.portionButton,
+.portionButtonActive {
+  min-height: 38px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 10px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-panel-text);
+  cursor: pointer;
+  font: 800 11px/1.2 var(--fc-admin-font), Roboto, Arial, sans-serif;
+}
+
+.portionButtonActive {
+  border-color: var(--fc-admin-selected-border);
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc-admin-selected-bg) 72%, transparent);
+}
+
 .dangerButton {
   border: 0;
   padding: 6px 0;

@@ -43,6 +43,33 @@ test("AM cutoffs convert only later punches to automatic AM leave", () => {
   assert.equal(isAfterAttendanceAmCutoff("2026-09-01", "AC", "2026-09-01T03:01:00.000Z"), true)
 })
 
+test("normal starts receive a one-minute grace window", () => {
+  const workDate = "2026-08-14"
+  const base = {
+    workDate,
+    team: "BT" as const,
+    leavePortions: [],
+    effectiveSignOut: hktTimestampForDateAndTime(workDate, "19:00")!.toISOString(),
+    required: true,
+  }
+  assert.equal(
+    deriveAttendanceExpectation({
+      ...base,
+      effectiveSignIn: new Date(
+        hktTimestampForDateAndTime(workDate, "10:00")!.getTime() + 59_000,
+      ).toISOString(),
+    }).late,
+    false,
+  )
+  assert.equal(
+    deriveAttendanceExpectation({
+      ...base,
+      effectiveSignIn: hktTimestampForDateAndTime(workDate, "10:01")!.toISOString(),
+    }).late,
+    true,
+  )
+})
+
 test("only sign-outs at or after 17:00 are official", () => {
   assert.equal(
     isOfficialAttendanceSignOut(

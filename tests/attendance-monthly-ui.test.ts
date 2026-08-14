@@ -116,7 +116,8 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.match(client, /holidayTitle\(day\.holiday\)/)
   assert.match(client, /recordCellValue\(record, "in", day\.holiday, viewNow\)/)
   assert.match(client, /item\.workMode === "home-office"/)
-  assert.match(client, /Default \(\{leaveDraft\.defaultWorkMode/)
+  assert.match(client, /Not attending holiday/)
+  assert.match(client, /Holiday attendance/)
   assert.match(client, /direction === "in" \? "10:30" : "19:30"/)
   assert.match(client, /hongKongDateTimeKey\(now\)/)
   assert.match(client, /REFRESHING…[\s\S]*?REFRESH/)
@@ -128,14 +129,14 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.match(dayEdit, /postAttendance\("save-day-edit"/)
   assert.equal(dayEdit.match(/postAttendance\(/g)?.length, 1)
   assert.doesNotMatch(dayEdit, /save-work-mode|save-leave|delete-leave/)
-  assert.match(client, /value="office"/)
-  assert.match(client, /Holiday Attendance \(Office\)/)
+  assert.match(client, /value="mode:office"/)
+  assert.match(client, /Holiday attendance/)
   assert.match(client, /<h2 id="leave-title">EDIT ATTENDANCE<\/h2>/)
-  assert.match(client, /<option value="full">Full day<\/option>/)
+  assert.match(client, /\["full", "Full day"\]/)
   assert.doesNotMatch(client, />\s*Note\s*<textarea/)
   assert.match(client, /scope: "month"/)
-  assert.match(client, /value="home-office"/)
-  assert.match(client, /<option value="business-trip">Business Trip<\/option>/)
+  assert.match(client, /value="mode:home-office"/)
+  assert.match(client, /<option value="mode:business-trip">Business trip<\/option>/)
   assert.match(client, /existingLeaveEntryId: leaveDraft\.entryId/)
   const deleteDayEntry = client.slice(
     client.indexOf("async function deleteLeave()"),
@@ -154,6 +155,15 @@ test("day editor treats HO and OS as legacy work modes, not new leave", () => {
   assert.doesNotMatch(leaveCodes, /value: "HO"|value: "OS"/)
   assert.match(client, /Legacy work-mode record \(remove to replace\)/)
   assert.match(client, /leaveDraft\.entryId[\s\S]*?deleteLeave\(\)/)
+})
+
+test("day editor combines attendance status and uses direct portion buttons", () => {
+  assert.match(client, /Attendance status/)
+  assert.doesNotMatch(client, />Work mode</)
+  assert.doesNotMatch(client, />Leave</)
+  assert.match(client, /styles\.portionButtons/)
+  assert.match(client, /aria-pressed=\{leaveDraft\.portion === value\}/)
+  assert.doesNotMatch(client, /<option value="default">Default/)
 })
 
 test("Reminder selection excludes historical, unlinked, and invalid-email staff", () => {
