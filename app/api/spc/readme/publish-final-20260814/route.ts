@@ -137,7 +137,7 @@ export async function POST(request: Request) {
         key_points: [],
         q_and_a_prompt: "",
         visual_kind: "video",
-        duration_seconds: 288.46,
+        duration_seconds: 288,
         video_path: MEDIA_PATH,
         video_mime_type: "video/mp4",
         video_bytes: EXPECTED_BYTES,
@@ -170,7 +170,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, chunk: updated, sha256: digest })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not publish final chapter."
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === "object" && error && "message" in error
+        ? String(error.message)
+        : "Could not publish final chapter."
     return NextResponse.json({ message }, { status: 500 })
   }
 }
