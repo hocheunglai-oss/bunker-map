@@ -44,9 +44,18 @@ test("Monthly Record edits only the leave portion represented by the clicked cel
   )
   assert.match(
     client,
-    /const matching = record \? leaveEntryForDirection\(record, direction\) : undefined/,
+    /const matching = record \? editableAttendanceEntry\(record, direction\) : undefined/,
   )
   assert.doesNotMatch(client, /\|\| entries\[0\]/)
+})
+
+test("either side of a HOME or OS day edits the same portioned record", () => {
+  assert.match(
+    client,
+    /function editableAttendanceEntry[\s\S]*?leaveEntryForDirection\(item, direction\)[\s\S]*?entry\.code === "HO" \|\| entry\.code === "OS"/,
+  )
+  assert.match(client, /entryId: matching\?\.id/)
+  assert.match(client, /portion: matching\?\.portion/)
 })
 
 test("sign-in cells distinguish on-time, late, and automatic AM leave", () => {

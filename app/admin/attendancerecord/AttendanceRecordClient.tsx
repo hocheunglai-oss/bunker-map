@@ -594,6 +594,18 @@ function leaveEntryForDirection(
   return entries.find((entry) => entry.portion === matchingPortion)
 }
 
+function editableAttendanceEntry(
+  item: ApiAttendanceDailyItem,
+  direction: "in" | "out",
+) {
+  const directionalEntry = leaveEntryForDirection(item, direction)
+  if (directionalEntry) return directionalEntry
+  // HOME and OS represent one attendance status for the day. Allow either
+  // side of the IN/OUT pair to edit the same stored half-day entry, so an AM
+  // or PM record can be promoted to Full day without creating a duplicate.
+  return leaveEntries(item).find((entry) => entry.code === "HO" || entry.code === "OS")
+}
+
 function recordCellValue(
   item: ApiAttendanceDailyItem | undefined,
   direction: "in" | "out",
@@ -1173,7 +1185,7 @@ export default function AttendanceRecordClient() {
     holiday: ApiAttendanceHoliday | null | undefined,
   ) {
     if (!canEdit) return
-    const matching = record ? leaveEntryForDirection(record, direction) : undefined
+    const matching = record ? editableAttendanceEntry(record, direction) : undefined
     const manualWorkMode = record?.workModeOverride?.mode ||
       (record?.workModeSource === "manual" ? record.workMode : undefined)
     const defaultWorkMode = record?.defaultWorkMode ||
