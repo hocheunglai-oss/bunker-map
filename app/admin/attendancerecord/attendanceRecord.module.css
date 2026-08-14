@@ -451,10 +451,88 @@
   font-weight: 900;
 }
 
-.yearSummaryTable td[title]:not([title=""]) {
-  cursor: help;
-  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+.dateTraceButton {
+  min-width: 22px;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--fc-admin-link);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--fc-admin-link) 35%, transparent);
   text-underline-offset: 3px;
+}
+
+.dateTraceButton:hover,
+.dateTraceButton:focus-visible,
+.dateTraceButton[aria-expanded="true"] {
+  border-radius: 5px;
+  outline: none;
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
+}
+
+.dateTracePopover {
+  position: fixed;
+  z-index: 1200;
+  width: 280px;
+  max-height: min(340px, calc(100vh - 24px));
+  overflow: auto;
+  border: 1px solid var(--fc-admin-selected-border);
+  border-radius: 14px;
+  padding: 13px 14px;
+  background: var(--fc-admin-panel-bg);
+  box-shadow: 0 14px 38px rgb(15 23 42 / 18%);
+  color: var(--fc-admin-text);
+}
+
+.dateTracePopoverAbove {
+  transform: translateY(-100%);
+}
+
+.dateTracePopover > span,
+.dateTracePopover > strong,
+.dateTracePopover > small {
+  display: block;
+}
+
+.dateTracePopover > span {
+  margin-bottom: 3px;
+  color: var(--fc-admin-link);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.dateTracePopover > strong {
+  margin-bottom: 9px;
+  font-size: 12px;
+}
+
+.dateTracePopover ul {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.dateTracePopover li {
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: var(--fc-row-bg);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.dateTracePopover > small {
+  margin-top: 9px;
+  color: var(--fc-admin-muted);
+  font-size: 9px;
 }
 
 .yearSummaryTable .summaryZero {

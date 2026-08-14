@@ -27,6 +27,13 @@ import type {
 } from "./types"
 
 type TabId = "monthly-record" | "monthly" | "all-time"
+type DateTracePopover = {
+  label: string
+  dates: string[]
+  left: number
+  top: number
+  above: boolean
+}
 type MonthSection = {
   month: number
   label: string
@@ -462,13 +469,20 @@ function displaySummaryDays(value: number) {
   return Math.abs(value) < 0.00001 ? "–" : displayDays(value)
 }
 
-function dateTraceTitle(dates: string[] | undefined) {
-  if (!dates?.length) return ""
-  return dates
-    .slice()
-    .sort()
-    .map((date) => displayShortDate(date))
-    .join(" · ")
+function traceDates(dates: string[] | undefined) {
+  return [...new Set(dates || [])].sort()
+}
+
+function displayTraceDate(value: string) {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    weekday: "short",
+  }).format(date)
 }
 
 function AttendanceLegend() {
@@ -729,6 +743,7 @@ export default function AttendanceRecordClient() {
   const [addUsersOpen, setAddUsersOpen] = useState(false)
   const [rosterDraft, setRosterDraft] = useState<RosterDraftItem[]>([])
   const [leaveDraft, setLeaveDraft] = useState<LeaveDraft | null>(null)
+  const [dateTrace, setDateTrace] = useState<DateTracePopover | null>(null)
   const [rosterSearch, setRosterSearch] = useState("")
   const monthRequestRef = useRef(0)
   const yearRequestRef = useRef(0)
@@ -854,6 +869,68 @@ export default function AttendanceRecordClient() {
       window.removeEventListener("keydown", closeOnEscape)
     }
   }, [addUsersOpen, leaveDraft, pendingAction, reminderOpen])
+
+  useEffect(() => {
+    if (!dateTrace) return
+    const timeout = window.setTimeout(() => setDateTrace(null), 8000)
+    const close = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-date-trace-popover]")) return
+      setDateTrace(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDateTrace(null)
+    }
+    window.addEventListener("pointerdown", close)
+    window.addEventListener("keydown", closeOnEscape)
+    return () => {
+      window.clearTimeout(timeout)
+      window.removeEventListener("pointerdown", close)
+      window.removeEventListener("keydown", closeOnEscape)
+    }
+  }, [dateTrace])
+
+  function openDateTrace(
+    button: HTMLButtonElement,
+    label: string,
+    dates: string[] | undefined,
+  ) {
+    const visibleDates = traceDates(dates)
+    if (!visibleDates.length) return
+    const rect = button.getBoundingClientRect()
+    const width = 280
+    const above = rect.bottom + 220 > window.innerHeight
+    setDateTrace({
+      label,
+      dates: visibleDates,
+      left: Math.min(window.innerWidth - width - 12, Math.max(12, rect.left + rect.width / 2 - width / 2)),
+      top: above ? Math.max(12, rect.top - 8) : rect.bottom + 8,
+      above,
+    })
+  }
+
+  function traceableNumber(
+    value: number,
+    dates: string[] | undefined,
+    label: string,
+  ) {
+    const visibleDates = traceDates(dates)
+    if (!visibleDates.length) return displaySummaryDays(value)
+    return (
+      <button
+        type="button"
+        className={styles.dateTraceButton}
+        aria-label={`${label}: ${displayDays(value)}. Show dates`}
+        aria-expanded={dateTrace?.label === label}
+        onClick={(event) => {
+          event.stopPropagation()
+          openDateTrace(event.currentTarget, label, visibleDates)
+        }}
+      >
+        {displaySummaryDays(value)}
+      </button>
+    )
+  }
 
   const postAttendance = useCallback(async (action: string, body: Record<string, unknown>) => {
     const response = await fetch("/api/admin/attendance", {
@@ -1369,7 +1446,10 @@ export default function AttendanceRecordClient() {
               key={tab.id}
               className={activeTab === tab.id ? styles.activeTab : styles.tab}
               aria-current={activeTab === tab.id ? "page" : undefined}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setDateTrace(null)
+                setActiveTab(tab.id)
+              }}
             >
               {tab.label}
             </button>
@@ -1576,17 +1656,17 @@ export default function AttendanceRecordClient() {
                             </th>
                             {SUMMARY_CODES.slice(0, 5).map((code) => {
                               const value = codeTotal(row.summary, code)
-                              return <td key={code} className={summaryNumberClass(value)} title={dateTraceTitle(row.summary?.codeDates?.[code])}>{displaySummaryDays(value)}</td>
+                              return <td key={code} className={summaryNumberClass(value)}>{traceableNumber(value, row.summary?.codeDates?.[code], `${row.person.staffCode} · ${section.label} ${selectedSummaryYear} · ${code}`)}</td>
                             })}
-                            <td className={summaryNumberClass(codeTotal(row.summary, "HOL"))} title={dateTraceTitle(row.summary?.codeDates?.HOL)}>
-                              {displaySummaryDays(codeTotal(row.summary, "HOL"))}
+                            <td className={summaryNumberClass(codeTotal(row.summary, "HOL"))}>
+                              {traceableNumber(codeTotal(row.summary, "HOL"), row.summary?.codeDates?.HOL, `${row.person.staffCode} · ${section.label} ${selectedSummaryYear} · HOL`)}
                             </td>
                             {SUMMARY_CODES.slice(5).map((code) => {
                               const value = codeTotal(row.summary, code)
-                              return <td key={code} className={summaryNumberClass(value)} title={code === "HO" ? "" : dateTraceTitle(row.summary?.codeDates?.[code])}>{displaySummaryDays(value)}</td>
+                              return <td key={code} className={summaryNumberClass(value)}>{code === "HO" ? displaySummaryDays(value) : traceableNumber(value, row.summary?.codeDates?.[code], `${row.person.staffCode} · ${section.label} ${selectedSummaryYear} · ${code}`)}</td>
                             })}
                             <td className={summaryNumberClass(row.attendedDays, "attended")}>{displaySummaryDays(row.attendedDays)}</td>
-                            <td className={summaryNumberClass(row.lateDays, "late")} title={dateTraceTitle(row.summary?.lateDates)}>{displaySummaryDays(row.lateDays)}</td>
+                            <td className={summaryNumberClass(row.lateDays, "late")}>{traceableNumber(row.lateDays, row.summary?.lateDates, `${row.person.staffCode} · ${section.label} ${selectedSummaryYear} · LATE`)}</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
                                 <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
@@ -1713,11 +1793,11 @@ export default function AttendanceRecordClient() {
                           <td className={styles.balanceCell}>{displaySummaryDays(annual?.openingCarryForwardUnits || 0)}</td>
                           <td className={summaryNumberClass(annual?.allowanceUnits || 0)}>{displaySummaryDays(annual?.allowanceUnits || 0)}</td>
                           {SUMMARY_CODES.slice(0, 5).map((code) => (
-                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))} title={dateTraceTitle(annual?.codeDates?.[code])}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{traceableNumber(annualCodeTotal(annual, code), annual?.codeDates?.[code], `${person.staffCode} · ${selectedAllTimeYear} · ${code}`)}</td>
                           ))}
-                          <td className={summaryNumberClass(annualCodeTotal(annual, "HOL"))} title={dateTraceTitle(annual?.codeDates?.HOL)}>{displaySummaryDays(annualCodeTotal(annual, "HOL"))}</td>
+                          <td className={summaryNumberClass(annualCodeTotal(annual, "HOL"))}>{traceableNumber(annualCodeTotal(annual, "HOL"), annual?.codeDates?.HOL, `${person.staffCode} · ${selectedAllTimeYear} · HOL`)}</td>
                           {SUMMARY_CODES.slice(5).map((code) => (
-                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))} title={code === "HO" ? "" : dateTraceTitle(annual?.codeDates?.[code])}>{displaySummaryDays(annualCodeTotal(annual, code))}</td>
+                            <td key={code} className={summaryNumberClass(annualCodeTotal(annual, code))}>{code === "HO" ? displaySummaryDays(annualCodeTotal(annual, code)) : traceableNumber(annualCodeTotal(annual, code), annual?.codeDates?.[code], `${person.staffCode} · ${selectedAllTimeYear} · ${code}`)}</td>
                           ))}
                           <td className={styles.closingBalanceCell}>{displaySummaryDays(annual?.closingBalanceUnits || 0)}</td>
                           <td className={styles.confirmationCell}>
@@ -1769,6 +1849,23 @@ export default function AttendanceRecordClient() {
           </section>
         ) : null}
       </div>
+
+      {dateTrace ? (
+        <aside
+          className={`${styles.dateTracePopover} ${dateTrace.above ? styles.dateTracePopoverAbove : ""}`}
+          style={{ left: dateTrace.left, top: dateTrace.top }}
+          role="status"
+          aria-live="polite"
+          data-date-trace-popover
+        >
+          <span>RECORD DATES</span>
+          <strong>{dateTrace.label}</strong>
+          <ul>
+            {dateTrace.dates.map((date) => <li key={date}>{displayTraceDate(date)}</li>)}
+          </ul>
+          <small>Closes automatically</small>
+        </aside>
+      ) : null}
 
       {leaveDraft ? (
         <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pendingAction) setLeaveDraft(null) }}>
