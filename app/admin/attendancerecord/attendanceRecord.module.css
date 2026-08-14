@@ -1135,6 +1135,7 @@
 }
 
 .formGrid select,
+.formGrid input,
 .formGrid textarea {
   width: 100%;
   min-height: 38px;
@@ -1155,6 +1156,7 @@
 }
 
 .formGrid select:focus,
+.formGrid input:focus,
 .formGrid textarea:focus {
   border-color: var(--fc-admin-selected-border);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fc-admin-selected-bg) 70%, transparent);

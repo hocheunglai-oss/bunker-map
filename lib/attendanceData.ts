@@ -2085,6 +2085,33 @@ export async function saveAttendanceDayEdit(
     leaveCode = requestedLeaveCode
   }
 
+  const parseCorrectionTime = (value: unknown, fieldName: string) => {
+    if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) {
+      throw new AttendanceValidationError(`${fieldName} must use HH:MM.`)
+    }
+    const timestamp = hktTimestampForDateAndTime(workDate, value)
+    if (!timestamp) {
+      throw new AttendanceValidationError(`${fieldName} is invalid.`)
+    }
+    return timestamp.toISOString()
+  }
+  const updateSignIn = row.updateSignIn === true
+  const updateSignOut = row.updateSignOut === true
+  const signInTime = updateSignIn
+    ? parseCorrectionTime(row.signInTime, "Sign-in time")
+    : null
+  const signOutTime = updateSignOut
+    ? parseCorrectionTime(row.signOutTime, "Sign-out time")
+    : null
+  if (signOutTime && !isOfficialAttendanceSignOut(workDate, signOutTime)) {
+    throw new AttendanceValidationError(
+      "Official sign-out time cannot be earlier than 17:00.",
+    )
+  }
+  if (signInTime && signOutTime && Date.parse(signOutTime) <= Date.parse(signInTime)) {
+    throw new AttendanceValidationError("Sign-out time must be later than sign-in time.")
+  }
+
   const { data, error } = await client.rpc("save_attendance_day_edit", {
     p_person_id: personId,
     p_work_date: workDate,
@@ -2095,6 +2122,10 @@ export async function saveAttendanceDayEdit(
     p_leave_portion: leavePortion,
     p_leave_code: leaveCode,
     p_leave_note: leaveNote,
+    p_update_sign_in: updateSignIn,
+    p_sign_in_time: signInTime,
+    p_update_sign_out: updateSignOut,
+    p_sign_out_time: signOutTime,
     p_actor: actor,
   })
   throwIfError(error, "Could not save the attendance day.")
@@ -2104,6 +2135,9 @@ export async function saveAttendanceDayEdit(
   const leaveEntries = Array.isArray(result.leave_entries)
     ? result.leave_entries.map(mapLeave)
     : []
+  const overrides = Array.isArray(result.overrides)
+    ? result.overrides.map(mapOverride)
+    : []
   return {
     workModeOverride:
       workModeOverride &&
@@ -2112,6 +2146,7 @@ export async function saveAttendanceDayEdit(
         ? mapWorkModeOverride(workModeOverride)
         : null,
     leaveEntries,
+    overrides,
   }
 }
 

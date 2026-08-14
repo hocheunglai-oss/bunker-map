@@ -62,7 +62,7 @@ test("sign-in cells distinguish on-time, late, and automatic AM leave", () => {
   assert.match(client, /item\.automaticAmLeave\) return "AM LEAVE"/)
   assert.match(client, /item\.late\) return styles\.lateCell/)
   assert.match(client, /item\.effectiveSignIn\) return styles\.onTimeCell/)
-  assert.match(client, /item\.early\) return styles\.earlyCell/)
+  assert.match(client, /item\.early && item\.effectiveSignOut\) return styles\.onTimeCell/)
   assert.match(client, /item\.effectiveSignOut\) return styles\.onTimeCell/)
   assert.match(styles, /td\.onTimeCell[\s\S]*?#067647/)
 })
@@ -147,6 +147,11 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.match(client, /value="mode:home-office"/)
   assert.match(client, /<option value="mode:business-trip">Business trip<\/option>/)
   assert.match(client, /existingLeaveEntryId: leaveDraft\.entryId/)
+  assert.match(client, /aria-label="Sign in time"/)
+  assert.match(client, /aria-label="Sign out time"/)
+  assert.match(client, /Official sign-out time cannot be earlier than 17:00/)
+  assert.match(dayEdit, /updateSignIn:/)
+  assert.match(dayEdit, /updateSignOut:/)
   const deleteDayEntry = client.slice(
     client.indexOf("async function deleteLeave()"),
     client.indexOf("async function confirmMonth("),
@@ -154,6 +159,20 @@ test("Monthly Record renders Hong Kong holidays and supports explicit work-mode 
   assert.match(deleteDayEntry, /postAttendance\("save-day-edit"/)
   assert.match(deleteDayEntry, /leaveEnabled: false/)
   assert.doesNotMatch(deleteDayEntry, /postAttendance\("delete-leave"/)
+})
+
+test("manual IN and OUT corrections are atomic, audited replacements", () => {
+  const attendanceData = source("../lib/attendanceData.ts")
+  const migration = source("../supabase/migrations/20260814104623_add_attendance_time_corrections_to_day_editor.sql")
+  assert.match(attendanceData, /p_update_sign_in: updateSignIn/)
+  assert.match(attendanceData, /p_update_sign_out: updateSignOut/)
+  assert.match(migration, /insert into public\.attendance_manual_overrides/)
+  assert.match(migration, /'replace', 'OnDuty'/)
+  assert.match(migration, /'replace', 'OffDuty'/)
+  assert.match(migration, /where action = 'replace'/)
+  assert.match(migration, /Manual attendance editor correction/)
+  assert.match(migration, /to service_role/)
+  assert.match(migration, /from public, anon, authenticated, service_role/)
 })
 
 test("day editor gives HOME and OS auditable AM, PM, and full-day portions", () => {

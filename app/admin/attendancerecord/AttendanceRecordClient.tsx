@@ -58,6 +58,10 @@ type LeaveDraft = {
   workModeOverrideId?: string
   entryId?: string
   holiday: boolean
+  signInTime: string
+  signOutTime: string
+  initialSignInTime: string
+  initialSignOutTime: string
 }
 
 type RosterDraftItem = {
@@ -654,7 +658,9 @@ function recordCellTone(
   if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
-  if (direction === "out" && item.early) return styles.earlyCell
+  // Every official sign-out (17:00 or later) is acceptable for display,
+  // including one before the team's normal finish time.
+  if (direction === "out" && item.early && item.effectiveSignOut) return styles.onTimeCell
   if (direction === "out" && item.effectiveSignOut) return styles.onTimeCell
   if (item.holidayAttendance || holiday) return styles.holidayCell
   if (item.workMode === "home-office") {
@@ -1222,6 +1228,18 @@ export default function AttendanceRecordClient() {
       workModeOverrideId: record?.workModeOverride?.id || undefined,
       entryId: matching?.id,
       holiday: Boolean(holiday || record?.holiday),
+      signInTime: record?.effectiveSignIn
+        ? hktTimeFromTimestamp(record.effectiveSignIn) || ""
+        : "",
+      signOutTime: record?.effectiveSignOut
+        ? hktTimeFromTimestamp(record.effectiveSignOut) || ""
+        : "",
+      initialSignInTime: record?.effectiveSignIn
+        ? hktTimeFromTimestamp(record.effectiveSignIn) || ""
+        : "",
+      initialSignOutTime: record?.effectiveSignOut
+        ? hktTimeFromTimestamp(record.effectiveSignOut) || ""
+        : "",
     })
   }
 
@@ -1234,6 +1252,16 @@ export default function AttendanceRecordClient() {
     setPendingAction("save-day-edit")
     setNotice("")
     try {
+      if (
+        leaveDraft.signInTime &&
+        leaveDraft.signOutTime &&
+        leaveDraft.signOutTime <= leaveDraft.signInTime
+      ) {
+        throw new Error("Sign-out time must be later than sign-in time.")
+      }
+      if (leaveDraft.signOutTime && leaveDraft.signOutTime < "17:00") {
+        throw new Error("Official sign-out time cannot be earlier than 17:00.")
+      }
       await postAttendance("save-day-edit", {
         dayEdit: {
           personId: leaveDraft.personId,
@@ -1245,6 +1273,14 @@ export default function AttendanceRecordClient() {
           leavePortion: leaveDraft.leaveEnabled ? leaveDraft.portion : undefined,
           leaveCode: leaveDraft.leaveEnabled ? leaveDraft.code : undefined,
           leaveNote: leaveDraft.note.trim() || undefined,
+          updateSignIn:
+            Boolean(leaveDraft.signInTime) &&
+            leaveDraft.signInTime !== leaveDraft.initialSignInTime,
+          signInTime: leaveDraft.signInTime || undefined,
+          updateSignOut:
+            Boolean(leaveDraft.signOutTime) &&
+            leaveDraft.signOutTime !== leaveDraft.initialSignOutTime,
+          signOutTime: leaveDraft.signOutTime || undefined,
         },
       })
 
@@ -1963,6 +1999,29 @@ export default function AttendanceRecordClient() {
                   </div>
                 </fieldset>
               ) : null}
+              <label>
+                Sign in
+                <input
+                  type="time"
+                  aria-label="Sign in time"
+                  value={leaveDraft.signInTime}
+                  onChange={(event) => setLeaveDraft((draft) => draft
+                    ? { ...draft, signInTime: event.target.value }
+                    : draft)}
+                />
+              </label>
+              <label>
+                Sign out
+                <input
+                  type="time"
+                  aria-label="Sign out time"
+                  min="17:00"
+                  value={leaveDraft.signOutTime}
+                  onChange={(event) => setLeaveDraft((draft) => draft
+                    ? { ...draft, signOutTime: event.target.value }
+                    : draft)}
+                />
+              </label>
             </div>
             <div className={styles.modalFooter}>
               <span>
