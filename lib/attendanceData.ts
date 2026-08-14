@@ -25,6 +25,7 @@ import {
   type AttendanceTeamAssignment,
 } from "@/lib/attendanceTeamHistory"
 import {
+  applyPhysicalAttendanceToWorkMode,
   derivedBusinessTripUnits,
   derivedHomeOfficeUnits,
   resolveAttendanceWorkMode,
@@ -613,7 +614,7 @@ function buildAttendanceRecord(
   const {
     override: workModeOverride,
     defaultWorkMode,
-    workMode,
+    workMode: resolvedWorkMode,
     workModeSource,
   } = resolveAttendanceWorkMode({
     personId: person.id,
@@ -660,6 +661,11 @@ function buildAttendanceRecord(
 
   const effectiveSignIn = effectiveTime("OnDuty")
   const effectiveSignOut = effectiveTime("OffDuty")
+  const workMode = applyPhysicalAttendanceToWorkMode({
+    workMode: resolvedWorkMode,
+    workModeSource,
+    hasPhysicalAttendance: Boolean(effectiveSignIn || effectiveSignOut),
+  })
   const datedAssignment = attendanceTeamAssignmentForDate(
     person.id,
     workDate,

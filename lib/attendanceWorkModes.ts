@@ -56,6 +56,20 @@ export function resolveAttendanceWorkMode(input: {
   return { policy, override, defaultWorkMode, workMode, workModeSource }
 }
 
+export function applyPhysicalAttendanceToWorkMode(input: {
+  workMode: AttendanceWorkMode
+  workModeSource: "manual" | "leave" | "default" | null
+  hasPhysicalAttendance: boolean
+}) {
+  // A dated manual/legacy work-mode decision remains authoritative. A default
+  // HOME policy, however, is only a fallback: an actual office punch proves
+  // that the person attended in person and must use the normal late rules.
+  if (input.hasPhysicalAttendance && input.workModeSource === "default") {
+    return "office" as const
+  }
+  return input.workMode
+}
+
 type DerivedWorkModeUnitsInput = {
   workMode: AttendanceWorkMode
   workModeSource: "manual" | "leave" | "default" | null

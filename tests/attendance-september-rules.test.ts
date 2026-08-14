@@ -6,11 +6,39 @@ import {
   sortAttendancePeople,
 } from "../lib/attendanceCalendar"
 import {
+  applyPhysicalAttendanceToWorkMode,
   derivedBusinessTripUnits,
   derivedHomeOfficeUnits,
   resolveAttendanceWorkMode,
   type AttendanceWorkModePolicy,
 } from "../lib/attendanceWorkModes"
+
+test("a physical office punch overrides only a default HOME policy", () => {
+  assert.equal(
+    applyPhysicalAttendanceToWorkMode({
+      workMode: "home-office",
+      workModeSource: "default",
+      hasPhysicalAttendance: true,
+    }),
+    "office",
+  )
+  assert.equal(
+    applyPhysicalAttendanceToWorkMode({
+      workMode: "home-office",
+      workModeSource: "manual",
+      hasPhysicalAttendance: true,
+    }),
+    "home-office",
+  )
+  assert.equal(
+    applyPhysicalAttendanceToWorkMode({
+      workMode: "home-office",
+      workModeSource: "default",
+      hasPhysicalAttendance: false,
+    }),
+    "home-office",
+  )
+})
 
 function source(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8")
