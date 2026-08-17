@@ -3464,7 +3464,7 @@ body {
   padding-bottom: 44px;
 }
 
-.spc-enquiry-clear-button {
+.fc-admin-scope .spc-enquiry-clear-button {
   position: absolute;
   right: 8px;
   bottom: 8px;
@@ -3484,7 +3484,7 @@ body {
   box-shadow: none;
 }
 
-.spc-enquiry-clear-button.is-active {
+.fc-admin-scope .spc-enquiry-clear-button.is-active {
   border-color: var(--fc-admin-primary-button-bg);
   background: var(--fc-admin-primary-button-bg);
   color: var(--fc-admin-primary-button-text);
@@ -3492,11 +3492,11 @@ body {
   box-shadow: 0 4px 10px rgba(0, 113, 227, 0.14);
 }
 
-.spc-enquiry-clear-button:disabled {
+.fc-admin-scope .spc-enquiry-clear-button:disabled {
   cursor: default;
 }
 
-.spc-enquiry-clear-button:focus-visible {
+.fc-admin-scope .spc-enquiry-clear-button:focus-visible {
   outline: 2px solid #0a84ff;
   outline-offset: 2px;
 }
