@@ -51,6 +51,14 @@ function notFound() {
   )
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || fallback)
+  }
+  return fallback
+}
+
 export async function GET(request: Request) {
   if (!authorized(request)) return notFound()
   try {
@@ -69,7 +77,7 @@ export async function GET(request: Request) {
       { headers: { "Cache-Control": "no-store" } },
     )
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not inspect final chapter."
+    const message = errorMessage(error, "Could not inspect final chapter.")
     return NextResponse.json({ message }, { status: 500 })
   }
 }
@@ -180,7 +188,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, chunk: updated, sha256: digest })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not publish final chapter."
+    const message = errorMessage(error, "Could not publish final chapter.")
     return NextResponse.json({ message }, { status: 500 })
   }
 }
