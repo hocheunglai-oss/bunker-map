@@ -68,7 +68,6 @@ type ParserReportDraft = {
   aiOutput: string
   aiSources: ParserAiSourceLink[]
   correctedOutput: string
-  note: string
 }
 
 type ParserAiSourceLink = {
@@ -412,7 +411,6 @@ export default function EnquiryWorksheetPage() {
     aiOutput: "",
     aiSources: [],
     correctedOutput: "",
-    note: "",
   })
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const [parserReportCount, setParserReportCount] = useState(0)
@@ -815,7 +813,6 @@ export default function EnquiryWorksheetPage() {
       aiOutput,
       aiSources: parserAiSuggestion?.imoSources || [],
       correctedOutput: (shortenedDraft || shortenedEnquiry).trim(),
-      note: "",
     })
     setParserReportStatus("idle")
   }
@@ -838,7 +835,7 @@ export default function EnquiryWorksheetPage() {
           cleanedText: cleanedEnquiryText,
           parserOutput,
           correctedOutput,
-          note: parserReportDraft.note,
+          note: "",
           pageUrl: window.location.href,
           metadata: {
             guesses,
@@ -857,9 +854,6 @@ export default function EnquiryWorksheetPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
-      applyCorrectedShortenedEnquiry(correctedOutput)
-      setCopyStatus("idle")
-      setWhatsappStatus("idle")
       await loadParserReportCount()
       notifyParserReportCountChanged("enquiryworksheet")
       setParserReportStatus("saved")
@@ -1292,31 +1286,6 @@ export default function EnquiryWorksheetPage() {
                   </a>
                 </p>
               ) : null}
-              <label>
-                <span>CORRECT VERSION</span>
-                <textarea
-                  value={parserReportDraft.correctedOutput}
-                  onChange={(event) =>
-                    setParserReportDraft((current) => ({
-                      ...current,
-                      correctedOutput: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>NOTE</span>
-                <input
-                  value={parserReportDraft.note}
-                  onChange={(event) =>
-                    setParserReportDraft((current) => ({
-                      ...current,
-                      note: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </label>
               {parserReportStatus === "saved" ? <p className={styles.copyStatus}>Report saved.</p> : null}
               {parserReportStatus === "failed" ? <p className={styles.copyError}>Report failed. Please try again.</p> : null}
             </div>

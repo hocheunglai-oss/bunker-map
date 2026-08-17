@@ -101,6 +101,24 @@ test("review UI shows user queue left, AI queue right, and acknowledges without 
   assert.match(panelSource, /aiSources: draft\.aiSources/)
 })
 
+test("enquiry worksheet report dialog leaves correction and notes to the admin review page", () => {
+  const worksheetSource = readFileSync(
+    new URL("../app/admin/enquiryworksheet/page.tsx", import.meta.url),
+    "utf8",
+  )
+  const reviewSource = readFileSync(
+    new URL("../components/ParserReportReviewPanel.tsx", import.meta.url),
+    "utf8",
+  )
+
+  const dialogStart = worksheetSource.indexOf("parser-report-title")
+  const dialogSource = worksheetSource.slice(dialogStart)
+  assert.doesNotMatch(dialogSource, /CORRECT VERSION/)
+  assert.doesNotMatch(dialogSource, /<span>NOTE<\/span>/)
+  assert.match(reviewSource, /<span>Correct Version<\/span>/)
+  assert.match(reviewSource, /<span>Note<\/span>/)
+})
+
 test("sidebar displays only the number of reports pending user review", () => {
   const badgeSource = readFileSync(
     new URL("../components/ParserReportSidebarBadge.tsx", import.meta.url),
