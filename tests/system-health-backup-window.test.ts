@@ -154,3 +154,9 @@ test("daily backup keeps only the latest verified artifact and its predecessor",
     /OLDER VERIFIED FILES PERMANENTLY DELETED/,
   )
 })
+
+test("daily backup uses the Drive upload checksum receipt before full health verification", () => {
+  const route = source("../app/api/backups/bunker-map-drive/route.ts")
+  assert.match(route, /md5Checksum,size/)
+  assert.match(route, /uploaded\.md5Checksum !== streamed\.uploadedFileMd5/)
+})

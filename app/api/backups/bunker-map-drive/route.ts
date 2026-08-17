@@ -89,6 +89,7 @@ type BackupFinalWriter = {
   stream: PassThrough
   artifactHasher: ReturnType<typeof createHash>
   fileHasher: ReturnType<typeof createHash>
+  fileMd5Hasher: ReturnType<typeof createHash>
   fileByteLength: number
 }
 
@@ -117,6 +118,7 @@ type PreparedBackupData = {
 type StreamedBackupFile = {
   artifactSha256: string
   uploadedFileSha256: string
+  uploadedFileMd5: string
   fileByteLength: number
 }
 
@@ -446,6 +448,7 @@ async function writeFinalChunk(
 ) {
   const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8")
   writer.fileHasher.update(chunk)
+  writer.fileMd5Hasher.update(chunk)
   if (includeInArtifact) writer.artifactHasher.update(chunk)
   writer.fileByteLength += chunk.byteLength
   if (!writer.stream.write(chunk)) {
@@ -1392,6 +1395,7 @@ async function streamPreparedBackupToDrive(
     stream: body,
     artifactHasher: createHash("sha256"),
     fileHasher: createHash("sha256"),
+    fileMd5Hasher: createHash("md5"),
     fileByteLength: 0,
   }
 
@@ -1410,7 +1414,7 @@ async function streamPreparedBackupToDrive(
       mimeType: "application/json",
       body,
     },
-    fields: "id,name,webViewLink,createdTime,mimeType,appProperties",
+    fields: "id,name,webViewLink,createdTime,mimeType,md5Checksum,size,appProperties",
     supportsAllDrives: true,
   })
 
@@ -1460,6 +1464,7 @@ async function streamPreparedBackupToDrive(
       return {
         artifactSha256,
         uploadedFileSha256: writer.fileHasher.digest("hex"),
+        uploadedFileMd5: writer.fileMd5Hasher.digest("hex"),
         fileByteLength: writer.fileByteLength,
       }
     } catch (error) {
@@ -1958,13 +1963,13 @@ async function createBackup(provenance: BackupProvenance) {
     }
     uploadedFileId = uploaded.id
 
-    const downloaded = await inspectDriveFileBytes(drive, uploaded.id)
+    const driveSize = Number(uploaded.size)
     if (
-      downloaded.uploadedFileSha256 !== streamed.uploadedFileSha256 ||
-      downloaded.fileByteLength !== streamed.fileByteLength
+      uploaded.md5Checksum !== streamed.uploadedFileMd5 ||
+      driveSize !== streamed.fileByteLength
     ) {
       throw new Error(
-        `Drive verification failed for ${fileName}: streamed upload and downloaded byte receipts do not match.`
+        `Drive verification failed for ${fileName}: streamed upload and Drive checksum receipts do not match.`
       )
     }
 
