@@ -4,6 +4,7 @@ import { timedJson } from "@/lib/serverTiming"
 import { listSupplierTraderOptions } from "@/lib/spcUsers"
 import { resolveSpcEnquiryScope } from "@/lib/spcEnquiryScope"
 import {
+  amendSpcEnquiry,
   createSpcEnquiry,
   listSpcEnquiryIds,
   listSpcEnquiries,
@@ -228,6 +229,27 @@ export async function PATCH(request: Request) {
       const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
       const source = payload as Record<string, unknown>
       const enquiry = await reofferSpcEnquiry(
+        id,
+        {
+          title: typeof source.title === "string" ? source.title : "",
+          vesselName: typeof source.vesselName === "string" ? source.vesselName : "",
+          port: typeof source.port === "string" ? source.port : "",
+          product: typeof source.product === "string" ? source.product : "",
+          quantity: typeof source.quantity === "string" ? source.quantity : "",
+          deliveryDate: typeof source.deliveryDate === "string" ? source.deliveryDate : "",
+          supplierName: typeof source.supplierName === "string" ? source.supplierName : "",
+          notes: typeof source.notes === "string" ? source.notes : "",
+        },
+        session,
+        request,
+      )
+      return NextResponse.json({ success: true, enquiry })
+    }
+
+    if (payload.mode === "amend") {
+      const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
+      const source = payload as Record<string, unknown>
+      const enquiry = await amendSpcEnquiry(
         id,
         {
           title: typeof source.title === "string" ? source.title : "",

@@ -3164,6 +3164,30 @@ body {
   background: #ffffff;
 }
 
+.spc-chrome-installation-panel .spc-panel-header p {
+  margin: 4px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+}
+
+.spc-chrome-dispatcher-status {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  background: #f3f8f6;
+  color: var(--fc-admin-panel-text);
+  padding: 12px 20px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.spc-chrome-dispatcher-status strong {
+  flex: 0 0 auto;
+  color: #087c66;
+  font-size: 10px;
+}
+
 .spc-guide-list {
   display: grid;
 }
@@ -3703,6 +3727,23 @@ body {
   margin-top: 8px;
 }
 
+.spc-sent-enquiry-card.is-amended {
+  border-color: #dc3a32;
+  box-shadow: inset 3px 0 0 #dc3a32;
+}
+
+.spc-enquiry-amendment {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  border-left: 3px solid #dc3a32;
+  background: #fff1f0;
+  color: #b42318;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .spc-sent-enquiry-summary,
 .spc-sent-enquiry-meta,
 .spc-sent-enquiry-actions {
@@ -3756,6 +3797,12 @@ body {
   border-color: #d84a3f;
   background: #fff0ef;
   color: #b42318;
+}
+
+.spc-sent-enquiry-actions button.is-amend {
+  border-color: #1683e8;
+  background: #e7f3ff;
+  color: #0a5bd3;
 }
 
 .spc-sent-enquiry-actions button.is-postpone {

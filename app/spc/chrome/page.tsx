@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { SPC_SPEED_BOARD_VERSION } from "@/lib/spcSpeedBoardNotice"
+import { SPC_GROUP_DISPATCHER_VERSION } from "@/lib/spcGroupDispatcherVersion"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
 const PAGE_TITLE = "WHATSAPP EXTENSION"
@@ -54,12 +55,45 @@ const STEPS: readonly Step[] = [
   },
 ]
 
+const DISPATCHER_STEPS: readonly Step[] = [
+  {
+    title: "Dedicated Windows desktop",
+    details: [
+      "Use only the approved SPC WhatsApp Business desktop. Do not install this dispatcher on trader computers.",
+      "Keep WhatsApp Web and this Chrome profile open during trading hours; offline enquiries remain queued.",
+    ],
+    action: {
+      href: "/api/spc/group-dispatcher/download",
+      label: `GROUP DISPATCHER ${SPC_GROUP_DISPATCHER_VERSION}`,
+    },
+  },
+  {
+    title: "Install and pair",
+    details: [
+      "Extract the ZIP, load fcuno-spc-group-dispatcher through chrome://extensions, then refresh WhatsApp Web.",
+      "Enter the exact existing WhatsApp trading group name and choose PAIR DISPATCHER.",
+      "Pairing a replacement computer automatically revokes the previous dispatcher.",
+    ],
+  },
+]
+
+type DispatcherStatus = {
+  id: string
+  deviceLabel: string
+  groupName: string
+  extensionVersion: string
+  lastSeenAt: string | null
+  lastError: string | null
+}
+
 export default function SpcChromeExtensionPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
   const [noticeSending, setNoticeSending] = useState(false)
   const [noticeMessage, setNoticeMessage] = useState("")
   const [noticeIsError, setNoticeIsError] = useState(false)
+  const [dispatcher, setDispatcher] = useState<DispatcherStatus | null>(null)
+  const [dispatcherLoading, setDispatcherLoading] = useState(true)
   const canView = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(
@@ -75,6 +109,29 @@ export default function SpcChromeExtensionPage() {
     if (!authLoading && !authenticated) router.replace("/spc")
     if (!authLoading && authenticated && hasPermissionSnapshot && !canView) router.replace("/spc")
   }, [authLoading, authenticated, canView, hasPermissionSnapshot, router])
+
+  useEffect(() => {
+    if (!canView) return
+    let cancelled = false
+    fetch("/api/spc/group-dispatcher", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.message || "Failed to load dispatcher status.")
+        if (!cancelled) setDispatcher(data.dispatcher || null)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setNoticeMessage(error instanceof Error ? error.message : "Failed to load dispatcher status.")
+          setNoticeIsError(true)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDispatcherLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canView])
 
   async function sendUpdateNotice() {
     if (
@@ -107,6 +164,24 @@ export default function SpcChromeExtensionPage() {
     } finally {
       setNoticeSending(false)
     }
+  }
+
+  async function revokeDispatcher() {
+    if (!window.confirm("Revoke the active SPC Group Dispatcher? Queued enquiries will wait until another desktop is paired.")) return
+    const response = await fetch("/api/spc/group-dispatcher", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "revoke" }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      setNoticeMessage(data.message || "Failed to revoke dispatcher.")
+      setNoticeIsError(true)
+      return
+    }
+    setDispatcher(null)
+    setNoticeMessage("The active SPC Group Dispatcher was revoked.")
+    setNoticeIsError(false)
   }
 
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
@@ -159,6 +234,55 @@ export default function SpcChromeExtensionPage() {
           ))}
         </div>
       </section>
+      {canEdit ? (
+        <section className="spc-panel spc-chrome-installation-panel">
+          <div className="spc-panel-header">
+            <div>
+              <h2>GROUP DISPATCHER</h2>
+              <p>Dedicated delivery service for the approved SPC WhatsApp Business desktop.</p>
+            </div>
+            {dispatcher ? (
+              <button
+                type="button"
+                className="spc-page-action spc-chrome-notice-button"
+                onClick={() => void revokeDispatcher()}
+              >
+                Revoke Dispatcher
+              </button>
+            ) : null}
+          </div>
+          <div className="spc-guide-list">
+            {DISPATCHER_STEPS.map((step, index) => (
+              <article className="spc-guide-step" key={step.title}>
+                <span>{String(index + 1)}</span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <ul>{step.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+                  {step.action ? (
+                    <a className="spc-page-action spc-chrome-download" href={step.action.href}>
+                      {step.action.label}
+                    </a>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="spc-chrome-dispatcher-status">
+            <strong>STATUS</strong>
+            {dispatcherLoading ? (
+              <span>Loading...</span>
+            ) : dispatcher ? (
+              <span>
+                Active: {dispatcher.deviceLabel} / {dispatcher.groupName} / v{dispatcher.extensionVersion}
+                {dispatcher.lastSeenAt ? ` / Last seen ${new Date(dispatcher.lastSeenAt).toLocaleString()}` : ""}
+                {dispatcher.lastError ? ` / ${dispatcher.lastError}` : ""}
+              </span>
+            ) : (
+              <span>No active dispatcher. New enquiries will remain safely queued.</span>
+            )}
+          </div>
+        </section>
+      ) : null}
     </SpcShell>
   )
 }

@@ -41,6 +41,10 @@ type SpcEnquiry = {
   meta: SpcEnquiryMeta
   formattedText: string
   createdByDisplayName: string
+  revisionNumber: number
+  lastAmendedAt: string | null
+  lastAmendedByUsername: string | null
+  amendmentChanges: Array<{ field: string; label: string; before: string; after: string }>
   createdAt: string
   updatedAt: string
 }
@@ -357,6 +361,7 @@ export default function SpcEnquiriesPage() {
   const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
   const [outcomeDraft, setOutcomeDraft] = useState<OutcomeDraft | null>(null)
   const [reofferDraft, setReofferDraft] = useState<ReofferDraft | null>(null)
+  const [enquiryEditorMode, setEnquiryEditorMode] = useState<"reoffer" | "amend">("reoffer")
   const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
   const [validationAttempted, setValidationAttempted] = useState(false)
   const [dismissedDraftMissingFields, setDismissedDraftMissingFields] = useState<Set<DraftFieldKey>>(() => new Set())
@@ -909,6 +914,14 @@ export default function SpcEnquiriesPage() {
   }
 
   function openReoffer(enquiry: SpcEnquiry) {
+    setEnquiryEditorMode("reoffer")
+    setReofferValidationAttempted(false)
+    setDismissedReofferMissingFields(new Set())
+    setReofferDraft(draftFromEnquiry(enquiry))
+  }
+
+  function openAmend(enquiry: SpcEnquiry) {
+    setEnquiryEditorMode("amend")
     setReofferValidationAttempted(false)
     setDismissedReofferMissingFields(new Set())
     setReofferDraft(draftFromEnquiry(enquiry))
@@ -934,7 +947,7 @@ export default function SpcEnquiriesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: reofferDraft.id,
-          mode: "reoffer",
+          mode: enquiryEditorMode,
           title: reofferDraft.title || reofferDraft.vesselName || standardText.slice(0, 80),
           vesselName: reofferDraft.vesselName,
           product: productTextForDraft(reofferDraft, finalVlsfoMaxRemarks),
@@ -948,15 +961,19 @@ export default function SpcEnquiriesPage() {
         }),
       })
       const data = (await response.json()) as { enquiry?: SpcEnquiry; message?: string }
-      if (!response.ok || !data.enquiry) throw new Error(data.message || "Failed to reoffer enquiry.")
+      if (!response.ok || !data.enquiry) {
+        throw new Error(data.message || `Failed to ${enquiryEditorMode === "amend" ? "amend" : "reoffer"} enquiry.`)
+      }
 
-      setEnquiries((current) => [
-        data.enquiry!,
-        ...current.filter((enquiry) => enquiry.id !== reofferDraft.id && enquiry.id !== data.enquiry!.id),
-      ])
+      setEnquiries((current) => enquiryEditorMode === "amend"
+        ? current.map((enquiry) => enquiry.id === data.enquiry!.id ? data.enquiry! : enquiry)
+        : [
+            data.enquiry!,
+            ...current.filter((enquiry) => enquiry.id !== reofferDraft.id && enquiry.id !== data.enquiry!.id),
+          ])
       setReofferDraft(null)
     } catch (error) {
-      reportEnquiryError(error, "Failed to reoffer enquiry.")
+      reportEnquiryError(error, `Failed to ${enquiryEditorMode === "amend" ? "amend" : "reoffer"} enquiry.`)
     } finally {
       setSaving(false)
       setUpdatingId("")
@@ -1093,13 +1110,21 @@ export default function SpcEnquiriesPage() {
               {activeEnquiries.map((enquiry) => {
                 const matches = matchesFor(enquiry)
                 return (
-                  <article key={enquiry.id} className="spc-sent-enquiry-card">
+                  <article key={enquiry.id} className={`spc-sent-enquiry-card${enquiry.lastAmendedAt ? " is-amended" : ""}`}>
                     <div className="spc-sent-enquiry-summary"><p>{enquiry.formattedText || enquiry.title}</p><span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>{enquiryStatusLabel(enquiry)}</span></div>
+                    {enquiry.lastAmendedAt ? (
+                      <div className="spc-enquiry-amendment">
+                        <strong>AMENDED REV {enquiry.revisionNumber}</strong>
+                        {enquiry.amendmentChanges.map((change) => (
+                          <span key={change.field}>{change.label}: {change.after || "removed"}</span>
+                        ))}
+                      </div>
+                    ) : null}
                     {enquiry.status === "quoted" && enquiry.meta?.stemSupplierTraderDisplayName ? <div className="spc-outcome-note">Stemmed to {enquiry.meta.stemSupplierTraderDisplayName}</div> : null}
                     {enquiry.status === "cancelled" && enquiry.meta?.lostReason ? <div className="spc-outcome-note is-lost">Lost: {enquiry.meta.lostReason}</div> : null}
                     {matches.length > 0 ? <div className="spc-enquiry-match"><strong>RECORD</strong>{matches.slice(0, 3).map((match) => <span key={match.id}>{recordLine(match)}</span>)}</div> : null}
                     <div className="spc-sent-enquiry-meta"><span>{displayTime(enquiry.createdAt)}</span></div>
-                    {enquiry.status === "sent" ? <div className="spc-sent-enquiry-actions"><button type="button" onClick={() => openOutcome(enquiry, "stem")} disabled={!canEdit || updatingId === enquiry.id}>STEM</button><button type="button" className="is-lost" onClick={() => openOutcome(enquiry, "lost")} disabled={!canEdit || updatingId === enquiry.id}>LOST</button><button type="button" className="is-postpone" onClick={() => void quickOutcome(enquiry, "postpone")} disabled={!canEdit || updatingId === enquiry.id}>POSTPONE</button><button type="button" className="is-cancel" onClick={() => void quickOutcome(enquiry, "cancel")} disabled={!canEdit || updatingId === enquiry.id}>CANCEL</button></div> : null}
+                    {enquiry.status === "sent" ? <div className="spc-sent-enquiry-actions"><button type="button" className="is-amend" onClick={() => openAmend(enquiry)} disabled={!canEdit || updatingId === enquiry.id}>AMEND</button><button type="button" onClick={() => openOutcome(enquiry, "stem")} disabled={!canEdit || updatingId === enquiry.id}>STEM</button><button type="button" className="is-lost" onClick={() => openOutcome(enquiry, "lost")} disabled={!canEdit || updatingId === enquiry.id}>LOST</button><button type="button" className="is-postpone" onClick={() => void quickOutcome(enquiry, "postpone")} disabled={!canEdit || updatingId === enquiry.id}>POSTPONE</button><button type="button" className="is-cancel" onClick={() => void quickOutcome(enquiry, "cancel")} disabled={!canEdit || updatingId === enquiry.id}>CANCEL</button></div> : null}
                   </article>
                 )
               })}
@@ -1192,7 +1217,7 @@ export default function SpcEnquiriesPage() {
 
       {reofferDraft ? (
         <div className="spc-dialog-backdrop" role="presentation">
-          <section className="spc-dialog spc-reoffer-dialog" role="dialog" aria-modal="true" aria-label="Reoffer enquiry">
+          <section className="spc-dialog spc-reoffer-dialog" role="dialog" aria-modal="true" aria-label={enquiryEditorMode === "amend" ? "Amend enquiry" : "Reoffer enquiry"}>
             <div className="spc-dialog-header">
               <h2 className="spc-reoffer-warning-title">PLEASE DOUBLE CHECK ENQUIRY DETAILS</h2>
               <button type="button" onClick={() => setReofferDraft(null)}>×</button>
@@ -1279,7 +1304,7 @@ export default function SpcEnquiriesPage() {
               <div className="spc-dialog-actions">
                 <button type="button" onClick={() => setReofferDraft(null)} disabled={saving}>Cancel</button>
                 <button type="submit" className="is-primary" disabled={saving || updatingId === reofferDraft.id}>
-                  {saving ? "Sending..." : "Send Reoffer"}
+                  {saving ? "Sending..." : enquiryEditorMode === "amend" ? "Send Amendment" : "Send Reoffer"}
                 </button>
               </div>
             </form>

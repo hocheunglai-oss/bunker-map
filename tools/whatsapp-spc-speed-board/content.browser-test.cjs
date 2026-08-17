@@ -838,6 +838,34 @@ async function main() {
       assert.deepEqual(secondTraderInitial.senders.sort(), ["BARRY KHOO", "OL", "OTTO LAI"])
       assert.equal(secondTraderInitial.locallyHidden, false)
 
+      const amendmentUpdate = {
+        revisionNumber: 2,
+        lastAmendedAt: "2026-07-23T09:25:00Z",
+        amendmentChanges: [
+          { field: "quantity", label: "Quantity", before: "vlsfo 500mts", after: "vlsfo 650mts" },
+        ],
+        updatedAt: "2026-07-23T09:25:00Z",
+      }
+      await Promise.all([
+        firstRunPage.evaluate((update) => {
+          window.enquiryOverrides["enq-1"] = update
+          window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+        }, amendmentUpdate),
+        secondTraderPage.evaluate((update) => {
+          window.enquiryOverrides["enq-1"] = update
+          window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+        }, amendmentUpdate),
+      ])
+      await secondTraderPage.waitForSelector(
+        "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'].is-amended",
+      )
+      assert.match(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-enquiry-amendment",
+        ).innerText(),
+        /AMENDED REV 2[\s\S]*Quantity: vlsfo 650mts/,
+      )
+
       const outcomeCases = [
         {
           label: "STEM",

@@ -1,6 +1,6 @@
 # FCUNO SPC WhatsApp Board
 
-Current version: `0.6.0`.
+Current version: `0.6.1`.
 
 Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 
@@ -46,6 +46,7 @@ Enable only one FCUNO WhatsApp board in a Chrome profile. If both FCUNO and SPC 
 ## Notes
 
 - This is intentionally separate from `tools/whatsapp-speed-board`, so the current personal version can stay unchanged.
+- Buyer amendments retain the same enquiry and are highlighted with a red outline and revision details.
 - The Brent indicator uses SPC's validated `/api/market/brent` service, backed by
   the official ICE front-month Brent futures feed. ICE data is delayed by at
   least 15 minutes, and the numeric quote is hidden whenever validation fails.

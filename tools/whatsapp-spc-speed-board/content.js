@@ -1261,6 +1261,18 @@
     return `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(vessel)}</strong> ${escapeHtml(details)}`
   }
 
+  function enquiryAmendmentChanges(enquiry) {
+    const source = enquiry?.amendmentChanges || enquiry?.last_amendment_changes
+    if (!Array.isArray(source)) return []
+    return source.flatMap((item) => {
+      if (!item || typeof item !== "object") return []
+      const field = cleanText(item.field)
+      const label = cleanText(item.label)
+      if (!field || !label) return []
+      return [{ field, label, before: cleanText(item.before), after: cleanText(item.after) }]
+    })
+  }
+
   function enquiryVesselName(enquiry) {
     const explicitName = cleanText(enquiry?.vesselName || enquiry?.vessel_name)
     const bodyName = enquiryBodyText(enquiry).split("/")[0]
@@ -1738,18 +1750,21 @@
       const sendable = isSendableEnquiry(enquiry)
       const status = enquiryStatusKey(enquiry)
       const statusText = enquiryStatusText(enquiry)
+      const amendmentChanges = enquiryAmendmentChanges(enquiry)
+      const amended = Boolean(enquiry.lastAmendedAt || enquiry.last_amended_at || amendmentChanges.length)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
       const senderContact = enquirySenderContact(enquiry)
       return `
-        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${amended ? " is-amended" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           ${senderContact
             ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`
             : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`}
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
+            ${amended ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiry.revisionNumber || enquiry.revision_number || "")}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}</span>` : ""}
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>

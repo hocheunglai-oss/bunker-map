@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "FCUNO SPC WhatsApp Board",
-  "version": "0.6.1",
-  "description": "SPC Supplier/Buyer board plus sent enquiry sender for WhatsApp Web.",
-  "permissions": ["storage", "notifications", "debugger"],
+  "name": "FCUNO SPC Group Dispatcher",
+  "version": "1.0.0",
+  "description": "Dedicated SPC enquiry dispatcher for one approved WhatsApp trading group.",
+  "permissions": ["storage", "debugger"],
   "background": {
     "service_worker": "background.js"
   },
@@ -17,7 +17,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["spc-sidebar-logo.png", "spc-enquiry-chat-button.webp"],
+      "resources": ["spc-sidebar-logo.png"],
       "matches": ["https://web.whatsapp.com/*"]
     }
   ],

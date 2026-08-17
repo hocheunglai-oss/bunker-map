@@ -63,11 +63,11 @@ test("SPC Lost Record retains a separately authorized shared record scope", () =
   assert.match(route, /hasSpcPagePermission\(session, "spc-lost-record", "view"\)/)
 })
 
-test("SPC web outcome and reoffer mutations enforce enquiry ownership", () => {
+test("SPC web outcome, amendment, and reoffer mutations enforce enquiry ownership", () => {
   assert.match(enquiriesStore, /function requireEnquiryOwner\(row: SpcEnquiryRow, session: SpcSession\)/)
   assert.equal(
     (enquiriesStore.match(/requireEnquiryOwner\(existing, session\)/g) || []).length,
-    2,
+    3,
   )
 })
 

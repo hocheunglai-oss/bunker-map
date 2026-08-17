@@ -3,10 +3,18 @@ import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spc
 import {
   formatSpcEnquiry,
   readSpcEnquiryMeta,
+  splitSpcEnquiryNotes,
   writeSpcEnquiryNotes,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
 import { ensurePendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
+import {
+  buildSpcEnquirySnapshot,
+  buildSpcGroupAmendmentMessage,
+  diffSpcEnquirySnapshots,
+  ensureCreatedSpcGroupDelivery,
+  type SpcAmendmentChange,
+} from "@/lib/spcGroupDispatcher"
 
 export type SpcEnquiry = {
   id: string
@@ -24,6 +32,10 @@ export type SpcEnquiry = {
   formattedText: string
   createdByUsername: string
   createdByDisplayName: string
+  revisionNumber: number
+  lastAmendedAt: string | null
+  lastAmendedByUsername: string | null
+  amendmentChanges: SpcAmendmentChange[]
   createdAt: string
   updatedAt: string
 }
@@ -83,6 +95,10 @@ type SpcEnquiryRow = {
   notes: string | null
   created_by_username: string
   created_by_display_name: string
+  revision_number: number
+  last_amended_at: string | null
+  last_amended_by_username: string | null
+  last_amendment_changes: unknown
   created_at: string
   updated_at: string
 }
@@ -115,11 +131,47 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
     formattedText: "",
     createdByUsername: row.created_by_username,
     createdByDisplayName: row.created_by_display_name,
+    revisionNumber: Number(row.revision_number || 1),
+    lastAmendedAt: row.last_amended_at,
+    lastAmendedByUsername: row.last_amended_by_username,
+    amendmentChanges: sanitizeAmendmentChanges(row.last_amendment_changes),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
   mapped.formattedText = formatSpcEnquiry(mapped)
   return mapped
+}
+
+function sanitizeAmendmentChanges(value: unknown): SpcAmendmentChange[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const row = item as Record<string, unknown>
+    const field = cleanText(typeof row.field === "string" ? row.field : undefined)
+    const label = cleanText(typeof row.label === "string" ? row.label : undefined)
+    if (!field || !label) return []
+    return [{
+      field,
+      label,
+      before: typeof row.before === "string" ? row.before : "",
+      after: typeof row.after === "string" ? row.after : "",
+    }]
+  })
+}
+
+function enquirySnapshot(row: Pick<SpcEnquiryRow,
+  "title" | "vessel_name" | "port" | "product" | "quantity" | "delivery_date" | "supplier_name" | "notes"
+>) {
+  return buildSpcEnquirySnapshot({
+    title: row.title,
+    vesselName: row.vessel_name || "",
+    port: row.port || "",
+    product: row.product || "",
+    quantity: row.quantity || "",
+    deliveryDate: row.delivery_date || "",
+    supplierName: row.supplier_name || "",
+    notes: splitSpcEnquiryNotes(row.notes).text,
+  })
 }
 
 function requireEnquiryOwner(row: SpcEnquiryRow, session: SpcSession) {
@@ -233,7 +285,17 @@ export async function createSpcEnquiry(
     : await duplicateQuery.eq("title", title).maybeSingle()
 
   if (duplicateError) throw duplicateError
-  if (duplicate) return mapEnquiry(duplicate as SpcEnquiryRow)
+  if (duplicate) {
+    const enquiry = mapEnquiry(duplicate as SpcEnquiryRow)
+    await ensureCreatedSpcGroupDelivery({
+      enquiryId: enquiry.id,
+      session,
+      request,
+      formattedText: enquiry.formattedText,
+      snapshot: enquirySnapshot(duplicate as SpcEnquiryRow),
+    })
+    return enquiry
+  }
 
   const { data, error } = await supabase
     .from("spc_enquiries")
@@ -254,7 +316,93 @@ export async function createSpcEnquiry(
     .single()
 
   if (error) throw error
-  return mapEnquiry(data as SpcEnquiryRow)
+  const row = data as SpcEnquiryRow
+  const enquiry = mapEnquiry(row)
+  await ensureCreatedSpcGroupDelivery({
+    enquiryId: enquiry.id,
+    session,
+    request,
+    formattedText: enquiry.formattedText,
+    snapshot: enquirySnapshot(row),
+  })
+  return enquiry
+}
+
+export async function amendSpcEnquiry(
+  id: string,
+  input: SaveSpcEnquiryInput,
+  session: SpcSession,
+  request: Request,
+) {
+  const enquiryId = cleanText(id)
+  const title = cleanText(input.title)
+  if (!enquiryId) throw new Error("Enquiry id is required.")
+  if (!title) throw new Error("Enquiry title is required.")
+  if (!session.username) throw new Error("Authenticated username is required.")
+
+  const context = createSpcAuditContext(session, request, "spc-buyer-enquiries", {
+    action: "amend-enquiry",
+    targetType: "spc-enquiry",
+    targetId: enquiryId,
+  })
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  requireEnquiryOwner(existing, session)
+
+  const providedNotes = cleanText(input.notes)
+  const nextNotes = writeSpcEnquiryNotes(
+    providedNotes || splitSpcEnquiryNotes(existing.notes).text,
+    { ...readSpcEnquiryMeta(existing.notes), ...readSpcEnquiryMeta(providedNotes) },
+  )
+  const nextRow: SpcEnquiryRow = {
+    ...existing,
+    title,
+    vessel_name: cleanText(input.vesselName),
+    port: cleanText(input.port),
+    product: cleanText(input.product),
+    quantity: cleanText(input.quantity),
+    delivery_date: cleanDateInput(input.deliveryDate),
+    supplier_name: cleanText(input.supplierName),
+    notes: nextNotes,
+    revision_number: Number(existing.revision_number || 1) + 1,
+    last_amended_at: new Date().toISOString(),
+    last_amended_by_username: session.username,
+    last_amendment_changes: [],
+    updated_at: new Date().toISOString(),
+  }
+  const beforeSnapshot = enquirySnapshot(existing)
+  const afterSnapshot = enquirySnapshot(nextRow)
+  const changes = diffSpcEnquirySnapshots(beforeSnapshot, afterSnapshot)
+  if (changes.length === 0) throw new Error("At least one enquiry field must change.")
+  const formattedText = formatSpcEnquiry(nextRow)
+  const messageText = buildSpcGroupAmendmentMessage(
+    formattedText,
+    nextRow.revision_number,
+    changes,
+  )
+
+  const { data, error } = await supabase.rpc("amend_spc_enquiry_with_group_delivery", {
+    p_enquiry_id: enquiryId,
+    p_actor_username: session.username,
+    p_actor_display_name: session.displayName || session.username,
+    p_enquiry: {
+      title: nextRow.title,
+      vesselName: nextRow.vessel_name,
+      port: nextRow.port,
+      product: nextRow.product,
+      quantity: nextRow.quantity,
+      deliveryDate: nextRow.delivery_date,
+      supplierName: nextRow.supplier_name,
+      notes: nextRow.notes,
+    },
+    p_formatted_text: formattedText,
+    p_changed_fields: changes,
+    p_message_text: messageText,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : null
+  if (!row) throw new Error("SPC amendment did not return the updated enquiry.")
+  return mapEnquiry(row as SpcEnquiryRow)
 }
 
 export async function updateSpcEnquiryOutcome(
