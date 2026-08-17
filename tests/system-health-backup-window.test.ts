@@ -22,6 +22,14 @@ const systemHealthPageSource = readFileSync(
   new URL("../app/admin/systemhealth/page.tsx", import.meta.url),
   "utf8",
 )
+const backupMaintenanceSource = readFileSync(
+  new URL("../lib/backupMaintenance.ts", import.meta.url),
+  "utf8",
+)
+
+function source(path: string) {
+  return readFileSync(new URL(path, import.meta.url), "utf8")
+}
 
 function numericConstant(source: string, name: string) {
   const match = source.match(new RegExp(`const ${name} = (\\d[\\d_]*)`))
@@ -73,6 +81,29 @@ test("daily backup has bounded retries that skip after a recent schema-current s
   assert.match(backupRouteSource, /provenance\.source === "vercel-cron"/)
   assert.match(backupRouteSource, /previousAgeHours <= CRON_RETRY_COVERAGE_HOURS/)
   assert.match(backupRouteSource, /skipped: true/)
+})
+
+test("high-frequency cron writers defer while a verified backup owns the lease", () => {
+  const guardedCronSources = [
+    source("../app/api/event-calendar/google-sync/route.ts"),
+    source("../app/api/cron/attendance-sync/route.ts"),
+    source("../app/api/cron/spc-mobile-deliveries/route.ts"),
+  ]
+  for (const cronSource of guardedCronSources) {
+    assert.match(cronSource, /await isVerifiedBackupActive\(\)/)
+    assert.match(cronSource, /deferred: true/)
+    assert.match(cronSource, /Verified daily backup in progress/)
+  }
+  assert.match(
+    backupMaintenanceSource,
+    /rpc\([\s\S]*"is_bunker_map_verified_backup_active"/,
+  )
+  const migration = source(
+    "../supabase/migrations/20260817030551_defer_crons_during_verified_backup.sql",
+  )
+  assert.match(migration, /backup_lock\.expires_at > clock_timestamp\(\)/)
+  assert.match(migration, /grant execute[\s\S]*to service_role/)
+  assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/)
 })
 
 test("backup truth rechecks retry transient Supabase edge failures", () => {

@@ -7,6 +7,7 @@ import { OfficeCalendarEvent } from "@/data/eventCalendar"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { getEventCalendarRecordVersion } from "@/lib/eventCalendarStore"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { isVerifiedBackupActive } from "@/lib/backupMaintenance"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
@@ -403,6 +404,13 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (await isVerifiedBackupActive()) {
+      return NextResponse.json({
+        success: true,
+        deferred: true,
+        reason: "Verified daily backup in progress",
+      })
+    }
     return NextResponse.json(await runQueuedGoogleSync(null))
   } catch (error) {
     return NextResponse.json({

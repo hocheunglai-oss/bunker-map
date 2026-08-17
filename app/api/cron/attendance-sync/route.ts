@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
 import { runAttendanceSync } from "@/lib/attendanceSync"
+import { isVerifiedBackupActive } from "@/lib/backupMaintenance"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -40,6 +41,13 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (await isVerifiedBackupActive()) {
+      return privateJson({
+        success: true,
+        deferred: true,
+        reason: "Verified daily backup in progress",
+      })
+    }
     const sync = await runAttendanceSync()
     return privateJson({ success: true, sync })
   } catch (error) {
