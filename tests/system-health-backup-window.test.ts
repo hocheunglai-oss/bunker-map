@@ -102,6 +102,10 @@ test("high-frequency cron writers defer while a verified backup owns the lease",
     "../supabase/migrations/20260817030551_defer_crons_during_verified_backup.sql",
   )
   assert.match(migration, /backup_lock\.expires_at > clock_timestamp\(\)/)
+  const lockNameMigration = source(
+    "../supabase/migrations/20260817032829_align_verified_backup_lock_name.sql",
+  )
+  assert.match(lockNameMigration, /daily-supabase-drive-v2/)
   assert.match(migration, /grant execute[\s\S]*to service_role/)
   assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/)
 })
