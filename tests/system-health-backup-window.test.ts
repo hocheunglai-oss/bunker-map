@@ -144,12 +144,14 @@ test("SPC mobile delivery state is registered and mutation-fenced for daily back
 
 test("SPC group dispatcher state is registered for daily backup", () => {
   const route = source("../app/api/backups/bunker-map-drive/route.ts")
+  const health = source("../lib/systemHealth.ts")
   for (const table of [
     "spc_enquiry_revisions",
     "spc_group_dispatchers",
     "spc_group_delivery_jobs",
   ]) {
     assert.match(route, new RegExp(`table: "${table}"`))
+    assert.match(health, new RegExp(`table: "${table}"`))
   }
 })
 
