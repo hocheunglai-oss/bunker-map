@@ -65,12 +65,16 @@ test("SPC enquiry send failures are visible to the user", () => {
 test("SPC enquiry clear action sits inside the parser box", () => {
   assert.match(
     enquiriesPage,
-    /className="spc-enquiry-raw-control"[\s\S]*?<textarea[\s\S]*?className="spc-enquiry-clear-button"/,
+    /className="spc-enquiry-raw-control"[\s\S]*?<textarea[\s\S]*?className=\{`spc-enquiry-clear-button/,
   )
   assert.match(
     globalStyles,
-    /\.spc-enquiry-clear-button \{[\s\S]*?position: absolute;[\s\S]*?right: 10px;[\s\S]*?bottom: 10px;/,
+    /\.spc-enquiry-clear-button \{[\s\S]*?position: absolute;[\s\S]*?right: 8px;[\s\S]*?bottom: 8px;[\s\S]*?min-height: 27px;/,
   )
+  assert.match(enquiriesPage, /hasDraftContent \? " is-active" : ""/)
+  assert.match(enquiriesPage, /disabled=\{!canEdit \|\| saving \|\| !hasDraftContent\}/)
+  assert.match(enquiriesPage, />\s*CLEAR\s*<\/button>/)
+  assert.match(globalStyles, /\.spc-enquiry-clear-button\.is-active \{[\s\S]*?background: var\(--fc-admin-primary-button-bg\);/)
 })
 
 test("SPC Lost Record retains a separately authorized shared record scope", () => {

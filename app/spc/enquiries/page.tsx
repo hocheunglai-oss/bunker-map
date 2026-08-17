@@ -413,6 +413,17 @@ export default function SpcEnquiriesPage() {
   const cautionTerms = detectSpcCautionTerms(draft.rawText)
   const attentionTerms = detectAttentionTerms(draft.rawText).filter((term) => term !== "RMK")
   const reofferAttentionTerms = detectAttentionTerms(reofferDraft?.rawText || reofferDraft?.standardText || "")
+  const hasDraftContent = [
+    draft.rawText,
+    draft.vesselName,
+    draft.imo,
+    draft.eta,
+    draft.hsfo,
+    draft.vlsfo,
+    draft.lsmgo,
+    draft.remarks,
+    draft.standardText,
+  ].some((value) => value.trim().length > 0)
 
   function shouldShowDraftMissing(field: DraftFieldKey) {
     return validationAttempted && draftMissingFields.has(field) && !dismissedDraftMissingFields.has(field)
@@ -1019,11 +1030,11 @@ export default function SpcEnquiriesPage() {
                     />
                     <button
                       type="button"
-                      className="spc-enquiry-clear-button"
+                      className={`spc-enquiry-clear-button${hasDraftContent ? " is-active" : ""}`}
                       onClick={clearDraft}
-                      disabled={!canEdit || saving}
+                      disabled={!canEdit || saving || !hasDraftContent}
                     >
-                      Clear
+                      CLEAR
                     </button>
                   </div>
                 </div>
