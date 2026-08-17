@@ -9,6 +9,18 @@ import {
   createCompressedBackupStageReadStream,
 } from "../lib/compressedBackupStage"
 
+test("production staging limit preserves temporary-disk headroom", async () => {
+  const route = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(
+      new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url),
+      "utf8"
+    )
+  )
+
+  assert.match(route, /MAX_COMPRESSED_STAGING_BYTES = 480 \* 1024 \* 1024/)
+  assert.doesNotMatch(route, /MAX_COMPRESSED_STAGING_BYTES = 512 \* 1024 \* 1024/)
+})
+
 async function writeChunk(
   writable: ReturnType<typeof createCompressedBackupStage>["writable"],
   value: Buffer

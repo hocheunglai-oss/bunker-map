@@ -36,7 +36,11 @@ const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
 const SUPABASE_TRUTH_RPC_ATTEMPTS = 3
 const SUPABASE_TRUTH_RPC_RETRY_DELAY_MS = 1_000
-const MAX_COMPRESSED_STAGING_BYTES = 400 * 1024 * 1024
+// Vercel functions provide 512 MiB of writable /tmp storage. Keep 32 MiB free
+// for runtime overhead while allowing the compressed database stage to grow
+// with the audit ledger. The final JSON is streamed to Drive and never stored
+// in /tmp.
+const MAX_COMPRESSED_STAGING_BYTES = 480 * 1024 * 1024
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 
