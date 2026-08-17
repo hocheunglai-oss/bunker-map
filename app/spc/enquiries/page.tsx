@@ -1003,22 +1003,30 @@ export default function SpcEnquiriesPage() {
                 <span>ENQUIRY WORKSPACE</span>
                 <h2>New Enquiry</h2>
               </div>
-              <button type="button" className="spc-blue-action" onClick={clearDraft} disabled={!canEdit || saving}>
-                Clear
-              </button>
             </div>
             <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form" noValidate>
               <div className="spc-enquiry-parser-pane">
-                <label className="spc-enquiry-raw">
-                  <span>Parser</span>
-                  <textarea
-                    value={draft.rawText}
-                    onChange={(event) => updateDraft("rawText", event.target.value)}
-                    placeholder="PASTE YOUR ENQUIRY HERE"
-                    rows={12}
-                    disabled={!canEdit}
-                  />
-                </label>
+                <div className="spc-enquiry-raw">
+                  <label htmlFor="spc-enquiry-parser">Parser</label>
+                  <div className="spc-enquiry-raw-control">
+                    <textarea
+                      id="spc-enquiry-parser"
+                      value={draft.rawText}
+                      onChange={(event) => updateDraft("rawText", event.target.value)}
+                      placeholder="PASTE YOUR ENQUIRY HERE"
+                      rows={12}
+                      disabled={!canEdit}
+                    />
+                    <button
+                      type="button"
+                      className="spc-enquiry-clear-button"
+                      onClick={clearDraft}
+                      disabled={!canEdit || saving}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
                 {cautionTerms.length > 0 ? (
                   <div className="spc-enquiry-warning">
                     {formatSpcCautionWarning(cautionTerms)}

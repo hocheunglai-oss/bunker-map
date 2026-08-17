@@ -10,6 +10,10 @@ const enquiriesPage = readFileSync(
   new URL("../app/spc/enquiries/page.tsx", import.meta.url),
   "utf8",
 )
+const globalStyles = readFileSync(
+  new URL("../app/globals.css", import.meta.url),
+  "utf8",
+)
 const enquiriesStore = readFileSync(
   new URL("../lib/spcEnquiries.ts", import.meta.url),
   "utf8",
@@ -56,6 +60,17 @@ test("SPC forced-password sessions render the password form without a route tran
 test("SPC enquiry send failures are visible to the user", () => {
   assert.match(enquiriesPage, /setSendError\(error instanceof Error \? error\.message/)
   assert.match(enquiriesPage, /role="alert"/)
+})
+
+test("SPC enquiry clear action sits inside the parser box", () => {
+  assert.match(
+    enquiriesPage,
+    /className="spc-enquiry-raw-control"[\s\S]*?<textarea[\s\S]*?className="spc-enquiry-clear-button"/,
+  )
+  assert.match(
+    globalStyles,
+    /\.spc-enquiry-clear-button \{[\s\S]*?position: absolute;[\s\S]*?right: 10px;[\s\S]*?bottom: 10px;/,
+  )
 })
 
 test("SPC Lost Record retains a separately authorized shared record scope", () => {

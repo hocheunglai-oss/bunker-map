@@ -3446,10 +3446,51 @@ body {
   resize: none;
 }
 
+.spc-enquiry-raw {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.spc-enquiry-raw-control {
+  position: relative;
+}
+
 .spc-enquiry-raw textarea {
+  display: block;
   min-height: clamp(230px, 33vh, 390px);
   border-color: #c5d3e2;
   background: rgba(255, 255, 255, 0.9);
+  padding-bottom: 54px;
+}
+
+.spc-enquiry-clear-button {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fc-admin-primary-button-bg);
+  border-radius: 999px;
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+  cursor: pointer;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 6px 14px rgba(0, 113, 227, 0.16);
+}
+
+.spc-enquiry-clear-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.spc-enquiry-clear-button:focus-visible {
+  outline: 2px solid #0a84ff;
+  outline-offset: 2px;
 }
 
 .spc-enquiry-preview-field textarea {
