@@ -77,3 +77,25 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.doesNotMatch(content, /document\.visibilityState === "hidden"/)
   assert.match(content, /claim\.job\.attemptCount > 1 && outgoingMessageCount/)
 })
+
+test("the dispatcher download files are included in the production server trace", async () => {
+  const nextConfig = await readFile(new URL("../next.config.js", import.meta.url), "utf8")
+  assert.match(
+    nextConfig,
+    /"\/api\/spc\/group-dispatcher\/download": \["\.\/tools\/whatsapp-spc-group-dispatcher\/\*\*\/\*"\]/,
+  )
+
+  for (const file of [
+    "manifest.json",
+    "background.js",
+    "content.js",
+    "styles.css",
+    "spc-sidebar-logo.png",
+    "README.md",
+  ]) {
+    const content = await readFile(
+      new URL(`../tools/whatsapp-spc-group-dispatcher/${file}`, import.meta.url),
+    )
+    assert.ok(content.length > 0, `${file} must be available to the download route`)
+  }
+})

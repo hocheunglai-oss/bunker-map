@@ -41,6 +41,7 @@ const nextConfig = {
   poweredByHeader: false,
   outputFileTracingIncludes: {
     "/api/spc/chrome-extension/download": ["./tools/whatsapp-spc-speed-board/**/*"],
+    "/api/spc/group-dispatcher/download": ["./tools/whatsapp-spc-group-dispatcher/**/*"],
   },
   async headers() {
     return [
