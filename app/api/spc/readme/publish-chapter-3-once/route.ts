@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
-const TOKEN_DIGEST = "30996fdb62744aa5726f2129b89ca4f5dac23a45eb27434caad65173e3601371"
-const EXPIRES_AT = Date.parse("2026-08-17T13:09:09Z")
+const TOKEN_DIGEST = "a96e7b5c269f44a4ba5260a22887b4b0a60265010c867137c6341555145585df"
+const EXPIRES_AT = Date.parse("2026-08-17T13:30:00Z")
 const CHAPTER_THREE_ID = "cfbdd69f-e8a2-469e-993a-c5aac540e2ee"
 const EXPECTED_VIDEO_BYTES = 26_213_015
 const publisherSession: SpcSession = {
