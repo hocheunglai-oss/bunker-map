@@ -155,7 +155,7 @@ export async function POST(request: Request) {
         key_points: [],
         q_and_a_prompt: "",
         visual_kind: "video",
-        duration_seconds: 277.139,
+        duration_seconds: 277,
         video_path: MEDIA_PATH,
         video_mime_type: "video/mp4",
         video_bytes: EXPECTED_BYTES,
