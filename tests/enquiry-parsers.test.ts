@@ -743,3 +743,69 @@ test("pairs labelled grade and quantity lists in order", () => {
     "josco lucky / 25 aug / vlsfo 180CST MAX 650-790mts / lsmgo 90-100mts",
   )
 })
+
+test("replays the August 18 pending review reports", () => {
+  const oceanBanquet = [
+    "MV. Ocean Banquet\t IMO: 9740108",
+    "Port\tBusan",
+    "Dates\t28 August 2026 - 02 September 2026",
+    "ETA: 28 August 2026",
+    "Requirements\t300 - 450 MT VLSFO 0.5% (ISO 8217:2010)",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(oceanBanquet),
+    "ocean banquet / 9740108 / busan 28 aug - 2 sep / vlsfo 300-450mts",
+  )
+
+  const sunnyBright = [
+    "Vessel   Sunny Bright   (LPG Carrier)",
+    "Place     Yeosu",
+    "ETA       September 6~ 8 (this might change)",
+    "Grade/Quantity   VLSFO(RMG380 Sulphur Max 0.5%) 600-700 MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(sunnyBright),
+    "sunny bright / yosu 6 - 8 sep / vlsfo 600-700mts",
+  )
+
+  const pazifik = [
+    "Vessel / IMO : M/V PAZIFIK IMO 9293430 LPG",
+    "Port / Berth : Yeosu",
+    "Delivery Date / ETA / ETS : 02.09.2026 - 05.09.2026",
+    "HFO 3,5% : Nil",
+    "VLSFO 0,5% : 500 mts IFO380cst. RMG380 0,5% / VLSFO",
+    "MGO/DMA 0,1% : Nil",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(pazifik),
+    "pazifik / 9293430 / yosu 2 - 5 sep / vlsfo 500mts",
+  )
+
+  const overseasSantorini = [
+    "Vessel",
+    "Overseas Santorini",
+    "IMO",
+    "9435909",
+    "Port",
+    "Singapore",
+    "ETA",
+    "19-Aug-26",
+    "Bunker Date",
+    "19-Aug-26",
+    "204-Aug-26",
+    "Quantity 1",
+    "Units",
+    "Grade",
+    "ISO Spec",
+    "Sulfur max",
+    "535-610",
+    "MTS",
+    "DMA",
+    "2017",
+    "0.10%",
+  ].join("\n")
+  assert.equal(
+    parseSpcEnquiryText(overseasSantorini).standardText,
+    "overseas santorini / 9435909 / sg 19 aug / lsmgo 535-610mts",
+  )
+})

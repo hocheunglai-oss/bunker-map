@@ -29,7 +29,7 @@ const VESSEL_LABEL_PATTERN =
   /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|\bname\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)/i
 
 const VESSEL_FIELD_PATTERN =
-  /^\s*['"]?\s*(?:[-•*=]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|name\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?\s*(?:[:：#\-/\t]|\s{2,})/i
+  /^\s*['"]?\s*(?:[-•*=]\s*)?(?:\d+\s*[\).:-]\s*)?(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?|name\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)(?:\s*\(\s*imo(?:\s*no\.?|\s*number)?\s*\.?\s*\))?(?:\s*[:：#\-/\t]\s*|\s+(?=\S)|\s*$)/i
 
 const BUYER_LABEL_PATTERN =
   /^\s*(?:\d+\s*[\).:-]\s*)?(?:buyer|client|for\s+account(?:\s+of)?|account(?:\s+name)?|for\s+a\/?c(?:\s+of)?|a\/?c|acct|for\s+acct(?:\s+of)?)\b\s*(?:[:#\-\t]|\s{2,})?\s*(.*)$/i
@@ -131,10 +131,10 @@ function cleanVesselName(value: string) {
   next = next.replace(/^\s*(?:LPG|LNG)\s*\/?\s*C\b\s*/i, "")
   next = next.replace(/\(\s*(?:V|VOY|VOYAGE)\.?\s*[\w./-]+\s*\)/gi, "")
   next = next.replace(/\s*\/+\s*$/, "")
-  next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker)\s*\)?\.?\s*$/i, "")
-  next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker)\.?\s*$/i, "")
+  next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\s*\)?\.?\s*$/i, "")
+  next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\.?\s*$/i, "")
   next = next.replace(/\s*\/\/.*$/g, "")
-  next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker)\.?\s*$/i, "")
+  next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\.?\s*$/i, "")
   next = next.replace(/[“”]/g, '"')
   next = stripOuterNoise(next)
 
@@ -385,6 +385,13 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
+    const simplePlaceValue = line.match(/^\s*place(?:\s*[:：#\-\t]\s*|\s+)(.+)$/i)?.[1] || ""
+    const simplePlacePort = findKnownPort(simplePlaceValue, {
+      ...options,
+      includeShortAliases: true,
+    })
+    if (simplePlacePort) return simplePlacePort
+
     const match = line.match(PORT_LABEL_PATTERN)
     if (!match) continue
 

@@ -243,7 +243,17 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
+  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"))) {
+    const range = formatDateRange(match[2], match[1], match[3], match[1])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*[./]\\s*(${monthNamePattern})\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*[./]\\s*(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[2], match[3], match[4])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{1,2})[./](\d{1,2})(?:[./]\d{2,4})?\s*(?:-|~|to)\s*(\d{1,2})[./](\d{1,2})(?:[./]\d{2,4})?\b/gi)) {
     const range = formatDateRange(match[1], match[2], match[3], match[4])
     if (range) dates.push(range)
   }
@@ -327,7 +337,7 @@ function extractDeliveryDate(text: string) {
 
   const candidateLines = lines.filter((line) => !isContactOrAddressLine(line))
   const labelledLines = candidateLines.filter((line) =>
-    /^\s*(?:delivery|window|date)\b/i.test(line) || OPERATIONAL_SCHEDULE_LINE_PATTERN.test(line),
+    /^\s*(?:delivery|window|dates?)\b/i.test(line) || OPERATIONAL_SCHEDULE_LINE_PATTERN.test(line),
   )
   const dates = findEnquiryDates(labelledLines.join(" ") || candidateLines.join("\n"))
 
@@ -711,6 +721,8 @@ function extractPairedProductQuantityLines(lines: string[], autoDetectVlsfoRemar
 }
 
 function productMatches(line: string) {
+  const hasExplicitVlsfo = /\b(?:v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo)\b/i.test(line)
+
   return Array.from(
     line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
   )
@@ -722,6 +734,11 @@ function productMatches(line: string) {
     .filter((match): match is { index: number; value: string; product: ProductSegment["product"] } =>
       match.index >= 0 && Boolean(match.product),
     )
+    .filter((match) => !(
+      hasExplicitVlsfo &&
+      match.product === "hsfo" &&
+      /^ifo\s*\d{2,3}\s*cst\b/i.test(line.slice(match.index))
+    ))
 }
 
 function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: boolean) {
@@ -767,7 +784,18 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
   const unitOnlyPattern = new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i")
   for (let index = nearby.length - 1; index >= 0; index -= 1) {
     const line = nearby[index]
-    if (unitOnlyPattern.test(line)) break
+    if (unitOnlyPattern.test(line)) {
+      const hasTableHeader = nearby
+        .slice(0, Math.max(0, index - 1))
+        .some((value) => /\b(?:qty|quantity|units?|grades?|iso\s*spec|sulphur|sulfur|max)\b/i.test(value))
+      if (hasTableHeader) {
+        const precedingQuantity = extractQuantityFromProductSegment(
+          `${nearby[index - 1] || ""} ${line}`,
+        )
+        if (precedingQuantity) return precedingQuantity
+      }
+      break
+    }
     if (containsProduct(line)) break
     if (/^\s*0+(?:[,.]0+)?\s*$/.test(line)) break
     const labelled = /^\s*(?:qty|quantity)\b/i.test(line)
