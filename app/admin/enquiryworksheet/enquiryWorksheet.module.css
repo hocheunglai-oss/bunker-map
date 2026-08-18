@@ -26,6 +26,7 @@
   box-shadow: 0 12px 30px rgba(30, 35, 31, 0.08);
   font-size: 7pt;
   line-height: 1.05;
+  zoom: 1.08;
 }
 
 .sheet input,
@@ -281,7 +282,7 @@
   position: sticky;
   top: 18px;
   box-sizing: border-box;
-  width: 480px;
+  width: 440px;
   max-height: calc(100vh - 48px);
   overflow: auto;
   padding: 16px;
@@ -319,7 +320,7 @@
 }
 
 .generatorText {
-  min-height: 160px;
+  min-height: 240px;
   resize: vertical;
   padding: 12px;
   line-height: 1.45;
@@ -362,10 +363,7 @@
 }
 
 .shortenedHeader {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px 78px 72px 36px;
-  align-items: center;
-  gap: 8px;
+  display: block;
 }
 
 .shortenedHeader > span {
@@ -487,10 +485,18 @@
   color: var(--fc-admin-muted);
 }
 
-.vlsfoRemarkButtons {
+.parserToolButtons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
+}
+
+.parserToolButtons button {
+  min-width: 0;
+  width: 100%;
+  padding-left: 5px;
+  padding-right: 5px;
+  font-size: 11px;
 }
 
 .remarkButton,
@@ -529,14 +535,6 @@
 
 .copyError {
   color: var(--fc-admin-danger-bg);
-}
-
-.reportedCount {
-  margin: 1px 0 0;
-  color: var(--fc-admin-muted);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0;
 }
 
 .reportBackdrop {
@@ -783,6 +781,7 @@
     overflow: hidden;
     border-color: #777;
     box-shadow: none;
+    zoom: 1;
     break-inside: avoid;
     page-break-inside: avoid;
   }

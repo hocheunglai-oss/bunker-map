@@ -119,6 +119,24 @@ test("enquiry worksheet report dialog leaves correction and notes to the admin r
   assert.match(reviewSource, /<span>Note<\/span>/)
 })
 
+test("enquiry worksheet generator follows the requested parser-first layout", () => {
+  const worksheetSource = readFileSync(
+    new URL("../app/admin/enquiryworksheet/page.tsx", import.meta.url),
+    "utf8",
+  )
+  const enquiry = worksheetSource.indexOf('aria-label="Enquiry text"')
+  const generate = worksheetSource.indexOf(">\n              Generate\n")
+  const shortened = worksheetSource.indexOf('aria-label="Shortened enquiry"')
+  const parserTools = worksheetSource.indexOf("styles.parserToolButtons")
+
+  assert.ok(enquiry >= 0)
+  assert.ok(generate > enquiry)
+  assert.ok(shortened > generate)
+  assert.ok(parserTools > shortened)
+  assert.doesNotMatch(worksheetSource, /REPORTED \(\{parserReportCount\}\)/)
+  assert.match(worksheetSource, /value=\{guesses\.port\}[\s\S]*?className=\{styles\.capsInput\}/)
+})
+
 test("sidebar displays only the number of reports pending user review", () => {
   const badgeSource = readFileSync(
     new URL("../components/ParserReportSidebarBadge.tsx", import.meta.url),

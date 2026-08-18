@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
@@ -53,13 +53,6 @@ type EnquiryWorksheetCache = {
 
 type EnquiryWorksheetPortsResponse = {
   ports?: string[]
-}
-
-type ParserReportsResponse = {
-  reports?: unknown[]
-  unresolvedReports?: number
-  totalReports?: number
-  resolvedReports?: number
 }
 
 type ParserReportDraft = {
@@ -413,7 +406,6 @@ export default function EnquiryWorksheetPage() {
     correctedOutput: "",
   })
   const [parserReportStatus, setParserReportStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
-  const [parserReportCount, setParserReportCount] = useState(0)
   const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
   const [parserAiMessage, setParserAiMessage] = useState("")
   const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
@@ -424,32 +416,6 @@ export default function EnquiryWorksheetPage() {
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
   }, [])
-
-  const loadParserReportCount = useCallback(async () => {
-    if (!authenticated) {
-      setParserReportCount(0)
-      return
-    }
-
-    try {
-      const response = await fetch("/api/parser-reports?source=enquiryworksheet&summary=1", { cache: "no-store" })
-      const payload = (await response.json().catch(() => ({}))) as ParserReportsResponse
-      if (!response.ok) throw new Error("Unable to load parser reports.")
-      setParserReportCount(
-        typeof payload.unresolvedReports === "number"
-          ? payload.unresolvedReports
-          : Array.isArray(payload.reports)
-            ? payload.reports.length
-            : 0,
-      )
-    } catch {
-      setParserReportCount(0)
-    }
-  }, [authenticated])
-
-  useEffect(() => {
-    void loadParserReportCount()
-  }, [loadParserReportCount])
 
   useEffect(() => {
     if (!authenticated) return
@@ -854,7 +820,6 @@ export default function EnquiryWorksheetPage() {
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
-      await loadParserReportCount()
       notifyParserReportCountChanged("enquiryworksheet")
       setParserReportStatus("saved")
       window.setTimeout(() => {
@@ -939,12 +904,68 @@ export default function EnquiryWorksheetPage() {
             </div>
           ) : null}
 
+          <div className={styles.panelActions}>
+            <button
+              type="button"
+              className={styles.primaryPanelButton}
+              onClick={generateWorksheet}
+              data-admin-button-style="preserve"
+            >
+              Generate
+            </button>
+            <button
+              type="button"
+              className={styles.primaryPanelButton}
+              onClick={() => window.print()}
+              data-admin-view-safe="true"
+              data-admin-button-style="preserve"
+            >
+              Print
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryPanelButton}
+              onClick={clearDraft}
+              data-admin-button-style="preserve"
+            >
+              Clear
+            </button>
+          </div>
+
           <section className={styles.shortenedPanel} aria-label="Shortened enquiry">
             <div className={styles.shortenedHeader}>
               <span className={styles.shortenedTitle}>
                 <span>SHORTENED ENQUIRY</span>
                 <span>(USE WITH CAUTION)</span>
               </span>
+            </div>
+            <textarea
+              className={styles.shortenedBox}
+              value={shortenedDraft}
+              onChange={(event) => {
+                setShortenedDraft(event.target.value)
+                setCopyStatus("idle")
+                setWhatsappStatus("idle")
+              }}
+              placeholder="No shortened enquiry yet."
+              aria-label="Editable shortened enquiry"
+            />
+            <div className={styles.parserToolButtons}>
+              {vlsfoRemarkOptions.map((remark) => {
+                const active = vlsfoMaxRemarks.includes(remark)
+                return (
+                  <button
+                    key={remark}
+                    type="button"
+                    aria-pressed={active}
+                    className={active ? styles.remarkButtonActive : styles.remarkButton}
+                    onClick={() => toggleVlsfoMaxRemark(remark)}
+                    data-admin-button-style="preserve"
+                  >
+                    {remark.startsWith("180") ? "180" : "120"}
+                  </button>
+                )
+              })}
               <button
                 type="button"
                 className={styles.copyButton}
@@ -992,34 +1013,6 @@ export default function EnquiryWorksheetPage() {
                   <path d="m10.4 13.7 4.2-4.2" />
                 </svg>
               </button>
-            </div>
-            <textarea
-              className={styles.shortenedBox}
-              value={shortenedDraft}
-              onChange={(event) => {
-                setShortenedDraft(event.target.value)
-                setCopyStatus("idle")
-                setWhatsappStatus("idle")
-              }}
-              placeholder="No shortened enquiry yet."
-              aria-label="Editable shortened enquiry"
-            />
-            <div className={styles.vlsfoRemarkButtons}>
-              {vlsfoRemarkOptions.map((remark) => {
-                const active = vlsfoMaxRemarks.includes(remark)
-                return (
-                  <button
-                    key={remark}
-                    type="button"
-                    aria-pressed={active}
-                    className={active ? styles.remarkButtonActive : styles.remarkButton}
-                    onClick={() => toggleVlsfoMaxRemark(remark)}
-                    data-admin-button-style="preserve"
-                  >
-                    Add {remark}
-                  </button>
-                )
-              })}
             </div>
             {copyStatus === "copied" ? <p className={styles.copyStatus}>Copied.</p> : null}
             {copyStatus === "failed" ? <p className={styles.copyError}>Copy failed.</p> : null}
@@ -1088,6 +1081,7 @@ export default function EnquiryWorksheetPage() {
                   preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({ ...current, port: event.target.value.toLowerCase() }))
                 }}
+                className={styles.capsInput}
               />
             </label>
             <label>
@@ -1103,34 +1097,6 @@ export default function EnquiryWorksheetPage() {
             </label>
           </div>
 
-          <div className={styles.panelActions}>
-            <button
-              type="button"
-              className={styles.primaryPanelButton}
-              onClick={generateWorksheet}
-              data-admin-button-style="preserve"
-            >
-              Generate
-            </button>
-            <button
-              type="button"
-              className={styles.primaryPanelButton}
-              onClick={() => window.print()}
-              data-admin-view-safe="true"
-              data-admin-button-style="preserve"
-            >
-              Print
-            </button>
-            <button
-              type="button"
-              className={styles.secondaryPanelButton}
-              onClick={clearDraft}
-              data-admin-button-style="preserve"
-            >
-              Clear
-            </button>
-          </div>
-
           {guesses.warnings.length > 0 ? (
             <ul className={styles.parserWarnings}>
               {guesses.warnings.map((warning) => (
@@ -1138,7 +1104,6 @@ export default function EnquiryWorksheetPage() {
               ))}
             </ul>
           ) : null}
-          <p className={styles.reportedCount}>REPORTED ({parserReportCount})</p>
         </aside>
 
         <section className={styles.sheet} aria-label="Enquiry worksheet">
