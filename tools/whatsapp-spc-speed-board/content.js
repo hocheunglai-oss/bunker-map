@@ -8,6 +8,7 @@
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
+  const ENQUIRY_REPLY_GROUP_NAME = "Otto (FCBHK) SG Enqs"
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
   const SEND_LOCK_TTL_MS = 2500
@@ -576,7 +577,7 @@
       const labels = Array.from(main.querySelectorAll("[aria-label], [title]"))
         .map((element) => cleanText(element.getAttribute("aria-label") || element.getAttribute("title")))
         .filter(Boolean)
-      if (labels.some((label) => /\b(?:message to group|group info)\b/i.test(label))) return "group"
+      if (labels.some((label) => /\b(?:message to group|group info)\b|群組(?:資訊|資料)|群组(?:信息|资料)/i.test(label))) return "group"
     } catch {
     }
     const subtitle = candidates.slice(1).join(" ")
@@ -912,6 +913,45 @@
     return false
   }
 
+  async function searchAndOpenExactGroup(groupName) {
+    const targetName = cleanText(groupName)
+    const targetKey = targetName.toLowerCase()
+    if (!targetName) return ""
+
+    const currentChat = getCurrentChat()
+    if (currentChat?.kind === "group" && cleanText(currentChat.name).toLowerCase() === targetKey) {
+      return currentChat.name
+    }
+
+    const searchBox = findSideSearchBox()
+    if (!searchBox || !(await setSearchText(searchBox, targetName))) return ""
+
+    for (const delay of [30, 80, 140, 240, 400]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const exactRows = primarySearchResultRows().filter((row) => chatRowNames(row).includes(targetKey))
+      if (exactRows.length > 1) {
+        await clearSearchText()
+        return ""
+      }
+      if (exactRows.length !== 1) continue
+      if (!(await requestNativeElementClick(chatRowTarget(exactRows[0])))) continue
+
+      for (const verifyDelay of [30, 80, 140, 240, 400]) {
+        await new Promise((resolve) => window.setTimeout(resolve, verifyDelay))
+        const openedChat = getCurrentChat()
+        if (openedChat?.kind !== "group" || cleanText(openedChat.name).toLowerCase() !== targetKey) continue
+        await clearSearchText()
+        return openedChat.name
+      }
+
+      await clearSearchText()
+      return ""
+    }
+
+    await clearSearchText()
+    return ""
+  }
+
   async function openContact(contact) {
     if (currentChatMatchesContact(contact)) return true
     return searchAndOpenContact(contact)
@@ -1140,21 +1180,22 @@
     }, ENQUIRY_OPEN_RELEASE_DELAY_MS)
   }
 
-  async function performOpenEnquirySenderChat(enquiry) {
-    const contact = enquirySenderContact(enquiry)
+  async function performOpenEnquiryGroupChat(enquiry) {
     const replyText = enquiryReplyText(enquiry)
-    if (!contact || !replyText) return false
-    const openedChatName = await searchAndOpenPhoneContact(contact)
+    if (!replyText) return false
+    const openedChatName = await searchAndOpenExactGroup(ENQUIRY_REPLY_GROUP_NAME)
     if (!openedChatName) return false
     const expectedChatName = openedChatName.toLowerCase()
 
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const currentChatName = cleanText(getCurrentChat()?.name).toLowerCase()
-      if (currentChatName === expectedChatName && prepareComposerDraftText(replyText)) {
+      const currentChat = getCurrentChat()
+      const currentChatName = cleanText(currentChat?.name).toLowerCase()
+      if (currentChat?.kind === "group" && currentChatName === expectedChatName && prepareComposerDraftText(replyText)) {
         window.setTimeout(() => {
           const composer = findComposer()
-          const latestChatName = cleanText(getCurrentChat()?.name).toLowerCase()
-          if (latestChatName === expectedChatName && composerText(composer) === cleanText(replyText)) {
+          const latestChat = getCurrentChat()
+          const latestChatName = cleanText(latestChat?.name).toLowerCase()
+          if (latestChat?.kind === "group" && latestChatName === expectedChatName && composerText(composer) === cleanText(replyText)) {
             focusComposerAtEnd(composer)
           }
         }, 180)
@@ -1165,9 +1206,9 @@
     return false
   }
 
-  function openEnquirySenderChat(enquiry) {
+  function openEnquiryGroupChat(enquiry) {
     if (enquiryChatOpenPromise || !acquireEnquiryOpenLock()) return enquiryChatOpenPromise || Promise.resolve(false)
-    const openPromise = performOpenEnquirySenderChat(enquiry)
+    const openPromise = performOpenEnquiryGroupChat(enquiry)
     enquiryChatOpenPromise = openPromise
     const release = () => {
       if (enquiryChatOpenPromise === openPromise) enquiryChatOpenPromise = null
@@ -1756,12 +1797,9 @@
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
-      const senderContact = enquirySenderContact(enquiry)
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${amended ? " is-amended" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
-          ${senderContact
-            ? `<button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp chat with ${escapeHtml(sender)} and type ${escapeHtml(enquiryReplyText(enquiry))}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`
-            : `<button class="fcuno-wa-spc-enquiry-chat is-unavailable" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" disabled title="No unique phonebook mobile number for ${escapeHtml(sender)}" aria-label="No WhatsApp chat number for ${escapeHtml(sender)}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>`}
+          <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and type ${escapeHtml(enquiryReplyText(enquiry))}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             ${amended ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiry.revisionNumber || enquiry.revision_number || "")}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}</span>` : ""}
@@ -2231,7 +2269,7 @@
         const enquiry = state.enquiries.find((item) => item.id === button.dataset.id)
         if (!enquiry) return
         if (recordEnquirySeen(enquiry)) saveState()
-        void openEnquirySenderChat(enquiry)
+        void openEnquiryGroupChat(enquiry)
       })
     })
     host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
@@ -2273,6 +2311,7 @@
       enquiryTextForIds,
       enquirySenderContact,
       enquiryReplyText,
+      searchAndOpenExactGroup,
       loadCrudeWatch,
       insertComposerText,
       loadEnquiries,

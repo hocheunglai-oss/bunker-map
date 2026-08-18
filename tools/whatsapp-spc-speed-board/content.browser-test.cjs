@@ -10,6 +10,7 @@ const enquiryChatButton = fs.readFileSync(path.join(__dirname, "spc-enquiry-chat
 const enquiry = "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts"
 const enquiry2 = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 const enquiry3 = "a keiga / 9385453 / 3 oct / vlsfo 260mts"
+const enquiryReplyGroup = "Otto (FCBHK) SG Enqs"
 const expected = `Good day, please quote for the following enquiries.\n\n${enquiry}`
 const sharedFeedStartedAt = "2026-07-23T09:20:00.000Z"
 const crudeWatch = {
@@ -38,9 +39,9 @@ const html = `<!doctype html>
       #newChatDrawer, #phoneDialer { display: none; margin: 8px 16px; padding: 10px; border: 1px solid #ddd; }
       #phoneNumberInput { min-height: 24px; padding: 6px; border: 1px solid #ccc; }
       #phoneDialerResult { display: none; padding: 12px; cursor: pointer; border-top: 1px solid #eee; }
-      #chatHeading, #commonHeading, #commonGroupRow, #renamedRow, #senderRow, #ottoSenderRow { display: none; }
+      #chatHeading, #commonHeading, #commonGroupRow, #renamedRow, #senderRow, #ottoSenderRow, #enquiryGroupRow { display: none; }
       #chatHeading, #commonHeading { padding: 8px 16px; }
-      #renamedRow, #senderRow, #ottoSenderRow, #commonGroupRow { padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
+      #renamedRow, #senderRow, #ottoSenderRow, #enquiryGroupRow, #commonGroupRow { padding: 16px; cursor: pointer; border-top: 1px solid #eee; }
       #main { width: 720px; min-height: 540px; }
       header { height: 56px; border-bottom: 1px solid #ddd; display: flex; align-items: center; padding: 0 16px; }
       .messages { height: 360px; background: #f6efe5; }
@@ -80,6 +81,9 @@ const html = `<!doctype html>
       </div>
       <div id="ottoSenderRow" role="row" data-testid="list-item-otto-sender">
         <div role="gridcell"><div data-testid="cell-frame-container" onclick="if (event.isTrusted || window.nativeClickInProgress) window.setChatTitle('+852 9000 0002')"><span title="+852 9000 0002">+852 9000 0002</span></div></div>
+      </div>
+      <div id="enquiryGroupRow" role="row" data-testid="list-item-enquiry-group">
+        <div role="gridcell"><div data-testid="cell-frame-container" onclick="if (event.isTrusted || window.nativeClickInProgress) window.setChatTitle('Otto (FCBHK) SG Enqs', 'group')"><span title="Otto (FCBHK) SG Enqs">Otto (FCBHK) SG Enqs</span></div></div>
       </div>
       <div id="commonHeading" role="row"><h2>Groups in common</h2></div>
       <div id="commonGroupRow" role="row" data-testid="list-item-common-group"><div role="gridcell"><div data-testid="cell-frame-container"><span title="Shared group">Shared group</span></div></div></div>
@@ -135,10 +139,11 @@ const html = `<!doctype html>
           feedStartedAt: "2026-06-30T00:00:00Z"
         }
       };
-      window.setChatTitle = (name) => {
+      window.setChatTitle = (name, kind = "contact") => {
         const title = document.getElementById("chatTitle");
         title.textContent = name;
         title.setAttribute("title", name);
+        document.getElementById("profileDetails").setAttribute("aria-label", kind === "group" ? "群組資訊" : "個人檔案詳情");
       };
       document.getElementById("phoneNumberInput").addEventListener("input", (event) => {
         if (!event.isTrusted && event.inputType === "insertText" && event.data) {
@@ -167,11 +172,13 @@ const html = `<!doctype html>
         const showRenamed = value.includes("otto tone");
         const showSender = value.includes("+6590000001");
         const showOttoSender = value.includes("+85290000002");
-        const showDirect = showRenamed || showSender || showOttoSender;
+        const showEnquiryGroup = value === ${JSON.stringify(enquiryReplyGroup.toLowerCase())};
+        const showDirect = showRenamed || showSender || showOttoSender || showEnquiryGroup;
         document.getElementById("chatHeading").style.display = showDirect ? "block" : "none";
         document.getElementById("renamedRow").style.display = showRenamed ? "block" : "none";
         document.getElementById("senderRow").style.display = showSender ? "block" : "none";
         document.getElementById("ottoSenderRow").style.display = showOttoSender ? "block" : "none";
+        document.getElementById("enquiryGroupRow").style.display = showEnquiryGroup ? "block" : "none";
         document.getElementById("commonHeading").style.display = showSender || showOttoSender ? "block" : "none";
         document.getElementById("commonGroupRow").style.display = showSender || showOttoSender ? "block" : "none";
       };
@@ -442,11 +449,12 @@ async function main() {
         window.senderOpenDocument = document.documentElement
         window.setChatTitle("Other Chat")
         document.getElementById("search").value = ""
-        document.getElementById("senderRow").style.display = "none"
+        document.getElementById("enquiryGroupRow").style.display = "none"
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
       await page.waitForFunction(() => (
-        document.getElementById("chatTitle")?.getAttribute("title") === "Barry Local Alias" &&
+        document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
+        document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
         window.editorModel === "Re: Taisei Maru No.15, " &&
         document.getElementById("search")?.value === "" &&
         document.activeElement === document.getElementById("composer")
@@ -460,21 +468,21 @@ async function main() {
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
         dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
-        searchedPhone: window.searchValues.includes("+6590000001"),
+        searchedGroup: window.searchValues.includes("otto (fcbhk) sg enqs"),
         nativeReplaceCount: window.nativeReplaceCount,
         nativeClickCount: window.nativeClickCount,
       }))
       assert.equal(page.url(), senderOpenBeforeUrl)
       assert.deepEqual(senderOpenResult, {
         sameDocument: true,
-        chatTitle: "Barry Local Alias",
+        chatTitle: "Otto (FCBHK) SG Enqs",
         searchText: "",
         composerText: "Re: Taisei Maru No.15, ",
         composerFocused: true,
         sentCount: 0,
         dialerOpenCount: 0,
         dialerValue: "",
-        searchedPhone: true,
+        searchedGroup: true,
         nativeReplaceCount: 2,
         nativeClickCount: 1,
       })
@@ -491,7 +499,8 @@ async function main() {
         button.click()
       })
       await page.waitForFunction(() => (
-        document.getElementById("chatTitle")?.getAttribute("title") === "Barry Local Alias" &&
+        document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
+        document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
         window.editorModel === "Re: Taisei Maru No.15, " &&
         window.nativeInsertCount === 1
       ), { timeout: 5000 })
@@ -531,7 +540,8 @@ async function main() {
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-2']", { force: true })
       await page.waitForFunction(() => (
-        document.getElementById("chatTitle")?.getAttribute("title") === "+852 9000 0002" &&
+        document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
+        document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
         window.editorModel === "Re: Shan Ren, " &&
         document.activeElement === document.getElementById("composer")
       ), { timeout: 5000 })
@@ -542,16 +552,16 @@ async function main() {
         sentCount: window.sentMessages.length,
         dialerOpenCount: window.dialerOpenCount,
         dialerValue: document.getElementById("phoneNumberInput")?.textContent || "",
-        searchedPhone: window.searchValues.includes("+85290000002"),
+        searchedGroup: window.searchValues.includes("otto (fcbhk) sg enqs"),
       }))
       assert.deepEqual(unsavedSenderOpenResult, {
-        chatTitle: "+852 9000 0002",
+        chatTitle: "Otto (FCBHK) SG Enqs",
         composerText: "Re: Shan Ren, ",
         composerFocused: true,
         sentCount: 0,
         dialerOpenCount: 0,
         dialerValue: "",
-        searchedPhone: true,
+        searchedGroup: true,
       })
 
       await page.evaluate(() => {
