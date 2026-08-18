@@ -67,6 +67,24 @@ test("sign-in cells distinguish on-time, late, and automatic AM leave", () => {
   assert.match(styles, /td\.onTimeCell[\s\S]*?#067647/)
 })
 
+test("half-day leave stacks the working-session punches in chronological order", () => {
+  assert.match(
+    client,
+    /function halfDayPunchValue[\s\S]*?direction === "in"[\s\S]*?absenceEntryForPortion\(item, "pm"\)/,
+  )
+  assert.match(
+    client,
+    /direction === "out"[\s\S]*?absenceEntryForPortion\(item, "am"\)[\s\S]*?item\.automaticAmLeave/,
+  )
+  assert.match(
+    client,
+    /\[item\.effectiveSignIn, item\.effectiveSignOut\][\s\S]*?\.join\("\\n"\)/,
+  )
+  assert.match(client, /return item\.early \? styles\.lateCell : styles\.onTimeCell/)
+  assert.match(client, /return item\.late \? styles\.lateCell : styles\.onTimeCell/)
+  assert.match(styles, /\.cellButton[\s\S]*?white-space: pre-line/)
+})
+
 test("Monthly view includes required Excel totals, confirmation, and reminders", () => {
   for (const label of [
     "ALS",
@@ -173,6 +191,18 @@ test("manual IN and OUT corrections are atomic, audited replacements", () => {
   assert.match(migration, /Manual attendance editor correction/)
   assert.match(migration, /to service_role/)
   assert.match(migration, /from public, anon, authenticated, service_role/)
+})
+
+test("PM leave permits an audited morning sign-out while normal days retain 17:00", () => {
+  const attendanceData = source("../lib/attendanceData.ts")
+  const migration = source("../supabase/migrations/20260818023111_support_half_day_attendance_punches.sql")
+  assert.match(attendanceData, /const hasAfternoonLeave/)
+  assert.match(attendanceData, /checkType !== "OffDuty" \|\|[\s\S]*?hasAfternoonLeave/)
+  assert.match(attendanceData, /const permitsMorningSignOut/)
+  assert.match(migration, /p_leave_portion = 'pm'/)
+  assert.match(migration, /Sign-out before 17:00 requires PM leave/)
+  assert.match(migration, /from public, anon, authenticated, service_role/)
+  assert.match(migration, /to service_role/)
 })
 
 test("day editor gives HOME and OS auditable AM, PM, and full-day portions", () => {

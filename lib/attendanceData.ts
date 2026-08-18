@@ -612,6 +612,7 @@ function buildAttendanceRecord(
   const absenceLeaves = personLeaves.filter(
     (entry) => entry.code !== "HO" && entry.code !== "OS",
   )
+  const hasAfternoonLeave = absenceLeaves.some((entry) => entry.portion === "pm")
   const recordedWorkMode = personLeaves.find(
     (entry) => entry.code === "HO" || entry.code === "OS",
   )
@@ -647,6 +648,7 @@ function buildAttendanceRecord(
     if (
       replacement?.punchTime &&
       (checkType !== "OffDuty" ||
+        hasAfternoonLeave ||
         isOfficialAttendanceSignOut(workDate, replacement.punchTime))
     ) {
       return replacement.punchTime
@@ -656,6 +658,7 @@ function buildAttendanceRecord(
         (punch) =>
           punch.checkType === checkType &&
           (checkType !== "OffDuty" ||
+            hasAfternoonLeave ||
             isOfficialAttendanceSignOut(workDate, punch.punchTime)),
       )
       .sort((left, right) => Date.parse(left.punchTime) - Date.parse(right.punchTime))
@@ -2103,7 +2106,16 @@ export async function saveAttendanceDayEdit(
   const signOutTime = updateSignOut
     ? parseCorrectionTime(row.signOutTime, "Sign-out time")
     : null
-  if (signOutTime && !isOfficialAttendanceSignOut(workDate, signOutTime)) {
+  const permitsMorningSignOut =
+    row.leaveEnabled === true &&
+    leavePortion === "pm" &&
+    leaveCode !== "HO" &&
+    leaveCode !== "OS"
+  if (
+    signOutTime &&
+    !isOfficialAttendanceSignOut(workDate, signOutTime) &&
+    !permitsMorningSignOut
+  ) {
     throw new AttendanceValidationError(
       "Official sign-out time cannot be earlier than 17:00.",
     )

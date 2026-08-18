@@ -610,6 +610,32 @@ function editableAttendanceEntry(
   return leaveEntries(item).find((entry) => entry.code === "HO" || entry.code === "OS")
 }
 
+function absenceEntryForPortion(
+  item: ApiAttendanceDailyItem,
+  portion: "am" | "pm",
+) {
+  return leaveEntries(item).find(
+    (entry) =>
+      entry.portion === portion && entry.code !== "HO" && entry.code !== "OS",
+  )
+}
+
+function halfDayPunchValue(
+  item: ApiAttendanceDailyItem,
+  direction: "in" | "out",
+) {
+  const showMorningPair =
+    direction === "in" && Boolean(absenceEntryForPortion(item, "pm"))
+  const showAfternoonPair =
+    direction === "out" &&
+    (Boolean(absenceEntryForPortion(item, "am")) || item.automaticAmLeave)
+  if (!showMorningPair && !showAfternoonPair) return ""
+  return [item.effectiveSignIn, item.effectiveSignOut]
+    .filter((value): value is string => Boolean(value))
+    .map(displayTime)
+    .join("\n")
+}
+
 function recordCellValue(
   item: ApiAttendanceDailyItem | undefined,
   direction: "in" | "out",
@@ -624,6 +650,8 @@ function recordCellValue(
     (item.workMode === "home-office" || item.workMode === "business-trip")
   ) return ""
   if (direction === "in" && item.automaticAmLeave) return "AM LEAVE"
+  const halfDayPunches = halfDayPunchValue(item, direction)
+  if (halfDayPunches) return halfDayPunches
   const punch = direction === "in" ? item.effectiveSignIn : item.effectiveSignOut
   if (punch) return displayTime(punch)
   const status = String(item.status || "").toUpperCase()
@@ -655,6 +683,17 @@ function recordCellTone(
     item.workModeSource === "leave" &&
     (item.workMode === "home-office" || item.workMode === "business-trip")
   ) return ""
+  const morningPair =
+    direction === "in" && Boolean(absenceEntryForPortion(item, "pm"))
+  if (morningPair && (item.effectiveSignIn || item.effectiveSignOut)) {
+    return item.early ? styles.lateCell : styles.onTimeCell
+  }
+  const afternoonPair =
+    direction === "out" &&
+    (Boolean(absenceEntryForPortion(item, "am")) || item.automaticAmLeave)
+  if (afternoonPair && (item.effectiveSignIn || item.effectiveSignOut)) {
+    return item.late ? styles.lateCell : styles.onTimeCell
+  }
   if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
@@ -1259,7 +1298,16 @@ export default function AttendanceRecordClient() {
       ) {
         throw new Error("Sign-out time must be later than sign-in time.")
       }
-      if (leaveDraft.signOutTime && leaveDraft.signOutTime < "17:00") {
+      const permitsMorningSignOut =
+        leaveDraft.leaveEnabled &&
+        leaveDraft.portion === "pm" &&
+        leaveDraft.code !== "HO" &&
+        leaveDraft.code !== "OS"
+      if (
+        leaveDraft.signOutTime &&
+        leaveDraft.signOutTime < "17:00" &&
+        !permitsMorningSignOut
+      ) {
         throw new Error("Official sign-out time cannot be earlier than 17:00.")
       }
       await postAttendance("save-day-edit", {
@@ -2015,7 +2063,14 @@ export default function AttendanceRecordClient() {
                 <input
                   type="time"
                   aria-label="Sign out time"
-                  min="17:00"
+                  min={
+                    leaveDraft.leaveEnabled &&
+                    leaveDraft.portion === "pm" &&
+                    leaveDraft.code !== "HO" &&
+                    leaveDraft.code !== "OS"
+                      ? undefined
+                      : "17:00"
+                  }
                   value={leaveDraft.signOutTime}
                   onChange={(event) => setLeaveDraft((draft) => draft
                     ? { ...draft, signOutTime: event.target.value }

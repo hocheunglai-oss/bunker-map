@@ -303,6 +303,8 @@
   color: inherit;
   cursor: pointer;
   font: inherit;
+  white-space: pre-line;
+  line-height: 1.45;
 }
 
 .cellButton:focus-visible {
