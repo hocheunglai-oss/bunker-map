@@ -60,4 +60,44 @@ test("the SPC download page explains how to update the loaded unpacked folder", 
 
   assert.match(page, /replace the files inside the same fcuno-spc-whatsapp-board folder that Chrome already uses/)
   assert.match(page, /confirm the new version is shown, then refresh WhatsApp Web/)
+  assert.match(page, /checks its installed version automatically/)
+  assert.match(page, /red UPDATE REQUIRED bar/)
+})
+
+test("publishes a no-store version contract for every installed SPC board", () => {
+  const route = readFileSync(
+    join(process.cwd(), "app/api/spc/chrome-extension/version/route.ts"),
+    "utf8",
+  )
+  const background = readFileSync(
+    join(process.cwd(), "tools/whatsapp-spc-speed-board/background.js"),
+    "utf8",
+  )
+
+  assert.match(route, /latestVersion: SPC_SPEED_BOARD_VERSION/)
+  assert.match(route, /requiredVersion: SPC_SPEED_BOARD_VERSION/)
+  assert.match(route, /Cache-Control.*no-store/)
+  assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/)
+  assert.match(background, /compareVersions\(installedVersion, requiredVersion\) < 0/)
+  assert.match(background, /load-spc-extension-version/)
+  assert.match(background, /SPC Speed Board update required/)
+  assert.match(background, /spc-update-notified-/)
+})
+
+test("shows a persistent update warning without changing the normal board size", () => {
+  const content = readFileSync(
+    join(process.cwd(), "tools/whatsapp-spc-speed-board/content.js"),
+    "utf8",
+  )
+  const styles = readFileSync(
+    join(process.cwd(), "tools/whatsapp-spc-speed-board/styles.css"),
+    "utf8",
+  )
+
+  assert.match(content, /UPDATE REQUIRED/)
+  assert.match(content, /VERSION CHECK OFFLINE/)
+  assert.match(content, /VERSION_REFRESH_MS = 5 \* 60 \* 1000/)
+  assert.match(styles, /\.fcuno-wa-spc-shell\.has-version-alert/)
+  assert.match(styles, /grid-template-rows: 50px 38px minmax\(0, 1fr\)/)
+  assert.match(styles, /\.fcuno-wa-spc-icon\.is-update-required/)
 })

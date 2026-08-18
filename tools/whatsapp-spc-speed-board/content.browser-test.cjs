@@ -133,6 +133,7 @@ const html = `<!doctype html>
       window.__FCUNO_WA_SPC_ENABLE_TEST_API__ = true;
       const searchParams = new URLSearchParams(window.location.search);
       const firstRun = searchParams.get("firstRun") === "1";
+      const staleVersion = searchParams.get("staleVersion") === "1";
       window.invalidateStorageOnRead = searchParams.get("invalidateStorage") === "1";
       window.storageData = firstRun ? {} : {
         "fcuno-wa-spc-board-v1": {
@@ -191,6 +192,19 @@ const html = `<!doctype html>
           lastError: null,
           getURL: (asset) => new URL(asset, window.location.href).href,
           sendMessage: (message, callback) => {
+            if (message && message.type === "load-spc-extension-version") {
+              callback({
+                ok: true,
+                status: {
+                  installedVersion: staleVersion ? "0.6.2" : "0.6.3",
+                  latestVersion: "0.6.3",
+                  requiredVersion: "0.6.3",
+                  updateRequired: staleVersion,
+                  updatePageUrl: "https://spc.fcuno.com/chrome"
+                }
+              });
+              return;
+            }
             if (message && message.type === "load-spc-enquiries") {
               const enquiries = [
                 {
@@ -350,6 +364,20 @@ async function main() {
         crudeResult.title,
         /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
       )
+      assert.equal(await page.locator(".fcuno-wa-spc-version-alert").count(), 0)
+
+      const staleVersionPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      await staleVersionPage.goto(`${url}?staleVersion=1`, { waitUntil: "domcontentloaded" })
+      await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
+      assert.equal(
+        (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
+        "UPDATE REQUIRED Installed v0.6.2 · Required v0.6.3 UPDATE",
+      )
+      assert.equal(
+        await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
+        "https://spc.fcuno.com/chrome",
+      )
+      await staleVersionPage.close()
 
       await page.locator("#fcuno-wa-spc-board [data-action='add-current'][data-list='buyer']").click()
       await page.waitForFunction(() => {

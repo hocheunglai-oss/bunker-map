@@ -3,7 +3,10 @@ const SPC_ENQUIRIES_URL =
   `https://spc.fcuno.com/api/spc/enquiries?limit=250&scope=shared&createdAfter=${encodeURIComponent(SPC_SHARED_FEED_STARTED_AT)}`
 const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
 const BRENT_API_URL = "https://spc.fcuno.com/api/market/brent"
+const SPC_EXTENSION_VERSION_URL = "https://spc.fcuno.com/api/spc/chrome-extension/version"
+const SPC_EXTENSION_UPDATE_PAGE_URL = "https://spc.fcuno.com/chrome"
 const CRUDE_CACHE_TTL_MS = 30000
+const VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const MAX_CRUDE_AGE_MS = 60 * 60 * 1000
 const SPC_ENQUIRY_LIMIT = 250
 const NETWORK_TIMEOUT_MS = 8000
@@ -13,6 +16,7 @@ let enquiryCache = { payload: null, cursor: "", sessionKey: "" }
 let enquiryPromise = null
 let senderContactCache = { sessionKey: "", byUsername: new Map() }
 let senderContactPromise = null
+let versionCache = { at: 0, payload: null }
 const debuggerQueues = new Map()
 
 async function fetchWithTimeout(url, options = {}) {
@@ -226,6 +230,69 @@ async function fetchCrudeWatch() {
   return payload
 }
 
+function versionParts(value) {
+  return String(value || "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => (Number.isFinite(part) && part >= 0 ? part : 0))
+}
+
+function compareVersions(first, second) {
+  const left = versionParts(first)
+  const right = versionParts(second)
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] || 0) - (right[index] || 0)
+    if (difference !== 0) return difference > 0 ? 1 : -1
+  }
+  return 0
+}
+
+async function notifyExtensionUpdate(status) {
+  if (!status?.updateRequired || !chrome.notifications?.create || !chrome.storage?.local) return
+  const notificationKey = `spc-update-notified-${status.requiredVersion}`
+  const stored = await chromeCall((callback) => chrome.storage.local.get([notificationKey], callback)).catch(() => ({}))
+  if (stored?.[notificationKey]) return
+
+  await chromeCall((callback) => chrome.notifications.create(notificationKey, {
+    type: "basic",
+    iconUrl: "spc-sidebar-logo.png",
+    title: "SPC Speed Board update required",
+    message: `Installed v${status.installedVersion}. Update to v${status.requiredVersion} before trading.`,
+  }, callback)).catch(() => {})
+  await chromeCall((callback) => chrome.storage.local.set({ [notificationKey]: true }, callback)).catch(() => {})
+}
+
+async function fetchExtensionVersionStatus() {
+  const now = Date.now()
+  if (versionCache.payload && now - versionCache.at < VERSION_CACHE_TTL_MS) {
+    return versionCache.payload
+  }
+
+  const response = await fetchWithTimeout(SPC_EXTENSION_VERSION_URL, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data?.message || `Version check failed: ${response.status}`)
+
+  const installedVersion = chrome.runtime.getManifest().version
+  const latestVersion = String(data.latestVersion || "").trim()
+  const requiredVersion = String(data.requiredVersion || latestVersion).trim()
+  if (!latestVersion || !requiredVersion) throw new Error("Version service returned an invalid response.")
+
+  const payload = {
+    installedVersion,
+    latestVersion,
+    requiredVersion,
+    updateRequired: compareVersions(installedVersion, requiredVersion) < 0,
+    updatePageUrl: String(data.updatePageUrl || SPC_EXTENSION_UPDATE_PAGE_URL),
+  }
+  versionCache = { at: now, payload }
+  await notifyExtensionUpdate(payload)
+  return payload
+}
+
 function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT, activeIds) {
   const byId = new Map()
   ;[...(current || []), ...(changes || [])].forEach((enquiry) => {
@@ -371,6 +438,19 @@ async function fetchSpcEnquiryChatContacts(usernames, sessionKey = enquiryCache.
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false
+
+  if (message.type === "load-spc-extension-version") {
+    fetchExtensionVersionStatus()
+      .then((status) => sendResponse({ ok: true, status }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "Unable to check the extension version.",
+        })
+      })
+
+    return true
+  }
 
   if (message.type === "notify-new-enquiries") {
     const count = Math.max(Number(message.count || 0), 1)

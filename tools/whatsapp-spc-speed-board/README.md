@@ -1,6 +1,6 @@
 # FCUNO SPC WhatsApp Board
 
-Current version: `0.6.2`.
+Current version: `0.6.3`.
 
 Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 
@@ -29,6 +29,12 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Saved Supplier/Buyer shortcuts keep the exact local WhatsApp chat or group name seen by that trader. Adding a shortcut never opens Contact Info, reads a phone number, or consults the FCUNO phonebook.
 - Enquiry-sender buttons receive one normalized WhatsApp number from SPC. They use native keyboard input in WhatsApp's normal left search, require one direct-chat result, open it with a native click, verify the opened header, and only then prefill the reply. There is no sender-name or direct-link fallback.
 - After updating the unpacked extension, reload the extension and WhatsApp Web. An invalidated previous content script now shuts down cleanly and releases the page for the replacement board.
+- Checks the required production version every five minutes. A persistent red
+  `UPDATE REQUIRED` bar identifies an old unpacked copy; an amber warning shows
+  when the version service cannot be reached, so stale installations do not
+  remain silent.
+- Shows a one-time Chrome notification for each required release and keeps a red
+  exclamation indicator visible when an outdated board is collapsed.
 
 ## Install
 

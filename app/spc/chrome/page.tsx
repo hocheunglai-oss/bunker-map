@@ -49,6 +49,7 @@ const STEPS: readonly Step[] = [
   {
     title: "Update",
     details: [
+      "The board checks its installed version automatically. A red UPDATE REQUIRED bar means that computer is still running an old copy.",
       "Download and extract the new ZIP, then replace the files inside the same fcuno-spc-whatsapp-board folder that Chrome already uses.",
       "Go to chrome://extensions, click Reload on FCUNO SPC WhatsApp Board, confirm the new version is shown, then refresh WhatsApp Web.",
     ],

@@ -16,6 +16,8 @@
   const ENQUIRY_OPEN_LOCK_TTL_MS = 12000
   const ENQUIRY_OPEN_RELEASE_DELAY_MS = 700
   const CRUDE_REFRESH_MS = 15000
+  const VERSION_REFRESH_MS = 5 * 60 * 1000
+  const EXTENSION_UPDATE_PAGE_URL = "https://spc.fcuno.com/chrome"
   const CONTACT_MENU_AUTO_HIDE_MS = 1800
   const GENERIC_CHAT_CONTROL_TEXTS = new Set([
     "profile details",
@@ -66,6 +68,8 @@
     enquiryError: "",
     crude: null,
     crudeError: "",
+    extensionVersionStatus: null,
+    extensionVersionError: "",
     dragging: null,
     draggingType: "",
     draggingEnquiryIds: [],
@@ -74,6 +78,7 @@
   let unreadTimer = 0
   let enquiryTimer = 0
   let crudeTimer = 0
+  let versionTimer = 0
   let templateSaveTimer = 0
   let contactMenuHideTimer = 0
   let lastEnquiryFingerprint = ""
@@ -114,11 +119,13 @@
     if (unreadTimer) window.clearInterval(unreadTimer)
     if (enquiryTimer) window.clearInterval(enquiryTimer)
     if (crudeTimer) window.clearInterval(crudeTimer)
+    if (versionTimer) window.clearInterval(versionTimer)
     if (templateSaveTimer) window.clearTimeout(templateSaveTimer)
     if (contactMenuHideTimer) window.clearTimeout(contactMenuHideTimer)
     unreadTimer = 0
     enquiryTimer = 0
     crudeTimer = 0
+    versionTimer = 0
     templateSaveTimer = 0
     contactMenuHideTimer = 0
     window.removeEventListener("beforeunload", handleBeforeUnload)
@@ -158,6 +165,7 @@
     if (document.visibilityState === "hidden") return
     safeRun(loadEnquiries)
     safeRun(loadCrudeWatch)
+    safeRun(loadExtensionVersionStatus)
     safeRun(refreshUnreadIndicators)
   }
 
@@ -1062,6 +1070,33 @@
     }
   }
 
+  function loadExtensionVersionStatus() {
+    const previousStatus = JSON.stringify(state.extensionVersionStatus)
+    const previousError = state.extensionVersionError
+    const sent = sendRuntimeMessage({ type: "load-spc-extension-version" }, (response, runtimeError) => {
+      if (runtimeError || !response || !response.ok || !response.status) {
+        state.extensionVersionStatus = null
+        state.extensionVersionError = response?.message || runtimeError || "Version check unavailable."
+      } else {
+        state.extensionVersionStatus = response.status
+        state.extensionVersionError = ""
+      }
+
+      if (
+        previousStatus !== JSON.stringify(state.extensionVersionStatus) ||
+        previousError !== state.extensionVersionError
+      ) {
+        renderWhenIdle()
+      }
+    })
+
+    if (!sent) {
+      state.extensionVersionStatus = null
+      state.extensionVersionError = runtimeUnavailableMessage()
+      if (previousStatus !== "null" || previousError !== state.extensionVersionError) renderWhenIdle()
+    }
+  }
+
   function visibleEnquiries() {
     return state.enquiries.filter((enquiry) => {
       if (state.hiddenEnquiryIds[enquiry.id]) return false
@@ -1907,6 +1942,32 @@
     render()
   }
 
+  function renderExtensionVersionAlert() {
+    const status = state.extensionVersionStatus
+    if (status?.updateRequired) {
+      const updatePageUrl = cleanText(status.updatePageUrl) || EXTENSION_UPDATE_PAGE_URL
+      return `
+        <div class="fcuno-wa-spc-version-alert is-required" role="alert">
+          <strong>UPDATE REQUIRED</strong>
+          <span>Installed v${escapeHtml(status.installedVersion)} · Required v${escapeHtml(status.requiredVersion)}</span>
+          <a href="${escapeHtml(updatePageUrl)}" target="_blank" rel="noreferrer">UPDATE</a>
+        </div>
+      `
+    }
+
+    if (state.extensionVersionError) {
+      return `
+        <div class="fcuno-wa-spc-version-alert is-offline" role="status">
+          <strong>VERSION CHECK OFFLINE</strong>
+          <span>${escapeHtml(state.extensionVersionError)}</span>
+          <a href="${EXTENSION_UPDATE_PAGE_URL}" target="_blank" rel="noreferrer">CHECK</a>
+        </div>
+      `
+    }
+
+    return ""
+  }
+
   function render() {
     if (extensionContextStopped) return
     renderPending = false
@@ -1917,13 +1978,25 @@
       document.body.appendChild(host)
     }
 
+    const versionAlert = renderExtensionVersionAlert()
+    const versionToggleClass = state.extensionVersionStatus?.updateRequired
+      ? " is-update-required"
+      : state.extensionVersionError
+        ? " is-version-offline"
+        : ""
+    const toggleLabel = state.collapsed && state.extensionVersionStatus?.updateRequired
+      ? "!"
+      : state.collapsed
+        ? "‹"
+        : "›"
     host.innerHTML = `
-      <div class="fcuno-wa-spc-shell${state.collapsed ? " is-collapsed" : ""}">
+      <div class="fcuno-wa-spc-shell${state.collapsed ? " is-collapsed" : ""}${versionAlert ? " has-version-alert" : ""}">
         <div class="fcuno-wa-spc-head">
           <img class="fcuno-wa-spc-logo" src="${escapeHtml(LOGO_SRC)}" alt="Singapore Purchasing Center" />
           ${renderCrudeWatch()}
-          <button class="fcuno-wa-spc-icon" type="button" data-action="toggle">${state.collapsed ? "‹" : "›"}</button>
+          <button class="fcuno-wa-spc-icon${versionToggleClass}" type="button" data-action="toggle" title="${state.extensionVersionStatus?.updateRequired ? "SPC Speed Board update required" : state.extensionVersionError ? "SPC Speed Board version check offline" : "Toggle SPC Speed Board"}">${toggleLabel}</button>
         </div>
+        ${versionAlert}
         <div class="fcuno-wa-spc-main">
           <div class="fcuno-wa-spc-contacts">
             <div class="fcuno-wa-spc-quick">
@@ -2346,6 +2419,7 @@
     render()
     safeRun(loadEnquiries)
     safeRun(loadCrudeWatch)
+    safeRun(loadExtensionVersionStatus)
     safeRun(refreshUnreadIndicators)
     window.setTimeout(() => safeRun(trySendPending), 650)
     unreadTimer = window.setInterval(() => {
@@ -2357,6 +2431,9 @@
     crudeTimer = window.setInterval(() => {
       if (document.visibilityState !== "hidden") safeRun(loadCrudeWatch)
     }, CRUDE_REFRESH_MS)
+    versionTimer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") safeRun(loadExtensionVersionStatus)
+    }, VERSION_REFRESH_MS)
   }
 
   function handleBeforeUnload() {
