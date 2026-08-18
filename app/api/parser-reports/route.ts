@@ -7,13 +7,14 @@ import {
 } from "@/lib/adminAudit"
 import { parserReportAccessPage } from "@/lib/parserReportAccess"
 import {
-  acknowledgedParserReportMetadata,
   asParserReportMetadata,
+  completedParserReportMetadata,
   pendingParserReportMetadata,
   parserReportCounts,
   parserReportFromRow,
+  parserReportReviewStage,
   parserReportWithState,
-  readyParserReportMetadata,
+  queuedAiParserReportMetadata,
   type ParserReportRow,
   type ParserReportSource,
 } from "@/lib/parserReports"
@@ -208,40 +209,82 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Report source is required." }, { status: 400 })
     }
 
-    if (payload.action === "review" || payload.action === "acknowledge") {
+    if (
+      payload.action === "submit-ai" ||
+      payload.action === "review" ||
+      payload.action === "acknowledge"
+    ) {
+      const action = payload.action
       const id = asString(payload.id, 100)
-      const correctedOutput = asString(payload.correctedOutput)
-      if (!id || !correctedOutput) {
-        return NextResponse.json({ message: "Report and corrected output are required." }, { status: 400 })
+      if (!id) {
+        return NextResponse.json({ message: "Parser report is required." }, { status: 400 })
       }
       const { supabase } = await getSessionAndClient(source, request, "edit", true)
       const { data: existing, error: existingError } = await supabase
         .from("parser_reports")
-        .select("metadata")
+        .select("metadata, corrected_output, note, status")
         .eq("id", id)
         .eq("source", source)
         .maybeSingle()
       if (existingError) throw existingError
       if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
+
+      const existingStatus = existing.status === "reviewed" ? "reviewed" : "new"
+      const existingMetadata = asParserReportMetadata(existing.metadata)
+      const reviewStage = parserReportReviewStage(existingMetadata, existingStatus)
+      const isLegacyAcknowledgement = action === "acknowledge" &&
+        existingStatus === "reviewed" &&
+        (existingMetadata.aiReviewState === "ready" || existingMetadata.pendingUserReview === true)
+
+      if (action === "submit-ai" && reviewStage !== "pending-user") {
+        return NextResponse.json(
+          { message: "This report is not pending your review." },
+          { status: 409 },
+        )
+      }
+      if (action === "review" && reviewStage !== "pending-ai") {
+        return NextResponse.json(
+          { message: "This report is not pending AI review." },
+          { status: 409 },
+        )
+      }
+      if (action === "acknowledge" && !isLegacyAcknowledgement) {
+        return NextResponse.json(
+          { message: "This legacy report is no longer awaiting acknowledgement." },
+          { status: 409 },
+        )
+      }
+
+      const submittedCorrectedOutput = asString(payload.correctedOutput)
+      const correctedOutput = action === "submit-ai"
+        ? submittedCorrectedOutput
+        : asString(existing.corrected_output)
+      if (!correctedOutput) {
+        return NextResponse.json({ message: "Corrected output is required." }, { status: 400 })
+      }
+
       const now = new Date().toISOString()
-      const acknowledging = payload.action === "acknowledge"
       const aiOutput = asString(payload.aiOutput)
       const reviewMetadata = aiOutput
         ? {
-            ...asParserReportMetadata(existing.metadata),
+            ...existingMetadata,
             aiFixOutput: aiOutput,
             aiSources: parserAiSources(payload.aiSources),
           }
-        : existing.metadata
+        : existingMetadata
+      const metadata = action === "submit-ai"
+        ? queuedAiParserReportMetadata(existingMetadata, now, correctedOutput)
+        : completedParserReportMetadata(reviewMetadata, now)
+      const note = payload.note === undefined
+        ? asString(existing.note, MAX_NOTE_LENGTH)
+        : asString(payload.note, MAX_NOTE_LENGTH)
       const { data, error } = await supabase
         .from("parser_reports")
         .update({
           corrected_output: correctedOutput,
-          note: asString(payload.note, MAX_NOTE_LENGTH),
-          metadata: acknowledging
-            ? acknowledgedParserReportMetadata(existing.metadata, now)
-            : readyParserReportMetadata(reviewMetadata, now, correctedOutput),
-          status: "reviewed",
+          note,
+          metadata,
+          status: action === "submit-ai" ? "new" : "reviewed",
           updated_at: now,
         })
         .eq("id", id)

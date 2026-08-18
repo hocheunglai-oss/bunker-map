@@ -4,11 +4,12 @@ import test from "node:test"
 import { ADMIN_PAGE_DEFINITIONS, getAdminPageByPath } from "../lib/adminPages"
 import { parserReportAccessPage } from "../lib/parserReportAccess"
 import {
-  acknowledgedParserReportMetadata,
+  completedParserReportMetadata,
   pendingParserReportMetadata,
   parserReportCounts,
+  parserReportReviewStage,
   parserReportWithState,
-  readyParserReportMetadata,
+  queuedAiParserReportMetadata,
   type ParserReportRecord,
 } from "../lib/parserReports"
 import { SPC_PAGE_DEFINITIONS, getDefaultSpcPermissionsForRole } from "../lib/spcPages"
@@ -35,55 +36,72 @@ const pendingReport: ParserReportRecord = {
   updatedAt: "2026-08-04T00:00:00.000Z",
 }
 
-test("a queued parser report remains unresolved until manual review", () => {
+test("legacy reports in the old inverted queue return to pending user review", () => {
   const report = parserReportWithState(pendingReport)
   assert.equal(report.resolved, false)
-  assert.equal(report.pendingAiReview, true)
-  assert.equal(report.readyForUserReview, false)
+  assert.equal(report.pendingAiReview, false)
+  assert.equal(report.readyForUserReview, true)
 })
 
-test("an AI-completed report remains visible until the user opens it", () => {
-  const readyReport = parserReportWithState({
+test("a user-corrected report moves to AI review and closes after AI completion", () => {
+  const queuedMetadata = queuedAiParserReportMetadata(
+    pendingParserReportMetadata(pendingReport.metadata),
+    "2026-08-11T01:00:00.000Z",
+    pendingReport.correctedOutput,
+  )
+  const queuedReport = parserReportWithState({
     ...pendingReport,
-    metadata: { pendingReview: false, pendingUserReview: true },
+    metadata: queuedMetadata,
+  })
+  const completedReport = parserReportWithState({
+    ...pendingReport,
+    metadata: completedParserReportMetadata(queuedMetadata, "2026-08-11T02:00:00.000Z"),
     status: "reviewed",
   })
-  const counts = parserReportCounts([readyReport])
+  const counts = parserReportCounts([completedReport])
 
-  assert.equal(readyReport.pendingAiReview, false)
-  assert.equal(readyReport.readyForUserReview, true)
+  assert.equal(queuedReport.pendingAiReview, true)
+  assert.equal(queuedReport.readyForUserReview, false)
+  assert.equal(completedReport.pendingAiReview, false)
+  assert.equal(completedReport.readyForUserReview, false)
   assert.equal(counts.pendingAiReview, 0)
-  assert.equal(counts.readyForUserReview, 1)
+  assert.equal(counts.readyForUserReview, 0)
+  assert.equal(counts.unresolved, 0)
 })
 
-test("report workflow metadata moves through pending, ready, and acknowledged states", () => {
+test("report metadata follows user review, AI review, and complete states", () => {
   const pending = pendingParserReportMetadata({ draft: { vesselName: "TEST" } })
-  const ready = readyParserReportMetadata(
+  const queued = queuedAiParserReportMetadata(
     { ...pending, manualVlsfoMaxRemarks: ["80cst max", "180cst max"] },
     "2026-08-11T01:00:00.000Z",
     "test / vlsfo 180CST MAX 100mts",
   )
-  const acknowledged = acknowledgedParserReportMetadata(ready, "2026-08-11T02:00:00.000Z")
+  const completed = completedParserReportMetadata(queued, "2026-08-11T02:00:00.000Z")
 
   assert.deepEqual(pending, {
     draft: { vesselName: "TEST" },
-    pendingReview: true,
-    pendingUserReview: false,
-    aiReviewState: "pending",
+    reviewWorkflowVersion: 2,
+    pendingReview: false,
+    pendingUserReview: true,
+    aiReviewState: "pending-user",
     aiReviewedAt: null,
     userReviewedAt: null,
   })
-  assert.equal(ready.pendingReview, false)
-  assert.equal(ready.pendingUserReview, true)
-  assert.equal(ready.aiReviewState, "ready")
-  assert.equal(ready.aiReviewedAt, "2026-08-11T01:00:00.000Z")
-  assert.deepEqual(ready.manualVlsfoMaxRemarks, ["180cst max"])
-  assert.equal(acknowledged.pendingUserReview, false)
-  assert.equal(acknowledged.aiReviewState, "acknowledged")
-  assert.equal(acknowledged.userReviewedAt, "2026-08-11T02:00:00.000Z")
+  assert.equal(parserReportReviewStage(pending, "new"), "pending-user")
+  assert.equal(queued.pendingReview, true)
+  assert.equal(queued.pendingUserReview, false)
+  assert.equal(queued.aiReviewState, "pending-ai")
+  assert.equal(queued.userReviewedAt, "2026-08-11T01:00:00.000Z")
+  assert.deepEqual(queued.manualVlsfoMaxRemarks, ["180cst max"])
+  assert.equal(parserReportReviewStage(queued, "new"), "pending-ai")
+  assert.equal(completed.pendingReview, false)
+  assert.equal(completed.pendingUserReview, false)
+  assert.equal(completed.aiReviewState, "complete")
+  assert.equal(completed.aiReviewedAt, "2026-08-11T02:00:00.000Z")
+  assert.equal(parserReportReviewStage(completed, "reviewed"), "complete")
 })
 
-test("review UI shows user queue left, AI queue right, and acknowledges without a completed-fix dialog", () => {
+test("review UI moves the human correction to AI and closes after AI review", () => {
   const panelSource = readFileSync(
     new URL("../components/ParserReportReviewPanel.tsx", import.meta.url),
     "utf8",
@@ -95,8 +113,12 @@ test("review UI shows user queue left, AI queue right, and acknowledges without 
   assert.ok(pendingAiPosition > pendingUserPosition)
   assert.doesNotMatch(panelSource, /Confirm Reviewed/)
   assert.doesNotMatch(panelSource, /Completed Parser Fix/)
-  assert.doesNotMatch(panelSource, /ready-user/)
-  assert.match(panelSource, /onClick=\{\(\) => void acknowledgeReadyReport\(report\)\}/)
+  assert.match(panelSource, /openReport\(report, "pending-user"\)/)
+  assert.match(panelSource, /action: "submit-ai"/)
+  assert.match(panelSource, /Pass To AI Review/)
+  assert.match(panelSource, /Complete AI Review/)
+  assert.doesNotMatch(panelSource, /Mark Ready For Review/)
+  assert.doesNotMatch(panelSource, /correctedOutput: data\.correctedOutput/)
   assert.match(panelSource, /aiOutput: draft\.aiOutput/)
   assert.match(panelSource, /aiSources: draft\.aiSources/)
 })

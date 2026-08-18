@@ -61,6 +61,8 @@ export type ParserReportWithState = ParserReportRecord & {
   readyForUserReview: boolean
 }
 
+export type ParserReportReviewStage = "pending-user" | "pending-ai" | "complete"
+
 export function asParserReportMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -70,40 +72,51 @@ export function asParserReportMetadata(value: unknown): Record<string, unknown> 
 export function pendingParserReportMetadata(value: unknown) {
   return {
     ...asParserReportMetadata(value),
-    pendingReview: true,
-    pendingUserReview: false,
-    aiReviewState: "pending",
+    reviewWorkflowVersion: 2,
+    pendingReview: false,
+    pendingUserReview: true,
+    aiReviewState: "pending-user",
     aiReviewedAt: null,
     userReviewedAt: null,
   }
 }
 
-export function readyParserReportMetadata(
+export function queuedAiParserReportMetadata(
   value: unknown,
   reviewedAt: string,
-  correctedOutput?: string,
+  correctedOutput: string,
 ) {
   return {
     ...asParserReportMetadata(value),
-    ...(correctedOutput === undefined
-      ? {}
-      : { manualVlsfoMaxRemarks: detectVlsfoMaxRemarks(correctedOutput) }),
-    pendingReview: false,
-    pendingUserReview: true,
-    aiReviewState: "ready",
-    aiReviewedAt: reviewedAt,
-    userReviewedAt: null,
+    reviewWorkflowVersion: 2,
+    manualVlsfoMaxRemarks: detectVlsfoMaxRemarks(correctedOutput),
+    pendingReview: true,
+    pendingUserReview: false,
+    aiReviewState: "pending-ai",
+    aiReviewedAt: null,
+    userReviewedAt: reviewedAt,
   }
 }
 
-export function acknowledgedParserReportMetadata(value: unknown, reviewedAt: string) {
+export function completedParserReportMetadata(value: unknown, reviewedAt: string) {
   return {
     ...asParserReportMetadata(value),
+    reviewWorkflowVersion: 2,
     pendingReview: false,
     pendingUserReview: false,
-    aiReviewState: "acknowledged",
-    userReviewedAt: reviewedAt,
+    aiReviewState: "complete",
+    aiReviewedAt: reviewedAt,
   }
+}
+
+export function parserReportReviewStage(
+  value: unknown,
+  status: ParserReportStatus,
+): ParserReportReviewStage {
+  if (status !== "new") return "complete"
+
+  const metadata = asParserReportMetadata(value)
+  return metadata.aiReviewState === "pending-ai" ? "pending-ai" : "pending-user"
 }
 
 export function parserReportFromRow(row: ParserReportRow): ParserReportRecord {
@@ -179,11 +192,11 @@ export function parserReportWithState(report: ParserReportRecord): ParserReportW
     currentParserOutput = ""
   }
 
-  const pendingReview = report.metadata.pendingReview === true
-  const readyForUserReview = report.metadata.pendingUserReview === true
-  const resolved = !pendingReview && Boolean(currentParserOutput.trim()) &&
+  const reviewStage = parserReportReviewStage(report.metadata, report.status)
+  const pendingAiReview = reviewStage === "pending-ai"
+  const readyForUserReview = reviewStage === "pending-user"
+  const resolved = reviewStage === "complete" && Boolean(currentParserOutput.trim()) &&
     normalizeParserReportOutput(currentParserOutput) === normalizeParserReportOutput(report.correctedOutput)
-  const pendingAiReview = report.status === "new" && !resolved && !readyForUserReview
 
   return {
     ...report,
@@ -198,7 +211,7 @@ export function parserReportWithState(report: ParserReportRecord): ParserReportW
 export function parserReportCounts(reports: ParserReportWithState[]) {
   return {
     total: reports.length,
-    unresolved: reports.filter((report) => report.pendingAiReview).length,
+    unresolved: reports.filter((report) => report.pendingAiReview || report.readyForUserReview).length,
     pendingAiReview: reports.filter((report) => report.pendingAiReview).length,
     readyForUserReview: reports.filter((report) => report.readyForUserReview).length,
     resolved: reports.filter((report) => report.resolved).length,
