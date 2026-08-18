@@ -43,6 +43,9 @@ const PORT_LABEL_PATTERN =
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
 
+const PORT_COUNTRY_LINE_PATTERN =
+  /,\s*(?:republic\s+of\s+korea|south\s+korea|s\.?\s*korea|korea|china|taiwan|japan|singapore|hong\s+kong|malaysia|indonesia|thailand|vietnam|mauritius|india|sri\s+lanka|belgium|netherlands|united\s+arab\s+emirates|u\.?a\.?e\.?)\b(?:\s*\([^)]*\))?\s*$/i
+
 function normalizeInput(text: string) {
   return text
     .replace(/\r\n?/g, "\n")
@@ -434,6 +437,14 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
       includeShortAliases: true,
     })
     if (standalonePort) return standalonePort
+
+    if (PORT_COUNTRY_LINE_PATTERN.test(line)) {
+      const countryQualifiedPort = findKnownPort(line, {
+        ...options,
+        includeShortAliases: true,
+      })
+      if (countryQualifiedPort) return countryQualifiedPort
+    }
 
     const atMatch = line.match(/@\s*([A-Za-z][A-Za-z\s.'-]{1,36})\b/)
     const atPort = cleanPortName(atMatch?.[1] || "", {

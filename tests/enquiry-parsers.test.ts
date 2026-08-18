@@ -745,6 +745,17 @@ test("pairs labelled grade and quantity lists in order", () => {
 })
 
 test("replays the August 18 pending review reports", () => {
+  const bangor = [
+    "M/V BANGOR (9228057)",
+    "YEOSU, SOUTH KOREA",
+    "27TH - 30TH AUGUST, 2026",
+    "900 - 1000 MTONS // VLSFO RMG 380 0.5 % (ISO 8217 - 2017)",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(bangor),
+    "bangor / 9228057 / yosu 27 - 30 aug / vlsfo 900-1,000mts",
+  )
+
   const oceanBanquet = [
     "MV. Ocean Banquet\t IMO: 9740108",
     "Port\tBusan",
