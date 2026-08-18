@@ -604,10 +604,16 @@ function editableAttendanceEntry(
 ) {
   const directionalEntry = leaveEntryForDirection(item, direction)
   if (directionalEntry) return directionalEntry
+  const entries = leaveEntries(item)
+  // A half-day absence governs the working session shown in the opposite
+  // cell: PM leave carries the morning OUT time in the IN cell, while AM
+  // leave carries the afternoon IN time in the OUT cell. When there is only
+  // one stored status for the day, either cell must therefore edit it.
+  if (entries.length === 1) return entries[0]
   // HOME and OS represent one attendance status for the day. Allow either
   // side of the IN/OUT pair to edit the same stored half-day entry, so an AM
   // or PM record can be promoted to Full day without creating a duplicate.
-  return leaveEntries(item).find((entry) => entry.code === "HO" || entry.code === "OS")
+  return entries.find((entry) => entry.code === "HO" || entry.code === "OS")
 }
 
 function absenceEntryForPortion(

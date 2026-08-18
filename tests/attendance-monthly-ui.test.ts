@@ -85,6 +85,13 @@ test("half-day leave stacks the working-session punches in chronological order",
   assert.match(styles, /\.cellButton[\s\S]*?white-space: pre-line/)
 })
 
+test("either cell edits the sole half-day status governing its paired punches", () => {
+  assert.match(
+    client,
+    /function editableAttendanceEntry[\s\S]*?const entries = leaveEntries\(item\)[\s\S]*?if \(entries\.length === 1\) return entries\[0\]/,
+  )
+})
+
 test("Monthly view includes required Excel totals, confirmation, and reminders", () => {
   for (const label of [
     "ALS",
