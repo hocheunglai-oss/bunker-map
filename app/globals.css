@@ -3188,6 +3188,74 @@ body {
   font-size: 10px;
 }
 
+.spc-chrome-api-group-pilot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px 20px;
+}
+
+.spc-chrome-api-group-pilot label {
+  display: grid;
+  gap: 6px;
+}
+
+.spc-chrome-api-group-pilot label span {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.spc-chrome-api-group-pilot input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--fc-admin-panel-text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.spc-chrome-api-group-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--fc-admin-border-soft);
+  background: #eef9f5;
+  padding: 12px 20px;
+}
+
+.spc-chrome-api-group-result > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.spc-chrome-api-group-result strong {
+  color: var(--fc-admin-heading);
+  font-size: 13px;
+}
+
+.spc-chrome-api-group-result span {
+  overflow-wrap: anywhere;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .spc-chrome-api-group-pilot {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-chrome-api-group-result {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .spc-guide-list {
   display: grid;
 }

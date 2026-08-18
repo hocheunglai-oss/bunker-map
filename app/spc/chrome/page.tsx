@@ -86,6 +86,14 @@ type DispatcherStatus = {
   lastError: string | null
 }
 
+type ApiGroupResult = {
+  id: string
+  subject: string
+  createdAt: string | null
+  inviteLink: string
+  reused: boolean
+}
+
 export default function SpcChromeExtensionPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
@@ -94,6 +102,9 @@ export default function SpcChromeExtensionPage() {
   const [noticeIsError, setNoticeIsError] = useState(false)
   const [dispatcher, setDispatcher] = useState<DispatcherStatus | null>(null)
   const [dispatcherLoading, setDispatcherLoading] = useState(true)
+  const [apiGroupSubject, setApiGroupSubject] = useState("OTTO LAI (SPC)")
+  const [apiGroupCreating, setApiGroupCreating] = useState(false)
+  const [apiGroupResult, setApiGroupResult] = useState<ApiGroupResult | null>(null)
   const canView = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "edit")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(
@@ -182,6 +193,44 @@ export default function SpcChromeExtensionPage() {
     setDispatcher(null)
     setNoticeMessage("The active SPC Group Dispatcher was revoked.")
     setNoticeIsError(false)
+  }
+
+  async function createApiGroup() {
+    const subject = apiGroupSubject.replace(/\s+/g, " ").trim()
+    if (!subject) {
+      setNoticeMessage("Group subject is required.")
+      setNoticeIsError(true)
+      return
+    }
+    if (!window.confirm(`Create the official WhatsApp API test group "${subject}"?`)) return
+
+    setApiGroupCreating(true)
+    setApiGroupResult(null)
+    setNoticeMessage("")
+    setNoticeIsError(false)
+    try {
+      const response = await fetch("/api/spc/whatsapp-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject }),
+      })
+      const data = (await response.json()) as {
+        message?: string
+        group?: ApiGroupResult
+        warning?: string
+      }
+      if (!response.ok || !data.group) throw new Error(data.message || "Failed to create the WhatsApp API group.")
+      setApiGroupResult(data.group)
+      const outcome = data.group.reused
+        ? "Existing API group found."
+        : "Official WhatsApp API test group created."
+      setNoticeMessage(`${outcome}${data.warning ? ` ${data.warning}` : ""}`)
+    } catch (error) {
+      setNoticeMessage(error instanceof Error ? error.message : "Failed to create the WhatsApp API group.")
+      setNoticeIsError(true)
+    } finally {
+      setApiGroupCreating(false)
+    }
   }
 
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
@@ -281,6 +330,51 @@ export default function SpcChromeExtensionPage() {
               <span>No active dispatcher. New enquiries will remain safely queued.</span>
             )}
           </div>
+        </section>
+      ) : null}
+      {canEdit ? (
+        <section className="spc-panel spc-chrome-installation-panel">
+          <div className="spc-panel-header">
+            <div>
+              <h2>OFFICIAL GROUPS API PILOT</h2>
+              <p>Create one Meta-managed test group and retrieve its invitation link.</p>
+            </div>
+          </div>
+          <div className="spc-chrome-api-group-pilot">
+            <label>
+              <span>GROUP SUBJECT</span>
+              <input
+                value={apiGroupSubject}
+                onChange={(event) => setApiGroupSubject(event.target.value)}
+                maxLength={128}
+                disabled={apiGroupCreating}
+              />
+            </label>
+            <button
+              type="button"
+              className="spc-page-action"
+              onClick={() => void createApiGroup()}
+              disabled={apiGroupCreating || !apiGroupSubject.trim()}
+            >
+              {apiGroupCreating ? "Creating..." : "Create Test Group"}
+            </button>
+          </div>
+          {apiGroupResult ? (
+            <div className="spc-chrome-api-group-result" role="status">
+              <div>
+                <strong>{apiGroupResult.subject}</strong>
+                <span>Meta group ID: {apiGroupResult.id}</span>
+              </div>
+              <a
+                className="spc-page-action spc-chrome-download"
+                href={apiGroupResult.inviteLink}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Invite Link
+              </a>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </SpcShell>

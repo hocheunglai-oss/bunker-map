@@ -263,6 +263,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_enquiry_revisions: "SPC enquiry revision",
   spc_group_delivery_jobs: "SPC group delivery",
   spc_group_dispatchers: "SPC group dispatcher",
+  spc_whatsapp_groups: "SPC WhatsApp API group",
   spc_fixtures: "SPC fixture",
   spc_role_defaults: "SPC permission group",
   spc_suppliers: "SPC supplier",
