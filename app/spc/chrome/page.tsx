@@ -103,6 +103,7 @@ export default function SpcChromeExtensionPage() {
   const [dispatcher, setDispatcher] = useState<DispatcherStatus | null>(null)
   const [dispatcherLoading, setDispatcherLoading] = useState(true)
   const [apiGroupSubject, setApiGroupSubject] = useState("OTTO LAI (SPC)")
+  const [apiGroupArmed, setApiGroupArmed] = useState(false)
   const [apiGroupCreating, setApiGroupCreating] = useState(false)
   const [apiGroupResult, setApiGroupResult] = useState<ApiGroupResult | null>(null)
   const canView = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "view")
@@ -202,9 +203,8 @@ export default function SpcChromeExtensionPage() {
       setNoticeIsError(true)
       return
     }
-    if (!window.confirm(`Create the official WhatsApp API test group "${subject}"?`)) return
-
     setApiGroupCreating(true)
+    setApiGroupArmed(false)
     setApiGroupResult(null)
     setNoticeMessage("")
     setNoticeIsError(false)
@@ -345,7 +345,11 @@ export default function SpcChromeExtensionPage() {
               <span>GROUP SUBJECT</span>
               <input
                 value={apiGroupSubject}
-                onChange={(event) => setApiGroupSubject(event.target.value)}
+                onChange={(event) => {
+                  setApiGroupSubject(event.target.value)
+                  setApiGroupArmed(false)
+                  setApiGroupResult(null)
+                }}
                 maxLength={128}
                 disabled={apiGroupCreating}
               />
@@ -353,12 +357,27 @@ export default function SpcChromeExtensionPage() {
             <button
               type="button"
               className="spc-page-action"
-              onClick={() => void createApiGroup()}
+              onClick={() => {
+                if (!apiGroupArmed) {
+                  setApiGroupArmed(true)
+                  return
+                }
+                void createApiGroup()
+              }}
               disabled={apiGroupCreating || !apiGroupSubject.trim()}
             >
-              {apiGroupCreating ? "Creating..." : "Create Test Group"}
+              {apiGroupCreating
+                ? "Creating..."
+                : apiGroupArmed
+                  ? "Confirm Create"
+                  : "Create Test Group"}
             </button>
           </div>
+          {apiGroupArmed ? (
+            <p className="spc-chrome-api-group-confirmation" role="status">
+              Confirm to create this external Meta WhatsApp group. This action cannot be undone here.
+            </p>
+          ) : null}
           {apiGroupResult ? (
             <div className="spc-chrome-api-group-result" role="status">
               <div>

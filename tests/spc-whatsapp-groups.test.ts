@@ -76,3 +76,13 @@ test("the pilot route is edit-protected and audited without the invite link", as
   assert.match(route, /Do not create it again/)
   assert.doesNotMatch(route, /after_row:[\s\S]{0,400}inviteLink/)
 })
+
+test("the pilot page uses inline two-step confirmation instead of a browser dialog", async () => {
+  const page = await readFile(new URL("../app/spc/chrome/page.tsx", import.meta.url), "utf8")
+  const createFunction = page.slice(
+    page.indexOf("async function createApiGroup"),
+    page.indexOf("if (authLoading", page.indexOf("async function createApiGroup")),
+  )
+  assert.match(page, /Confirm Create/)
+  assert.doesNotMatch(createFunction, /window\.confirm/)
+})
