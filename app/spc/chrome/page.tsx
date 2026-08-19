@@ -14,6 +14,8 @@ import { SPC_GROUP_DISPATCHER_VERSION } from "@/lib/spcGroupDispatcherVersion"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
 const PAGE_TITLE = "WHATSAPP EXTENSION"
+const DISPATCHER_UPDATE_REQUEST_SOURCE = "fcuno-spc-dispatcher-updater"
+const DISPATCHER_UPDATE_RESPONSE_SOURCE = "fcuno-spc-dispatcher-extension"
 
 type Step = {
   title: string
@@ -67,7 +69,7 @@ const DISPATCHER_STEPS: readonly Step[] = [
     details: [
       "Use only the approved SPC WhatsApp Business desktop. Do not install this dispatcher on trader computers.",
       "Keep WhatsApp Web and this Chrome profile open during trading hours; offline enquiries remain queued.",
-      `Download and extract the versioned ZIP. The selected folder must be fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION} and must contain manifest.json.`,
+      "Download and extract the ZIP. The selected folder is always named fcuno-spc-group-dispatcher and must contain manifest.json.",
     ],
     action: {
       href: "/api/spc/group-dispatcher/download",
@@ -78,8 +80,9 @@ const DISPATCHER_STEPS: readonly Step[] = [
     title: "Update the installed folder",
     details: [
       "Choose UPDATE INSTALLED FOLDER above and select the dispatcher folder Chrome is currently using. The page verifies manifest.json and replaces that folder directly.",
-      `Open chrome://extensions and click Reload on FCUNO SPC Group Dispatcher. Confirm the card shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
-      "Keep spc.fcuno.com signed in in the same Chrome profile. WhatsApp Web refreshes automatically after the extension reloads.",
+      `The updater reloads the extension and WhatsApp Web automatically. Confirm the dispatcher shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
+      "Copies older than version 1.1.6 need one final click on Reload in chrome://extensions. Removal and reinstallation are not required.",
+      "Keep spc.fcuno.com signed in in the same Chrome profile while updating.",
       "The dispatcher connects automatically. Exact WhatsApp groups are managed centrally in User Management.",
       "Use the ZIP download only for a first installation or if the installed folder is no longer available.",
     ],
@@ -112,6 +115,43 @@ type ApiGroupResult = {
 
 type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<SpcDispatcherDirectoryHandle>
+}
+
+function requestDispatcherInPlaceReload() {
+  return new Promise<boolean>((resolve) => {
+    const requestId = window.crypto.randomUUID()
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleResponse)
+      resolve(false)
+    }, 1_500)
+
+    function handleResponse(event: MessageEvent) {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const data = event.data as {
+        source?: string
+        action?: string
+        requestId?: string
+        ok?: boolean
+      } | null
+      if (
+        data?.source !== DISPATCHER_UPDATE_RESPONSE_SOURCE
+        || data.action !== "apply-update-result"
+        || data.requestId !== requestId
+      ) {
+        return
+      }
+      window.clearTimeout(timeout)
+      window.removeEventListener("message", handleResponse)
+      resolve(Boolean(data.ok))
+    }
+
+    window.addEventListener("message", handleResponse)
+    window.postMessage({
+      source: DISPATCHER_UPDATE_REQUEST_SOURCE,
+      action: "apply-update",
+      requestId,
+    }, window.location.origin)
+  })
 }
 
 export default function SpcChromeExtensionPage() {
@@ -246,9 +286,17 @@ export default function SpcChromeExtensionPage() {
         throw new Error(`The server returned dispatcher v${data.version || "unknown"}; v${SPC_GROUP_DISPATCHER_VERSION} is required.`)
       }
       const result = await updateSpcDispatcherDirectory(directory, data)
-      setNoticeMessage(
-        `${result.directoryName} was updated from v${result.previousVersion} to v${result.version}. Open chrome://extensions and click Reload on FCUNO SPC Group Dispatcher.`,
-      )
+      const reloadScheduled = await requestDispatcherInPlaceReload()
+      if (reloadScheduled) {
+        setNoticeMessage(
+          `${result.directoryName} was updated from v${result.previousVersion} to v${result.version}. Applying the update now...`,
+        )
+        window.setTimeout(() => window.location.reload(), 1_200)
+      } else {
+        setNoticeMessage(
+          `${result.directoryName} was updated from v${result.previousVersion} to v${result.version}. This older copy needs one final Reload in chrome://extensions. Do not remove or reinstall it. Future updates will reload automatically.`,
+        )
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setNoticeMessage("Dispatcher folder update cancelled.")

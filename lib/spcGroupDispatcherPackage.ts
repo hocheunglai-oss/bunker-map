@@ -4,6 +4,7 @@ export const SPC_GROUP_DISPATCHER_FILES = [
   "manifest.json",
   "background.js",
   "content.js",
+  "updater-bridge.js",
   "styles.css",
   "spc-sidebar-logo.png",
   "README.md",

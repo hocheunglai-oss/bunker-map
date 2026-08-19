@@ -110,6 +110,16 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
       < background.indexOf('if (!state.token) throw new Error("This dispatcher is not paired.")'),
     "unpaired state must be readable before automatic pairing",
   )
+  assert.match(background, /message\?\.type === "extension-apply-update"/)
+  assert.match(background, /chrome\.runtime\.reload\(\)/)
+  assert.match(background, /fcunoSpcGroupDispatcherUpdatePendingV1/)
+
+  const updaterBridge = await readFile(
+    new URL("../tools/whatsapp-spc-group-dispatcher/updater-bridge.js", import.meta.url),
+    "utf8",
+  )
+  assert.match(updaterBridge, /fcuno-spc-dispatcher-updater/)
+  assert.match(updaterBridge, /extension-apply-update/)
 })
 
 test("the folder updater validates the installed extension and writes the manifest last", async () => {
@@ -118,12 +128,12 @@ test("the folder updater validates the installed extension and writes the manife
   const stored = new Map<string, Uint8Array>([
     [
       "manifest.json",
-      encoder.encode(JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.1.4" })),
+      encoder.encode(JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.1.5" })),
     ],
   ])
   const writes: string[] = []
   const directory: SpcDispatcherDirectoryHandle = {
-    name: "fcuno-spc-group-dispatcher-v1.1.4",
+    name: "fcuno-spc-group-dispatcher-v1.1.5",
     async getFileHandle(name, options) {
       if (!stored.has(name) && !options?.create) throw new Error(`Missing ${name}`)
       return {
@@ -142,9 +152,9 @@ test("the folder updater validates the installed extension and writes the manife
       }
     },
   }
-  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.1.5" })
+  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.1.6" })
   const bundle = {
-    version: "1.1.5",
+    version: "1.1.6",
     files: SPC_GROUP_DISPATCHER_FILES.map((name) => ({
       name,
       contentBase64: Buffer.from(name === "manifest.json" ? manifest : `updated:${name}`).toString("base64"),
@@ -153,12 +163,12 @@ test("the folder updater validates the installed extension and writes the manife
 
   const result = await updateSpcDispatcherDirectory(directory, bundle)
   assert.deepEqual(result, {
-    directoryName: "fcuno-spc-group-dispatcher-v1.1.4",
-    previousVersion: "1.1.4",
-    version: "1.1.5",
+    directoryName: "fcuno-spc-group-dispatcher-v1.1.5",
+    previousVersion: "1.1.5",
+    version: "1.1.6",
   })
   assert.equal(writes.at(-1), "manifest.json")
-  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.1.5")
+  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.1.6")
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {
@@ -179,7 +189,8 @@ test("the dispatcher download files are included in the production server trace"
     nextConfig,
     /"\/api\/spc\/group-dispatcher\/files": \["\.\/tools\/whatsapp-spc-group-dispatcher\/\*\*\/\*"\]/,
   )
-  assert.match(downloadRoute, /fcuno-spc-group-dispatcher-v\$\{SPC_GROUP_DISPATCHER_VERSION\}/)
+  assert.match(downloadRoute, /const ARCHIVE_ROOT = "fcuno-spc-group-dispatcher"/)
+  assert.match(downloadRoute, /\$\{ARCHIVE_ROOT\}-v\$\{SPC_GROUP_DISPATCHER_VERSION\}\.zip/)
   assert.match(downloadRoute, /"X-SPC-Dispatcher-Version": SPC_GROUP_DISPATCHER_VERSION/)
   assert.match(filesRoute, /contentBase64:/)
   assert.match(filesRoute, /SPC_GROUP_DISPATCHER_FILES\.map/)
@@ -188,6 +199,7 @@ test("the dispatcher download files are included in the production server trace"
     "manifest.json",
     "background.js",
     "content.js",
+    "updater-bridge.js",
     "styles.css",
     "spc-sidebar-logo.png",
     "README.md",

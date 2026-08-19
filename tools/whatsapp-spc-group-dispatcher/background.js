@@ -1,5 +1,6 @@
 const API_URL = "https://spc.fcuno.com/api/spc/group-dispatcher"
 const STORAGE_KEY = "fcunoSpcGroupDispatcherV1"
+const UPDATE_PENDING_KEY = "fcunoSpcGroupDispatcherUpdatePendingV1"
 const VERSION = chrome.runtime.getManifest().version
 const debuggerQueues = new Map()
 
@@ -24,6 +25,27 @@ function reloadOpenWhatsAppTabs() {
 }
 
 chrome.runtime.onInstalled.addListener(reloadOpenWhatsAppTabs)
+
+function isTrustedSpcPage(sender) {
+  const senderUrl = String(sender?.url || sender?.tab?.url || "")
+  return senderUrl === "https://spc.fcuno.com/" || senderUrl.startsWith("https://spc.fcuno.com/")
+}
+
+async function prepareInPlaceUpdate(sender) {
+  if (!isTrustedSpcPage(sender)) throw new Error("Dispatcher updates are accepted only from spc.fcuno.com.")
+  await chromeCall((callback) => chrome.storage.local.set({ [UPDATE_PENDING_KEY]: true }, callback))
+  setTimeout(() => chrome.runtime.reload(), 350)
+  return { message: "Extension reload scheduled." }
+}
+
+async function finishInPlaceUpdate(sender) {
+  if (!isTrustedSpcPage(sender)) return {}
+  const result = await chromeCall((callback) => chrome.storage.local.get([UPDATE_PENDING_KEY], callback))
+  if (!result?.[UPDATE_PENDING_KEY]) return {}
+  await chromeCall((callback) => chrome.storage.local.remove([UPDATE_PENDING_KEY], callback))
+  reloadOpenWhatsAppTabs()
+  return { refreshedWhatsApp: true }
+}
 
 function enqueueDebuggerAction(tabId, action) {
   const previous = debuggerQueues.get(tabId) || Promise.resolve()
@@ -207,6 +229,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  if (message?.type === "extension-apply-update") {
+    return respond(prepareInPlaceUpdate(sender))
+  }
+  if (message?.type === "extension-update-page-ready") {
+    return respond(finishInPlaceUpdate(sender))
+  }
   if (String(message?.type || "").startsWith("dispatcher-")) {
     return respond(handleApiMessage(message))
   }

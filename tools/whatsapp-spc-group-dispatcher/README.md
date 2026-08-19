@@ -1,5 +1,9 @@
 # FCUNO SPC Group Dispatcher
 
+Install the unpacked extension once from the stable `fcuno-spc-group-dispatcher` folder. Later releases update that same folder from `spc.fcuno.com/chrome` and reload the extension automatically.
+
+Copies older than 1.1.6 require one final manual **Reload** in `chrome://extensions` after using **Update Installed Folder**. Do not remove and reinstall the extension.
+
 This is the dedicated Windows dispatcher for the Singapore Purchasing Center. It is intentionally separate from the trader Speed Board.
 
 ## Installation

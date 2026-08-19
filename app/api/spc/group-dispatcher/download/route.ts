@@ -7,8 +7,8 @@ import { spcPrivateJson } from "@/lib/spcResponse"
 
 export const runtime = "nodejs"
 
-const ARCHIVE_ROOT = `fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION}`
-const ARCHIVE_FILENAME = `${ARCHIVE_ROOT}.zip`
+const ARCHIVE_ROOT = "fcuno-spc-group-dispatcher"
+const ARCHIVE_FILENAME = `${ARCHIVE_ROOT}-v${SPC_GROUP_DISPATCHER_VERSION}.zip`
 const SOURCE_DIRECTORY = path.join(process.cwd(), "tools", "whatsapp-spc-group-dispatcher")
 export async function GET() {
   try {

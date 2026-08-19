@@ -7,6 +7,7 @@ const { chromium } = require("playwright")
 
 const source = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
 const backgroundSource = fs.readFileSync(path.join(__dirname, "background.js"), "utf8")
+const updaterBridgeSource = fs.readFileSync(path.join(__dirname, "updater-bridge.js"), "utf8")
 const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
 const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
 const groupName = "FCUNO - SPC TRADING GROUP"
@@ -41,7 +42,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.5'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.6'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-claim'){
@@ -72,7 +73,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.5" }),
+      getManifest: () => ({ version: "1.1.6" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -97,7 +98,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.5" }),
+      getManifest: () => ({ version: "1.1.6" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -144,6 +145,113 @@ async function verifyUnpairedBackgroundState() {
   assert.equal(fetchCalls[0].action, "pair")
 }
 
+async function verifyInPlaceUpdateReload() {
+  let messageListener = null
+  const stored = {}
+  const timers = []
+  const reloadedTabs = []
+  let extensionReloads = 0
+  const chrome = {
+    runtime: {
+      lastError: null,
+      getManifest: () => ({ version: "1.1.6" }),
+      onInstalled: { addListener: () => {} },
+      onMessage: { addListener: (listener) => { messageListener = listener } },
+      reload: () => { extensionReloads += 1 },
+    },
+    tabs: {
+      query: (_query, callback) => callback([{ id: 31 }]),
+      reload: (tabId, callback) => { reloadedTabs.push(tabId); callback() },
+    },
+    storage: {
+      local: {
+        get: (keys, callback) => {
+          const result = {}
+          for (const key of keys) result[key] = stored[key]
+          callback(result)
+        },
+        set: (value, callback) => { Object.assign(stored, value); callback() },
+        remove: (keys, callback) => {
+          for (const key of keys) delete stored[key]
+          callback()
+        },
+      },
+    },
+    debugger: { attach: () => {}, detach: () => {}, sendCommand: () => {} },
+  }
+  vm.runInNewContext(backgroundSource, {
+    chrome,
+    fetch: async () => ({ ok: true, json: async () => ({}) }),
+    setTimeout: (callback) => { timers.push(callback); return timers.length },
+  })
+
+  const send = (request, url = "https://spc.fcuno.com/chrome") => new Promise((resolve) => {
+    assert.equal(messageListener(request, { url, tab: { id: 8, url } }, resolve), true)
+  })
+  const scheduled = await send({ type: "extension-apply-update" })
+  assert.equal(scheduled.ok, true)
+  assert.equal(stored.fcunoSpcGroupDispatcherUpdatePendingV1, true)
+  assert.equal(extensionReloads, 0)
+  timers.shift()()
+  assert.equal(extensionReloads, 1)
+
+  const finished = await send({ type: "extension-update-page-ready" })
+  assert.equal(finished.ok, true)
+  assert.equal(finished.refreshedWhatsApp, true)
+  assert.equal(stored.fcunoSpcGroupDispatcherUpdatePendingV1, undefined)
+  assert.deepEqual(reloadedTabs, [31])
+
+  const rejected = await send({ type: "extension-apply-update" }, "https://example.com/")
+  assert.equal(rejected.ok, false)
+  assert.match(rejected.message, /only from spc\.fcuno\.com/)
+}
+
+async function verifyUpdaterBridge() {
+  let messageListener = null
+  const runtimeMessages = []
+  const postedMessages = []
+  const window = {
+    location: { origin: "https://spc.fcuno.com" },
+    addEventListener: (type, listener) => {
+      if (type === "message") messageListener = listener
+    },
+    postMessage: (message, origin) => postedMessages.push({ message, origin }),
+  }
+  const chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage: (message, callback) => {
+        runtimeMessages.push(message)
+        callback({ ok: true })
+      },
+    },
+  }
+  vm.runInNewContext(updaterBridgeSource, { chrome, window, Promise, Error })
+  assert.deepEqual(JSON.parse(JSON.stringify(runtimeMessages)), [{ type: "extension-update-page-ready" }])
+  assert.equal(typeof messageListener, "function")
+
+  await messageListener({
+    source: window,
+    origin: window.location.origin,
+    data: {
+      source: "fcuno-spc-dispatcher-updater",
+      action: "apply-update",
+      requestId: "request-1",
+    },
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(runtimeMessages.at(-1))), { type: "extension-apply-update" })
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))), {
+    message: {
+      source: "fcuno-spc-dispatcher-extension",
+      action: "apply-update-result",
+      requestId: "request-1",
+      ok: true,
+      message: "",
+    },
+    origin: window.location.origin,
+  })
+}
+
 async function withServer(callback) {
   const server = http.createServer((request, response) => {
     if (request.url === "/spc-sidebar-logo.png") {
@@ -162,6 +270,8 @@ async function withServer(callback) {
 async function main() {
   verifyUpdateReloadsWhatsApp()
   await verifyUnpairedBackgroundState()
+  await verifyInPlaceUpdateReload()
+  await verifyUpdaterBridge()
   await withServer(async (url) => {
     const browser = await chromium.launch({
       executablePath: process.env.CHROME_EXECUTABLE_PATH || chromium.executablePath(),
@@ -183,7 +293,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.5/)
+      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.6/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
