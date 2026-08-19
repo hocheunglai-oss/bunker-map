@@ -58,10 +58,11 @@ const STEPS: readonly Step[] = [
 
 const DISPATCHER_STEPS: readonly Step[] = [
   {
-    title: "Dedicated Windows desktop",
+    title: `Download dispatcher ${SPC_GROUP_DISPATCHER_VERSION}`,
     details: [
       "Use only the approved SPC WhatsApp Business desktop. Do not install this dispatcher on trader computers.",
       "Keep WhatsApp Web and this Chrome profile open during trading hours; offline enquiries remain queued.",
+      `Download and extract the versioned ZIP. The selected folder must be fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION} and must contain manifest.json.`,
     ],
     action: {
       href: "/api/spc/group-dispatcher/download",
@@ -69,9 +70,11 @@ const DISPATCHER_STEPS: readonly Step[] = [
     },
   },
   {
-    title: "Install and pair",
+    title: "Replace the old unpacked extension",
     details: [
-      "Extract the ZIP, load fcuno-spc-group-dispatcher through chrome://extensions, then refresh WhatsApp Web.",
+      "Open chrome://extensions and remove the existing FCUNO SPC Group Dispatcher card. Refreshing WhatsApp Web or clicking Reload on the old folder does not install downloaded files.",
+      `Choose Load unpacked and select the new fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION} folder. Confirm the extension card itself shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
+      "Return to WhatsApp Web. The new extension refreshes the tab automatically after installation.",
       "Enter a device label and choose PAIR DISPATCHER. Exact WhatsApp groups are managed centrally in User Management.",
       "Pairing a replacement computer automatically revokes the previous dispatcher.",
     ],
@@ -117,6 +120,9 @@ export default function SpcChromeExtensionPage() {
   const [apiGroupResult, setApiGroupResult] = useState<ApiGroupResult | null>(null)
   const canView = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-chrome-extension", "edit")
+  const dispatcherNeedsUpdate = Boolean(
+    dispatcher && dispatcher.extensionVersion !== SPC_GROUP_DISPATCHER_VERSION,
+  )
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(
     permissions,
     "spc-chrome-extension",
@@ -334,7 +340,8 @@ export default function SpcChromeExtensionPage() {
               <span>Loading...</span>
             ) : dispatcher ? (
               <span>
-                Active: {dispatcher.deviceLabel} / multi-route / v{dispatcher.extensionVersion}
+                Active: {dispatcher.deviceLabel} / multi-route / installed v{dispatcher.extensionVersion} / required v{SPC_GROUP_DISPATCHER_VERSION}
+                {dispatcherNeedsUpdate ? " / UPDATE REQUIRED" : " / Current"}
                 {dispatcher.lastSeenAt ? ` / Last seen ${new Date(dispatcher.lastSeenAt).toLocaleString()}` : ""}
                 {dispatcher.lastError ? ` / ${dispatcher.lastError}` : ""}
               </span>

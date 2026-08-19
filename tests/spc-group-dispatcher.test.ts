@@ -102,10 +102,16 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
 
 test("the dispatcher download files are included in the production server trace", async () => {
   const nextConfig = await readFile(new URL("../next.config.js", import.meta.url), "utf8")
+  const downloadRoute = await readFile(
+    new URL("../app/api/spc/group-dispatcher/download/route.ts", import.meta.url),
+    "utf8",
+  )
   assert.match(
     nextConfig,
     /"\/api\/spc\/group-dispatcher\/download": \["\.\/tools\/whatsapp-spc-group-dispatcher\/\*\*\/\*"\]/,
   )
+  assert.match(downloadRoute, /fcuno-spc-group-dispatcher-v\$\{SPC_GROUP_DISPATCHER_VERSION\}/)
+  assert.match(downloadRoute, /"X-SPC-Dispatcher-Version": SPC_GROUP_DISPATCHER_VERSION/)
 
   for (const file of [
     "manifest.json",
