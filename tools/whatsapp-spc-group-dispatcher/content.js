@@ -86,13 +86,14 @@
       .filter(Boolean)
   }
 
-  function currentChatName() {
+  function currentChatNames() {
     const header = getMain()?.querySelector("header")
-    return textCandidates(header)[0] || ""
+    return textCandidates(header)
   }
 
   function exactChatIsOpen(groupName) {
-    return currentChatName().toLowerCase() === cleanText(groupName).toLowerCase()
+    const expected = cleanText(groupName).toLowerCase()
+    return currentChatNames().some((candidate) => candidate.toLowerCase() === expected)
   }
 
   function findSearchBox() {

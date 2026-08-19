@@ -26,7 +26,7 @@ function html(ambiguous = false, initiallyPaired = true) {
       ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${groupName}">${groupName}</span></div></div>` : ""}
       <div id="partial" class="row" role="row"><span title="${groupName} OLD">${groupName} OLD</span></div>
     </div>
-    <div id="main"><header><button><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span></button></header>
+    <div id="main"><header><button><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
       <div class="messages" id="messages"></div><div id="composer" contenteditable="true" role="textbox"></div>
     </div>
     <script>
@@ -42,7 +42,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.6'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.7'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-claim'){
@@ -73,7 +73,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.6" }),
+      getManifest: () => ({ version: "1.1.7" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -98,7 +98,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.6" }),
+      getManifest: () => ({ version: "1.1.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -154,7 +154,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.6" }),
+      getManifest: () => ({ version: "1.1.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -293,7 +293,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.6/)
+      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.7/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
