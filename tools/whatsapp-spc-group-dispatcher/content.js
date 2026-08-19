@@ -154,6 +154,36 @@
     return textCandidates(row)[0] || ""
   }
 
+  function sameVisualChatRow(left, right) {
+    if (left === right || left.contains(right) || right.contains(left)) return true
+    const leftRect = left.getBoundingClientRect()
+    const rightRect = right.getBoundingClientRect()
+    return Math.abs(leftRect.top - rightRect.top) <= 2
+      && Math.abs(leftRect.bottom - rightRect.bottom) <= 2
+      && Math.abs(leftRect.left - rightRect.left) <= 2
+      && Math.abs(leftRect.right - rightRect.right) <= 2
+  }
+
+  function preferredVisualChatRow(left, right) {
+    if (left.contains(right)) return left
+    if (right.contains(left)) return right
+    const leftIsCell = left.matches("[data-testid='cell-frame-container']")
+    const rightIsCell = right.matches("[data-testid='cell-frame-container']")
+    if (leftIsCell !== rightIsCell) return leftIsCell ? left : right
+    const leftRect = left.getBoundingClientRect()
+    const rightRect = right.getBoundingClientRect()
+    return leftRect.width * leftRect.height >= rightRect.width * rightRect.height ? left : right
+  }
+
+  function uniqueVisualChatRows(rows) {
+    return rows.reduce((unique, row) => {
+      const matchIndex = unique.findIndex((candidate) => sameVisualChatRow(candidate, row))
+      if (matchIndex === -1) unique.push(row)
+      else unique[matchIndex] = preferredVisualChatRow(unique[matchIndex], row)
+      return unique
+    }, [])
+  }
+
   async function nativeClick(element) {
     element.scrollIntoView({ block: "center", inline: "nearest" })
     const rect = element.getBoundingClientRect()
@@ -172,9 +202,9 @@
 
     for (const delay of [80, 150, 260, 420, 650]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
-      const exactRows = visibleChatRows().filter(
+      const exactRows = uniqueVisualChatRows(visibleChatRows().filter(
         (row) => rowPrimaryName(row).toLowerCase() === groupName.toLowerCase(),
-      )
+      ))
       if (exactRows.length > 1) throw new Error("STOP_REVIEW: More than one exact WhatsApp group match was found.")
       if (exactRows.length !== 1) continue
       await nativeClick(exactRows[0])

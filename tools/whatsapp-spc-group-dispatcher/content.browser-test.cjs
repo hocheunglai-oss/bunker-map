@@ -19,8 +19,8 @@ function html(ambiguous = false) {
     ${styles.replaceAll("</style>", "<\\/style>")}
   </style></head><body>
     <div id="side"><input id="search" type="text" aria-label="Search input textbox" />
-      <div id="exact" class="row" role="row" onclick="if(window.nativeClick)window.openGroup()"><span title="${groupName}">${groupName}</span></div>
-      ${ambiguous ? `<div id="duplicate" class="row" role="row"><span title="${groupName}">${groupName}</span></div>` : ""}
+      <div id="exact" class="row" data-testid="cell-frame-container" onclick="if(window.nativeClick)window.openGroup()"><div role="row"><span title="${groupName}">${groupName}</span></div></div>
+      ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${groupName}">${groupName}</span></div></div>` : ""}
       <div id="partial" class="row" role="row"><span title="${groupName} OLD">${groupName} OLD</span></div>
     </div>
     <div id="main"><header><button aria-label="Group info"><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
@@ -38,7 +38,7 @@ function html(ambiguous = false) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
