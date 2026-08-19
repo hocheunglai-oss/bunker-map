@@ -14,4 +14,6 @@ This is the dedicated Windows dispatcher for the Singapore Purchasing Center. It
 
 Only one dispatcher device is active at a time. Pairing a replacement device revokes the previous device. One dispatcher can service multiple centrally assigned groups. Keep WhatsApp Web open; queued enquiries wait safely while the desktop is offline.
 
+Installing or reloading a dispatcher update automatically refreshes open WhatsApp Web tabs so Chrome replaces the previous content script. The dispatcher pairing remains in extension storage when the same unpacked extension folder is updated.
+
 The dispatcher never sends to a partial group-name match. Nested WhatsApp wrappers for one visible result are treated as one chat, while genuinely separate exact group results or uncertain sends are stopped for manual review instead of being retried blindly.

@@ -13,6 +13,18 @@ function chromeCall(invoke) {
   })
 }
 
+function reloadOpenWhatsAppTabs() {
+  chrome.tabs.query({ url: "https://web.whatsapp.com/*" }, (tabs) => {
+    if (chrome.runtime.lastError) return
+    for (const tab of tabs || []) {
+      if (!Number.isInteger(tab.id)) continue
+      chrome.tabs.reload(tab.id, () => void chrome.runtime.lastError)
+    }
+  })
+}
+
+chrome.runtime.onInstalled.addListener(reloadOpenWhatsAppTabs)
+
 function enqueueDebuggerAction(tabId, action) {
   const previous = debuggerQueues.get(tabId) || Promise.resolve()
   const current = previous.catch(() => {}).then(action)

@@ -2,9 +2,11 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const http = require("node:http")
 const path = require("node:path")
+const vm = require("node:vm")
 const { chromium } = require("playwright")
 
 const source = fs.readFileSync(path.join(__dirname, "content.js"), "utf8")
+const backgroundSource = fs.readFileSync(path.join(__dirname, "background.js"), "utf8")
 const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
 const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
 const groupName = "FCUNO - SPC TRADING GROUP"
@@ -38,7 +40,7 @@ function html(ambiguous = false) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.2'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
@@ -61,6 +63,32 @@ function html(ambiguous = false) {
   </body></html>`
 }
 
+function verifyUpdateReloadsWhatsApp() {
+  let installedListener = null
+  const queries = []
+  const reloads = []
+  const chrome = {
+    runtime: {
+      lastError: null,
+      getManifest: () => ({ version: "1.1.2" }),
+      onInstalled: { addListener: (listener) => { installedListener = listener } },
+      onMessage: { addListener: () => {} },
+    },
+    tabs: {
+      query: (query, callback) => { queries.push(query); callback([{ id: 14 }, { id: null }]) },
+      reload: (tabId, callback) => { reloads.push(tabId); callback() },
+    },
+    storage: { local: { get: () => {}, set: () => {} } },
+    debugger: { attach: () => {}, detach: () => {}, sendCommand: () => {} },
+  }
+  vm.runInNewContext(backgroundSource, { chrome, fetch: async () => ({ ok: true, json: async () => ({}) }) })
+  assert.equal(typeof installedListener, "function")
+  installedListener({ reason: "update" })
+  assert.equal(queries.length, 1)
+  assert.equal(queries[0].url, "https://web.whatsapp.com/*")
+  assert.deepEqual(reloads, [14])
+}
+
 async function withServer(callback) {
   const server = http.createServer((request, response) => {
     if (request.url === "/spc-sidebar-logo.png") {
@@ -75,6 +103,7 @@ async function withServer(callback) {
 }
 
 async function main() {
+  verifyUpdateReloadsWhatsApp()
   await withServer(async (url) => {
     const browser = await chromium.launch({
       executablePath: process.env.CHROME_EXECUTABLE_PATH || chromium.executablePath(),

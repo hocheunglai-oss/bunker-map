@@ -4,6 +4,7 @@
   const BOARD_ID = "fcuno-spc-group-dispatcher"
   const POLL_MS = 2000
   const VERSION = chrome.runtime.getManifest().version
+  const LOGO_URL = chrome.runtime.getURL("spc-sidebar-logo.png")
   let state = {
     paired: false,
     paused: false,
@@ -64,7 +65,7 @@
     }
     root.innerHTML = `
       <header>
-        <img src="${escapeHtml(chrome.runtime.getURL("spc-sidebar-logo.png"))}" alt="Singapore Purchasing Center" />
+        <img src="${escapeHtml(LOGO_URL)}" alt="Singapore Purchasing Center" />
         <span>GROUP DISPATCHER <b>v${escapeHtml(VERSION)}</b></span>
       </header>
       <main>
