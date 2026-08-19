@@ -41,7 +41,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.4'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.5'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-claim'){
@@ -72,7 +72,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.4" }),
+      getManifest: () => ({ version: "1.1.5" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -89,6 +89,59 @@ function verifyUpdateReloadsWhatsApp() {
   assert.equal(queries.length, 1)
   assert.equal(queries[0].url, "https://web.whatsapp.com/*")
   assert.deepEqual(reloads, [14])
+}
+
+async function verifyUnpairedBackgroundState() {
+  let messageListener = null
+  let storedState = {}
+  const chrome = {
+    runtime: {
+      lastError: null,
+      getManifest: () => ({ version: "1.1.5" }),
+      onInstalled: { addListener: () => {} },
+      onMessage: { addListener: (listener) => { messageListener = listener } },
+    },
+    tabs: { query: () => {}, reload: () => {} },
+    storage: {
+      local: {
+        get: (_keys, callback) => callback({ fcunoSpcGroupDispatcherV1: storedState }),
+        set: (value, callback) => {
+          storedState = value.fcunoSpcGroupDispatcherV1
+          callback()
+        },
+      },
+    },
+    debugger: { attach: () => {}, detach: () => {}, sendCommand: () => {} },
+  }
+  const fetchCalls = []
+  const fetch = async (_url, options) => {
+    const body = JSON.parse(options.body)
+    fetchCalls.push(body)
+    return {
+      ok: true,
+      json: async () => ({
+        dispatcherId: "dispatcher-1",
+        token: "paired-token",
+        deviceLabel: body.deviceLabel,
+      }),
+    }
+  }
+  vm.runInNewContext(backgroundSource, { chrome, fetch })
+  assert.equal(typeof messageListener, "function")
+
+  const send = (request) => new Promise((resolve) => {
+    assert.equal(messageListener(request, {}, resolve), true)
+  })
+  const empty = await send({ type: "dispatcher-state" })
+  assert.equal(empty.ok, true)
+  assert.equal(empty.token, undefined)
+
+  const paired = await send({ type: "dispatcher-pair", deviceLabel: "SPC Trading Desktop" })
+  assert.equal(paired.ok, true)
+  assert.equal(paired.token, "paired-token")
+  assert.equal(storedState.token, "paired-token")
+  assert.equal(fetchCalls.length, 1)
+  assert.equal(fetchCalls[0].action, "pair")
 }
 
 async function withServer(callback) {
@@ -108,6 +161,7 @@ async function withServer(callback) {
 
 async function main() {
   verifyUpdateReloadsWhatsApp()
+  await verifyUnpairedBackgroundState()
   await withServer(async (url) => {
     const browser = await chromium.launch({
       executablePath: process.env.CHROME_EXECUTABLE_PATH || chromium.executablePath(),
@@ -129,7 +183,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.4/)
+      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.5/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })

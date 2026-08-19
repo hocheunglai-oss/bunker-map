@@ -1,6 +1,7 @@
 import path from "node:path"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { createStoredZip } from "@/lib/extensionZip"
+import { SPC_GROUP_DISPATCHER_FILES } from "@/lib/spcGroupDispatcherPackage"
 import { SPC_GROUP_DISPATCHER_VERSION } from "@/lib/spcGroupDispatcherVersion"
 import { spcPrivateJson } from "@/lib/spcResponse"
 
@@ -9,22 +10,13 @@ export const runtime = "nodejs"
 const ARCHIVE_ROOT = `fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION}`
 const ARCHIVE_FILENAME = `${ARCHIVE_ROOT}.zip`
 const SOURCE_DIRECTORY = path.join(process.cwd(), "tools", "whatsapp-spc-group-dispatcher")
-const FILES = [
-  "manifest.json",
-  "background.js",
-  "content.js",
-  "styles.css",
-  "spc-sidebar-logo.png",
-  "README.md",
-] as const
-
 export async function GET() {
   try {
     await requireSpcPagePermission("spc-chrome-extension", "edit")
     const zip = await createStoredZip({
       archiveRoot: ARCHIVE_ROOT,
       sourceDirectory: SOURCE_DIRECTORY,
-      files: FILES,
+      files: SPC_GROUP_DISPATCHER_FILES,
     })
     return new Response(zip, {
       headers: {

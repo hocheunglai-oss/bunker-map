@@ -162,6 +162,7 @@ async function apiRequest(body, token = "") {
 
 async function handleApiMessage(message) {
   const state = await readState()
+  if (message.type === "dispatcher-state") return state
   if (message.type === "dispatcher-pair") {
     const data = await apiRequest({
       action: "pair",
@@ -193,7 +194,6 @@ async function handleApiMessage(message) {
       error: message.error || "",
     }, state.token)
   }
-  if (message.type === "dispatcher-state") return state
   if (message.type === "dispatcher-set-paused") return writeState({ paused: Boolean(message.paused) })
   throw new Error("Unsupported dispatcher request.")
 }

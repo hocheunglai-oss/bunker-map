@@ -16,3 +16,5 @@ Only one dispatcher device is active at a time. Pairing a replacement device rev
 Installing or reloading a dispatcher update automatically refreshes open WhatsApp Web tabs so Chrome replaces the previous content script. The dispatcher pairing remains in extension storage when the same unpacked extension folder is updated.
 
 The dispatcher never sends to a partial group-name match. Nested WhatsApp wrappers for one visible result are treated as one chat. Delivery requires one exact search result and the same exact title after opening; genuinely separate exact results, a different opened title, or uncertain sends stop for manual review instead of being retried blindly. Search, open, compose, and send steps intentionally use conservative pauses for reliability.
+
+An unpaired installation reads its empty local state before requesting automatic pairing. Keep `spc.fcuno.com` signed in within the same Chrome profile while installing or reloading the dispatcher.

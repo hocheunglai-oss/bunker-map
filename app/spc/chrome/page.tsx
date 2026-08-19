@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { SPC_SPEED_BOARD_VERSION } from "@/lib/spcSpeedBoardNotice"
+import {
+  updateSpcDispatcherDirectory,
+  type SpcDispatcherDirectoryHandle,
+  type SpcGroupDispatcherBundle,
+} from "@/lib/spcGroupDispatcherPackage"
 import { SPC_GROUP_DISPATCHER_VERSION } from "@/lib/spcGroupDispatcherVersion"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 
@@ -70,13 +75,13 @@ const DISPATCHER_STEPS: readonly Step[] = [
     },
   },
   {
-    title: "Replace the old unpacked extension",
+    title: "Update the installed folder",
     details: [
-      "Open chrome://extensions and remove the existing FCUNO SPC Group Dispatcher card. Refreshing WhatsApp Web or clicking Reload on the old folder does not install downloaded files.",
-      `Choose Load unpacked and select the new fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION} folder. Confirm the extension card itself shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
-      "Sign in to spc.fcuno.com in the same Chrome profile, then return to WhatsApp Web. The new extension refreshes the WhatsApp tab automatically after installation.",
+      "Choose UPDATE INSTALLED FOLDER above and select the dispatcher folder Chrome is currently using. The page verifies manifest.json and replaces that folder directly.",
+      `Open chrome://extensions and click Reload on FCUNO SPC Group Dispatcher. Confirm the card shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
+      "Keep spc.fcuno.com signed in in the same Chrome profile. WhatsApp Web refreshes automatically after the extension reloads.",
       "The dispatcher connects automatically. Exact WhatsApp groups are managed centrally in User Management.",
-      "Pairing a replacement computer automatically revokes the previous dispatcher.",
+      "Use the ZIP download only for a first installation or if the installed folder is no longer available.",
     ],
   },
 ]
@@ -105,6 +110,10 @@ type ApiGroupResult = {
   reused: boolean
 }
 
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<SpcDispatcherDirectoryHandle>
+}
+
 export default function SpcChromeExtensionPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions } = useSpcAuth()
@@ -114,6 +123,7 @@ export default function SpcChromeExtensionPage() {
   const [dispatcher, setDispatcher] = useState<DispatcherStatus | null>(null)
   const [dispatcherHealth, setDispatcherHealth] = useState<DispatcherHealth | null>(null)
   const [dispatcherLoading, setDispatcherLoading] = useState(true)
+  const [dispatcherFolderUpdating, setDispatcherFolderUpdating] = useState(false)
   const [apiGroupSubject, setApiGroupSubject] = useState("OTTO LAI (SPC)")
   const [apiGroupArmed, setApiGroupArmed] = useState(false)
   const [apiGroupCreating, setApiGroupCreating] = useState(false)
@@ -214,6 +224,43 @@ export default function SpcChromeExtensionPage() {
     setNoticeIsError(false)
   }
 
+  async function updateInstalledDispatcherFolder() {
+    const picker = (window as DirectoryPickerWindow).showDirectoryPicker
+    if (!picker) {
+      setNoticeMessage("Installed-folder updates require desktop Google Chrome or Microsoft Edge.")
+      setNoticeIsError(true)
+      return
+    }
+
+    setDispatcherFolderUpdating(true)
+    setNoticeMessage("")
+    setNoticeIsError(false)
+    try {
+      const directory = await picker({ mode: "readwrite" })
+      const response = await fetch("/api/spc/group-dispatcher/files", {
+        cache: "no-store",
+      })
+      const data = (await response.json()) as SpcGroupDispatcherBundle & { message?: string }
+      if (!response.ok) throw new Error(data.message || "Failed to load dispatcher update files.")
+      if (data.version !== SPC_GROUP_DISPATCHER_VERSION) {
+        throw new Error(`The server returned dispatcher v${data.version || "unknown"}; v${SPC_GROUP_DISPATCHER_VERSION} is required.`)
+      }
+      const result = await updateSpcDispatcherDirectory(directory, data)
+      setNoticeMessage(
+        `${result.directoryName} was updated from v${result.previousVersion} to v${result.version}. Open chrome://extensions and click Reload on FCUNO SPC Group Dispatcher.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setNoticeMessage("Dispatcher folder update cancelled.")
+        return
+      }
+      setNoticeMessage(error instanceof Error ? error.message : "Failed to update the installed dispatcher folder.")
+      setNoticeIsError(true)
+    } finally {
+      setDispatcherFolderUpdating(false)
+    }
+  }
+
   async function createApiGroup() {
     const subject = apiGroupSubject.replace(/\s+/g, " ").trim()
     if (!subject) {
@@ -308,15 +355,25 @@ export default function SpcChromeExtensionPage() {
               <h2>GROUP DISPATCHER</h2>
               <p>Dedicated delivery service for the approved SPC WhatsApp Business desktop.</p>
             </div>
-            {dispatcher ? (
+            <div className="spc-chrome-header-actions">
               <button
                 type="button"
                 className="spc-page-action spc-chrome-notice-button"
-                onClick={() => void revokeDispatcher()}
+                onClick={() => void updateInstalledDispatcherFolder()}
+                disabled={dispatcherFolderUpdating}
               >
-                Revoke Dispatcher
+                {dispatcherFolderUpdating ? "Updating..." : "Update Installed Folder"}
               </button>
-            ) : null}
+              {dispatcher ? (
+                <button
+                  type="button"
+                  className="spc-page-action spc-chrome-notice-button"
+                  onClick={() => void revokeDispatcher()}
+                >
+                  Revoke Dispatcher
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="spc-guide-list">
             {DISPATCHER_STEPS.map((step, index) => (
