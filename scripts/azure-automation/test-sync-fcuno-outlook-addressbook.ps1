@@ -14,6 +14,19 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
   }
 }
 
+$dependencyOrderedRows = Sort-ExchangeQueueRowsForDependencies @(
+  [pscustomobject]@{ action = "update_group_members"; queue_sequence = 20; id = "group-members" },
+  [pscustomobject]@{ action = "delete_contact"; queue_sequence = 10; id = "delete-contact" },
+  [pscustomobject]@{ action = "update_contact"; queue_sequence = 30; id = "update-contact-later" },
+  [pscustomobject]@{ action = "create_contact"; queue_sequence = 5; id = "create-contact" },
+  [pscustomobject]@{ action = "update_group"; queue_sequence = 15; id = "update-group" },
+  [pscustomobject]@{ action = "update_contact"; queue_sequence = 8; id = "update-contact-earlier" }
+)
+Assert-Equal `
+  "create-contact,update-contact-earlier,update-contact-later,update-group,group-members,delete-contact" `
+  (($dependencyOrderedRows | ForEach-Object { $_.id }) -join ",") `
+  "Incremental batches must settle contact recipients before groups and defer contact deletion"
+
 foreach ($email in @(
   "abc.@example.com",
   "a..b@example.com",

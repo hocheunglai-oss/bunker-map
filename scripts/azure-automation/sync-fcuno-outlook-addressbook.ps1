@@ -4182,6 +4182,29 @@ function Process-ExchangeQueueRow($Row, [hashtable]$Stats) {
   }
 }
 
+function Get-ExchangeQueueDependencyRank($Row) {
+  $action = Clean-Text $Row.action
+  switch ($action) {
+    "create_contact" { return 0 }
+    "update_contact" { return 0 }
+    "create_group" { return 1 }
+    "update_group" { return 1 }
+    "update_group_members" { return 1 }
+    "delete_group" { return 1 }
+    "delete_contact" { return 2 }
+    default { return 3 }
+  }
+}
+
+function Sort-ExchangeQueueRowsForDependencies($Rows) {
+  return @(
+    @($Rows) |
+      Sort-Object `
+        @{ Expression = { Get-ExchangeQueueDependencyRank $_ }; Ascending = $true }, `
+        @{ Expression = { [long]$_.queue_sequence }; Ascending = $true }
+  )
+}
+
 function Invoke-IncrementalExchangeSync {
   if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
   $stats = @{
@@ -4217,7 +4240,11 @@ function Invoke-IncrementalExchangeSync {
     Increment-Stat $stats "queuedRows" @($batchRows).Count
     $script:CanonicalExchangeRows = $null
 
-  foreach ($row in $batchRows) {
+  # A group can reference a contact created or renamed later in the same claimed
+  # batch. Project contact creates/updates first, then reconcile groups, and
+  # remove contacts last so every group mutation resolves against settled
+  # recipient identities. Queue sequence remains stable within each phase.
+  foreach ($row in (Sort-ExchangeQueueRowsForDependencies $batchRows)) {
     $rowId = Clean-Text $row.id
     if (-not $rowId) { continue }
     $beforeCounters = $null
