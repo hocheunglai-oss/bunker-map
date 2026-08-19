@@ -74,8 +74,8 @@ const DISPATCHER_STEPS: readonly Step[] = [
     details: [
       "Open chrome://extensions and remove the existing FCUNO SPC Group Dispatcher card. Refreshing WhatsApp Web or clicking Reload on the old folder does not install downloaded files.",
       `Choose Load unpacked and select the new fcuno-spc-group-dispatcher-v${SPC_GROUP_DISPATCHER_VERSION} folder. Confirm the extension card itself shows version ${SPC_GROUP_DISPATCHER_VERSION}.`,
-      "Return to WhatsApp Web. The new extension refreshes the tab automatically after installation.",
-      "Enter a device label and choose PAIR DISPATCHER. Exact WhatsApp groups are managed centrally in User Management.",
+      "Sign in to spc.fcuno.com in the same Chrome profile, then return to WhatsApp Web. The new extension refreshes the WhatsApp tab automatically after installation.",
+      "The dispatcher connects automatically. Exact WhatsApp groups are managed centrally in User Management.",
       "Pairing a replacement computer automatically revokes the previous dispatcher.",
     ],
   },

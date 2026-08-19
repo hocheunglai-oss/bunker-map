@@ -12,7 +12,7 @@ const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
 const groupName = "FCUNO - SPC TRADING GROUP"
 const message = "*AMENDED - REV 2*\n\nlong pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts\n\n*ETA:* *10 - 18 aug* (was 8 - 10 aug)"
 
-function html(ambiguous = false) {
+function html(ambiguous = false, initiallyPaired = true) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:Arial}#side{float:left;width:340px;height:700px}#search{margin:12px;width:280px;padding:8px}
     .row{display:none;padding:14px;border-top:1px solid #ddd;cursor:pointer}#main{margin-left:340px;min-height:700px}
@@ -30,6 +30,7 @@ function html(ambiguous = false) {
     </div>
     <script>
       window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
+      window.initiallyPaired = ${initiallyPaired ? "true" : "false"}; window.pairRequests = 0;
       window.openGroup = () => { const title=document.getElementById('chatTitle'); title.textContent=${JSON.stringify(groupName)}; title.title=${JSON.stringify(groupName)}; document.getElementById('composer').focus(); };
       window.applyText = (text) => {
         const active=document.activeElement;
@@ -40,8 +41,9 @@ function html(ambiguous = false) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.3'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
-        if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',deviceLabel:'TEST DESKTOP',paused:false});return;}
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.4'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+        if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
+        if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
           window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(groupName)},messageText:${JSON.stringify(message)}}});return;
@@ -70,7 +72,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.3" }),
+      getManifest: () => ({ version: "1.1.4" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -94,8 +96,10 @@ async function withServer(callback) {
     if (request.url === "/spc-sidebar-logo.png") {
       response.writeHead(200, { "content-type": "image/png" }); response.end(logo); return
     }
-    const ambiguous = new URL(request.url, "http://localhost").searchParams.get("ambiguous") === "1"
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous))
+    const requestUrl = new URL(request.url, "http://localhost")
+    const ambiguous = requestUrl.searchParams.get("ambiguous") === "1"
+    const initiallyPaired = requestUrl.searchParams.get("unpaired") !== "1"
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired))
   })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   try { await callback(`http://127.0.0.1:${server.address().port}/`) }
@@ -112,26 +116,43 @@ async function main() {
     try {
       const page = await browser.newPage({ viewport: { width: 1400, height: 800 } })
       await page.goto(url, { waitUntil: "domcontentloaded" })
-      await page.waitForFunction(() => window.completions.length === 1, null, { timeout: 10000 })
+      await page.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
       const sent = await page.evaluate(() => ({
         completions: window.completions,
         sent: window.sent,
         searches: window.searches,
         title: document.getElementById("chatTitle").textContent,
+        panelText: document.getElementById("fcuno-spc-group-dispatcher").innerText,
       }))
       assert.equal(sent.sent.length, 1, JSON.stringify(sent))
       assert.equal(sent.sent[0], message)
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
+      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.4/)
+      assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
       await ambiguousPage.goto(`${url}?ambiguous=1`, { waitUntil: "domcontentloaded" })
-      await ambiguousPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 10000 })
+      await ambiguousPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
       const blocked = await ambiguousPage.evaluate(() => ({ completions: window.completions, sent: window.sent }))
       assert.equal(blocked.sent.length, 0)
       assert.equal(blocked.completions[0].result, "manual_review")
       assert.match(blocked.completions[0].error, /More than one exact WhatsApp group match/)
+
+      const unpairedPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+      await unpairedPage.goto(`${url}?unpaired=1`, { waitUntil: "domcontentloaded" })
+      await unpairedPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
+      const autoPaired = await unpairedPage.evaluate(() => ({
+        completions: window.completions,
+        pairRequests: window.pairRequests,
+        sent: window.sent,
+        panelText: document.getElementById("fcuno-spc-group-dispatcher").innerText,
+      }))
+      assert.equal(autoPaired.pairRequests, 1, JSON.stringify(autoPaired))
+      assert.equal(autoPaired.sent.length, 1, JSON.stringify(autoPaired))
+      assert.equal(autoPaired.completions[0].result, "sent")
+      assert.doesNotMatch(autoPaired.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
     } finally {
       await browser.close()
     }

@@ -9,11 +9,10 @@ This is the dedicated Windows dispatcher for the Singapore Purchasing Center. It
 3. Download and extract the Group Dispatcher ZIP.
 4. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this folder.
 5. Refresh WhatsApp Web.
-6. Enter a device label, then choose **Pair Dispatcher**.
-7. In SPC User Management, create each delivery route with the exact existing WhatsApp group name and assign every buyer to the correct route.
+6. The dispatcher connects automatically. In SPC User Management, create each delivery route with the exact existing WhatsApp group name and assign every buyer to the correct route.
 
 Only one dispatcher device is active at a time. Pairing a replacement device revokes the previous device. One dispatcher can service multiple centrally assigned groups. Keep WhatsApp Web open; queued enquiries wait safely while the desktop is offline.
 
 Installing or reloading a dispatcher update automatically refreshes open WhatsApp Web tabs so Chrome replaces the previous content script. The dispatcher pairing remains in extension storage when the same unpacked extension folder is updated.
 
-The dispatcher never sends to a partial group-name match. Nested WhatsApp wrappers for one visible result are treated as one chat, and international group headers are verified from their member list even when WhatsApp omits the English word "You". Genuinely separate exact group results or uncertain sends are stopped for manual review instead of being retried blindly.
+The dispatcher never sends to a partial group-name match. Nested WhatsApp wrappers for one visible result are treated as one chat. Delivery requires one exact search result and the same exact title after opening; genuinely separate exact results, a different opened title, or uncertain sends stop for manual review instead of being retried blindly. Search, open, compose, and send steps intentionally use conservative pauses for reliability.
