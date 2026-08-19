@@ -6,9 +6,14 @@ import { listManagedSpcUsers } from "@/lib/spcUsers"
 import type { SpcEnquiry } from "@/lib/spcEnquiries"
 
 const MAX_ATTEMPTS = 20
+const PROCESSING_STALE_MS = 5 * 60 * 1000
 const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 21600]
 const TEMPLATE_NAME = process.env.SPC_MOBILE_MODE_TEMPLATE_NAME?.trim() || "spc_mobile_mode_on"
 const TEMPLATE_LANGUAGE = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_LANGUAGE?.trim() || "en_US"
+const DELIVERY_COLUMNS = "id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count,processing_started_at"
+
+class DeliveryUncertainError extends Error {}
+class WhatsappRejectedError extends Error {}
 
 type DeliveryRow = {
   id: string
@@ -21,6 +26,7 @@ type DeliveryRow = {
   content_message_id: string | null
   trader_message_id: string | null
   attempt_count: number
+  processing_started_at: string | null
 }
 
 type MobileModeRow = {
@@ -31,6 +37,7 @@ type MobileModeRow = {
   activation_message_id: string | null
   activation_attempt_count: number
   conversation_open_until: string | null
+  updated_at: string
 }
 
 type EnquiryRow = {
@@ -65,21 +72,38 @@ function safeWhatsappId(payload: unknown) {
 async function sendWhatsapp(body: Record<string, unknown>) {
   const version = requireEnv("WHATSAPP_GRAPH_API_VERSION")
   const phoneNumberId = requireEnv("SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID")
-  const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${requireEnv("WHATSAPP_ACCESS_TOKEN")}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", ...body }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(10_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${requireEnv("WHATSAPP_ACCESS_TOKEN")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", ...body }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    throw new DeliveryUncertainError("WhatsApp request outcome is uncertain.")
+  }
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const code = payload && typeof payload === "object" && "error" in payload
       ? String((payload as { error?: { code?: unknown } }).error?.code || "rejected")
       : "rejected"
-    throw new Error(`WhatsApp rejected the message (${code.slice(0, 32)}).`)
+    throw new WhatsappRejectedError(`WhatsApp rejected the message (${code.slice(0, 32)}).`)
   }
-  return safeWhatsappId(payload)
+  try {
+    return safeWhatsappId(payload)
+  } catch {
+    throw new DeliveryUncertainError("WhatsApp accepted the request without a usable message id.")
+  }
+}
+
+function retryAt(attemptCount: number) {
+  return new Date(Date.now() + RETRY_SECONDS[Math.min(Math.max(attemptCount - 1, 0), RETRY_SECONDS.length - 1)] * 1000).toISOString()
+}
+
+function failureStatus(error: unknown) {
+  return error instanceof DeliveryUncertainError ? "manual_review" : "failed"
 }
 
 export function formatSpcMobileEnquiryText(row: Pick<EnquiryRow, "title" | "notes">) {
@@ -202,31 +226,61 @@ async function sendModePrompt(row: MobileModeRow) {
 export async function processPendingSpcMobileDeliveries(limit = 20) {
   const supabase = serviceClient()
   const now = new Date().toISOString()
+  const staleBefore = new Date(Date.now() - PROCESSING_STALE_MS).toISOString()
+  const { error: staleDeliveryError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+    status: "manual_review",
+    processing_started_at: null,
+    last_error_code: "Delivery ownership expired; verify WhatsApp before retrying.",
+    updated_at: now,
+  }).eq("status", "processing").lt("processing_started_at", staleBefore)
+  if (staleDeliveryError) throw staleDeliveryError
+  const { error: staleModeError } = await supabase.from("spc_mobile_modes").update({
+    activation_status: "manual_review",
+    activation_last_error: "Activation ownership expired; verify WhatsApp before retrying.",
+    updated_at: now,
+  }).eq("activation_status", "processing").lt("updated_at", staleBefore)
+  if (staleModeError) throw staleModeError
   const { data: pendingModes, error: modeError } = await supabase.from("spc_mobile_modes")
-    .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until")
+    .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,updated_at")
     .eq("enabled", true).in("activation_status", ["queued", "failed"])
     .lte("activation_next_attempt_at", now).limit(limit)
   if (modeError) throw modeError
   for (const mode of (pendingModes || []) as MobileModeRow[]) {
+    const claimTime = new Date().toISOString()
+    const { data: claimedMode, error: claimError } = await supabase.from("spc_mobile_modes").update({
+      activation_status: "processing",
+      activation_attempt_count: mode.activation_attempt_count + 1,
+      activation_last_error: null,
+      updated_at: claimTime,
+    }).eq("spc_user_id", mode.spc_user_id).eq("activation_status", mode.activation_status)
+      .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,updated_at")
+      .maybeSingle()
+    if (claimError) throw claimError
+    if (!claimedMode) continue
     try {
-      const messageId = await sendModePrompt(mode)
-      await supabase.from("spc_mobile_modes").update({
+      const messageId = await sendModePrompt(claimedMode as MobileModeRow)
+      const { data: checkpointedMode, error: checkpointError } = await supabase.from("spc_mobile_modes").update({
         activation_status: "prompt_sent", activation_message_id: messageId,
-        activation_delivery_status: "accepted", activation_attempt_count: mode.activation_attempt_count + 1,
+        activation_delivery_status: "accepted",
         activation_last_error: null, updated_at: new Date().toISOString(),
-      }).eq("spc_user_id", mode.spc_user_id).in("activation_status", ["queued", "failed"])
+      }).eq("spc_user_id", mode.spc_user_id).eq("activation_status", "processing")
+        .select("spc_user_id").maybeSingle()
+      if (checkpointError || !checkpointedMode) {
+        throw new DeliveryUncertainError("WhatsApp accepted the activation prompt but its checkpoint failed.")
+      }
     } catch (modeSendError) {
       const attempts = mode.activation_attempt_count + 1
+      const status = failureStatus(modeSendError)
       await supabase.from("spc_mobile_modes").update({
-        activation_status: "failed", activation_attempt_count: attempts,
-        activation_next_attempt_at: new Date(Date.now() + RETRY_SECONDS[Math.min(attempts - 1, RETRY_SECONDS.length - 1)] * 1000).toISOString(),
+        activation_status: status,
+        activation_next_attempt_at: status === "failed" ? retryAt(attempts) : new Date().toISOString(),
         activation_last_error: (modeSendError instanceof Error ? modeSendError.message : "activation_failed").slice(0, 160),
         updated_at: new Date().toISOString(),
-      }).eq("spc_user_id", mode.spc_user_id)
+      }).eq("spc_user_id", mode.spc_user_id).eq("activation_status", "processing")
     }
   }
   const { data, error } = await supabase.from("spc_mobile_enquiry_deliveries")
-    .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
+    .select(DELIVERY_COLUMNS)
     .in("status", ["queued", "failed", "acknowledged"])
     .lte("next_attempt_at", new Date().toISOString())
     .lt("attempt_count", MAX_ATTEMPTS)
@@ -235,6 +289,7 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
   if (error) throw error
   let processed = 0
   for (const delivery of (data || []) as DeliveryRow[]) {
+    let claimed: DeliveryRow | null = null
     try {
       const { data: mode, error: currentModeError } = await supabase.from("spc_mobile_modes")
         .select("enabled,conversation_open_until,activation_status").eq("spc_user_id", delivery.spc_user_id).maybeSingle()
@@ -250,25 +305,36 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
         }
         continue
       }
-      if (delivery.status === "acknowledged") {
-        await releaseDelivery(delivery)
-        processed += 1
-        continue
-      }
-      const { error: updateError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
-        status: "acknowledged", acknowledged_at: new Date().toISOString(), last_error_code: null, updated_at: new Date().toISOString(),
-      }).eq("id", delivery.id).in("status", ["queued", "failed", "prompt_sent"])
-      if (updateError) throw updateError
-      await releaseDelivery({ ...delivery, status: "acknowledged" })
+      const claimTime = new Date().toISOString()
+      const { data: claim, error: claimError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+        status: "processing",
+        processing_started_at: claimTime,
+        acknowledged_at: claimTime,
+        attempt_count: delivery.attempt_count + 1,
+        last_error_code: null,
+        updated_at: claimTime,
+      }).eq("id", delivery.id).eq("status", delivery.status).select(DELIVERY_COLUMNS).maybeSingle()
+      if (claimError) throw claimError
+      if (!claim) continue
+      claimed = claim as DeliveryRow
+      console.info("SPC mobile delivery claimed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id, attemptCount: claimed.attempt_count })
+      await releaseDelivery(claimed)
+      console.info("SPC mobile delivery completed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id })
       processed += 1
     } catch (error) {
-      const attempts = delivery.attempt_count + 1
+      if (!claimed) {
+        console.error("SPC mobile delivery could not be claimed", { deliveryId: delivery.id, error: error instanceof Error ? error.message : "delivery_failed" })
+        continue
+      }
+      const status = failureStatus(error)
       await supabase.from("spc_mobile_enquiry_deliveries").update({
-        status: delivery.status === "acknowledged" ? "acknowledged" : "failed", attempt_count: attempts,
-        next_attempt_at: new Date(Date.now() + RETRY_SECONDS[Math.min(attempts - 1, RETRY_SECONDS.length - 1)] * 1000).toISOString(),
+        status,
+        processing_started_at: null,
+        next_attempt_at: status === "failed" ? retryAt(claimed.attempt_count) : new Date().toISOString(),
         last_error_code: (error instanceof Error ? error.message : "delivery_failed").slice(0, 160),
         updated_at: new Date().toISOString(),
-      }).eq("id", delivery.id)
+      }).eq("id", claimed.id).eq("status", "processing")
+      console.error("SPC mobile delivery stopped", { deliveryId: claimed.id, status, error: error instanceof Error ? error.message : "delivery_failed" })
     }
   }
   return { examined: data?.length || 0, processed }
@@ -283,20 +349,30 @@ async function releaseDelivery(delivery: DeliveryRow) {
   let contentId = delivery.content_message_id
   if (!contentId) {
     contentId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: formatSpcMobileEnquiryText(row) } })
-    const { error: checkpointError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+    const { data: checkpoint, error: checkpointError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
       content_message_id: contentId, content_delivery_status: "accepted", updated_at: new Date().toISOString(),
-    }).eq("id", delivery.id)
-    if (checkpointError) throw checkpointError
+    }).eq("id", delivery.id).eq("status", "processing").select("id").maybeSingle()
+    if (checkpointError || !checkpoint) {
+      throw new DeliveryUncertainError("WhatsApp accepted the enquiry but its checkpoint failed.")
+    }
   }
   let traderId = delivery.trader_message_id
-  if (!traderId) traderId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: row.created_by_display_name.trim() || "SPC BUYER TRADER" } })
+  if (!traderId) {
+    traderId = await sendWhatsapp({ to: delivery.recipient_phone, type: "text", text: { preview_url: false, body: row.created_by_display_name.trim() || "SPC BUYER TRADER" } })
+    const { data: checkpoint, error: checkpointError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+      trader_message_id: traderId, trader_delivery_status: "accepted", updated_at: new Date().toISOString(),
+    }).eq("id", delivery.id).eq("status", "processing").select("id").maybeSingle()
+    if (checkpointError || !checkpoint) {
+      throw new DeliveryUncertainError("WhatsApp accepted the trader label but its checkpoint failed.")
+    }
+  }
   const now = new Date().toISOString()
-  const { error: updateError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+  const { data: completed, error: updateError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
     status: "content_sent", content_message_id: contentId, trader_message_id: traderId,
     content_delivery_status: "accepted", trader_delivery_status: "accepted",
-    acknowledged_at: now, completed_at: now, last_error_code: null, updated_at: now,
-  }).eq("id", delivery.id)
-  if (updateError) throw updateError
+    acknowledged_at: now, completed_at: now, processing_started_at: null, last_error_code: null, updated_at: now,
+  }).eq("id", delivery.id).eq("status", "processing").select("id").maybeSingle()
+  if (updateError || !completed) throw updateError || new Error("The mobile delivery completion checkpoint was not applied.")
 }
 
 export async function acknowledgeSpcMobileDelivery(from: string, token?: string) {
@@ -324,7 +400,7 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
 
   // Backward compatibility for enquiry-specific RECEIVE prompts already delivered before this change.
   let query = supabase.from("spc_mobile_enquiry_deliveries")
-    .select("id,enquiry_id,spc_user_id,recipient_phone,acknowledgement_token,status,prompt_message_id,content_message_id,trader_message_id,attempt_count")
+    .select(DELIVERY_COLUMNS)
     .eq("recipient_phone", from).in("status", ["prompt_sent", "acknowledged"])
   query = token ? query.eq("acknowledgement_token", token) : query.order("created_at", { ascending: false }).limit(2)
   const { data, error } = await query
@@ -337,7 +413,7 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
     conversation_open_until: new Date(inboundAt.getTime() + 24 * 60 * 60 * 1000).toISOString(), updated_at: inboundAt.toISOString(),
   }).eq("spc_user_id", delivery.spc_user_id)
   await supabase.from("spc_mobile_enquiry_deliveries").update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id).in("status", ["prompt_sent", "acknowledged"])
-  await releaseDelivery(delivery)
+  await processPendingSpcMobileDeliveries()
   return true
 }
 

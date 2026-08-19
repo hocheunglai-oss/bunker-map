@@ -42,7 +42,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.7'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.8'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-claim'){
@@ -51,13 +51,16 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(request.type==='dispatcher-complete'){window.completions.push(request);callback({ok:true});return;}
         if(request.type==='native-replace-text'){callback({ok:window.applyText(request.text)});return;}
-        if(request.type==='native-insert-text'){const c=document.getElementById('composer');c.textContent=String(request.text||'');callback({ok:true});return;}
+        if(request.type==='native-insert-text'){
+          const current=document.getElementById('composer');const replacement=current.cloneNode(false);
+          replacement.textContent=String(request.text||'');current.replaceWith(replacement);replacement.focus();callback({ok:true});return;
+        }
         if(request.type==='native-click'){
           const target=document.elementFromPoint(Number(request.x),Number(request.y));window.nativeClick=true;target?.closest('.row')?.click();window.nativeClick=false;callback({ok:true});return;
         }
         if(request.type==='native-enter'){
           const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';
-          if(!${ambiguous ? "true" : "false"} && text){const row=document.createElement('div');row.dataset.id='true_1';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);c.replaceChildren();}
+          if(!${ambiguous ? "true" : "false"} && text){const row=document.createElement('div');row.className='message-out';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);c.replaceChildren();}
           callback({ok:true});return;
         }
         if(request.type==='dispatcher-set-paused'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
@@ -73,7 +76,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.7" }),
+      getManifest: () => ({ version: "1.1.8" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -98,7 +101,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.7" }),
+      getManifest: () => ({ version: "1.1.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -154,7 +157,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.7" }),
+      getManifest: () => ({ version: "1.1.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -293,7 +296,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.7/)
+      assert.match(sent.panelText, /DELIVERY\s+v1\.1\.8/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })

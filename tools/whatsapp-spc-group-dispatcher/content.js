@@ -209,8 +209,17 @@
   function outgoingMessageCount(message) {
     const target = comparable(message)
     if (!target) return 0
-    return Array.from(getMain()?.querySelectorAll("[data-id^='true_'], [data-id*='true_']") || [])
+    const rows = Array.from(getMain()?.querySelectorAll(
+      ".message-out, [data-testid='msg-container'], [data-id^='true_'], [data-id*='true_']",
+    ) || [])
+      .filter((row, index, allRows) => allRows.indexOf(row) === index)
       .filter(isVisible)
+      .filter((row) => {
+        if (row.matches(".message-out") || row.closest(".message-out")) return true
+        const identified = row.matches("[data-id]") ? row : row.closest("[data-id]")
+        return String(identified?.getAttribute("data-id") || "").includes("true_")
+      })
+    return rows
       .filter((row) => comparable(row.innerText || row.textContent).includes(target))
       .length
   }
@@ -222,18 +231,24 @@
     composer.focus()
     await runtimeMessage({ type: "native-replace-text", text: "" })
     await runtimeMessage({ type: "native-insert-text", text: message })
-    await new Promise((resolve) => setTimeout(resolve, 800))
-    if (!comparable(composer.innerText || composer.textContent).includes(comparable(message))) {
-      throw new Error("WhatsApp did not accept the enquiry text.")
+    let accepted = false
+    for (const delay of [250, 500, 900]) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      const nextComposer = findComposer()
+      if (comparable(nextComposer?.innerText || nextComposer?.textContent).includes(comparable(message))) {
+        accepted = true
+        break
+      }
+      if (outgoingMessageCount(message) > beforeCount) return true
+    }
+    if (!accepted) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm the enquiry text before sending.")
     }
     await runtimeMessage({ type: "native-enter" })
 
     for (const delay of [700, 1200, 2000, 3000, 4500]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
-      const nextComposer = findComposer()
-      if (outgoingMessageCount(message) > beforeCount && !cleanText(nextComposer?.innerText || nextComposer?.textContent)) {
-        return true
-      }
+      if (outgoingMessageCount(message) > beforeCount) return true
     }
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
   }
