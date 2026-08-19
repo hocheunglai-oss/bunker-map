@@ -325,9 +325,9 @@ test("SPC user lifecycle is atomic and the final ADMIN invariant is database-enf
     "utf8",
   )
   const canonicalMarker = "-- Make SPC user rows and their role/profile metadata one atomic security"
-  const nextCanonicalMarker = "-- Isolated SPC WhatsApp MFA proof of concept."
+  const nextCanonicalMarker = "create or replace function public.save_spc_user_with_delivery_route"
 
-  assert.match(usersSource, /\.rpc\("save_spc_user_with_admin_continuity"/)
+  assert.match(usersSource, /\.rpc\("save_spc_user_with_delivery_route"/)
   assert.match(usersSource, /"delete_spc_user_with_admin_continuity"/)
   assert.doesNotMatch(
     usersSource,

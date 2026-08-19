@@ -44,6 +44,7 @@ type SpcUserRow = {
   username: string
   display_name: string | null
   whatsapp_phone: string | null
+  delivery_route_id: string | null
   role: string
   password_hash: string
   is_active: boolean
@@ -107,6 +108,7 @@ export type ManagedSpcUser = {
   username: string
   displayName: string
   whatsappPhone: string
+  deliveryRouteId: string
   role: SpcRoleId
   roleLabel: string
   office: string
@@ -166,6 +168,7 @@ export type SaveSpcUserInput = {
   username: string
   displayName?: string
   whatsappPhone?: string
+  deliveryRouteId?: string
   role?: string
   office?: string
   mustChangePassword?: boolean
@@ -696,6 +699,7 @@ function mapSpcUser(
     username: row.username,
     displayName: row.display_name || row.username,
     whatsappPhone: row.whatsapp_phone ? `+${normaliseSpcWhatsappPhone(row.whatsapp_phone)}` : "",
+    deliveryRouteId: row.delivery_route_id || "",
     role,
     roleLabel: getSpcRoleLabel(role),
     office: profile?.office || SPC_DEFAULT_OFFICES[0],
@@ -1162,6 +1166,10 @@ export async function saveManagedSpcUser(
   const roleDefault = getRoleDefaultMap(roleDefaults)[role]
   if (!roleDefault) throw new Error("Select a valid permission group.")
   const isActive = input.isActive !== false
+  const deliveryRouteId = input.deliveryRouteId?.trim() || ""
+  if (isActive && role !== "SUPPLIER TRADER" && !deliveryRouteId) {
+    throw new Error("An active enquiry delivery route is required for this user.")
+  }
   const whatsappPhone = normaliseSpcWhatsappPhoneForAccount(
     input.whatsappPhone,
     isActive,
@@ -1186,11 +1194,12 @@ export async function saveManagedSpcUser(
     }
 
     const { data, error } = await supabase
-      .rpc("save_spc_user_with_admin_continuity", {
+      .rpc("save_spc_user_with_delivery_route", {
         p_user_id: input.id || null,
         p_username: username,
         p_display_name: input.displayName?.trim() || username,
         p_whatsapp_phone: whatsappPhone || null,
+        p_delivery_route_id: deliveryRouteId || null,
         p_database_role: getDatabaseRole(role),
         p_effective_role: role,
         p_office: normaliseOffice(input.office) || null,

@@ -34,6 +34,7 @@ const PAGE_TABLES: Record<string, string[]> = {
     "spc_users",
     "spc_role_defaults",
     "spc_user_management_events",
+    "spc_delivery_routes",
     "office_calendar_store",
   ],
   "spc-mfa-test": ["spc_mfa_test_events"],

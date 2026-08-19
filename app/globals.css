@@ -7185,6 +7185,9 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-user-directory-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
   padding: 8px;
 }
@@ -7480,6 +7483,143 @@ body:has(.spc-statistics-page) .spc-main {
   grid-column: 1 / -1;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.spc-route-dialog {
+  width: min(680px, 100%);
+}
+
+.spc-route-note {
+  margin: 0;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 12px 16px;
+}
+
+.spc-route-message {
+  border-bottom: 1px solid #acd9c9;
+  background: #eefaf5;
+  color: #006b52;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 9px 16px;
+}
+
+.spc-route-message.is-error {
+  border-color: #f0b8c0;
+  background: #fff7f8;
+  color: #b00020;
+}
+
+.spc-route-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(260px, 1.3fr) auto;
+  gap: 10px;
+  align-items: end;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  background: var(--fc-admin-panel-soft-bg);
+  padding: 12px 16px;
+}
+
+.spc-route-form label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.spc-route-form input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  font-size: 12px;
+  outline: none;
+  padding: 0 9px;
+}
+
+.spc-route-form-actions,
+.spc-route-row > div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.spc-route-form-actions button,
+.spc-route-row button {
+  min-height: 32px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 6px 11px;
+  white-space: nowrap;
+}
+
+.spc-route-form-actions button.is-primary {
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
+.spc-route-row button.is-danger {
+  border-color: #f0b8c0;
+  background: #fff7f8;
+  color: #b00020;
+}
+
+.spc-route-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.spc-route-row {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  padding: 9px 16px;
+}
+
+.spc-route-row.is-disabled {
+  opacity: 0.56;
+}
+
+.spc-route-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.spc-route-row strong,
+.spc-route-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spc-route-row strong {
+  color: var(--fc-admin-heading);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.spc-route-row small {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 750;
 }
 
 .spc-user-grid {
@@ -8427,6 +8567,14 @@ body:has(.spc-statistics-page) .spc-main {
 
   .spc-user-dialog-fields {
     grid-template-columns: 1fr;
+  }
+
+  .spc-route-form {
+    grid-template-columns: 1fr;
+  }
+
+  .spc-route-form-actions {
+    justify-content: flex-end;
   }
 
   .spc-enquiry-remarks {

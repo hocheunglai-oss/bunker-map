@@ -171,6 +171,7 @@ const TABLES: TableConfig[] = [
   { key: "spcEnquiryRevisions", table: "spc_enquiry_revisions", order: [{ column: "id", ascending: true }] },
   { key: "spcGroupDispatchers", table: "spc_group_dispatchers", order: [{ column: "id", ascending: true }] },
   { key: "spcGroupDeliveryJobs", table: "spc_group_delivery_jobs", order: [{ column: "id", ascending: true }] },
+  { key: "spcDeliveryRoutes", table: "spc_delivery_routes", order: [{ column: "id", ascending: true }] },
   { key: "attendancePeople", table: "attendance_people", order: [{ column: "id", ascending: true }] },
   { key: "attendanceTeamAssignments", table: "attendance_team_assignments", order: [{ column: "person_id", ascending: true }, { column: "effective_from", ascending: true }] },
   { key: "attendanceRawPunches", table: "attendance_raw_punches", order: [{ column: "id", ascending: true }] },

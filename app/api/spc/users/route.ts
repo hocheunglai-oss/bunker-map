@@ -23,6 +23,11 @@ import {
 } from "@/lib/spcUsers"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { spcPrivateJson } from "@/lib/spcResponse"
+import {
+  deactivateSpcDeliveryRoute,
+  listSpcDeliveryRoutes,
+  saveSpcDeliveryRoute,
+} from "@/lib/spcDeliveryRoutes"
 
 type UserActionPayload = {
   action?: string
@@ -31,6 +36,7 @@ type UserActionPayload = {
     username?: string
     displayName?: string
     whatsappPhone?: string
+    deliveryRouteId?: string
     role?: string
     office?: string
     mustChangePassword?: boolean
@@ -43,6 +49,12 @@ type UserActionPayload = {
     permissions?: Record<string, "none" | "view" | "edit">
   }
   office?: string
+  deliveryRoute?: {
+    id?: string
+    label?: string
+    exactGroupName?: string
+    isActive?: boolean
+  }
   id?: string
 }
 
@@ -82,6 +94,20 @@ function describeUserManagementAction(
         action: "save-office",
         targetType: "spc-office",
         targetId: safeAuditText(payload.office, 256),
+      }
+    case "save-delivery-route":
+      return {
+        operation: payload.deliveryRoute?.id ? "UPDATE" : "INSERT",
+        action: payload.deliveryRoute?.id ? "update-delivery-route" : "create-delivery-route",
+        targetType: "spc-delivery-route",
+        targetId: safeAuditText(payload.deliveryRoute?.id, 256),
+      }
+    case "deactivate-delivery-route":
+      return {
+        operation: "UPDATE",
+        action: "deactivate-delivery-route",
+        targetType: "spc-delivery-route",
+        targetId: safeAuditText(payload.id, 256),
       }
     case "delete-office":
       return {
@@ -130,6 +156,11 @@ function errorStatus(error: unknown) {
             message.includes("final active ADMIN") ||
             message.includes("valid permission group") ||
             message.includes("WhatsApp phone") ||
+            message.includes("delivery route") ||
+            message.includes("Delivery route") ||
+            message.includes("Route label") ||
+            message.includes("Exact WhatsApp group") ||
+            message.includes("Move all active users") ||
             message.includes("Built-in") ||
             message.includes("Move all users") ||
             message.includes("Move users")
@@ -165,7 +196,12 @@ function auditErrorCode(error: unknown) {
     message.includes("Password") ||
     message.includes("password") ||
     message.includes("no more than") ||
-    message.includes("WhatsApp phone")
+    message.includes("WhatsApp phone") ||
+    message.includes("delivery route") ||
+    message.includes("Delivery route") ||
+    message.includes("Route label") ||
+    message.includes("Exact WhatsApp group") ||
+    message.includes("Move all active users")
   ) {
     return "invalid_request"
   }
@@ -176,13 +212,15 @@ export async function GET() {
   try {
     await requireSpcAdminPagePermission("spc-user-management", "view")
     const roleDefaultState = await listManagedSpcRoleDefaults(SPC_PAGE_DEFINITIONS)
-    const [users, offices] = await Promise.all([
+    const [users, offices, deliveryRoutes] = await Promise.all([
       listManagedSpcUsers(roleDefaultState, SPC_PAGE_DEFINITIONS),
       listManagedSpcOffices(),
+      listSpcDeliveryRoutes(),
     ])
     return spcPrivateJson({
       users,
       offices,
+      deliveryRoutes,
       pages: SPC_PAGE_DEFINITIONS,
       roleDefaults: roleDefaultState,
       groupStorage: "shared-store",
@@ -267,6 +305,7 @@ export async function POST(request: Request) {
           username: payload.user.username,
           displayName: payload.user.displayName,
           whatsappPhone: payload.user.whatsappPhone,
+          deliveryRouteId: payload.user.deliveryRouteId,
           role: payload.user.role,
           office: payload.user.office,
           mustChangePassword: payload.user.mustChangePassword,
@@ -288,6 +327,28 @@ export async function POST(request: Request) {
 
       const offices = await saveManagedSpcOffice(payload.office, auditContext)
       return spcPrivateJson({ success: true, offices })
+    }
+
+    if (payload.action === "save-delivery-route") {
+      if (!payload.deliveryRoute?.label || !payload.deliveryRoute.exactGroupName) {
+        throw new Error("Route label and exact WhatsApp group name are required.")
+      }
+      const deliveryRoute = await saveSpcDeliveryRoute(
+        {
+          id: payload.deliveryRoute.id,
+          label: payload.deliveryRoute.label,
+          exactGroupName: payload.deliveryRoute.exactGroupName,
+          isActive: payload.deliveryRoute.isActive,
+        },
+        auditContext,
+      )
+      return spcPrivateJson({ success: true, deliveryRoute })
+    }
+
+    if (payload.action === "deactivate-delivery-route") {
+      if (!payload.id) throw new Error("Delivery route is required.")
+      const deliveryRoute = await deactivateSpcDeliveryRoute(payload.id, auditContext)
+      return spcPrivateJson({ success: true, deliveryRoute })
     }
 
     if (payload.action === "delete-office") {

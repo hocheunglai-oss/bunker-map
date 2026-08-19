@@ -197,6 +197,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   spc_enquiry_revisions: "spc-buyer-enquiries",
   spc_group_delivery_jobs: "spc-chrome-extension",
   spc_group_dispatchers: "spc-chrome-extension",
+  spc_delivery_routes: "spc-user-management",
   spc_fixtures: "spc-fixtures",
   spc_role_defaults: "spc-user-management",
   spc_suppliers: "spc-suppliers",
@@ -263,6 +264,7 @@ const ENTITY_NAMES: Record<string, string> = {
   spc_enquiry_revisions: "SPC enquiry revision",
   spc_group_delivery_jobs: "SPC group delivery",
   spc_group_dispatchers: "SPC group dispatcher",
+  spc_delivery_routes: "SPC enquiry delivery route",
   spc_whatsapp_groups: "SPC WhatsApp API group",
   spc_fixtures: "SPC fixture",
   spc_role_defaults: "SPC permission group",
@@ -402,6 +404,7 @@ const SPC_TABLE_NAMES = new Set([
   "spc_enquiry_revisions",
   "spc_group_delivery_jobs",
   "spc_group_dispatchers",
+  "spc_delivery_routes",
   "spc_fixtures",
   "spc_role_defaults",
   "spc_suppliers",
@@ -419,6 +422,7 @@ const NON_UNDOABLE_TABLES = new Set([
   "spc_enquiry_revisions",
   "spc_group_delivery_jobs",
   "spc_group_dispatchers",
+  "spc_delivery_routes",
   "spc_user_management_events",
   "spc_mfa_test_events",
   "spc_suppliers",
@@ -1798,7 +1802,7 @@ export async function listAuditLogs(options: {
     query = query.or("actor_id.is.null,actor_id.not.like.spc:%")
   } else if (scope === "spc") {
     query = query.or(
-      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_enquiry_revisions,spc_group_delivery_jobs,spc_group_dispatchers,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices,spc_user_management_events,spc_mfa_test_events)",
+      "actor_id.like.spc:%,table_name.in.(spc_users,spc_enquiries,spc_enquiry_revisions,spc_delivery_routes,spc_group_delivery_jobs,spc_group_dispatchers,spc_fixtures,spc_role_defaults,spc_suppliers,spc_speedboard_notices,spc_user_management_events,spc_mfa_test_events)",
     )
   }
 

@@ -155,12 +155,11 @@ async function handleApiMessage(message) {
       action: "pair",
       dispatcherId: state.dispatcherId || message.dispatcherId,
       deviceLabel: message.deviceLabel,
-      groupName: message.groupName,
     })
     await writeState({
       dispatcherId: data.dispatcherId,
       token: data.token,
-      groupName: data.groupName,
+      groupName: "",
       deviceLabel: data.deviceLabel,
       paused: false,
     })

@@ -6,12 +6,28 @@ grant usage on schema private to service_role;
 
 create sequence if not exists public.spc_enquiry_number_seq;
 
+create table if not exists public.spc_delivery_routes (
+  id uuid primary key default gen_random_uuid(),
+  label text not null check (char_length(btrim(label)) between 1 and 100),
+  exact_group_name text not null check (char_length(btrim(exact_group_name)) between 1 and 200),
+  is_active boolean not null default true,
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp()
+);
+
+create unique index if not exists spc_delivery_routes_label_lower_key
+on public.spc_delivery_routes(lower(btrim(label)));
+
+create unique index if not exists spc_delivery_routes_group_lower_key
+on public.spc_delivery_routes(lower(btrim(exact_group_name)));
+
 create table if not exists public.spc_users (
   id uuid primary key default gen_random_uuid(),
   username text not null,
   display_name text,
   whatsapp_phone text
     check (whatsapp_phone is null or whatsapp_phone ~ '^[1-9][0-9]{7,14}$'),
+  delivery_route_id uuid references public.spc_delivery_routes(id) on delete restrict,
   role text not null default 'buyer_trader'
     check (role in ('buyer_trader', 'supplier_trader')),
   password_hash text not null,
@@ -20,8 +36,16 @@ create table if not exists public.spc_users (
   updated_at timestamptz not null default now()
 );
 
+alter table public.spc_users
+add column if not exists delivery_route_id uuid
+references public.spc_delivery_routes(id) on delete restrict;
+
 create unique index if not exists spc_users_username_lower_key
 on public.spc_users(lower(username));
+
+create index if not exists spc_users_delivery_route_id_idx
+on public.spc_users(delivery_route_id)
+where delivery_route_id is not null;
 
 create table if not exists public.spc_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -245,6 +269,11 @@ create table if not exists public.spc_group_delivery_jobs (
   revision_number integer not null check (revision_number >= 1),
   event_type text not null check (event_type in ('created', 'amended')),
   message_text text not null check (char_length(message_text) between 1 and 12000),
+  delivery_route_id uuid references public.spc_delivery_routes(id) on delete restrict,
+  destination_route_label text
+    check (destination_route_label is null or char_length(btrim(destination_route_label)) between 1 and 100),
+  destination_group_name text
+    check (destination_group_name is null or char_length(btrim(destination_group_name)) between 1 and 200),
   status text not null default 'queued'
     check (status in ('queued', 'claimed', 'sent', 'failed', 'manual_review', 'cancelled')),
   attempt_count integer not null default 0 check (attempt_count between 0 and 20),
@@ -259,6 +288,12 @@ create table if not exists public.spc_group_delivery_jobs (
   unique (enquiry_id, revision_number, event_type)
 );
 
+alter table public.spc_group_delivery_jobs
+add column if not exists delivery_route_id uuid
+  references public.spc_delivery_routes(id) on delete restrict,
+add column if not exists destination_route_label text,
+add column if not exists destination_group_name text;
+
 create index if not exists spc_group_delivery_jobs_pending_idx
 on public.spc_group_delivery_jobs(available_at, created_at)
 where status in ('queued', 'failed', 'claimed');
@@ -266,6 +301,10 @@ where status in ('queued', 'failed', 'claimed');
 create index if not exists spc_group_delivery_jobs_claimed_by_idx
 on public.spc_group_delivery_jobs(claimed_by)
 where claimed_by is not null;
+
+create index if not exists spc_group_delivery_jobs_delivery_route_id_idx
+on public.spc_group_delivery_jobs(delivery_route_id)
+where delivery_route_id is not null;
 
 create table if not exists public.spc_fixtures (
   id uuid primary key default gen_random_uuid(),
@@ -972,7 +1011,23 @@ set search_path = ''
 as $$
 declare
   enquiry_row public.spc_enquiries%rowtype;
+  route_row public.spc_delivery_routes%rowtype;
 begin
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
+  )
+    and routes.is_active;
+
+  if not found then
+    raise exception 'No active enquiry delivery route is assigned to this user.';
+  end if;
+
   select * into enquiry_row
   from public.spc_enquiries
   where id = p_enquiry_id
@@ -1009,12 +1064,18 @@ begin
     enquiry_id,
     revision_number,
     event_type,
-    message_text
+    message_text,
+    delivery_route_id,
+    destination_route_label,
+    destination_group_name
   ) values (
     enquiry_row.id,
     enquiry_row.revision_number,
     'created',
-    p_message_text
+    p_message_text,
+    route_row.id,
+    btrim(route_row.label),
+    btrim(route_row.exact_group_name)
   )
   on conflict (enquiry_id, revision_number, event_type) do nothing;
 end;
@@ -1036,12 +1097,28 @@ set search_path = ''
 as $$
 declare
   existing public.spc_enquiries%rowtype;
+  route_row public.spc_delivery_routes%rowtype;
   next_revision integer;
   before_snapshot jsonb;
   after_snapshot jsonb;
 begin
   if jsonb_typeof(p_enquiry) <> 'object' or jsonb_typeof(p_changed_fields) <> 'array' then
     raise exception 'Invalid SPC amendment payload.';
+  end if;
+
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
+  )
+    and routes.is_active;
+
+  if not found then
+    raise exception 'No active enquiry delivery route is assigned to this user.';
   end if;
 
   select * into existing
@@ -1130,12 +1207,18 @@ begin
     enquiry_id,
     revision_number,
     event_type,
-    message_text
+    message_text,
+    delivery_route_id,
+    destination_route_label,
+    destination_group_name
   ) values (
     p_enquiry_id,
     next_revision,
     'amended',
-    p_message_text
+    p_message_text,
+    route_row.id,
+    btrim(route_row.label),
+    btrim(route_row.exact_group_name)
   );
 
   return query
@@ -1178,6 +1261,7 @@ begin
     )
       and jobs.available_at <= clock_timestamp()
       and jobs.attempt_count < 20
+      and nullif(btrim(jobs.destination_group_name), '') is not null
     order by jobs.created_at, jobs.id
     for update skip locked
     limit 1
@@ -1260,6 +1344,12 @@ before update on public.spc_enquiries
 for each row
 execute function public.set_spc_updated_at();
 
+drop trigger if exists set_spc_delivery_routes_updated_at on public.spc_delivery_routes;
+create trigger set_spc_delivery_routes_updated_at
+before update on public.spc_delivery_routes
+for each row
+execute function public.set_spc_updated_at();
+
 drop trigger if exists set_spc_fixtures_updated_at on public.spc_fixtures;
 create trigger set_spc_fixtures_updated_at
 before update on public.spc_fixtures
@@ -1288,6 +1378,7 @@ alter table public.spc_users enable row level security;
 alter table public.spc_sessions enable row level security;
 alter table public.spc_enquiries enable row level security;
 alter table public.spc_enquiry_revisions enable row level security;
+alter table public.spc_delivery_routes enable row level security;
 alter table public.spc_group_dispatchers enable row level security;
 alter table public.spc_group_delivery_jobs enable row level security;
 alter table public.spc_fixtures enable row level security;
@@ -1329,6 +1420,13 @@ create policy "spc_group_dispatchers_no_public_access"
   using (false)
   with check (false);
 
+drop policy if exists "spc_delivery_routes_no_public_access" on public.spc_delivery_routes;
+create policy "spc_delivery_routes_no_public_access"
+  on public.spc_delivery_routes
+  for all
+  using (false)
+  with check (false);
+
 drop policy if exists "spc_group_delivery_jobs_no_public_access" on public.spc_group_delivery_jobs;
 create policy "spc_group_delivery_jobs_no_public_access"
   on public.spc_group_delivery_jobs
@@ -1364,6 +1462,7 @@ grant select, update, delete on table public.spc_sessions
 to service_role;
 revoke all on table public.spc_enquiries from anon, authenticated;
 revoke all on table public.spc_enquiry_revisions from public, anon, authenticated;
+revoke all on table public.spc_delivery_routes from public, anon, authenticated;
 revoke all on table public.spc_group_dispatchers from public, anon, authenticated;
 revoke all on table public.spc_group_delivery_jobs from public, anon, authenticated;
 revoke all on table public.spc_fixtures from anon, authenticated;
@@ -1374,6 +1473,7 @@ revoke all on sequence public.spc_enquiry_number_seq from anon, authenticated;
 grant select, insert, update, delete on table public.spc_users to service_role;
 grant select, insert, update, delete on table public.spc_enquiries to service_role;
 grant select, insert, update, delete on table public.spc_enquiry_revisions to service_role;
+grant select, insert, update, delete on table public.spc_delivery_routes to service_role;
 grant select, insert, update, delete on table public.spc_group_dispatchers to service_role;
 grant select, insert, update, delete on table public.spc_group_delivery_jobs to service_role;
 grant select, insert, update, delete on table public.spc_fixtures to service_role;
@@ -1387,6 +1487,7 @@ begin
     perform public.audit_enable_table('public.spc_users'::regclass);
     perform public.audit_enable_table('public.spc_enquiries'::regclass);
     perform public.audit_enable_table('public.spc_enquiry_revisions'::regclass);
+    perform public.audit_enable_table('public.spc_delivery_routes'::regclass);
     perform public.audit_enable_table('public.spc_group_dispatchers'::regclass);
     perform public.audit_enable_table('public.spc_group_delivery_jobs'::regclass);
     perform public.audit_enable_table('public.spc_fixtures'::regclass);
@@ -1991,6 +2092,98 @@ revoke truncate on table public.spc_users
   from public, anon, authenticated, service_role;
 revoke truncate on table public.office_calendar_store
   from public, anon, authenticated, service_role;
+
+create or replace function public.save_spc_user_with_delivery_route(
+  p_user_id uuid,
+  p_username text,
+  p_display_name text,
+  p_whatsapp_phone text,
+  p_database_role text,
+  p_effective_role text,
+  p_office text,
+  p_must_change_password boolean,
+  p_is_supplier_trader boolean,
+  p_password_hash text,
+  p_is_active boolean,
+  p_delivery_route_id uuid
+)
+returns table (
+  id uuid,
+  username text,
+  display_name text,
+  whatsapp_phone text,
+  role text,
+  is_active boolean,
+  delivery_route_id uuid,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = pg_catalog, pg_temp
+as $$
+declare
+  saved_user_id uuid;
+begin
+  if p_delivery_route_id is not null
+    and not exists (
+      select 1
+      from public.spc_delivery_routes as routes
+      where routes.id = p_delivery_route_id
+        and routes.is_active
+    )
+  then
+    raise exception 'Select an active enquiry delivery route.';
+  end if;
+
+  select saved.id
+    into saved_user_id
+  from public.save_spc_user_with_admin_continuity(
+    p_user_id,
+    p_username,
+    p_display_name,
+    p_whatsapp_phone,
+    p_database_role,
+    p_effective_role,
+    p_office,
+    p_must_change_password,
+    p_is_supplier_trader,
+    p_password_hash,
+    p_is_active
+  ) as saved
+  limit 1;
+
+  if saved_user_id is null then
+    raise exception 'SPC user could not be saved.';
+  end if;
+
+  update public.spc_users as users
+  set delivery_route_id = p_delivery_route_id,
+      updated_at = clock_timestamp()
+  where users.id = saved_user_id;
+
+  return query
+  select
+    users.id,
+    users.username,
+    users.display_name,
+    users.whatsapp_phone,
+    users.role,
+    users.is_active,
+    users.delivery_route_id,
+    users.created_at,
+    users.updated_at
+  from public.spc_users as users
+  where users.id = saved_user_id;
+end;
+$$;
+
+revoke all on function public.save_spc_user_with_delivery_route(
+  uuid, text, text, text, text, text, text, boolean, boolean, text, boolean, uuid
+) from public, anon, authenticated, service_role;
+grant execute on function public.save_spc_user_with_delivery_route(
+  uuid, text, text, text, text, text, text, boolean, boolean, text, boolean, uuid
+) to service_role;
 
 -- Isolated SPC WhatsApp MFA proof of concept. This does not change the SPC
 -- login/session flow. Challenges stay in a private schema and can only be

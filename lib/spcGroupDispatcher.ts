@@ -32,6 +32,8 @@ export type SpcGroupDeliveryJob = {
   revisionNumber: number
   eventType: "created" | "amended"
   messageText: string
+  routeLabel: string
+  groupName: string
   attemptCount: number
 }
 
@@ -51,6 +53,8 @@ type DeliveryJobRow = {
   revision_number: number
   event_type: "created" | "amended"
   message_text: string
+  destination_route_label: string
+  destination_group_name: string
   attempt_count: number
 }
 
@@ -84,6 +88,8 @@ function mapJob(row: DeliveryJobRow): SpcGroupDeliveryJob {
     revisionNumber: row.revision_number,
     eventType: row.event_type,
     messageText: row.message_text,
+    routeLabel: cleanText(row.destination_route_label, 100),
+    groupName: cleanText(row.destination_group_name, 200),
     attemptCount: row.attempt_count,
   }
 }
@@ -174,7 +180,7 @@ export async function pairSpcGroupDispatcher(input: {
   request: Request
   dispatcherId?: string
   deviceLabel: string
-  groupName: string
+  groupName?: string
   extensionVersion: string
 }) {
   if (!input.session.username) throw new Error("Authenticated username is required.")
@@ -182,9 +188,7 @@ export async function pairSpcGroupDispatcher(input: {
     ? String(input.dispatcherId)
     : randomUUID()
   const deviceLabel = cleanText(input.deviceLabel, 100)
-  const groupName = cleanText(input.groupName, 200)
   if (!deviceLabel) throw new Error("Device label is required.")
-  if (!groupName) throw new Error("Exact WhatsApp group name is required.")
 
   const token = randomBytes(32).toString("base64url")
   const context = createSpcAuditContext(input.session, input.request, "spc-chrome-extension", {
@@ -202,7 +206,7 @@ export async function pairSpcGroupDispatcher(input: {
   const { error } = await supabase.from("spc_group_dispatchers").upsert({
     id: dispatcherId,
     device_label: deviceLabel,
-    group_name: groupName,
+    group_name: "MULTI-ROUTE",
     token_hash: tokenHash(token),
     extension_version: cleanText(input.extensionVersion, 30) || SPC_GROUP_DISPATCHER_VERSION,
     active: true,
@@ -213,7 +217,7 @@ export async function pairSpcGroupDispatcher(input: {
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
-  return { dispatcherId, token, groupName, deviceLabel }
+  return { dispatcherId, token, groupName: "MULTI-ROUTE", deviceLabel }
 }
 
 export async function getActiveSpcGroupDispatcher() {
@@ -281,10 +285,14 @@ export async function heartbeatSpcGroupDispatcher(token: string, extensionVersio
     id: authenticated.row.id,
     groupName: authenticated.row.group_name,
     deviceLabel: authenticated.row.device_label,
+    extensionVersion: cleanText(extensionVersion, 30) || authenticated.row.extension_version,
   }
 }
 
 export async function claimSpcGroupDelivery(token: string, extensionVersion: string) {
+  if (cleanText(extensionVersion, 30) !== SPC_GROUP_DISPATCHER_VERSION) {
+    throw new Error(`Update the SPC Group Dispatcher to v${SPC_GROUP_DISPATCHER_VERSION} before sending.`)
+  }
   const dispatcher = await heartbeatSpcGroupDispatcher(token, extensionVersion)
   if (!dispatcher) return null
   const claimToken = randomBytes(32).toString("base64url")

@@ -38,11 +38,11 @@ function html(ambiguous = false) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.0.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
-        if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',groupName:${JSON.stringify(groupName)},deviceLabel:'TEST DESKTOP',paused:false});return;}
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+        if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
-          window.claimed=true;callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',messageText:${JSON.stringify(message)}}});return;
+          window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(groupName)},messageText:${JSON.stringify(message)}}});return;
         }
         if(request.type==='dispatcher-complete'){window.completions.push(request);callback({ok:true});return;}
         if(request.type==='native-replace-text'){callback({ok:window.applyText(request.text)});return;}

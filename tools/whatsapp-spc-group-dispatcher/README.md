@@ -9,8 +9,9 @@ This is the dedicated Windows dispatcher for the Singapore Purchasing Center. It
 3. Download and extract the Group Dispatcher ZIP.
 4. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this folder.
 5. Refresh WhatsApp Web.
-6. Enter a device label and the exact existing WhatsApp trading group name, then choose **Pair Dispatcher**.
+6. Enter a device label, then choose **Pair Dispatcher**.
+7. In SPC User Management, create each delivery route with the exact existing WhatsApp group name and assign every buyer to the correct route.
 
-Only one dispatcher device is active at a time. Pairing a replacement device revokes the previous device. Keep WhatsApp Web open; queued enquiries wait safely while the desktop is offline.
+Only one dispatcher device is active at a time. Pairing a replacement device revokes the previous device. One dispatcher can service multiple centrally assigned groups. Keep WhatsApp Web open; queued enquiries wait safely while the desktop is offline.
 
 The dispatcher never sends to a partial group-name match. An ambiguous group or an uncertain send is stopped for manual review instead of being retried blindly.

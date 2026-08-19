@@ -71,7 +71,7 @@
         ${state.paired ? `
           <dl>
             <div><dt>DEVICE</dt><dd>${escapeHtml(state.deviceLabel)}</dd></div>
-            <div><dt>TRADING GROUP</dt><dd>${escapeHtml(state.groupName)}</dd></div>
+            <div><dt>CURRENT ROUTE</dt><dd>${escapeHtml(state.groupName || "Waiting for enquiry")}</dd></div>
           </dl>
           <div class="fcuno-spc-dispatcher-status${state.error ? " is-error" : ""}">
             <i></i><span>${escapeHtml(state.error || state.status)}</span>
@@ -79,9 +79,8 @@
           ${state.lastDelivery ? `<p class="fcuno-spc-dispatcher-last">${escapeHtml(state.lastDelivery)}</p>` : ""}
           <button type="button" data-action="pause" class="is-secondary">${state.paused ? "RESUME" : "PAUSE"}</button>
         ` : `
-          <p>Pair this dedicated Windows desktop with one exact WhatsApp trading group.</p>
+          <p>Pair this dedicated Windows desktop. User Management assigns each enquiry to an exact WhatsApp group.</p>
           <label>DEVICE LABEL<input name="deviceLabel" value="${escapeHtml(state.deviceLabel)}" maxlength="100" /></label>
-          <label>EXACT GROUP NAME<input name="groupName" value="${escapeHtml(state.groupName)}" maxlength="200" /></label>
           <button type="button" data-action="pair">PAIR DISPATCHER</button>
           <small>Open and log in to spc.fcuno.com in this Chrome profile before pairing.</small>
         `}
@@ -244,8 +243,8 @@
         state.status = "Connected. Waiting for enquiries."
         return
       }
-      state.groupName = claim.dispatcher.groupName
-      state.status = `Sending REV ${claim.job.revisionNumber}...`
+      state.groupName = claim.job.groupName
+      state.status = `Sending ${claim.job.routeLabel || "assigned route"} REV ${claim.job.revisionNumber}...`
       render()
       await openExactGroup(state.groupName)
       if (claim.job.attemptCount > 1 && outgoingMessageCount(claim.job.messageText) > 0) {
@@ -294,7 +293,7 @@
       const saved = await runtimeMessage({ type: "dispatcher-state" })
       state.paired = Boolean(saved.token)
       state.paused = Boolean(saved.paused)
-      state.groupName = cleanText(saved.groupName)
+      state.groupName = ""
       state.deviceLabel = cleanText(saved.deviceLabel) || state.deviceLabel
       state.status = state.paired ? "Connected. Waiting for enquiries." : "Pairing required."
     } catch (error) {
@@ -310,16 +309,15 @@
     if (action === "pair") {
       const root = document.getElementById(BOARD_ID)
       const deviceLabel = cleanText(root?.querySelector("input[name='deviceLabel']")?.value)
-      const groupName = cleanText(root?.querySelector("input[name='groupName']")?.value)
       state.error = ""
       state.status = "Pairing..."
       render()
       try {
-        const paired = await runtimeMessage({ type: "dispatcher-pair", deviceLabel, groupName })
+        const paired = await runtimeMessage({ type: "dispatcher-pair", deviceLabel })
         state.paired = true
         state.paused = false
         state.deviceLabel = paired.deviceLabel
-        state.groupName = paired.groupName
+        state.groupName = ""
         state.status = "Connected. Waiting for enquiries."
       } catch (error) {
         state.error = error instanceof Error ? error.message : String(error)

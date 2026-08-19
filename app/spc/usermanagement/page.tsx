@@ -21,6 +21,7 @@ type ManagedSpcUser = {
   username: string
   displayName: string
   whatsappPhone: string
+  deliveryRouteId: string
   role: SpcRoleId
   roleLabel: string
   office: string
@@ -47,7 +48,25 @@ type UsersResponse = {
   offices?: string[]
   pages?: SpcPageDefinition[]
   roleDefaults?: ManagedSpcRoleDefault[]
+  deliveryRoutes?: SpcDeliveryRoute[]
   message?: string
+}
+
+type SpcDeliveryRoute = {
+  id: string
+  label: string
+  exactGroupName: string
+  isActive: boolean
+  assignedUserCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+type DeliveryRouteDraft = {
+  id?: string
+  label: string
+  exactGroupName: string
+  isActive: boolean
 }
 
 type UserTab = "SUPPLIER TRADER" | "BUYER TRADER" | "ADMIN" | "OFFICE"
@@ -57,6 +76,7 @@ type UserDraft = {
   username: string
   displayName: string
   whatsappPhone: string
+  deliveryRouteId: string
   role: Exclude<UserTab, "OFFICE">
   office: string
   password: string
@@ -90,6 +110,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
     username: "",
     displayName: "",
     whatsappPhone: "",
+    deliveryRouteId: "",
     role,
     office,
     password: SPC_DEFAULT_PASSWORD,
@@ -109,6 +130,7 @@ function userToDraft(user: ManagedSpcUser, fallbackOffice: string): UserDraft {
     username: user.username,
     displayName: user.displayName,
     whatsappPhone: user.whatsappPhone,
+    deliveryRouteId: user.deliveryRouteId,
     role,
     office: user.office || fallbackOffice,
     password: "",
@@ -125,11 +147,18 @@ export default function SpcUserManagementPage() {
   const [offices, setOffices] = useState<string[]>(DEFAULT_OFFICES)
   const [pages, setPages] = useState<SpcPageDefinition[]>([])
   const [roleDefaults, setRoleDefaults] = useState<ManagedSpcRoleDefault[]>([])
+  const [deliveryRoutes, setDeliveryRoutes] = useState<SpcDeliveryRoute[]>([])
   const [activeTab, setActiveTab] = useState<UserTab>("SUPPLIER TRADER")
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null)
   const [selectedOffice, setSelectedOffice] = useState("")
   const [officeDialogOpen, setOfficeDialogOpen] = useState(false)
   const [officeDraft, setOfficeDraft] = useState("")
+  const [routeDialogOpen, setRouteDialogOpen] = useState(false)
+  const [routeDraft, setRouteDraft] = useState<DeliveryRouteDraft>({
+    label: "",
+    exactGroupName: "",
+    isActive: true,
+  })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
@@ -187,6 +216,7 @@ export default function SpcUserManagementPage() {
       setOffices(data.offices?.length ? data.offices : DEFAULT_OFFICES)
       setPages(data.pages || [])
       setRoleDefaults(data.roleDefaults || [])
+      setDeliveryRoutes(data.deliveryRoutes || [])
       setSelectedOffice((current) => {
         const nextOffices = data.offices?.length ? data.offices : DEFAULT_OFFICES
         return current && nextOffices.includes(current) ? current : nextOffices[0] || DEFAULT_OFFICES[0]
@@ -229,6 +259,100 @@ export default function SpcUserManagementPage() {
   function editUser(user: ManagedSpcUser) {
     setMessage("")
     setUserDraft(userToDraft(user, firstOffice))
+  }
+
+  function openRouteDialog() {
+    setMessage("")
+    setRouteDraft({ label: "", exactGroupName: "", isActive: true })
+    setRouteDialogOpen(true)
+  }
+
+  function editRoute(route: SpcDeliveryRoute) {
+    setRouteDraft({
+      id: route.id,
+      label: route.label,
+      exactGroupName: route.exactGroupName,
+      isActive: route.isActive,
+    })
+  }
+
+  async function saveRoute(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canEdit) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save-delivery-route", deliveryRoute: routeDraft }),
+      })
+      const data = (await response.json()) as { deliveryRoute?: SpcDeliveryRoute; message?: string }
+      if (!response.ok || !data.deliveryRoute) throw new Error(data.message || "Failed to save delivery route.")
+      await loadUsers()
+      setRouteDraft({ label: "", exactGroupName: "", isActive: true })
+      setMessage("Delivery route saved.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save delivery route.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deactivateRoute(route: SpcDeliveryRoute) {
+    if (!canEdit || !window.confirm(`Deactivate ${route.label}?`)) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deactivate-delivery-route", id: route.id }),
+      })
+      const data = (await response.json()) as { deliveryRoute?: SpcDeliveryRoute; message?: string }
+      if (!response.ok || !data.deliveryRoute) throw new Error(data.message || "Failed to deactivate delivery route.")
+      await loadUsers()
+      setMessage("Delivery route deactivated.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to deactivate delivery route.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function activateRoute(route: SpcDeliveryRoute) {
+    if (!canEdit) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-delivery-route",
+          deliveryRoute: {
+            id: route.id,
+            label: route.label,
+            exactGroupName: route.exactGroupName,
+            isActive: true,
+          },
+        }),
+      })
+      const data = (await response.json()) as { deliveryRoute?: SpcDeliveryRoute; message?: string }
+      if (!response.ok || !data.deliveryRoute) throw new Error(data.message || "Failed to activate delivery route.")
+      await loadUsers()
+      setMessage("Delivery route activated.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to activate delivery route.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function updateDraft<K extends keyof UserDraft>(key: K, value: UserDraft[K]) {
@@ -440,6 +564,9 @@ export default function SpcUserManagementPage() {
             <button type="button" onClick={openAddDialog} disabled={!canEdit}>
               Add
             </button>
+            <button type="button" onClick={openRouteDialog} disabled={!canEdit}>
+              Routes
+            </button>
           </div>
 
           <div className="spc-compact-list">
@@ -483,6 +610,9 @@ export default function SpcUserManagementPage() {
                       <small>
                         {user.username} · {user.office || firstOffice}
                         {user.whatsappPhone ? ` · ${user.whatsappPhone}` : ""}
+                        {user.deliveryRouteId
+                          ? ` · ${deliveryRoutes.find((route) => route.id === user.deliveryRouteId)?.label || "ROUTE"}`
+                          : " · NO ROUTE"}
                         {user.role !== activeTab ? ` · ${user.roleLabel || roleLabel(user.role)}` : ""}
                       </small>
                     </span>
@@ -613,6 +743,86 @@ export default function SpcUserManagementPage() {
         </div>
       ) : null}
 
+      {routeDialogOpen ? (
+        <div className="spc-dialog-backdrop" role="presentation">
+          <div className="spc-dialog spc-user-dialog spc-route-dialog" role="dialog" aria-modal="true">
+            <div className="spc-dialog-header">
+              <h2>Enquiry Delivery Routes</h2>
+              <button type="button" onClick={() => setRouteDialogOpen(false)}>×</button>
+            </div>
+            <p className="spc-route-note">
+              Assign each buyer to one exact WhatsApp group. Queued enquiries retain this destination if the route is edited later.
+            </p>
+            {message ? (
+              <div className={messageIsError ? "spc-route-message is-error" : "spc-route-message"}>
+                {message}
+              </div>
+            ) : null}
+            <form className="spc-route-form" onSubmit={saveRoute}>
+              <label>
+                <span>Route Label</span>
+                <input
+                  value={routeDraft.label}
+                  onChange={(event) => setRouteDraft((current) => ({ ...current, label: event.target.value }))}
+                  placeholder="SINGAPORE BUYERS"
+                  maxLength={100}
+                  required
+                />
+              </label>
+              <label>
+                <span>Exact WhatsApp Group Name</span>
+                <input
+                  value={routeDraft.exactGroupName}
+                  onChange={(event) => setRouteDraft((current) => ({ ...current, exactGroupName: event.target.value }))}
+                  placeholder="Otto (FCBHK) SG Enqs"
+                  maxLength={200}
+                  required
+                />
+              </label>
+              <div className="spc-route-form-actions">
+                {routeDraft.id ? (
+                  <button
+                    type="button"
+                    onClick={() => setRouteDraft({ label: "", exactGroupName: "", isActive: true })}
+                  >
+                    Cancel Edit
+                  </button>
+                ) : null}
+                <button type="submit" className="is-primary" disabled={saving}>
+                  {saving ? "Saving..." : routeDraft.id ? "Update Route" : "Add Route"}
+                </button>
+              </div>
+            </form>
+            <div className="spc-route-list">
+              {deliveryRoutes.map((route) => (
+                <article key={route.id} className={route.isActive ? "spc-route-row" : "spc-route-row is-disabled"}>
+                  <span>
+                    <strong>{route.label}</strong>
+                    <small>{route.exactGroupName} · {route.assignedUserCount} users</small>
+                  </span>
+                  <div>
+                    <button type="button" onClick={() => editRoute(route)} disabled={!canEdit}>Edit</button>
+                    {route.isActive ? (
+                      <button type="button" className="is-danger" onClick={() => void deactivateRoute(route)} disabled={!canEdit || saving}>
+                        Deactivate
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => void activateRoute(route)} disabled={!canEdit || saving}>
+                        Activate
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {deliveryRoutes.length === 0 ? <p className="spc-empty">No delivery routes configured.</p> : null}
+            </div>
+            <div className="spc-dialog-actions">
+              <button type="button" onClick={() => setRouteDialogOpen(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {userDraft ? (
         <div className="spc-dialog-backdrop" role="presentation">
           <form className="spc-dialog spc-user-dialog" role="dialog" aria-modal="true" onSubmit={saveUser}>
@@ -667,6 +877,23 @@ export default function SpcUserManagementPage() {
                   {offices.map((office) => (
                     <option key={office} value={office}>{office}</option>
                   ))}
+                </select>
+              </label>
+              <label>
+                <span>Enquiry Route{userDraft.isActive && userDraft.role !== "SUPPLIER TRADER" ? " *" : ""}</span>
+                <select
+                  value={userDraft.deliveryRouteId}
+                  onChange={(event) => updateDraft("deliveryRouteId", event.target.value)}
+                  required={userDraft.isActive && userDraft.role !== "SUPPLIER TRADER"}
+                >
+                  <option value="">Not assigned</option>
+                  {deliveryRoutes
+                    .filter((route) => route.isActive || route.id === userDraft.deliveryRouteId)
+                    .map((route) => (
+                      <option key={route.id} value={route.id}>
+                        {route.label} · {route.exactGroupName}{route.isActive ? "" : " · INACTIVE"}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>

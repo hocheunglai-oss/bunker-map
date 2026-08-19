@@ -72,7 +72,7 @@ const DISPATCHER_STEPS: readonly Step[] = [
     title: "Install and pair",
     details: [
       "Extract the ZIP, load fcuno-spc-group-dispatcher through chrome://extensions, then refresh WhatsApp Web.",
-      "Enter the exact existing WhatsApp trading group name and choose PAIR DISPATCHER.",
+      "Enter a device label and choose PAIR DISPATCHER. Exact WhatsApp groups are managed centrally in User Management.",
       "Pairing a replacement computer automatically revokes the previous dispatcher.",
     ],
   },
@@ -85,6 +85,13 @@ type DispatcherStatus = {
   extensionVersion: string
   lastSeenAt: string | null
   lastError: string | null
+}
+
+type DispatcherHealth = {
+  activeRouteCount: number
+  queuedCount: number
+  manualReviewCount: number
+  failedCount: number
 }
 
 type ApiGroupResult = {
@@ -102,6 +109,7 @@ export default function SpcChromeExtensionPage() {
   const [noticeMessage, setNoticeMessage] = useState("")
   const [noticeIsError, setNoticeIsError] = useState(false)
   const [dispatcher, setDispatcher] = useState<DispatcherStatus | null>(null)
+  const [dispatcherHealth, setDispatcherHealth] = useState<DispatcherHealth | null>(null)
   const [dispatcherLoading, setDispatcherLoading] = useState(true)
   const [apiGroupSubject, setApiGroupSubject] = useState("OTTO LAI (SPC)")
   const [apiGroupArmed, setApiGroupArmed] = useState(false)
@@ -130,7 +138,10 @@ export default function SpcChromeExtensionPage() {
       .then(async (response) => {
         const data = await response.json()
         if (!response.ok) throw new Error(data.message || "Failed to load dispatcher status.")
-        if (!cancelled) setDispatcher(data.dispatcher || null)
+        if (!cancelled) {
+          setDispatcher(data.dispatcher || null)
+          setDispatcherHealth(data.health || null)
+        }
       })
       .catch((error) => {
         if (!cancelled) {
@@ -323,13 +334,18 @@ export default function SpcChromeExtensionPage() {
               <span>Loading...</span>
             ) : dispatcher ? (
               <span>
-                Active: {dispatcher.deviceLabel} / {dispatcher.groupName} / v{dispatcher.extensionVersion}
+                Active: {dispatcher.deviceLabel} / multi-route / v{dispatcher.extensionVersion}
                 {dispatcher.lastSeenAt ? ` / Last seen ${new Date(dispatcher.lastSeenAt).toLocaleString()}` : ""}
                 {dispatcher.lastError ? ` / ${dispatcher.lastError}` : ""}
               </span>
             ) : (
               <span>No active dispatcher. New enquiries will remain safely queued.</span>
             )}
+            {dispatcherHealth ? (
+              <span>
+                Routes {dispatcherHealth.activeRouteCount} / queued {dispatcherHealth.queuedCount} / failed {dispatcherHealth.failedCount} / review {dispatcherHealth.manualReviewCount}. Speed Board delivery remains available independently.
+              </span>
+            ) : null}
           </div>
         </section>
       ) : null}

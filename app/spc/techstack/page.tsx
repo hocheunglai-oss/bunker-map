@@ -54,7 +54,7 @@ const SERVICES = [
 
 const DATABASE_GROUPS = [
   { title: "SPC AUTH", tables: ["spc_users", "spc_sessions", "private.spc_login_attempts", "private.spc_whatsapp_login_mfa_enrollment", "private.spc_whatsapp_login_mfa_challenges", "office_calendar_store: spc-permission-groups"] },
-  { title: "SPC OPERATIONS", tables: ["spc_enquiries", "spc_enquiry_revisions", "spc_group_dispatchers", "spc_group_delivery_jobs", "spc_fixtures", "spc_mobile_modes", "spc_mobile_enquiry_deliveries"] },
+  { title: "SPC OPERATIONS", tables: ["spc_enquiries", "spc_enquiry_revisions", "spc_delivery_routes", "spc_group_dispatchers", "spc_group_delivery_jobs", "spc_fixtures", "spc_mobile_modes", "spc_mobile_enquiry_deliveries"] },
   { title: "SPC PARSER REVIEW", tables: ["parser_reports"] },
   { title: "SPC FEEDBACK", tables: ["spc_feedback"] },
   { title: "SPC PRESENTATION", tables: ["spc_presentation_chunks", "Supabase Storage: spc-presentation-media"] },

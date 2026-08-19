@@ -15,6 +15,7 @@ import {
   ensureCreatedSpcGroupDelivery,
   type SpcAmendmentChange,
 } from "@/lib/spcGroupDispatcher"
+import { requireActiveSpcDeliveryRouteForUsername } from "@/lib/spcDeliveryRoutes"
 
 export type SpcEnquiry = {
   id: string
@@ -263,6 +264,7 @@ export async function createSpcEnquiry(
   const title = cleanText(input.title)
   if (!title) throw new Error("Enquiry title is required.")
   if (!session.username) throw new Error("Authenticated username is required.")
+  await requireActiveSpcDeliveryRouteForUsername(session.username)
 
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries", {
     action: "create-enquiry",
@@ -339,6 +341,7 @@ export async function amendSpcEnquiry(
   if (!enquiryId) throw new Error("Enquiry id is required.")
   if (!title) throw new Error("Enquiry title is required.")
   if (!session.username) throw new Error("Authenticated username is required.")
+  await requireActiveSpcDeliveryRouteForUsername(session.username)
 
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries", {
     action: "amend-enquiry",

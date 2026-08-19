@@ -9,6 +9,7 @@ import {
   pairSpcGroupDispatcher,
   revokeSpcGroupDispatcher,
 } from "@/lib/spcGroupDispatcher"
+import { getSpcGroupDeliveryHealth } from "@/lib/spcDeliveryRoutes"
 
 export const runtime = "nodejs"
 
@@ -33,9 +34,13 @@ function errorResponse(error: unknown) {
 export async function GET() {
   try {
     await requireSpcPagePermission("spc-chrome-extension", "view")
-    const dispatcher = await getActiveSpcGroupDispatcher()
+    const [dispatcher, health] = await Promise.all([
+      getActiveSpcGroupDispatcher(),
+      getSpcGroupDeliveryHealth(),
+    ])
     return privateJson({
       dispatcher,
+      health,
       version: SPC_GROUP_DISPATCHER_VERSION,
     })
   } catch (error) {

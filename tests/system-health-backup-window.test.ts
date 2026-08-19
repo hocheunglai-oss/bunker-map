@@ -145,14 +145,18 @@ test("SPC mobile delivery state is registered and mutation-fenced for daily back
 test("SPC group dispatcher state is registered for daily backup", () => {
   const route = source("../app/api/backups/bunker-map-drive/route.ts")
   const health = source("../lib/systemHealth.ts")
+  const routeFence = source("../supabase/migrations/20260819032149_fence_spc_delivery_routes_backup_table.sql")
   for (const table of [
     "spc_enquiry_revisions",
     "spc_group_dispatchers",
     "spc_group_delivery_jobs",
+    "spc_delivery_routes",
   ]) {
     assert.match(route, new RegExp(`table: "${table}"`))
     assert.match(health, new RegExp(`table: "${table}"`))
   }
+  assert.match(routeFence, /bunker_map_backup_epoch_fence/)
+  assert.match(routeFence, /public\.spc_delivery_routes/)
 })
 
 test("daily backup keeps only the latest verified artifact and its predecessor", () => {

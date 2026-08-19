@@ -51,6 +51,17 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   assert.match(hardeningMigration, /spc_group_delivery_jobs_claimed_by_idx/)
   assert.match(hardeningMigration, /spc_group_delivery_jobs_no_public_access[\s\S]+using \(false\)[\s\S]+with check \(false\)/)
 
+  const routingMigration = await readFile(
+    new URL("../supabase/migrations/20260819025850_add_spc_delivery_routes.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(routingMigration, /create table if not exists public\.spc_delivery_routes/)
+  assert.match(routingMigration, /destination_group_name/)
+  assert.match(routingMigration, /No active enquiry delivery route is assigned to this user/)
+  assert.match(routingMigration, /nullif\(btrim\(jobs\.destination_group_name\), ''\) is not null/)
+  assert.match(routingMigration, /save_spc_user_with_delivery_route/)
+  assert.match(routingMigration, /revoke all privileges on table public\.spc_delivery_routes from public, anon, authenticated/)
+
   const bootstrapSchema = await readFile(
     new URL("../supabase/spc_schema.sql", import.meta.url),
     "utf8",
@@ -76,6 +87,8 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /result: requiresReview \? "manual_review" : "failed"/)
   assert.doesNotMatch(content, /document\.visibilityState === "hidden"/)
   assert.match(content, /claim\.job\.attemptCount > 1 && outgoingMessageCount/)
+  assert.match(content, /state\.groupName = claim\.job\.groupName/)
+  assert.doesNotMatch(content, /input\[name='groupName'\]/)
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {
