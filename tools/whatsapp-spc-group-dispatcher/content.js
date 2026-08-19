@@ -113,7 +113,11 @@
       .map((element) => cleanText(element.getAttribute("aria-label") || element.getAttribute("title")))
     if (labels.some((label) => /group info|message to group/i.test(label))) return true
     const subtitle = textCandidates(main.querySelector("header")).slice(1).join(" ")
-    return /[,，]/.test(subtitle) && /\byou\b/i.test(subtitle)
+    const members = subtitle.split(/[,，]/).map(cleanText).filter(Boolean)
+    if (members.length < 2) return false
+    if (members.some((member) => /\byou\b/i.test(member))) return true
+    const phoneMembers = members.filter((member) => member.replace(/\D/g, "").length >= 7)
+    return phoneMembers.length >= 2 || members.length >= 3
   }
 
   function exactGroupIsOpen(groupName) {

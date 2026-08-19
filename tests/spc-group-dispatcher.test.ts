@@ -88,6 +88,7 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.doesNotMatch(content, /document\.visibilityState === "hidden"/)
   assert.match(content, /claim\.job\.attemptCount > 1 && outgoingMessageCount/)
   assert.match(content, /state\.groupName = claim\.job\.groupName/)
+  assert.match(content, /phoneMembers\.length >= 2 \|\| members\.length >= 3/)
   assert.doesNotMatch(content, /input\[name='groupName'\]/)
 
   const background = await readFile(

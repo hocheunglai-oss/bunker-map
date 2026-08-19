@@ -25,7 +25,7 @@ function html(ambiguous = false) {
       ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${groupName}">${groupName}</span></div></div>` : ""}
       <div id="partial" class="row" role="row"><span title="${groupName} OLD">${groupName} OLD</span></div>
     </div>
-    <div id="main"><header><button aria-label="Group info"><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
+    <div id="main"><header><button><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span></button></header>
       <div class="messages" id="messages"></div><div id="composer" contenteditable="true" role="textbox"></div>
     </div>
     <script>
@@ -40,7 +40,7 @@ function html(ambiguous = false) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.2'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.1.3'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:'paired',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
@@ -70,7 +70,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.1.2" }),
+      getManifest: () => ({ version: "1.1.3" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
