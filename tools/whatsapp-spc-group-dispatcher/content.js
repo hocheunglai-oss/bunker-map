@@ -263,6 +263,96 @@
     return candidates[candidates.length - 1] || null
   }
 
+  function composerText(composer) {
+    return cleanText(composer?.innerText || composer?.textContent || "")
+  }
+
+  function clearComposerText(composer) {
+    composer.focus()
+    const selection = window.getSelection()
+    if (selection) {
+      const range = document.createRange()
+      range.selectNodeContents(composer)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } else {
+      document.execCommand("selectAll", false)
+    }
+    document.execCommand("delete", false)
+    composer.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: "deleteContentBackward",
+      data: "",
+    }))
+    if (composerText(composer)) {
+      composer.replaceChildren()
+      composer.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        inputType: "deleteContentBackward",
+        data: "",
+      }))
+    }
+  }
+
+  function setComposerDomText(composer, text) {
+    const lines = String(text || "").split("\n")
+    composer.replaceChildren()
+    lines.forEach((line, index) => {
+      if (index > 0) composer.appendChild(document.createElement("br"))
+      composer.appendChild(document.createTextNode(line))
+    })
+    composer.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: text,
+    }))
+  }
+
+  function replaceComposerText(composer, text) {
+    clearComposerText(composer)
+    setComposerDomText(composer, text)
+    return comparable(composerText(composer)) === comparable(text)
+  }
+
+  function sendButtonLabel(element) {
+    const labels = [element, ...element.querySelectorAll("[aria-label], [title], [data-testid], [data-icon]")]
+      .flatMap((candidate) => [
+        candidate.getAttribute("aria-label"),
+        candidate.getAttribute("title"),
+        candidate.getAttribute("data-testid"),
+        candidate.getAttribute("data-icon"),
+      ])
+      .map(cleanText)
+      .filter(Boolean)
+    return labels.join(" ").toLowerCase()
+  }
+
+  function isSendButton(element) {
+    return /\bsend\b|send-filled|wds-ic-send/.test(sendButtonLabel(element))
+  }
+
+  function findSendButton(composer) {
+    const main = getMain()
+    if (!main || !composer) return null
+    const composerRect = composer.getBoundingClientRect()
+    const candidates = Array.from(main.querySelectorAll(
+      "button, [role='button'], span[data-icon], [data-testid]",
+    ))
+      .map((element) => element.closest("button, [role='button']") || element)
+      .filter((element, index, all) => all.indexOf(element) === index)
+      .filter(isVisible)
+      .filter(isSendButton)
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        const verticallyAligned = rect.bottom >= composerRect.top - 20
+          && rect.top <= composerRect.bottom + 40
+        const toComposerRight = rect.left >= composerRect.right - 180
+        return verticallyAligned && toComposerRight
+      })
+    if (candidates.length !== 1) return null
+    return candidates[0]
+  }
+
   function outgoingMessageCount(message) {
     const target = comparable(message)
     if (!target) return 0
@@ -285,16 +375,28 @@
     const composer = findComposer()
     if (!composer) throw new Error("WhatsApp message box is unavailable.")
     const beforeCount = outgoingMessageCount(message)
-    composer.focus()
-    const result = await runtimeMessage({ type: "native-send-text", text: message })
-    if (!result.accepted) {
+    if (!replaceComposerText(composer, message)) {
       throw new Error("SEND_UNCERTAIN: WhatsApp did not stage the exact enquiry text.")
     }
-    for (const delay of [500, 900, 1400]) {
+
+    let sendButton = null
+    for (const delay of [120, 250, 500, 800]) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      if (comparable(composerText(findComposer())) !== comparable(message)) {
+        throw new Error("SEND_UNCERTAIN: WhatsApp changed the staged enquiry text.")
+      }
+      sendButton = findSendButton(findComposer())
+      if (sendButton) break
+    }
+    if (!sendButton) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp Send button is unavailable or ambiguous.")
+    }
+
+    await nativeClick(sendButton)
+    for (const delay of [500, 900, 1400, 2200]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
       if (outgoingMessageCount(message) > beforeCount) return true
     }
-    if (result.submitted) return true
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
   }
 

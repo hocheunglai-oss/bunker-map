@@ -18,7 +18,8 @@ function html(ambiguous = false, initiallyPaired = true) {
     body{margin:0;font-family:Arial}#side{float:left;width:340px;height:700px}#search{margin:12px;width:280px;padding:8px}
     .row{display:none;padding:14px;border-top:1px solid #ddd;cursor:pointer}#main{margin-left:340px;min-height:700px}
     header{height:56px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #ddd}.messages{height:520px}
-    #composer{min-height:60px;margin:10px;padding:10px;border:1px solid #ccc;white-space:pre-wrap}
+    #composeLine{display:flex;align-items:flex-end;gap:8px;margin:10px}#composer{min-height:60px;flex:1;padding:10px;border:1px solid #ccc;white-space:pre-wrap}
+    #send{width:44px;height:44px}
     ${styles.replaceAll("</style>", "<\\/style>")}
   </style></head><body>
     <div id="side"><input id="search" type="text" aria-label="Search input textbox" />
@@ -27,7 +28,7 @@ function html(ambiguous = false, initiallyPaired = true) {
       <div id="partial" class="row" role="row"><span title="${groupName} OLD">${groupName} OLD</span></div>
     </div>
     <div id="main"><header><button><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
-      <div class="messages" id="messages"></div><div id="composer" contenteditable="true" role="textbox"></div>
+      <div class="messages" id="messages"></div><div id="composeLine"><div id="composer" contenteditable="true" role="textbox"></div><button id="send" aria-label="Send" data-testid="compose-btn-send"><span data-icon="wds-ic-send-filled">Send</span></button></div>
     </div>
     <script>
       window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
@@ -42,7 +43,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.2'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.3'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -52,14 +53,11 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(request.type==='dispatcher-complete'){window.completions.push(request);callback({ok:true});return;}
         if(request.type==='native-replace-text'){callback({ok:window.applyText(request.text)});return;}
-        if(request.type==='native-send-text'){
-          const current=document.getElementById('composer');const replacement=current.cloneNode(false);
-          const text=String(request.text||'');replacement.textContent=text;current.replaceWith(replacement);replacement.focus();
-          if(!${ambiguous ? "true" : "false"} && text){const row=document.createElement('div');row.className='message-out';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);replacement.replaceChildren();}
-          callback({ok:true,accepted:true,submitted:true});return;
-        }
         if(request.type==='native-click'){
-          const target=document.elementFromPoint(Number(request.x),Number(request.y));window.nativeClick=true;target?.closest('.row')?.click();window.nativeClick=false;callback({ok:true});return;
+          const target=document.elementFromPoint(Number(request.x),Number(request.y));window.nativeClick=true;
+          target?.closest('.row')?.click();
+          if(target?.closest('#send')){const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';if(text){const row=document.createElement('div');row.className='message-out';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);c.replaceChildren();}}
+          window.nativeClick=false;callback({ok:true});return;
         }
         if(request.type==='native-enter'){
           const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';
@@ -79,7 +77,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.2" }),
+      getManifest: () => ({ version: "1.2.3" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -104,7 +102,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.2" }),
+      getManifest: () => ({ version: "1.2.3" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -160,7 +158,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.2" }),
+      getManifest: () => ({ version: "1.2.3" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -208,7 +206,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.2" }),
+      getManifest: () => ({ version: "1.2.3" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -263,7 +261,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.2" }),
+      getManifest: () => ({ version: "1.2.3" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -404,7 +402,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.2/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.3/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
