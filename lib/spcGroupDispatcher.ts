@@ -30,7 +30,7 @@ export type SpcGroupDeliveryJob = {
   id: string
   enquiryId: string
   revisionNumber: number
-  eventType: "created" | "amended"
+  eventType: "created" | "amended" | "postponed" | "reoffer"
   messageText: string
   routeLabel: string
   groupName: string
@@ -57,7 +57,7 @@ type DeliveryJobRow = {
   id: string
   enquiry_id: string
   revision_number: number
-  event_type: "created" | "amended"
+  event_type: SpcGroupDeliveryJob["eventType"]
   message_text: string
   destination_route_label: string
   destination_group_name: string
@@ -169,6 +169,14 @@ export function buildSpcGroupAmendmentMessage(
   return [`*AMENDED - REV ${revisionNumber}*`, cleanText(formattedText), details]
     .filter(Boolean)
     .join("\n\n")
+}
+
+export function buildSpcGroupPostponedMessage(formattedText: string) {
+  return ["*POSTPONED*", cleanText(formattedText)].filter(Boolean).join("\n\n")
+}
+
+export function buildSpcGroupReofferMessage(formattedText: string) {
+  return ["*REOFFER*", cleanText(formattedText)].filter(Boolean).join("\n\n")
 }
 
 export async function ensureCreatedSpcGroupDelivery(input: {

@@ -4,6 +4,8 @@ import test from "node:test"
 import {
   buildSpcEnquirySnapshot,
   buildSpcGroupAmendmentMessage,
+  buildSpcGroupPostponedMessage,
+  buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
 } from "@/lib/spcGroupDispatcher"
 import {
@@ -36,6 +38,12 @@ test("SPC amendment messages identify and bold only the current changed values",
   assert.match(message, /^\*AMENDED - REV 2\*/)
   assert.match(message, /\*ETA:\* \*2026-08-18\* \(was 2026-08-10\)/)
   assert.match(message, /\*Quantity:\* \*lsmgo 230mts\* \(was lsmgo 200mts\)/)
+})
+
+test("SPC postponement and reoffer messages carry explicit trading status", () => {
+  const enquiry = "long pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts"
+  assert.equal(buildSpcGroupPostponedMessage(enquiry), `*POSTPONED*\n\n${enquiry}`)
+  assert.equal(buildSpcGroupReofferMessage(enquiry), `*REOFFER*\n\n${enquiry}`)
 })
 
 test("SPC group delivery migration is idempotent, leased, and service-role only", async () => {
@@ -77,6 +85,17 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   assert.match(reofferMigration, /insert into public\.spc_group_delivery_jobs/)
   assert.match(reofferMigration, /revoke all on function public\.reoffer_spc_enquiry_with_group_delivery[\s\S]+to service_role/)
 
+  const statusMigration = await readFile(
+    new URL("../supabase/migrations/20260820090000_route_spc_postponements_and_reoffers.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(statusMigration, /event_type in \('created', 'amended', 'postponed', 'reoffer'\)/)
+  assert.match(statusMigration, /create or replace function public\.postpone_spc_enquiry_with_group_delivery/)
+  assert.match(statusMigration, /for update/)
+  assert.match(statusMigration, /insert into public\.spc_group_delivery_jobs[\s\S]+?'postponed'/)
+  assert.match(statusMigration, /reoffer_row\.revision_number,[\s\S]+?'reoffer'/)
+  assert.match(statusMigration, /revoke all on function public\.postpone_spc_enquiry_with_group_delivery[\s\S]+to service_role/)
+
   const bootstrapSchema = await readFile(
     new URL("../supabase/spc_schema.sql", import.meta.url),
     "utf8",
@@ -84,6 +103,7 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   for (const functionName of [
     "enqueue_spc_enquiry_group_delivery",
     "amend_spc_enquiry_with_group_delivery",
+    "postpone_spc_enquiry_with_group_delivery",
     "reoffer_spc_enquiry_with_group_delivery",
     "claim_spc_group_delivery_job",
     "complete_spc_group_delivery_job",
@@ -105,6 +125,8 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /\.message-out, \[data-testid='msg-container'\]/)
   assert.match(content, /function outgoingMessageSnapshot\(message\)/)
   assert.match(content, /function hasNewOutgoingMessage\(message, before\)/)
+  assert.match(content, /activity\.eventType === "postponed"[\s\S]+return "POST"/)
+  assert.match(content, /activity\.eventType === "reoffer"[\s\S]+return "REOFFER"/)
   assert.match(content, /replaceComposerText\(composer, message\)/)
   assert.match(content, /await runtimeMessage\(\{ type: "native-enter" \}\)/)
   assert.match(content, /await nativeClick\(sendButton\)/)
@@ -187,9 +209,9 @@ test("the folder updater validates the installed extension and writes the manife
       }
     },
   }
-  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.5" })
+  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.6" })
   const bundle = {
-    version: "1.2.5",
+    version: "1.2.6",
     files: SPC_GROUP_DISPATCHER_FILES.map((name) => ({
       name,
       contentBase64: Buffer.from(name === "manifest.json" ? manifest : `updated:${name}`).toString("base64"),
@@ -200,10 +222,10 @@ test("the folder updater validates the installed extension and writes the manife
   assert.deepEqual(result, {
     directoryName: "fcuno-spc-group-dispatcher",
     previousVersion: "1.1.6",
-    version: "1.2.5",
+    version: "1.2.6",
   })
   assert.equal(writes.at(-1), "manifest.json")
-  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.5")
+  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.6")
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {

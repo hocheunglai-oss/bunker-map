@@ -69,6 +69,20 @@
     return "Received"
   }
 
+  function activityBadge(activity) {
+    if (activity.eventType === "amended") return `REV ${activity.revisionNumber}`
+    if (activity.eventType === "postponed") return "POST"
+    if (activity.eventType === "reoffer") return "REOFFER"
+    return "NEW"
+  }
+
+  function sendingStatus(activity) {
+    if (activity.eventType === "amended") return `Sending revision ${activity.revisionNumber}`
+    if (activity.eventType === "postponed") return "Sending postponement"
+    if (activity.eventType === "reoffer") return "Sending reoffer"
+    return "Sending enquiry"
+  }
+
   function render() {
     let root = document.getElementById(BOARD_ID)
     if (!root) {
@@ -125,7 +139,7 @@
     empty.hidden = true
     activity.hidden = false
     activity.className = `fcuno-spc-dispatcher-activity is-${state.activity.status || "received"}`
-    setText(activity.querySelector("[data-role='activity-badge']"), state.activity.eventType === "amended" ? `REV ${state.activity.revisionNumber}` : "NEW")
+    setText(activity.querySelector("[data-role='activity-badge']"), activityBadge(state.activity))
     setText(activity.querySelector("[data-role='activity-result']"), activityResult(state.activity))
     setText(activity.querySelector("[data-role='activity-message']"), state.activity.messageText)
     setText(activity.querySelector("[data-role='activity-route']"), `To ${state.activity.groupName}`)
@@ -458,7 +472,7 @@
       }
       state.error = ""
       state.phase = "working"
-      state.status = claim.job.eventType === "amended" ? `Sending revision ${claim.job.revisionNumber}` : "Sending enquiry"
+      state.status = sendingStatus(claim.job)
       state.activity = { ...claim.job, status: "sending" }
       render()
       await openExactGroup(claim.job.groupName)

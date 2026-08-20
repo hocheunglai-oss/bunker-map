@@ -11,6 +11,8 @@ import { ensurePendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
 import {
   buildSpcEnquirySnapshot,
   buildSpcGroupAmendmentMessage,
+  buildSpcGroupPostponedMessage,
+  buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
   ensureCreatedSpcGroupDelivery,
   type SpcAmendmentChange,
@@ -476,11 +478,27 @@ export async function updateSpcEnquiryOutcome(
     nextMeta.cancelledAt = now
   }
 
+  const nextNotes = writeSpcEnquiryNotes(currentText, nextMeta)
+  if (outcome === "postpone") {
+    if (!session.username) throw new Error("Authenticated username is required.")
+    await requireActiveSpcDeliveryRouteForUsername(session.username)
+    const { data, error } = await supabase.rpc("postpone_spc_enquiry_with_group_delivery", {
+      p_enquiry_id: enquiryId,
+      p_actor_username: session.username,
+      p_notes: nextNotes,
+      p_message_text: buildSpcGroupPostponedMessage(currentText),
+    })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : null
+    if (!row) throw new Error("SPC postponement did not return the updated enquiry.")
+    return mapEnquiry(row as SpcEnquiryRow)
+  }
+
   const { data, error } = await supabase
     .from("spc_enquiries")
     .update({
       status,
-      notes: writeSpcEnquiryNotes(currentText, nextMeta),
+      notes: nextNotes,
       updated_at: now,
     })
     .eq("id", enquiryId)
@@ -546,6 +564,7 @@ export async function reofferSpcEnquiry(
     updated_at: now,
   }
   const formattedText = formatSpcEnquiry(nextRow)
+  const messageText = buildSpcGroupReofferMessage(formattedText)
 
   const retiredMeta: SpcEnquiryMeta = {
     ...readSpcEnquiryMeta(existing.notes),
@@ -573,7 +592,7 @@ export async function reofferSpcEnquiry(
     },
     p_formatted_text: formattedText,
     p_after_snapshot: enquirySnapshot(nextRow),
-    p_message_text: formattedText,
+    p_message_text: messageText,
     p_retired_notes: writeSpcEnquiryNotes(currentText, retiredMeta),
   })
   if (error) throw error

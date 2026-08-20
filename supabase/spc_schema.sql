@@ -234,7 +234,7 @@ create table if not exists public.spc_enquiry_revisions (
   id uuid primary key default gen_random_uuid(),
   enquiry_id uuid not null references public.spc_enquiries(id) on delete cascade,
   revision_number integer not null check (revision_number >= 1),
-  event_type text not null check (event_type in ('created', 'amended')),
+  event_type text not null check (event_type in ('created', 'amended', 'reoffer')),
   formatted_text text not null,
   changed_fields jsonb not null default '[]'::jsonb check (jsonb_typeof(changed_fields) = 'array'),
   before_snapshot jsonb,
@@ -267,7 +267,7 @@ create table if not exists public.spc_group_delivery_jobs (
   id uuid primary key default gen_random_uuid(),
   enquiry_id uuid not null references public.spc_enquiries(id) on delete cascade,
   revision_number integer not null check (revision_number >= 1),
-  event_type text not null check (event_type in ('created', 'amended')),
+  event_type text not null check (event_type in ('created', 'amended', 'postponed', 'reoffer')),
   message_text text not null check (char_length(message_text) between 1 and 12000),
   delivery_route_id uuid references public.spc_delivery_routes(id) on delete restrict,
   destination_route_label text
@@ -1228,6 +1228,83 @@ begin
 end;
 $$;
 
+create or replace function public.postpone_spc_enquiry_with_group_delivery(
+  p_enquiry_id uuid,
+  p_actor_username text,
+  p_notes text,
+  p_message_text text
+)
+returns setof public.spc_enquiries
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  enquiry_row public.spc_enquiries%rowtype;
+  route_row public.spc_delivery_routes%rowtype;
+begin
+  if nullif(btrim(p_message_text), '') is null then
+    raise exception 'SPC postponement message is required.';
+  end if;
+
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
+  )
+    and routes.is_active;
+
+  if not found then
+    raise exception 'No active enquiry delivery route is assigned to this user.';
+  end if;
+
+  select * into enquiry_row
+  from public.spc_enquiries
+  where id = p_enquiry_id
+    and lower(created_by_username) = lower(btrim(p_actor_username))
+  for update;
+
+  if not found then
+    raise exception 'SPC enquiry was not found or is not owned by the actor.';
+  end if;
+
+  if enquiry_row.status <> 'sent' then
+    raise exception 'Only an active enquiry can be postponed.';
+  end if;
+
+  update public.spc_enquiries
+  set notes = nullif(btrim(p_notes), ''),
+      updated_at = clock_timestamp()
+  where id = enquiry_row.id
+  returning * into enquiry_row;
+
+  insert into public.spc_group_delivery_jobs (
+    enquiry_id,
+    revision_number,
+    event_type,
+    message_text,
+    delivery_route_id,
+    destination_route_label,
+    destination_group_name
+  ) values (
+    enquiry_row.id,
+    enquiry_row.revision_number,
+    'postponed',
+    btrim(p_message_text),
+    route_row.id,
+    btrim(route_row.label),
+    btrim(route_row.exact_group_name)
+  )
+  on conflict (enquiry_id, revision_number, event_type) do nothing;
+
+  return next enquiry_row;
+end;
+$$;
+
 create or replace function public.reoffer_spc_enquiry_with_group_delivery(
   p_source_enquiry_id uuid,
   p_actor_username text,
@@ -1337,7 +1414,7 @@ begin
   ) values (
     reoffer_row.id,
     reoffer_row.revision_number,
-    'created',
+    'reoffer',
     p_formatted_text,
     '[]'::jsonb,
     null,
@@ -1357,7 +1434,7 @@ begin
   ) values (
     reoffer_row.id,
     reoffer_row.revision_number,
-    'created',
+    'reoffer',
     p_message_text,
     route_row.id,
     btrim(route_row.label),
@@ -1469,6 +1546,11 @@ grant execute on function public.enqueue_spc_enquiry_group_delivery(uuid, text, 
 revoke all on function public.amend_spc_enquiry_with_group_delivery(uuid, text, text, jsonb, text, jsonb, text)
   from public, anon, authenticated, service_role;
 grant execute on function public.amend_spc_enquiry_with_group_delivery(uuid, text, text, jsonb, text, jsonb, text)
+  to service_role;
+
+revoke all on function public.postpone_spc_enquiry_with_group_delivery(uuid, text, text, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.postpone_spc_enquiry_with_group_delivery(uuid, text, text, text)
   to service_role;
 
 revoke all on function public.reoffer_spc_enquiry_with_group_delivery(uuid, text, text, jsonb, text, jsonb, text, text)

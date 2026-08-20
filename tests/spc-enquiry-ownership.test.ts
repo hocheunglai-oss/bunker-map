@@ -110,3 +110,13 @@ test("SPC reoffers atomically create the group delivery and reuse official API d
   assert.doesNotMatch(reofferSource, /\.from\("spc_enquiries"\)\s*\.insert/)
   assert.match(route, /payload\.mode === "reoffer"[\s\S]*?enqueueAndScheduleSpcMobileDelivery\(enquiry\)/)
 })
+
+test("SPC postponements atomically update the enquiry and enqueue group delivery", () => {
+  const outcomeStart = enquiriesStore.indexOf("export async function updateSpcEnquiryOutcome")
+  const outcomeEnd = enquiriesStore.indexOf("export async function reofferSpcEnquiry", outcomeStart)
+  const outcomeSource = enquiriesStore.slice(outcomeStart, outcomeEnd)
+
+  assert.match(outcomeSource, /outcome === "postpone"[\s\S]*?requireActiveSpcDeliveryRouteForUsername/)
+  assert.match(outcomeSource, /rpc\("postpone_spc_enquiry_with_group_delivery"/)
+  assert.match(outcomeSource, /buildSpcGroupPostponedMessage\(currentText\)/)
+})
