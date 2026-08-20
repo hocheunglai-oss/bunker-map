@@ -87,41 +87,51 @@ async function nativeClick(tabId, x, y) {
   })
 }
 
-async function nativeReplaceText(tabId, text) {
-  return withDebugger(tabId, async (target) => {
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function comparable(value) {
+  return String(value || "").replace(/\s+/g, " ").replace(/\*/g, "").trim().toLowerCase()
+}
+
+async function replaceTextWithTarget(target, text) {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       key: "a",
       code: "KeyA",
       modifiers: 2,
       commands: ["SelectAll"],
     }, callback))
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "a",
       code: "KeyA",
       modifiers: 2,
     }, callback))
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       key: "Backspace",
       code: "Backspace",
       windowsVirtualKeyCode: 8,
       nativeVirtualKeyCode: 8,
     }, callback))
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "Backspace",
       code: "Backspace",
       windowsVirtualKeyCode: 8,
       nativeVirtualKeyCode: 8,
     }, callback))
-    if (text) {
-      await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.insertText", {
+  if (text) {
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.insertText", {
         text: String(text),
       }, callback))
-    }
-  })
+  }
+}
+
+async function nativeReplaceText(tabId, text) {
+  return withDebugger(tabId, (target) => replaceTextWithTarget(target, text))
 }
 
 async function nativeInsertText(tabId, text) {
@@ -150,6 +160,74 @@ async function nativeEnter(tabId) {
       windowsVirtualKeyCode: 13,
       nativeVirtualKeyCode: 13,
     }, callback))
+  })
+}
+
+async function readActiveComposer(target) {
+  const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+    expression: `(() => {
+      const visible = (element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      }
+      const main = document.querySelector("#main") || document.querySelector("[role='main']")
+      if (!main) return ""
+      const candidates = Array.from(main.querySelectorAll("[contenteditable='true'][role='textbox'], [contenteditable='true']")).filter(visible)
+      const active = document.activeElement
+      const composer = candidates.includes(active) ? active : candidates[candidates.length - 1]
+      return String(composer?.innerText || composer?.textContent || "")
+    })()`,
+    returnByValue: true,
+  }, callback))
+  return String(evaluation?.result?.value || "")
+}
+
+async function pressEnterWithTarget(target) {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+    unmodifiedText: "\r",
+    text: "\r",
+  }, callback))
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  }, callback))
+}
+
+async function nativeSendText(tabId, text) {
+  const expected = comparable(text)
+  if (!expected) throw new Error("The enquiry text is empty.")
+  return withDebugger(tabId, async (target) => {
+    await replaceTextWithTarget(target, "")
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.insertText", {
+      text: String(text),
+    }, callback))
+
+    let observed = ""
+    for (const wait of [250, 500, 900]) {
+      await delay(wait)
+      observed = await readActiveComposer(target)
+      if (comparable(observed).includes(expected)) break
+    }
+    if (!comparable(observed).includes(expected)) {
+      return { accepted: false, submitted: false }
+    }
+
+    await pressEnterWithTarget(target)
+    for (const wait of [350, 650, 1000]) {
+      await delay(wait)
+      if (!comparable(await readActiveComposer(target))) {
+        return { accepted: true, submitted: true }
+      }
+    }
+    return { accepted: true, submitted: false }
   })
 }
 
@@ -207,6 +285,9 @@ async function handleApiMessage(message) {
   if (message.type === "dispatcher-claim") {
     return apiRequest({ action: "claim" }, state.token)
   }
+  if (message.type === "dispatcher-latest") {
+    return apiRequest({ action: "latest" }, state.token)
+  }
   if (message.type === "dispatcher-complete") {
     return apiRequest({
       action: "complete",
@@ -250,6 +331,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "native-enter") {
     return respond(enqueueDebuggerAction(tabId, () => nativeEnter(tabId)))
+  }
+  if (message?.type === "native-send-text") {
+    return respond(enqueueDebuggerAction(tabId, () => nativeSendText(tabId, message.text)))
   }
   return false
 })

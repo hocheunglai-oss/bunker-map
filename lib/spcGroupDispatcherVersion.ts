@@ -1,1 +1,1 @@
-export const SPC_GROUP_DISPATCHER_VERSION = "1.1.8"
+export const SPC_GROUP_DISPATCHER_VERSION = "1.1.9"

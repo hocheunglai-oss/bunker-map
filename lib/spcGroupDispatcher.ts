@@ -37,6 +37,12 @@ export type SpcGroupDeliveryJob = {
   attemptCount: number
 }
 
+export type SpcGroupDeliveryActivity = SpcGroupDeliveryJob & {
+  status: "claimed" | "sent" | "failed" | "manual_review"
+  lastError: string
+  updatedAt: string
+}
+
 type DispatcherRow = {
   id: string
   device_label: string
@@ -56,6 +62,12 @@ type DeliveryJobRow = {
   destination_route_label: string
   destination_group_name: string
   attempt_count: number
+}
+
+type DeliveryActivityRow = DeliveryJobRow & {
+  status: SpcGroupDeliveryActivity["status"]
+  last_error: string | null
+  updated_at: string
 }
 
 function requireEnv(name: string) {
@@ -91,6 +103,15 @@ function mapJob(row: DeliveryJobRow): SpcGroupDeliveryJob {
     routeLabel: cleanText(row.destination_route_label, 100),
     groupName: cleanText(row.destination_group_name, 200),
     attemptCount: row.attempt_count,
+  }
+}
+
+function mapActivity(row: DeliveryActivityRow): SpcGroupDeliveryActivity {
+  return {
+    ...mapJob(row),
+    status: row.status,
+    lastError: cleanText(row.last_error, 1000),
+    updatedAt: row.updated_at,
   }
 }
 
@@ -306,6 +327,21 @@ export async function claimSpcGroupDelivery(token: string, extensionVersion: str
   return row
     ? { dispatcher, claimToken, job: mapJob(row as DeliveryJobRow) }
     : { dispatcher, claimToken: "", job: null }
+}
+
+export async function getLatestSpcGroupDelivery(token: string) {
+  const authenticated = await authenticatedDispatcher(token)
+  if (!authenticated) return null
+  const { data, error } = await authenticated.supabase
+    .from("spc_group_delivery_jobs")
+    .select("id,enquiry_id,revision_number,event_type,message_text,destination_route_label,destination_group_name,attempt_count,status,last_error,updated_at")
+    .eq("claimed_by", authenticated.row.id)
+    .in("status", ["claimed", "sent", "failed", "manual_review"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data ? mapActivity(data as DeliveryActivityRow) : null
 }
 
 export async function completeSpcGroupDelivery(input: {

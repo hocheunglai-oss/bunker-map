@@ -9,8 +9,10 @@
   let state = {
     paired: false,
     busy: false,
-    status: "Loading...",
+    phase: "connecting",
+    status: "Starting redelivery",
     error: "",
+    activity: null,
   }
   let timer = 0
   let nextPairAttempt = 0
@@ -53,6 +55,20 @@
     })
   }
 
+  function setText(element, value) {
+    const next = String(value || "")
+    if (element && element.textContent !== next) element.textContent = next
+  }
+
+  function activityResult(activity) {
+    if (!activity) return ""
+    if (activity.status === "sending" || activity.status === "claimed") return "Sending"
+    if (activity.status === "sent") return "Sent"
+    if (activity.status === "manual_review") return "Manual review"
+    if (activity.status === "failed") return "Not delivered"
+    return "Received"
+  }
+
   function render() {
     let root = document.getElementById(BOARD_ID)
     if (!root) {
@@ -60,18 +76,59 @@
       root.id = BOARD_ID
       document.body.appendChild(root)
       document.body.classList.add("fcuno-spc-dispatcher-active")
+      root.innerHTML = `
+        <header>
+          <img src="${escapeHtml(LOGO_URL)}" alt="Singapore Purchasing Center" />
+          <span>REDELIVERY <b>v${escapeHtml(VERSION)}</b></span>
+        </header>
+        <main>
+          <div class="fcuno-spc-dispatcher-status is-connecting" data-role="status">
+            <i><em></em></i>
+            <div>
+              <strong data-role="status-title"></strong>
+              <span data-role="status-detail"></span>
+            </div>
+          </div>
+          <section class="fcuno-spc-dispatcher-activity" data-role="activity" hidden>
+            <div class="fcuno-spc-dispatcher-activity-head">
+              <span data-role="activity-badge"></span>
+              <strong data-role="activity-result"></strong>
+            </div>
+            <p data-role="activity-message"></p>
+            <span data-role="activity-route"></span>
+          </section>
+          <p class="fcuno-spc-dispatcher-empty" data-role="empty">Waiting for the next enquiry.</p>
+        </main>
+      `
     }
-    root.innerHTML = `
-      <header>
-        <img src="${escapeHtml(LOGO_URL)}" alt="Singapore Purchasing Center" />
-        <span>DELIVERY <b>v${escapeHtml(VERSION)}</b></span>
-      </header>
-      <main>
-        <div class="fcuno-spc-dispatcher-status${state.error ? " is-error" : ""}">
-          <i></i><span>${escapeHtml(state.error || state.status)}</span>
-        </div>
-      </main>
-    `
+    const status = root.querySelector("[data-role='status']")
+    status.className = `fcuno-spc-dispatcher-status is-${state.error ? "error" : state.phase}`
+    setText(root.querySelector("[data-role='status-title']"), state.error || state.status)
+    const statusDetail = state.error
+      ? "Enquiry retained for review"
+      : state.phase === "working"
+        ? "WhatsApp is preparing the message"
+        : state.phase === "sent"
+          ? "Monitoring SPC enquiries"
+          : state.phase === "ready"
+            ? "Monitoring SPC enquiries"
+            : "Connecting securely to SPC"
+    setText(root.querySelector("[data-role='status-detail']"), statusDetail)
+
+    const activity = root.querySelector("[data-role='activity']")
+    const empty = root.querySelector("[data-role='empty']")
+    if (!state.activity) {
+      activity.hidden = true
+      empty.hidden = false
+      return
+    }
+    empty.hidden = true
+    activity.hidden = false
+    activity.className = `fcuno-spc-dispatcher-activity is-${state.activity.status || "received"}`
+    setText(activity.querySelector("[data-role='activity-badge']"), state.activity.eventType === "amended" ? `REV ${state.activity.revisionNumber}` : "NEW")
+    setText(activity.querySelector("[data-role='activity-result']"), activityResult(state.activity))
+    setText(activity.querySelector("[data-role='activity-message']"), state.activity.messageText)
+    setText(activity.querySelector("[data-role='activity-route']"), `To ${state.activity.groupName}`)
   }
 
   function getMain() {
@@ -229,44 +286,36 @@
     if (!composer) throw new Error("WhatsApp message box is unavailable.")
     const beforeCount = outgoingMessageCount(message)
     composer.focus()
-    await runtimeMessage({ type: "native-replace-text", text: "" })
-    await runtimeMessage({ type: "native-insert-text", text: message })
-    let accepted = false
-    for (const delay of [250, 500, 900]) {
-      await new Promise((resolve) => setTimeout(resolve, delay))
-      const nextComposer = findComposer()
-      if (comparable(nextComposer?.innerText || nextComposer?.textContent).includes(comparable(message))) {
-        accepted = true
-        break
-      }
-      if (outgoingMessageCount(message) > beforeCount) return true
-    }
-    if (!accepted) {
+    const result = await runtimeMessage({ type: "native-send-text", text: message })
+    if (!result.accepted) {
       throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm the enquiry text before sending.")
     }
-    await runtimeMessage({ type: "native-enter" })
-
-    for (const delay of [700, 1200, 2000, 3000, 4500]) {
+    for (const delay of [500, 900, 1400]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
       if (outgoingMessageCount(message) > beforeCount) return true
     }
+    if (result.submitted) return true
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
   }
 
   async function processQueue() {
     if (!state.paired || state.busy) return
     state.busy = true
-    if (!state.error) state.status = "Checking for enquiries..."
-    render()
     let claim = null
     try {
       claim = await runtimeMessage({ type: "dispatcher-claim" })
       if (!claim.job) {
-        if (!state.error) state.status = "Delivery active."
+        if (!state.error && state.phase === "connecting") {
+          state.phase = "ready"
+          state.status = "Ready for enquiries"
+          render()
+        }
         return
       }
       state.error = ""
-      state.status = `Delivering REV ${claim.job.revisionNumber}...`
+      state.phase = "working"
+      state.status = claim.job.eventType === "amended" ? `Sending revision ${claim.job.revisionNumber}` : "Sending enquiry"
+      state.activity = { ...claim.job, status: "sending" }
       render()
       await openExactGroup(claim.job.groupName)
       if (claim.job.attemptCount > 1 && outgoingMessageCount(claim.job.messageText) > 0) {
@@ -276,7 +325,9 @@
           claimToken: claim.claimToken,
           result: "sent",
         })
-        state.status = "Delivery active."
+        state.phase = "sent"
+        state.status = "Enquiry sent"
+        state.activity = { ...claim.job, status: "sent" }
         return
       }
       await sendAndVerify(claim.job.messageText)
@@ -286,13 +337,19 @@
         claimToken: claim.claimToken,
         result: "sent",
       })
-      state.status = "Delivery active."
+      state.phase = "sent"
+      state.status = "Enquiry sent"
+      state.activity = { ...claim.job, status: "sent" }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const requiresReview = /^(SEND_UNCERTAIN|STOP_REVIEW):/.test(message)
+      state.phase = "error"
       state.error = requiresReview
         ? message.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
         : message
+      if (claim?.job) {
+        state.activity = { ...claim.job, status: requiresReview ? "manual_review" : "failed" }
+      }
       if (claim?.job && claim?.claimToken) {
         await runtimeMessage({
           type: "dispatcher-complete",
@@ -313,7 +370,8 @@
     nextPairAttempt = Date.now() + PAIR_RETRY_MS
     state.busy = true
     state.error = ""
-    state.status = "Connecting..."
+    state.phase = "connecting"
+    state.status = "Connecting redelivery"
     render()
     try {
       const saved = await runtimeMessage({ type: "dispatcher-state" })
@@ -322,9 +380,26 @@
         await runtimeMessage({ type: "dispatcher-pair", deviceLabel: "SPC Trading Desktop" })
       }
       state.paired = true
-      state.status = "Delivery active."
+      const latest = await runtimeMessage({ type: "dispatcher-latest" })
+      if (latest.job) {
+        state.activity = latest.job
+        if (latest.job.status === "manual_review" || latest.job.status === "failed") {
+          state.phase = "error"
+          state.error = latest.job.lastError
+            ? latest.job.lastError.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
+            : "The latest enquiry requires review."
+        } else if (latest.job.status === "sent") {
+          state.phase = "sent"
+          state.status = "Latest enquiry sent"
+        }
+      }
+      if (!state.error && state.phase !== "sent") {
+        state.phase = "ready"
+        state.status = "Ready for enquiries"
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      state.phase = "error"
       state.error = `Connection failed. Sign in to spc.fcuno.com, then refresh WhatsApp Web. ${message}`
     } finally {
       state.busy = false

@@ -5,6 +5,7 @@ import {
   claimSpcGroupDelivery,
   completeSpcGroupDelivery,
   getActiveSpcGroupDispatcher,
+  getLatestSpcGroupDelivery,
   heartbeatSpcGroupDispatcher,
   pairSpcGroupDispatcher,
   revokeSpcGroupDispatcher,
@@ -88,6 +89,11 @@ export async function POST(request: Request) {
       return claimed
         ? privateJson({ success: true, ...claimed })
         : privateJson({ message: "Unauthorized" }, 401)
+    }
+
+    if (action === "latest") {
+      const job = await getLatestSpcGroupDelivery(token)
+      return privateJson({ success: true, job })
     }
 
     if (action === "complete") {
