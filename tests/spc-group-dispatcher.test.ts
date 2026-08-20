@@ -137,6 +137,8 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(background, /async function findVisibleSendButton/)
   assert.match(background, /\[data-icon='send'\]/)
   assert.match(background, /\[data-icon='wds-ic-send-filled'\]/)
+  assert.match(background, /async function focusVisibleComposer/)
+  assert.match(background, /rect\.bottom > window\.innerHeight \* 0\.55/)
   assert.match(background, /await clickWithTarget\(target, sendButton\.x, sendButton\.y\)/)
   assert.match(background, /await enterWithTarget\(target\)/)
   assert.match(background, /message\?\.type === "native-send-text"/)
@@ -180,9 +182,9 @@ test("the folder updater validates the installed extension and writes the manife
       }
     },
   }
-  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.1" })
+  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.2" })
   const bundle = {
-    version: "1.2.1",
+    version: "1.2.2",
     files: SPC_GROUP_DISPATCHER_FILES.map((name) => ({
       name,
       contentBase64: Buffer.from(name === "manifest.json" ? manifest : `updated:${name}`).toString("base64"),
@@ -193,10 +195,10 @@ test("the folder updater validates the installed extension and writes the manife
   assert.deepEqual(result, {
     directoryName: "fcuno-spc-group-dispatcher",
     previousVersion: "1.1.6",
-    version: "1.2.1",
+    version: "1.2.2",
   })
   assert.equal(writes.at(-1), "manifest.json")
-  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.1")
+  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.2")
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {

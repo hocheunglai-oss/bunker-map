@@ -42,7 +42,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.2'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -79,7 +79,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.1" }),
+      getManifest: () => ({ version: "1.2.2" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -104,7 +104,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.1" }),
+      getManifest: () => ({ version: "1.2.2" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -160,7 +160,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.1" }),
+      getManifest: () => ({ version: "1.2.2" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -173,7 +173,9 @@ async function verifyAtomicNativeSend() {
         commands.push({ method, params })
         if (method === "Input.insertText") composerText = String(params.text || "")
         if (method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") composerText = ""
-        if (method === "Runtime.evaluate" && params.expression.includes("compose-btn-send")) {
+        if (method === "Runtime.evaluate" && params.expression.includes("document.createRange")) {
+          callback({ result: { value: { found: true, focused: true, text: composerText } } })
+        } else if (method === "Runtime.evaluate" && params.expression.includes("compose-btn-send")) {
           callback({ result: { value: composerText ? { count: 1, x: 700, y: 500 } : { count: 0 } } })
         } else if (method === "Runtime.evaluate") callback({ result: { value: composerText } })
         else callback({})
@@ -206,7 +208,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.1" }),
+      getManifest: () => ({ version: "1.2.2" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -221,7 +223,9 @@ async function verifyGuardedEnterFallback() {
         if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown" && params.key === "Enter") {
           composerText = ""
         }
-        if (method === "Runtime.evaluate" && params.expression.includes("compose-btn-send")) {
+        if (method === "Runtime.evaluate" && params.expression.includes("document.createRange")) {
+          callback({ result: { value: { found: true, focused: true, text: composerText } } })
+        } else if (method === "Runtime.evaluate" && params.expression.includes("compose-btn-send")) {
           callback({ result: { value: { count: 0 } } })
         } else if (method === "Runtime.evaluate") callback({ result: { value: composerText } })
         else callback({})
@@ -259,7 +263,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.1" }),
+      getManifest: () => ({ version: "1.2.2" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -400,7 +404,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.1/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.2/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)

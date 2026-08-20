@@ -169,18 +169,66 @@ async function nativeEnter(tabId) {
   return withDebugger(tabId, enterWithTarget)
 }
 
+async function focusVisibleComposer(target) {
+  const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+    expression: `(() => {
+      const visible = (element) => {
+        const rect = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none"
+      }
+      const candidates = Array.from(document.querySelectorAll(
+        "[data-testid='conversation-compose-box-input'], [contenteditable='true'][role='textbox'], [contenteditable='true']",
+      ))
+        .filter((element) => visible(element) && !element.closest("#fcuno-spc-dispatcher-root"))
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.bottom > window.innerHeight * 0.55)
+        .sort((left, right) => right.rect.bottom - left.rect.bottom)
+      const active = document.activeElement
+      const composer = candidates.find(({ element }) => element === active)?.element || candidates[0]?.element
+      if (!composer) return { found: false, focused: false, text: "" }
+      composer.focus()
+      const selection = window.getSelection()
+      if (selection) {
+        const range = document.createRange()
+        range.selectNodeContents(composer)
+        range.collapse(false)
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+      return {
+        found: true,
+        focused: document.activeElement === composer,
+        text: String(composer.innerText || composer.textContent || ""),
+      }
+    })()`,
+    returnByValue: true,
+  }, callback))
+  const value = evaluation?.result?.value || {}
+  return {
+    found: Boolean(value.found),
+    focused: Boolean(value.focused),
+    text: String(value.text || ""),
+  }
+}
+
 async function readActiveComposer(target) {
   const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
     expression: `(() => {
       const visible = (element) => {
         const rect = element.getBoundingClientRect()
-        return rect.width > 0 && rect.height > 0
+        const style = getComputedStyle(element)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none"
       }
       const candidates = Array.from(document.querySelectorAll(
-        "[data-testid='conversation-compose-box-input'], [contenteditable='true'][role='textbox']",
-      )).filter(visible)
+        "[data-testid='conversation-compose-box-input'], [contenteditable='true'][role='textbox'], [contenteditable='true']",
+      ))
+        .filter((element) => visible(element) && !element.closest("#fcuno-spc-dispatcher-root"))
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.bottom > window.innerHeight * 0.55)
+        .sort((left, right) => right.rect.bottom - left.rect.bottom)
       const active = document.activeElement
-      const composer = candidates.includes(active) ? active : candidates[candidates.length - 1]
+      const composer = candidates.find(({ element }) => element === active)?.element || candidates[0]?.element
       return String(composer?.innerText || composer?.textContent || "")
     })()`,
     returnByValue: true,
@@ -223,6 +271,10 @@ async function nativeSendText(tabId, text) {
   const expected = comparable(text)
   if (!expected) throw new Error("The enquiry text is empty.")
   return withDebugger(tabId, async (target) => {
+    const composer = await focusVisibleComposer(target)
+    if (!composer.found || !composer.focused) {
+      return { accepted: false, submitted: false }
+    }
     await replaceTextWithTarget(target, "")
     await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.insertText", {
       text: String(text),
