@@ -487,11 +487,11 @@ assert.equal(api.currentChatMatchesContact(renameSafeContact), false)
 const enquiry = "shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts"
 assert.equal(
   api.enquiryReplyText({ vesselName: "long pu 16", formattedText: enquiry }),
-  "Re: Long Pu 16, ",
+  `*${enquiry}*\n`,
 )
 assert.equal(
   api.enquiryReplyText({ formattedText: "aal antwerp / 9958781 / 9 - 13 aug / vlsfo 150mts" }),
-  "Re: Aal Antwerp, ",
+  "*aal antwerp / 9958781 / 9 - 13 aug / vlsfo 150mts*\n",
 )
 let composer = setComposer(enquiry)
 assert.equal(api.insertComposerText(enquiry), true)

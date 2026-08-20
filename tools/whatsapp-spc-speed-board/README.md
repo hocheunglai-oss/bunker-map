@@ -1,6 +1,6 @@
 # FCUNO SPC WhatsApp Board
 
-Current version: `0.6.3`.
+Current version: `0.6.4`.
 
 Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 
@@ -18,7 +18,7 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 - Lets the user edit and tick/untick a reusable opening template before sending enquiries.
 - Lets the user click an enquiry row to select it with a blue highlight, then click it again to cancel selection.
 - Shows the Send command and effective selection inside the fixed button, including whether the opening template will be included.
-- Shows the supplied green paper-plane button on each enquiry. It enters the sender's full verified WhatsApp number once in WhatsApp's normal left search, opens the single matching result, rejects repeat clicks while routing, never refreshes the page, prefills `Re: <Vessel Name>, ` exactly once, and leaves the composer focused without sending.
+- Shows the supplied green paper-plane button on each enquiry. It opens the exact SPC enquiry group without refreshing the page, puts the full enquiry in WhatsApp bold syntax on the first line, leaves the cursor ready on the second line, and does not send automatically.
 - Uses checkbox-free enquiry rows and sends all currently blue-selected enquiries into the current WhatsApp chat.
 - Lets the user drag one sent enquiry directly onto a saved Supplier/Buyer chat to open that chat and send it.
 - Suppresses only immediate duplicate drag/send events; a deliberate retry is available after 2.5 seconds instead of being silently blocked for 30 seconds.

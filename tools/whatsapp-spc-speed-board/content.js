@@ -1359,8 +1359,8 @@
   }
 
   function enquiryReplyText(enquiry) {
-    const vessel = enquiryVesselName(enquiry)
-    return vessel ? `Re: ${vessel}, ` : ""
+    const body = enquiryBodyText(enquiry)
+    return body ? `*${body}*\n` : ""
   }
 
   function enquiryTextForDrag(id) {
@@ -1834,7 +1834,7 @@
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${amended ? " is-amended" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
-          <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and type ${escapeHtml(enquiryReplyText(enquiry))}" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and type ${escapeHtml(enquiryReplyText(enquiry))}"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
+          <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             ${amended ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiry.revisionNumber || enquiry.revision_number || "")}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}</span>` : ""}

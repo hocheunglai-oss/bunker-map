@@ -196,9 +196,9 @@ const html = `<!doctype html>
               callback({
                 ok: true,
                 status: {
-                  installedVersion: staleVersion ? "0.6.2" : "0.6.3",
-                  latestVersion: "0.6.3",
-                  requiredVersion: "0.6.3",
+                  installedVersion: staleVersion ? "0.6.3" : "0.6.4",
+                  latestVersion: "0.6.4",
+                  requiredVersion: "0.6.4",
                   updateRequired: staleVersion,
                   updatePageUrl: "https://spc.fcuno.com/chrome"
                 }
@@ -371,7 +371,7 @@ async function main() {
       await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
       assert.equal(
         (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
-        "UPDATE REQUIRED Installed v0.6.2 · Required v0.6.3 UPDATE",
+        "UPDATE REQUIRED Installed v0.6.3 · Required v0.6.4 UPDATE",
       )
       assert.equal(
         await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
@@ -483,7 +483,7 @@ async function main() {
       await page.waitForFunction(() => (
         document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
         document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
-        window.editorModel === "Re: Taisei Maru No.15, " &&
+        window.editorModel === "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n" &&
         document.getElementById("search")?.value === "" &&
         document.activeElement === document.getElementById("composer")
       ), { timeout: 5000 })
@@ -505,7 +505,7 @@ async function main() {
         sameDocument: true,
         chatTitle: "Otto (FCBHK) SG Enqs",
         searchText: "",
-        composerText: "Re: Taisei Maru No.15, ",
+        composerText: "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n",
         composerFocused: true,
         sentCount: 0,
         dialerOpenCount: 0,
@@ -529,14 +529,14 @@ async function main() {
       await page.waitForFunction(() => (
         document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
         document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
-        window.editorModel === "Re: Taisei Maru No.15, " &&
+        window.editorModel === "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n" &&
         window.nativeInsertCount === 1
       ), { timeout: 5000 })
       assert.deepEqual(await page.evaluate(() => ({
         composerText: window.editorModel,
         nativeInsertCount: window.nativeInsertCount,
       })), {
-        composerText: "Re: Taisei Maru No.15, ",
+        composerText: "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n",
         nativeInsertCount: 1,
       })
 
@@ -547,14 +547,14 @@ async function main() {
         document.getElementById("composer").blur()
       })
       await page.click("#fcuno-wa-spc-board [data-action='open-enquiry-chat'][data-id='enq-1']", { force: true })
-      await page.waitForFunction(() => window.editorModel === "Re: Taisei Maru No.15, ", { timeout: 3000 })
+      await page.waitForFunction(() => window.editorModel === "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n", { timeout: 3000 })
       const sameChatPrefill = await page.evaluate(() => ({
         composerText: window.editorModel,
         composerFocused: document.activeElement === document.getElementById("composer"),
         sentCount: window.sentMessages.length,
       }))
       assert.deepEqual(sameChatPrefill, {
-        composerText: "Re: Taisei Maru No.15, ",
+        composerText: "*taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts*\n",
         composerFocused: true,
         sentCount: 0,
       })
@@ -570,7 +570,7 @@ async function main() {
       await page.waitForFunction(() => (
         document.getElementById("chatTitle")?.getAttribute("title") === "Otto (FCBHK) SG Enqs" &&
         document.getElementById("profileDetails")?.getAttribute("aria-label") === "群組資訊" &&
-        window.editorModel === "Re: Shan Ren, " &&
+        window.editorModel === "*shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts*\n" &&
         document.activeElement === document.getElementById("composer")
       ), { timeout: 5000 })
       const unsavedSenderOpenResult = await page.evaluate(() => ({
@@ -584,7 +584,7 @@ async function main() {
       }))
       assert.deepEqual(unsavedSenderOpenResult, {
         chatTitle: "Otto (FCBHK) SG Enqs",
-        composerText: "Re: Shan Ren, ",
+        composerText: "*shan ren / 9474606 / 11 - 13 jan / vlsfo 110mts / lsmgo 55mts*\n",
         composerFocused: true,
         sentCount: 0,
         dialerOpenCount: 0,
