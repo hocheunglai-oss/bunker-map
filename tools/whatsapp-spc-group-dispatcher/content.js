@@ -352,9 +352,9 @@
     return candidates[0]
   }
 
-  function outgoingMessageCount(message) {
+  function matchingOutgoingMessageRows(message) {
     const target = comparable(message)
-    if (!target) return 0
+    if (!target) return []
     const rows = Array.from(getMain()?.querySelectorAll(
       ".message-out, [data-testid='msg-container'], [data-id^='true_'], [data-id*='true_']",
     ) || [])
@@ -365,15 +365,38 @@
         const identified = row.matches("[data-id]") ? row : row.closest("[data-id]")
         return String(identified?.getAttribute("data-id") || "").includes("true_")
       })
-    return rows
-      .filter((row) => comparable(row.innerText || row.textContent).includes(target))
-      .length
+    return rows.filter((row) => comparable(row.innerText || row.textContent).includes(target))
   }
 
-  async function waitForOutgoingMessage(message, beforeCount, delays) {
+  function outgoingMessageCount(message) {
+    return matchingOutgoingMessageRows(message).length
+  }
+
+  function outgoingMessageIdentity(row) {
+    const identified = row.matches("[data-id]") ? row : row.closest("[data-id]") || row.querySelector("[data-id]")
+    return cleanText(identified?.getAttribute("data-id"))
+  }
+
+  function outgoingMessageSnapshot(message) {
+    const rows = matchingOutgoingMessageRows(message)
+    return {
+      identities: new Set(rows.map(outgoingMessageIdentity).filter(Boolean)),
+      rows: new Set(rows),
+    }
+  }
+
+  function hasNewOutgoingMessage(message, before) {
+    return matchingOutgoingMessageRows(message).some((row) => {
+      const identity = outgoingMessageIdentity(row)
+      if (identity) return !before.identities.has(identity)
+      return !before.rows.has(row)
+    })
+  }
+
+  async function waitForOutgoingMessage(message, beforeSnapshot, delays) {
     for (const delay of delays) {
       await new Promise((resolve) => setTimeout(resolve, delay))
-      if (outgoingMessageCount(message) > beforeCount) return true
+      if (hasNewOutgoingMessage(message, beforeSnapshot)) return true
     }
     return false
   }
@@ -381,7 +404,7 @@
   async function sendAndVerify(message, groupName) {
     const composer = findComposer()
     if (!composer) throw new Error("WhatsApp message box is unavailable.")
-    const beforeCount = outgoingMessageCount(message)
+    const beforeSnapshot = outgoingMessageSnapshot(message)
     replaceComposerText(composer, message)
 
     let staged = false
@@ -405,7 +428,7 @@
     }
 
     await runtimeMessage({ type: "native-enter" })
-    if (await waitForOutgoingMessage(message, beforeCount, [500, 900, 1400])) return true
+    if (await waitForOutgoingMessage(message, beforeSnapshot, [500, 900, 1400])) return true
 
     const remainingComposer = findComposer()
     const remainingTextIsExact = comparable(composerText(remainingComposer)) === comparable(message)
@@ -413,7 +436,7 @@
       sendButton = findSendButton(remainingComposer)
       if (sendButton) {
         await nativeClick(sendButton)
-        if (await waitForOutgoingMessage(message, beforeCount, [500, 900, 1400, 2200, 3500])) return true
+        if (await waitForOutgoingMessage(message, beforeSnapshot, [500, 900, 1400, 2200, 3500])) return true
       }
     }
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
