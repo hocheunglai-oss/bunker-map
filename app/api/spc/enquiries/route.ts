@@ -11,6 +11,7 @@ import {
   reofferSpcEnquiry,
   updateSpcEnquiryFixture,
   updateSpcEnquiryOutcome,
+  type SpcEnquiry,
   type SpcEnquiryOutcome,
 } from "@/lib/spcEnquiries"
 import { enqueueSpcMobileEnquiry, processPendingSpcMobileDeliveries } from "@/lib/spcMobileEnquiries"
@@ -74,6 +75,20 @@ function parseIsoTimestamp(value: string) {
   return ISO_CURSOR_TIMESTAMP_PATTERN.test(value) && !Number.isNaN(Date.parse(value))
     ? value
     : null
+}
+
+async function enqueueAndScheduleSpcMobileDelivery(enquiry: SpcEnquiry) {
+  const mobileRecipientCount = await enqueueSpcMobileEnquiry(enquiry)
+  if (mobileRecipientCount > 0) {
+    after(async () => {
+      try {
+        await processPendingSpcMobileDeliveries()
+      } catch (error) {
+        console.error("Immediate SPC mobile delivery failed", error)
+      }
+    })
+  }
+  return mobileRecipientCount
 }
 
 export async function GET(request: Request) {
@@ -172,16 +187,7 @@ export async function POST(request: Request) {
     const session = await requireSpcPagePermission("spc-buyer-enquiries", "edit")
     const payload = (await request.json()) as EnquiryPayload
     const enquiry = await createSpcEnquiry(payload, session, request)
-    const mobileRecipientCount = await enqueueSpcMobileEnquiry(enquiry)
-    if (mobileRecipientCount > 0) {
-      after(async () => {
-        try {
-          await processPendingSpcMobileDeliveries()
-        } catch (error) {
-          console.error("Immediate SPC mobile delivery failed", error)
-        }
-      })
-    }
+    const mobileRecipientCount = await enqueueAndScheduleSpcMobileDelivery(enquiry)
     return NextResponse.json({ success: true, enquiry, mobileRecipientCount })
   } catch (error) {
     return errorResponse(error, "Failed to save SPC enquiry.")
@@ -243,7 +249,8 @@ export async function PATCH(request: Request) {
         session,
         request,
       )
-      return NextResponse.json({ success: true, enquiry })
+      const mobileRecipientCount = await enqueueAndScheduleSpcMobileDelivery(enquiry)
+      return NextResponse.json({ success: true, enquiry, mobileRecipientCount })
     }
 
     if (payload.mode === "amend") {

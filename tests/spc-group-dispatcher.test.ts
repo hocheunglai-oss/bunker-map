@@ -67,6 +67,16 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   assert.match(routingMigration, /save_spc_user_with_delivery_route/)
   assert.match(routingMigration, /revoke all privileges on table public\.spc_delivery_routes from public, anon, authenticated/)
 
+  const reofferMigration = await readFile(
+    new URL("../supabase/migrations/20260820042838_reoffer_spc_enquiry_with_group_delivery.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(reofferMigration, /create or replace function public\.reoffer_spc_enquiry_with_group_delivery/)
+  assert.match(reofferMigration, /for update/)
+  assert.match(reofferMigration, /if source_row\.status <> 'sent'/)
+  assert.match(reofferMigration, /insert into public\.spc_group_delivery_jobs/)
+  assert.match(reofferMigration, /revoke all on function public\.reoffer_spc_enquiry_with_group_delivery[\s\S]+to service_role/)
+
   const bootstrapSchema = await readFile(
     new URL("../supabase/spc_schema.sql", import.meta.url),
     "utf8",
@@ -74,6 +84,7 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   for (const functionName of [
     "enqueue_spc_enquiry_group_delivery",
     "amend_spc_enquiry_with_group_delivery",
+    "reoffer_spc_enquiry_with_group_delivery",
     "claim_spc_group_delivery_job",
     "complete_spc_group_delivery_job",
   ]) {
@@ -90,7 +101,7 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /currentChatNames\(\)\.some\(\(candidate\) => candidate\.toLowerCase\(\) === expected\)/)
   assert.match(content, /More than one exact WhatsApp group match was found/)
   assert.match(content, /SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message/)
-  assert.match(content, /SEND_UNCERTAIN: WhatsApp did not confirm the enquiry text before sending/)
+  assert.match(content, /SEND_UNCERTAIN: WhatsApp did not expose a Send button for the enquiry/)
   assert.match(content, /\.message-out, \[data-testid='msg-container'\]/)
   assert.match(content, /type: "native-send-text"/)
   assert.match(content, /REDELIVERY/)
@@ -123,6 +134,9 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(background, /fcunoSpcGroupDispatcherUpdatePendingV1/)
   assert.match(background, /async function nativeSendText/)
   assert.match(background, /return withDebugger\(tabId, async \(target\) =>/)
+  assert.match(background, /async function findVisibleSendButton/)
+  assert.match(background, /\[data-icon='send'\]/)
+  assert.match(background, /await clickWithTarget\(target, sendButton\.x, sendButton\.y\)/)
   assert.match(background, /message\?\.type === "native-send-text"/)
   assert.match(background, /message\.type === "dispatcher-latest"/)
 
@@ -164,9 +178,9 @@ test("the folder updater validates the installed extension and writes the manife
       }
     },
   }
-  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.1.9" })
+  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.0" })
   const bundle = {
-    version: "1.1.9",
+    version: "1.2.0",
     files: SPC_GROUP_DISPATCHER_FILES.map((name) => ({
       name,
       contentBase64: Buffer.from(name === "manifest.json" ? manifest : `updated:${name}`).toString("base64"),
@@ -177,10 +191,10 @@ test("the folder updater validates the installed extension and writes the manife
   assert.deepEqual(result, {
     directoryName: "fcuno-spc-group-dispatcher",
     previousVersion: "1.1.6",
-    version: "1.1.9",
+    version: "1.2.0",
   })
   assert.equal(writes.at(-1), "manifest.json")
-  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.1.9")
+  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.0")
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {

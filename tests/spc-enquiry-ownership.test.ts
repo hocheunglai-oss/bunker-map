@@ -99,3 +99,14 @@ test("SPC cancellation preserves the shared record for Speed Board status update
   assert.match(outcomeSource, /nextMeta\.cancelledAt = now/)
   assert.doesNotMatch(outcomeSource, /\.delete\(\)/)
 })
+
+test("SPC reoffers atomically create the group delivery and reuse official API delivery", () => {
+  const reofferStart = enquiriesStore.indexOf("export async function reofferSpcEnquiry")
+  const reofferEnd = enquiriesStore.indexOf("export async function updateSpcEnquiryFixture", reofferStart)
+  const reofferSource = enquiriesStore.slice(reofferStart, reofferEnd)
+
+  assert.match(reofferSource, /requireActiveSpcDeliveryRouteForUsername\(session\.username\)/)
+  assert.match(reofferSource, /rpc\("reoffer_spc_enquiry_with_group_delivery"/)
+  assert.doesNotMatch(reofferSource, /\.from\("spc_enquiries"\)\s*\.insert/)
+  assert.match(route, /payload\.mode === "reoffer"[\s\S]*?enqueueAndScheduleSpcMobileDelivery\(enquiry\)/)
+})

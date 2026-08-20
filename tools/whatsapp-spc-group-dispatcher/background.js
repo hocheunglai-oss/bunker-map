@@ -73,18 +73,22 @@ async function withDebugger(tabId, action) {
 
 async function nativeClick(tabId, x, y) {
   return withDebugger(tabId, async (target) => {
-    for (const event of [
-      { type: "mouseMoved", button: "none", buttons: 0 },
-      { type: "mousePressed", button: "left", buttons: 1, clickCount: 1 },
-      { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1 },
-    ]) {
-      await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
-        ...event,
-        x,
-        y,
-      }, callback))
-    }
+    await clickWithTarget(target, x, y)
   })
+}
+
+async function clickWithTarget(target, x, y) {
+  for (const event of [
+    { type: "mouseMoved", button: "none", buttons: 0 },
+    { type: "mousePressed", button: "left", buttons: 1, clickCount: 1 },
+    { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1 },
+  ]) {
+    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      ...event,
+      x,
+      y,
+    }, callback))
+  }
 }
 
 function delay(milliseconds) {
@@ -182,23 +186,37 @@ async function readActiveComposer(target) {
   return String(evaluation?.result?.value || "")
 }
 
-async function pressEnterWithTarget(target) {
-  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
-    type: "rawKeyDown",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-    nativeVirtualKeyCode: 13,
-    unmodifiedText: "\r",
-    text: "\r",
+async function findVisibleSendButton(target) {
+  const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+    expression: `(() => {
+      const main = document.querySelector("#main") || document.querySelector("[role='main']")
+      if (!main) return { count: 0 }
+      const visible = (element) => {
+        const rect = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none"
+      }
+      const controls = []
+      const add = (element) => {
+        const control = element?.closest?.("button, [role='button']") || element
+        if (control && !control.hasAttribute("disabled") && visible(control) && !controls.includes(control)) controls.push(control)
+      }
+      for (const element of main.querySelectorAll(
+        "[data-testid='compose-btn-send'], [data-testid='send'], [data-icon='send'], [data-icon='send-filled']",
+      )) add(element)
+      for (const element of main.querySelectorAll("button[aria-label='Send'], [role='button'][aria-label='Send']")) add(element)
+      if (controls.length !== 1) return { count: controls.length }
+      const rect = controls[0].getBoundingClientRect()
+      return { count: 1, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })()`,
+    returnByValue: true,
   }, callback))
-  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-    nativeVirtualKeyCode: 13,
-  }, callback))
+  const value = evaluation?.result?.value || {}
+  return {
+    count: Number(value.count || 0),
+    x: Number(value.x || 0),
+    y: Number(value.y || 0),
+  }
 }
 
 async function nativeSendText(tabId, text) {
@@ -210,20 +228,24 @@ async function nativeSendText(tabId, text) {
       text: String(text),
     }, callback))
 
-    let observed = ""
-    for (const wait of [250, 500, 900]) {
+    let sendButton = { count: 0, x: 0, y: 0 }
+    for (const wait of [250, 500, 900, 1400]) {
       await delay(wait)
-      observed = await readActiveComposer(target)
-      if (comparable(observed).includes(expected)) break
+      sendButton = await findVisibleSendButton(target)
+      if (sendButton.count === 1) break
     }
-    if (!comparable(observed).includes(expected)) {
+    if (sendButton.count !== 1) {
       return { accepted: false, submitted: false }
     }
 
-    await pressEnterWithTarget(target)
-    for (const wait of [350, 650, 1000]) {
+    await clickWithTarget(target, sendButton.x, sendButton.y)
+    for (const wait of [350, 650, 1000, 1600]) {
       await delay(wait)
-      if (!comparable(await readActiveComposer(target))) {
+      const [composer, remainingButton] = await Promise.all([
+        readActiveComposer(target),
+        findVisibleSendButton(target),
+      ])
+      if (!comparable(composer) || remainingButton.count === 0) {
         return { accepted: true, submitted: true }
       }
     }

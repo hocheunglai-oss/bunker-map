@@ -505,6 +505,7 @@ export async function reofferSpcEnquiry(
   const title = cleanText(input.title)
   if (!title) throw new Error("Enquiry title is required.")
   if (!session.username) throw new Error("Authenticated username is required.")
+  await requireActiveSpcDeliveryRouteForUsername(session.username)
 
   const context = createSpcAuditContext(session, request, "spc-buyer-enquiries")
   const supabase = createSpcAuditedSupabaseClient(context)
@@ -522,26 +523,29 @@ export async function reofferSpcEnquiry(
     stemSupplierTraderUsername: undefined,
     stemSupplierTraderDisplayName: undefined,
   }
-
-  const { data, error } = await supabase
-    .from("spc_enquiries")
-    .insert({
-      title,
-      vessel_name: cleanText(input.vesselName),
-      port: cleanText(input.port),
-      product: cleanText(input.product),
-      quantity: cleanText(input.quantity),
-      delivery_date: cleanDateInput(input.deliveryDate),
-      supplier_name: cleanText(input.supplierName),
-      notes: writeSpcEnquiryNotes(providedNotes || currentText, newMeta),
-      status: "sent",
-      created_by_username: session.username,
-      created_by_display_name: session.displayName || session.username,
-    })
-    .select("*")
-    .single()
-
-  if (error) throw error
+  const nextRow: SpcEnquiryRow = {
+    ...existing,
+    id: "",
+    enquiry_number: "",
+    title,
+    vessel_name: cleanText(input.vesselName),
+    port: cleanText(input.port),
+    product: cleanText(input.product),
+    quantity: cleanText(input.quantity),
+    delivery_date: cleanDateInput(input.deliveryDate),
+    supplier_name: cleanText(input.supplierName),
+    notes: writeSpcEnquiryNotes(providedNotes || currentText, newMeta),
+    status: "sent",
+    revision_number: 1,
+    last_amended_at: null,
+    last_amended_by_username: null,
+    last_amendment_changes: [],
+    created_by_username: session.username,
+    created_by_display_name: session.displayName || session.username,
+    created_at: now,
+    updated_at: now,
+  }
+  const formattedText = formatSpcEnquiry(nextRow)
 
   const retiredMeta: SpcEnquiryMeta = {
     ...readSpcEnquiryMeta(existing.notes),
@@ -553,30 +557,29 @@ export async function reofferSpcEnquiry(
     stemSupplierTraderDisplayName: undefined,
   }
 
-  const { error: retireError } = await supabase
-    .from("spc_enquiries")
-    .update({
-      status: "closed",
-      notes: writeSpcEnquiryNotes(currentText, retiredMeta),
-      updated_at: now,
-    })
-    .eq("id", enquiryId)
-
-  if (retireError) {
-    const { error: rollbackError } = await supabase
-      .from("spc_enquiries")
-      .delete()
-      .eq("id", (data as SpcEnquiryRow).id)
-
-    if (rollbackError) {
-      throw new Error(
-        `Failed to retire the original enquiry and rollback the reoffer: ${retireError.message}; ${rollbackError.message}`,
-      )
-    }
-    throw retireError
-  }
-
-  return mapEnquiry(data as SpcEnquiryRow)
+  const { data, error } = await supabase.rpc("reoffer_spc_enquiry_with_group_delivery", {
+    p_source_enquiry_id: enquiryId,
+    p_actor_username: session.username,
+    p_actor_display_name: session.displayName || session.username,
+    p_enquiry: {
+      title: nextRow.title,
+      vesselName: nextRow.vessel_name,
+      port: nextRow.port,
+      product: nextRow.product,
+      quantity: nextRow.quantity,
+      deliveryDate: nextRow.delivery_date,
+      supplierName: nextRow.supplier_name,
+      notes: nextRow.notes,
+    },
+    p_formatted_text: formattedText,
+    p_after_snapshot: enquirySnapshot(nextRow),
+    p_message_text: formattedText,
+    p_retired_notes: writeSpcEnquiryNotes(currentText, retiredMeta),
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : null
+  if (!row) throw new Error("SPC reoffer did not return the new enquiry.")
+  return mapEnquiry(row as SpcEnquiryRow)
 }
 
 export async function updateSpcEnquiryFixture(

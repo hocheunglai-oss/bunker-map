@@ -288,7 +288,7 @@
     composer.focus()
     const result = await runtimeMessage({ type: "native-send-text", text: message })
     if (!result.accepted) {
-      throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm the enquiry text before sending.")
+      throw new Error("SEND_UNCERTAIN: WhatsApp did not expose a Send button for the enquiry.")
     }
     for (const delay of [500, 900, 1400]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
