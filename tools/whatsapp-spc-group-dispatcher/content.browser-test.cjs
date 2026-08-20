@@ -13,7 +13,7 @@ const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
 const groupName = "FCUNO - SPC TRADING GROUP"
 const message = "*AMENDED - REV 2*\n\nlong pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts\n\n*ETA:* *10 - 18 aug* (was 8 - 10 aug)"
 
-function html(ambiguous = false, initiallyPaired = true) {
+function html(ambiguous = false, initiallyPaired = true, enterSubmits = true) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:Arial}#side{float:left;width:340px;height:700px}#search{margin:12px;width:280px;padding:8px}
     .row{display:none;padding:14px;border-top:1px solid #ddd;cursor:pointer}#main{margin-left:340px;min-height:700px}
@@ -43,7 +43,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.3'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.4'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -61,7 +61,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(request.type==='native-enter'){
           const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';
-          if(!${ambiguous ? "true" : "false"} && text){const row=document.createElement('div');row.className='message-out';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);c.replaceChildren();}
+          if(${enterSubmits ? "true" : "false"} && !${ambiguous ? "true" : "false"} && text){const row=document.createElement('div');row.className='message-out';row.textContent=text;document.getElementById('messages').appendChild(row);window.sent.push(text);c.replaceChildren();}
           callback({ok:true});return;
         }
         if(request.type==='dispatcher-set-paused'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
@@ -77,7 +77,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.3" }),
+      getManifest: () => ({ version: "1.2.4" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -102,7 +102,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.3" }),
+      getManifest: () => ({ version: "1.2.4" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -158,7 +158,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.3" }),
+      getManifest: () => ({ version: "1.2.4" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -206,7 +206,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.3" }),
+      getManifest: () => ({ version: "1.2.4" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -261,7 +261,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.3" }),
+      getManifest: () => ({ version: "1.2.4" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -367,7 +367,8 @@ async function withServer(callback) {
     const requestUrl = new URL(request.url, "http://localhost")
     const ambiguous = requestUrl.searchParams.get("ambiguous") === "1"
     const initiallyPaired = requestUrl.searchParams.get("unpaired") !== "1"
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired))
+    const enterSubmits = requestUrl.searchParams.get("enterFallback") !== "1"
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired, enterSubmits))
   })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   try { await callback(`http://127.0.0.1:${server.address().port}/`) }
@@ -402,7 +403,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.3/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.4/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
@@ -415,6 +416,14 @@ async function main() {
         return node === document.querySelector("#fcuno-spc-group-dispatcher [data-role='status']")
       })
       assert.equal(stableStatusNode, true)
+
+      const fallbackPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+      await fallbackPage.goto(`${url}?enterFallback=1`, { waitUntil: "domcontentloaded" })
+      await fallbackPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
+      const fallback = await fallbackPage.evaluate(() => ({ completions: window.completions, sent: window.sent }))
+      assert.equal(fallback.sent.length, 1, JSON.stringify(fallback))
+      assert.equal(fallback.sent[0], message)
+      assert.equal(fallback.completions[0].result, "sent")
 
       const ambiguousPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
       await ambiguousPage.goto(`${url}?ambiguous=1`, { waitUntil: "domcontentloaded" })

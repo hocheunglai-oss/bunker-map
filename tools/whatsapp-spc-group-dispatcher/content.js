@@ -311,7 +311,6 @@
   function replaceComposerText(composer, text) {
     clearComposerText(composer)
     setComposerDomText(composer, text)
-    return comparable(composerText(composer)) === comparable(text)
   }
 
   function sendButtonLabel(element) {
@@ -371,31 +370,51 @@
       .length
   }
 
-  async function sendAndVerify(message) {
+  async function waitForOutgoingMessage(message, beforeCount, delays) {
+    for (const delay of delays) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      if (outgoingMessageCount(message) > beforeCount) return true
+    }
+    return false
+  }
+
+  async function sendAndVerify(message, groupName) {
     const composer = findComposer()
     if (!composer) throw new Error("WhatsApp message box is unavailable.")
     const beforeCount = outgoingMessageCount(message)
-    if (!replaceComposerText(composer, message)) {
-      throw new Error("SEND_UNCERTAIN: WhatsApp did not stage the exact enquiry text.")
-    }
+    replaceComposerText(composer, message)
 
+    let staged = false
     let sendButton = null
-    for (const delay of [120, 250, 500, 800]) {
+    for (const delay of [120, 250, 500, 800, 1200]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
-      if (comparable(composerText(findComposer())) !== comparable(message)) {
-        throw new Error("SEND_UNCERTAIN: WhatsApp changed the staged enquiry text.")
-      }
-      sendButton = findSendButton(findComposer())
+      const nextComposer = findComposer()
+      if (comparable(composerText(nextComposer)) !== comparable(message)) continue
+      staged = true
+      sendButton = findSendButton(nextComposer)
       if (sendButton) break
     }
-    if (!sendButton) {
-      throw new Error("SEND_UNCERTAIN: WhatsApp Send button is unavailable or ambiguous.")
+    if (!staged) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp did not stage the exact enquiry text.")
+    }
+    if (!exactChatIsOpen(groupName)) {
+      throw new Error("STOP_REVIEW: WhatsApp changed to a different chat before sending.")
+    }
+    if (comparable(composerText(findComposer())) !== comparable(message)) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp changed the staged enquiry text.")
     }
 
-    await nativeClick(sendButton)
-    for (const delay of [500, 900, 1400, 2200]) {
-      await new Promise((resolve) => setTimeout(resolve, delay))
-      if (outgoingMessageCount(message) > beforeCount) return true
+    await runtimeMessage({ type: "native-enter" })
+    if (await waitForOutgoingMessage(message, beforeCount, [500, 900, 1400])) return true
+
+    const remainingComposer = findComposer()
+    const remainingTextIsExact = comparable(composerText(remainingComposer)) === comparable(message)
+    if (remainingTextIsExact) {
+      sendButton = findSendButton(remainingComposer)
+      if (sendButton) {
+        await nativeClick(sendButton)
+        if (await waitForOutgoingMessage(message, beforeCount, [500, 900, 1400, 2200, 3500])) return true
+      }
     }
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
   }
@@ -432,7 +451,7 @@
         state.activity = { ...claim.job, status: "sent" }
         return
       }
-      await sendAndVerify(claim.job.messageText)
+      await sendAndVerify(claim.job.messageText, claim.job.groupName)
       await runtimeMessage({
         type: "dispatcher-complete",
         jobId: claim.job.id,

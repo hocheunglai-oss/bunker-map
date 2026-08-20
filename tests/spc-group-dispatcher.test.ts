@@ -104,6 +104,7 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /SEND_UNCERTAIN: WhatsApp did not stage the exact enquiry text/)
   assert.match(content, /\.message-out, \[data-testid='msg-container'\]/)
   assert.match(content, /replaceComposerText\(composer, message\)/)
+  assert.match(content, /await runtimeMessage\(\{ type: "native-enter" \}\)/)
   assert.match(content, /await nativeClick\(sendButton\)/)
   assert.doesNotMatch(content, /type: "native-send-text"/)
   assert.match(content, /REDELIVERY/)
@@ -184,9 +185,9 @@ test("the folder updater validates the installed extension and writes the manife
       }
     },
   }
-  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.3" })
+  const manifest = JSON.stringify({ name: "FCUNO SPC Group Dispatcher", version: "1.2.4" })
   const bundle = {
-    version: "1.2.3",
+    version: "1.2.4",
     files: SPC_GROUP_DISPATCHER_FILES.map((name) => ({
       name,
       contentBase64: Buffer.from(name === "manifest.json" ? manifest : `updated:${name}`).toString("base64"),
@@ -197,10 +198,10 @@ test("the folder updater validates the installed extension and writes the manife
   assert.deepEqual(result, {
     directoryName: "fcuno-spc-group-dispatcher",
     previousVersion: "1.1.6",
-    version: "1.2.3",
+    version: "1.2.4",
   })
   assert.equal(writes.at(-1), "manifest.json")
-  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.3")
+  assert.equal(JSON.parse(decoder.decode(stored.get("manifest.json"))).version, "1.2.4")
 })
 
 test("the dispatcher download files are included in the production server trace", async () => {
