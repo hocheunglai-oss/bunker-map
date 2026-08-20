@@ -42,7 +42,7 @@ function html(ambiguous = false, initiallyPaired = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -79,7 +79,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.0" }),
+      getManifest: () => ({ version: "1.2.1" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -104,7 +104,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.0" }),
+      getManifest: () => ({ version: "1.2.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -160,7 +160,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.0" }),
+      getManifest: () => ({ version: "1.2.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -199,6 +199,57 @@ async function verifyAtomicNativeSend() {
   assert.equal(commands.some((command) => command.method === "Input.dispatchKeyEvent" && command.params.key === "Enter"), false)
 }
 
+async function verifyGuardedEnterFallback() {
+  let messageListener = null
+  let composerText = ""
+  const commands = []
+  const chrome = {
+    runtime: {
+      lastError: null,
+      getManifest: () => ({ version: "1.2.1" }),
+      onInstalled: { addListener: () => {} },
+      onMessage: { addListener: (listener) => { messageListener = listener } },
+    },
+    tabs: { query: () => {}, reload: () => {} },
+    storage: { local: { get: (_keys, callback) => callback({}), set: (_value, callback) => callback() } },
+    debugger: {
+      attach: (_target, _version, callback) => callback(),
+      detach: (_target, callback) => callback(),
+      sendCommand: (_target, method, params, callback) => {
+        commands.push({ method, params })
+        if (method === "Input.insertText") composerText = String(params.text || "")
+        if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown" && params.key === "Enter") {
+          composerText = ""
+        }
+        if (method === "Runtime.evaluate" && params.expression.includes("compose-btn-send")) {
+          callback({ result: { value: { count: 0 } } })
+        } else if (method === "Runtime.evaluate") callback({ result: { value: composerText } })
+        else callback({})
+      },
+    },
+  }
+  vm.runInNewContext(backgroundSource, {
+    chrome,
+    fetch: async () => ({ ok: true, json: async () => ({}) }),
+    setTimeout,
+  })
+  const result = await new Promise((resolve) => {
+    assert.equal(messageListener({ type: "native-send-text", text: message }, { tab: { id: 22 } }, resolve), true)
+  })
+  assert.deepEqual(
+    { ok: result.ok, accepted: result.accepted, submitted: result.submitted },
+    { ok: true, accepted: true, submitted: true },
+  )
+  assert.equal(
+    commands.some((command) =>
+      command.method === "Input.dispatchKeyEvent"
+      && command.params.type === "rawKeyDown"
+      && command.params.key === "Enter"),
+    true,
+  )
+  assert.equal(commands.some((command) => command.method === "Input.dispatchMouseEvent"), false)
+}
+
 async function verifyInPlaceUpdateReload() {
   let messageListener = null
   const stored = {}
@@ -208,7 +259,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.0" }),
+      getManifest: () => ({ version: "1.2.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -325,6 +376,7 @@ async function main() {
   verifyUpdateReloadsWhatsApp()
   await verifyUnpairedBackgroundState()
   await verifyAtomicNativeSend()
+  await verifyGuardedEnterFallback()
   await verifyInPlaceUpdateReload()
   await verifyUpdaterBridge()
   await withServer(async (url) => {
@@ -348,7 +400,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.0/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.1/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)

@@ -146,9 +146,8 @@ async function nativeInsertText(tabId, text) {
   )
 }
 
-async function nativeEnter(tabId) {
-  return withDebugger(tabId, async (target) => {
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+async function enterWithTarget(target) {
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       key: "Enter",
       code: "Enter",
@@ -156,15 +155,18 @@ async function nativeEnter(tabId) {
       nativeVirtualKeyCode: 13,
       unmodifiedText: "\r",
       text: "\r",
-    }, callback))
-    await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+  }, callback))
+  await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "Enter",
       code: "Enter",
       windowsVirtualKeyCode: 13,
       nativeVirtualKeyCode: 13,
-    }, callback))
-  })
+  }, callback))
+}
+
+async function nativeEnter(tabId) {
+  return withDebugger(tabId, enterWithTarget)
 }
 
 async function readActiveComposer(target) {
@@ -174,9 +176,9 @@ async function readActiveComposer(target) {
         const rect = element.getBoundingClientRect()
         return rect.width > 0 && rect.height > 0
       }
-      const main = document.querySelector("#main") || document.querySelector("[role='main']")
-      if (!main) return ""
-      const candidates = Array.from(main.querySelectorAll("[contenteditable='true'][role='textbox'], [contenteditable='true']")).filter(visible)
+      const candidates = Array.from(document.querySelectorAll(
+        "[data-testid='conversation-compose-box-input'], [contenteditable='true'][role='textbox']",
+      )).filter(visible)
       const active = document.activeElement
       const composer = candidates.includes(active) ? active : candidates[candidates.length - 1]
       return String(composer?.innerText || composer?.textContent || "")
@@ -189,8 +191,6 @@ async function readActiveComposer(target) {
 async function findVisibleSendButton(target) {
   const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
     expression: `(() => {
-      const main = document.querySelector("#main") || document.querySelector("[role='main']")
-      if (!main) return { count: 0 }
       const visible = (element) => {
         const rect = element.getBoundingClientRect()
         const style = getComputedStyle(element)
@@ -201,10 +201,10 @@ async function findVisibleSendButton(target) {
         const control = element?.closest?.("button, [role='button']") || element
         if (control && !control.hasAttribute("disabled") && visible(control) && !controls.includes(control)) controls.push(control)
       }
-      for (const element of main.querySelectorAll(
-        "[data-testid='compose-btn-send'], [data-testid='send'], [data-icon='send'], [data-icon='send-filled']",
+      for (const element of document.querySelectorAll(
+        "[data-testid='compose-btn-send'], [data-testid='send'], [data-testid='wds-ic-send-filled'], [data-icon='send'], [data-icon='send-filled'], [data-icon='wds-ic-send-filled']",
       )) add(element)
-      for (const element of main.querySelectorAll("button[aria-label='Send'], [role='button'][aria-label='Send']")) add(element)
+      for (const element of document.querySelectorAll("button[aria-label='Send'], [role='button'][aria-label='Send']")) add(element)
       if (controls.length !== 1) return { count: controls.length }
       const rect = controls[0].getBoundingClientRect()
       return { count: 1, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
@@ -229,16 +229,24 @@ async function nativeSendText(tabId, text) {
     }, callback))
 
     let sendButton = { count: 0, x: 0, y: 0 }
+    let stagedText = ""
     for (const wait of [250, 500, 900, 1400]) {
       await delay(wait)
-      sendButton = await findVisibleSendButton(target)
-      if (sendButton.count === 1) break
+      ;[sendButton, stagedText] = await Promise.all([
+        findVisibleSendButton(target),
+        readActiveComposer(target),
+      ])
+      if (comparable(stagedText) === expected && sendButton.count === 1) break
     }
-    if (sendButton.count !== 1) {
+    if (comparable(stagedText) !== expected) {
       return { accepted: false, submitted: false }
     }
 
-    await clickWithTarget(target, sendButton.x, sendButton.y)
+    if (sendButton.count === 1) {
+      await clickWithTarget(target, sendButton.x, sendButton.y)
+    } else {
+      await enterWithTarget(target)
+    }
     for (const wait of [350, 650, 1000, 1600]) {
       await delay(wait)
       const [composer, remainingButton] = await Promise.all([
