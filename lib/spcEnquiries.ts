@@ -11,7 +11,6 @@ import { ensurePendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
 import {
   buildSpcEnquirySnapshot,
   buildSpcGroupAmendmentMessage,
-  buildSpcGroupPostponedMessage,
   buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
   ensureCreatedSpcGroupDelivery,
@@ -379,11 +378,11 @@ export async function amendSpcEnquiry(
   const afterSnapshot = enquirySnapshot(nextRow)
   const changes = diffSpcEnquirySnapshots(beforeSnapshot, afterSnapshot)
   if (changes.length === 0) throw new Error("At least one enquiry field must change.")
+  const originalFormattedText = formatSpcEnquiry(existing)
   const formattedText = formatSpcEnquiry(nextRow)
   const messageText = buildSpcGroupAmendmentMessage(
     formattedText,
-    nextRow.revision_number,
-    changes,
+    originalFormattedText,
   )
 
   const { data, error } = await supabase.rpc("amend_spc_enquiry_with_group_delivery", {
@@ -479,21 +478,6 @@ export async function updateSpcEnquiryOutcome(
   }
 
   const nextNotes = writeSpcEnquiryNotes(currentText, nextMeta)
-  if (outcome === "postpone") {
-    if (!session.username) throw new Error("Authenticated username is required.")
-    await requireActiveSpcDeliveryRouteForUsername(session.username)
-    const { data, error } = await supabase.rpc("postpone_spc_enquiry_with_group_delivery", {
-      p_enquiry_id: enquiryId,
-      p_actor_username: session.username,
-      p_notes: nextNotes,
-      p_message_text: buildSpcGroupPostponedMessage(currentText),
-    })
-    if (error) throw error
-    const row = Array.isArray(data) ? data[0] : null
-    if (!row) throw new Error("SPC postponement did not return the updated enquiry.")
-    return mapEnquiry(row as SpcEnquiryRow)
-  }
-
   const { data, error } = await supabase
     .from("spc_enquiries")
     .update({

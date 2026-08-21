@@ -150,33 +150,58 @@ export function diffSpcEnquirySnapshots(
   })
 }
 
-function whatsappBold(value: string) {
-  const clean = cleanText(value).replace(/\*/g, "")
-  return clean ? `*${clean}*` : "*(removed)*"
+function enquirySegments(value: string) {
+  return cleanText(value)
+    .split(/\s*\/\s*/)
+    .map((segment) => cleanText(segment).replace(/\*/g, ""))
+    .filter(Boolean)
+}
+
+function unchangedSegmentIndexes(current: string[], original: string[]) {
+  const lengths = Array.from({ length: current.length + 1 }, () =>
+    Array<number>(original.length + 1).fill(0),
+  )
+  for (let currentIndex = current.length - 1; currentIndex >= 0; currentIndex -= 1) {
+    for (let originalIndex = original.length - 1; originalIndex >= 0; originalIndex -= 1) {
+      lengths[currentIndex][originalIndex] =
+        current[currentIndex].toLowerCase() === original[originalIndex].toLowerCase()
+          ? lengths[currentIndex + 1][originalIndex + 1] + 1
+          : Math.max(lengths[currentIndex + 1][originalIndex], lengths[currentIndex][originalIndex + 1])
+    }
+  }
+
+  const unchanged = new Set<number>()
+  let currentIndex = 0
+  let originalIndex = 0
+  while (currentIndex < current.length && originalIndex < original.length) {
+    if (current[currentIndex].toLowerCase() === original[originalIndex].toLowerCase()) {
+      unchanged.add(currentIndex)
+      currentIndex += 1
+      originalIndex += 1
+    } else if (lengths[currentIndex + 1][originalIndex] >= lengths[currentIndex][originalIndex + 1]) {
+      currentIndex += 1
+    } else {
+      originalIndex += 1
+    }
+  }
+  return unchanged
 }
 
 export function buildSpcGroupAmendmentMessage(
   formattedText: string,
-  revisionNumber: number,
-  changes: SpcAmendmentChange[],
+  originalFormattedText: string,
 ) {
-  const details = changes
-    .map((change) => {
-      const before = change.before ? ` (was ${change.before.replace(/\*/g, "")})` : ""
-      return `*${change.label}:* ${whatsappBold(change.after)}${before}`
-    })
-    .join("\n")
-  return [`*AMENDED - REV ${revisionNumber}*`, cleanText(formattedText), details]
-    .filter(Boolean)
-    .join("\n\n")
-}
-
-export function buildSpcGroupPostponedMessage(formattedText: string) {
-  return ["*POSTPONED*", cleanText(formattedText)].filter(Boolean).join("\n\n")
+  const current = enquirySegments(formattedText)
+  const original = enquirySegments(originalFormattedText)
+  const unchanged = unchangedSegmentIndexes(current, original)
+  const amended = current
+    .map((segment, index) => (unchanged.has(index) ? segment : `*${segment}*`))
+    .join(" / ")
+  return `AMENDED: ${amended}\noriginal: ${original.join(" / ")}`
 }
 
 export function buildSpcGroupReofferMessage(formattedText: string) {
-  return ["*REOFFER*", cleanText(formattedText)].filter(Boolean).join("\n\n")
+  return cleanText(formattedText)
 }
 
 export async function ensureCreatedSpcGroupDelivery(input: {

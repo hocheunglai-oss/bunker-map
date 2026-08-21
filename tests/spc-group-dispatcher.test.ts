@@ -4,7 +4,6 @@ import test from "node:test"
 import {
   buildSpcEnquirySnapshot,
   buildSpcGroupAmendmentMessage,
-  buildSpcGroupPostponedMessage,
   buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
 } from "@/lib/spcGroupDispatcher"
@@ -32,18 +31,29 @@ test("SPC amendment messages identify and bold only the current changed values",
 
   const message = buildSpcGroupAmendmentMessage(
     "long pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts",
-    2,
-    changes,
+    "long pu 16 / 8357588 / 10 - 12 aug / lsmgo 200mts",
   )
-  assert.match(message, /^\*AMENDED - REV 2\*/)
-  assert.match(message, /\*ETA:\* \*2026-08-18\* \(was 2026-08-10\)/)
-  assert.match(message, /\*Quantity:\* \*lsmgo 230mts\* \(was lsmgo 200mts\)/)
+  assert.equal(
+    message,
+    "AMENDED: long pu 16 / 8357588 / *10 - 18 aug* / *lsmgo 230mts*\n"
+      + "original: long pu 16 / 8357588 / 10 - 12 aug / lsmgo 200mts",
+  )
 })
 
-test("SPC postponement and reoffer messages carry explicit trading status", () => {
+test("SPC amendment messages preserve the standardized trading format", () => {
+  assert.equal(
+    buildSpcGroupAmendmentMessage(
+      "testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 2,000mts",
+      "testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 200-300mts",
+    ),
+    "AMENDED: testing vessel / 9998690 / sg 22 - 27 aug / *vlsfo 2,000mts*\n"
+      + "original: testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 200-300mts",
+  )
+})
+
+test("SPC reoffers use the same plain format as new enquiries", () => {
   const enquiry = "long pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts"
-  assert.equal(buildSpcGroupPostponedMessage(enquiry), `*POSTPONED*\n\n${enquiry}`)
-  assert.equal(buildSpcGroupReofferMessage(enquiry), `*REOFFER*\n\n${enquiry}`)
+  assert.equal(buildSpcGroupReofferMessage(enquiry), enquiry)
 })
 
 test("SPC group delivery migration is idempotent, leased, and service-role only", async () => {

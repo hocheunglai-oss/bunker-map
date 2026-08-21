@@ -111,12 +111,13 @@ test("SPC reoffers atomically create the group delivery and reuse official API d
   assert.match(route, /payload\.mode === "reoffer"[\s\S]*?enqueueAndScheduleSpcMobileDelivery\(enquiry\)/)
 })
 
-test("SPC postponements atomically update the enquiry and enqueue group delivery", () => {
+test("SPC postponements update the enquiry without enqueueing WhatsApp delivery", () => {
   const outcomeStart = enquiriesStore.indexOf("export async function updateSpcEnquiryOutcome")
   const outcomeEnd = enquiriesStore.indexOf("export async function reofferSpcEnquiry", outcomeStart)
   const outcomeSource = enquiriesStore.slice(outcomeStart, outcomeEnd)
 
-  assert.match(outcomeSource, /outcome === "postpone"[\s\S]*?requireActiveSpcDeliveryRouteForUsername/)
-  assert.match(outcomeSource, /rpc\("postpone_spc_enquiry_with_group_delivery"/)
-  assert.match(outcomeSource, /buildSpcGroupPostponedMessage\(currentText\)/)
+  assert.match(outcomeSource, /outcome === "postpone"[\s\S]*?nextMeta\.postponedAt = now/)
+  assert.match(outcomeSource, /\.from\("spc_enquiries"\)[\s\S]*?\.update\(/)
+  assert.doesNotMatch(outcomeSource, /rpc\("postpone_spc_enquiry_with_group_delivery"/)
+  assert.doesNotMatch(outcomeSource, /buildSpcGroupPostponedMessage/)
 })
