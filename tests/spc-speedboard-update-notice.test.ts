@@ -95,6 +95,11 @@ test("shows a persistent update warning without changing the normal board size",
   )
 
   assert.match(content, /UPDATE REQUIRED/)
+  assert.match(content, /const EXTENSION_UPDATE_PAGE_URL = "https:\/\/spc\.fcuno\.com\/chrome"/)
+  assert.match(
+    content,
+    /<a href="\$\{escapeHtml\(updatePageUrl\)\}" target="_blank" rel="noreferrer">UPDATE<\/a>/,
+  )
   assert.match(content, /VERSION CHECK OFFLINE/)
   assert.match(content, /VERSION_REFRESH_MS = 5 \* 60 \* 1000/)
   assert.match(styles, /\.fcuno-wa-spc-shell\.has-version-alert/)
