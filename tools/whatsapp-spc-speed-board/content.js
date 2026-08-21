@@ -54,12 +54,15 @@
     enquiries: [],
     senderContacts: {},
     selectedEnquiries: {},
+    seenEnquiryIds: {},
+    acknowledgedAmendmentRevisions: {},
     hiddenEnquiryIds: {},
     templateEnabled: true,
     templateEditing: false,
     templateText: DEFAULT_TEMPLATE_TEXT,
     feedPolicyVersion: SHARED_FEED_POLICY_VERSION,
     feedStartedAt: SHARED_FEED_STARTED_AT,
+    legacySeenCutoff: SHARED_FEED_STARTED_AT,
     lastSeenEnquiryAt: SHARED_FEED_STARTED_AT,
     lastNotifiedEnquiryAt: SHARED_FEED_STARTED_AT,
     pendingSend: null,
@@ -369,11 +372,14 @@
     return {
       collapsed: state.collapsed,
       contacts: state.contacts,
+      seenEnquiryIds: state.seenEnquiryIds,
+      acknowledgedAmendmentRevisions: state.acknowledgedAmendmentRevisions,
       hiddenEnquiryIds: state.hiddenEnquiryIds,
       templateEnabled: state.templateEnabled,
       templateText: state.templateText,
       feedPolicyVersion: state.feedPolicyVersion,
       feedStartedAt: state.feedStartedAt,
+      legacySeenCutoff: state.legacySeenCutoff,
       lastSeenEnquiryAt: state.lastSeenEnquiryAt,
       lastNotifiedEnquiryAt: state.lastNotifiedEnquiryAt,
       pendingSend: state.pendingSend,
@@ -394,6 +400,24 @@
     }
   }
 
+  function sanitizeBooleanMap(value) {
+    if (!value || typeof value !== "object") return {}
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter((entry) => entry[1])
+        .map((entry) => [String(entry[0]), true]),
+    )
+  }
+
+  function sanitizeRevisionMap(value) {
+    if (!value || typeof value !== "object") return {}
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([id, revision]) => [String(id), Math.max(0, Math.floor(Number(revision) || 0))])
+        .filter((entry) => entry[1] > 0),
+    )
+  }
+
   function sanitizeSavedState(value) {
     const source = value && typeof value === "object" ? value : {}
     const usesSharedFeedPolicy = Number(source.feedPolicyVersion) === SHARED_FEED_POLICY_VERSION
@@ -401,6 +425,9 @@
       collapsed: Boolean(source.collapsed),
       feedPolicyVersion: SHARED_FEED_POLICY_VERSION,
       feedStartedAt: SHARED_FEED_STARTED_AT,
+      legacySeenCutoff: usesSharedFeedPolicy
+        ? cleanText(source.legacySeenCutoff) || cleanText(source.lastSeenEnquiryAt) || SHARED_FEED_STARTED_AT
+        : SHARED_FEED_STARTED_AT,
       lastSeenEnquiryAt: usesSharedFeedPolicy
         ? cleanText(source.lastSeenEnquiryAt) || SHARED_FEED_STARTED_AT
         : SHARED_FEED_STARTED_AT,
@@ -410,14 +437,9 @@
       templateEnabled: typeof source.templateEnabled === "boolean" ? source.templateEnabled : true,
       templateText: cleanTemplateText(source.templateText) || DEFAULT_TEMPLATE_TEXT,
       pendingSend: sanitizePendingSend(source.pendingSend),
-      hiddenEnquiryIds:
-        source.hiddenEnquiryIds && typeof source.hiddenEnquiryIds === "object"
-          ? Object.fromEntries(
-              Object.entries(source.hiddenEnquiryIds)
-                .filter((entry) => entry[1])
-                .map((entry) => [String(entry[0]), true]),
-            )
-          : {},
+      seenEnquiryIds: sanitizeBooleanMap(source.seenEnquiryIds),
+      acknowledgedAmendmentRevisions: sanitizeRevisionMap(source.acknowledgedAmendmentRevisions),
+      hiddenEnquiryIds: sanitizeBooleanMap(source.hiddenEnquiryIds),
       contacts: Array.isArray(source.contacts)
         ? source.contacts
             .filter((contact) => contact && typeof contact === "object")
@@ -452,11 +474,14 @@
     const saved = sanitizeSavedState(parsed)
     state.collapsed = saved.collapsed
     state.contacts = saved.contacts
+    state.seenEnquiryIds = saved.seenEnquiryIds
+    state.acknowledgedAmendmentRevisions = saved.acknowledgedAmendmentRevisions
     state.hiddenEnquiryIds = saved.hiddenEnquiryIds
     state.templateEnabled = saved.templateEnabled
     state.templateText = saved.templateText
     state.feedPolicyVersion = saved.feedPolicyVersion
     state.feedStartedAt = saved.feedStartedAt
+    state.legacySeenCutoff = saved.legacySeenCutoff
     state.lastSeenEnquiryAt = saved.lastSeenEnquiryAt
     state.lastNotifiedEnquiryAt = saved.lastNotifiedEnquiryAt
     state.pendingSend = saved.pendingSend
@@ -1110,6 +1135,7 @@
     if (state.feedStartedAt) return false
     state.feedPolicyVersion = SHARED_FEED_POLICY_VERSION
     state.feedStartedAt = SHARED_FEED_STARTED_AT
+    state.legacySeenCutoff = state.feedStartedAt
     state.lastSeenEnquiryAt = state.feedStartedAt
     state.lastNotifiedEnquiryAt = state.feedStartedAt
     state.selectedEnquiries = {}
@@ -1254,17 +1280,63 @@
   }
 
   function recordEnquirySeen(enquiry) {
+    const id = cleanText(enquiry?.id)
     const createdAt = enquiryCreatedAt(enquiry)
-    if (!createdAt || createdAt <= state.lastSeenEnquiryAt) return false
-    state.lastSeenEnquiryAt = createdAt
-    return true
+    let changed = false
+    if (id && !state.seenEnquiryIds[id]) {
+      state.seenEnquiryIds[id] = true
+      changed = true
+    }
+    if (createdAt && createdAt > state.lastSeenEnquiryAt) {
+      state.lastSeenEnquiryAt = createdAt
+      changed = true
+    }
+    return changed
+  }
+
+  function isEnquirySeen(enquiry) {
+    const id = cleanText(enquiry?.id)
+    if (id && state.seenEnquiryIds[id]) return true
+    const createdAt = enquiryCreatedAt(enquiry)
+    return Boolean(createdAt && state.legacySeenCutoff && createdAt <= state.legacySeenCutoff)
+  }
+
+  function enquiryRevisionNumber(enquiry) {
+    return Math.max(1, Math.floor(Number(enquiry?.revisionNumber || enquiry?.revision_number || 1) || 1))
+  }
+
+  function isPendingAmendment(enquiry) {
+    const changes = enquiryAmendmentChanges(enquiry)
+    if (!changes.length && !enquiry?.lastAmendedAt && !enquiry?.last_amended_at) return false
+    const revision = enquiryRevisionNumber(enquiry)
+    const acknowledged = Number(state.acknowledgedAmendmentRevisions[cleanText(enquiry?.id)] || 0)
+    return revision > acknowledged
+  }
+
+  function acknowledgeAmendment(enquiry) {
+    const id = cleanText(enquiry?.id)
+    if (!id || !isPendingAmendment(enquiry)) return
+    state.acknowledgedAmendmentRevisions[id] = enquiryRevisionNumber(enquiry)
+    delete state.selectedEnquiries[id]
+    recordEnquirySeen(enquiry)
+    saveState()
+    render()
   }
 
   function toggleEnquirySelection(enquiry) {
     if (!enquiry) return
     if (isSendableEnquiry(enquiry)) {
-      if (state.selectedEnquiries[enquiry.id]) delete state.selectedEnquiries[enquiry.id]
-      else state.selectedEnquiries[enquiry.id] = true
+      if (state.selectedEnquiries[enquiry.id]) {
+        delete state.selectedEnquiries[enquiry.id]
+      } else if (isPendingAmendment(enquiry)) {
+        state.selectedEnquiries = { [enquiry.id]: true }
+      } else {
+        Object.keys(state.selectedEnquiries).forEach((id) => {
+          const selected = state.enquiries.find((item) => item.id === id)
+          if (selected && isPendingAmendment(selected)) delete state.selectedEnquiries[id]
+        })
+        state.selectedEnquiries[enquiry.id] = true
+      }
     }
     recordEnquirySeen(enquiry)
     saveState()
@@ -1349,6 +1421,106 @@
     })
   }
 
+  function enquirySegments(value) {
+    return cleanText(value)
+      .split(/\s*\/\s*/)
+      .map((segment) => cleanText(segment).replace(/\*/g, ""))
+      .filter(Boolean)
+  }
+
+  function changedSegmentIndexes(current, original) {
+    const lengths = Array.from({ length: current.length + 1 }, () =>
+      Array(original.length + 1).fill(0),
+    )
+    for (let currentIndex = current.length - 1; currentIndex >= 0; currentIndex -= 1) {
+      for (let originalIndex = original.length - 1; originalIndex >= 0; originalIndex -= 1) {
+        lengths[currentIndex][originalIndex] =
+          current[currentIndex].toLowerCase() === original[originalIndex].toLowerCase()
+            ? lengths[currentIndex + 1][originalIndex + 1] + 1
+            : Math.max(lengths[currentIndex + 1][originalIndex], lengths[currentIndex][originalIndex + 1])
+      }
+    }
+
+    const unchanged = new Set()
+    let currentIndex = 0
+    let originalIndex = 0
+    while (currentIndex < current.length && originalIndex < original.length) {
+      if (current[currentIndex].toLowerCase() === original[originalIndex].toLowerCase()) {
+        unchanged.add(currentIndex)
+        currentIndex += 1
+        originalIndex += 1
+      } else if (lengths[currentIndex + 1][originalIndex] >= lengths[currentIndex][originalIndex + 1]) {
+        currentIndex += 1
+      } else {
+        originalIndex += 1
+      }
+    }
+    return new Set(current.map((_segment, index) => index).filter((index) => !unchanged.has(index)))
+  }
+
+  function amendmentChangedSegmentIndexes(enquiry) {
+    const segments = enquirySegments(enquiryBodyText(enquiry))
+    const changed = new Set()
+    enquiryAmendmentChanges(enquiry).forEach((change) => {
+      const after = cleanText(change.after).toLowerCase()
+      if (change.field === "notes" && change.before && change.after) {
+        changedSegmentIndexes(enquirySegments(change.after), enquirySegments(change.before)).forEach((index) => {
+          if (index < segments.length) changed.add(index)
+        })
+      }
+      segments.forEach((segment, index) => {
+        const normalized = segment.toLowerCase()
+        if (after && (normalized === after || normalized.includes(after) || after.includes(normalized))) changed.add(index)
+      })
+      if (change.field === "vesselName") changed.add(0)
+      if (change.field === "deliveryDate" || change.field === "port") changed.add(Math.min(2, segments.length - 1))
+      if ((change.field === "product" || change.field === "quantity") && !changed.size && segments.length > 3) {
+        changed.add(3)
+      }
+    })
+    return changed
+  }
+
+  function amendmentCategories(enquiry) {
+    const categories = new Set()
+    const bodySegments = enquirySegments(enquiryBodyText(enquiry))
+    const changes = enquiryAmendmentChanges(enquiry)
+    changes.forEach((change) => {
+      if (change.field === "vesselName") categories.add("Vessel Name")
+      else if (change.field === "deliveryDate") categories.add("Date")
+      else if (change.field === "quantity") categories.add("Quantity")
+      else if (change.field === "port") categories.add("Date")
+      else if (change.field === "product") {
+        const beforeGrade = cleanText(change.before).split(/\s+/)[0]?.toLowerCase() || ""
+        const afterGrade = cleanText(change.after).split(/\s+/)[0]?.toLowerCase() || ""
+        if (!beforeGrade && afterGrade) categories.add("Grade Added")
+        else if (beforeGrade && beforeGrade === afterGrade) categories.add("Quantity")
+        else categories.add("Grade Added")
+      } else if (change.field === "title") {
+        categories.add("Vessel Name")
+      }
+    })
+
+    amendmentChangedSegmentIndexes(enquiry).forEach((index) => {
+      if (index === 0) categories.add("Vessel Name")
+      else if (index === 1 && /^\d{7}$/.test(bodySegments[index] || "")) categories.add("IMO")
+      else if (index === 2) categories.add("Date")
+    })
+
+    const order = ["Vessel Name", "IMO", "Date", "Quantity", "Grade Added"]
+    const ordered = order.filter((label) => categories.has(label))
+    return ordered.length ? ordered : ["Enquiry"]
+  }
+
+  function amendmentSendText(enquiry) {
+    const changedIndexes = amendmentChangedSegmentIndexes(enquiry)
+    const body = enquirySegments(enquiryBodyText(enquiry))
+      .map((segment, index) => (changedIndexes.has(index) ? `*${segment}*` : segment))
+      .join(" / ")
+    const heading = `${amendmentCategories(enquiry).join(" / ")} Amended`
+    return body ? `${heading}\n\n${body}` : heading
+  }
+
   function enquiryVesselName(enquiry) {
     const explicitName = cleanText(enquiry?.vesselName || enquiry?.vessel_name)
     const bodyName = enquiryBodyText(enquiry).split("/")[0]
@@ -1368,9 +1540,10 @@
   }
 
   function selectedSendableEnquiryIds() {
-    return visibleEnquiries()
+    const selected = visibleEnquiries()
       .filter((enquiry) => state.selectedEnquiries[enquiry.id] && isSendableEnquiry(enquiry))
-      .map((enquiry) => enquiry.id)
+    const pendingAmendment = selected.find(isPendingAmendment)
+    return (pendingAmendment ? [pendingAmendment] : selected).map((enquiry) => enquiry.id)
   }
 
   function sendSelectionLabel() {
@@ -1381,13 +1554,22 @@
   }
 
   function activeDragEnquiryIds(draggedId) {
+    const dragged = visibleEnquiries().find((enquiry) => enquiry.id === draggedId)
+    if (dragged && isPendingAmendment(dragged)) return [draggedId]
     const selectedIds = selectedSendableEnquiryIds()
+    if (selectedIds.some((id) => isPendingAmendment(visibleEnquiries().find((enquiry) => enquiry.id === id)))) {
+      return draggedId ? [draggedId] : selectedIds.slice(0, 1)
+    }
     if (selectedIds.length >= 2) return selectedIds
     return draggedId ? [draggedId] : []
   }
 
   function enquiryTextForIds(ids) {
     const idSet = new Set((ids || []).map(cleanText).filter(Boolean))
+    const pendingAmendment = visibleEnquiries().find(
+      (enquiry) => idSet.has(enquiry.id) && isSendableEnquiry(enquiry) && isPendingAmendment(enquiry),
+    )
+    if (pendingAmendment) return amendmentSendText(pendingAmendment)
     const seenBodies = new Set()
     const text = visibleEnquiries()
       .filter((enquiry) => idSet.has(enquiry.id) && isSendableEnquiry(enquiry))
@@ -1822,22 +2004,22 @@
   function renderEnquiries() {
     const rows = visibleEnquiries().map((enquiry) => {
       const createdAt = enquiryCreatedAt(enquiry)
-      const isNew = !state.lastSeenEnquiryAt || createdAt > state.lastSeenEnquiryAt
+      const isNew = !isEnquirySeen(enquiry)
       const sendable = isSendableEnquiry(enquiry)
       const status = enquiryStatusKey(enquiry)
       const statusText = enquiryStatusText(enquiry)
       const amendmentChanges = enquiryAmendmentChanges(enquiry)
-      const amended = Boolean(enquiry.lastAmendedAt || enquiry.last_amended_at || amendmentChanges.length)
+      const pendingAmendment = isPendingAmendment(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
       return `
-        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${amended ? " is-amended" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
+        <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${pendingAmendment ? " is-amended is-amendment-pending" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
-            ${amended ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiry.revisionNumber || enquiry.revision_number || "")}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}</span>` : ""}
+            ${pendingAmendment ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiryRevisionNumber(enquiry))}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}<button type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}">OK</button></span>` : ""}
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
@@ -2329,6 +2511,14 @@
         hideEnquiry(button.dataset.id || "")
       })
     })
+    host.querySelectorAll("[data-action='acknowledge-amendment']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const enquiry = state.enquiries.find((item) => item.id === button.dataset.id)
+        acknowledgeAmendment(enquiry)
+      })
+    })
     host.querySelectorAll("[data-action='select-enquiry']").forEach((row) => {
       row.addEventListener("click", () => {
         const enquiry = state.enquiries.find((item) => item.id === row.dataset.id)
@@ -2348,6 +2538,8 @@
     host.querySelectorAll(".fcuno-wa-spc-enquiry[draggable='true']").forEach((row) => {
       row.addEventListener("dragstart", (event) => {
         const id = row.dataset.id || ""
+        const enquiry = state.enquiries.find((item) => item.id === id)
+        if (recordEnquirySeen(enquiry)) saveState()
         const ids = activeDragEnquiryIds(id)
         const text = enquiryTextForIds(ids)
         if (!text) {
@@ -2381,9 +2573,13 @@
       currentChatMatchesContact,
       findSendButton,
       getCurrentChat,
+      acknowledgeAmendment,
+      amendmentCategories,
+      amendmentSendText,
       enquiryTextForIds,
       enquirySenderContact,
       enquiryReplyText,
+      isPendingAmendment,
       searchAndOpenExactGroup,
       loadCrudeWatch,
       insertComposerText,

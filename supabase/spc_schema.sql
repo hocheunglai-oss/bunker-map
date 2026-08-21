@@ -1013,21 +1013,6 @@ declare
   enquiry_row public.spc_enquiries%rowtype;
   route_row public.spc_delivery_routes%rowtype;
 begin
-  select * into route_row
-  from public.spc_delivery_routes as routes
-  where routes.id = (
-    select users.delivery_route_id
-    from public.spc_users as users
-    where lower(users.username) = lower(btrim(p_actor_username))
-      and users.is_active
-    limit 1
-  )
-    and routes.is_active;
-
-  if not found then
-    raise exception 'No active enquiry delivery route is assigned to this user.';
-  end if;
-
   select * into enquiry_row
   from public.spc_enquiries
   where id = p_enquiry_id
@@ -1060,24 +1045,37 @@ begin
   )
   on conflict (enquiry_id, revision_number) do nothing;
 
-  insert into public.spc_group_delivery_jobs (
-    enquiry_id,
-    revision_number,
-    event_type,
-    message_text,
-    delivery_route_id,
-    destination_route_label,
-    destination_group_name
-  ) values (
-    enquiry_row.id,
-    enquiry_row.revision_number,
-    'created',
-    p_message_text,
-    route_row.id,
-    btrim(route_row.label),
-    btrim(route_row.exact_group_name)
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
   )
-  on conflict (enquiry_id, revision_number, event_type) do nothing;
+    and routes.is_active;
+
+  if route_row.id is not null then
+    insert into public.spc_group_delivery_jobs (
+      enquiry_id,
+      revision_number,
+      event_type,
+      message_text,
+      delivery_route_id,
+      destination_route_label,
+      destination_group_name
+    ) values (
+      enquiry_row.id,
+      enquiry_row.revision_number,
+      'created',
+      p_message_text,
+      route_row.id,
+      btrim(route_row.label),
+      btrim(route_row.exact_group_name)
+    )
+    on conflict (enquiry_id, revision_number, event_type) do nothing;
+  end if;
 end;
 $$;
 
@@ -1104,21 +1102,6 @@ declare
 begin
   if jsonb_typeof(p_enquiry) <> 'object' or jsonb_typeof(p_changed_fields) <> 'array' then
     raise exception 'Invalid SPC amendment payload.';
-  end if;
-
-  select * into route_row
-  from public.spc_delivery_routes as routes
-  where routes.id = (
-    select users.delivery_route_id
-    from public.spc_users as users
-    where lower(users.username) = lower(btrim(p_actor_username))
-      and users.is_active
-    limit 1
-  )
-    and routes.is_active;
-
-  if not found then
-    raise exception 'No active enquiry delivery route is assigned to this user.';
   end if;
 
   select * into existing
@@ -1203,23 +1186,36 @@ begin
     btrim(p_actor_display_name)
   );
 
-  insert into public.spc_group_delivery_jobs (
-    enquiry_id,
-    revision_number,
-    event_type,
-    message_text,
-    delivery_route_id,
-    destination_route_label,
-    destination_group_name
-  ) values (
-    p_enquiry_id,
-    next_revision,
-    'amended',
-    p_message_text,
-    route_row.id,
-    btrim(route_row.label),
-    btrim(route_row.exact_group_name)
-  );
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
+  )
+    and routes.is_active;
+
+  if route_row.id is not null then
+    insert into public.spc_group_delivery_jobs (
+      enquiry_id,
+      revision_number,
+      event_type,
+      message_text,
+      delivery_route_id,
+      destination_route_label,
+      destination_group_name
+    ) values (
+      p_enquiry_id,
+      next_revision,
+      'amended',
+      p_message_text,
+      route_row.id,
+      btrim(route_row.label),
+      btrim(route_row.exact_group_name)
+    );
+  end if;
 
   return query
   select enquiries.*
@@ -1335,21 +1331,6 @@ begin
     raise exception 'SPC reoffer title and message are required.';
   end if;
 
-  select * into route_row
-  from public.spc_delivery_routes as routes
-  where routes.id = (
-    select users.delivery_route_id
-    from public.spc_users as users
-    where lower(users.username) = lower(btrim(p_actor_username))
-      and users.is_active
-    limit 1
-  )
-    and routes.is_active;
-
-  if not found then
-    raise exception 'No active enquiry delivery route is assigned to this user.';
-  end if;
-
   select * into source_row
   from public.spc_enquiries
   where id = p_source_enquiry_id
@@ -1423,23 +1404,36 @@ begin
     btrim(p_actor_display_name)
   );
 
-  insert into public.spc_group_delivery_jobs (
-    enquiry_id,
-    revision_number,
-    event_type,
-    message_text,
-    delivery_route_id,
-    destination_route_label,
-    destination_group_name
-  ) values (
-    reoffer_row.id,
-    reoffer_row.revision_number,
-    'reoffer',
-    p_message_text,
-    route_row.id,
-    btrim(route_row.label),
-    btrim(route_row.exact_group_name)
-  );
+  select * into route_row
+  from public.spc_delivery_routes as routes
+  where routes.id = (
+    select users.delivery_route_id
+    from public.spc_users as users
+    where lower(users.username) = lower(btrim(p_actor_username))
+      and users.is_active
+    limit 1
+  )
+    and routes.is_active;
+
+  if route_row.id is not null then
+    insert into public.spc_group_delivery_jobs (
+      enquiry_id,
+      revision_number,
+      event_type,
+      message_text,
+      delivery_route_id,
+      destination_route_label,
+      destination_group_name
+    ) values (
+      reoffer_row.id,
+      reoffer_row.revision_number,
+      'reoffer',
+      p_message_text,
+      route_row.id,
+      btrim(route_row.label),
+      btrim(route_row.exact_group_name)
+    );
+  end if;
 
   return query
   select enquiries.*

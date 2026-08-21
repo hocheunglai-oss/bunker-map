@@ -106,6 +106,15 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   assert.match(statusMigration, /reoffer_row\.revision_number,[\s\S]+?'reoffer'/)
   assert.match(statusMigration, /revoke all on function public\.postpone_spc_enquiry_with_group_delivery[\s\S]+to service_role/)
 
+  const assignmentMigration = await readFile(
+    new URL("../supabase/migrations/20260821080000_route_spc_enquiries_only_when_assigned.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(assignmentMigration, /lower\(users\.username\) <> lower\('otto@cosulich\.com\.hk'\)/)
+  assert.match(assignmentMigration, /set delivery_route_id = null/)
+  assert.match(assignmentMigration, /if route_row\.id is not null then[\s\S]+insert into public\.spc_group_delivery_jobs/)
+  assert.doesNotMatch(assignmentMigration, /raise exception 'No active enquiry delivery route is assigned/)
+
   const bootstrapSchema = await readFile(
     new URL("../supabase/spc_schema.sql", import.meta.url),
     "utf8",
@@ -119,6 +128,17 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
     "complete_spc_group_delivery_job",
   ]) {
     assert.match(bootstrapSchema, new RegExp(`create or replace function public\\.${functionName}`))
+  }
+  for (const functionName of [
+    "enqueue_spc_enquiry_group_delivery",
+    "amend_spc_enquiry_with_group_delivery",
+    "reoffer_spc_enquiry_with_group_delivery",
+  ]) {
+    const functionStart = bootstrapSchema.indexOf(`create or replace function public.${functionName}`)
+    const functionEnd = bootstrapSchema.indexOf("\n$$;", functionStart)
+    const functionSource = bootstrapSchema.slice(functionStart, functionEnd)
+    assert.match(functionSource, /if route_row\.id is not null then/)
+    assert.doesNotMatch(functionSource, /No active enquiry delivery route is assigned/)
   }
 })
 

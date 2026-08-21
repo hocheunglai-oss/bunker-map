@@ -564,6 +564,52 @@ assert.equal(api.sendSelectionLabel(), "Send Temp & 1 Enq")
 api.state.selectedEnquiries = {}
 assert.equal(api.sendSelectionLabel(), "Send")
 
+const amendedEnquiry = {
+  id: "enq-amended",
+  formattedText: "test only stanley route / 9002201 / sg 29 aug / vlsfo 19mts",
+  createdAt: "2026-08-21T07:00:00Z",
+  status: "sent",
+  revisionNumber: 2,
+  lastAmendedAt: "2026-08-21T07:01:00Z",
+  amendmentChanges: [
+    { field: "product", label: "Fuel", before: "vlsfo 9mts", after: "vlsfo 19mts" },
+  ],
+}
+api.state.enquiries = [
+  { id: "enq-normal", formattedText: duplicateMessage, createdAt: "2026-08-21T06:59:00Z", status: "sent" },
+  amendedEnquiry,
+]
+api.state.acknowledgedAmendmentRevisions = {}
+api.state.selectedEnquiries = { "enq-normal": true }
+api.toggleEnquirySelection(amendedEnquiry)
+assert.deepEqual(
+  JSON.parse(JSON.stringify(api.state.selectedEnquiries)),
+  { "enq-amended": true },
+  "a pending amendment must replace other selected enquiries",
+)
+assert.equal(api.isPendingAmendment(amendedEnquiry), true)
+assert.deepEqual(Array.from(api.amendmentCategories(amendedEnquiry)), ["Quantity"])
+assert.equal(
+  api.selectedEnquiryText(),
+  "Quantity Amended\n\ntest only stanley route / 9002201 / sg 29 aug / *vlsfo 19mts*",
+)
+api.state.acknowledgedAmendmentRevisions = { "enq-amended": 2 }
+assert.equal(api.isPendingAmendment(amendedEnquiry), false)
+assert.equal(
+  api.selectedEnquiryText(),
+  `Good day, please quote for the following enquiries.\n\n${amendedEnquiry.formattedText}`,
+)
+
+const sanitizedAmendmentState = api.sanitizeSavedState({
+  seenEnquiryIds: { "enq-normal": true, ignored: false },
+  acknowledgedAmendmentRevisions: { "enq-amended": 2, ignored: 0 },
+})
+assert.deepEqual(JSON.parse(JSON.stringify(sanitizedAmendmentState.seenEnquiryIds)), { "enq-normal": true })
+assert.deepEqual(
+  JSON.parse(JSON.stringify(sanitizedAmendmentState.acknowledgedAmendmentRevisions)),
+  { "enq-amended": 2 },
+)
+
 api.state.senderContacts = api.sanitizeSenderContacts({
   "BARRY@COSULICH.COM.SG": {
     username: "barry@cosulich.com.sg",

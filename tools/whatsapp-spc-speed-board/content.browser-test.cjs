@@ -196,9 +196,9 @@ const html = `<!doctype html>
               callback({
                 ok: true,
                 status: {
-                  installedVersion: staleVersion ? "0.6.3" : "0.6.4",
-                  latestVersion: "0.6.4",
-                  requiredVersion: "0.6.4",
+                  installedVersion: staleVersion ? "0.6.4" : "0.6.5",
+                  latestVersion: "0.6.5",
+                  requiredVersion: "0.6.5",
                   updateRequired: staleVersion,
                   updatePageUrl: "https://spc.fcuno.com/chrome"
                 }
@@ -371,7 +371,7 @@ async function main() {
       await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
       assert.equal(
         (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
-        "UPDATE REQUIRED Installed v0.6.3 · Required v0.6.4 UPDATE",
+        "UPDATE REQUIRED Installed v0.6.4 · Required v0.6.5 UPDATE",
       )
       assert.equal(
         await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
@@ -877,6 +877,7 @@ async function main() {
       assert.equal(secondTraderInitial.locallyHidden, false)
 
       const amendmentUpdate = {
+        formattedText: "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 650mts",
         revisionNumber: 2,
         lastAmendedAt: "2026-07-23T09:25:00Z",
         amendmentChanges: [
@@ -903,6 +904,87 @@ async function main() {
         ).innerText(),
         /AMENDED REV 2[\s\S]*Quantity: vlsfo 650mts/,
       )
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] [data-action='acknowledge-amendment']",
+        ).count(),
+        1,
+      )
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+        ).evaluate((row) => getComputedStyle(row).backgroundColor),
+        "rgb(255, 240, 239)",
+      )
+
+      const pendingAmendmentSelection = await secondTraderPage.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        api.state.selectedEnquiries = { "enq-2": true }
+        const amended = api.state.enquiries.find((enquiry) => enquiry.id === "enq-1")
+        api.toggleEnquirySelection(amended)
+        return {
+          ids: api.selectedSendableEnquiryIds(),
+          text: api.selectedEnquiryText(),
+          pending: api.isPendingAmendment(amended),
+        }
+      })
+      assert.deepEqual(pendingAmendmentSelection.ids, ["enq-1"])
+      assert.equal(pendingAmendmentSelection.pending, true)
+      assert.equal(
+        pendingAmendmentSelection.text,
+        "Quantity Amended\n\ntaisei maru no.15 / 8710728 / 14 - 15 jan / *vlsfo 650mts*",
+      )
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+        ).evaluate((row) => getComputedStyle(row).backgroundColor),
+        "rgb(231, 243, 255)",
+      )
+
+      await secondTraderPage.click(
+        "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] [data-action='acknowledge-amendment']",
+      )
+      await secondTraderPage.waitForFunction(
+        () => !document.querySelector("#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'].is-amendment-pending"),
+      )
+      const acknowledgedAmendment = await secondTraderPage.evaluate(() => {
+        const api = window.__FCUNO_WA_SPC_TEST_API__
+        const enquiry = api.state.enquiries.find((item) => item.id === "enq-1")
+        return {
+          storedRevision:
+            window.storageData["fcuno-wa-spc-board-v1"]?.acknowledgedAmendmentRevisions?.["enq-1"],
+          pending: api.isPendingAmendment(enquiry),
+          text: api.enquiryTextForIds(["enq-1"]),
+        }
+      })
+      assert.deepEqual(acknowledgedAmendment, {
+        storedRevision: 2,
+        pending: false,
+        text: `Good day, please quote for the following enquiries.\n\n${amendmentUpdate.formattedText}`,
+      })
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+        ).evaluate((row) => getComputedStyle(row).backgroundColor),
+        "rgb(244, 246, 248)",
+      )
+
+      const thirdTraderPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+      await thirdTraderPage.goto(`${url}?firstRun=1`, { waitUntil: "domcontentloaded" })
+      await thirdTraderPage.evaluate((update) => {
+        window.enquiryOverrides["enq-1"] = update
+        window.__FCUNO_WA_SPC_TEST_API__.loadEnquiries()
+      }, amendmentUpdate)
+      await thirdTraderPage.waitForSelector(
+        "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'].is-amendment-pending",
+      )
+      assert.equal(
+        await thirdTraderPage.evaluate(
+          () => window.storageData["fcuno-wa-spc-board-v1"]?.acknowledgedAmendmentRevisions?.["enq-1"] || 0,
+        ),
+        0,
+      )
+      await thirdTraderPage.close()
 
       const outcomeCases = [
         {
