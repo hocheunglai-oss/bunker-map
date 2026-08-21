@@ -47,7 +47,7 @@ export function createCompressedBackupStage(
   // design while compressing those repeated snapshots efficiently.
   const writable = createBrotliCompress({
     params: {
-      [constants.BROTLI_PARAM_QUALITY]: 5,
+      [constants.BROTLI_PARAM_QUALITY]: 3,
       [constants.BROTLI_PARAM_LGWIN]: 24,
     },
   })
