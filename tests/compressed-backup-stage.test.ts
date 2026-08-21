@@ -28,7 +28,7 @@ async function writeChunk(
   if (!writable.write(value)) await once(writable, "drain")
 }
 
-test("compressed staging round-trips a logical backup larger than its storage limit", async () => {
+test("Brotli staging round-trips a logical backup larger than its storage limit", async () => {
   const directory = await mkdtemp(join(tmpdir(), "compressed-backup-stage-"))
   const filePath = join(directory, "data.json.gz")
   try {

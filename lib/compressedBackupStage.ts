@@ -1,7 +1,11 @@
 import { createReadStream, createWriteStream } from "node:fs"
 import { Transform, type TransformCallback } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import { constants, createGunzip, createGzip } from "node:zlib"
+import {
+  constants,
+  createBrotliCompress,
+  createBrotliDecompress,
+} from "node:zlib"
 
 class StoredByteLimit extends Transform {
   byteLength = 0
@@ -36,7 +40,17 @@ export function createCompressedBackupStage(
     throw new Error("Compressed backup staging limit must be a positive integer.")
   }
 
-  const writable = createGzip({ level: constants.Z_BEST_SPEED })
+  // Audit snapshots can contain multi-megabyte before/after documents. Gzip's
+  // 32 KiB window cannot reuse that distant repetition, which caused the
+  // bounded staging file to exceed /tmp even though the logical backup was
+  // still valid. Brotli's larger window keeps the same private, bounded staging
+  // design while compressing those repeated snapshots efficiently.
+  const writable = createBrotliCompress({
+    params: {
+      [constants.BROTLI_PARAM_QUALITY]: 5,
+      [constants.BROTLI_PARAM_LGWIN]: 24,
+    },
+  })
   const limiter = new StoredByteLimit(maximumByteLength)
   let failure: Error | null = null
   const settled = pipeline(
@@ -66,7 +80,7 @@ export function createCompressedBackupStage(
 
 export function createCompressedBackupStageReadStream(filePath: string) {
   const source = createReadStream(filePath)
-  const gunzip = createGunzip()
-  source.once("error", (error) => gunzip.destroy(error))
-  return source.pipe(gunzip)
+  const brotli = createBrotliDecompress()
+  source.once("error", (error) => brotli.destroy(error))
+  return source.pipe(brotli)
 }

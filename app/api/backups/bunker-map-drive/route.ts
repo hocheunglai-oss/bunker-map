@@ -1999,7 +1999,7 @@ async function createBackup(provenance: BackupProvenance) {
         artifactSha256: streamed.artifactSha256,
         uploadedFileSha256: streamed.uploadedFileSha256,
         fileByteLength: streamed.fileByteLength,
-        stagingEncoding: "gzip",
+        stagingEncoding: "br",
         stagingSourceByteLength: prepared.stagingSourceByteLength,
         stagingFileByteLength: prepared.stagingFileByteLength,
         verificationStatus: "complete",
