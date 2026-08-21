@@ -377,7 +377,21 @@
       .filter((row) => {
         if (row.matches(".message-out") || row.closest(".message-out")) return true
         const identified = row.matches("[data-id]") ? row : row.closest("[data-id]")
-        return String(identified?.getAttribute("data-id") || "").includes("true_")
+        if (String(identified?.getAttribute("data-id") || "").includes("true_")) return true
+
+        // Current WhatsApp Web no longer exposes message-out/data-id on every
+        // outgoing bubble. Its accessible message metadata still identifies
+        // the author as the signed-in user and exposes the delivery state.
+        const container = row.matches("[data-testid='msg-container']")
+          ? row
+          : row.closest("[data-testid='msg-container']")
+        if (!container) return false
+        const labels = Array.from(container.querySelectorAll("[aria-label]"))
+          .map((element) => cleanText(element.getAttribute("aria-label")).toLowerCase())
+          .filter(Boolean)
+        const authoredByCurrentUser = labels.some((label) => /^(you|you:|你|你:|您|您:)$/.test(label))
+        const hasOutgoingState = labels.some((label) => /^(sent|delivered|read|pending)$/.test(label))
+        return authoredByCurrentUser && hasOutgoingState
       })
     return rows.filter((row) => comparable(row.innerText || row.textContent).includes(target))
   }

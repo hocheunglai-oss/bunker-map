@@ -34,11 +34,15 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true) {
       window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
       window.initiallyPaired = ${initiallyPaired ? "true" : "false"}; window.pairRequests = 0;
       window.appendOutgoing = (text) => {
-        document.getElementById('old-message')?.remove();
-        const row=document.createElement('div');row.className='message-out';row.textContent=text;
+        const row=document.createElement('div');row.dataset.testid='msg-container';
+        row.innerHTML='<span aria-label="You:"></span><span data-testid="selectable-text"></span><span aria-label="Sent"></span>';
+        row.querySelector('[data-testid="selectable-text"]').textContent=text;
         document.getElementById('messages').appendChild(row);window.sent.push(text);
       };
-      const oldMessage=document.createElement('div');oldMessage.id='old-message';oldMessage.className='message-out';oldMessage.textContent=${JSON.stringify(message)};document.getElementById('messages').appendChild(oldMessage);
+      const oldMessage=document.createElement('div');oldMessage.id='old-message';oldMessage.dataset.testid='msg-container';
+      oldMessage.innerHTML='<span aria-label="You:"></span><span data-testid="selectable-text"></span><span aria-label="Delivered"></span>';
+      oldMessage.querySelector('[data-testid="selectable-text"]').textContent=${JSON.stringify(message)};
+      document.getElementById('messages').appendChild(oldMessage);
       window.openGroup = () => { const title=document.getElementById('chatTitle'); title.textContent=${JSON.stringify(groupName)}; title.title=${JSON.stringify(groupName)}; document.getElementById('composer').focus(); };
       window.applyText = (text) => {
         const active=document.activeElement;
@@ -49,7 +53,7 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.6'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.7'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -83,7 +87,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.6" }),
+      getManifest: () => ({ version: "1.2.7" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -108,7 +112,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.6" }),
+      getManifest: () => ({ version: "1.2.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -164,7 +168,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.6" }),
+      getManifest: () => ({ version: "1.2.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -212,7 +216,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.6" }),
+      getManifest: () => ({ version: "1.2.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -267,7 +271,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.6" }),
+      getManifest: () => ({ version: "1.2.7" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -409,7 +413,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.6/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.7/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
