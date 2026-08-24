@@ -133,6 +133,7 @@ function cleanVesselName(value: string) {
   next = next.replace(/^\s*(?:M\s*[./-]?\s*V|M\s*[./-]?\s*T|MV|MT)\b\s*/i, "")
   next = next.replace(/^\s*(?:LPG|LNG)\s*\/?\s*C\b\s*/i, "")
   next = next.replace(/\(\s*(?:V|VOY|VOYAGE)\.?\s*[\w./-]+\s*\)/gi, "")
+  next = next.replace(/\s+(?:in|at)\s+(?:the\s+)?dry\s*dock\b.*$/i, "")
   next = next.replace(/\s*\/+\s*$/, "")
   next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\s*\)?\.?\s*$/i, "")
   next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\.?\s*$/i, "")
@@ -153,7 +154,7 @@ function isPlausibleVesselName(value: string) {
   }
   if (/\b\d{1,2}\s*(?:[./-]\s*\d{1,2}|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/i.test(value)) return false
   const compact = value.replace(/\s+/g, "")
-  if (/(?:LSMGO|LEMGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)/i.test(compact)) return false
+  if (/(?:LSMGO|LEMGO|LSGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)/i.test(compact)) return false
   return true
 }
 
@@ -234,7 +235,7 @@ function extractSlashPrefixVessel(lines: string[]) {
 function extractColonProductVessel(lines: string[]) {
   for (const line of lines.slice(0, 6)) {
     const match = line.match(
-      /^\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)\s*:\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\b/i,
+      /^\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)\s*:\s*(?:v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)\b/i,
     )
     const cleaned = cleanVesselName(match?.[1] || "")
     if (isPlausibleVesselName(cleaned)) return cleaned
@@ -267,7 +268,7 @@ function extractLeadingVesselBeforeTradingDetails(lines: string[]) {
     if (/^\s*(?:account|agent|buyer|date|eta|port|position|product|quantity)\b/i.test(line)) continue
 
     const match = line.match(
-      /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)?\.?\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s*(?:[,，]\s*)?(?:@|at\s+|eta\b|etb\b|etd\b|ets\b|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)))\b/i,
+      /^\s*(?:m\s*[./-]?\s*v|m\s*[./-]?\s*t|mv|mt)?\.?\s*([A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s*(?:[,，]\s*)?(?:@|at\s+|eta\b|etb\b|etd\b|ets\b|v\s*l\s*s\s*f\s*o|vlsfo|lsfo|hsfo|hfo|ifo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)))\b/i,
     )
     const cleaned = cleanVesselName(match?.[1] || "")
     if (isPlausibleVesselName(cleaned)) return cleaned

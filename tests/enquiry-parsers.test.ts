@@ -839,3 +839,36 @@ test("replays the August 18 pending review reports", () => {
     "overseas santorini / 9435909 / sg 19 aug / lsmgo 535-610mts",
   )
 })
+
+test("replays the August 24 FCUNO reports without operational-rate leakage", () => {
+  const goldenAspirant = [
+    "Could you please give us your offer for supplying following bunker quantity to captioned vessel at Singapore?",
+    "GOLDEN ASPIRANT (9758313)",
+    "VLSFO: 500MT + LSMGO: 30MT",
+    "ETA 2ND SEP ~ 14TH SEP, 2026",
+    "REMARK:",
+    "AS PER OUR MANAGEMENT COMPANY SAFETY POLICY, VSL MAX SUPPLY RATE IS FO 150 CBM/HR AND MGO 60 CBM/HR.",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(goldenAspirant),
+    "golden aspirant / 9758313 / singapore 2 - 14 sep / vlsfo 500mts / lsmgo 30mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText(goldenAspirant).standardText,
+    "golden aspirant / 9758313 / sg 2 - 14 sep / vlsfo 500mts / lsmgo 30mts",
+  )
+
+  const uruguay = [
+    "URUGUAY in drydock, HK, 1-2 SEPT, 400-600 MTS VLSFO, 50 LSGO",
+    "[20/08/2026, 16:41:29] Stanley Chui: ciao Jacopo, she is currently in Guangzhou, so she will call HK for bunkering only right?",
+    "imo 9426154",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(uruguay),
+    "uruguay / 9426154 / hk 1 - 2 sep / vlsfo 400-600mts / lsmgo 50mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText(uruguay).standardText,
+    "uruguay / 9426154 / 1 - 2 sep / vlsfo 400-600mts / lsmgo 50mts",
+  )
+})

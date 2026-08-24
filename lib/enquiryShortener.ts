@@ -478,7 +478,7 @@ function extractDeliverySchedule(
 
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
-  if (/(?:lsmgo|lemgo|mgo|mdo|dma|dmb|gasoil)/i.test(compact)) return "lsmgo"
+  if (/(?:lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gasoil)/i.test(compact)) return "lsmgo"
   if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
@@ -506,7 +506,7 @@ function isNonRequestProductReference(value: string) {
   if (hasExplicitQuantity) return false
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(normalized) ||
-    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
+    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
     /^\s*(?:fuel|diesel)\s+oils?\b.*\bspecs?\b/i.test(normalized) ||
     /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(normalized) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(normalized)
@@ -641,6 +641,13 @@ function extractBareRangeImmediatelyBeforeProduct(value: string) {
     : ""
 }
 
+function extractBareQuantityImmediatelyBeforeProduct(value: string) {
+  const single = value.match(/(\d+(?:[,.]\d+)?)\s*$/)
+  return single && isUsableQuantityNumber(single[1])
+    ? `${normalizeEnquiryQuantityNumber(single[1])}mts`
+    : ""
+}
+
 function extractQuantityImmediatelyAfterProduct(value: string) {
   const range = value.match(new RegExp(String.raw`^\s*[:#-]?\s*(\d+(?:[,.]\d+)?)\s*(?:-|~|/|to)\s*(\d+(?:[,.]\d+)?)\s*(?:${QUANTITY_UNIT_PATTERN})?`, "i"))
   if (range && isUsableQuantityNumber(range[1]) && isUsableQuantityNumber(range[2])) {
@@ -724,7 +731,7 @@ function productMatches(line: string) {
   const hasExplicitVlsfo = /\b(?:v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo)\b/i.test(line)
 
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,
@@ -758,7 +765,8 @@ function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: bool
     )
     const precedingQuantity =
       extractQuantityImmediatelyBeforeProduct(precedingText) ||
-      extractBareRangeImmediatelyBeforeProduct(precedingText)
+      extractBareRangeImmediatelyBeforeProduct(precedingText) ||
+      extractBareQuantityImmediatelyBeforeProduct(precedingText)
     const followingQuantity =
       extractQuantityFromInlineUnit(segmentText) ||
       extractQuantityImmediatelyAfterProduct(segmentText.slice(match.value.length)) ||
@@ -809,9 +817,18 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
   return ""
 }
 
+function stripOperationalRateClause(value: string) {
+  return value.replace(
+    /\b(?:(?:vsl|vessel)\s+)?(?:max(?:imum)?\s+)?(?:supply|pumping|transfer|loading|discharg(?:e|ing))\s+rate\b.*$/i,
+    "",
+  )
+}
+
 function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
   const lines = normalizeInput(text)
     .split("\n")
+    .map(cleanSpaces)
+    .map(stripOperationalRateClause)
     .map(cleanSpaces)
     .filter(Boolean)
 
