@@ -65,11 +65,12 @@ test("Attendance Sync remains visible in System Health without sending email not
   )
 })
 
-test("recent schema drift remains visible without sending a daily warning email", () => {
+test("backup warnings remain visible without sending repetitive email alerts", () => {
   assert.match(
     noticeRouteSource,
-    /check\.id === "backup"[\s\S]*check\.status === "warning"[\s\S]*predates the live database schema[\s\S]*ageHours <= 36[\s\S]*unverifiedBackupFiles === 0/,
+    /check\.id === "backup" && check\.status === "warning"/,
   )
+  assert.doesNotMatch(noticeRouteSource, /check\.id === "backup" && check\.status === "error"/)
 })
 
 test("daily backup has bounded retries that skip after a recent schema-current success", () => {
