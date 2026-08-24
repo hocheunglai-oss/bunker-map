@@ -16,10 +16,29 @@ import {
   ensureSpcSingaporeEta,
   extractExplicitSpcFuelFields,
   parseSpcEnquiryText,
+  restoreStoredSpcEnquiryFields,
 } from "../lib/spcEnquiryText"
 
 mock.timers.enable({ apis: ["Date"], now: new Date("2026-07-30T00:00:00.000Z") })
 test.after(() => mock.timers.reset())
+
+test("restores stored SPC amendment fields even when a test IMO fails checksum validation", () => {
+  const restored = restoreStoredSpcEnquiryFields({
+    formattedText: "testing vessel 1 / 9847286 / sg 14 sep / vlsfo 500mts / lsmgo 100mts",
+    vesselName: "testing vessel 1",
+    meta: {
+      imo: "9847286",
+      eta: "sg 14 sep",
+      vlsfo: "500",
+      lsmgo: "100",
+    },
+  })
+
+  assert.equal(restored.imo, "9847286")
+  assert.equal(restored.eta, "sg 14 sep")
+  assert.equal(restored.vlsfo, "500")
+  assert.equal(restored.lsmgo, "100")
+})
 
 function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"80cst max" | "120cst max" | "180cst max"> = []) {
   const guess = parseEnquiryWorksheetGuess(rawText)

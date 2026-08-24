@@ -50,6 +50,13 @@ export type SpcEnquiryTextInput = {
   enquiryNumber?: string | null
 }
 
+export type StoredSpcEnquiryFieldsInput = {
+  formattedText?: string | null
+  title?: string | null
+  vesselName?: string | null
+  meta?: SpcEnquiryMeta | null
+}
+
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
@@ -458,5 +465,19 @@ export function parseSpcEnquiryText(
     lsmgo,
     remarks,
     standardText: standardText || delimited.standardText || lowerText(rawText),
+  }
+}
+
+export function restoreStoredSpcEnquiryFields(input: StoredSpcEnquiryFieldsInput) {
+  const parsed = parseSpcEnquiryText(input.formattedText || input.title || "")
+  const meta = input.meta || {}
+  return {
+    ...parsed,
+    vesselName: lowerText(input.vesselName || parsed.vesselName),
+    imo: cleanMetaValue(meta.imo) || parsed.imo,
+    eta: cleanMetaValue(meta.eta) || parsed.eta,
+    hsfo: cleanMetaValue(meta.hsfo) || parsed.hsfo,
+    vlsfo: cleanMetaValue(meta.vlsfo) || parsed.vlsfo,
+    lsmgo: cleanMetaValue(meta.lsmgo) || parsed.lsmgo,
   }
 }

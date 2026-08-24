@@ -1473,7 +1473,13 @@
         if (after && (normalized === after || normalized.includes(after) || after.includes(normalized))) changed.add(index)
       })
       if (change.field === "vesselName") changed.add(0)
+      if (change.field === "imo" && segments.length > 1) changed.add(1)
+      if (change.field === "eta" && segments.length > 2) changed.add(2)
       if (change.field === "deliveryDate" || change.field === "port") changed.add(Math.min(2, segments.length - 1))
+      if (change.field === "hsfo" || change.field === "vlsfo" || change.field === "lsmgo") {
+        const fuelIndex = segments.findIndex((segment) => segment.toLowerCase().startsWith(change.field.toLowerCase()))
+        if (fuelIndex >= 0) changed.add(fuelIndex)
+      }
       if ((change.field === "product" || change.field === "quantity") && !changed.size && segments.length > 3) {
         changed.add(3)
       }
@@ -1486,9 +1492,12 @@
     const bodySegments = enquirySegments(enquiryBodyText(enquiry))
     const changes = enquiryAmendmentChanges(enquiry)
     changes.forEach((change) => {
-      if (change.field === "vesselName") categories.add("Vessel Name")
-      else if (change.field === "deliveryDate") categories.add("Date")
-      else if (change.field === "quantity") categories.add("Quantity")
+      if (["Vessel Name", "IMO", "Date", "Quantity", "Grade Added"].includes(change.label)) {
+        categories.add(change.label)
+      } else if (change.field === "vesselName") categories.add("Vessel Name")
+      else if (change.field === "imo") categories.add("IMO")
+      else if (change.field === "eta" || change.field === "deliveryDate") categories.add("Date")
+      else if (change.field === "quantity" || change.field === "hsfo" || change.field === "vlsfo" || change.field === "lsmgo") categories.add("Quantity")
       else if (change.field === "port") categories.add("Date")
       else if (change.field === "product") {
         const beforeGrade = cleanText(change.before).split(/\s+/)[0]?.toLowerCase() || ""
@@ -1518,7 +1527,7 @@
       .map((segment, index) => (changedIndexes.has(index) ? `*${segment}*` : segment))
       .join(" / ")
     const heading = `${amendmentCategories(enquiry).join(" / ")} Amended`
-    return body ? `${heading}\n\n${body}` : heading
+    return body ? `${heading}\n${body}` : heading
   }
 
   function enquiryVesselName(enquiry) {
@@ -2019,7 +2028,7 @@
           <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
-            ${pendingAmendment ? `<span class="fcuno-wa-spc-enquiry-amendment"><strong>AMENDED REV ${escapeHtml(enquiryRevisionNumber(enquiry))}</strong>${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}<button type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}">OK</button></span>` : ""}
+            ${pendingAmendment ? `<span class="fcuno-wa-spc-enquiry-amendment">${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}<button type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}">OK</button></span>` : ""}
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>

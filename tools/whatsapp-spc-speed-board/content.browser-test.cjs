@@ -196,9 +196,9 @@ const html = `<!doctype html>
               callback({
                 ok: true,
                 status: {
-                  installedVersion: staleVersion ? "0.6.4" : "0.6.5",
-                  latestVersion: "0.6.5",
-                  requiredVersion: "0.6.5",
+                  installedVersion: staleVersion ? "0.6.5" : "0.6.6",
+                  latestVersion: "0.6.6",
+                  requiredVersion: "0.6.6",
                   updateRequired: staleVersion,
                   updatePageUrl: "https://spc.fcuno.com/chrome"
                 }
@@ -371,7 +371,7 @@ async function main() {
       await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
       assert.equal(
         (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
-        "UPDATE REQUIRED Installed v0.6.4 · Required v0.6.5 UPDATE",
+        "UPDATE REQUIRED Installed v0.6.5 · Required v0.6.6 UPDATE",
       )
       assert.equal(
         await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
@@ -902,7 +902,13 @@ async function main() {
         await secondTraderPage.locator(
           "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-enquiry-amendment",
         ).innerText(),
-        /AMENDED REV 2[\s\S]*Quantity: vlsfo 650mts/,
+        /^Quantity: vlsfo 650mts[\s\S]*OK$/,
+      )
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-enquiry-amendment",
+        ).innerText().then((text) => text.includes("AMENDED REV") || text.includes("Details:")),
+        false,
       )
       assert.equal(
         await secondTraderPage.locator(
@@ -932,7 +938,7 @@ async function main() {
       assert.equal(pendingAmendmentSelection.pending, true)
       assert.equal(
         pendingAmendmentSelection.text,
-        "Quantity Amended\n\ntaisei maru no.15 / 8710728 / 14 - 15 jan / *vlsfo 650mts*",
+        "Quantity Amended\ntaisei maru no.15 / 8710728 / 14 - 15 jan / *vlsfo 650mts*",
       )
       assert.equal(
         await secondTraderPage.locator(

@@ -16,14 +16,13 @@ export type SpcAmendmentChange = {
 }
 
 export type SpcEnquirySnapshot = {
-  title: string
   vesselName: string
-  port: string
-  product: string
-  quantity: string
-  deliveryDate: string
-  supplierName: string
-  notes: string
+  imo: string
+  eta: string
+  hsfo: string
+  vlsfo: string
+  lsmgo: string
+  remarks: string
 }
 
 export type SpcGroupDeliveryJob = {
@@ -117,26 +116,24 @@ function mapActivity(row: DeliveryActivityRow): SpcGroupDeliveryActivity {
 
 export function buildSpcEnquirySnapshot(input: Partial<SpcEnquirySnapshot>): SpcEnquirySnapshot {
   return {
-    title: cleanText(input.title, 1000),
     vesselName: cleanText(input.vesselName, 300),
-    port: cleanText(input.port, 300),
-    product: cleanText(input.product, 500),
-    quantity: cleanText(input.quantity, 500),
-    deliveryDate: cleanText(input.deliveryDate, 20),
-    supplierName: cleanText(input.supplierName, 500),
-    notes: cleanText(input.notes),
+    imo: cleanText(input.imo, 20),
+    eta: cleanText(input.eta, 300),
+    hsfo: cleanText(input.hsfo, 500),
+    vlsfo: cleanText(input.vlsfo, 500),
+    lsmgo: cleanText(input.lsmgo, 500),
+    remarks: cleanText(input.remarks, 1000),
   }
 }
 
 const AMENDMENT_FIELDS: Array<{ field: keyof SpcEnquirySnapshot; label: string }> = [
-  { field: "vesselName", label: "Vessel" },
-  { field: "title", label: "Enquiry" },
-  { field: "deliveryDate", label: "ETA" },
-  { field: "product", label: "Fuel" },
-  { field: "quantity", label: "Quantity" },
-  { field: "port", label: "Port" },
-  { field: "supplierName", label: "Supplier" },
-  { field: "notes", label: "Details" },
+  { field: "vesselName", label: "Vessel Name" },
+  { field: "imo", label: "IMO" },
+  { field: "eta", label: "Date" },
+  { field: "hsfo", label: "Quantity" },
+  { field: "vlsfo", label: "Quantity" },
+  { field: "lsmgo", label: "Quantity" },
+  { field: "remarks", label: "Remarks" },
 ]
 
 export function diffSpcEnquirySnapshots(
@@ -146,7 +143,11 @@ export function diffSpcEnquirySnapshots(
   return AMENDMENT_FIELDS.flatMap(({ field, label }) => {
     const previous = cleanText(before[field])
     const next = cleanText(after[field])
-    return previous === next ? [] : [{ field, label, before: previous, after: next }]
+    if (previous === next) return []
+    const nextLabel = (field === "hsfo" || field === "vlsfo" || field === "lsmgo") && !previous && next
+      ? "Grade Added"
+      : label
+    return [{ field, label: nextLabel, before: previous, after: next }]
   })
 }
 
@@ -187,17 +188,100 @@ function unchangedSegmentIndexes(current: string[], original: string[]) {
   return unchanged
 }
 
+function changedSegmentIndexes(current: string[], original: string[]) {
+  const unchanged = unchangedSegmentIndexes(current, original)
+  return new Set(current.map((_segment, index) => index).filter((index) => !unchanged.has(index)))
+}
+
+const AMENDMENT_LABEL_ORDER = ["Vessel Name", "IMO", "Date", "Quantity", "Grade Added", "Remarks"]
+
+function segmentLabel(current: string[], original: string[], index: number) {
+  if (index === 0) return "Vessel Name"
+  if (index === 1 && /^\d{7}$/.test(current[index] || "")) return "IMO"
+  if (index === 2) return "Date"
+
+  const currentGrade = cleanText(current[index]).split(/\s+/)[0]?.toLowerCase() || ""
+  const originalGrade = cleanText(original[index]).split(/\s+/)[0]?.toLowerCase() || ""
+  return currentGrade && currentGrade !== originalGrade ? "Grade Added" : "Quantity"
+}
+
+function semanticChangesFromFormattedText(beforeText: string, afterText: string) {
+  const before = enquirySegments(beforeText)
+  const after = enquirySegments(afterText)
+  const changed = changedSegmentIndexes(after, before)
+  return Array.from(changed).map((index) => {
+    const label = segmentLabel(after, before, index)
+    const field = index === 0
+      ? "vesselName"
+      : label === "IMO"
+        ? "imo"
+        : label === "Date"
+          ? "eta"
+          : cleanText(after[index]).split(/\s+/)[0]?.toLowerCase() || `segment-${index}`
+    return {
+      field,
+      label,
+      before: before[index] || "",
+      after: after[index] || "",
+    }
+  })
+}
+
+export function normalizeSpcAmendmentChanges(changes: SpcAmendmentChange[]) {
+  const textChange = changes.find(
+    (change) => change.field === "notes" && change.before && change.after,
+  )
+  if (textChange) return semanticChangesFromFormattedText(textChange.before, textChange.after)
+
+  const semanticFields = new Set(["vesselName", "imo", "eta", "hsfo", "vlsfo", "lsmgo", "remarks"])
+  const semantic = changes.filter((change) => semanticFields.has(change.field))
+  if (semantic.length > 0) return semantic
+
+  return changes.flatMap((change) => {
+    if (change.field === "title") {
+      return [{ ...change, field: "vesselName", label: "Vessel Name" }]
+    }
+    if (change.field === "deliveryDate" || change.field === "port") {
+      return [{ ...change, field: "eta", label: "Date" }]
+    }
+    if (change.field === "product" || change.field === "quantity") {
+      return [{ ...change, label: change.before ? "Quantity" : "Grade Added" }]
+    }
+    return []
+  })
+}
+
+function amendmentLabels(
+  changes: SpcAmendmentChange[],
+  current: string[],
+  original: string[],
+  changed: Set<number>,
+) {
+  const labels = new Set(
+    normalizeSpcAmendmentChanges(changes)
+      .map((change) => cleanText(change.label, 100))
+      .filter(Boolean),
+  )
+  if (labels.size === 0) {
+    changed.forEach((index) => labels.add(segmentLabel(current, original, index)))
+  }
+  return AMENDMENT_LABEL_ORDER.filter((label) => labels.has(label))
+}
+
 export function buildSpcGroupAmendmentMessage(
   formattedText: string,
   originalFormattedText: string,
+  changes: SpcAmendmentChange[] = [],
 ) {
   const current = enquirySegments(formattedText)
   const original = enquirySegments(originalFormattedText)
-  const unchanged = unchangedSegmentIndexes(current, original)
+  const changed = changedSegmentIndexes(current, original)
   const amended = current
-    .map((segment, index) => (unchanged.has(index) ? segment : `*${segment}*`))
+    .map((segment, index) => (changed.has(index) ? `*${segment}*` : segment))
     .join(" / ")
-  return `AMENDED: ${amended}\noriginal: ${original.join(" / ")}`
+  const labels = amendmentLabels(changes, current, original, changed)
+  const heading = `${(labels.length ? labels : ["Enquiry"]).join(" / ")} Amended`
+  return amended ? `${heading}\n${amended}` : heading
 }
 
 export function buildSpcGroupReofferMessage(formattedText: string) {

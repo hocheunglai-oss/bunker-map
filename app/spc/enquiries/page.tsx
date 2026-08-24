@@ -10,6 +10,7 @@ import {
   cleanSpcEnquiryText,
   formatSpcFuelSegment,
   parseSpcEnquiryText,
+  restoreStoredSpcEnquiryFields,
   spcFuelInputValue,
   writeSpcEnquiryNotes,
   type ParsedSpcEnquiry,
@@ -342,14 +343,20 @@ function reportEnquiryError(error: unknown, fallback: string) {
 }
 
 function draftFromEnquiry(enquiry: SpcEnquiry): ReofferDraft {
-  const parsed = normaliseDraft(enquiry.formattedText || enquiry.title || "")
+  const parsed = restoreStoredSpcEnquiryFields(enquiry)
+  const structured = {
+    ...parsed,
+    hsfo: spcFuelInputValue(parsed.hsfo, "hsfo"),
+    vlsfo: spcFuelInputValue(parsed.vlsfo, "vlsfo"),
+    lsmgo: spcFuelInputValue(parsed.lsmgo, "lsmgo"),
+  }
   return {
     ...emptyDraft,
-    ...parsed,
+    ...structured,
     id: enquiry.id,
     enquiryNumber: enquiry.enquiryNumber,
-    vesselName: parsed.vesselName || String(enquiry.vesselName || "").toLowerCase(),
-    standardText: parsed.standardText || enquiry.formattedText || enquiry.title,
+    title: [structured.vesselName || "reoffer", structured.eta].filter(Boolean).join(" / "),
+    standardText: standardTextForDraft(structured),
   }
 }
 
@@ -1133,7 +1140,6 @@ export default function SpcEnquiriesPage() {
                     <div className="spc-sent-enquiry-summary"><p>{enquiry.formattedText || enquiry.title}</p><span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>{enquiryStatusLabel(enquiry)}</span></div>
                     {enquiry.lastAmendedAt ? (
                       <div className="spc-enquiry-amendment">
-                        <strong>AMENDED REV {enquiry.revisionNumber}</strong>
                         {enquiry.amendmentChanges.map((change) => (
                           <span key={change.field}>{change.label}: {change.after || "removed"}</span>
                         ))}

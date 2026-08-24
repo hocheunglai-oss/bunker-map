@@ -2,6 +2,8 @@ import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import {
   formatSpcEnquiry,
+  formatSpcFuelSegment,
+  parseSpcEnquiryText,
   readSpcEnquiryMeta,
   splitSpcEnquiryNotes,
   writeSpcEnquiryNotes,
@@ -14,6 +16,7 @@ import {
   buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
   ensureCreatedSpcGroupDelivery,
+  normalizeSpcAmendmentChanges,
   type SpcAmendmentChange,
 } from "@/lib/spcGroupDispatcher"
 
@@ -135,11 +138,14 @@ function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
     revisionNumber: Number(row.revision_number || 1),
     lastAmendedAt: row.last_amended_at,
     lastAmendedByUsername: row.last_amended_by_username,
-    amendmentChanges: sanitizeAmendmentChanges(row.last_amendment_changes),
+    amendmentChanges: [] as SpcAmendmentChange[],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
   mapped.formattedText = formatSpcEnquiry(mapped)
+  mapped.amendmentChanges = normalizeSpcAmendmentChanges(
+    sanitizeAmendmentChanges(row.last_amendment_changes),
+  )
   return mapped
 }
 
@@ -163,15 +169,17 @@ function sanitizeAmendmentChanges(value: unknown): SpcAmendmentChange[] {
 function enquirySnapshot(row: Pick<SpcEnquiryRow,
   "title" | "vessel_name" | "port" | "product" | "quantity" | "delivery_date" | "supplier_name" | "notes"
 >) {
+  const notesText = splitSpcEnquiryNotes(row.notes).text
+  const meta = readSpcEnquiryMeta(row.notes)
+  const parsed = parseSpcEnquiryText(notesText)
   return buildSpcEnquirySnapshot({
-    title: row.title,
-    vesselName: row.vessel_name || "",
-    port: row.port || "",
-    product: row.product || "",
-    quantity: row.quantity || "",
-    deliveryDate: row.delivery_date || "",
-    supplierName: row.supplier_name || "",
-    notes: splitSpcEnquiryNotes(row.notes).text,
+    vesselName: row.vessel_name || parsed.vesselName,
+    imo: meta.imo || parsed.imo,
+    eta: meta.eta || parsed.eta,
+    hsfo: formatSpcFuelSegment("hsfo", meta.hsfo || parsed.hsfo),
+    vlsfo: formatSpcFuelSegment("vlsfo", meta.vlsfo || parsed.vlsfo),
+    lsmgo: formatSpcFuelSegment("lsmgo", meta.lsmgo || parsed.lsmgo),
+    remarks: parsed.remarks,
   })
 }
 
@@ -378,6 +386,7 @@ export async function amendSpcEnquiry(
   const messageText = buildSpcGroupAmendmentMessage(
     formattedText,
     originalFormattedText,
+    changes,
   )
 
   const { data, error } = await supabase.rpc("amend_spc_enquiry_with_group_delivery", {

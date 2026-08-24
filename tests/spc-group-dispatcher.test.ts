@@ -6,6 +6,7 @@ import {
   buildSpcGroupAmendmentMessage,
   buildSpcGroupReofferMessage,
   diffSpcEnquirySnapshots,
+  normalizeSpcAmendmentChanges,
 } from "@/lib/spcGroupDispatcher"
 import {
   SPC_GROUP_DISPATCHER_FILES,
@@ -15,39 +16,79 @@ import {
 
 test("SPC amendment messages identify and bold only the current changed values", () => {
   const before = buildSpcEnquirySnapshot({
-    title: "long pu 16 / 10 - 12 aug",
     vesselName: "long pu 16",
-    deliveryDate: "2026-08-10",
-    quantity: "lsmgo 200mts",
+    imo: "8357588",
+    eta: "10 - 12 aug",
+    lsmgo: "lsmgo 200mts",
   })
   const after = buildSpcEnquirySnapshot({
-    title: "long pu 16 / 10 - 18 aug",
     vesselName: "long pu 16",
-    deliveryDate: "2026-08-18",
-    quantity: "lsmgo 230mts",
+    imo: "8357588",
+    eta: "10 - 18 aug",
+    lsmgo: "lsmgo 230mts",
   })
   const changes = diffSpcEnquirySnapshots(before, after)
-  assert.deepEqual(changes.map((change) => change.field), ["title", "deliveryDate", "quantity"])
+  assert.deepEqual(changes.map((change) => change.field), ["eta", "lsmgo"])
 
   const message = buildSpcGroupAmendmentMessage(
     "long pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts",
     "long pu 16 / 8357588 / 10 - 12 aug / lsmgo 200mts",
+    changes,
   )
   assert.equal(
     message,
-    "AMENDED: long pu 16 / 8357588 / *10 - 18 aug* / *lsmgo 230mts*\n"
-      + "original: long pu 16 / 8357588 / 10 - 12 aug / lsmgo 200mts",
+    "Date / Quantity Amended\nlong pu 16 / 8357588 / *10 - 18 aug* / *lsmgo 230mts*",
   )
 })
 
 test("SPC amendment messages preserve the standardized trading format", () => {
+  const before = buildSpcEnquirySnapshot({
+    vesselName: "testing vessel 1",
+    imo: "9847286",
+    eta: "sg 14 sep",
+    vlsfo: "vlsfo 500mts",
+    lsmgo: "lsmgo 100mts",
+  })
+  const after = buildSpcEnquirySnapshot({
+    vesselName: "testing vessel 1.5",
+    imo: "9846285",
+    eta: "sg 17 - 19 sep",
+    vlsfo: "vlsfo 600mts",
+    lsmgo: "lsmgo 100mts",
+  })
+  const changes = diffSpcEnquirySnapshots(before, after)
+  assert.deepEqual(changes.map((change) => change.field), ["vesselName", "imo", "eta", "vlsfo"])
   assert.equal(
     buildSpcGroupAmendmentMessage(
-      "testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 2,000mts",
-      "testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 200-300mts",
+      "testing vessel 1.5 / 9846285 / sg 17 - 19 sep / vlsfo 600mts / lsmgo 100mts",
+      "testing vessel 1 / 9847286 / sg 14 sep / vlsfo 500mts / lsmgo 100mts",
+      changes,
     ),
-    "AMENDED: testing vessel / 9998690 / sg 22 - 27 aug / *vlsfo 2,000mts*\n"
-      + "original: testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 200-300mts",
+    "Vessel Name / IMO / Date / Quantity Amended\n"
+      + "*testing vessel 1.5* / *9846285* / *sg 17 - 19 sep* / *vlsfo 600mts* / lsmgo 100mts",
+  )
+})
+
+test("legacy full-detail amendment rows are reduced to semantic changed details", () => {
+  const changes = normalizeSpcAmendmentChanges([
+    { field: "title", label: "Enquiry", before: "testing vessel 1", after: "testing vessel 1.5" },
+    { field: "product", label: "Fuel", before: "vlsfo 500mts", after: "vlsfo 600mts" },
+    {
+      field: "notes",
+      label: "Details",
+      before: "testing vessel 1 / 9847286 / sg 14 sep / vlsfo 500mts / lsmgo 100mts",
+      after: "testing vessel 1.5 / 9846285 / sg 17 - 19 sep / vlsfo 600mts / lsmgo 100mts",
+    },
+  ])
+
+  assert.deepEqual(
+    changes.map(({ field, label, after }) => ({ field, label, after })),
+    [
+      { field: "vesselName", label: "Vessel Name", after: "testing vessel 1.5" },
+      { field: "imo", label: "IMO", after: "9846285" },
+      { field: "eta", label: "Date", after: "sg 17 - 19 sep" },
+      { field: "vlsfo", label: "Quantity", after: "vlsfo 600mts" },
+    ],
   )
 })
 
