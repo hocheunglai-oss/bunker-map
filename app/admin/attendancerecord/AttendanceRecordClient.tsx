@@ -75,8 +75,8 @@ type RosterDraftItem = {
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "monthly-record", label: "ATTENDANCE (CURRENT MONTH)" },
-  { id: "monthly", label: "MONTHLY" },
-  { id: "all-time", label: "ALL TIME" },
+  { id: "monthly", label: "MONTHLY STATEMENT" },
+  { id: "all-time", label: "ALL TIME RECORD" },
 ]
 
 const MONTH_NAMES = [
