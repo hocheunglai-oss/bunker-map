@@ -784,6 +784,7 @@ export default function AttendanceRecordClient() {
   const [viewNow, setViewNow] = useState(() => new Date())
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
   const [selectedSummaryYear, setSelectedSummaryYear] = useState(currentYear)
+  const [selectedSummaryPersonId, setSelectedSummaryPersonId] = useState("all")
   const [selectedAllTimeYear, setSelectedAllTimeYear] = useState(currentYear)
   const [monthData, setMonthData] = useState<AttendanceMonthData>(EMPTY_MONTH)
   const [yearData, setYearData] = useState<Record<number, AttendanceMonthData>>({})
@@ -1102,6 +1103,26 @@ export default function AttendanceRecordClient() {
   const closedMonthSections = useMemo(
     () => monthSections.filter((section) => yearData[section.month]?.periodClosed),
     [monthSections, yearData],
+  )
+
+  const summaryPeople = useMemo(() => {
+    const peopleById = new Map<string, ApiAttendancePerson>()
+    for (const section of monthSections) {
+      for (const row of section.rows) peopleById.set(row.person.id, row.person)
+    }
+    return sortAttendancePeople([...peopleById.values()], staffOrder)
+  }, [monthSections, staffOrder])
+
+  const filteredMonthSections = useMemo(
+    () => selectedSummaryPersonId === "all"
+      ? monthSections
+      : monthSections
+          .map((section) => ({
+            ...section,
+            rows: section.rows.filter((row) => row.person.id === selectedSummaryPersonId),
+          }))
+          .filter((section) => section.rows.length > 0),
+    [monthSections, selectedSummaryPersonId],
   )
 
   const yearOptions = useMemo(
@@ -1686,21 +1707,40 @@ export default function AttendanceRecordClient() {
         {activeTab === "monthly" ? (
           <section className={styles.tabContent} aria-label="Monthly attendance">
             <div className={styles.yearToolbar}>
-              <label className={styles.yearSelector}>
-                <span>YEAR</span>
-                <select
-                  value={selectedSummaryYear}
-                  onChange={(event) => {
-                    setSelectedSummaryYear(Number(event.target.value))
-                    setYearData({})
-                    setReminderSelection(new Set())
-                  }}
-                  disabled={yearLoading}
-                  aria-label="Monthly attendance year"
-                >
-                  {yearOptions.map((year) => <option value={year} key={year}>{year}</option>)}
-                </select>
-              </label>
+              <div className={styles.summaryFilters}>
+                <label className={styles.yearSelector}>
+                  <span>YEAR</span>
+                  <select
+                    value={selectedSummaryYear}
+                    onChange={(event) => {
+                      setSelectedSummaryYear(Number(event.target.value))
+                      setSelectedSummaryPersonId("all")
+                      setYearData({})
+                      setReminderSelection(new Set())
+                    }}
+                    disabled={yearLoading}
+                    aria-label="Monthly attendance year"
+                  >
+                    {yearOptions.map((year) => <option value={year} key={year}>{year}</option>)}
+                  </select>
+                </label>
+                <label className={styles.userSelector}>
+                  <span>USER</span>
+                  <select
+                    value={selectedSummaryPersonId}
+                    onChange={(event) => setSelectedSummaryPersonId(event.target.value)}
+                    disabled={yearLoading}
+                    aria-label="Monthly attendance user"
+                  >
+                    <option value="all">ALL USERS</option>
+                    {summaryPeople.map((person) => (
+                      <option value={person.id} key={person.id}>
+                        {person.staffCode}{staffSecondaryLabel(person) ? ` — ${staffSecondaryLabel(person)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <button
                 type="button"
                 className={styles.primaryButton}
@@ -1738,7 +1778,7 @@ export default function AttendanceRecordClient() {
                     </tr>
                   </thead>
                   <tbody>
-                    {monthSections.map((section) =>
+                    {filteredMonthSections.map((section) =>
                       section.rows.map((row, rowIndex) => {
                         const confirmed = row.summary?.confirmation?.status === "confirmed"
                         const systemConfirmed = confirmed && row.summary?.confirmation?.confirmedBy === "system:attendance-auto-confirm"
@@ -1792,7 +1832,7 @@ export default function AttendanceRecordClient() {
                         )
                       }),
                     )}
-                    {!monthSections.length ? (
+                    {!filteredMonthSections.length ? (
                       <tr><td colSpan={16}><div className={styles.emptyState}>No monthly records were found for {selectedSummaryYear}.</div></td></tr>
                     ) : null}
                   </tbody>
