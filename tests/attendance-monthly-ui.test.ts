@@ -263,6 +263,7 @@ test("Reminder selection excludes historical, unlinked, and invalid-email staff"
 })
 
 test("All Time uses User Management roster membership and group metadata", () => {
+  assert.doesNotMatch(client, /SEARCH STAFF|Name or initials|rosterSearch/)
   assert.match(client, /const EXCLUDED_STAFF_CODES = new Set\(\["SY", "CD", "HC"\]\)/)
   assert.match(client, /source\.availableUsers/)
   assert.match(client, /user\.attendanceTeam \|\| user\.attendanceGroup/)

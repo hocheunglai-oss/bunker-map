@@ -808,7 +808,6 @@ export default function AttendanceRecordClient() {
   const [rosterDraft, setRosterDraft] = useState<RosterDraftItem[]>([])
   const [leaveDraft, setLeaveDraft] = useState<LeaveDraft | null>(null)
   const [dateTrace, setDateTrace] = useState<DateTracePopover | null>(null)
-  const [rosterSearch, setRosterSearch] = useState("")
   const monthRequestRef = useRef(0)
   const yearRequestRef = useRef(0)
   const settingsRequestRef = useRef(0)
@@ -1210,14 +1209,11 @@ export default function AttendanceRecordClient() {
   }, [selectedAllTimeYear, settings.annualSummaries, settings.entitlements, settings.monthlyAdjustments, settings.people])
 
   const rosterPeople = useMemo(() => {
-    const search = rosterSearch.trim().toLowerCase()
-    const filtered = settings.people.filter((person) => {
-      if (!isActiveRosterPerson(person)) return false
-      if (!search) return true
-      return `${person.staffCode} ${person.displayName} ${person.adminUsername || person.username || ""}`.toLowerCase().includes(search)
-    })
-    return sortAttendancePeople(filtered, staffOrder)
-  }, [rosterSearch, settings.people, staffOrder])
+    return sortAttendancePeople(
+      settings.people.filter(isActiveRosterPerson),
+      staffOrder,
+    )
+  }, [settings.people, staffOrder])
 
   const annualTotals = useMemo(() => {
     const totals = {
@@ -1860,15 +1856,6 @@ export default function AttendanceRecordClient() {
                   >
                     {yearOptions.map((year) => <option value={year} key={year}>{year}</option>)}
                   </select>
-                </label>
-                <label>
-                  <span>SEARCH STAFF</span>
-                  <input
-                    type="search"
-                    value={rosterSearch}
-                    onChange={(event) => setRosterSearch(event.target.value)}
-                    placeholder="Name or initials"
-                  />
                 </label>
               </div>
               <button
