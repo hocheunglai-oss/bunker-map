@@ -2538,12 +2538,13 @@ export function buildAttendanceSecondReminderEmail(input: {
 }) {
   const monthLabel = attendanceMonthLabel(input.year, input.month)
   return {
-    subject: `***** Final Attendance Confirmation Reminder - ${monthLabel}`,
+    subject: `***** Attendance Confirmation Reminder - ${monthLabel}`,
     html: `
       <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
         <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
-        <p style="margin:0 0 10px">This is the second and final reminder to review and confirm your attendance record for <strong>${escapeHtml(monthLabel)}</strong>.</p>
-        <p style="margin:0 0 10px"><strong>Workflow:</strong> Please confirm the record before 18:00 HKT on the third Hong Kong working day of this month. If it remains unconfirmed, the system will mark it <strong>SYSTEM CONFIRMED</strong>.</p>
+        <p style="margin:0 0 10px">Please review and confirm your attendance record for <strong>${escapeHtml(monthLabel)}</strong>.</p>
+        <p style="margin:0 0 10px"><strong>Instruction:</strong> Open Attendance Record using the link below, select <strong>MONTHLY STATEMENT</strong>, review the month and click <strong>CONFIRM</strong>.</p>
+        <p style="margin:0 0 10px">If the record remains unconfirmed, the system will mark it <strong>SYSTEM CONFIRMED</strong> at 18:00 HKT on the third Hong Kong working day of this month. No further reminder will be sent.</p>
         <p style="margin:0 0 10px">System confirmation does not mean that you personally approved every entry and does not remove your right to dispute the record. After system confirmation, please contact an administrator directly if any correction is required.</p>
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>
@@ -2684,21 +2685,18 @@ export async function sendAttendanceSecondReminders(
     return { skipped: true, date: today, ...period, sent: 0, failed: 0, alreadySent: 0, unavailable: 0 }
   }
 
-  const [{ data: peopleData, error: peopleError }, { data: confirmedData, error: confirmedError }, managedUsers] = await Promise.all([
+  const [{ data: peopleData, error: peopleError }, managedUsers] = await Promise.all([
     client.from("attendance_people").select("id,admin_user_id,display_name").eq("is_active", true),
-    client.from("attendance_monthly_confirmations").select("person_id").eq("year", period.year).eq("month", period.month).eq("status", "confirmed"),
     listManagedAdminUsers(),
   ])
   throwIfError(peopleError, "Could not load second-reminder recipients.")
-  throwIfError(confirmedError, "Could not load attendance confirmations.")
-  const confirmedIds = new Set((confirmedData || []).map((value) => String(asRow(value).person_id)))
   const usersById = new Map(managedUsers.map((user) => [user.id, user]))
   const targets = (peopleData || []).flatMap((value) => {
     const person = asRow(value)
     const personId = String(person.id)
     const user = usersById.get(String(person.admin_user_id || ""))
     const emails = normalizeEmailList(user?.username || "")
-    if (confirmedIds.has(personId) || !user?.isActive || emails.length !== 1) return []
+    if (!user?.isActive || emails.length !== 1) return []
     return [{ personId, displayName: user.displayName || String(person.display_name || "Staff member"), email: emails[0] }]
   })
 
@@ -2735,7 +2733,7 @@ export async function sendAttendanceSecondReminders(
     sent: results.filter((value) => value === "sent").length,
     failed: results.filter((value) => value === "failed").length,
     alreadySent: results.filter((value) => value === "already-sent").length,
-    unavailable: Math.max(0, (peopleData || []).length - targets.length - confirmedIds.size),
+    unavailable: Math.max(0, (peopleData || []).length - targets.length),
   }
 }
 

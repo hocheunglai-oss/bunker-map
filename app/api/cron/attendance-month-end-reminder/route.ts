@@ -3,7 +3,6 @@ import { NextResponse } from "next/server"
 import {
   getAttendanceServiceClient,
   sendAttendanceAnnualSummaryReminders,
-  sendAttendanceMonthEndReviewReminders,
   sendAttendanceSecondReminders,
 } from "@/lib/attendanceData"
 
@@ -41,13 +40,12 @@ export async function GET(request: Request) {
 
   try {
     const client = getAttendanceServiceClient()
-    const [monthEndReview, secondReminder, annualSummary] = await Promise.all([
-      sendAttendanceMonthEndReviewReminders(client),
+    const [confirmationReminder, annualSummary] = await Promise.all([
       sendAttendanceSecondReminders(client),
       sendAttendanceAnnualSummaryReminders(client),
     ])
-    const failed = monthEndReview.failed + secondReminder.failed + annualSummary.failed
-    return privateJson({ success: failed === 0, monthEndReview, secondReminder, annualSummary }, {
+    const failed = confirmationReminder.failed + annualSummary.failed
+    return privateJson({ success: failed === 0, confirmationReminder, annualSummary }, {
       status: failed > 0 ? 502 : 200,
     })
   } catch (error) {

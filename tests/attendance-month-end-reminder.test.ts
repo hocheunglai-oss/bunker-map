@@ -13,9 +13,6 @@ function source(path: string) {
 
 const route = source("../app/api/cron/attendance-month-end-reminder/route.ts")
 const data = source("../lib/attendanceData.ts")
-const migration = source(
-  "../supabase/migrations/20260810092214_add_attendance_month_end_reminder_idempotency.sql",
-)
 const vercel = source("../vercel.json")
 const client = source("../app/admin/attendancerecord/AttendanceRecordClient.tsx")
 const autoRoute = source("../app/api/cron/attendance-auto-confirm/route.ts")
@@ -53,36 +50,33 @@ test("working-day workflow respects Hong Kong holidays and crosses the year boun
   assert.deepEqual(previousMonthPeriod(new Date("2027-01-04T00:00:00Z")), { year: 2026, month: 12 })
 })
 
-test("month-end reminder is authenticated, daily scheduled at 08:00 HKT, and retry-safe", () => {
+test("single confirmation reminder is authenticated, scheduled at 08:00 HKT, and retry-safe", () => {
   assert.match(route, /timingSafeEqual/)
   assert.match(route, /CRON_SECRET/)
   assert.match(vercel, /attendance-month-end-reminder[\s\S]*?"schedule": "0 0 \* \* \*"/)
   assert.match(data, /loadAttendanceCalendarContext/)
-  assert.match(data, /system:attendance-month-end-cron/)
-  assert.match(data, /dispatch_kind: "month_end_review"/)
+  assert.match(data, /system:attendance-second-reminder-cron/)
+  assert.match(data, /dispatch_kind: "second_reminder"/)
   assert.match(data, /pending\.error\?\.code === "23505"/)
-  assert.match(migration, /dispatch_kind in \('manual', 'month_end_review'\)/)
-  assert.match(
-    migration,
-    /create unique index if not exists attendance_reminder_dispatches_month_end_once[\s\S]*?where dispatch_kind = 'month_end_review'[\s\S]*?status in \('pending', 'sent'\)/,
-  )
+  assert.doesNotMatch(route, /sendAttendanceMonthEndReviewReminders/)
 })
 
-test("automatic email asks for review now and confirmation only after close", () => {
-  assert.match(data, /last Hong Kong working day/)
-  assert.match(data, /month is still in progress/)
-  assert.match(data, /confirm the monthly record after the month has closed/)
+test("single email gives confirmation instructions, deadline, and dispute rights", () => {
+  assert.match(data, /select <strong>MONTHLY STATEMENT<\/strong>/)
+  assert.match(data, /click <strong>CONFIRM<\/strong>/)
   assert.match(data, /Open Attendance Record/)
-  assert.match(data, /second and final reminder/)
+  assert.match(data, /18:00 HKT on the third Hong Kong working day/)
+  assert.match(data, /No further reminder will be sent/)
   assert.match(data, /SYSTEM CONFIRMED/)
   assert.match(data, /contact an administrator directly/)
 })
 
-test("second reminder and system confirmation are scheduled, audited, and visibly distinct", () => {
+test("all eligible users receive the reminder and system confirmation remains distinct", () => {
   assert.match(vercel, /attendance-auto-confirm[\s\S]*?"schedule": "0 10 \* \* \*"/)
   assert.match(autoRoute, /timingSafeEqual/)
   assert.match(autoRoute, /CRON_SECRET/)
   assert.match(data, /dispatch_kind: "second_reminder"/)
+  assert.doesNotMatch(data, /confirmedIds\.has\(personId\)/)
   assert.match(data, /confirmed_by: "system:attendance-auto-confirm"/)
   assert.match(data, /The employee may dispute the record directly with an administrator/)
   assert.match(client, /SYSTEM CONFIRMED/)
