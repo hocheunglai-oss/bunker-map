@@ -80,14 +80,12 @@
   font-size: 18px;
 }
 
-.recordToolbar > div:first-child,
-.yearToolbar > div:first-child {
+.recordToolbar > div:first-child {
   display: grid;
   gap: 3px;
 }
 
-.recordToolbar > div:first-child > span,
-.yearToolbar > div:first-child > span {
+.recordToolbar > div:first-child > span {
   color: var(--fc-admin-muted);
   font-size: 9px;
   font-weight: 900;

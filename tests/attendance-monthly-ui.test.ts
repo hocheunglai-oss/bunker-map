@@ -119,6 +119,7 @@ test("Monthly view includes required Excel totals, confirmation, and reminders",
   assert.match(client, /<option value="all">ALL USERS<\/option>/)
   assert.match(client, /filteredMonthSections\.map/)
   assert.match(styles, /\.yearToolbar > \.summaryFilters[\s\S]*?display: flex;/)
+  assert.doesNotMatch(styles, /\.yearToolbar > div:first-child/)
   assert.match(client, /selectedSummaryYear < currentYear \? 12 : currentMonth/)
   assert.match(client, /yearData\[section\.month\]\?\.periodClosed/)
   assert.match(client, /year: selectedSummaryYear/)
