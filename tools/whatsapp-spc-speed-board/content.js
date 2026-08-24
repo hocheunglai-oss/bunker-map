@@ -1409,6 +1409,42 @@
     return `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(vessel)}</strong> ${escapeHtml(details)}`
   }
 
+  function amendmentBeforeSegment(enquiry, segment, index) {
+    const normalizedSegment = cleanText(segment).toLowerCase()
+    const changes = enquiryAmendmentChanges(enquiry)
+    const direct = changes.find((change) => {
+      const after = cleanText(change.after).toLowerCase()
+      if (after && (normalizedSegment === after || normalizedSegment.includes(after) || after.includes(normalizedSegment))) {
+        return true
+      }
+      if (change.field === "vesselName") return index === 0
+      if (change.field === "imo") return index === 1
+      if (change.field === "eta" || change.field === "deliveryDate" || change.field === "port") return index === 2
+      if (change.field === "hsfo" || change.field === "vlsfo" || change.field === "lsmgo") {
+        return normalizedSegment.startsWith(change.field.toLowerCase())
+      }
+      return false
+    })
+    if (direct?.before) return cleanText(direct.before)
+
+    const fullTextChange = changes.find((change) => change.field === "notes" && change.before)
+    return fullTextChange ? enquirySegments(fullTextChange.before)[index] || "" : ""
+  }
+
+  function enquiryAmendmentBodyHtml(enquiry) {
+    const segments = enquirySegments(enquiryBodyText(enquiry))
+    const changedIndexes = amendmentChangedSegmentIndexes(enquiry)
+    return segments.map((segment, index) => {
+      if (!changedIndexes.has(index)) {
+        return index === 0
+          ? `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(segment)}</strong>`
+          : escapeHtml(segment)
+      }
+      const before = amendmentBeforeSegment(enquiry, segment, index)
+      return `<span class="fcuno-wa-spc-amendment-diff">${before ? `<del title="Previous value">${escapeHtml(before)}</del><span aria-hidden="true">→</span>` : ""}<strong>${escapeHtml(segment)}</strong></span>`
+    }).join('<span class="fcuno-wa-spc-enquiry-separator"> / </span>')
+  }
+
   function enquiryAmendmentChanges(enquiry) {
     const source = enquiry?.amendmentChanges || enquiry?.last_amendment_changes
     if (!Array.isArray(source)) return []
@@ -2017,7 +2053,6 @@
       const sendable = isSendableEnquiry(enquiry)
       const status = enquiryStatusKey(enquiry)
       const statusText = enquiryStatusText(enquiry)
-      const amendmentChanges = enquiryAmendmentChanges(enquiry)
       const pendingAmendment = isPendingAmendment(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
       const body = enquiryBodyText(enquiry)
@@ -2027,9 +2062,8 @@
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${pendingAmendment ? " is-amended is-amendment-pending" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
-            <em>${body ? enquiryBodyHtml(enquiry) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
-            ${pendingAmendment ? `<span class="fcuno-wa-spc-enquiry-amendment">${amendmentChanges.map((change) => `<i>${escapeHtml(change.label)}: ${escapeHtml(change.after || "removed")}</i>`).join("")}<button type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}">OK</button></span>` : ""}
-            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}</small>
+            <em>${body ? (pendingAmendment ? enquiryAmendmentBodyHtml(enquiry) : enquiryBodyHtml(enquiry)) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
+            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}${pendingAmendment ? `<button class="fcuno-wa-spc-enquiry-amendment" type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}" aria-label="Acknowledge amendment"><span>AMENDED</span><b aria-hidden="true">✓</b></button>` : ""}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
         </div>

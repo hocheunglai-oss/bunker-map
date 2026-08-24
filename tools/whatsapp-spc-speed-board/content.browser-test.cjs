@@ -196,9 +196,9 @@ const html = `<!doctype html>
               callback({
                 ok: true,
                 status: {
-                  installedVersion: staleVersion ? "0.6.5" : "0.6.6",
-                  latestVersion: "0.6.6",
-                  requiredVersion: "0.6.6",
+                  installedVersion: staleVersion ? "0.6.6" : "0.6.7",
+                  latestVersion: "0.6.7",
+                  requiredVersion: "0.6.7",
                   updateRequired: staleVersion,
                   updatePageUrl: "https://spc.fcuno.com/chrome"
                 }
@@ -371,7 +371,7 @@ async function main() {
       await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
       assert.equal(
         (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
-        "UPDATE REQUIRED Installed v0.6.5 · Required v0.6.6 UPDATE",
+        "UPDATE REQUIRED Installed v0.6.6 · Required v0.6.7 UPDATE",
       )
       assert.equal(
         await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
@@ -898,17 +898,23 @@ async function main() {
       await secondTraderPage.waitForSelector(
         "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'].is-amended",
       )
-      assert.match(
+      assert.equal(
         await secondTraderPage.locator(
-          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-enquiry-amendment",
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-amendment-diff del",
         ).innerText(),
-        /^Quantity: vlsfo 650mts[\s\S]*OK$/,
+        "vlsfo 500mts",
+      )
+      assert.equal(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-amendment-diff strong",
+        ).innerText(),
+        "vlsfo 650mts",
       )
       assert.equal(
         await secondTraderPage.locator(
           "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-enquiry-amendment",
-        ).innerText().then((text) => text.includes("AMENDED REV") || text.includes("Details:")),
-        false,
+        ).innerText().then((text) => text.replace(/\s+/g, " ").trim()),
+        "AMENDED ✓",
       )
       assert.equal(
         await secondTraderPage.locator(
@@ -922,6 +928,20 @@ async function main() {
         ).evaluate((row) => getComputedStyle(row).backgroundColor),
         "rgb(255, 240, 239)",
       )
+      assert.deepEqual(
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1']",
+        ).evaluate((row) => ({
+          padding: getComputedStyle(row).padding,
+          marginBottom: getComputedStyle(row).marginBottom,
+        })),
+        { padding: "6px", marginBottom: "5px" },
+      )
+      if (process.env.SPC_BROWSER_TEST_SCREENSHOT) {
+        await secondTraderPage.locator(
+          "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry-panel",
+        ).screenshot({ path: process.env.SPC_BROWSER_TEST_SCREENSHOT })
+      }
 
       const pendingAmendmentSelection = await secondTraderPage.evaluate(() => {
         const api = window.__FCUNO_WA_SPC_TEST_API__
