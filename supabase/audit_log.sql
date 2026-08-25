@@ -1519,8 +1519,10 @@ begin
     or not public.is_valid_outlook_template_recipient_resolution(
       template_record.recipient_resolution
     )
-    or template_record.recipient_resolution ->> 'reconciliationRequired'
-      is distinct from 'false'
+    or coalesce(
+      (template_record.recipient_resolution ->> 'reconciliationRequired')::boolean,
+      false
+    ) is not false
     or template_record.recipient_resolution ->> 'certificationRunId'
       is distinct from p_certification_run_id::text
     or pg_catalog.lower(
@@ -1560,8 +1562,19 @@ begin
       latest_certified_at := null;
   end;
 
-  if template_truth ->> 'valid' is distinct from 'true'
-    or template_truth ->> 'sourceTruthValid' is distinct from 'true'
+  if template_truth ->> 'sourceTruthValid' is distinct from 'true'
+    or coalesce(
+      template_truth #>> '{templates,unresolved}',
+      ''
+    ) is distinct from '0'
+    or coalesce(
+      template_truth #>> '{templates,stale}',
+      ''
+    ) is distinct from '0'
+    or coalesce(
+      template_truth #>> '{templates,invalidShape}',
+      ''
+    ) is distinct from '0'
     or template_truth ->> 'certificationRunId'
       is distinct from p_certification_run_id::text
     or pg_catalog.lower(template_truth ->> 'sourceFingerprint')
@@ -1571,8 +1584,6 @@ begin
     or exchange_truth ->> 'ledgerValid' is distinct from 'true'
     or exchange_truth ->> 'snapshotsValid' is distinct from 'true'
     or exchange_truth ->> 'referencesValid' is distinct from 'true'
-    or exchange_truth ->> 'operationallyConsistent'
-      is distinct from 'true'
     or exchange_truth ->> 'latestCertificationHasProjectionEvidence'
       is distinct from 'true'
     or exchange_truth ->> 'latestCertificationRunId'
@@ -1582,8 +1593,6 @@ begin
     or pg_catalog.lower(
       exchange_truth ->> 'latestProjectionSnapshotSha256'
     ) is distinct from normalized_fingerprint
-    or coalesce(queue_state ->> 'pending', '') is distinct from '0'
-    or coalesce(queue_state ->> 'processing', '') is distinct from '0'
     or coalesce(queue_state ->> 'failed', '') is distinct from '0'
     or coalesce(queue_state ->> 'terminalFailed', '') is distinct from '0'
     or latest_certified_at is null
@@ -1596,7 +1605,7 @@ begin
         )
   then
     raise exception
-      'OUTLOOK_INSERTION_TRUTH_STALE: certified Exchange truth is not exact, settled, and current.'
+      'OUTLOOK_INSERTION_TRUTH_STALE: certified Exchange truth is not valid and current.'
       using errcode = '55000';
   end if;
 

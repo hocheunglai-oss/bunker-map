@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 import { requireOutlookAddinPagePermissionForRequest } from "@/lib/adminAuth"
+import {
+  isCertifiedRecipientProjectionAvailable,
+  type OutlookExchangeTruthVerification,
+} from "@/lib/outlookRecipientMapAvailability"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -8,28 +12,6 @@ export const revalidate = 0
 const RECIPIENT_MAP_TTL_SECONDS = 120
 const DEFAULT_CERTIFICATION_MAX_AGE_SECONDS = 36 * 60 * 60
 const MAX_CERTIFICATION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
-const CLOCK_SKEW_MS = 5 * 60 * 1000
-
-type TruthVerification = {
-  valid?: unknown
-  integrityValid?: unknown
-  ledgerValid?: unknown
-  snapshotsValid?: unknown
-  referencesValid?: unknown
-  operationallyConsistent?: unknown
-  latestCertificationRunId?: unknown
-  latestCertificationAt?: unknown
-  latestSourceFingerprint?: unknown
-  latestCertificationHasProjectionEvidence?: unknown
-  latestProjectionSnapshotSha256?: unknown
-  queue?: {
-    pending?: unknown
-    processing?: unknown
-    failed?: unknown
-    terminalFailed?: unknown
-  }
-}
-
 type ProjectionContact = {
   sourceContactId?: unknown
   directoryName?: unknown
@@ -95,36 +77,6 @@ function certificationMaxAgeSeconds() {
   return Math.max(
     RECIPIENT_MAP_TTL_SECONDS,
     Math.min(Math.floor(configured), MAX_CERTIFICATION_MAX_AGE_SECONDS),
-  )
-}
-
-function isCertifiedTruthHealthy(
-  value: TruthVerification,
-  nowMs = Date.now(),
-  maxAgeSeconds = DEFAULT_CERTIFICATION_MAX_AGE_SECONDS,
-) {
-  const queue = value.queue || {}
-  const certifiedAtMs = Date.parse(cleanText(value.latestCertificationAt))
-  const certificationAgeMs = nowMs - certifiedAtMs
-  return (
-    value.valid === true &&
-    value.integrityValid === true &&
-    value.ledgerValid === true &&
-    value.snapshotsValid === true &&
-    value.referencesValid === true &&
-    value.operationallyConsistent === true &&
-    value.latestCertificationHasProjectionEvidence === true &&
-    cleanText(value.latestCertificationRunId) !== "" &&
-    /^[0-9a-f]{64}$/.test(cleanText(value.latestSourceFingerprint).toLowerCase()) &&
-    cleanText(value.latestProjectionSnapshotSha256).toLowerCase() ===
-      cleanText(value.latestSourceFingerprint).toLowerCase() &&
-    Number(queue.pending || 0) === 0 &&
-    Number(queue.processing || 0) === 0 &&
-    Number(queue.failed || 0) === 0 &&
-    Number(queue.terminalFailed || 0) === 0 &&
-    Number.isFinite(certifiedAtMs) &&
-    certificationAgeMs >= -CLOCK_SKEW_MS &&
-    certificationAgeMs <= maxAgeSeconds * 1000
   )
 }
 
@@ -227,8 +179,14 @@ export async function GET(request: Request) {
     )
     if (verificationError) throw verificationError
 
-    const verification = (verificationData || {}) as TruthVerification
-    if (!isCertifiedTruthHealthy(verification, now.getTime(), maxAgeSeconds)) {
+    const verification = (verificationData || {}) as OutlookExchangeTruthVerification
+    if (
+      !isCertifiedRecipientProjectionAvailable(
+        verification,
+        now.getTime(),
+        maxAgeSeconds,
+      )
+    ) {
       return NextResponse.json(
         {
           code: "RECIPIENT_TRUTH_UNAVAILABLE",

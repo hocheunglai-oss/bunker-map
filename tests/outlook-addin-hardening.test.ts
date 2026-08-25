@@ -12,6 +12,10 @@ const routeFiles = {
     "../lib/outlookTemplateRecipientResolver.ts",
     import.meta.url,
   ),
+  recipientAvailability: new URL(
+    "../lib/outlookRecipientMapAvailability.ts",
+    import.meta.url,
+  ),
   taskpane: new URL(
     "../app/api/outlook-addin/taskpane/route.ts",
     import.meta.url,
@@ -24,10 +28,22 @@ const adminTemplatePageFile = new URL(
 )
 
 async function sources() {
-  const [templates, recipients, recipientResolver, taskpane] = await Promise.all(
+  const [
+    templates,
+    recipients,
+    recipientResolver,
+    recipientAvailability,
+    taskpane,
+  ] = await Promise.all(
     Object.values(routeFiles).map((url) => readFile(url, "utf8")),
   )
-  return { templates, recipients, recipientResolver, taskpane }
+  return {
+    templates,
+    recipients,
+    recipientResolver,
+    recipientAvailability,
+    taskpane,
+  }
 }
 
 function renderedInlineTaskpaneScript(taskpane: string) {
@@ -69,7 +85,7 @@ test("all Outlook reads are confidential and permission-gated", async () => {
   const source = await sources()
 
   for (const [name, value] of Object.entries(source).filter(
-    ([name]) => name !== "recipientResolver",
+    ([name]) => !["recipientResolver", "recipientAvailability"].includes(name),
   )) {
     assert.match(
       value,
@@ -102,8 +118,8 @@ test("all Outlook reads are confidential and permission-gated", async () => {
   assert.doesNotMatch(source.recipients, /message:\s*(?:String\()?error/)
 })
 
-test("recipient map is built only from the latest settled certified projection", async () => {
-  const { recipients, recipientResolver } = await sources()
+test("recipient map keeps the latest certified projection available during active sync", async () => {
+  const { recipients, recipientResolver, recipientAvailability } = await sources()
 
   for (const flag of [
     "valid",
@@ -111,20 +127,29 @@ test("recipient map is built only from the latest settled certified projection",
     "ledgerValid",
     "snapshotsValid",
     "referencesValid",
-    "operationallyConsistent",
     "latestCertificationHasProjectionEvidence",
   ]) {
-    assert.match(recipients, new RegExp(`value\\.${flag} === true`))
+    assert.match(recipientAvailability, new RegExp(`value\\.${flag} === true`))
   }
-  for (const state of ["pending", "processing", "failed", "terminalFailed"]) {
+  for (const state of ["failed", "terminalFailed"]) {
     assert.match(
-      recipients,
+      recipientAvailability,
+      new RegExp(`Number\\(queue\\.${state} \\|\\| 0\\) === 0`),
+    )
+  }
+  assert.doesNotMatch(
+    recipientAvailability,
+    /value\.operationallyConsistent === true/,
+  )
+  for (const state of ["pending", "processing"]) {
+    assert.doesNotMatch(
+      recipientAvailability,
       new RegExp(`Number\\(queue\\.${state} \\|\\| 0\\) === 0`),
     )
   }
 
   assert.match(
-    recipients,
+    recipientAvailability,
     /certificationAgeMs <= maxAgeSeconds \* 1000/,
   )
   assert.match(
@@ -148,8 +173,8 @@ test("recipient map is built only from the latest settled certified projection",
     /\.eq\("snapshot_sha256", sourceFingerprint\)/,
   )
   assert.match(
-    recipients,
-    /latestProjectionSnapshotSha256\)\.toLowerCase\(\) ===[\s\S]*latestSourceFingerprint\)\.toLowerCase\(\)/,
+    recipientAvailability,
+    /cleanText\(value\.latestProjectionSnapshotSha256\)\.toLowerCase\(\) ===[\s\S]*sourceFingerprint/,
   )
   assert.match(recipients, /const sourceKey = `contact:\$\{sourceId\}`/)
   assert.match(recipients, /const sourceKey = `group:\$\{sourceId\}`/)

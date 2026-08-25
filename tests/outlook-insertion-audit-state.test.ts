@@ -11,6 +11,10 @@ const migrationFile = new URL(
   "../supabase/migrations/20260723141044_outlook_insertion_audit_state_machine.sql",
   import.meta.url,
 )
+const activeSyncContinuityMigrationFile = new URL(
+  "../supabase/migrations/20260825045312_keep_outlook_templates_available_during_sync.sql",
+  import.meta.url,
+)
 const auditBaselineFile = new URL("../supabase/audit_log.sql", import.meta.url)
 const taskpaneFile = new URL(
   "../app/api/outlook-addin/taskpane/route.ts",
@@ -77,6 +81,18 @@ function insertionEvent(input: {
   }
 }
 
+function latestReservationFunction(source: string) {
+  const start = source.lastIndexOf(
+    "create or replace function public.reserve_outlook_template_insertion(",
+  )
+  assert.ok(start >= 0, "reservation function should exist")
+  const nextFunction = source.indexOf(
+    "create or replace function public.complete_outlook_template_insertion(",
+    start,
+  )
+  return source.slice(start, nextFunction >= 0 ? nextFunction : undefined).trim()
+}
+
 test("database enforces append-only reservation and one terminal phase per operation", async () => {
   const [migration, baseline] = await Promise.all([
     readFile(migrationFile, "utf8"),
@@ -134,10 +150,25 @@ test("database enforces append-only reservation and one terminal phase per opera
 
   const stateMachineStart =
     "drop index if exists\n  public.audit_logs_outlook_template_insertion_operation_id_key;"
+  const reservationStart =
+    "create or replace function public.reserve_outlook_template_insertion("
+  const completionStart =
+    "create or replace function public.complete_outlook_template_insertion("
   assert.equal(
-    baseline.slice(baseline.lastIndexOf(stateMachineStart)),
-    migration.slice(migration.indexOf(stateMachineStart)),
-    "baseline and forward migration must keep the insertion state machine identical",
+    baseline.slice(
+      baseline.lastIndexOf(stateMachineStart),
+      baseline.lastIndexOf(reservationStart),
+    ),
+    migration.slice(
+      migration.indexOf(stateMachineStart),
+      migration.indexOf(reservationStart),
+    ),
+    "baseline and forward migration must keep the insertion state-machine guards identical",
+  )
+  assert.equal(
+    baseline.slice(baseline.lastIndexOf(completionStart)),
+    migration.slice(migration.indexOf(completionStart)),
+    "baseline and forward migration must keep terminal insertion handling identical",
   )
 })
 
@@ -245,6 +276,62 @@ test("database atomically validates and reserves exact current template truth", 
   assert.match(
     migration,
     /revoke all on function public\.reserve_outlook_template_insertion[\s\S]*from public, anon, authenticated;[\s\S]*grant execute[\s\S]*to service_role;/,
+  )
+})
+
+test("active Exchange sync keeps certified Outlook template insertion available", async () => {
+  const [migration, baseline] = await Promise.all([
+    readFile(activeSyncContinuityMigrationFile, "utf8"),
+    readFile(auditBaselineFile, "utf8"),
+  ])
+  const migrationFunction = latestReservationFunction(migration)
+  const baselineFunction = latestReservationFunction(baseline)
+
+  assert.equal(
+    baselineFunction,
+    migrationFunction,
+    "the audit baseline must contain the latest reservation function",
+  )
+  assert.doesNotMatch(
+    migrationFunction,
+    /template_truth ->> 'valid' is distinct from 'true'/,
+  )
+  for (const templateCount of ["unresolved", "stale", "invalidShape"]) {
+    assert.match(
+      migrationFunction,
+      new RegExp(`template_truth #>> '\\{templates,${templateCount}\\}'`),
+    )
+  }
+  assert.doesNotMatch(
+    migrationFunction,
+    /exchange_truth ->> 'operationallyConsistent'/,
+  )
+  for (const queueStatus of ["pending", "processing"]) {
+    assert.doesNotMatch(
+      migrationFunction,
+      new RegExp(`queue_state ->> '${queueStatus}'`),
+    )
+  }
+  for (const queueStatus of ["failed", "terminalFailed"]) {
+    assert.match(
+      migrationFunction,
+      new RegExp(`queue_state ->> '${queueStatus}'[\\s\\S]*is distinct from '0'`),
+    )
+  }
+  for (const field of [
+    "sourceTruthValid",
+    "valid",
+    "integrityValid",
+    "ledgerValid",
+    "snapshotsValid",
+    "referencesValid",
+    "latestCertificationHasProjectionEvidence",
+  ]) {
+    assert.match(migrationFunction, new RegExp(`->> '${field}'`))
+  }
+  assert.match(
+    migrationFunction,
+    /latest_certified_at[\s\S]*p_certification_max_age_seconds/,
   )
 })
 
