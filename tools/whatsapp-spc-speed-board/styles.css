@@ -712,20 +712,8 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
 
 .fcuno-wa-spc-amendment-diff {
   display: inline;
+  color: #b42318;
   white-space: normal;
-}
-
-.fcuno-wa-spc-amendment-diff del {
-  color: #667781;
-  font-weight: 700;
-  text-decoration-color: #b42318;
-  text-decoration-thickness: 1.5px;
-}
-
-.fcuno-wa-spc-amendment-diff > span {
-  margin: 0 3px;
-  color: #667781;
-  font-weight: 700;
 }
 
 .fcuno-wa-spc-amendment-diff strong {

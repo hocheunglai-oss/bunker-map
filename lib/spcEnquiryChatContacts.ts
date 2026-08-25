@@ -8,6 +8,13 @@ type SpcUserRow = {
   username: string
   display_name: string | null
   whatsapp_phone: string | null
+  delivery_route_id?: string | null
+}
+
+type SpcDeliveryRouteRow = {
+  id: string
+  exact_group_name: string
+  is_active: boolean
 }
 
 type PhonebookContactRow = {
@@ -33,6 +40,7 @@ export type SpcEnquiryChatContact = {
   displayName: string
   phone: string
   phonebookContactId: string
+  exactGroupName: string
 }
 
 const COUNTRY_CODE_BY_DOMAIN: Record<string, string> = {
@@ -105,8 +113,17 @@ function preferredPhone(contact: PhonebookContactRow, username: string) {
   return ""
 }
 
-export function resolveSpcEnquiryChatContacts(users: SpcUserRow[], contacts: PhonebookContactRow[]) {
+export function resolveSpcEnquiryChatContacts(
+  users: SpcUserRow[],
+  contacts: PhonebookContactRow[],
+  routes: SpcDeliveryRouteRow[] = [],
+) {
   const contactsByUsername = new Map<string, PhonebookContactRow[]>()
+  const activeRouteNames = new Map(
+    routes
+      .filter((route) => route.is_active && route.exact_group_name.trim())
+      .map((route) => [route.id, route.exact_group_name.trim()]),
+  )
   for (const contact of contacts) {
     for (const username of phonebookEmails(contact)) {
       const matches = contactsByUsername.get(username) || []
@@ -117,6 +134,9 @@ export function resolveSpcEnquiryChatContacts(users: SpcUserRow[], contacts: Pho
 
   return users.flatMap<SpcEnquiryChatContact>((user) => {
     const username = normalizeSpcChatUsername(user.username)
+    const exactGroupName = user.delivery_route_id
+      ? activeRouteNames.get(user.delivery_route_id) || ""
+      : ""
     const explicitPhone = normalizeWhatsappPhone(user.whatsapp_phone, username)
     if (username && explicitPhone) {
       return [{
@@ -124,17 +144,19 @@ export function resolveSpcEnquiryChatContacts(users: SpcUserRow[], contacts: Pho
         displayName: user.display_name?.trim() || username,
         phone: explicitPhone,
         phonebookContactId: "",
+        exactGroupName,
       }]
     }
     const matches = contactsByUsername.get(username) || []
-    if (!username || matches.length !== 1) return []
-    const phone = preferredPhone(matches[0], username)
-    if (!phone) return []
+    if (!username) return []
+    const phone = matches.length === 1 ? preferredPhone(matches[0], username) : ""
+    if (!phone && !exactGroupName) return []
     return [{
       username,
-      displayName: user.display_name?.trim() || matches[0].full_name?.trim() || username,
+      displayName: user.display_name?.trim() || matches[0]?.full_name?.trim() || username,
       phone,
-      phonebookContactId: matches[0].id,
+      phonebookContactId: phone ? matches[0].id : "",
+      exactGroupName,
     }]
   })
 }
@@ -154,7 +176,7 @@ export async function listSpcEnquiryChatContacts(requestedUsernames: unknown) {
   )
   const { data: userData, error: userError } = await supabase
     .from("spc_users")
-    .select("username,display_name,whatsapp_phone")
+    .select("username,display_name,whatsapp_phone,delivery_route_id")
     .eq("is_active", true)
     .in("username", usernames)
 
@@ -163,6 +185,7 @@ export async function listSpcEnquiryChatContacts(requestedUsernames: unknown) {
   if (users.length === 0) return []
 
   const allowedUsernames = users.map((user) => normalizeSpcChatUsername(user.username)).filter(Boolean)
+  const routeIds = Array.from(new Set(users.map((user) => user.delivery_route_id).filter(Boolean))) as string[]
   const contactRows = new Map<string, PhonebookContactRow>()
   const select = [
     "id",
@@ -178,12 +201,25 @@ export async function listSpcEnquiryChatContacts(requestedUsernames: unknown) {
     ...EMAIL_FIELDS,
   ].join(",")
 
-  for (const usernameChunk of chunk(allowedUsernames, PHONEBOOK_QUERY_CHUNK_SIZE)) {
-    const filters = usernameChunk.flatMap((username) => EMAIL_FIELDS.map((field) => `${field}.eq.${username}`))
-    const { data, error } = await supabase.from("phonebook_contacts").select(select).or(filters.join(","))
-    if (error) throw error
-    for (const contact of (data || []) as unknown as PhonebookContactRow[]) contactRows.set(contact.id, contact)
-  }
+  const [{ data: routeData, error: routeError }] = await Promise.all([
+    routeIds.length
+      ? supabase
+          .from("spc_delivery_routes")
+          .select("id,exact_group_name,is_active")
+          .in("id", routeIds)
+      : Promise.resolve({ data: [], error: null }),
+    ...chunk(allowedUsernames, PHONEBOOK_QUERY_CHUNK_SIZE).map(async (usernameChunk) => {
+      const filters = usernameChunk.flatMap((username) => EMAIL_FIELDS.map((field) => `${field}.eq.${username}`))
+      const { data, error } = await supabase.from("phonebook_contacts").select(select).or(filters.join(","))
+      if (error) throw error
+      for (const contact of (data || []) as unknown as PhonebookContactRow[]) contactRows.set(contact.id, contact)
+    }),
+  ])
+  if (routeError) throw routeError
 
-  return resolveSpcEnquiryChatContacts(users, Array.from(contactRows.values()))
+  return resolveSpcEnquiryChatContacts(
+    users,
+    Array.from(contactRows.values()),
+    (routeData || []) as SpcDeliveryRouteRow[],
+  )
 }

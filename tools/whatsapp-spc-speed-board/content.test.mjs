@@ -589,9 +589,14 @@ assert.deepEqual(
 )
 assert.equal(api.isPendingAmendment(amendedEnquiry), true)
 assert.deepEqual(Array.from(api.amendmentCategories(amendedEnquiry)), ["Quantity"])
+const amendmentBody = api.enquiryAmendmentBodyHtml(amendedEnquiry)
+assert.match(amendmentBody, /Fuel: vlsfo 19mts/)
+assert.doesNotMatch(amendmentBody, /vlsfo 9mts/)
+assert.doesNotMatch(amendmentBody, /<del|→/)
+assert.doesNotMatch(amendmentBody, /test only stanley route|9002201|sg 29 aug/)
 assert.equal(
   api.selectedEnquiryText(),
-  "Quantity Amended\n\ntest only stanley route / 9002201 / sg 29 aug / *vlsfo 19mts*",
+  "Quantity Amended\ntest only stanley route / 9002201 / sg 29 aug / *vlsfo 19mts*",
 )
 api.state.acknowledgedAmendmentRevisions = { "enq-amended": 2 }
 assert.equal(api.isPendingAmendment(amendedEnquiry), false)
@@ -611,24 +616,37 @@ assert.deepEqual(
 )
 
 api.state.senderContacts = api.sanitizeSenderContacts({
-  "BARRY@COSULICH.COM.SG": {
-    username: "barry@cosulich.com.sg",
-    displayName: "BARRY KHOO",
-    phone: "+65 9000 0001",
-    phonebookContactId: "phonebook-barry",
-  },
+  "OTTO@COSULICH.COM.HK": { username: "otto@cosulich.com.hk", displayName: "OTTO LAI", phone: "+852 6688 5575", exactGroupName: "Otto (FCBHK) SG Enqs" },
+  "VINCENT@COSULICH.COM.HK": { username: "vincent@cosulich.com.hk", displayName: "VINCENT LEE", phone: "+852 6688 5573", exactGroupName: "Vincent (FCBHK) SG Enqs" },
+  "STANLEY@COSULICH.COM.HK": { username: "stanley@cosulich.com.hk", displayName: "STANLEY CHUI", phone: "+852 6688 5572", exactGroupName: "Stanley (FCBHK) SG Enqs" },
 })
+assert.equal(api.enquirySenderGroupName({ createdByUsername: "otto@cosulich.com.hk" }), "Otto (FCBHK) SG Enqs")
+assert.equal(api.enquirySenderGroupName({ createdByUsername: "vincent@cosulich.com.hk" }), "Vincent (FCBHK) SG Enqs")
+assert.equal(api.enquirySenderGroupName({ createdByUsername: "stanley@cosulich.com.hk" }), "Stanley (FCBHK) SG Enqs")
 assert.deepEqual(
-  JSON.parse(JSON.stringify(api.enquirySenderContact({ createdByUsername: "BARRY@COSULICH.COM.SG" }))),
+  JSON.parse(JSON.stringify(api.enquirySenderContact({ createdByUsername: "VINCENT@COSULICH.COM.HK" }))),
   {
-    id: "spc-sender:barry@cosulich.com.sg",
-    name: "BARRY KHOO",
-    chatName: "BARRY KHOO",
-    phone: "6590000001",
+    id: "spc-sender:vincent@cosulich.com.hk",
+    name: "VINCENT LEE",
+    chatName: "VINCENT LEE",
+    phone: "85266885573",
     directUrl: "",
     kind: "contact",
   },
 )
 assert.equal(api.enquirySenderContact({ createdByUsername: "missing@cosulich.com.sg" }), null)
+api.state.enquiries = [{
+  id: "unrouted",
+  formattedText: "manual review test / 9000001 / sg 30 aug / vlsfo 10mts",
+  createdByUsername: "missing@cosulich.com.sg",
+  createdByDisplayName: "MISSING TRADER",
+  createdAt: "2026-08-25T04:00:00Z",
+  status: "sent",
+}]
+const unroutedHtml = api.renderEnquiries()
+assert.match(unroutedHtml, /Manual review required: no exact WhatsApp group configured for MISSING TRADER/)
+assert.match(unroutedHtml, /fcuno-wa-spc-enquiry-chat is-unavailable/)
+assert.match(unroutedHtml, /disabled/)
+assert.doesNotMatch(unroutedHtml, /Otto \(FCBHK\) SG Enqs/)
 
 console.log("SPC WhatsApp content tests passed")

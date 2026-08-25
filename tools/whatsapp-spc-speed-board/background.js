@@ -415,12 +415,14 @@ async function fetchSpcEnquiryChatContacts(usernames, sessionKey = enquiryCache.
         ;(Array.isArray(data.contacts) ? data.contacts : []).forEach((contact) => {
           const username = String(contact?.username || "").trim().toLowerCase()
           const phone = String(contact?.phone || "").replace(/\D/g, "")
-          if (!username || phone.length < 8 || phone.length > 15) return
+          const exactGroupName = String(contact?.exactGroupName || "").trim()
+          if (!username || (!exactGroupName && (phone.length < 8 || phone.length > 15))) return
           senderContactCache.byUsername.set(username, {
             username,
             displayName: String(contact?.displayName || username).trim(),
             phone,
             phonebookContactId: String(contact?.phonebookContactId || ""),
+            exactGroupName,
           })
         })
       }

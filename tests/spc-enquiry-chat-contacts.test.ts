@@ -51,6 +51,7 @@ test("resolves only one exact phonebook email match", () => {
       displayName: "BARRY KHOO",
       phone: "6591456766",
       phonebookContactId: "barry",
+      exactGroupName: "",
     },
   ])
 })
@@ -68,6 +69,42 @@ test("uses the verified SPC user WhatsApp phone before phonebook fallback", () =
       displayName: "BARRY KHOO",
       phone: "6591456766",
       phonebookContactId: "",
+      exactGroupName: "",
     },
   ])
+})
+
+test("resolves Otto, Vincent, and Stanley to their exact active delivery groups", () => {
+  const users = [
+    { username: "otto@cosulich.com.hk", display_name: "OTTO LAI", whatsapp_phone: "+852 6688 5575", delivery_route_id: "route-otto" },
+    { username: "vincent@cosulich.com.hk", display_name: "VINCENT LEE", whatsapp_phone: "+852 6688 5573", delivery_route_id: "route-vincent" },
+    { username: "stanley@cosulich.com.hk", display_name: "STANLEY CHUI", whatsapp_phone: "+852 6688 5572", delivery_route_id: "route-stanley" },
+  ]
+  const routes = [
+    { id: "route-otto", exact_group_name: "Otto (FCBHK) SG Enqs", is_active: true },
+    { id: "route-vincent", exact_group_name: "Vincent (FCBHK) SG Enqs", is_active: true },
+    { id: "route-stanley", exact_group_name: "Stanley (FCBHK) SG Enqs", is_active: true },
+  ]
+
+  assert.deepEqual(
+    resolveSpcEnquiryChatContacts(users, [], routes).map(({ displayName, exactGroupName }) => ({
+      displayName,
+      exactGroupName,
+    })),
+    [
+      { displayName: "OTTO LAI", exactGroupName: "Otto (FCBHK) SG Enqs" },
+      { displayName: "VINCENT LEE", exactGroupName: "Vincent (FCBHK) SG Enqs" },
+      { displayName: "STANLEY CHUI", exactGroupName: "Stanley (FCBHK) SG Enqs" },
+    ],
+  )
+})
+
+test("does not expose an inactive delivery group as a reply route", () => {
+  const result = resolveSpcEnquiryChatContacts(
+    [{ username: "vincent@cosulich.com.hk", display_name: "VINCENT LEE", whatsapp_phone: "+852 6688 5573", delivery_route_id: "route-vincent" }],
+    [],
+    [{ id: "route-vincent", exact_group_name: "Vincent (FCBHK) SG Enqs", is_active: false }],
+  )
+
+  assert.equal(result[0].exactGroupName, "")
 })

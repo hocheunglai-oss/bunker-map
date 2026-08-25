@@ -26,6 +26,7 @@ import {
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import { notifyParserReportCountChanged } from "@/lib/parserReportClient"
+import { spcAmendmentSummaryLabels } from "@/lib/spcAmendmentPresentation"
 
 type SpcEnquiry = {
   id: string
@@ -1135,13 +1136,14 @@ export default function SpcEnquiriesPage() {
             <div className="spc-sent-enquiries-list">
               {activeEnquiries.map((enquiry) => {
                 const matches = matchesFor(enquiry)
+                const amendmentLabels = spcAmendmentSummaryLabels(enquiry.amendmentChanges)
                 return (
                   <article key={enquiry.id} className={`spc-sent-enquiry-card${enquiry.lastAmendedAt ? " is-amended" : ""}`}>
                     <div className="spc-sent-enquiry-summary"><p>{enquiry.formattedText || enquiry.title}</p><span className={`spc-status-pill is-${enquiryStatusClass(enquiry)}`}>{enquiryStatusLabel(enquiry)}</span></div>
-                    {enquiry.lastAmendedAt ? (
+                    {enquiry.lastAmendedAt && amendmentLabels.length > 0 ? (
                       <div className="spc-enquiry-amendment">
-                        {enquiry.amendmentChanges.map((change) => (
-                          <span key={change.field}>{change.label}: {change.after || "removed"}</span>
+                        {amendmentLabels.map((label) => (
+                          <span key={label}>{label}</span>
                         ))}
                       </div>
                     ) : null}

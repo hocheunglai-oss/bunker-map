@@ -167,6 +167,7 @@ enquiryResponses.push({
       displayName: "BARRY KHOO",
       phone: "6590000001",
       phonebookContactId: "phonebook-barry",
+      exactGroupName: "Barry (FCBHK) SG Enqs",
     },
   ],
 })
@@ -180,6 +181,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(senderContacts)), {
     displayName: "BARRY KHOO",
     phone: "6590000001",
     phonebookContactId: "phonebook-barry",
+    exactGroupName: "Barry (FCBHK) SG Enqs",
   },
 })
 assert.equal(

@@ -8,7 +8,6 @@
   const LISTS = ["supplier", "buyer"]
   const LIST_LABELS = { supplier: "Supplier", buyer: "Buyer" }
   const DEFAULT_TEMPLATE_TEXT = "Good day, please quote for the following enquiries."
-  const ENQUIRY_REPLY_GROUP_NAME = "Otto (FCBHK) SG Enqs"
   const PENDING_SEND_TIMEOUT_MS = 30000
   const SEND_LOCK_KEY = "fcuno-wa-spc-send-lock-v1"
   const SEND_LOCK_TTL_MS = 2500
@@ -1203,14 +1202,21 @@
       if (!contact || typeof contact !== "object") return []
       const username = cleanText(contact.username || key).toLowerCase()
       const phone = phoneDigits(contact.phone)
-      if (!username || phone.length < 8 || phone.length > 15) return []
+      const exactGroupName = cleanText(contact.exactGroupName)
+      if (!username || (!exactGroupName && (phone.length < 8 || phone.length > 15))) return []
       return [[username, {
         username,
         displayName: cleanText(contact.displayName || username),
         phone,
         phonebookContactId: cleanText(contact.phonebookContactId),
+        exactGroupName,
       }]]
     }))
+  }
+
+  function enquirySenderGroupName(enquiry) {
+    const username = enquirySenderUsername(enquiry)
+    return cleanText(state.senderContacts[username]?.exactGroupName)
   }
 
   function enquirySenderContact(enquiry) {
@@ -1244,7 +1250,9 @@
   async function performOpenEnquiryGroupChat(enquiry) {
     const replyText = enquiryReplyText(enquiry)
     if (!replyText) return false
-    const openedChatName = await searchAndOpenExactGroup(ENQUIRY_REPLY_GROUP_NAME)
+    const groupName = enquirySenderGroupName(enquiry)
+    if (!groupName) return false
+    const openedChatName = await searchAndOpenExactGroup(groupName)
     if (!openedChatName) return false
     const expectedChatName = openedChatName.toLowerCase()
 
@@ -1409,40 +1417,13 @@
     return `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(vessel)}</strong> ${escapeHtml(details)}`
   }
 
-  function amendmentBeforeSegment(enquiry, segment, index) {
-    const normalizedSegment = cleanText(segment).toLowerCase()
-    const changes = enquiryAmendmentChanges(enquiry)
-    const direct = changes.find((change) => {
-      const after = cleanText(change.after).toLowerCase()
-      if (after && (normalizedSegment === after || normalizedSegment.includes(after) || after.includes(normalizedSegment))) {
-        return true
-      }
-      if (change.field === "vesselName") return index === 0
-      if (change.field === "imo") return index === 1
-      if (change.field === "eta" || change.field === "deliveryDate" || change.field === "port") return index === 2
-      if (change.field === "hsfo" || change.field === "vlsfo" || change.field === "lsmgo") {
-        return normalizedSegment.startsWith(change.field.toLowerCase())
-      }
-      return false
-    })
-    if (direct?.before) return cleanText(direct.before)
-
-    const fullTextChange = changes.find((change) => change.field === "notes" && change.before)
-    return fullTextChange ? enquirySegments(fullTextChange.before)[index] || "" : ""
-  }
-
   function enquiryAmendmentBodyHtml(enquiry) {
-    const segments = enquirySegments(enquiryBodyText(enquiry))
-    const changedIndexes = amendmentChangedSegmentIndexes(enquiry)
-    return segments.map((segment, index) => {
-      if (!changedIndexes.has(index)) {
-        return index === 0
-          ? `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(segment)}</strong>`
-          : escapeHtml(segment)
-      }
-      const before = amendmentBeforeSegment(enquiry, segment, index)
-      return `<span class="fcuno-wa-spc-amendment-diff">${before ? `<del title="Previous value">${escapeHtml(before)}</del><span aria-hidden="true">→</span>` : ""}<strong>${escapeHtml(segment)}</strong></span>`
-    }).join('<span class="fcuno-wa-spc-enquiry-separator"> / </span>')
+    const changes = enquiryAmendmentChanges(enquiry)
+    if (!changes.length) return escapeHtml(enquiryBodyText(enquiry))
+    return changes.map((change) => {
+      const value = cleanText(change.after) || "removed"
+      return `<span class="fcuno-wa-spc-amendment-diff"><strong>${escapeHtml(change.label)}: ${escapeHtml(value)}</strong></span>`
+    }).join('<span class="fcuno-wa-spc-enquiry-separator"> · </span>')
   }
 
   function enquiryAmendmentChanges(enquiry) {
@@ -2055,12 +2036,16 @@
       const statusText = enquiryStatusText(enquiry)
       const pendingAmendment = isPendingAmendment(enquiry)
       const sender = enquiry.createdByDisplayName || enquiry.created_by_display_name || enquiry.createdByUsername || "Unknown"
+      const replyGroupName = enquirySenderGroupName(enquiry)
+      const replyRouteLabel = replyGroupName
+        ? `Open WhatsApp group ${replyGroupName} and prepare this enquiry`
+        : `Manual review required: no exact WhatsApp group configured for ${sender}`
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${pendingAmendment ? " is-amended is-amendment-pending" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
-          <button class="fcuno-wa-spc-enquiry-chat" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry" aria-label="Open WhatsApp group ${escapeHtml(ENQUIRY_REPLY_GROUP_NAME)} and prepare this enquiry"><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
+          <button class="fcuno-wa-spc-enquiry-chat${replyGroupName ? "" : " is-unavailable"}" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="${escapeHtml(replyRouteLabel)}" aria-label="${escapeHtml(replyRouteLabel)}" ${replyGroupName ? "" : "disabled"}><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? (pendingAmendment ? enquiryAmendmentBodyHtml(enquiry) : enquiryBodyHtml(enquiry)) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
             <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}${pendingAmendment ? `<button class="fcuno-wa-spc-enquiry-amendment" type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}" aria-label="Acknowledge amendment"><span>AMENDED</span><b aria-hidden="true">✓</b></button>` : ""}</small>
@@ -2618,6 +2603,8 @@
       getCurrentChat,
       acknowledgeAmendment,
       amendmentCategories,
+      enquiryAmendmentBodyHtml,
+      enquirySenderGroupName,
       amendmentSendText,
       enquiryTextForIds,
       enquirySenderContact,
@@ -2635,6 +2622,7 @@
       renameContact,
       searchAndOpenPhoneContact,
       render,
+      renderEnquiries,
       sanitizeSavedState,
       sanitizeSenderContacts,
       sendSelectionLabel,
