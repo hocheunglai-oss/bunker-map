@@ -10,7 +10,10 @@ test("SPC mobile enquiry composer stays compact and touch friendly", () => {
     /\.spc-enquiry-raw textarea\s*\{[^}]*height:\s*132px;[^}]*min-height:\s*132px;/,
   )
   assert.match(css, /\.spc-enquiry-command-row button\s*\{[^}]*min-height:\s*42px;/)
-  assert.match(css, /\.fc-admin-scope \.fc-admin-mobile-menu\s*\{[^}]*min-height:\s*44px;/)
+  assert.match(
+    css,
+    /\.fc-admin-scope \.fc-admin-mobile-menu\s*\{[^}]*height:\s*44px\s*!important;[^}]*min-height:\s*44px\s*!important;/,
+  )
 })
 
 test("SPC mobile ledgers expose horizontal navigation and keep the key column visible", () => {

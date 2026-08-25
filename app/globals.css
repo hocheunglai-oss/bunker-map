@@ -8590,7 +8590,8 @@ body:has(.spc-statistics-page) .spc-main {
   }
 
   .fc-admin-scope .fc-admin-mobile-menu {
-    min-height: 44px;
+    height: 44px !important;
+    min-height: 44px !important;
     padding-inline: 14px;
   }
 
