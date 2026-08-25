@@ -1,12 +1,13 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
-import type { SpcSession } from "@/lib/spcAuth"
+import { hasSpcAdminPagePermission, type SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext } from "@/lib/spcAudit"
 import { listManagedSpcUsers } from "@/lib/spcUsers"
 import type { SpcEnquiry } from "@/lib/spcEnquiries"
 
 const MAX_ATTEMPTS = 20
 const PROCESSING_STALE_MS = 5 * 60 * 1000
+export const SPC_BACKUP_MODE_DURATION_MS = 24 * 60 * 60 * 1000
 const RETRY_SECONDS = [60, 300, 900, 1800, 3600, 7200, 14400, 21600]
 const TEMPLATE_NAME = process.env.SPC_MOBILE_MODE_TEMPLATE_NAME?.trim() || "spc_mobile_mode_on"
 const TEMPLATE_LANGUAGE = process.env.SPC_MOBILE_ENQUIRY_TEMPLATE_LANGUAGE?.trim() || "en_US"
@@ -37,6 +38,7 @@ type MobileModeRow = {
   activation_message_id: string | null
   activation_attempt_count: number
   conversation_open_until: string | null
+  expires_at: string | null
   updated_at: string
 }
 
@@ -106,15 +108,27 @@ function failureStatus(error: unknown) {
   return error instanceof DeliveryUncertainError ? "manual_review" : "failed"
 }
 
+export function isSpcBackupModeActive(
+  enabled: boolean,
+  expiresAt: string | null | undefined,
+  now = Date.now(),
+) {
+  return enabled && Date.parse(String(expiresAt || "")) > now
+}
+
+export function getSpcBackupModeExpiry(now = new Date()) {
+  return new Date(now.getTime() + SPC_BACKUP_MODE_DURATION_MS).toISOString()
+}
+
 export function formatSpcMobileEnquiryText(row: Pick<EnquiryRow, "title" | "notes">) {
   const marker = "---SPC_META---"
   const notes = String(row.notes || "").split(marker)[0].trim()
   return (notes || row.title).replace(/\s*\n\s*/g, " / ").replace(/\s+/g, " ").trim().slice(0, 1400)
 }
 
-async function eligibleTrader(session: SpcSession) {
+async function eligibleTrader(userId: string | null) {
   const users = await listManagedSpcUsers()
-  const user = users.find((candidate) => candidate.id === session.userId)
+  const user = users.find((candidate) => candidate.id === userId)
   if (!user) return null
   const whatsappPhone = user.whatsappPhone.replace(/\D/g, "")
   return user.isActive && user.isSupplierTrader && /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
@@ -122,29 +136,82 @@ async function eligibleTrader(session: SpcSession) {
     : null
 }
 
-export async function getSpcMobileMode(session: SpcSession) {
-  const trader = await eligibleTrader(session)
-  if (!trader) return { eligible: false, enabled: false, expiresAt: null, maskedPhone: "" }
-  const { data, error } = await serviceClient().from("spc_mobile_modes").select("enabled,conversation_open_until,activation_status").eq("spc_user_id", trader.id).maybeSingle()
+function targetUserId(session: SpcSession, requestedUserId?: string | null, access: "view" | "edit" = "view") {
+  const target = String(requestedUserId || session.userId || "").trim()
+  if (!target) throw new Error("Unauthorized")
+  if (target !== session.userId && !hasSpcAdminPagePermission(session, access)) throw new Error("Forbidden")
+  return target
+}
+
+async function expireSpcBackupModes(now = new Date()) {
+  const supabase = serviceClient()
+  const nowIso = now.toISOString()
+  const { data: expiredModes, error } = await supabase.from("spc_mobile_modes").update({
+    enabled: false,
+    deactivated_at: nowIso,
+    activation_token: null,
+    activation_status: "idle",
+    activation_message_id: null,
+    activation_delivery_status: null,
+    activation_next_attempt_at: nowIso,
+    activation_last_error: null,
+    updated_at: nowIso,
+  }).eq("enabled", true).or(`expires_at.is.null,expires_at.lte.${nowIso}`).select("spc_user_id")
   if (error) throw error
-  const enabled = data?.enabled === true
+  const expiredUserIds = (expiredModes || []).map((mode) => String(mode.spc_user_id)).filter(Boolean)
+  if (!expiredUserIds.length) return 0
+  const { error: deliveryError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+    status: "expired",
+    processing_started_at: null,
+    last_error_code: "Backup Mode expired.",
+    updated_at: nowIso,
+  }).in("spc_user_id", expiredUserIds).in("status", ["queued", "prompt_sent", "acknowledged", "failed"])
+  if (deliveryError) throw deliveryError
+  return expiredUserIds.length
+}
+
+export async function getSpcMobileMode(session: SpcSession, requestedUserId?: string | null) {
+  const userId = targetUserId(session, requestedUserId, "view")
+  await expireSpcBackupModes()
+  const trader = await eligibleTrader(userId)
+  if (!trader) return { eligible: false, enabled: false, expiresAt: null, maskedPhone: "" }
+  const { data, error } = await serviceClient().from("spc_mobile_modes").select("enabled,expires_at,conversation_open_until,activation_status").eq("spc_user_id", trader.id).maybeSingle()
+  if (error) throw error
+  const now = Date.now()
+  const enabled = isSpcBackupModeActive(data?.enabled === true, data?.expires_at, now)
+  const expiresAt = enabled ? String(data?.expires_at || "") : null
   return {
     eligible: true,
     enabled,
-    expiresAt: null,
+    expiresAt,
+    hoursRemaining: expiresAt ? Math.max(1, Math.ceil((Date.parse(expiresAt) - now) / 3_600_000)) : 0,
     conversationOpen: enabled && Date.parse(String(data?.conversation_open_until || "")) > Date.now(),
     activationStatus: enabled ? String(data?.activation_status || "queued") : "idle",
     maskedPhone: `+${trader.whatsappPhone.slice(0, 2)}${"•".repeat(Math.max(1, trader.whatsappPhone.length - 6))}${trader.whatsappPhone.slice(-4)}`,
   }
 }
 
-export async function setSpcMobileMode(session: SpcSession, enabled: boolean, request?: Request) {
-  const trader = await eligibleTrader(session)
-  if (!trader) throw new Error("Only an active supplier trader with a verified WhatsApp number can use Mobile Mode.")
+export async function setSpcMobileMode(
+  session: SpcSession,
+  enabled: boolean,
+  request?: Request,
+  requestedUserId?: string | null,
+) {
+  const userId = targetUserId(session, requestedUserId, "edit")
+  if (userId !== session.userId && enabled) throw new Error("Administrators can deactivate another user's Backup Mode but cannot activate it.")
+  if (!enabled && !hasSpcAdminPagePermission(session, "edit")) {
+    throw new Error("Backup Mode stays active for 24 hours. Ask an administrator to deactivate it early.")
+  }
+  const trader = await eligibleTrader(userId)
+  if (!trader) throw new Error("Only an active supplier trader with a verified WhatsApp number can use Backup Mode.")
   const now = new Date()
-  const expiresAt = null
+  const expiresAt = enabled ? getSpcBackupModeExpiry(now) : null
   const activationToken = randomBytes(24).toString("base64url")
-  const { error } = await serviceClient().from("spc_mobile_modes").upsert({
+  const supabase = serviceClient()
+  const { data: previousMode, error: previousModeError } = await supabase.from("spc_mobile_modes")
+    .select("enabled,expires_at").eq("spc_user_id", trader.id).maybeSingle()
+  if (previousModeError) throw previousModeError
+  const { error } = await supabase.from("spc_mobile_modes").upsert({
     spc_user_id: trader.id,
     username: trader.username,
     display_name: trader.displayName || trader.username,
@@ -164,13 +231,22 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
     updated_at: now.toISOString(),
   }, { onConflict: "spc_user_id" })
   if (error) throw error
+  if (!enabled) {
+    const { error: deliveryError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
+      status: "expired",
+      processing_started_at: null,
+      last_error_code: "Backup Mode was deactivated.",
+      updated_at: now.toISOString(),
+    }).eq("spc_user_id", trader.id).in("status", ["queued", "prompt_sent", "acknowledged", "failed"])
+    if (deliveryError) throw deliveryError
+  }
   const context = createSpcAuditContext(session, request, "spc-chrome-extension", {
-    action: enabled ? "activate-mobile-mode" : "deactivate-mobile-mode",
-    targetType: "spc-mobile-mode",
+    action: enabled ? "activate-backup-mode" : "deactivate-backup-mode",
+    targetType: "spc-backup-mode",
     targetId: trader.id,
     targetUsername: trader.username,
   })
-  const { error: auditError } = await serviceClient().from("audit_logs").insert({
+  const { error: auditError } = await supabase.from("audit_logs").insert({
     actor_user_id: context.actorUserId,
     actor_id: `spc:${context.username}`,
     actor_name: context.displayName,
@@ -180,19 +256,21 @@ export async function setSpcMobileMode(session: SpcSession, enabled: boolean, re
     operation: "UPDATE",
     record_pk: { spc_user_id: trader.id },
     changed_fields: ["enabled", "expires_at"],
-    before_row: null,
-    after_row: { title: "SPC Mobile Mode", enabled, expires_at: expiresAt },
+    before_row: previousMode ? { title: "SPC Backup Mode", enabled: previousMode.enabled, expires_at: previousMode.expires_at } : null,
+    after_row: { title: "SPC Backup Mode", enabled, expires_at: expiresAt },
     request_context: { pageId: context.pageId, pageLabel: context.pageLabel, pagePath: context.pagePath },
   })
   if (auditError) throw auditError
-  return getSpcMobileMode(session)
+  return getSpcMobileMode(session, trader.id)
 }
 
 export async function enqueueSpcMobileEnquiry(enquiry: SpcEnquiry) {
   const supabase = serviceClient()
+  const now = new Date()
+  await expireSpcBackupModes(now)
   const { data: modes, error } = await supabase.from("spc_mobile_modes")
     .select("spc_user_id,recipient_phone,display_name,conversation_open_until")
-    .eq("enabled", true)
+    .eq("enabled", true).gt("expires_at", now.toISOString())
   if (error) throw error
   if (!modes?.length) return 0
   const rows = modes.map((mode) => ({
@@ -226,6 +304,7 @@ async function sendModePrompt(row: MobileModeRow) {
 export async function processPendingSpcMobileDeliveries(limit = 20) {
   const supabase = serviceClient()
   const now = new Date().toISOString()
+  await expireSpcBackupModes(new Date(now))
   const staleBefore = new Date(Date.now() - PROCESSING_STALE_MS).toISOString()
   const { error: staleDeliveryError } = await supabase.from("spc_mobile_enquiry_deliveries").update({
     status: "manual_review",
@@ -241,9 +320,9 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
   }).eq("activation_status", "processing").lt("updated_at", staleBefore)
   if (staleModeError) throw staleModeError
   const { data: pendingModes, error: modeError } = await supabase.from("spc_mobile_modes")
-    .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,updated_at")
+    .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,expires_at,updated_at")
     .eq("enabled", true).in("activation_status", ["queued", "failed"])
-    .lte("activation_next_attempt_at", now).limit(limit)
+    .gt("expires_at", now).lte("activation_next_attempt_at", now).limit(limit)
   if (modeError) throw modeError
   for (const mode of (pendingModes || []) as MobileModeRow[]) {
     const claimTime = new Date().toISOString()
@@ -253,7 +332,8 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
       activation_last_error: null,
       updated_at: claimTime,
     }).eq("spc_user_id", mode.spc_user_id).eq("activation_status", mode.activation_status)
-      .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,updated_at")
+      .gt("expires_at", claimTime)
+      .select("spc_user_id,recipient_phone,activation_token,activation_status,activation_message_id,activation_attempt_count,conversation_open_until,expires_at,updated_at")
       .maybeSingle()
     if (claimError) throw claimError
     if (!claimedMode) continue
@@ -292,11 +372,12 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
     let claimed: DeliveryRow | null = null
     try {
       const { data: mode, error: currentModeError } = await supabase.from("spc_mobile_modes")
-        .select("enabled,conversation_open_until,activation_status").eq("spc_user_id", delivery.spc_user_id).maybeSingle()
+        .select("enabled,expires_at,conversation_open_until,activation_status").eq("spc_user_id", delivery.spc_user_id).maybeSingle()
       if (currentModeError) throw currentModeError
-      const windowOpen = mode?.enabled === true && Date.parse(String(mode.conversation_open_until || "")) > Date.now()
+      const backupModeActive = isSpcBackupModeActive(mode?.enabled === true, mode?.expires_at)
+      const windowOpen = backupModeActive && Date.parse(String(mode?.conversation_open_until || "")) > Date.now()
       if (!windowOpen) {
-        if (mode?.enabled === true && mode.activation_status === "acknowledged") {
+        if (backupModeActive && mode?.activation_status === "acknowledged") {
           await supabase.from("spc_mobile_modes").update({
             activation_token: randomBytes(24).toString("base64url"), activation_status: "queued",
             activation_message_id: null, activation_delivery_status: null, activation_attempt_count: 0,
@@ -317,13 +398,13 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
       if (claimError) throw claimError
       if (!claim) continue
       claimed = claim as DeliveryRow
-      console.info("SPC mobile delivery claimed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id, attemptCount: claimed.attempt_count })
+      console.info("SPC backup delivery claimed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id, attemptCount: claimed.attempt_count })
       await releaseDelivery(claimed)
-      console.info("SPC mobile delivery completed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id })
+      console.info("SPC backup delivery completed", { deliveryId: claimed.id, enquiryId: claimed.enquiry_id })
       processed += 1
     } catch (error) {
       if (!claimed) {
-        console.error("SPC mobile delivery could not be claimed", { deliveryId: delivery.id, error: error instanceof Error ? error.message : "delivery_failed" })
+        console.error("SPC backup delivery could not be claimed", { deliveryId: delivery.id, error: error instanceof Error ? error.message : "delivery_failed" })
         continue
       }
       const status = failureStatus(error)
@@ -334,7 +415,7 @@ export async function processPendingSpcMobileDeliveries(limit = 20) {
         last_error_code: (error instanceof Error ? error.message : "delivery_failed").slice(0, 160),
         updated_at: new Date().toISOString(),
       }).eq("id", claimed.id).eq("status", "processing")
-      console.error("SPC mobile delivery stopped", { deliveryId: claimed.id, status, error: error instanceof Error ? error.message : "delivery_failed" })
+      console.error("SPC backup delivery stopped", { deliveryId: claimed.id, status, error: error instanceof Error ? error.message : "delivery_failed" })
     }
   }
   return { examined: data?.length || 0, processed }
@@ -372,20 +453,23 @@ async function releaseDelivery(delivery: DeliveryRow) {
     content_delivery_status: "accepted", trader_delivery_status: "accepted",
     acknowledged_at: now, completed_at: now, processing_started_at: null, last_error_code: null, updated_at: now,
   }).eq("id", delivery.id).eq("status", "processing").select("id").maybeSingle()
-  if (updateError || !completed) throw updateError || new Error("The mobile delivery completion checkpoint was not applied.")
+  if (updateError || !completed) throw updateError || new Error("The backup delivery completion checkpoint was not applied.")
 }
 
 export async function acknowledgeSpcMobileDelivery(from: string, token?: string) {
   const supabase = serviceClient()
+  const now = new Date()
+  await expireSpcBackupModes(now)
   const modeQuery = supabase.from("spc_mobile_modes")
     .select("spc_user_id,activation_token,activation_status").eq("recipient_phone", from).eq("enabled", true)
+    .gt("expires_at", now.toISOString())
   const { data: modes, error: modeError } = token
     ? await modeQuery.eq("activation_token", token).limit(1)
     : await modeQuery.in("activation_status", ["prompt_sent", "failed"]).limit(2)
   if (modeError) throw modeError
   if (modes?.length === 1) {
     const mode = modes[0]
-    const inboundAt = new Date()
+    const inboundAt = now
     const openUntil = new Date(inboundAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
     await supabase.from("spc_mobile_modes").update({
       activation_status: "acknowledged", last_inbound_at: inboundAt.toISOString(),
@@ -411,7 +495,7 @@ export async function acknowledgeSpcMobileDelivery(from: string, token?: string)
   await supabase.from("spc_mobile_modes").update({
     activation_status: "acknowledged", last_inbound_at: inboundAt.toISOString(),
     conversation_open_until: new Date(inboundAt.getTime() + 24 * 60 * 60 * 1000).toISOString(), updated_at: inboundAt.toISOString(),
-  }).eq("spc_user_id", delivery.spc_user_id)
+  }).eq("spc_user_id", delivery.spc_user_id).eq("enabled", true).gt("expires_at", inboundAt.toISOString())
   await supabase.from("spc_mobile_enquiry_deliveries").update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id).in("status", ["prompt_sent", "acknowledged"])
   await processPendingSpcMobileDeliveries()
   return true

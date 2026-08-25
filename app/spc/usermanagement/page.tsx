@@ -52,6 +52,14 @@ type UsersResponse = {
   message?: string
 }
 
+type BackupModeStatus = {
+  eligible: boolean
+  enabled: boolean
+  expiresAt: string | null
+  maskedPhone: string
+  message?: string
+}
+
 type SpcDeliveryRoute = {
   id: string
   label: string
@@ -161,6 +169,8 @@ export default function SpcUserManagementPage() {
   })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [backupMode, setBackupMode] = useState<BackupModeStatus | null>(null)
+  const [backupModeLoading, setBackupModeLoading] = useState(false)
   const [message, setMessage] = useState("")
   const [messageIsError, setMessageIsError] = useState(false)
 
@@ -243,6 +253,7 @@ export default function SpcUserManagementPage() {
 
   function openAddDialog() {
     setMessage("")
+    setBackupMode(null)
     if (activeTab === "OFFICE") {
       setOfficeDraft("")
       setOfficeDialogOpen(true)
@@ -258,7 +269,48 @@ export default function SpcUserManagementPage() {
 
   function editUser(user: ManagedSpcUser) {
     setMessage("")
+    setBackupMode(null)
     setUserDraft(userToDraft(user, firstOffice))
+    if (user.isSupplierTrader) void loadBackupMode(user.id)
+  }
+
+  async function loadBackupMode(userId: string) {
+    setBackupModeLoading(true)
+    try {
+      const response = await fetch(`/api/spc/mobile-mode?userId=${encodeURIComponent(userId)}`, { cache: "no-store" })
+      const data = (await response.json()) as BackupModeStatus
+      if (!response.ok) throw new Error(data.message || "Failed to load Backup Mode.")
+      setBackupMode(data)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to load Backup Mode.")
+      setMessageIsError(true)
+    } finally {
+      setBackupModeLoading(false)
+    }
+  }
+
+  async function deactivateBackupMode() {
+    if (!canEdit || !userDraft?.id || !backupMode?.enabled || saving) return
+    if (!window.confirm(`Deactivate Backup Mode for ${userDraft.displayName || userDraft.username}?`)) return
+    setSaving(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/spc/mobile-mode", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false, userId: userDraft.id }),
+      })
+      const data = (await response.json()) as BackupModeStatus
+      if (!response.ok) throw new Error(data.message || "Failed to deactivate Backup Mode.")
+      setBackupMode(data)
+      setMessage("Backup Mode deactivated.")
+      setMessageIsError(false)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to deactivate Backup Mode.")
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function openRouteDialog() {
@@ -933,6 +985,28 @@ export default function SpcUserManagementPage() {
                 />
                 <span>Active account</span>
               </label>
+              {userDraft.id && userDraft.isSupplierTrader ? (
+                <div className={`spc-backup-mode-admin${backupMode?.enabled ? " is-active" : ""}`}>
+                  <span>
+                    <strong>BACKUP MODE</strong>
+                    <small>
+                      {backupModeLoading
+                        ? "CHECKING..."
+                        : backupMode?.enabled && backupMode.expiresAt
+                          ? `ACTIVE UNTIL ${new Date(backupMode.expiresAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()}`
+                          : "OFF"}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className="is-danger"
+                    onClick={() => void deactivateBackupMode()}
+                    disabled={!canEdit || saving || backupModeLoading || !backupMode?.enabled}
+                  >
+                    DEACTIVATE
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="spc-dialog-actions">
               <button type="button" onClick={() => setUserDraft(null)}>Cancel</button>

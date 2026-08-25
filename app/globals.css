@@ -7506,6 +7506,58 @@ body:has(.spc-statistics-page) .spc-main {
   letter-spacing: 0;
 }
 
+.spc-backup-mode-admin {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  padding: 8px 10px;
+}
+
+.spc-backup-mode-admin.is-active {
+  border-color: #80c9a5;
+  background: #f0fbf5;
+}
+
+.spc-backup-mode-admin > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.spc-backup-mode-admin strong {
+  color: var(--fc-tool-input-text);
+  font-size: 11px;
+}
+
+.spc-backup-mode-admin small {
+  color: var(--fc-admin-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.spc-backup-mode-admin button {
+  min-height: 30px;
+  border: 1px solid #f3aaa5;
+  border-radius: 7px;
+  background: #fff5f4;
+  color: #b42318;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 10px;
+}
+
+.spc-backup-mode-admin button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .spc-route-dialog {
   width: min(680px, 100%);
 }
