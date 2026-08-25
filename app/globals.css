@@ -1103,7 +1103,17 @@ body {
   line-height: 1.25;
 }
 
-.spc-welcome-introduction a {
+.spc-welcome-enquiry {
+  margin: 10px 0 0;
+  color: var(--fc-admin-muted);
+  font-size: clamp(16px, 2vw, 22px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.spc-welcome-introduction a,
+.spc-welcome-enquiry a {
   color: #0b6ee8;
   font-weight: 850;
   text-decoration: none;
@@ -1111,7 +1121,9 @@ body {
 }
 
 .spc-welcome-introduction a:hover,
-.spc-welcome-introduction a:focus-visible {
+.spc-welcome-introduction a:focus-visible,
+.spc-welcome-enquiry a:hover,
+.spc-welcome-enquiry a:focus-visible {
   color: #0758bd;
   text-decoration: underline;
 }

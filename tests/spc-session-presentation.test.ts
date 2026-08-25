@@ -49,6 +49,8 @@ test("SPC welcome and shared navigation use the same presentation label", () => 
   )
 
   assert.match(welcome, /WELCOME\{sessionPresentationLabel/)
+  assert.match(welcome, /<Link href="\/spc\/readme">INTRODUCTION<\/Link>/)
+  assert.match(welcome, /<Link href="\/spc\/enquiries">SEND ENQUIRY NOW<\/Link>/)
   assert.match(navigation, /title=\{sessionPresentationLabel \|\| "SPC"\}/)
   assert.match(navigation, /aria-label=\{`Signed in as \$\{sessionPresentationLabel \|\| "SPC"\}`\}/)
 })

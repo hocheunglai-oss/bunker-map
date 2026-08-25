@@ -248,6 +248,9 @@ export default function SpcLoginPage() {
             <p className="spc-welcome-introduction">
               YOU ARE INVITED TO THE <Link href="/spc/readme">INTRODUCTION</Link>
             </p>
+            <p className="spc-welcome-enquiry">
+              OR <Link href="/spc/enquiries">SEND ENQUIRY NOW</Link>
+            </p>
           </div>
         </section>
       </SpcShell>
