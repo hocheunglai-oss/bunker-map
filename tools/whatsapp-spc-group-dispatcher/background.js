@@ -370,6 +370,9 @@ async function handleApiMessage(message) {
   if (message.type === "dispatcher-latest") {
     return apiRequest({ action: "latest" }, state.token)
   }
+  if (message.type === "dispatcher-history") {
+    return apiRequest({ action: "history" }, state.token)
+  }
   if (message.type === "dispatcher-complete") {
     return apiRequest({
       action: "complete",
@@ -380,6 +383,7 @@ async function handleApiMessage(message) {
     }, state.token)
   }
   if (message.type === "dispatcher-set-paused") return writeState({ paused: Boolean(message.paused) })
+  if (message.type === "dispatcher-set-collapsed") return writeState({ collapsed: Boolean(message.collapsed) })
   throw new Error("Unsupported dispatcher request.")
 }
 

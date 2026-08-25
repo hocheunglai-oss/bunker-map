@@ -4,9 +4,11 @@ const SPC_ENQUIRIES_URL =
 const SPC_ENQUIRY_CHAT_CONTACTS_URL = "https://spc.fcuno.com/api/spc/enquiry-chat-contacts"
 const BRENT_API_URL = "https://spc.fcuno.com/api/market/brent"
 const SPC_EXTENSION_VERSION_URL = "https://spc.fcuno.com/api/spc/chrome-extension/version"
+const SPC_DELIVERY_ALERTS_URL = "https://spc.fcuno.com/api/spc/group-delivery-alerts"
 const SPC_EXTENSION_UPDATE_PAGE_URL = "https://spc.fcuno.com/chrome"
 const CRUDE_CACHE_TTL_MS = 30000
 const VERSION_CACHE_TTL_MS = 5 * 60 * 1000
+const DELIVERY_ALERT_CACHE_TTL_MS = 2000
 const MAX_CRUDE_AGE_MS = 60 * 60 * 1000
 const SPC_ENQUIRY_LIMIT = 250
 const NETWORK_TIMEOUT_MS = 8000
@@ -17,6 +19,8 @@ let enquiryPromise = null
 let senderContactCache = { sessionKey: "", byUsername: new Map() }
 let senderContactPromise = null
 let versionCache = { at: 0, payload: null }
+let deliveryAlertCache = { at: 0, payload: [] }
+const DELIVERY_ALERT_NOTIFICATION_KEY = "fcunoSpcDeliveryAlertNotificationsV1"
 const debuggerQueues = new Map()
 
 async function fetchWithTimeout(url, options = {}) {
@@ -293,6 +297,57 @@ async function fetchExtensionVersionStatus() {
   return payload
 }
 
+async function fetchGroupDeliveryAlerts() {
+  const now = Date.now()
+  if (now - deliveryAlertCache.at < DELIVERY_ALERT_CACHE_TTL_MS) return deliveryAlertCache.payload
+  const response = await fetchWithTimeout(SPC_DELIVERY_ALERTS_URL, {
+    cache: "no-store",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data?.message || `SPC delivery alerts failed: ${response.status}`)
+  const alerts = Array.isArray(data.alerts) ? data.alerts : []
+  deliveryAlertCache = { at: now, payload: alerts }
+  await notifyGroupDeliveryAlerts(alerts)
+  return alerts
+}
+
+async function notifyGroupDeliveryAlerts(alerts) {
+  if (!chrome.notifications?.create || !chrome.storage?.local || !Array.isArray(alerts) || !alerts.length) return
+  const stored = await chromeCall((callback) => chrome.storage.local.get([DELIVERY_ALERT_NOTIFICATION_KEY], callback)).catch(() => ({}))
+  const notified = stored?.[DELIVERY_ALERT_NOTIFICATION_KEY] && typeof stored[DELIVERY_ALERT_NOTIFICATION_KEY] === "object"
+    ? stored[DELIVERY_ALERT_NOTIFICATION_KEY]
+    : {}
+  let changed = false
+  for (const alert of alerts) {
+    const id = String(alert?.id || "")
+    const status = String(alert?.status || "")
+    if (!id || !["failed", "manual_review"].includes(status)) continue
+    const key = `${id}:${status}`
+    if (notified[key]) continue
+    const groupName = String(alert?.groupName || "SPC trading group")
+    const title = status === "manual_review"
+      ? "SPC delivery needs review"
+      : "SPC group delivery retrying"
+    const message = status === "manual_review"
+      ? `${groupName}: open REDelivery and review the retained enquiry.`
+      : `${groupName}: delivery failed and will retry automatically.`
+    await chromeCall((callback) => chrome.notifications.create(`spc-delivery-${key}`, {
+      type: "basic",
+      iconUrl: "spc-sidebar-logo.png",
+      title,
+      message,
+      priority: 2,
+    }, callback)).catch(() => {})
+    notified[key] = new Date().toISOString()
+    changed = true
+  }
+  if (changed) {
+    await chromeCall((callback) => chrome.storage.local.set({ [DELIVERY_ALERT_NOTIFICATION_KEY]: notified }, callback)).catch(() => {})
+  }
+}
+
 function mergeSpcEnquiries(current, changes, limit = SPC_ENQUIRY_LIMIT, activeIds) {
   const byId = new Map()
   ;[...(current || []), ...(changes || [])].forEach((enquiry) => {
@@ -565,8 +620,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   fetchSpcEnquiries()
     .then(async (enquiries) => {
       const usernames = enquirySenderUsernames(enquiries)
-      const senderContacts = await fetchSpcEnquiryChatContacts(usernames).catch(() => ({}))
-      sendResponse({ ok: true, enquiries, senderContacts })
+      const [senderContacts, deliveryAlertsResult] = await Promise.all([
+        fetchSpcEnquiryChatContacts(usernames).catch(() => ({})),
+        fetchGroupDeliveryAlerts()
+          .then((alerts) => ({ alerts, error: "" }))
+          .catch((error) => ({ alerts: [], error: error instanceof Error ? error.message : "Delivery monitoring unavailable." })),
+      ])
+      sendResponse({
+        ok: true,
+        enquiries,
+        senderContacts,
+        deliveryAlerts: deliveryAlertsResult.alerts,
+        deliveryAlertError: deliveryAlertsResult.error,
+      })
     })
     .catch((error) => {
       sendResponse({

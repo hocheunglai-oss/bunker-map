@@ -3,6 +3,11 @@ body.fcuno-spc-dispatcher-active {
   box-sizing: border-box !important;
 }
 
+body.fcuno-spc-dispatcher-collapsed {
+  padding-right: 46px !important;
+  box-sizing: border-box !important;
+}
+
 #fcuno-spc-group-dispatcher {
   position: fixed;
   z-index: 2147483646;
@@ -16,6 +21,7 @@ body.fcuno-spc-dispatcher-active {
   color: #182431;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 13px;
+  transition: width 160ms ease;
 }
 
 #fcuno-spc-group-dispatcher * {
@@ -53,8 +59,28 @@ body.fcuno-spc-dispatcher-active {
   font-weight: 500;
 }
 
+#fcuno-spc-group-dispatcher header button {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #31475b;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 28px;
+}
+
+#fcuno-spc-group-dispatcher header button:hover {
+  background: #edf2f6;
+}
+
 #fcuno-spc-group-dispatcher main {
   padding: 14px;
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
 }
 
 .fcuno-spc-dispatcher-status {
@@ -218,6 +244,95 @@ body.fcuno-spc-dispatcher-active {
   margin: 14px 2px 0;
   color: #718194;
   font-size: 11px;
+}
+
+.fcuno-spc-dispatcher-history {
+  margin-top: 14px;
+}
+
+.fcuno-spc-dispatcher-history h2 {
+  display: flex;
+  margin: 0 0 7px;
+  align-items: center;
+  justify-content: space-between;
+  color: #42576a;
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.fcuno-spc-dispatcher-history h2 span {
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: #e4ebf1;
+  text-align: center;
+}
+
+.fcuno-spc-dispatcher-history-row {
+  padding: 8px 9px;
+  border: 1px solid #d6dee6;
+  border-left: 3px solid #0a9878;
+  background: #fff;
+}
+
+.fcuno-spc-dispatcher-history-row + .fcuno-spc-dispatcher-history-row {
+  margin-top: 6px;
+}
+
+.fcuno-spc-dispatcher-history-row > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fcuno-spc-dispatcher-history-row strong,
+.fcuno-spc-dispatcher-history-row time {
+  color: #0a7f68;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.fcuno-spc-dispatcher-history-row p {
+  display: -webkit-box;
+  margin: 5px 0 4px;
+  overflow: hidden;
+  color: #182431;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.fcuno-spc-dispatcher-history-row > span,
+.fcuno-spc-dispatcher-history-empty {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  color: #718194;
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#fcuno-spc-group-dispatcher.is-collapsed {
+  width: 46px;
+}
+
+#fcuno-spc-group-dispatcher.is-collapsed header {
+  min-height: 46px;
+  padding: 9px;
+  justify-content: center;
+}
+
+#fcuno-spc-group-dispatcher.is-collapsed header img,
+#fcuno-spc-group-dispatcher.is-collapsed header span,
+#fcuno-spc-group-dispatcher.is-collapsed main {
+  display: none;
 }
 
 @keyframes fcuno-spc-status-pulse {

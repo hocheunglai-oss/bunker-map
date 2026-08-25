@@ -53,10 +53,11 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.8'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.3.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
+        if(request.type==='dispatcher-history'){callback({ok:true,jobs:[]});return;}
         if(request.type==='dispatcher-claim'){
           if(window.claimed){callback(${claimNetworkFailure ? "{ok:false,message:'Failed to fetch'}" : `{ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null}`});return;}
           window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(groupName)},messageText:${JSON.stringify(message)}}});return;
@@ -74,7 +75,7 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
           if(${enterSubmits ? "true" : "false"} && !${ambiguous ? "true" : "false"} && text){window.appendOutgoing(text);c.replaceChildren();}
           callback({ok:true});return;
         }
-        if(request.type==='dispatcher-set-paused'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
+        if(request.type==='dispatcher-set-paused'||request.type==='dispatcher-set-collapsed'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
       }}};
     </script><script>${source.replaceAll("</script>", "<\\/script>")}</script>
   </body></html>`
@@ -87,7 +88,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.8" }),
+      getManifest: () => ({ version: "1.3.0" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -112,7 +113,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.8" }),
+      getManifest: () => ({ version: "1.3.0" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -168,7 +169,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.8" }),
+      getManifest: () => ({ version: "1.3.0" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -216,7 +217,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.8" }),
+      getManifest: () => ({ version: "1.3.0" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -271,7 +272,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.8" }),
+      getManifest: () => ({ version: "1.3.0" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -414,10 +415,15 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.8/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.3\.0/)
+      assert.match(sent.panelText, /Delivered · last 24 hours\s+1/i)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
+      await page.locator("#fcuno-spc-group-dispatcher [data-action='toggle']").click()
+      assert.equal(await page.locator("#fcuno-spc-group-dispatcher").evaluate((node) => node.classList.contains("is-collapsed")), true)
+      assert.equal(await page.locator("body").evaluate((node) => node.classList.contains("fcuno-spc-dispatcher-collapsed")), true)
+      await page.locator("#fcuno-spc-group-dispatcher [data-action='toggle']").click()
       if (process.env.SPC_DISPATCHER_SCREENSHOT) {
         await page.screenshot({ path: process.env.SPC_DISPATCHER_SCREENSHOT, fullPage: true })
       }

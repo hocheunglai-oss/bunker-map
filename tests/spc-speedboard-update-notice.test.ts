@@ -106,3 +106,22 @@ test("shows a persistent update warning without changing the normal board size",
   assert.match(styles, /grid-template-rows: 50px 38px minmax\(0, 1fr\)/)
   assert.match(styles, /\.fcuno-wa-spc-icon\.is-update-required/)
 })
+
+test("shows shared group-delivery failures on every signed-in SPC Speed Board", () => {
+  const background = readFileSync(
+    join(process.cwd(), "tools/whatsapp-spc-speed-board/background.js"),
+    "utf8",
+  )
+  const content = readFileSync(
+    join(process.cwd(), "tools/whatsapp-spc-speed-board/content.js"),
+    "utf8",
+  )
+
+  assert.match(background, /api\/spc\/group-delivery-alerts/)
+  assert.match(background, /SPC delivery needs review/)
+  assert.match(background, /SPC group delivery retrying/)
+  assert.match(background, /spc-delivery-\$\{key\}/)
+  assert.match(content, /aria-label="SPC delivery alerts"/)
+  assert.match(content, /REVIEW/)
+  assert.match(content, /RETRYING/)
+})

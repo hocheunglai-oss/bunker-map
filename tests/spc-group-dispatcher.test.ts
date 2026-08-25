@@ -205,6 +205,9 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /REDELIVERY/)
   assert.match(content, /data-role="activity-message"/)
   assert.match(content, /dispatcher-latest/)
+  assert.match(content, /dispatcher-history/)
+  assert.match(content, /Delivered · last 24 hours/)
+  assert.match(content, /dispatcher-set-collapsed/)
   assert.doesNotMatch(content, /Checking for enquiries/)
   assert.match(content, /result: requiresReview \? "manual_review" : "failed"/)
   assert.match(content, /Retrying automatically; last delivery result is unchanged/)
@@ -243,6 +246,15 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(background, /await enterWithTarget\(target\)/)
   assert.match(background, /message\?\.type === "native-send-text"/)
   assert.match(background, /message\.type === "dispatcher-latest"/)
+  assert.match(background, /message\.type === "dispatcher-history"/)
+  assert.match(background, /message\.type === "dispatcher-set-collapsed"/)
+
+  const alertsRoute = await readFile(
+    new URL("../app/api/spc/group-delivery-alerts/route.ts", import.meta.url),
+    "utf8",
+  )
+  assert.match(alertsRoute, /requireSpcPagePermission\("spc-chrome-extension", "view"\)/)
+  assert.match(alertsRoute, /listSpcGroupDeliveryAlerts\(24, 50\)/)
 
   const updaterBridge = await readFile(
     new URL("../tools/whatsapp-spc-group-dispatcher/updater-bridge.js", import.meta.url),

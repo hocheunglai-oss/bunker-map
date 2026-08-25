@@ -42,6 +42,10 @@ export type SpcGroupDeliveryActivity = SpcGroupDeliveryJob & {
   updatedAt: string
 }
 
+export type SpcGroupDeliveryAlert = SpcGroupDeliveryActivity & {
+  status: "failed" | "manual_review"
+}
+
 type DispatcherRow = {
   id: string
   device_label: string
@@ -459,6 +463,38 @@ export async function getLatestSpcGroupDelivery(token: string) {
     .maybeSingle()
   if (error) throw error
   return data ? mapActivity(data as DeliveryActivityRow) : null
+}
+
+export async function listRecentSpcGroupDeliveries(token: string, hours = 24, limit = 100) {
+  const authenticated = await authenticatedDispatcher(token)
+  if (!authenticated) return null
+  const safeHours = Math.min(Math.max(Math.trunc(hours), 1), 72)
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 200)
+  const since = new Date(Date.now() - safeHours * 60 * 60 * 1000).toISOString()
+  const { data, error } = await authenticated.supabase
+    .from("spc_group_delivery_jobs")
+    .select("id,enquiry_id,revision_number,event_type,message_text,destination_route_label,destination_group_name,attempt_count,status,last_error,updated_at")
+    .eq("status", "sent")
+    .gte("updated_at", since)
+    .order("updated_at", { ascending: false })
+    .limit(safeLimit)
+  if (error) throw error
+  return ((data || []) as DeliveryActivityRow[]).map(mapActivity)
+}
+
+export async function listSpcGroupDeliveryAlerts(hours = 24, limit = 50) {
+  const safeHours = Math.min(Math.max(Math.trunc(hours), 1), 72)
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100)
+  const since = new Date(Date.now() - safeHours * 60 * 60 * 1000).toISOString()
+  const { data, error } = await serviceClient()
+    .from("spc_group_delivery_jobs")
+    .select("id,enquiry_id,revision_number,event_type,message_text,destination_route_label,destination_group_name,attempt_count,status,last_error,updated_at")
+    .in("status", ["failed", "manual_review"])
+    .gte("updated_at", since)
+    .order("updated_at", { ascending: false })
+    .limit(safeLimit)
+  if (error) throw error
+  return ((data || []) as DeliveryActivityRow[]).map(mapActivity) as SpcGroupDeliveryAlert[]
 }
 
 export async function completeSpcGroupDelivery(input: {

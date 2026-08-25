@@ -10,6 +10,8 @@ const fetchedUrls = []
 const fetchedOptions = []
 const enquiryResponses = []
 const debuggerCommands = []
+const notifications = []
+let storedValues = {}
 const context = {
   console,
   fetch: async (url, options = {}) => {
@@ -34,7 +36,23 @@ const context = {
         },
       },
     },
-    notifications: {},
+    notifications: {
+      create(id, options, callback) {
+        notifications.push({ id, options })
+        callback(id)
+      },
+    },
+    storage: {
+      local: {
+        get(keys, callback) {
+          callback(Object.fromEntries(keys.filter((key) => key in storedValues).map((key) => [key, storedValues[key]])))
+        },
+        set(values, callback) {
+          storedValues = { ...storedValues, ...values }
+          callback()
+        },
+      },
+    },
     debugger: {
       attach(_target, _version, callback) {
         callback()
@@ -167,7 +185,7 @@ enquiryResponses.push({
       displayName: "BARRY KHOO",
       phone: "6590000001",
       phonebookContactId: "phonebook-barry",
-      exactGroupName: "Barry (FCBHK) SG Enqs",
+      exactGroupName: "Barry (SGP) SG Enqs",
     },
   ],
 })
@@ -181,7 +199,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(senderContacts)), {
     displayName: "BARRY KHOO",
     phone: "6590000001",
     phonebookContactId: "phonebook-barry",
-    exactGroupName: "Barry (FCBHK) SG Enqs",
+    exactGroupName: "Barry (SGP) SG Enqs",
   },
 })
 assert.equal(
@@ -192,6 +210,25 @@ assert.equal(fetchedOptions.at(-1).method, undefined)
 const senderFetchCount = fetchedUrls.length
 await context.fetchSpcEnquiryChatContacts(["barry@cosulich.com.sg"], "trader-b")
 assert.equal(fetchedUrls.length, senderFetchCount)
+
+enquiryResponses.push({
+  alerts: [
+    {
+      id: "delivery-alert-1",
+      status: "manual_review",
+      groupName: "Barry (SGP) SG Enqs",
+      messageText: "testing vessel / 9998690 / sg 22 - 27 aug / vlsfo 200-300mts",
+    },
+  ],
+})
+const deliveryAlerts = await context.fetchGroupDeliveryAlerts()
+assert.equal(deliveryAlerts.length, 1)
+assert.equal(fetchedUrls.at(-1), "https://spc.fcuno.com/api/spc/group-delivery-alerts")
+assert.equal(notifications.length, 1)
+assert.equal(notifications[0].options.title, "SPC delivery needs review")
+assert.match(notifications[0].options.message, /Barry \(SGP\) SG Enqs/)
+await context.notifyGroupDeliveryAlerts(deliveryAlerts)
+assert.equal(notifications.length, 1, "each Speed Board must notify once per job status")
 
 const debuggerOrder = []
 let releaseDebugger

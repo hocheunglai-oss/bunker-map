@@ -196,9 +196,9 @@ const html = `<!doctype html>
               callback({
                 ok: true,
                 status: {
-                  installedVersion: staleVersion ? "0.6.6" : "0.6.7",
-                  latestVersion: "0.6.7",
-                  requiredVersion: "0.6.7",
+                  installedVersion: staleVersion ? "0.6.9" : "0.7.0",
+                  latestVersion: "0.7.0",
+                  requiredVersion: "0.7.0",
                   updateRequired: staleVersion,
                   updatePageUrl: "https://spc.fcuno.com/chrome"
                 }
@@ -214,7 +214,7 @@ const html = `<!doctype html>
                   createdAt: "2026-07-23T09:21:00Z",
                   updatedAt: "2026-07-23T09:21:00Z",
                   status: "sent",
-                  createdByUsername: "barry@cosulich.com.sg",
+                  createdByUsername: "otto@cosulich.com.hk",
                   createdByDisplayName: "OL"
                 },
                 {
@@ -246,15 +246,29 @@ const html = `<!doctype html>
                     username: "barry@cosulich.com.sg",
                     displayName: "BARRY KHOO",
                     phone: "6590000001",
-                    phonebookContactId: "phonebook-barry"
+                    phonebookContactId: "phonebook-barry",
+                    exactGroupName: "Barry (SGP) SG Enqs"
                   },
                   "otto@cosulich.com.hk": {
                     username: "otto@cosulich.com.hk",
                     displayName: "OTTO LAI",
                     phone: "85290000002",
-                    phonebookContactId: "phonebook-otto"
+                    phonebookContactId: "phonebook-otto",
+                    exactGroupName: "Otto (FCBHK) SG Enqs"
                   }
-                }
+                },
+                deliveryAlerts: [
+                  {
+                    id: "delivery-alert-1",
+                    status: "manual_review",
+                    eventType: "amended",
+                    messageText: "taisei maru no.15 / 8710728 / 14 - 15 jan / vlsfo 600mts",
+                    groupName: "Barry (SGP) SG Enqs",
+                    lastError: "WhatsApp group title could not be confirmed.",
+                    updatedAt: "2026-07-23T09:24:00Z"
+                  }
+                ],
+                deliveryAlertError: ""
               });
               return;
             }
@@ -365,13 +379,18 @@ async function main() {
         /ICE Brent crude futures · Sep26 · delayed at least 15 minutes/,
       )
       assert.equal(await page.locator(".fcuno-wa-spc-version-alert").count(), 0)
+      await page.waitForSelector(".fcuno-wa-spc-delivery-alert.is-review")
+      assert.match(
+        (await page.locator(".fcuno-wa-spc-delivery-alert.is-review").innerText()).replace(/\s+/g, " ").trim(),
+        /REVIEW Barry \(SGP\) SG Enqs taisei maru no\.15 \/ 8710728 .* WhatsApp group title could not be confirmed\./,
+      )
 
       const staleVersionPage = await browser.newPage({ viewport: { width: 1400, height: 900 } })
       await staleVersionPage.goto(`${url}?staleVersion=1`, { waitUntil: "domcontentloaded" })
       await staleVersionPage.waitForSelector(".fcuno-wa-spc-version-alert.is-required")
       assert.equal(
         (await staleVersionPage.locator(".fcuno-wa-spc-version-alert").innerText()).replace(/\s+/g, " ").trim(),
-        "UPDATE REQUIRED Installed v0.6.6 · Required v0.6.7 UPDATE",
+        "UPDATE REQUIRED Installed v0.6.9 · Required v0.7.0 UPDATE",
       )
       assert.equal(
         await staleVersionPage.locator(".fcuno-wa-spc-version-alert a").getAttribute("href"),
@@ -901,8 +920,8 @@ async function main() {
       assert.equal(
         await secondTraderPage.locator(
           "#fcuno-wa-spc-board .fcuno-wa-spc-enquiry[data-id='enq-1'] .fcuno-wa-spc-amendment-diff del",
-        ).innerText(),
-        "vlsfo 500mts",
+        ).count(),
+        0,
       )
       assert.equal(
         await secondTraderPage.locator(

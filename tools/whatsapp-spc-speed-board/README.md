@@ -1,6 +1,6 @@
 # FCUNO SPC WhatsApp Board
 
-Current version: `0.6.7`.
+Current version: `0.7.0`.
 
 Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
 
@@ -35,6 +35,8 @@ Separate Chrome extension for SPC supplier trading workflow on WhatsApp Web.
   remain silent.
 - Shows a one-time Chrome notification for each required release and keeps a red
   exclamation indicator visible when an outdated board is collapsed.
+- Shows active REDelivery failures or manual-review items on every signed-in
+  trader board and raises one Chrome notification per affected delivery state.
 
 ## Install
 

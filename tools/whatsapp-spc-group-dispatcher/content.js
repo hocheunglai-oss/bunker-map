@@ -9,11 +9,13 @@
   let state = {
     paired: false,
     busy: false,
+    collapsed: false,
     phase: "connecting",
     status: "Starting redelivery",
     error: "",
     errorType: "",
     activity: null,
+    history: [],
   }
   let timer = 0
   let nextPairAttempt = 0
@@ -84,6 +86,46 @@
     return "Sending enquiry"
   }
 
+  function activityTime(value) {
+    const date = new Date(String(value || ""))
+    if (Number.isNaN(date.getTime())) return ""
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+
+  function recentHistory(items) {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
+    const seen = new Set()
+    return (Array.isArray(items) ? items : [])
+      .filter((item) => item?.id && item?.status === "sent" && Date.parse(item.updatedAt || "") >= cutoff)
+      .filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+      .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))
+      .slice(0, 100)
+  }
+
+  function recordSentActivity(activity) {
+    const sent = { ...activity, status: "sent", updatedAt: new Date().toISOString() }
+    state.activity = sent
+    state.history = recentHistory([sent, ...state.history])
+  }
+
+  function renderHistory(items) {
+    const rows = recentHistory(items).map((item) => `
+      <article class="fcuno-spc-dispatcher-history-row">
+        <div>
+          <strong>${escapeHtml(activityBadge(item))} · SENT</strong>
+          <time>${escapeHtml(activityTime(item.updatedAt))}</time>
+        </div>
+        <p>${escapeHtml(item.messageText)}</p>
+        <span>To ${escapeHtml(item.groupName)}</span>
+      </article>
+    `).join("")
+    return rows || '<p class="fcuno-spc-dispatcher-history-empty">No confirmed deliveries in the last 24 hours.</p>'
+  }
+
   function render() {
     let root = document.getElementById(BOARD_ID)
     if (!root) {
@@ -95,6 +137,7 @@
         <header>
           <img src="${escapeHtml(LOGO_URL)}" alt="Singapore Purchasing Center" />
           <span>REDELIVERY <b>v${escapeHtml(VERSION)}</b></span>
+          <button type="button" data-action="toggle" title="Minimize REDelivery" aria-label="Minimize REDelivery">›</button>
         </header>
         <main>
           <div class="fcuno-spc-dispatcher-status is-connecting" data-role="status">
@@ -113,9 +156,25 @@
             <span data-role="activity-route"></span>
           </section>
           <p class="fcuno-spc-dispatcher-empty" data-role="empty">Waiting for the next enquiry.</p>
+          <section class="fcuno-spc-dispatcher-history">
+            <h2>Delivered · last 24 hours <span data-role="history-count"></span></h2>
+            <div data-role="history"></div>
+          </section>
         </main>
       `
+      root.querySelector("[data-action='toggle']")?.addEventListener("click", () => {
+        state.collapsed = !state.collapsed
+        void runtimeMessage({ type: "dispatcher-set-collapsed", collapsed: state.collapsed }).catch(() => {})
+        render()
+      })
     }
+    root.classList.toggle("is-collapsed", state.collapsed)
+    document.body.classList.toggle("fcuno-spc-dispatcher-collapsed", state.collapsed)
+    document.body.classList.toggle("fcuno-spc-dispatcher-active", !state.collapsed)
+    const toggle = root.querySelector("[data-action='toggle']")
+    setText(toggle, state.collapsed ? "‹" : "›")
+    toggle?.setAttribute("title", state.collapsed ? "Open REDelivery" : "Minimize REDelivery")
+    toggle?.setAttribute("aria-label", state.collapsed ? "Open REDelivery" : "Minimize REDelivery")
     const status = root.querySelector("[data-role='status']")
     const statusPhase = state.error
       ? state.errorType === "connection" ? "connecting" : "error"
@@ -141,18 +200,24 @@
 
     const activity = root.querySelector("[data-role='activity']")
     const empty = root.querySelector("[data-role='empty']")
-    if (!state.activity) {
+    const currentActivity = state.activity?.status === "sent" ? null : state.activity
+    if (!currentActivity) {
       activity.hidden = true
-      empty.hidden = false
-      return
+      empty.hidden = state.history.length > 0
+    } else {
+      empty.hidden = true
+      activity.hidden = false
+      activity.className = `fcuno-spc-dispatcher-activity is-${currentActivity.status || "received"}`
+      setText(activity.querySelector("[data-role='activity-badge']"), activityBadge(currentActivity))
+      setText(activity.querySelector("[data-role='activity-result']"), activityResult(currentActivity))
+      setText(activity.querySelector("[data-role='activity-message']"), currentActivity.messageText)
+      setText(activity.querySelector("[data-role='activity-route']"), `To ${currentActivity.groupName}`)
     }
-    empty.hidden = true
-    activity.hidden = false
-    activity.className = `fcuno-spc-dispatcher-activity is-${state.activity.status || "received"}`
-    setText(activity.querySelector("[data-role='activity-badge']"), activityBadge(state.activity))
-    setText(activity.querySelector("[data-role='activity-result']"), activityResult(state.activity))
-    setText(activity.querySelector("[data-role='activity-message']"), state.activity.messageText)
-    setText(activity.querySelector("[data-role='activity-route']"), `To ${state.activity.groupName}`)
+    const history = recentHistory(state.history)
+    state.history = history
+    setText(root.querySelector("[data-role='history-count']"), String(history.length))
+    const historyRoot = root.querySelector("[data-role='history']")
+    if (historyRoot) historyRoot.innerHTML = renderHistory(history)
   }
 
   function getMain() {
@@ -514,7 +579,7 @@
         })
         state.phase = "sent"
         state.status = "Enquiry sent"
-        state.activity = { ...claim.job, status: "sent" }
+        recordSentActivity(claim.job)
         return
       }
       await sendAndVerify(claim.job.messageText, claim.job.groupName)
@@ -526,7 +591,7 @@
       })
       state.phase = "sent"
       state.status = "Enquiry sent"
-      state.activity = { ...claim.job, status: "sent" }
+      recordSentActivity(claim.job)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const requiresReview = /^(SEND_UNCERTAIN|STOP_REVIEW):/.test(message)
@@ -567,12 +632,17 @@
     render()
     try {
       const saved = await runtimeMessage({ type: "dispatcher-state" })
+      state.collapsed = Boolean(saved.collapsed)
       if (saved.paused) await runtimeMessage({ type: "dispatcher-set-paused", paused: false })
       if (!saved.token) {
         await runtimeMessage({ type: "dispatcher-pair", deviceLabel: "SPC Trading Desktop" })
       }
       state.paired = true
-      const latest = await runtimeMessage({ type: "dispatcher-latest" })
+      const [latest, history] = await Promise.all([
+        runtimeMessage({ type: "dispatcher-latest" }),
+        runtimeMessage({ type: "dispatcher-history" }).catch(() => ({ jobs: [] })),
+      ])
+      state.history = recentHistory(history.jobs)
       if (latest.job) {
         state.activity = latest.job
         if (latest.job.status === "manual_review" || latest.job.status === "failed") {

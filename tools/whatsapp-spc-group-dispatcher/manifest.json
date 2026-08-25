@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FCUNO SPC Group Dispatcher",
-  "version": "1.2.8",
+  "version": "1.3.0",
   "description": "Dedicated SPC enquiry dispatcher for centrally assigned WhatsApp trading groups.",
   "permissions": ["storage", "debugger", "tabs"],
   "background": {

@@ -7,6 +7,7 @@ import {
   getActiveSpcGroupDispatcher,
   getLatestSpcGroupDelivery,
   heartbeatSpcGroupDispatcher,
+  listRecentSpcGroupDeliveries,
   pairSpcGroupDispatcher,
   revokeSpcGroupDispatcher,
 } from "@/lib/spcGroupDispatcher"
@@ -94,6 +95,13 @@ export async function POST(request: Request) {
     if (action === "latest") {
       const job = await getLatestSpcGroupDelivery(token)
       return privateJson({ success: true, job })
+    }
+
+    if (action === "history") {
+      const jobs = await listRecentSpcGroupDeliveries(token, 24, 100)
+      return jobs
+        ? privateJson({ success: true, jobs })
+        : privateJson({ message: "Unauthorized" }, 401)
     }
 
     if (action === "complete") {

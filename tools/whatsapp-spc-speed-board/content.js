@@ -51,6 +51,8 @@
     contacts: [],
     unreadById: {},
     enquiries: [],
+    deliveryAlerts: [],
+    deliveryAlertError: "",
     senderContacts: {},
     selectedEnquiries: {},
     seenEnquiryIds: {},
@@ -84,6 +86,7 @@
   let templateSaveTimer = 0
   let contactMenuHideTimer = 0
   let lastEnquiryFingerprint = ""
+  let lastDeliveryAlertFingerprint = ""
   let lastCrudeFingerprint = ""
   let recentSend = { key: "", at: 0 }
   let memorySendLock = { key: "", at: 0 }
@@ -1043,12 +1046,32 @@
       }
       const nextEnquiries = dedupeEnquiries(Array.isArray(response.enquiries) ? response.enquiries : [])
       const nextSenderContacts = sanitizeSenderContacts(response.senderContacts)
+      const nextDeliveryAlerts = (Array.isArray(response.deliveryAlerts) ? response.deliveryAlerts : []).flatMap((alert) => {
+        if (!alert || typeof alert !== "object") return []
+        const id = cleanText(alert.id)
+        const status = cleanText(alert.status)
+        if (!id || !["failed", "manual_review"].includes(status)) return []
+        return [{
+          id,
+          status,
+          eventType: cleanText(alert.eventType),
+          messageText: cleanText(alert.messageText),
+          groupName: cleanText(alert.groupName),
+          lastError: cleanText(alert.lastError),
+          updatedAt: cleanText(alert.updatedAt),
+        }]
+      })
+      const nextDeliveryAlertFingerprint = JSON.stringify(nextDeliveryAlerts)
       const nextFingerprint = enquiriesFingerprint(nextEnquiries)
       const contactsChanged = JSON.stringify(nextSenderContacts) !== JSON.stringify(state.senderContacts)
+      const alertsChanged = nextDeliveryAlertFingerprint !== lastDeliveryAlertFingerprint || state.deliveryAlertError !== cleanText(response.deliveryAlertError)
       state.enquiries = nextEnquiries
       state.senderContacts = nextSenderContacts
-      const changed = nextFingerprint !== lastEnquiryFingerprint || contactsChanged
+      state.deliveryAlerts = nextDeliveryAlerts
+      state.deliveryAlertError = cleanText(response.deliveryAlertError)
+      const changed = nextFingerprint !== lastEnquiryFingerprint || contactsChanged || alertsChanged
       lastEnquiryFingerprint = nextFingerprint
+      lastDeliveryAlertFingerprint = nextDeliveryAlertFingerprint
       const initializedFeed = initializeFeedBaseline()
       pruneEnquiryUiState()
       if (!initializedFeed) notifyNewEnquiries()
@@ -2066,12 +2089,33 @@
           <button type="button" class="is-primary" data-action="send-selected">${escapeHtml(sendSelectionLabel())}</button>
         </div>
         ${renderTemplate()}
+        ${renderDeliveryAlerts()}
         <div class="fcuno-wa-spc-enquiry-list">
           ${state.enquiryError ? `<div class="fcuno-wa-spc-error">${escapeHtml(state.enquiryError)}</div>` : ""}
           ${rows || `<div class="fcuno-wa-spc-empty">No enquiries loaded.</div>`}
         </div>
       </section>
     `
+  }
+
+  function renderDeliveryAlerts() {
+    const alerts = state.deliveryAlerts.map((alert) => {
+      const manual = alert.status === "manual_review"
+      const label = manual ? "REVIEW" : "RETRYING"
+      const detail = alert.lastError || (manual ? "Delivery needs manual review." : "Delivery will retry automatically.")
+      return `
+        <div class="fcuno-wa-spc-delivery-alert${manual ? " is-review" : " is-retrying"}">
+          <div><strong>${label}</strong><span>${escapeHtml(alert.groupName || "SPC trading group")}</span></div>
+          ${alert.messageText ? `<p>${escapeHtml(alert.messageText)}</p>` : ""}
+          <small>${escapeHtml(detail)}</small>
+        </div>
+      `
+    }).join("")
+    const unavailable = state.deliveryAlertError
+      ? `<div class="fcuno-wa-spc-delivery-monitor-error">Delivery monitoring unavailable: ${escapeHtml(state.deliveryAlertError)}</div>`
+      : ""
+    if (!alerts && !unavailable) return ""
+    return `<section class="fcuno-wa-spc-delivery-alerts" aria-label="SPC delivery alerts">${alerts}${unavailable}</section>`
   }
 
   function renderCrudeWatch() {
