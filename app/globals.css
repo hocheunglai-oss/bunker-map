@@ -8595,6 +8595,16 @@ body:has(.spc-statistics-page) .spc-main {
     padding-inline: 14px;
   }
 
+  .fc-admin-sidebar-icon-button.is-mobile {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .fc-admin-sidebar-footer-actions button {
+    min-height: 44px;
+  }
+
   body:has(.spc-fixture-ledger-panel) .spc-main {
     padding: 6px 10px 18px;
   }
