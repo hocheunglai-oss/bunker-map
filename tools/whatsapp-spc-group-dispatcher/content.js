@@ -12,6 +12,7 @@
     phase: "connecting",
     status: "Starting redelivery",
     error: "",
+    errorType: "",
     activity: null,
   }
   let timer = 0
@@ -116,10 +117,19 @@
       `
     }
     const status = root.querySelector("[data-role='status']")
-    status.className = `fcuno-spc-dispatcher-status is-${state.error ? "error" : state.phase}`
+    const statusPhase = state.error
+      ? state.errorType === "connection" ? "connecting" : "error"
+      : state.phase
+    status.className = `fcuno-spc-dispatcher-status is-${statusPhase}`
     setText(root.querySelector("[data-role='status-title']"), state.error || state.status)
     const statusDetail = state.error
-      ? "Enquiry retained for review"
+      ? state.errorType === "connection"
+        ? "Retrying automatically; last delivery result is unchanged"
+        : state.errorType === "review"
+          ? "Enquiry retained for review"
+          : state.errorType === "delivery"
+            ? "Delivery will retry automatically"
+            : "Open SPC, sign in, then refresh WhatsApp Web"
       : state.phase === "working"
         ? "WhatsApp is preparing the message"
         : state.phase === "sent"
@@ -476,8 +486,12 @@
     let claim = null
     try {
       claim = await runtimeMessage({ type: "dispatcher-claim" })
+      if (state.errorType === "connection") {
+        state.error = ""
+        state.errorType = ""
+      }
       if (!claim.job) {
-        if (!state.error && state.phase === "connecting") {
+        if (state.phase === "connecting") {
           state.phase = "ready"
           state.status = "Ready for enquiries"
           render()
@@ -485,6 +499,7 @@
         return
       }
       state.error = ""
+      state.errorType = ""
       state.phase = "working"
       state.status = sendingStatus(claim.job)
       state.activity = { ...claim.job, status: "sending" }
@@ -515,10 +530,14 @@
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const requiresReview = /^(SEND_UNCERTAIN|STOP_REVIEW):/.test(message)
-      state.phase = "error"
-      state.error = requiresReview
-        ? message.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
-        : message
+      const queueConnectionFailure = !claim?.job && !requiresReview
+      state.phase = queueConnectionFailure ? "connecting" : "error"
+      state.errorType = queueConnectionFailure ? "connection" : requiresReview ? "review" : "delivery"
+      state.error = queueConnectionFailure
+        ? "Connection interrupted"
+        : requiresReview
+          ? message.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
+          : message
       if (claim?.job) {
         state.activity = { ...claim.job, status: requiresReview ? "manual_review" : "failed" }
       }
@@ -542,6 +561,7 @@
     nextPairAttempt = Date.now() + PAIR_RETRY_MS
     state.busy = true
     state.error = ""
+    state.errorType = ""
     state.phase = "connecting"
     state.status = "Connecting redelivery"
     render()
@@ -557,6 +577,7 @@
         state.activity = latest.job
         if (latest.job.status === "manual_review" || latest.job.status === "failed") {
           state.phase = "error"
+          state.errorType = latest.job.status === "manual_review" ? "review" : "delivery"
           state.error = latest.job.lastError
             ? latest.job.lastError.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
             : "The latest enquiry requires review."
@@ -572,6 +593,7 @@
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       state.phase = "error"
+      state.errorType = "setup"
       state.error = `Connection failed. Sign in to spc.fcuno.com, then refresh WhatsApp Web. ${message}`
     } finally {
       state.busy = false

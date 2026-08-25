@@ -13,7 +13,7 @@ const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
 const groupName = "FCUNO - SPC TRADING GROUP"
 const message = "*AMENDED - REV 2*\n\nlong pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts\n\n*ETA:* *10 - 18 aug* (was 8 - 10 aug)"
 
-function html(ambiguous = false, initiallyPaired = true, enterSubmits = true) {
+function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, claimNetworkFailure = false) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:Arial}#side{float:left;width:340px;height:700px}#search{margin:12px;width:280px;padding:8px}
     .row{display:none;padding:14px;border-top:1px solid #ddd;cursor:pointer}#main{margin-left:340px;min-height:700px}
@@ -53,12 +53,12 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true) {
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.7'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.2.8'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
         if(request.type==='dispatcher-claim'){
-          if(window.claimed){callback({ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null});return;}
+          if(window.claimed){callback(${claimNetworkFailure ? "{ok:false,message:'Failed to fetch'}" : `{ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null}`});return;}
           window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(groupName)},messageText:${JSON.stringify(message)}}});return;
         }
         if(request.type==='dispatcher-complete'){window.completions.push(request);callback({ok:true});return;}
@@ -87,7 +87,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.7" }),
+      getManifest: () => ({ version: "1.2.8" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -112,7 +112,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.7" }),
+      getManifest: () => ({ version: "1.2.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -168,7 +168,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.7" }),
+      getManifest: () => ({ version: "1.2.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -216,7 +216,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.7" }),
+      getManifest: () => ({ version: "1.2.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -271,7 +271,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.2.7" }),
+      getManifest: () => ({ version: "1.2.8" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -378,7 +378,8 @@ async function withServer(callback) {
     const ambiguous = requestUrl.searchParams.get("ambiguous") === "1"
     const initiallyPaired = requestUrl.searchParams.get("unpaired") !== "1"
     const enterSubmits = requestUrl.searchParams.get("enterFallback") !== "1"
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired, enterSubmits))
+    const claimNetworkFailure = requestUrl.searchParams.get("networkFail") === "1"
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired, enterSubmits, claimNetworkFailure))
   })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   try { await callback(`http://127.0.0.1:${server.address().port}/`) }
@@ -413,7 +414,7 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.7/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.2\.8/)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
@@ -426,6 +427,26 @@ async function main() {
         return node === document.querySelector("#fcuno-spc-group-dispatcher [data-role='status']")
       })
       assert.equal(stableStatusNode, true)
+
+      const networkPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+      await networkPage.goto(`${url}?networkFail=1`, { waitUntil: "domcontentloaded" })
+      await networkPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
+      await networkPage.waitForFunction(
+        () => document.getElementById("fcuno-spc-group-dispatcher").innerText.includes("Connection interrupted"),
+        null,
+        { timeout: 10000 },
+      )
+      const interrupted = await networkPage.evaluate(() => ({
+        completions: window.completions,
+        sent: window.sent,
+        panelText: document.getElementById("fcuno-spc-group-dispatcher").innerText,
+      }))
+      assert.equal(interrupted.sent.length, 1, JSON.stringify(interrupted))
+      assert.equal(interrupted.completions.length, 1, JSON.stringify(interrupted))
+      assert.match(interrupted.panelText, /Connection interrupted/)
+      assert.match(interrupted.panelText, /Retrying automatically; last delivery result is unchanged/)
+      assert.match(interrupted.panelText, /SENT/i)
+      assert.doesNotMatch(interrupted.panelText, /Enquiry retained for review/)
 
       const fallbackPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
       await fallbackPage.goto(`${url}?enterFallback=1`, { waitUntil: "domcontentloaded" })

@@ -207,6 +207,8 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /dispatcher-latest/)
   assert.doesNotMatch(content, /Checking for enquiries/)
   assert.match(content, /result: requiresReview \? "manual_review" : "failed"/)
+  assert.match(content, /Retrying automatically; last delivery result is unchanged/)
+  assert.match(content, /state\.errorType === "review"/)
   assert.doesNotMatch(content, /document\.visibilityState === "hidden"/)
   assert.match(content, /claim\.job\.attemptCount > 1 && outgoingMessageCount/)
   assert.doesNotMatch(content, /return textCandidates\(header\)\[0\]/)
