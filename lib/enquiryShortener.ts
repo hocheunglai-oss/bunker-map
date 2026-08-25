@@ -72,6 +72,21 @@ const MONTHS: Record<string, string> = {
   december: "dec",
 }
 
+const MAX_DAY_BY_MONTH: Record<string, number> = {
+  jan: 31,
+  feb: 29,
+  mar: 31,
+  apr: 30,
+  may: 31,
+  jun: 30,
+  jul: 31,
+  aug: 31,
+  sep: 30,
+  oct: 31,
+  nov: 30,
+  dec: 31,
+}
+
 function normalizeInput(text: string) {
   return text
     .replace(/\r\n?/g, "\n")
@@ -137,19 +152,17 @@ function isUsableQuantityNumber(value: string) {
 }
 
 function normalizeDate(day: string, month: string) {
-  const normalizedMonth = MONTHS[month.toLowerCase()]
+  const normalizedMonth = validDateParts(day, month)
   const normalizedDay = Number(day)
-  if (!normalizedMonth || normalizedDay < 1 || normalizedDay > 31) return ""
-  if (/^\d+$/.test(month) && (Number(month) < 1 || Number(month) > 12)) return ""
+  if (!normalizedMonth) return ""
   return `${normalizedDay} ${normalizedMonth}`
 }
 
 function validDateParts(day: string, month: string) {
   const normalizedMonth = MONTHS[month.toLowerCase()]
   const normalizedDay = Number(day)
-  if (!normalizedMonth) return ""
-  if (normalizedDay < 1 || normalizedDay > 31) return ""
-  if (/^\d+$/.test(month) && (Number(month) < 1 || Number(month) > 12)) return ""
+  if (!normalizedMonth || !Number.isInteger(normalizedDay)) return ""
+  if (normalizedDay < 1 || normalizedDay > MAX_DAY_BY_MONTH[normalizedMonth]) return ""
   return normalizedMonth
 }
 

@@ -1,6 +1,7 @@
 import {
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
+  findEnquiryDates,
   formatVlsfoMaxRemark,
   normalizeEnquiryQuantityNumber,
   replaceHsfoWithRmk,
@@ -162,7 +163,16 @@ function isImoToken(value: string) {
 
 function looksLikeDateWindow(value: string) {
   const text = value.trim()
-  return MONTH_PATTERN.test(text) || /\b\d{1,2}\s*[-–]\s*\d{1,2}\b/.test(text)
+  if (MONTH_PATTERN.test(text)) return findEnquiryDates(text).length > 0
+
+  const bareRange = text.match(/^(?:sg\s+)?(\d{1,2})\s*[-–]\s*(\d{1,2})$/i)
+  return Boolean(
+    bareRange &&
+    Number(bareRange[1]) >= 1 &&
+    Number(bareRange[1]) <= 31 &&
+    Number(bareRange[2]) >= 1 &&
+    Number(bareRange[2]) <= 31,
+  )
 }
 
 function looksLikeFuel(value: string) {

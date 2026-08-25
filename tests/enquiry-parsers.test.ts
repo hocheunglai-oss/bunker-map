@@ -179,6 +179,22 @@ test("normalises compact SPC dates, vessel types, and concatenated fuels", () =>
   )
 })
 
+test("rejects impossible calendar dates in worksheet and SPC output", () => {
+  const reported = "testing vsl 3 / 9402017 / 33 aug / vlsfo 3,000mts / lsmgo 100mts"
+  const expected = "testing vsl 3 / 9402017 / vlsfo 3,000mts / lsmgo 100mts"
+
+  assert.equal(worksheetOutput(reported), expected)
+  assert.equal(parseSpcEnquiryText(reported).standardText, expected)
+  assert.equal(
+    parseSpcEnquiryText("testing vsl 3 / 9402017 / 31 apr / vlsfo 3,000mts").standardText,
+    "testing vsl 3 / 9402017 / vlsfo 3,000mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText("testing vsl 3 / 9402017 / 31 aug / vlsfo 3,000mts").standardText,
+    "testing vsl 3 / 9402017 / 31 aug / vlsfo 3,000mts",
+  )
+})
+
 test("extracts CBM quantity without concatenating the sulphur decimal", () => {
   assert.equal(
     parseSpcEnquiryText("PACIFIC HORNBILL / 9833233 / JUL10 / LSMGO 0.1% 200 cbm").standardText,
