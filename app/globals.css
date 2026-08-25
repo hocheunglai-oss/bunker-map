@@ -8560,10 +8560,122 @@ body:has(.spc-statistics-page) .spc-main {
   .spc-enquiry-parser-pane {
     border-right: 0;
     border-bottom: 1px solid var(--fc-admin-border-soft);
+    padding: 12px;
   }
 
   .spc-enquiry-entry-form textarea {
     min-height: 96px;
+  }
+
+  .spc-enquiry-raw textarea {
+    height: 132px;
+    min-height: 132px;
+    padding-bottom: 40px;
+  }
+
+  .spc-enquiry-preview-field textarea {
+    min-height: 68px;
+  }
+
+  .spc-enquiry-command-row button {
+    min-height: 42px;
+  }
+
+  .spc-enquiry-details-pane {
+    padding: 12px;
+  }
+
+  .spc-enquiry-details-pane input {
+    min-height: 38px;
+  }
+
+  .fc-admin-scope .fc-admin-mobile-menu {
+    min-height: 44px;
+    padding-inline: 14px;
+  }
+
+  body:has(.spc-fixture-ledger-panel) .spc-main {
+    padding: 6px 10px 18px;
+  }
+
+  .spc-fixture-ledger-panel,
+  .spc-supplier-ledger-panel {
+    width: 100%;
+  }
+
+  .spc-fixture-ledger-toolbar {
+    min-height: 44px;
+  }
+
+  .spc-fixture-ledger-toolbar::before,
+  .spc-supplier-ledger-panel::before {
+    content: "SWIPE SIDEWAYS TO VIEW ALL COLUMNS \2192";
+    color: #657080;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.035em;
+  }
+
+  .spc-fixture-ledger-toolbar::before {
+    margin-right: auto;
+  }
+
+  .spc-supplier-ledger-panel::before {
+    display: block;
+    border-bottom: 1px solid var(--fc-admin-border-soft);
+    background: #f8fafc;
+    padding: 9px 10px;
+  }
+
+  .spc-fixture-refresh-button {
+    min-height: 34px;
+  }
+
+  .spc-fixture-ledger-panel .spc-table-wrap,
+  .spc-supplier-ledger-panel .spc-table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-color: #aeb7c2 #edf0f3;
+    scrollbar-gutter: stable;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .spc-fixture-ledger-panel .spc-table-wrap::-webkit-scrollbar,
+  .spc-supplier-ledger-panel .spc-table-wrap::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .spc-fixture-ledger-panel .spc-table-wrap::-webkit-scrollbar-thumb,
+  .spc-supplier-ledger-panel .spc-table-wrap::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: #aeb7c2;
+  }
+
+  .spc-table.spc-fixture-table th:first-child,
+  .spc-table.spc-fixture-table td:first-child:not([colspan]),
+  .spc-table.spc-supplier-ledger-table th:first-child,
+  .spc-table.spc-supplier-ledger-table td:first-child {
+    position: sticky;
+    left: 0;
+    box-shadow: 3px 0 5px rgba(15, 23, 42, 0.08);
+  }
+
+  .spc-table.spc-fixture-table th:first-child,
+  .spc-table.spc-supplier-ledger-table th:first-child {
+    z-index: 18;
+  }
+
+  .spc-table.spc-fixture-table td:first-child:not([colspan]),
+  .spc-table.spc-supplier-ledger-table td:first-child {
+    z-index: 3;
+    background: #ffffff;
+  }
+
+  .spc-table.spc-fixture-table tr.is-pending td:first-child:not([colspan]) {
+    background: #fff6c7;
   }
 
   .spc-enquiry-fields {
