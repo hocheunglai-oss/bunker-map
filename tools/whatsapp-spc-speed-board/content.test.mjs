@@ -590,10 +590,28 @@ assert.deepEqual(
 assert.equal(api.isPendingAmendment(amendedEnquiry), true)
 assert.deepEqual(Array.from(api.amendmentCategories(amendedEnquiry)), ["Quantity"])
 const amendmentBody = api.enquiryAmendmentBodyHtml(amendedEnquiry)
-assert.match(amendmentBody, /Fuel: vlsfo 19mts/)
+assert.match(amendmentBody, /fcuno-wa-spc-enquiry-vessel[^>]*>test only stanley route/)
+assert.match(amendmentBody, /9002201/)
+assert.match(amendmentBody, /sg 29 aug/)
+assert.match(amendmentBody, /fcuno-wa-spc-amendment-diff[^>]*><strong>vlsfo 19mts/)
 assert.doesNotMatch(amendmentBody, /vlsfo 9mts/)
 assert.doesNotMatch(amendmentBody, /<del|→/)
-assert.doesNotMatch(amendmentBody, /test only stanley route|9002201|sg 29 aug/)
+assert.equal((amendmentBody.match(/fcuno-wa-spc-amendment-diff/g) || []).length, 1)
+const multiFieldAmendmentBody = api.enquiryAmendmentBodyHtml({
+  formattedText: "testing vsl 45 / 9821111 / 28 aug / vlsfo 1,100mts / lsmgo 330mts",
+  amendmentChanges: [
+    { field: "vesselName", label: "Vessel Name", before: "testing vsl 2", after: "testing vsl 45" },
+    { field: "imo", label: "IMO", before: "9111882", after: "9821111" },
+    { field: "vlsfo", label: "Quantity", before: "vlsfo 110mts", after: "vlsfo 1,100mts" },
+  ],
+})
+assert.equal((multiFieldAmendmentBody.match(/fcuno-wa-spc-amendment-diff/g) || []).length, 3)
+assert.match(multiFieldAmendmentBody, />testing vsl 45<\/strong>/)
+assert.match(multiFieldAmendmentBody, />9821111<\/strong>/)
+assert.match(multiFieldAmendmentBody, />vlsfo 1,100mts<\/strong>/)
+assert.match(multiFieldAmendmentBody, /fcuno-wa-spc-enquiry-separator"> \/ <\/span>28 aug/)
+assert.match(multiFieldAmendmentBody, /lsmgo 330mts$/)
+assert.doesNotMatch(multiFieldAmendmentBody, /testing vsl 2|9111882|vlsfo 110mts|<del|→/)
 assert.equal(
   api.selectedEnquiryText(),
   "Quantity Amended\ntest only stanley route / 9002201 / sg 29 aug / *vlsfo 19mts*",

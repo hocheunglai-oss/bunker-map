@@ -1418,12 +1418,16 @@
   }
 
   function enquiryAmendmentBodyHtml(enquiry) {
-    const changes = enquiryAmendmentChanges(enquiry)
-    if (!changes.length) return escapeHtml(enquiryBodyText(enquiry))
-    return changes.map((change) => {
-      const value = cleanText(change.after) || "removed"
-      return `<span class="fcuno-wa-spc-amendment-diff"><strong>${escapeHtml(change.label)}: ${escapeHtml(value)}</strong></span>`
-    }).join('<span class="fcuno-wa-spc-enquiry-separator"> · </span>')
+    const segments = enquirySegments(enquiryBodyText(enquiry))
+    const changedIndexes = amendmentChangedSegmentIndexes(enquiry)
+    return segments.map((segment, index) => {
+      if (changedIndexes.has(index)) {
+        return `<span class="fcuno-wa-spc-amendment-diff"><strong>${escapeHtml(segment)}</strong></span>`
+      }
+      return index === 0
+        ? `<strong class="fcuno-wa-spc-enquiry-vessel">${escapeHtml(segment)}</strong>`
+        : escapeHtml(segment)
+    }).join('<span class="fcuno-wa-spc-enquiry-separator"> / </span>')
   }
 
   function enquiryAmendmentChanges(enquiry) {
