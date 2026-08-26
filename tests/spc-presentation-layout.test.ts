@@ -26,6 +26,10 @@ test("SPC presentation uses the renamed route without changing its permission id
     nextConfig,
     /source: "\/spc\/readme",[\s\S]*?destination: "\/spc\/presentation",[\s\S]*?permanent: true/,
   )
+  assert.match(
+    nextConfig,
+    /source: "\/readme",[\s\S]*?destination: "\/presentation",[\s\S]*?permanent: true/,
+  )
 })
 
 test("SPC presentation removes repeated preview topics and keeps sections editor-only", () => {

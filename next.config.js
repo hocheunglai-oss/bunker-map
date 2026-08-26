@@ -47,6 +47,11 @@ const nextConfig = {
   async redirects() {
     return [
       {
+        source: "/readme",
+        destination: "/presentation",
+        permanent: true,
+      },
+      {
         source: "/spc/readme",
         destination: "/spc/presentation",
         permanent: true,
