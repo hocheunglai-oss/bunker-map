@@ -658,20 +658,6 @@ export default function SpcReadmePage() {
         <header className="spc-readme-toolbar">
           <div>
             <strong>INCORPORATE AI INTO TRADING</strong>
-            <span>INTERMEDIATE / {activeChapter || "NO CHAPTER"}</span>
-          </div>
-          <div className="spc-readme-toolbar-actions">
-            <span className="spc-readme-section-count">
-              {chapterChunks.length} {chapterChunks.length === 1 ? "SECTION" : "SECTIONS"}
-            </span>
-            <button
-              type="button"
-              className="is-primary"
-              disabled={!selected || presenterTransitioning}
-              onClick={() => void startPresentation("chapter")}
-            >
-              PLAY CHAPTER
-            </button>
           </div>
         </header>
 

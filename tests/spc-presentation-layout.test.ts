@@ -38,7 +38,9 @@ test("SPC presentation removes repeated preview topics and keeps sections editor
     presentationPage,
     /\{editorMode && canEdit \? \([\s\S]*?<nav className="spc-readme-chunk-list"/,
   )
-  assert.match(presentationPage, />\s*PLAY CHAPTER\s*<\/button>/)
+  assert.doesNotMatch(presentationPage, /spc-readme-section-count/)
+  assert.doesNotMatch(presentationPage, />\s*PLAY CHAPTER\s*<\/button>/)
+  assert.doesNotMatch(presentationPage, /INTERMEDIATE \/ \{activeChapter/)
 })
 
 test("SPC presentation gives the video a larger polished workspace", () => {
@@ -49,5 +51,13 @@ test("SPC presentation gives the video a larger polished workspace", () => {
   assert.match(
     globalStyles,
     /\.spc-readme-stage \{[\s\S]*?border-radius: 16px;[\s\S]*?box-shadow:/,
+  )
+  assert.match(
+    globalStyles,
+    /linear-gradient\(100deg, #eaf3ff 0%, #f7faff 45%, #ffffff 100%\)/,
+  )
+  assert.match(
+    globalStyles,
+    /\.spc-readme-toolbar > div:first-child strong \{[\s\S]*?font-size: clamp\(18px, 1\.7vw, 22px\);/,
   )
 })

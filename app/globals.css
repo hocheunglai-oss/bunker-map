@@ -5443,8 +5443,8 @@ body:has(.spc-statistics-page) .spc-main {
   gap: 20px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
   background:
-    radial-gradient(circle at 84% 20%, rgba(11, 112, 224, 0.14), transparent 32%),
-    linear-gradient(120deg, #ffffff 0%, #f5f9ff 100%);
+    radial-gradient(circle at 5% 45%, rgba(11, 112, 224, 0.16), transparent 38%),
+    linear-gradient(100deg, #eaf3ff 0%, #f7faff 45%, #ffffff 100%);
   padding: 12px 18px;
 }
 
@@ -5456,8 +5456,9 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-toolbar > div:first-child strong {
   color: #002855;
-  font-size: 14px;
+  font-size: clamp(18px, 1.7vw, 22px);
   font-weight: 900;
+  letter-spacing: -0.025em;
 }
 
 .spc-readme-toolbar > div:first-child span {
@@ -5473,14 +5474,6 @@ body:has(.spc-statistics-page) .spc-main {
   display: flex;
   align-items: center;
   gap: 7px;
-}
-
-.spc-readme-section-count {
-  color: #657082;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
 }
 
 .spc-readme-session-status > span {
