@@ -247,7 +247,7 @@ export default function SpcLoginPage() {
             <h1>WELCOME{sessionPresentationLabel ? `, ${sessionPresentationLabel}` : ""}</h1>
             <p className="spc-welcome-introduction">
               YOU ARE INVITED TO THE{" "}
-              <Link href="/spc/readme">
+              <Link href="/spc/presentation">
                 PRESENTATION OF
                 <br />
                 INCORPORATE AI INTO TRADING

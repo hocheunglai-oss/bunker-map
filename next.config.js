@@ -44,6 +44,15 @@ const nextConfig = {
     "/api/spc/group-dispatcher/download": ["./tools/whatsapp-spc-group-dispatcher/**/*"],
     "/api/spc/group-dispatcher/files": ["./tools/whatsapp-spc-group-dispatcher/**/*"],
   },
+  async redirects() {
+    return [
+      {
+        source: "/spc/readme",
+        destination: "/spc/presentation",
+        permanent: true,
+      },
+    ]
+  },
   async headers() {
     return [
       {

@@ -223,7 +223,7 @@ export default function SpcReadmePage() {
   }, [authenticated, canView])
 
   useEffect(() => {
-    document.title = "SPC INTRODUCTION"
+    document.title = "SPC PRESENTATION"
   }, [])
 
   useEffect(() => {
@@ -650,7 +650,7 @@ export default function SpcReadmePage() {
   }
 
   return (
-    <SpcShell title="INTRODUCTION">
+    <SpcShell title="PRESENTATION">
       {error ? <div className="spc-alert is-error">{error}</div> : null}
       {message ? <div className="spc-alert">{message}</div> : null}
 
@@ -659,6 +659,19 @@ export default function SpcReadmePage() {
           <div>
             <strong>INCORPORATE AI INTO TRADING</strong>
             <span>INTERMEDIATE / {activeChapter || "NO CHAPTER"}</span>
+          </div>
+          <div className="spc-readme-toolbar-actions">
+            <span className="spc-readme-section-count">
+              {chapterChunks.length} {chapterChunks.length === 1 ? "SECTION" : "SECTIONS"}
+            </span>
+            <button
+              type="button"
+              className="is-primary"
+              disabled={!selected || presenterTransitioning}
+              onClick={() => void startPresentation("chapter")}
+            >
+              PLAY CHAPTER
+            </button>
           </div>
         </header>
 
@@ -678,33 +691,31 @@ export default function SpcReadmePage() {
         </nav>
 
         <div className={`spc-readme-workspace${editorMode && canEdit ? " is-editing" : ""}`}>
-          <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
-            <div className="spc-readme-chunk-list-header">
-              <span>SECTIONS</span>
-            </div>
-            {loading ? <p className="spc-readme-empty">Loading...</p> : null}
-            {chapterChunks.map((chunk, index) => (
-              <button
-                type="button"
-                className={chunk.id === selected?.id ? "is-active" : ""}
-                onClick={() => setSelectedId(chunk.id)}
-                key={chunk.id}
-              >
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <span><small>{chunk.sectionLabel}</small><strong>{chunk.title}</strong></span>
-                <span><small>{formatDuration(chunk.durationSeconds)}</small>{chunk.status === "draft" ? <i>DRAFT</i> : null}</span>
-              </button>
-            ))}
-            {!loading && chapterChunks.length === 0 ? <p className="spc-readme-empty">No presentation sections.</p> : null}
-          </nav>
+          {editorMode && canEdit ? (
+            <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
+              <div className="spc-readme-chunk-list-header">
+                <span>SECTIONS</span>
+              </div>
+              {loading ? <p className="spc-readme-empty">Loading...</p> : null}
+              {chapterChunks.map((chunk, index) => (
+                <button
+                  type="button"
+                  className={chunk.id === selected?.id ? "is-active" : ""}
+                  onClick={() => setSelectedId(chunk.id)}
+                  key={chunk.id}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <span><small>{chunk.sectionLabel}</small><strong>{chunk.title}</strong></span>
+                  <span><small>{formatDuration(chunk.durationSeconds)}</small>{chunk.status === "draft" ? <i>DRAFT</i> : null}</span>
+                </button>
+              ))}
+              {!loading && chapterChunks.length === 0 ? <p className="spc-readme-empty">No presentation sections.</p> : null}
+            </nav>
+          ) : null}
 
           <main className="spc-readme-stage-pane">
             {selected ? (
               <>
-                <div className="spc-readme-stage-heading">
-                  <div><span>{selected.sectionLabel}</span><h1>{selected.title}</h1></div>
-                  <span>{formatDuration(selected.durationSeconds)}</span>
-                </div>
                 <div className="spc-readme-stage">
                   {selectedMedia.video ? (
                     <PresentationMedia
@@ -738,7 +749,7 @@ export default function SpcReadmePage() {
             <aside className="spc-readme-editor">
               <div className="spc-readme-editor-header">
                 <strong>PRIVATE EDITOR</strong>
-                <button type="button" onClick={() => { window.location.href = "/readme" }}>VIEW</button>
+                <button type="button" onClick={() => router.push("/spc/presentation")}>VIEW</button>
               </div>
               <label>
                 <span>CHAPTER</span>

@@ -31,10 +31,10 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   },
   {
     id: "spc-readme",
-    label: "INTRODUCTION",
+    label: "PRESENTATION",
     group: "trading",
-    path: "/spc/readme",
-    matchPrefixes: ["/readme", "/spc/readme"],
+    path: "/spc/presentation",
+    matchPrefixes: ["/presentation", "/spc/presentation", "/readme", "/spc/readme"],
   },
   {
     id: "spc-feedback",

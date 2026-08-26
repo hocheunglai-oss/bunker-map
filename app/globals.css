@@ -5429,15 +5429,23 @@ body:has(.spc-statistics-page) .spc-main {
   min-height: calc(100vh - 44px);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border-color: rgba(0, 40, 85, 0.14);
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(0, 40, 85, 0.1);
 }
 
 .spc-readme-toolbar {
   min-height: 62px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 20px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-  background: #ffffff;
-  padding: 10px 14px;
+  background:
+    radial-gradient(circle at 84% 20%, rgba(11, 112, 224, 0.14), transparent 32%),
+    linear-gradient(120deg, #ffffff 0%, #f5f9ff 100%);
+  padding: 12px 18px;
 }
 
 .spc-readme-toolbar > div:first-child {
@@ -5465,6 +5473,14 @@ body:has(.spc-statistics-page) .spc-main {
   display: flex;
   align-items: center;
   gap: 7px;
+}
+
+.spc-readme-section-count {
+  color: #657082;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .spc-readme-session-status > span {
@@ -5548,8 +5564,8 @@ body:has(.spc-statistics-page) .spc-main {
   gap: 2px;
   overflow-x: auto;
   border-bottom: 1px solid var(--fc-admin-border-soft);
-  background: #f7f8fa;
-  padding: 0 14px;
+  background: rgba(247, 249, 252, 0.96);
+  padding: 5px 14px 0;
 }
 
 .spc-readme-chapter-tabs button {
@@ -5560,7 +5576,8 @@ body:has(.spc-statistics-page) .spc-main {
   background: transparent;
   color: #657082;
   cursor: pointer;
-  padding: 11px 16px 10px;
+  border-radius: 10px 10px 0 0;
+  padding: 10px 16px 9px;
   font-size: 10px;
   font-weight: 900;
   white-space: nowrap;
@@ -5603,7 +5620,7 @@ body:has(.spc-statistics-page) .spc-main {
 .spc-readme-workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 330px);
 }
 
 .spc-readme-workspace.is-editing {
@@ -5721,8 +5738,10 @@ body:has(.spc-statistics-page) .spc-main {
 .spc-readme-stage-pane {
   min-width: 0;
   overflow-y: auto;
-  background: #ffffff;
-  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(11, 112, 224, 0.1), transparent 35%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 56%);
+  padding: clamp(18px, 2.4vw, 34px);
 }
 
 .spc-readme-stage-heading {
@@ -5761,8 +5780,12 @@ body:has(.spc-statistics-page) .spc-main {
   width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border: 1px solid #cfd7e2;
+  border: 1px solid rgba(0, 40, 85, 0.18);
+  border-radius: 16px;
   background: #edf1f5;
+  box-shadow:
+    0 22px 50px rgba(0, 40, 85, 0.14),
+    0 2px 8px rgba(0, 40, 85, 0.08);
 }
 
 .spc-readme-media,
@@ -6993,7 +7016,10 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 @media (max-width: 1180px) {
-  .spc-readme-workspace,
+  .spc-readme-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .spc-readme-workspace.is-editing {
     grid-template-columns: 200px minmax(0, 1fr);
   }
