@@ -72,15 +72,20 @@
     return "Received"
   }
 
+  function amendmentNumber(activity) {
+    const storedRevision = Math.max(2, Math.floor(Number(activity?.revisionNumber) || 2))
+    return storedRevision - 1
+  }
+
   function activityBadge(activity) {
-    if (activity.eventType === "amended") return `REV ${activity.revisionNumber}`
+    if (activity.eventType === "amended") return `REV ${amendmentNumber(activity)}`
     if (activity.eventType === "postponed") return "POST"
     if (activity.eventType === "reoffer") return "REOFFER"
     return "NEW"
   }
 
   function sendingStatus(activity) {
-    if (activity.eventType === "amended") return `Sending revision ${activity.revisionNumber}`
+    if (activity.eventType === "amended") return `Sending revision ${amendmentNumber(activity)}`
     if (activity.eventType === "postponed") return "Sending postponement"
     if (activity.eventType === "reoffer") return "Sending reoffer"
     return "Sending enquiry"

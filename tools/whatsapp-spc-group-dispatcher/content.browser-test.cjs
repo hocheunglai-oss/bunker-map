@@ -53,7 +53,7 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.3.0'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.3.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
@@ -88,7 +88,7 @@ function verifyUpdateReloadsWhatsApp() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.3.0" }),
+      getManifest: () => ({ version: "1.3.1" }),
       onInstalled: { addListener: (listener) => { installedListener = listener } },
       onMessage: { addListener: () => {} },
     },
@@ -113,7 +113,7 @@ async function verifyUnpairedBackgroundState() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.3.0" }),
+      getManifest: () => ({ version: "1.3.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -169,7 +169,7 @@ async function verifyAtomicNativeSend() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.3.0" }),
+      getManifest: () => ({ version: "1.3.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -217,7 +217,7 @@ async function verifyGuardedEnterFallback() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.3.0" }),
+      getManifest: () => ({ version: "1.3.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
     },
@@ -272,7 +272,7 @@ async function verifyInPlaceUpdateReload() {
   const chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "1.3.0" }),
+      getManifest: () => ({ version: "1.3.1" }),
       onInstalled: { addListener: () => {} },
       onMessage: { addListener: (listener) => { messageListener = listener } },
       reload: () => { extensionReloads += 1 },
@@ -415,7 +415,8 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.3\.0/)
+      assert.match(sent.panelText, /REDELIVERY\s+v1\.3\.1/)
+      assert.match(sent.panelText, /REV 1 · SENT/)
       assert.match(sent.panelText, /Delivered · last 24 hours\s+1/i)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)

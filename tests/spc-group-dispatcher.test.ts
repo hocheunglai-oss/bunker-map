@@ -198,6 +198,8 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /function hasNewOutgoingMessage\(message, before\)/)
   assert.match(content, /activity\.eventType === "postponed"[\s\S]+return "POST"/)
   assert.match(content, /activity\.eventType === "reoffer"[\s\S]+return "REOFFER"/)
+  assert.match(content, /storedRevision - 1/)
+  assert.match(content, /return `REV \$\{amendmentNumber\(activity\)\}`/)
   assert.match(content, /replaceComposerText\(composer, message\)/)
   assert.match(content, /await runtimeMessage\(\{ type: "native-enter" \}\)/)
   assert.match(content, /await nativeClick\(sendButton\)/)
