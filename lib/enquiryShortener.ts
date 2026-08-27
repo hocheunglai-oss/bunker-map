@@ -20,7 +20,7 @@ const KL_UNIT_PATTERN = String.raw`k\s*\.?\s*l`
 const EXPLICIT_PORT_LINE_PATTERN =
   /^\s*(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)(?:\s|[:#(（-]|$)/i
 const OPERATIONAL_SCHEDULE_LINE_PATTERN =
-  /^\s*(e\s*\.?\s*t\s*\.?\s*(?:a|b|d|s|c(?:\s*\.?\s*d)?)\s*\.?)\s*[:#-]?\s*(.*)$/i
+  /^\s*((?:e\s*\.?\s*t\s*\.?\s*(?:a|b|d|s|c(?:\s*\.?\s*d)?)|a\s*\.?\s*t\s*\.?\s*a)\s*\.?)\s*[:#-]?\s*(.*)$/i
 
 const MONTHS: Record<string, string> = {
   "1": "jan",
@@ -211,6 +211,16 @@ export function findEnquiryDates(value: string) {
   const dates: string[] = []
   const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|agu(?:st)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
+  for (const match of normalized.matchAll(/(?<!\d)(\d{1,2})[./](\d{1,2})\s*(?:-|~|to)\s*(\d{1,2})[./](\d{1,2})(?![./]\d)/gi)) {
+    const range = formatDateRange(match[2], match[1], match[4], match[3])
+    if (range) dates.push(range)
+  }
+
+  for (const match of normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\s*\\/\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthNamePattern})\\b`, "gi"))) {
+    const range = formatDateRange(match[1], match[2], match[3], match[4])
+    if (range) dates.push(range)
+  }
+
   for (const match of normalized.matchAll(/(?:\d{4}\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?\s*(?:-|~|to|至|到)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*[日号]/gi)) {
     const range = formatDateRange(match[2], match[1], match[4], match[3] || match[1])
     if (range) dates.push(range)
@@ -370,9 +380,9 @@ function extractOperationalSchedule(lines: string[]) {
     if (!match) continue
 
     const rawLabel = match[1].replace(/[^a-z]/gi, "").toLowerCase()
-    const label: OperationalScheduleEntry["label"] = rawLabel === "eta" || rawLabel === "etb"
-      ? rawLabel
-      : "etd"
+    const label: OperationalScheduleEntry["label"] = rawLabel === "eta" || rawLabel === "ata"
+      ? "eta"
+      : rawLabel === "etb" ? "etb" : "etd"
     const inlineValue = match[2].trim()
     const date = findEnquiryDates(inlineValue)[0] ||
       (!inlineValue ? findEnquiryDates(lines[index + 1] || "")[0] : "") ||
@@ -388,6 +398,30 @@ function formatOperationalWindow(firstDate: string, secondDate: string) {
   const second = secondDate.match(/^(\d{1,2})\s+([a-z]{3})$/i)
   if (!first || !second) return ""
   return formatDateRange(first[1], first[2], second[1], second[2])
+}
+
+function operationalDateBounds(value: string) {
+  const crossMonth = value.match(/^(\d{1,2})\s+([a-z]{3})\s+-\s+(\d{1,2})\s+([a-z]{3})$/i)
+  if (crossMonth) {
+    return {
+      start: `${Number(crossMonth[1])} ${crossMonth[2].toLowerCase()}`,
+      end: `${Number(crossMonth[3])} ${crossMonth[4].toLowerCase()}`,
+    }
+  }
+
+  const sameMonth = value.match(/^(\d{1,2})\s+-\s+(\d{1,2})\s+([a-z]{3})$/i)
+  if (sameMonth) {
+    const month = sameMonth[3].toLowerCase()
+    return {
+      start: `${Number(sameMonth[1])} ${month}`,
+      end: `${Number(sameMonth[2])} ${month}`,
+    }
+  }
+
+  const single = value.match(/^(\d{1,2})\s+([a-z]{3})$/i)
+  if (!single) return null
+  const date = `${Number(single[1])} ${single[2].toLowerCase()}`
+  return { start: date, end: date }
 }
 
 function extractAlternativeCaseSchedule(
@@ -437,12 +471,20 @@ function extractDeliverySchedule(
     const port = options.includePort
       ? formatShortenedPort(options.port?.trim() || extractEnquiryPort(text, { portNames: options.portNames }))
       : ""
+    const eta = operationalSchedule.find((entry) => entry.label === "eta")
+    const etb = operationalSchedule.find((entry) => entry.label === "etb")
+    const etd = operationalSchedule.find((entry) => entry.label === "etd")
+    const etaBounds = eta ? operationalDateBounds(eta.date) : null
+    const etdBounds = etd ? operationalDateBounds(etd.date) : null
+    const fullMovementWindow = eta && etb && etd && etaBounds && etdBounds
+      ? formatOperationalWindow(etaBounds.start, etdBounds.end)
+      : ""
+    if (fullMovementWindow) return [port, fullMovementWindow].filter(Boolean).join(" ")
+
     const hasExplicitEtd = scheduleLines.some((line) => {
       const match = line.match(OPERATIONAL_SCHEDULE_LINE_PATTERN)
       return match?.[1].replace(/[^a-z]/gi, "").toLowerCase() === "etd"
     })
-    const eta = operationalSchedule.find((entry) => entry.label === "eta")
-    const etd = operationalSchedule.find((entry) => entry.label === "etd")
     const usesDeliveryWindowTemplate = /\bgrades?\s+and\s+quantities\b/i.test(text)
     const window = usesDeliveryWindowTemplate && hasExplicitEtd &&
       operationalSchedule.length === 2 && eta && etd
@@ -492,7 +534,7 @@ function extractDeliverySchedule(
 function classifyProduct(value: string): ProductSegment["product"] | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gasoil)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
+  if (/(?:vlsfo|vslfo|lsmfo|lsfo|rmg180|180cst|120cst|ls(?:80|120|180|200)c+s+t)/i.test(compact) || /(?:^|\D)80\s*cst\b/i.test(value) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
   if (/\b(?:hsfo|hfo|ifo|rmk)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
@@ -519,7 +561,7 @@ function isNonRequestProductReference(value: string) {
   if (hasExplicitQuantity) return false
 
   return /^\s*(?:(?:remarks?|r\s*\.?\s*m\s*\.?\s*k\s*\.?|spec(?:ification)?|fuel\s+standard)\b|燃油标准)\s*[:：]?/i.test(normalized) ||
-    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
+    /^\s*(?:hsfo|hfo|ifo|v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)\s+spec(?:ification)?\b/i.test(normalized) ||
     /^\s*(?:fuel|diesel)\s+oils?\b.*\bspecs?\b/i.test(normalized) ||
     /(?:\b(?:please|kindly)\b.*\bbunker(?:ing)?\b|\bbunker(?:ing)?\s+carry\s+out\b)/i.test(normalized) ||
     /\b(?:attach|certificate|coq|flash\s+point|quality\s+claims?|for\s+guidance)\b/i.test(normalized)
@@ -741,10 +783,10 @@ function extractPairedProductQuantityLines(lines: string[], autoDetectVlsfoRemar
 }
 
 function productMatches(line: string) {
-  const hasExplicitVlsfo = /\b(?:v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo)\b/i.test(line)
+  const hasExplicitVlsfo = /\b(?:v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*(?:80|120|180|200)\s*c\s*s+\s*t)\b/i.test(line)
 
   return Array.from(
-    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180)\s*c\s*s+\s*t)/gi),
+    line.matchAll(/(?:hsfo|hfo|ifo|r\s*\.?\s*m\s*\.?\s*k|v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gas\s*oil|rmg\s*180|rmg\s*380|180\s*cst|120\s*cst|\b80\s*cst|l\s*s\s*(?:80|120|180|200)\s*c\s*s+\s*t)/gi),
   )
     .map((match) => ({
       index: match.index ?? -1,

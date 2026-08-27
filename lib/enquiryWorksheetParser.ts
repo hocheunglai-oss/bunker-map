@@ -207,6 +207,23 @@ function extractProseVessel(lines: string[]) {
   return ""
 }
 
+function extractStandaloneVesselBeforePort(lines: string[]) {
+  for (let index = 0; index < Math.min(lines.length - 1, 12); index += 1) {
+    const candidate = lines[index]
+    if (!PORT_LABEL_PATTERN.test(lines[index + 1])) continue
+    if (/[:@]/.test(candidate)) continue
+    if (/^(?:pls|please|kindly|thanks?|best\s+regards|regards|from\s+agents?|agent\s+details?)\b/i.test(candidate)) continue
+
+    const words = candidate.match(/[A-Za-z0-9]+/g) || []
+    if (words.length < 2 || words.length > 6) continue
+
+    const cleaned = cleanVesselName(candidate)
+    if (isPlausibleVesselName(cleaned)) return cleaned
+  }
+
+  return ""
+}
+
 function extractFallbackVessel(lines: string[], imo: string) {
   if (!imo) return ""
 
@@ -373,8 +390,14 @@ function extractStructuredSlashPort(
     if (!hasVesselIdentity || !hasTradingDetails) continue
 
     for (const part of parts.slice(1)) {
-      const port = findKnownPort(part, { ...options, includeShortAliases: true })
-      if (port) return port
+      const alternatives = findEnquiryPortsInText(part, {
+        portNames: options.portNames,
+        includeShortAliases: true,
+      })
+      if (/\bor\b/i.test(part) && alternatives.length > 1) {
+        return alternatives.slice(0, 2).join(" or ")
+      }
+      if (alternatives[0]) return alternatives[0]
     }
   }
 
@@ -430,8 +453,14 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     if (NON_PORT_CONTEXT_PATTERN.test(line) || /[\w.-]+@[\w.-]+/.test(line)) continue
 
     const etaSuffix = line.split(/\b(?:eta|etb|etd|ets)\b/i)[1] || ""
-    const etaPort = findKnownPort(etaSuffix, { ...options, includeShortAliases: true })
-    if (etaPort) return etaPort
+    const etaAlternatives = findEnquiryPortsInText(etaSuffix, {
+      portNames: options.portNames,
+      includeShortAliases: true,
+    })
+    if (/\bor\b/i.test(etaSuffix) && etaAlternatives.length > 1) {
+      return etaAlternatives.slice(0, 2).join(" or ")
+    }
+    if (etaAlternatives[0]) return etaAlternatives[0]
 
     const standalonePort = normalizeIndexedEnquiryPort(stripOuterNoise(line), {
       portNames: options.portNames,
@@ -530,6 +559,7 @@ export function parseEnquiryWorksheetGuess(
     (imoLine ? extractVesselFromImoLine(imoLine, imo) : "") ||
     extractLabelledVessel(lines) ||
     extractProseVessel(lines) ||
+    extractStandaloneVesselBeforePort(lines) ||
     extractFallbackVessel(lines, imo) ||
     extractColonProductVessel(lines) ||
     extractDelimitedHeaderVessel(lines, options) ||

@@ -61,7 +61,7 @@ export type StoredSpcEnquiryFieldsInput = {
 const SPC_META_MARKER = "---SPC_META---"
 const MONTH_PATTERN =
   /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i
-const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|rmk|mgo|gas\s*oil|fuel\s*oil|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
+const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*(?:80|120|180|200)\s*c\s*s+\s*t|hsfo|hfo|ifo|rmk|mgo|gas\s*oil|fuel\s*oil|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|ulsd|dma|mdo|biofuel|b24|b30|lng|mt|mts|cbm|rmg|180\s*cst|120\s*cst)/i
 const RMK_PRODUCT_PATTERN = /\br\s*\.?\s*m\s*\.?\s*k\s*\.?s?\b/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "imo",
@@ -186,7 +186,7 @@ export type ExplicitSpcFuelFields = Partial<Record<SpcFuelKey, string>>
 function classifyFuel(value: string): SpcFuelKey | "" {
   const compact = value.toLowerCase().replace(/\s+/g, "")
   if (/(?:lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gasoil)/i.test(compact)) return "lsmgo"
-  if (/(?:vlsfo|lsmfo|lsfo|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
+  if (/(?:vlsfo|vslfo|lsmfo|lsfo|ls(?:80|120|180|200)cst|rmg180|180cst|120cst)/i.test(compact) || /(?:^|[^0-9])0\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
     return "vlsfo"
   }
   if (/\b(?:hsfo|hfo|ifo|rmk)(?:\s*\d{2,3})?\b/i.test(value) || /(?:^|[^0-9])s?\s*3\s*[,.]\s*5(?:0)?(?=$|[^0-9])/i.test(value)) {
@@ -214,7 +214,7 @@ export function extractExplicitSpcFuelFields(rawValue: string): ExplicitSpcFuelF
 
   for (const line of lines) {
     const match = line.match(
-      /^\s*(?:[-*]\s*)?(v\s*l\s*s\s*f\s*o|vlsfo|lsmfo|lsfo|hsfo|hfo|ifo|rmk|fuel\s*oil|gas\s*oil|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)(?:\s*[:=-]\s*|\s+)(.+)$/i,
+      /^\s*(?:[-*]\s*)?(v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*(?:80|120|180|200)\s*c\s*s+\s*t|hsfo|hfo|ifo|rmk|fuel\s*oil|gas\s*oil|l\s*s\s*m\s*g\s*o|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb)(?:\s*[:=-]\s*|\s+)(.+)$/i,
     )
     if (!match) continue
 

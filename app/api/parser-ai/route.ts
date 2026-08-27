@@ -432,6 +432,7 @@ function buildInstructions(source: ParserAiSource) {
     "Return one corrected slash-separated enquiry line in correctedOutput.",
     "Do not invent vessel name, port, buyer, date, product, or quantity. Use empty strings and warnings when unclear.",
     "The raw enquiry is authoritative. If current fields or parser output conflict with the raw enquiry, correct them from the raw enquiry instead of preserving the existing field.",
+    "Never use an explicit port name as the vessel name or as the vessel name for IMO lookup. A standalone ship-like name immediately before a labelled port field is the vessel name.",
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
     "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Remove generic MV, M/V, MT, and M/T prefixes from the vessel name in correctedOutput.",
@@ -442,12 +443,14 @@ function buildInstructions(source: ParserAiSource) {
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
     "Use the calendar year to interpret dates but omit the year from correctedOutput.",
     "A day/day followed by a month is a delivery range: 1/5 aug means 1 - 5 aug, never 5 jan or only 5 aug.",
+    "A numeric M.D-M.D or M/D-M/D expression without a year is month-first: ETA9.2-9.12 means 2 - 12 sep, and 8/31-9/1 means 31 aug - 1 sep.",
+    "ATA is an arrival event equivalent to ETA. ATA/ETD: 7 sep/18 sep is one delivery window, 7 - 18 sep. When ETA, ETB, and ETD are all present, use the ETA start through the ETD end as one delivery window.",
     "Viscosity and specification numbers such as VLSFO 380, RMG 380, 380 CST, 380 Centistoke, and ISO 8217 are not quantities. Prefer the number explicitly paired with MT, MTS, CBM, KL, tons, or Chinese quantity units.",
     "Omit the eta label when ETA is the only event type. In a Grades and Quantities offer template, render explicit ETA and ETD as one delivery range, e.g. kaohsiung 3 - 7 aug. Otherwise preserve multiple event labels and normalize ETS to etd, e.g. inchon eta 27 jul, etd 29 jul.",
     "When multiple candidate ports are listed, include every port and its own window in one schedule segment joined by uppercase OR. Copy each port name from the raw enquiry exactly before normalizing its spelling; never substitute a different port.",
     "When the raw enquiry explicitly labels alternative Case 1, Case 2, and similar choices, join their port/date schedules with uppercase OR instead of and, and do not repeat identical fuel quantities.",
     "Preserve Busan New Port as busan new port; do not shorten it to busan. Normalize an open-ended numeric date such as 7/28~ to 28 jul and omit the dangling tilde when no end date is supplied.",
-    "Classify explicit VLSFO/LSMFO/LSFO/0.5 as VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
+    "Classify explicit VLSFO/VSLFO/LSMFO/LSFO/0.5 as VLSFO. Treat VSLFO as a typo for VLSFO and LS200CST as low-sulphur VLSFO. Do not convert VLSFO into HSFO because of nearby quantity numbers.",
     "RMG180, RMG380, 120CST, and 180CST alone do not prove sulphur class. Use the explicit VLSFO/LSFO/0.5 or HSFO/HFO/IFO/3.5 context; 3.5% RMG380 is HSFO.",
     "RMG 380 with explicit 0.5% sulphur is VLSFO, never HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
@@ -559,6 +562,22 @@ function normalizeOutputForSource(
   let reconciledDraft = source === "spc"
     ? reconcileExplicitSpcFuels(sourceText, draft)
     : draft
+  const deterministicGuess = parseEnquiryWorksheetGuess(sourceText, {
+    detectBuyer: source !== "spc",
+  })
+  const comparedPort = reconciledDraft.port || deterministicGuess.port
+  const draftVesselIsPort = Boolean(
+    reconciledDraft.vesselName &&
+    comparedPort &&
+    compactLookupText(reconciledDraft.vesselName) === compactLookupText(comparedPort),
+  )
+  if (deterministicGuess.vesselName && (!reconciledDraft.vesselName || draftVesselIsPort)) {
+    reconciledDraft = {
+      ...reconciledDraft,
+      vesselName: deterministicGuess.vesselName,
+      correctedOutput: draftVesselIsPort ? "" : reconciledDraft.correctedOutput,
+    }
+  }
   if (source === "spc") {
     const sourceEta = parseSpcEnquiryText(
       rawText || cleanedText,

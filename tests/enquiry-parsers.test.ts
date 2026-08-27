@@ -888,3 +888,61 @@ test("replays the August 24 FCUNO reports without operational-rate leakage", () 
     "uruguay / 9426154 / 1 - 2 sep / vlsfo 400-600mts / lsmgo 50mts",
   )
 })
+
+test("replays the August 26 and 27 FCUNO reports", () => {
+  const evaShanghai = [
+    "Eva Shanghai",
+    "port: kaohsiung, discharging",
+    "LSMGO: 50-70mt",
+    "ETA Kaohsiung 8/31",
+    "ETB 8/31-9/1",
+    "ETD 9/2-3 (WOG, WP, IAGW",
+  ].join("\n")
+  assert.equal(parseEnquiryWorksheetGuess(evaShanghai).vesselName, "EVA SHANGHAI")
+  assert.equal(
+    worksheetOutput(evaShanghai),
+    "eva shanghai / kaohsiung 31 aug - 3 sep / lsmgo 50-70mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText(evaShanghai).standardText,
+    "eva shanghai / 31 aug - 3 sep / lsmgo 50-70mts",
+  )
+
+  const saturn = [
+    "船名：MV SATURN（IMO: 9325362）",
+    "加油港口：JOHOR（装港）",
+    "ETA9.2-9.12",
+    "LSFO: 115MT (380CST SULFUR: MAXIMUM 0.5%)",
+    "LSMGO: 30MT",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(saturn),
+    "saturn / 9325362 / johor 2 - 12 sep / vlsfo 115mts / lsmgo 30mts",
+  )
+
+  const universeReliance = [
+    "船名（IMO NO.)：UNIVERSE RELIANCE(IMO 9200407)",
+    "加油港口：PORT KELANG,MALAYSIA(卸货）",
+    "ATA/ETD:7TH SEP/18TH SEP 2026",
+    "加油量: LSFO 130-200MT 380CST",
+  ].join("\n")
+  assert.equal(
+    worksheetOutput(universeReliance),
+    "universe reliance / 9200407 / port klang 7 - 18 sep / vlsfo 130-200mts",
+  )
+
+  assert.equal(
+    worksheetOutput("MERIDIAN 9 / 9354208 / ETA PORT KELANG 3-4 SEP / VSLFO 150MT"),
+    "meridian 9 / 9354208 / port klang 3 - 4 sep / vlsfo 150mts",
+  )
+
+  const gaoXinZhiZe = "Gao Xin Zhi Ze / 9545572 / ETA Busan or Yosu 5-10th Sep / LS200CST Max 150-170MT/ LSMGO 50-70MT"
+  assert.equal(
+    worksheetOutput(gaoXinZhiZe),
+    "gao xin zhi ze / 9545572 / busan or yosu 5 - 10 sep / vlsfo 150-170mts / lsmgo 50-70mts",
+  )
+  assert.equal(
+    parseSpcEnquiryText(gaoXinZhiZe).standardText,
+    "gao xin zhi ze / 9545572 / 5 - 10 sep / vlsfo 150-170mts / lsmgo 50-70mts",
+  )
+})
