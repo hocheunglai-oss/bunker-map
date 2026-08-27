@@ -704,7 +704,9 @@ function mapSpcUser(
     roleLabel: getSpcRoleLabel(role),
     office: profile?.office || SPC_DEFAULT_OFFICES[0],
     mustChangePassword: profile?.mustChangePassword === true,
-    isSupplierTrader: role === "SUPPLIER TRADER" || profile?.isSupplierTrader === true,
+    isSupplierTrader:
+      role === "SUPPLIER TRADER" ||
+      (role === "ADMIN" && profile?.isSupplierTrader === true),
     permissions,
     isActive: row.is_active !== false,
     createdAt: row.created_at,
@@ -926,9 +928,9 @@ export async function listSpcAuditUserOptions(): Promise<SpcAuditUserOption[]> {
 }
 
 export function isActiveSupplierTraderOption(
-  user: Pick<ManagedSpcUser, "isActive" | "role">,
+  user: Pick<ManagedSpcUser, "isActive" | "isSupplierTrader">,
 ) {
-  return user.isActive && normaliseSpcRole(user.role) === "SUPPLIER TRADER"
+  return user.isActive && user.isSupplierTrader
 }
 
 export async function listSupplierTraderOptions(
@@ -1208,9 +1210,11 @@ export async function saveManagedSpcUser(
             ? input.mustChangePassword
             : null,
         p_is_supplier_trader:
-          typeof input.isSupplierTrader === "boolean"
-            ? input.isSupplierTrader
-            : null,
+          role === "SUPPLIER TRADER"
+            ? true
+            : role === "ADMIN" && typeof input.isSupplierTrader === "boolean"
+              ? input.isSupplierTrader
+              : false,
         p_password_hash: passwordHash,
         p_is_active: isActive,
       })

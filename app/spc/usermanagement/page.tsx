@@ -960,15 +960,16 @@ export default function SpcUserManagementPage() {
                   required={!userDraft.id}
                 />
               </label>
-              <label className="spc-checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={userDraft.role === "SUPPLIER TRADER" || userDraft.isSupplierTrader}
-                  onChange={(event) => updateDraft("isSupplierTrader", event.target.checked)}
-                  disabled={userDraft.role === "SUPPLIER TRADER"}
-                />
-                <span>Include in Supplier Trader lists</span>
-              </label>
+              {userDraft.role === "ADMIN" ? (
+                <label className="spc-checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={userDraft.isSupplierTrader}
+                    onChange={(event) => updateDraft("isSupplierTrader", event.target.checked)}
+                  />
+                  <span>Include in Supplier Trader lists</span>
+                </label>
+              ) : null}
               <label className="spc-checkbox-field">
                 <input
                   type="checkbox"
