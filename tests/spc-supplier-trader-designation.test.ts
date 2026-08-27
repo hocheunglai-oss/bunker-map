@@ -2,20 +2,24 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { isActiveSupplierTraderOption } from "../lib/spcUsers"
 
-test("an active admin can remain selectable as a supplier trader", () => {
+test("only an active user with the Supplier Trader role is selectable", () => {
   assert.equal(
-    isActiveSupplierTraderOption({ isActive: true, isSupplierTrader: true }),
+    isActiveSupplierTraderOption({ isActive: true, role: "SUPPLIER TRADER" }),
     true,
   )
 })
 
-test("inactive and non-trading users stay out of supplier trader lists", () => {
+test("inactive Supplier Traders and other roles stay out of supplier trader lists", () => {
   assert.equal(
-    isActiveSupplierTraderOption({ isActive: false, isSupplierTrader: true }),
+    isActiveSupplierTraderOption({ isActive: false, role: "SUPPLIER TRADER" }),
     false,
   )
   assert.equal(
-    isActiveSupplierTraderOption({ isActive: true, isSupplierTrader: false }),
+    isActiveSupplierTraderOption({ isActive: true, role: "BUYER TRADER" }),
+    false,
+  )
+  assert.equal(
+    isActiveSupplierTraderOption({ isActive: true, role: "ADMIN" }),
     false,
   )
 })

@@ -926,9 +926,9 @@ export async function listSpcAuditUserOptions(): Promise<SpcAuditUserOption[]> {
 }
 
 export function isActiveSupplierTraderOption(
-  user: Pick<ManagedSpcUser, "isActive" | "isSupplierTrader">,
+  user: Pick<ManagedSpcUser, "isActive" | "role">,
 ) {
-  return user.isActive && user.isSupplierTrader
+  return user.isActive && normaliseSpcRole(user.role) === "SUPPLIER TRADER"
 }
 
 export async function listSupplierTraderOptions(
