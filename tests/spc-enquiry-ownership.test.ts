@@ -121,3 +121,10 @@ test("SPC postponements update the enquiry without enqueueing WhatsApp delivery"
   assert.doesNotMatch(outcomeSource, /rpc\("postpone_spc_enquiry_with_group_delivery"/)
   assert.doesNotMatch(outcomeSource, /buildSpcGroupPostponedMessage/)
 })
+
+test("postponed enquiries can be cancelled or reoffered", () => {
+  assert.match(
+    enquiriesPage,
+    /spc-postponed-enquiry-actions[\s\S]*?quickOutcome\(enquiry, "cancel"\)[\s\S]*?CANCEL[\s\S]*?openReoffer\(enquiry\)[\s\S]*?REOFFER/,
+  )
+})

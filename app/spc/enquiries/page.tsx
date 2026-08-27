@@ -1168,13 +1168,23 @@ export default function SpcEnquiriesPage() {
                   <article key={enquiry.id} className="spc-postponed-enquiry-card">
                     <p>{enquiry.formattedText || enquiry.title}</p>
                     <span>Postponed {displayDate(enquiry.meta?.postponedAt || enquiry.updatedAt)}</span>
-                    <button
-                      type="button"
-                      onClick={() => openReoffer(enquiry)}
-                      disabled={!canEdit || updatingId === enquiry.id}
-                    >
-                      Reoffer
-                    </button>
+                    <div className="spc-postponed-enquiry-actions">
+                      <button
+                        type="button"
+                        className="is-cancel"
+                        onClick={() => void quickOutcome(enquiry, "cancel")}
+                        disabled={!canEdit || updatingId === enquiry.id}
+                      >
+                        CANCEL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openReoffer(enquiry)}
+                        disabled={!canEdit || updatingId === enquiry.id}
+                      >
+                        REOFFER
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>

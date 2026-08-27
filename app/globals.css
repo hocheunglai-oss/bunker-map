@@ -3883,8 +3883,6 @@ body {
 }
 
 .spc-postponed-enquiry-card button {
-  grid-column: 2;
-  grid-row: 1 / span 2;
   min-width: 84px;
   min-height: 26px;
   border: 1px solid #d49b22;
@@ -3895,6 +3893,24 @@ body {
   font-size: 10px;
   font-weight: 900;
   padding: 5px 10px;
+}
+
+.spc-postponed-enquiry-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spc-postponed-enquiry-card button.is-cancel {
+  border-color: #ef9a9a;
+  color: #b42318;
+}
+
+.spc-postponed-enquiry-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .spc-sent-enquiries-list {
