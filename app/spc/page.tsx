@@ -246,12 +246,9 @@ export default function SpcLoginPage() {
           <div className="fc-admin-welcome-content spc-welcome-content">
             <h1>WELCOME{sessionPresentationLabel ? `, ${sessionPresentationLabel}` : ""}</h1>
             <p className="spc-welcome-introduction">
-              YOU ARE INVITED TO THE{" "}
-              <Link href="/spc/presentation">
-                PRESENTATION OF
-                <br />
-                INCORPORATE AI INTO TRADING
-              </Link>
+              YOU ARE INVITED TO THE PRESENTATION OF
+              <br />
+              <Link href="/spc/presentation">INCORPORATE AI INTO TRADING</Link>
             </p>
             <p className="spc-welcome-enquiry">
               OR <Link href="/spc/enquiries">SEND ENQUIRY NOW</Link>

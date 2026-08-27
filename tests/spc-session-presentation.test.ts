@@ -51,7 +51,7 @@ test("SPC welcome and shared navigation use the same presentation label", () => 
   assert.match(welcome, /WELCOME\{sessionPresentationLabel/)
   assert.match(
     welcome,
-    /<Link href="\/spc\/presentation">[\s\S]*?PRESENTATION OF[\s\S]*?<br \/>[\s\S]*?INCORPORATE AI INTO TRADING[\s\S]*?<\/Link>/,
+    /YOU ARE INVITED TO THE PRESENTATION OF[\s\S]*?<br \/>[\s\S]*?<Link href="\/spc\/presentation">INCORPORATE AI INTO TRADING<\/Link>/,
   )
   assert.match(welcome, /<Link href="\/spc\/enquiries">SEND ENQUIRY NOW<\/Link>/)
   assert.match(navigation, /title=\{sessionPresentationLabel \|\| "SPC"\}/)
