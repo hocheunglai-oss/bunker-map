@@ -1211,6 +1211,136 @@
     return "SENT"
   }
 
+  const ENQUIRY_MATCH_WARNING_PRIORITY = Object.freeze({
+    "CHECK VSL NAME": 1,
+    "CHECK IMO": 2,
+    "DUP EX QTY": 3,
+    DUPLICATE: 4,
+  })
+
+  function normalizeEnquiryMatchText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[\u2010-\u2015\u2212]/g, "-")
+      .replace(/,/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  }
+
+  function normalizeEnquiryMatchToken(value) {
+    return normalizeEnquiryMatchText(value).replace(/[^\p{L}\p{N}-]+/gu, "")
+  }
+
+  function enquiryFuelGrade(value) {
+    const text = normalizeEnquiryMatchText(value)
+    if (/^(?:hsfo|hfo|ifo|rmk)\b/.test(text)) return "hsfo"
+    if (/^(?:vlsfo|lsfo|lsmfo)\b/.test(text)) return "vlsfo"
+    if (/^(?:lsmgo|mgo|lsgo)\b/.test(text)) return "lsmgo"
+    return ""
+  }
+
+  function enquiryMatchParts(enquiry) {
+    const bodyParts = enquiryBodyText(enquiry)
+      .split(/\s*\/\s*/)
+      .map(cleanText)
+      .filter(Boolean)
+    const meta = enquiry?.meta && typeof enquiry.meta === "object" ? enquiry.meta : {}
+    const vesselText = cleanText(enquiry?.vesselName || enquiry?.vessel_name || bodyParts[0])
+    const bodyImo = bodyParts.find((part) => /^\d{7}$/.test(part.replace(/\D/g, ""))) || ""
+    const imoText = cleanText(meta.imo || bodyImo)
+    const bodyEta = bodyParts.find((part) => /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(part)) || ""
+    const etaText = cleanText(meta.eta || bodyEta)
+    const imoToken = String(imoText || "").replace(/\D/g, "")
+    const etaToken = normalizeEnquiryMatchToken(etaText)
+    const fuels = []
+    const remarks = []
+
+    bodyParts.slice(1).forEach((part) => {
+      const partImo = part.replace(/\D/g, "")
+      if (imoToken && partImo === imoToken) return
+      if (etaToken && normalizeEnquiryMatchToken(part) === etaToken) return
+      const grade = enquiryFuelGrade(part)
+      if (grade) {
+        fuels.push(`${grade}:${normalizeEnquiryMatchToken(part)}`)
+        return
+      }
+      remarks.push(part)
+    })
+
+    if (fuels.length === 0) {
+      const metaFuelGrades = ["hsfo", "vlsfo", "lsmgo"]
+      metaFuelGrades.forEach((grade) => {
+        const value = cleanText(meta[grade])
+        if (value) fuels.push(`${grade}:${normalizeEnquiryMatchToken(value)}`)
+      })
+      if (fuels.length === 0 && enquiry?.product) {
+        String(enquiry.product)
+          .split(/\s*\/\s*/)
+          .map(cleanText)
+          .filter(Boolean)
+          .forEach((part) => {
+            const grade = enquiryFuelGrade(part)
+            if (grade) fuels.push(`${grade}:${normalizeEnquiryMatchToken(part)}`)
+          })
+      }
+    }
+
+    return {
+      vessel: normalizeEnquiryMatchToken(vesselText),
+      imo: imoToken,
+      eta: etaToken,
+      port: normalizeEnquiryMatchToken(enquiry?.port),
+      fuels: Array.from(new Set(fuels)).sort().join("|"),
+      remarks: normalizeEnquiryMatchToken(remarks.join(" / ")),
+    }
+  }
+
+  function classifyEnquiryMatch(firstEnquiry, secondEnquiry) {
+    if (!firstEnquiry || !secondEnquiry || cleanText(firstEnquiry.id) === cleanText(secondEnquiry.id)) return ""
+    if (!isSendableEnquiry(firstEnquiry) || !isSendableEnquiry(secondEnquiry)) return ""
+    const first = enquiryMatchParts(firstEnquiry)
+    const second = enquiryMatchParts(secondEnquiry)
+    if (!first.vessel || !second.vessel || !first.imo || !second.imo) return ""
+
+    const sameVessel = first.vessel === second.vessel
+    const sameImo = first.imo === second.imo
+    const sameEta = first.eta === second.eta
+    const samePort = first.port === second.port
+    const sameFuels = first.fuels === second.fuels
+    const sameRemarks = first.remarks === second.remarks
+    const sameNonIdentityDetails = sameEta && samePort && sameFuels && sameRemarks
+
+    if (sameVessel && sameImo && sameNonIdentityDetails) return "DUPLICATE"
+    if (sameVessel && sameImo && sameEta && samePort && sameRemarks && !sameFuels) return "DUP EX QTY"
+    if (sameVessel && !sameImo && sameNonIdentityDetails) return "CHECK IMO"
+    if (!sameVessel && sameImo && sameNonIdentityDetails) return "CHECK VSL NAME"
+    return ""
+  }
+
+  function enquiryMatchWarnings(enquiries = state.enquiries) {
+    const active = (Array.isArray(enquiries) ? enquiries : []).filter(isSendableEnquiry)
+    const warnings = {}
+    const applyWarning = (enquiry, label) => {
+      const id = cleanText(enquiry?.id)
+      if (!id || !label) return
+      const current = warnings[id]
+      if (!current || ENQUIRY_MATCH_WARNING_PRIORITY[label] > ENQUIRY_MATCH_WARNING_PRIORITY[current]) {
+        warnings[id] = label
+      }
+    }
+
+    for (let firstIndex = 0; firstIndex < active.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < active.length; secondIndex += 1) {
+        const label = classifyEnquiryMatch(active[firstIndex], active[secondIndex])
+        if (!label) continue
+        applyWarning(active[firstIndex], label)
+        applyWarning(active[secondIndex], label)
+      }
+    }
+    return warnings
+  }
+
   function enquiryCreatedAt(enquiry) {
     return enquiry.createdAt || enquiry.created_at || ""
   }
@@ -2055,6 +2185,7 @@
   }
 
   function renderEnquiries() {
+    const matchWarnings = enquiryMatchWarnings(state.enquiries)
     const rows = visibleEnquiries().map((enquiry) => {
       const createdAt = enquiryCreatedAt(enquiry)
       const isNew = !isEnquirySeen(enquiry)
@@ -2070,12 +2201,13 @@
       const body = enquiryBodyText(enquiry)
       const isDragging = state.draggingEnquiryIds.includes(enquiry.id)
       const isSelected = Boolean(state.selectedEnquiries[enquiry.id])
+      const matchWarning = matchWarnings[enquiry.id] || ""
       return `
         <div class="fcuno-wa-spc-enquiry${isNew ? " is-new" : ""}${isDragging ? " is-dragging" : ""}${isSelected ? " is-selected" : ""}${pendingAmendment ? " is-amended is-amendment-pending" : ""} is-${escapeHtml(status)}" ${sendable ? `draggable="true"` : ""} data-action="select-enquiry" data-id="${escapeHtml(enquiry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
           <button class="fcuno-wa-spc-enquiry-chat${replyGroupName ? "" : " is-unavailable"}" data-action="open-enquiry-chat" data-id="${escapeHtml(enquiry.id)}" type="button" draggable="false" title="${escapeHtml(replyRouteLabel)}" aria-label="${escapeHtml(replyRouteLabel)}" ${replyGroupName ? "" : "disabled"}><img class="fcuno-wa-spc-enquiry-chat-image" src="${escapeHtml(ENQUIRY_CHAT_BUTTON_SRC)}" alt="" draggable="false" /></button>
           <span class="fcuno-wa-spc-enquiry-copy">
             <em>${body ? (pendingAmendment ? enquiryAmendmentBodyHtml(enquiry) : enquiryBodyHtml(enquiry)) : escapeHtml(enquiry.title || "ENQUIRY")}</em>
-            <small>${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}${pendingAmendment ? `<button class="fcuno-wa-spc-enquiry-amendment" type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}" aria-label="Acknowledge amendment"><span>AMENDED</span><b aria-hidden="true">✓</b></button>` : ""}</small>
+            <small>${matchWarning ? `<b class="fcuno-wa-spc-match-warning" title="Matching active enquiry">${escapeHtml(matchWarning)}</b>` : ""}${sendable ? "" : `<b class="fcuno-wa-spc-status is-${escapeHtml(status)}">${escapeHtml(statusText)}</b>`}<b class="fcuno-wa-spc-enquiry-sender">${escapeHtml(sender)}</b> · ${escapeHtml(formatTime(createdAt))}${pendingAmendment ? `<button class="fcuno-wa-spc-enquiry-amendment" type="button" data-action="acknowledge-amendment" data-id="${escapeHtml(enquiry.id)}" aria-label="Acknowledge amendment"><span>AMENDED</span><b aria-hidden="true">✓</b></button>` : ""}</small>
           </span>
           <button class="fcuno-wa-spc-enquiry-remove" type="button" data-action="hide-enquiry" data-id="${escapeHtml(enquiry.id)}" title="Remove">×</button>
         </div>
@@ -2652,6 +2784,9 @@
       acknowledgeAmendment,
       amendmentCategories,
       enquiryAmendmentBodyHtml,
+      classifyEnquiryMatch,
+      enquiryMatchParts,
+      enquiryMatchWarnings,
       enquirySenderGroupName,
       amendmentSendText,
       enquiryTextForIds,

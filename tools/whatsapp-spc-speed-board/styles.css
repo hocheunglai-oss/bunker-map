@@ -797,6 +797,21 @@ body.fcuno-wa-spc-collapsed #fcuno-wa-spc-board {
   font-weight: 800;
 }
 
+.fcuno-wa-spc-match-warning {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  border: 1px solid #e3b341;
+  border-radius: 999px;
+  background: #fff3bf;
+  color: #795513;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
 .fcuno-wa-spc-amendment-diff {
   display: inline;
   color: #b42318;

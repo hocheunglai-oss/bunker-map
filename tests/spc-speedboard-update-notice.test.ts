@@ -64,6 +64,20 @@ test("the SPC download page explains how to update the loaded unpacked folder", 
   assert.match(page, /red UPDATE REQUIRED bar/)
 })
 
+test("documents the four informational matching-enquiry warnings", () => {
+  const page = readFileSync(join(process.cwd(), "app/spc/chrome/page.tsx"), "utf8")
+  const styles = readFileSync(join(process.cwd(), "app/globals.css"), "utf8")
+
+  assert.match(page, /MATCHING ENQUIRY WARNINGS/)
+  assert.match(page, /DUPLICATE/)
+  assert.match(page, /DUP EX QTY/)
+  assert.match(page, /CHECK IMO/)
+  assert.match(page, /CHECK VSL NAME/)
+  assert.match(page, /never merge, remove, reroute, or delay an enquiry/)
+  assert.match(styles, /\.spc-chrome-matching-rule-list/)
+  assert.match(styles, /background: #fff3bf/)
+})
+
 test("publishes a no-store version contract for every installed SPC board", () => {
   const route = readFileSync(
     join(process.cwd(), "app/api/spc/chrome-extension/version/route.ts"),

@@ -89,6 +89,25 @@ const DISPATCHER_STEPS: readonly Step[] = [
   },
 ]
 
+const MATCHING_WARNING_RULES = [
+  {
+    label: "DUPLICATE",
+    detail: "Vessel, IMO, ETA, grades, quantities, and remarks match another active enquiry.",
+  },
+  {
+    label: "DUP EX QTY",
+    detail: "Vessel and IMO match, while the grade or quantity is different.",
+  },
+  {
+    label: "CHECK IMO",
+    detail: "Vessel and all trading details match, but the IMO is different.",
+  },
+  {
+    label: "CHECK VSL NAME",
+    detail: "IMO and all trading details match, but the vessel name is different.",
+  },
+] as const
+
 type DispatcherStatus = {
   id: string
   deviceLabel: string
@@ -392,6 +411,22 @@ export default function SpcChromeExtensionPage() {
                   </a>
                 ) : null}
               </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="spc-panel spc-chrome-installation-panel spc-chrome-matching-rules">
+        <div className="spc-panel-header">
+          <div>
+            <h2>MATCHING ENQUIRY WARNINGS</h2>
+            <p>Yellow warnings help traders review similar active enquiries. They never merge, remove, reroute, or delay an enquiry.</p>
+          </div>
+        </div>
+        <div className="spc-chrome-matching-rule-list">
+          {MATCHING_WARNING_RULES.map((rule) => (
+            <article key={rule.label}>
+              <strong>{rule.label}</strong>
+              <span>{rule.detail}</span>
             </article>
           ))}
         </div>

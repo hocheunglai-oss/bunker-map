@@ -564,6 +564,77 @@ assert.equal(api.sendSelectionLabel(), "Send Temp & 1 Enq")
 api.state.selectedEnquiries = {}
 assert.equal(api.sendSelectionLabel(), "Send")
 
+const matchingBase = {
+  id: "match-base",
+  vesselName: "Sea Runner",
+  formattedText: "sea runner / 9123456 / sg 1 - 2 sep / vlsfo 500mts / no barge",
+  meta: { imo: "9123456", eta: "sg 1 - 2 sep", vlsfo: "500" },
+  createdByUsername: "buyer-one@example.com",
+  createdByDisplayName: "BUYER ONE",
+  createdAt: "2026-08-27T04:00:00Z",
+  status: "sent",
+}
+const matchingDuplicate = {
+  ...matchingBase,
+  id: "match-duplicate",
+  vesselName: "SEA RUNNER",
+  formattedText: "SEA RUNNER / 9123456 / sg 1-2 sep / vlsfo 500mts / no barge",
+  createdByUsername: "buyer-two@example.com",
+  createdByDisplayName: "BUYER TWO",
+}
+const matchingDifferentQuantity = {
+  ...matchingBase,
+  id: "match-quantity",
+  formattedText: "sea runner / 9123456 / sg 1 - 2 sep / vlsfo 700mts / no barge",
+  meta: { ...matchingBase.meta, vlsfo: "700" },
+}
+const matchingDifferentImo = {
+  ...matchingBase,
+  id: "match-imo",
+  formattedText: "sea runner / 9234567 / sg 1 - 2 sep / vlsfo 500mts / no barge",
+  meta: { ...matchingBase.meta, imo: "9234567" },
+}
+const matchingDifferentVessel = {
+  ...matchingBase,
+  id: "match-vessel",
+  vesselName: "Sea Runner II",
+  formattedText: "sea runner ii / 9123456 / sg 1 - 2 sep / vlsfo 500mts / no barge",
+}
+assert.equal(api.classifyEnquiryMatch(matchingBase, matchingDuplicate), "DUPLICATE")
+assert.equal(api.classifyEnquiryMatch(matchingBase, matchingDifferentQuantity), "DUP EX QTY")
+assert.equal(api.classifyEnquiryMatch(matchingBase, matchingDifferentImo), "CHECK IMO")
+assert.equal(api.classifyEnquiryMatch(matchingBase, matchingDifferentVessel), "CHECK VSL NAME")
+assert.equal(
+  api.classifyEnquiryMatch(matchingBase, {
+    ...matchingBase,
+    id: "match-date",
+    formattedText: "sea runner / 9123456 / sg 3 sep / vlsfo 500mts / no barge",
+    meta: { ...matchingBase.meta, eta: "sg 3 sep" },
+  }),
+  "",
+)
+assert.equal(
+  api.classifyEnquiryMatch(matchingBase, { ...matchingDuplicate, id: "match-closed", status: "quoted" }),
+  "",
+  "resolved enquiries must not create active matching warnings",
+)
+const matchingWarnings = api.enquiryMatchWarnings([
+  matchingBase,
+  matchingDuplicate,
+  matchingDifferentQuantity,
+  matchingDifferentImo,
+  matchingDifferentVessel,
+])
+assert.equal(matchingWarnings["match-base"], "DUPLICATE", "the highest-priority matching warning should win")
+assert.equal(matchingWarnings["match-quantity"], "DUP EX QTY")
+assert.equal(matchingWarnings["match-imo"], "CHECK IMO")
+assert.equal(matchingWarnings["match-vessel"], "CHECK VSL NAME")
+api.state.enquiries = [matchingBase, matchingDuplicate]
+api.state.senderContacts = {}
+const matchingHtml = api.renderEnquiries()
+assert.equal((matchingHtml.match(/fcuno-wa-spc-match-warning/g) || []).length, 2)
+assert.equal((matchingHtml.match(/DUPLICATE/g) || []).length, 2)
+
 const amendedEnquiry = {
   id: "enq-amended",
   formattedText: "test only stanley route / 9002201 / sg 29 aug / vlsfo 19mts",
