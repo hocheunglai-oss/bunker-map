@@ -34,6 +34,10 @@ const discoverySource = readFileSync(
   "utf8",
 )
 const jwksSource = readFileSync(new URL("../app/api/oidc/jwks/route.ts", import.meta.url), "utf8")
+const syncJwksSource = readFileSync(
+  new URL("../app/api/fcos-identity-sync/jwks/route.ts", import.meta.url),
+  "utf8",
+)
 const tokenSource = readFileSync(new URL("../app/api/oidc/token/route.ts", import.meta.url), "utf8")
 const userinfoSource = readFileSync(new URL("../app/api/oidc/userinfo/route.ts", import.meta.url), "utf8")
 const revokeSource = readFileSync(new URL("../app/api/oidc/revoke/route.ts", import.meta.url), "utf8")
@@ -94,6 +98,8 @@ test("federation endpoints and delivery remain explicitly disabled by default", 
   for (const source of [discoverySource, authorizeSource, jwksSource, tokenSource, userinfoSource, revokeSource]) {
     assert.match(source, /if \(!isFcunoOidcEnabled\(\)\) return federationNotFound\(\)/)
   }
+  assert.match(syncJwksSource, /if \(!isFcosIdentitySyncEnabled\(\)\) return federationNotFound\(\)/)
+  assert.doesNotMatch(syncJwksSource, /isFcunoOidcEnabled/)
   assert.match(syncRouteSource, /if \(!isFcosIdentitySyncEnabled\(\)\)/)
   assert.match(syncRouteSource, /disabled: true, processed: 0/)
   assert.ok(syncRouteSource.indexOf("!isFcosIdentitySyncEnabled()") < syncRouteSource.indexOf("processFcunoIdentitySyncOutbox()"))

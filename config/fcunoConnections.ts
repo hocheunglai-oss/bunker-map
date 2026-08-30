@@ -1,6 +1,6 @@
 export const fcunoConnectionPolicy = Object.freeze({
   schemaVersion: 1,
-  policyVersion: 1,
+  policyVersion: 2,
   connectionOrder: ["api", "cli", "chrome"] as const,
   github: {
     repository: "hocheunglai-oss/bunker-map",
@@ -22,6 +22,8 @@ export const fcunoConnectionPolicy = Object.freeze({
   federation: {
     issuer: "https://fcuno.com",
     protocolVersion: "1.0",
+    syncAudience: "fcos-identity-sync",
+    syncJwksUrl: "https://fcuno.com/api/fcos-identity-sync/jwks",
     oidcClientId: "fcos-production",
     oidcRedirectUris: [
       "https://pjforfvchygdyqfcgpmw.supabase.co/auth/v1/callback",
@@ -33,6 +35,7 @@ export const fcunoConnectionPolicy = Object.freeze({
       vercelProjectId: "prj_0pUORPGfFPyKtYhKr6ecwJ9ydvEs",
       supabaseProjectRef: "pjforfvchygdyqfcgpmw",
       productionOrigin: "https://fcos.fcuno.com",
+      syncEndpoint: "https://fcos.fcuno.com/api/fcuno/identity-sync",
     },
   },
 })
@@ -57,17 +60,26 @@ export function validateFcunoConnectionPolicy(
   requireNonEmpty(policy.supabase.projectRef, "supabase.projectRef")
   requireNonEmpty(policy.federation.issuer, "federation.issuer")
   requireNonEmpty(policy.federation.protocolVersion, "federation.protocolVersion")
+  requireNonEmpty(policy.federation.syncAudience, "federation.syncAudience")
+  requireNonEmpty(policy.federation.syncJwksUrl, "federation.syncJwksUrl")
   requireNonEmpty(policy.federation.oidcClientId, "federation.oidcClientId")
   requireNonEmpty(
     policy.federation.fcos.supabaseProjectRef,
     "federation.fcos.supabaseProjectRef",
   )
+  requireNonEmpty(policy.federation.fcos.syncEndpoint, "federation.fcos.syncEndpoint")
 
   if (policy.browser.fallbackProfile !== "Otto") {
     throw new Error("FCUNO browser fallback must use the Otto profile.")
   }
   if (policy.vercel.productionOrigins[0] !== policy.federation.issuer) {
     throw new Error("The primary FCUNO origin must equal the OIDC issuer.")
+  }
+  if (policy.federation.syncJwksUrl !== `${policy.federation.issuer}/api/fcos-identity-sync/jwks`) {
+    throw new Error("FCUNO synchronization verification keys must use the dedicated issuer route.")
+  }
+  if (policy.federation.fcos.syncEndpoint !== `${policy.federation.fcos.productionOrigin}/api/fcuno/identity-sync`) {
+    throw new Error("FCOS identity synchronization must use the pinned production endpoint.")
   }
   if (policy.supabase.projectRef === policy.federation.fcos.supabaseProjectRef) {
     throw new Error("FCUNO and FCOS must retain separate Supabase projects.")
