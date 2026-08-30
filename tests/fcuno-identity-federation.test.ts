@@ -15,6 +15,7 @@ import {
   verifyOidcToken,
 } from "@/lib/fcunoOidc"
 import { normaliseOidcAuthorizeReturnTo } from "@/lib/fcunoOidcContinuation"
+import { isFcosIdentitySyncEnabled, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 
 const migration = readFileSync(
   new URL("../supabase/migrations/20260831090000_fcuno_identity_federation.sql", import.meta.url),
@@ -26,6 +27,18 @@ const syncSource = readFileSync(
 )
 const authorizeSource = readFileSync(
   new URL("../app/api/oidc/authorize/route.ts", import.meta.url),
+  "utf8",
+)
+const discoverySource = readFileSync(
+  new URL("../app/.well-known/openid-configuration/route.ts", import.meta.url),
+  "utf8",
+)
+const jwksSource = readFileSync(new URL("../app/api/oidc/jwks/route.ts", import.meta.url), "utf8")
+const tokenSource = readFileSync(new URL("../app/api/oidc/token/route.ts", import.meta.url), "utf8")
+const userinfoSource = readFileSync(new URL("../app/api/oidc/userinfo/route.ts", import.meta.url), "utf8")
+const revokeSource = readFileSync(new URL("../app/api/oidc/revoke/route.ts", import.meta.url), "utf8")
+const syncRouteSource = readFileSync(
+  new URL("../app/api/cron/fcos-identity-sync/route.ts", import.meta.url),
   "utf8",
 )
 const userManagementSource = readFileSync(
@@ -68,6 +81,22 @@ test("OIDC accepts only an explicit openid scope and fresh FCUNO authentication"
   const now = Date.parse("2026-08-31T09:00:00.000Z")
   assert.equal(isFreshOidcAuthentication(new Date(now - OIDC_MAX_AUTH_AGE_SECONDS * 1000).toISOString(), now), true)
   assert.equal(isFreshOidcAuthentication(new Date(now - (OIDC_MAX_AUTH_AGE_SECONDS + 1) * 1000).toISOString(), now), false)
+})
+
+test("federation endpoints and delivery remain explicitly disabled by default", () => {
+  assert.equal(isFcunoOidcEnabled({}), false)
+  assert.equal(isFcunoOidcEnabled({ FCUNO_OIDC_ENABLED: "false" }), false)
+  assert.equal(isFcunoOidcEnabled({ FCUNO_OIDC_ENABLED: "TRUE" }), false)
+  assert.equal(isFcunoOidcEnabled({ FCUNO_OIDC_ENABLED: "true" }), true)
+  assert.equal(isFcosIdentitySyncEnabled({}), false)
+  assert.equal(isFcosIdentitySyncEnabled({ FCUNO_FCOS_IDENTITY_SYNC_ENABLED: "true" }), true)
+
+  for (const source of [discoverySource, authorizeSource, jwksSource, tokenSource, userinfoSource, revokeSource]) {
+    assert.match(source, /if \(!isFcunoOidcEnabled\(\)\) return federationNotFound\(\)/)
+  }
+  assert.match(syncRouteSource, /if \(!isFcosIdentitySyncEnabled\(\)\)/)
+  assert.match(syncRouteSource, /disabled: true, processed: 0/)
+  assert.ok(syncRouteSource.indexOf("!isFcosIdentitySyncEnabled()") < syncRouteSource.indexOf("processFcunoIdentitySyncOutbox()"))
 })
 
 test("OIDC emits and verifies an ES256 JWT with a stable event id", () => {

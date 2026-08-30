@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { federationNotFound, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 import { buildIdentityClaims, getOidcClient, hashOidcValue, verifyOidcToken } from "@/lib/fcunoOidc"
 import { getOidcIdentity, isOidcTokenRevoked } from "@/lib/fcunoOidcStore"
 
@@ -10,6 +11,7 @@ function unauthorized() {
 }
 
 export async function GET(request: Request) {
+  if (!isFcunoOidcEnabled()) return federationNotFound()
   const match = /^Bearer ([A-Za-z0-9._-]{20,8192})$/.exec(request.headers.get("authorization") || "")
   if (!match) return unauthorized()
   try {

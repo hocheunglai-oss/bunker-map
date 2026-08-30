@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { federationNotFound, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 import { getOidcClient, hashOidcValue, validateClientAuthentication, verifyOidcToken } from "@/lib/fcunoOidc"
 import { revokeOidcToken } from "@/lib/fcunoOidcStore"
 
@@ -8,6 +9,7 @@ export const runtime = "nodejs"
 function complete() { return new Response(null, { status: 200, headers: { "Cache-Control": "no-store" } }) }
 
 export async function POST(request: Request) {
+  if (!isFcunoOidcEnabled()) return federationNotFound()
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/x-www-form-urlencoded")) return complete()
   try {
     const form = await request.formData()

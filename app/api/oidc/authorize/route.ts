@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { clearAdminSession, requireAdminSessionForOidc } from "@/lib/adminAuth"
+import { federationNotFound, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 import {
   createAuthorizationCode,
   getOidcClient,
@@ -40,6 +41,7 @@ function interactiveLoginRedirect(request: Request) {
 }
 
 export async function GET(request: Request) {
+  if (!isFcunoOidcEnabled()) return federationNotFound()
   const params = new URL(request.url).searchParams
   let clientId = ""
   let redirectUri = ""

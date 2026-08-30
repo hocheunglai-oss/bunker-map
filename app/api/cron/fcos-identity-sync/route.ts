@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
+import { isFcosIdentitySyncEnabled } from "@/lib/fcunoFederationFlags"
 import { processFcunoIdentitySyncOutbox } from "@/lib/fcunoIdentitySync"
 
 export const dynamic = "force-dynamic"
@@ -16,6 +17,12 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET
   if (!secret || !authorized(request, secret)) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "private, no-store" } })
+  }
+  if (!isFcosIdentitySyncEnabled()) {
+    return NextResponse.json(
+      { success: true, disabled: true, processed: 0 },
+      { headers: { "Cache-Control": "private, no-store" } },
+    )
   }
   try {
     return NextResponse.json({ success: true, ...(await processFcunoIdentitySyncOutbox()) }, { headers: { "Cache-Control": "private, no-store" } })

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { federationNotFound, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 import {
   buildIdentityClaims,
   getOidcClient,
@@ -23,6 +24,7 @@ function single(form: FormData, name: string, required = true) {
 }
 
 export async function POST(request: Request) {
+  if (!isFcunoOidcEnabled()) return federationNotFound()
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/x-www-form-urlencoded")) return errorResponse("invalid_request")
   try {
     const form = await request.formData()

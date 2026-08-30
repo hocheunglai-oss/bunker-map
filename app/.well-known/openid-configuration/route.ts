@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
+import { federationNotFound, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
 import { getOidcIssuer, getOidcJwks } from "@/lib/fcunoOidc"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 
 export async function GET() {
+  if (!isFcunoOidcEnabled()) return federationNotFound()
   try {
     const issuer = getOidcIssuer()
     // Validate key configuration here too, so discovery never advertises a
