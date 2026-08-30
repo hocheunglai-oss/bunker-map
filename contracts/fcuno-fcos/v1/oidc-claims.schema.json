@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fcuno.com/contracts/fcuno-fcos/v1/oidc-claims.schema.json",
+  "title": "FCUNO OIDC ID-token identity claims",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "iss",
+    "sub",
+    "aud",
+    "exp",
+    "iat",
+    "auth_time",
+    "nonce",
+    "email",
+    "email_verified",
+    "name",
+    "preferred_username",
+    "identity_revision",
+    "credential_revision",
+    "use_fcos",
+    "use_spc"
+  ],
+  "properties": {
+    "iss": { "const": "https://fcuno.com" },
+    "sub": { "type": "string", "format": "uuid" },
+    "aud": { "const": "fcos-production" },
+    "exp": { "type": "integer", "minimum": 1 },
+    "iat": { "type": "integer", "minimum": 1 },
+    "auth_time": { "type": "integer", "minimum": 1 },
+    "nonce": { "type": "string", "minLength": 16, "maxLength": 512 },
+    "email": { "type": "string", "format": "email", "maxLength": 320 },
+    "email_verified": { "const": true },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "preferred_username": { "type": "string", "minLength": 1, "maxLength": 320 },
+    "identity_revision": { "type": "integer", "minimum": 1 },
+    "credential_revision": { "type": "integer", "minimum": 1 },
+    "use_fcos": { "const": true },
+    "use_spc": { "type": "boolean" }
+  }
+}

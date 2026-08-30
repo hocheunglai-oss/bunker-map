@@ -15,6 +15,7 @@ const ADMIN_SESSION_TOUCH_INTERVAL_MS = 60 * 60 * 1000
 type AdminSessionRow = {
   id: string
   admin_user_id: string
+  created_at: string
   expires_at: string
   last_seen_at: string
   revoked_at: string | null
@@ -23,6 +24,7 @@ type AdminSessionRow = {
 export type DatabaseAdminSession = {
   id: string
   adminUserId: string
+  createdAt: string
   expiresAt: string
 }
 
@@ -144,7 +146,7 @@ export async function getDatabaseAdminSession(
   const supabase = getServiceClient()
   const { data, error } = await supabase
     .from("admin_sessions")
-    .select("id,admin_user_id,expires_at,last_seen_at,revoked_at")
+    .select("id,admin_user_id,created_at,expires_at,last_seen_at,revoked_at")
     .eq("token_hash", hashAdminSessionToken(token))
     .is("revoked_at", null)
     .gt("expires_at", now.toISOString())
@@ -175,6 +177,7 @@ export async function getDatabaseAdminSession(
   return {
     id: row.id,
     adminUserId: row.admin_user_id,
+    createdAt: row.created_at,
     expiresAt,
   }
 }

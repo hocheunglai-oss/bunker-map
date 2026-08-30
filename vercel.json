@@ -33,7 +33,7 @@
     },
     {
       "path": "/api/event-calendar/google-sync",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/attendance-month-end-reminder",
@@ -50,6 +50,10 @@
     {
       "path": "/api/cron/spc-mobile-deliveries",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/fcos-identity-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -39,6 +39,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Verify immutable FCUNO-FCOS contract
+        run: npm run contract:verify
+
       - name: Build the production application
         run: npm run build
 
@@ -52,10 +55,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install locked dependencies
@@ -68,6 +71,13 @@ jobs:
         run: |
           set -o pipefail
           npm run test:security 2>&1 | tee security-tests.tap
+
+      - name: Run federation contract and implementation tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:federation 2>&1 | tee federation-tests.tap
 
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -106,6 +116,7 @@ jobs:
           name: spc-security-evidence-${{ github.run_id }}
           path: |
             security-tests.tap
+            federation-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt
@@ -126,10 +137,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Check both production hostnames
         shell: bash

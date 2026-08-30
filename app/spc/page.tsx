@@ -11,6 +11,7 @@ import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/s
 const LOGIN_UNAVAILABLE_MESSAGE = "Sign-in is temporarily unavailable. Please try again."
 const LOGIN_RATE_LIMIT_MESSAGE = "Too many sign-in attempts. Please try again later."
 const MFA_VERIFICATION_MESSAGE = "The code could not be verified. Use your password to request a new code."
+const fcunoSpcLoginEnabled = process.env.NEXT_PUBLIC_FCUNO_SPC_LOGIN_ENABLED === "true"
 
 type SpcLoginResponse = {
   message?: string
@@ -329,6 +330,19 @@ export default function SpcLoginPage() {
           </form>
         ) : (
           <form onSubmit={handleLogin} className="spc-login-form">
+            {fcunoSpcLoginEnabled ? (
+              <>
+                <button
+                  type="button"
+                  className="spc-login-submit"
+                  onClick={() => window.location.assign("/api/spc/fcuno-login")}
+                  disabled={submitting || loading}
+                >
+                  Continue with FCUNO
+                </button>
+                <p className="spc-login-mfa-help">External SPC users can continue with their SPC password below.</p>
+              </>
+            ) : null}
             <label className="spc-login-field">
               <span className="spc-login-hidden-label">Username</span>
               <span className="spc-input-wrap">

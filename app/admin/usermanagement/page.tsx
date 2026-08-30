@@ -20,6 +20,11 @@ type ManagedAdminUser = {
   id: string
   username: string
   displayName: string
+  email: string
+  emailVerified: boolean
+  isActive: boolean
+  useFcos: boolean
+  useSpc: boolean
   role: string
   attendanceGroup: "BT" | "BS" | "AC" | null
   permissions: AdminPagePermissionMap
@@ -49,6 +54,11 @@ type DraftUser = {
   id?: string
   username: string
   displayName: string
+  email: string
+  emailVerified: boolean
+  isActive: boolean
+  useFcos: boolean
+  useSpc: boolean
   role: string
   attendanceGroup: "" | "BT" | "BS" | "AC"
   password: string
@@ -129,6 +139,11 @@ function createDraftUser(role = "AC"): DraftUser {
   return {
     username: "",
     displayName: "",
+    email: "",
+    emailVerified: false,
+    isActive: true,
+    useFcos: false,
+    useSpc: false,
     role,
     attendanceGroup,
     password: "",
@@ -140,6 +155,11 @@ function userToDraft(user: ManagedAdminUser): DraftUser {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
+    email: user.email,
+    emailVerified: user.emailVerified,
+    isActive: user.isActive,
+    useFcos: user.useFcos,
+    useSpc: user.useSpc,
     role: normaliseAdminRole(user.role),
     attendanceGroup: user.attendanceGroup || "",
     password: "",
@@ -323,6 +343,11 @@ export default function UserManagementPage() {
             id: draft.id,
             username: draft.username,
             displayName: draft.displayName,
+            email: draft.email,
+            emailVerified: draft.emailVerified,
+            isActive: draft.isActive,
+            useFcos: draft.useFcos,
+            useSpc: draft.useSpc,
             role: draft.role,
             attendanceGroup: draft.attendanceGroup || null,
             password: draft.password,
@@ -651,6 +676,9 @@ export default function UserManagementPage() {
                           ATTENDANCE {user.attendanceGroup}
                         </span>
                       ) : null}
+                      {user.useFcos ? <span style={{ display: "inline-flex", border: "1px solid #1473e655", borderRadius: "999px", padding: "3px 7px", color: "#1473e6", fontSize: "10px", fontWeight: 900 }}>FCOS</span> : null}
+                      {user.useSpc ? <span style={{ display: "inline-flex", border: "1px solid #0f9f6e55", borderRadius: "999px", padding: "3px 7px", color: "#0f9f6e", fontSize: "10px", fontWeight: 900 }}>SPC</span> : null}
+                      {!user.isActive ? <span style={{ display: "inline-flex", border: "1px solid var(--fc-admin-danger-border)", borderRadius: "999px", padding: "3px 7px", color: "var(--fc-admin-danger-text)", fontSize: "10px", fontWeight: 900 }}>INACTIVE</span> : null}
                     </div>
                   </div>
                   <button
@@ -997,6 +1025,47 @@ export default function UserManagementPage() {
                     style={inputStyle}
                   />
                 </label>
+                <label style={labelStyle}>
+                  Identity Email
+                  <input
+                    type="email"
+                    value={draft.email}
+                    onChange={(event) => updateDraft("email", event.target.value)}
+                    disabled={!canEdit || saving}
+                    style={inputStyle}
+                  />
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: "9px" }}>
+                  {([
+                    ["isActive", "Active"],
+                    ["emailVerified", "Email Verified"],
+                    ["useFcos", "Use FCOS"],
+                    ["useSpc", "Use SPC"],
+                  ] as const).map(([key, label]) => {
+                    const accessControl = key === "useFcos" || key === "useSpc"
+                    const disabled = !canEdit || saving || (accessControl && (!draft.isActive || !draft.emailVerified))
+                    return (
+                      <label key={key} style={{ display: "flex", alignItems: "center", gap: "9px", minHeight: "42px", border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", padding: "0 11px", color: "var(--fc-admin-panel-text)", fontSize: "12px", fontWeight: 800 }}>
+                        <input
+                          type="checkbox"
+                          checked={draft[key]}
+                          disabled={disabled}
+                          onChange={(event) => {
+                            const checked = event.target.checked
+                            setDraft((current) => ({
+                              ...current,
+                              [key]: checked,
+                              ...((key === "isActive" || key === "emailVerified") && !checked
+                                ? { useFcos: false, useSpc: false }
+                                : {}),
+                            }))
+                          }}
+                        />
+                        {label}
+                      </label>
+                    )
+                  })}
+                </div>
                 <label style={labelStyle}>
                   Password
                   <input

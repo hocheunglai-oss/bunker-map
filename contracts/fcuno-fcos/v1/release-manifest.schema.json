@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fcuno.com/contracts/fcuno-fcos/v1/release-manifest.schema.json",
+  "title": "FCUNO and FCOS immutable federation release pair",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "release_id",
+    "contract_version",
+    "contract_sha256",
+    "fcuno",
+    "fcos",
+    "verified_at",
+    "verified_by"
+  ],
+  "properties": {
+    "release_id": { "type": "string", "pattern": "^fcuno-fcos-[0-9]{8}-[0-9]{2}$" },
+    "contract_version": { "const": "1.0" },
+    "contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fcuno": { "$ref": "#/$defs/application" },
+    "fcos": { "$ref": "#/$defs/application" },
+    "verified_at": { "type": "string", "format": "date-time" },
+    "verified_by": { "type": "string", "minLength": 1, "maxLength": 200 }
+  },
+  "$defs": {
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit_sha",
+        "preview_url",
+        "deployment_id",
+        "migration_head"
+      ],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^hocheunglai-oss/[A-Za-z0-9._-]+$" },
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "preview_url": { "type": "string", "pattern": "^https://[A-Za-z0-9.-]+\\.vercel\\.app/?$" },
+        "deployment_id": { "type": "string", "pattern": "^dpl_[A-Za-z0-9]+$" },
+        "migration_head": { "type": "string", "pattern": "^[0-9]{14}_[a-z0-9_]+$" }
+      }
+    }
+  }
+}

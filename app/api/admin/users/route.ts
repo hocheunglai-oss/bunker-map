@@ -16,6 +16,11 @@ type UserActionPayload = {
     id?: string
     username?: string
     displayName?: string
+    email?: string
+    emailVerified?: boolean
+    isActive?: boolean
+    useFcos?: boolean
+    useSpc?: boolean
     role?: string
     attendanceGroup?: "BT" | "BS" | "AC" | null
     password?: string
@@ -96,11 +101,26 @@ export async function POST(request: Request) {
 
       const pages = await getDiscoveredAdminPages()
       const roleDefaults = (await loadManagedAdminRoleDefaults(pages)).roleDefaults
+      const existingUsers = payload.user.id
+        ? await listManagedAdminUsers(roleDefaults, pages)
+        : []
+      const existingUser = existingUsers.find((user) => user.id === payload.user?.id)
+      if (existingUser && session.username === existingUser.username && payload.user.isActive === false) {
+        return NextResponse.json(
+          { message: "You cannot deactivate the account you are signed in with." },
+          { status: 400 },
+        )
+      }
       const user = await saveManagedAdminUser(
         {
           id: payload.user.id,
           username: payload.user.username,
           displayName: payload.user.displayName,
+          email: payload.user.email ?? existingUser?.email ?? "",
+          emailVerified: payload.user.emailVerified ?? existingUser?.emailVerified ?? false,
+          isActive: payload.user.isActive ?? existingUser?.isActive ?? true,
+          useFcos: payload.user.useFcos ?? existingUser?.useFcos ?? false,
+          useSpc: payload.user.useSpc ?? existingUser?.useSpc ?? false,
           role: payload.user.role,
           attendanceGroup: payload.user.attendanceGroup,
           password: payload.user.password,

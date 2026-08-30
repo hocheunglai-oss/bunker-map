@@ -116,6 +116,7 @@ export type ManagedSpcUser = {
   isSupplierTrader: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
+  identitySource: "external" | "fcuno"
   createdAt: string
   updatedAt: string
   credentialUpdatedAt: string
@@ -688,6 +689,7 @@ function mapSpcUser(
   pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
   userRoleMap: Record<string, string> = {},
   userProfileMap: Record<string, SpcUserProfileAssignment> = {},
+  identitySource: "external" | "fcuno" = "external",
 ): ManagedSpcUser {
   const role = getStoredSpcRole(row, userRoleMap)
   const profile = userProfileMap[row.id] || userProfileMap[`username:${row.username.toLowerCase()}`]
@@ -709,6 +711,7 @@ function mapSpcUser(
       (role === "ADMIN" && profile?.isSupplierTrader === true),
     permissions,
     isActive: row.is_active !== false,
+    identitySource,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     credentialUpdatedAt: row.updated_at,
@@ -891,19 +894,80 @@ export async function listManagedSpcUsers(
     const stored = await loadStoredRoleDefaults(supabase)
     const userRoleMap = getUserRoleMap(stored.userRoles)
     const userProfileMap = getUserProfileMap(stored.userProfiles)
-    const { data, error } = await supabase
-      .from("spc_users")
-      .select("*")
-      .order("role", { ascending: true })
-      .order("username", { ascending: true })
+    const [{ data, error }, linksResult] = await Promise.all([
+      supabase
+        .from("spc_users")
+        .select("*")
+        .order("role", { ascending: true })
+        .order("username", { ascending: true }),
+      supabase.from("spc_identity_links").select("spc_user_id"),
+    ])
 
     if (error) throw error
+    if (linksResult.error && !String(linksResult.error.message || "").includes("spc_identity_links")) {
+      throw linksResult.error
+    }
+    const linkedIds = new Set((linksResult.data || []).map((row) => String(row.spc_user_id)))
     return ((data || []) as unknown as SpcUserRow[]).map((row) =>
-      mapSpcUser(row, defaults, pages, userRoleMap, userProfileMap),
+      mapSpcUser(
+        row,
+        defaults,
+        pages,
+        userRoleMap,
+        userProfileMap,
+        linkedIds.has(row.id) ? "fcuno" : "external",
+      ),
     )
   } catch (error) {
     throw friendlySpcUserError(error)
   }
+}
+
+export async function getFcunoLinkedSpcAccess(spcUserId: string) {
+  const supabase = getServiceClient()
+  const { data: link, error: linkError } = await supabase
+    .from("spc_identity_links")
+    .select("admin_user_id")
+    .eq("spc_user_id", spcUserId)
+    .maybeSingle()
+  if (linkError) {
+    if (String(linkError.message || "").includes("spc_identity_links")) {
+      return { linked: false, authorized: false, adminUserId: null }
+    }
+    throw linkError
+  }
+  if (!link) return { linked: false, authorized: false, adminUserId: null }
+  const { data: identity, error: identityError } = await supabase
+    .from("admin_users")
+    .select("id,is_active,use_spc,email_verified")
+    .eq("id", link.admin_user_id)
+    .maybeSingle()
+  if (identityError) throw identityError
+  return {
+    linked: true,
+    authorized: identity?.is_active === true
+      && identity?.use_spc === true
+      && identity?.email_verified === true,
+    adminUserId: String(link.admin_user_id),
+  }
+}
+
+export async function getFcunoLinkedSpcUser(adminUserId: string) {
+  const supabase = getServiceClient()
+  const { data: identity, error: identityError } = await supabase
+    .from("admin_users")
+    .select("id,is_active,use_spc,email_verified")
+    .eq("id", adminUserId)
+    .maybeSingle()
+  if (identityError) throw identityError
+  if (!identity?.is_active || !identity.use_spc || !identity.email_verified) return null
+  const { data: link, error: linkError } = await supabase
+    .from("spc_identity_links")
+    .select("spc_user_id")
+    .eq("admin_user_id", adminUserId)
+    .maybeSingle()
+  if (linkError) throw linkError
+  return link ? getDatabaseSpcUserById(String(link.spc_user_id)) : null
 }
 
 export async function listSpcAuditUserOptions(): Promise<SpcAuditUserOption[]> {
@@ -1103,6 +1167,10 @@ export async function changeManagedSpcUserPassword(
     if (!data) throw new Error("User not found.")
 
     const row = data as SpcUserRow
+    const linkedAccess = await getFcunoLinkedSpcAccess(row.id)
+    if (linkedAccess.linked) {
+      throw new Error("FCUNO-linked users do not have an SPC password.")
+    }
     const supabase = getServiceClient(withSpcAuditAction(actor, {
       action: "change-password",
       targetType: "spc-user",
@@ -1161,22 +1229,41 @@ export async function saveManagedSpcUser(
   pages: SpcPageDefinition[] = SPC_PAGE_DEFINITIONS,
   roleDefaults: ManagedSpcRoleDefault[] = [],
 ) {
-  const username = normaliseUsername(input.username)
+  let existingRow: SpcUserRow | null = null
+  let linkedIdentity = false
+  if (input.id) {
+    const lookupClient = getServiceClient()
+    const [{ data: existing, error: existingError }, linkedAccess] = await Promise.all([
+      lookupClient.from("spc_users").select("*").eq("id", input.id).maybeSingle(),
+      getFcunoLinkedSpcAccess(input.id),
+    ])
+    if (existingError) throw friendlySpcUserError(existingError)
+    if (!existing) throw new Error("User not found.")
+    existingRow = existing as SpcUserRow
+    linkedIdentity = linkedAccess.linked
+  }
+
+  const username = linkedIdentity && existingRow
+    ? existingRow.username
+    : normaliseUsername(input.username)
   if (!username) throw new Error("Username is required.")
 
   const role = normaliseSpcRole(input.role)
   const roleDefault = getRoleDefaultMap(roleDefaults)[role]
   if (!roleDefault) throw new Error("Select a valid permission group.")
-  const isActive = input.isActive !== false
+  const isActive = linkedIdentity && existingRow
+    ? existingRow.is_active !== false
+    : input.isActive !== false
   const deliveryRouteId = input.deliveryRouteId?.trim() || ""
   if (isActive && role !== "SUPPLIER TRADER" && !deliveryRouteId) {
     throw new Error("An active enquiry delivery route is required for this user.")
   }
-  const whatsappPhone = normaliseSpcWhatsappPhoneForAccount(
-    input.whatsappPhone,
-    isActive,
-  )
-  const passwordInput = input.password || (input.id ? "" : SPC_DEFAULT_PASSWORD)
+  const whatsappPhone = linkedIdentity && existingRow
+    ? existingRow.whatsapp_phone || ""
+    : normaliseSpcWhatsappPhoneForAccount(input.whatsappPhone, isActive)
+  const passwordInput = linkedIdentity
+    ? ""
+    : input.password || (input.id ? "" : SPC_DEFAULT_PASSWORD)
   const auditActor = withSpcAuditAction(actor, {
     action: input.id ? "update-user" : "create-user",
     targetType: "spc-user",
@@ -1187,8 +1274,14 @@ export async function saveManagedSpcUser(
 
   try {
     const supabase = getServiceClient(auditActor)
+    const effectiveUsername = username
+    const effectiveDisplayName = linkedIdentity && existingRow
+      ? existingRow.display_name || existingRow.username
+      : input.displayName?.trim() || username
+    const effectiveWhatsappPhone = whatsappPhone
+    const effectiveIsActive = isActive
     let passwordHash: string | null = null
-    if (passwordInput) {
+    if (passwordInput && !linkedIdentity) {
       requireValidSpcPassword(passwordInput)
       passwordHash = await hashPassword(passwordInput)
     } else if (!input.id) {
@@ -1198,15 +1291,17 @@ export async function saveManagedSpcUser(
     const { data, error } = await supabase
       .rpc("save_spc_user_with_delivery_route", {
         p_user_id: input.id || null,
-        p_username: username,
-        p_display_name: input.displayName?.trim() || username,
-        p_whatsapp_phone: whatsappPhone || null,
+        p_username: effectiveUsername,
+        p_display_name: effectiveDisplayName,
+        p_whatsapp_phone: effectiveWhatsappPhone || null,
         p_delivery_route_id: deliveryRouteId || null,
         p_database_role: getDatabaseRole(role),
         p_effective_role: role,
         p_office: normaliseOffice(input.office) || null,
         p_must_change_password:
-          typeof input.mustChangePassword === "boolean"
+          linkedIdentity
+            ? false
+            : typeof input.mustChangePassword === "boolean"
             ? input.mustChangePassword
             : null,
         p_is_supplier_trader:
@@ -1216,7 +1311,7 @@ export async function saveManagedSpcUser(
               ? input.isSupplierTrader
               : false,
         p_password_hash: passwordHash,
-        p_is_active: isActive,
+        p_is_active: effectiveIsActive,
       })
       .single()
     if (error) throw error
@@ -1335,6 +1430,10 @@ export async function deleteManagedSpcUser(id: string, actor?: SpcActor) {
       .maybeSingle()
     if (lookupError) throw lookupError
     const existingRow = existingUser as unknown as SpcUserRow | null
+    const linkedAccess = await getFcunoLinkedSpcAccess(id)
+    if (linkedAccess.linked) {
+      throw new Error("FCUNO-linked users must be removed through FCUNO User Management.")
+    }
     const supabase = getServiceClient(withSpcAuditAction(actor, {
       action: "delete-user",
       targetType: "spc-user",

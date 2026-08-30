@@ -484,11 +484,11 @@ test("original login MFA migration remains private, pinned, atomic and canonical
   assert.match(migration, /extensions\.digest\(users\.whatsapp_phone, 'sha256'\)/)
   assert.match(
     migration,
-    /enabled,\s*created_at,\s*updated_at\s*\)[\s\S]*?true,\s*pg_catalog\.statement_timestamp\(\),\s*pg_catalog\.statement_timestamp\(\)/,
+    /create table if not exists private\.spc_whatsapp_login_mfa_enrollment \([\s\S]*?created_at timestamptz not null default clock_timestamp\(\),[\s\S]*?updated_at timestamptz not null default clock_timestamp\(\)/,
   )
   assert.match(
     migration,
-    /insert into private\.spc_whatsapp_login_mfa_enrollment as enrollment[\s\S]*?created_at,\s*updated_at\s*\)[\s\S]*?now_value,\s*now_value/,
+    /insert into private\.spc_whatsapp_login_mfa_enrollment \(\s*spc_user_id,\s*whatsapp_phone_hash,\s*enabled\s*\)[\s\S]*?on conflict \(spc_user_id\) do nothing/,
   )
   assert.match(migration, /otto_count <> 1 or eligible_count <> 1 or enrolled_count <> 1/)
   assert.match(migration, /whatsapp_phone_hash ~ '\^\[0-9a-f\]\{64\}\$'/)

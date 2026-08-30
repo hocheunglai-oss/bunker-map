@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css"
 import { AdminAiWorkbench } from "@/components/AdminAiWorkbench"
 import { PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { normaliseOidcAuthorizeReturnTo } from "@/lib/fcunoOidcContinuation"
 
 const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
 const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
@@ -432,6 +433,15 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!authenticated || resetRequired) return
+    const target = normaliseOidcAuthorizeReturnTo(
+      new URLSearchParams(window.location.search).get("returnTo"),
+      window.location.origin,
+    )
+    if (target) window.location.replace(target)
+  }, [authenticated, resetRequired])
+
+  useEffect(() => {
+    if (!authenticated || resetRequired) return
 
     let cancelled = false
 
@@ -496,6 +506,14 @@ export default function AdminPage() {
       )
     }
 
+    const target = normaliseOidcAuthorizeReturnTo(
+      new URLSearchParams(window.location.search).get("returnTo"),
+      window.location.origin,
+    )
+    if (target && data.user?.resetRequired !== true) {
+      window.location.assign(target)
+      return
+    }
     window.location.reload()
   }
 
@@ -523,6 +541,14 @@ export default function AdminPage() {
       }
 
       window.localStorage.removeItem("bunker_admin_actor")
+      const target = normaliseOidcAuthorizeReturnTo(
+        new URLSearchParams(window.location.search).get("returnTo"),
+        window.location.origin,
+      )
+      if (target) {
+        window.location.assign(target)
+        return
+      }
       window.location.reload()
     } catch {
       setMessage("Password reset is temporarily unavailable. Please try again.")
