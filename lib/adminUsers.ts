@@ -13,6 +13,7 @@ import {
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
+import { isValidEmailAddress } from "@/lib/emailAddress"
 
 const scryptAsync = promisify(scrypt)
 const ADMIN_ROLE_METADATA_KEY = "__adminRole"
@@ -942,7 +943,7 @@ export async function saveManagedAdminUser(
   const isActive = input.isActive !== false
   const useFcos = input.useFcos === true
   const useSpc = input.useSpc === true
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !isValidEmailAddress(email)) {
     throw new Error("Enter a valid identity email address.")
   }
   if (emailVerified && !email) throw new Error("A verified identity requires an email address.")
