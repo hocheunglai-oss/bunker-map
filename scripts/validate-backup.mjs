@@ -18,6 +18,7 @@ const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
 const EVENT_CALENDAR_GOOGLE_SYNC_JOBS_MIGRATION_HEAD = "20260811125141"
 const SPC_FEEDBACK_MIGRATION_HEAD = "20260812095000"
 const SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD = "20260813070206"
+const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -84,6 +85,12 @@ const TABLE_SECTIONS = [
   { key: "spcEnquiries", table: "spc_enquiries", primaryKey: ["id"] },
   { key: "spcFixtures", table: "spc_fixtures", primaryKey: ["id"] },
   { key: "spcSuppliers", table: "spc_suppliers", primaryKey: ["key"] },
+  {
+    key: "spcLostReasonOptions",
+    table: "spc_lost_reason_options",
+    primaryKey: ["id"],
+    introducedAt: SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD,
+  },
   { key: "parserReports", table: "parser_reports", primaryKey: ["id"] },
   {
     key: "openAiUsageEvents",

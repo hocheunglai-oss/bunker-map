@@ -15,6 +15,7 @@ import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
 import {
   ensureSpcSingaporeEta,
   extractExplicitSpcFuelFields,
+  formatSpcEnquiry,
   parseSpcEnquiryText,
   restoreStoredSpcEnquiryFields,
 } from "../lib/spcEnquiryText"
@@ -40,7 +41,7 @@ test("restores stored SPC amendment fields even when a test IMO fails checksum v
   assert.equal(restored.lsmgo, "100")
 })
 
-function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"80cst max" | "120cst max" | "180cst max"> = []) {
+function worksheetOutput(rawText: string, manualVlsfoMaxRemarks: Array<"80cst min" | "80cst max" | "120cst max" | "180cst max"> = []) {
   const guess = parseEnquiryWorksheetGuess(rawText)
   return buildShortenedEnquiry(
     rawText,
@@ -169,13 +170,45 @@ test("does not turn voyage numbers or address floors into products and dates", (
 test("shows Singapore on FCUNO and abbreviates it as sg on SPC", () => {
   const raw = "GUANG MAO 8-9日到达新加坡，lsfo 700吨"
   assert.equal(worksheetOutput(raw), "guang mao / singapore 8 - 9 jul / vlsfo 700mts")
-  assert.equal(parseSpcEnquiryText(raw).standardText, "guang mao / sg 8 - 9 jul / vlsfo 700mts")
+  assert.equal(parseSpcEnquiryText(raw).standardText, "GUANG MAO / SG / 8 - 9 JUL / 700 MT VLSFO (0.5%)")
+})
+
+test("uses the canonical SPC format, Singapore aliases, and explicit VLSFO minimum viscosity", () => {
+  const expected = "SW NORTH WIND I (9514004) / SG / 28 AUG / 500 MT HSFO RMG380 (3.5%) / 350 MT VLSFO (0.5%) / 150 MT LSMGO (0.1%)"
+  assert.equal(
+    parseSpcEnquiryText("SW NORTH WIND I / 9514004 / Singapore / 28 Aug / HSFO 500MT / VLSFO 350MT / LSMGO 150MT").standardText,
+    expected,
+  )
+
+  for (const port of ["SG", "Singapore", "Spore", "Sing"]) {
+    assert.equal(
+      parseSpcEnquiryText(`SW NORTH WIND I / 9514004 / ${port} / 28 Aug / VLSFO 350MT`).standardText,
+      "SW NORTH WIND I (9514004) / SG / 28 AUG / 350 MT VLSFO (0.5%)",
+    )
+  }
+  assert.equal(
+    parseSpcEnquiryText("SW NORTH WIND I / 9514004 / 28 Aug / VLSFO 350MT").standardText,
+    "SW NORTH WIND I (9514004) / SG / 28 AUG / 350 MT VLSFO (0.5%)",
+  )
+  assert.equal(
+    parseSpcEnquiryText("SHAN REN / 9474606 / TAICHUNG / 16 - 18 AUG / VLSFO 110MT").standardText,
+    "SHAN REN (9474606) / TAICHUNG / 16 - 18 AUG / 110 MT VLSFO (0.5%)",
+  )
+  assert.equal(
+    parseSpcEnquiryText("SW NORTH WIND I / 9514004 / Singapore / 28 Aug / VLSFO 80CST MIN 350MT").standardText,
+    "SW NORTH WIND I (9514004) / SG / 28 AUG / 350 MT VLSFO (0.5%) 80CST MIN",
+  )
+})
+
+test("does not rewrite historical stored SPC enquiry text", () => {
+  const historical = "sw north wind i / 9514004 / sg 28 aug / vlsfo 350mts"
+  assert.equal(formatSpcEnquiry({ notes: historical }), historical)
 })
 
 test("normalises compact SPC dates, vessel types, and concatenated fuels", () => {
   assert.equal(
     parseSpcEnquiryText("OCEAN LEADER General Cargo. IMO 9260976/SGP12JUL/HSFO500mts/lsmgo100mts").standardText,
-    "ocean leader / 9260976 / sg 12 jul / HSFO 500mts / lsmgo 100mts",
+    "OCEAN LEADER (9260976) / SG / 12 JUL / 500 MT HSFO RMG380 (3.5%) / 100 MT LSMGO (0.1%)",
   )
 })
 
@@ -184,21 +217,24 @@ test("rejects impossible calendar dates in worksheet and SPC output", () => {
   const expected = "testing vsl 3 / 9402017 / vlsfo 3,000mts / lsmgo 100mts"
 
   assert.equal(worksheetOutput(reported), expected)
-  assert.equal(parseSpcEnquiryText(reported).standardText, expected)
+  assert.equal(
+    parseSpcEnquiryText(reported).standardText,
+    "TESTING VSL 3 (9402017) / SG / 3,000 MT VLSFO (0.5%) / 100 MT LSMGO (0.1%)",
+  )
   assert.equal(
     parseSpcEnquiryText("testing vsl 3 / 9402017 / 31 apr / vlsfo 3,000mts").standardText,
-    "testing vsl 3 / 9402017 / vlsfo 3,000mts",
+    "TESTING VSL 3 (9402017) / SG / 3,000 MT VLSFO (0.5%)",
   )
   assert.equal(
     parseSpcEnquiryText("testing vsl 3 / 9402017 / 31 aug / vlsfo 3,000mts").standardText,
-    "testing vsl 3 / 9402017 / 31 aug / vlsfo 3,000mts",
+    "TESTING VSL 3 (9402017) / SG / 31 AUG / 3,000 MT VLSFO (0.5%)",
   )
 })
 
 test("extracts CBM quantity without concatenating the sulphur decimal", () => {
   assert.equal(
     parseSpcEnquiryText("PACIFIC HORNBILL / 9833233 / JUL10 / LSMGO 0.1% 200 cbm").standardText,
-    "pacific hornbill / 10 jul / lsmgo 200mts",
+    "PACIFIC HORNBILL / SG / 10 JUL / 200 MT LSMGO (0.1%)",
   )
 })
 
@@ -214,7 +250,7 @@ test("requires manual viscosity confirmation in the deterministic parser", () =>
 test("does not infer HSFO or a quantity from an ambiguous RMG 380 grade", () => {
   const raw = "VESSEL: TEST SHIP\nPORT: SINGAPORE\nETA: 12 JUL\nPRODUCT: RMG 380"
   assert.equal(worksheetOutput(raw), "test ship / singapore 12 jul")
-  assert.equal(parseSpcEnquiryText(raw).standardText, "test ship / sg 12 jul")
+  assert.equal(parseSpcEnquiryText(raw).standardText, "TEST SHIP / SG / 12 JUL")
 })
 
 test("does not use specification or viscosity numbers as quantities", () => {
@@ -249,11 +285,11 @@ test("SPC parser preserves RMK as the HSFO-side product", () => {
   assert.equal(parsed.hsfo, "500mts")
   assert.equal(parsed.vlsfo, "")
   assert.equal(parsed.lsmgo, "")
-  assert.equal(parsed.standardText, "chan ming / 12 aug / RMK 500mts")
+  assert.equal(parsed.standardText, "CHAN MING / SG / 12 AUG / 500 MT RMK")
 
   const structured = parseSpcEnquiryText("VESSEL: CHAN MING\nETA: 12 AUG\nRMK: 500MT")
   assert.equal(structured.hsfo, "500mts")
-  assert.equal(structured.standardText, "chan ming / 12 aug / RMK 500mts")
+  assert.equal(structured.standardText, "CHAN MING / SG / 12 AUG / 500 MT RMK")
 })
 
 test("RMK conversion changes HSFO only", () => {
@@ -312,11 +348,11 @@ test("replays the remaining distinct historical report formats", () => {
   const spcCases = [
     {
       raw: "OCEAN LEADER General Cargo. IMO 9260976/JUL12/LSFO180mts/lsmgo30mts",
-      expected: "ocean leader / 9260976 / 12 jul / vlsfo 180mts / lsmgo 30mts",
+      expected: "OCEAN LEADER (9260976) / SG / 12 JUL / 180 MT VLSFO (0.5%) / 30 MT LSMGO (0.1%)",
     },
     {
       raw: "OCEAN LEADER General Cargo. IMO 9260976 / SGP 12 jul / HSFO 100mts, lsfo 500mts, lsmgo 30mts",
-      expected: "ocean leader / 9260976 / sg 12 jul / HSFO 100mts / vlsfo 500mts / lsmgo 30mts",
+      expected: "OCEAN LEADER (9260976) / SG / 12 JUL / 100 MT HSFO RMG380 (3.5%) / 500 MT VLSFO (0.5%) / 30 MT LSMGO (0.1%)",
     },
   ]
 
@@ -380,7 +416,7 @@ test("replays the July 14 reported parser formats", () => {
 
   assert.equal(
     parseSpcEnquiryText("pacific hornbill / sg 17 - 22 jul / vlsfo 500mts / lsmgo 40mts").standardText,
-    "pacific hornbill / sg 17 - 22 jul / vlsfo 500mts / lsmgo 40mts",
+    "PACIFIC HORNBILL / SG / 17 - 22 JUL / 500 MT VLSFO (0.5%) / 40 MT LSMGO (0.1%)",
   )
 })
 
@@ -460,7 +496,7 @@ test("replays the July 17 FCUNO reports with canonical schedules and fuels", () 
 
   assert.equal(
     parseSpcEnquiryText("TEST SHIP / 5 - 12 aug / LSMFO 100MT / LSMGO 60MT").standardText,
-    "test ship / 5 - 12 aug / vlsfo 100mts / lsmgo 60mts",
+    "TEST SHIP / SG / 5 - 12 AUG / 100 MT VLSFO (0.5%) / 60 MT LSMGO (0.1%)",
   )
 })
 
@@ -661,7 +697,7 @@ test("replays the August 3 reports with slash windows and structured SPC specifi
   })
   assert.equal(
     parseSpcEnquiryText(harmony).standardText,
-    "harmony / 9402017 / sg 22 aug - 6 sep / vlsfo 700mts / lsmgo 30mts",
+    "HARMONY (9402017) / SG / 22 AUG - 6 SEP / 700 MT VLSFO (0.5%) / 30 MT LSMGO (0.1%)",
   )
 })
 
@@ -692,7 +728,7 @@ test("ignores narrative dates beneath an operational notes heading", () => {
 
   assert.equal(
     parseSpcEnquiryText(ravenArrow).standardText,
-    "raven arrow / 9574858 / sg 1 sep / vlsfo 1,000mts",
+    "RAVEN ARROW (9574858) / SG / 1 SEP / 1,000 MT VLSFO (0.5%)",
   )
 })
 
@@ -739,7 +775,7 @@ test("replays the August 7 compact IMO, separated port, KL, and gas oil reports"
   })
   assert.equal(
     parseSpcEnquiryText(barbaraLeeBattler).standardText,
-    "barbara lee battler / 8738328 / sg 1 sep / vlsfo 500mts / lsmgo 100mts",
+    "BARBARA LEE BATTLER (8738328) / SG / 1 SEP / 500 MT VLSFO (0.5%) / 100 MT LSMGO (0.1%)",
   )
 })
 
@@ -748,15 +784,15 @@ test("uses sg only for Singapore enquiries on SPC", () => {
   assert.equal(ensureSpcSingaporeEta("SGP12 Jul"), "sg 12 jul")
   assert.equal(
     parseSpcEnquiryText("SHAN REN / 9474606 / SINGAPORE / 16 - 18 AUG / VLSFO 110MT").standardText,
-    "shan ren / 9474606 / sg 16 - 18 aug / vlsfo 110mts",
+    "SHAN REN (9474606) / SG / 16 - 18 AUG / 110 MT VLSFO (0.5%)",
   )
   assert.equal(
     parseSpcEnquiryText("SHAN REN / 9474606 / SIN 16 - 18 AUG / VLSFO 110MT").standardText,
-    "shan ren / 9474606 / sg 16 - 18 aug / vlsfo 110mts",
+    "SHAN REN (9474606) / SG / 16 - 18 AUG / 110 MT VLSFO (0.5%)",
   )
   assert.equal(
     parseSpcEnquiryText("SHAN REN / 9474606 / TAICHUNG / 16 - 18 AUG / VLSFO 110MT").standardText,
-    "shan ren / 9474606 / 16 - 18 aug / vlsfo 110mts",
+    "SHAN REN (9474606) / TAICHUNG / 16 - 18 AUG / 110 MT VLSFO (0.5%)",
   )
 })
 
@@ -775,7 +811,7 @@ test("pairs labelled grade and quantity lists in order", () => {
   )
   assert.equal(
     parseSpcEnquiryText(raw, ["180cst max"]).standardText,
-    "josco lucky / 25 aug / vlsfo 180CST MAX 650-790mts / lsmgo 90-100mts",
+    "JOSCO LUCKY / KLANG / 25 AUG / 650-790 MT VLSFO (0.5%) 180CST MAX / 90-100 MT LSMGO (0.1%)",
   )
 })
 
@@ -852,7 +888,7 @@ test("replays the August 18 pending review reports", () => {
   ].join("\n")
   assert.equal(
     parseSpcEnquiryText(overseasSantorini).standardText,
-    "overseas santorini / 9435909 / sg 19 aug / lsmgo 535-610mts",
+    "OVERSEAS SANTORINI (9435909) / SG / 19 AUG / 535-610 MT LSMGO (0.1%)",
   )
 })
 
@@ -871,7 +907,7 @@ test("replays the August 24 FCUNO reports without operational-rate leakage", () 
   )
   assert.equal(
     parseSpcEnquiryText(goldenAspirant).standardText,
-    "golden aspirant / 9758313 / sg 2 - 14 sep / vlsfo 500mts / lsmgo 30mts",
+    "GOLDEN ASPIRANT (9758313) / SG / 2 - 14 SEP / 500 MT VLSFO (0.5%) / 30 MT LSMGO (0.1%)",
   )
 
   const uruguay = [
@@ -885,7 +921,7 @@ test("replays the August 24 FCUNO reports without operational-rate leakage", () 
   )
   assert.equal(
     parseSpcEnquiryText(uruguay).standardText,
-    "uruguay / 9426154 / 1 - 2 sep / vlsfo 400-600mts / lsmgo 50mts",
+    "URUGUAY (9426154) / HONG KONG / 1 - 2 SEP / 400-600 MT VLSFO (0.5%) / 50 MT LSMGO (0.1%)",
   )
 })
 
@@ -905,7 +941,7 @@ test("replays the August 26 and 27 FCUNO reports", () => {
   )
   assert.equal(
     parseSpcEnquiryText(evaShanghai).standardText,
-    "eva shanghai / 31 aug - 3 sep / lsmgo 50-70mts",
+    "EVA SHANGHAI / KAOHSIUNG / 31 AUG - 3 SEP / 50-70 MT LSMGO (0.1%)",
   )
 
   const saturn = [
@@ -943,6 +979,6 @@ test("replays the August 26 and 27 FCUNO reports", () => {
   )
   assert.equal(
     parseSpcEnquiryText(gaoXinZhiZe).standardText,
-    "gao xin zhi ze / 9545572 / 5 - 10 sep / vlsfo 150-170mts / lsmgo 50-70mts",
+    "GAO XIN ZHI ZE (9545572) / BUSAN OR YOSU / 5 - 10 SEP / 150-170 MT VLSFO (0.5%) / 50-70 MT LSMGO (0.1%)",
   )
 })

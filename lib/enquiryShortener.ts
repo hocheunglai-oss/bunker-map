@@ -1,6 +1,6 @@
 import { extractEnquiryPort } from "@/lib/enquiryWorksheetParser"
 
-export type VlsfoMaxRemark = "80cst max" | "120cst max" | "180cst max"
+export type VlsfoMaxRemark = "80cst min" | "80cst max" | "120cst max" | "180cst max"
 
 export type BuildShortenedEnquiryOptions = {
   autoDetectVlsfoRemarks?: boolean
@@ -570,7 +570,9 @@ function isNonRequestProductReference(value: string) {
 export function detectVlsfoMaxRemarks(value: string): VlsfoMaxRemark[] {
   const normalized = normalizeInput(value)
   const remarks: VlsfoMaxRemark[] = []
-  if (/(?:^|[^0-9])(?:rmg\s*)?80\s*cst\b/i.test(normalized) || /\brmg\s*80\b/i.test(normalized)) {
+  if (/\b80\s*cst\s*min\b/i.test(normalized)) {
+    remarks.push("80cst min")
+  } else if (/(?:^|[^0-9])(?:rmg\s*)?80\s*cst\b/i.test(normalized) || /\brmg\s*80\b/i.test(normalized)) {
     remarks.push("80cst max")
   }
   if (/(?:^|[^0-9])(?:rmg\s*)?180\s*cst\b/i.test(normalized) || /\brmg\s*180\b/i.test(normalized)) {
@@ -940,7 +942,7 @@ function mergeRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
 }
 
 export function formatVlsfoMaxRemark(remark: VlsfoMaxRemark) {
-  return remark.replace("cst max", "CST MAX")
+  return remark.replace("cst max", "CST MAX").replace("cst min", "CST MIN")
 }
 
 export function applyVlsfoMaxRemarksToShortenedEnquiry(
@@ -956,7 +958,7 @@ export function applyVlsfoMaxRemarksToShortenedEnquiry(
       if (!/^vlsfo\b/i.test(trimmed)) return trimmed
 
       const withoutRemarks = trimmed
-        .replace(/\s+(?:80|120|180)\s*CST\s+MAX\b/gi, "")
+        .replace(/\s+(?:80\s*CST\s+MIN|(?:80|120|180)\s*CST\s+MAX)\b/gi, "")
         .replace(/\s+/g, " ")
         .trim()
 

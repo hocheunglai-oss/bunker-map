@@ -7,13 +7,14 @@ import {
   replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
-import { isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import { extractEnquiryPort, isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
 
 export type ParsedSpcEnquiry = {
   rawText: string
   title: string
   vesselName: string
   imo: string
+  port: string
   eta: string
   hsfo: string
   vlsfo: string
@@ -24,7 +25,17 @@ export type ParsedSpcEnquiry = {
 
 export type SpcEnquiryMeta = {
   imo?: string
+  port?: string
   lostReason?: string
+  supplierLostReason?: string
+  supplierLostReasonDetails?: string
+  supplierLostReasonUpdatedAt?: string
+  supplierLostReasonUpdatedByUsername?: string
+  supplierLostReasonUpdatedByDisplayName?: string
+  spcComments?: string
+  spcCommentsUpdatedAt?: string
+  spcCommentsUpdatedByUsername?: string
+  spcCommentsUpdatedByDisplayName?: string
   stemSupplierTraderUsername?: string
   stemSupplierTraderDisplayName?: string
   outcomeAt?: string
@@ -65,7 +76,17 @@ const FUEL_PATTERN = /(v\s*l\s*s\s*f\s*o|vlsfo|vslfo|lsmfo|lsfo|l\s*s\s*(?:80|12
 const RMK_PRODUCT_PATTERN = /\br\s*\.?\s*m\s*\.?\s*k\s*\.?s?\b/i
 const META_KEYS: Array<keyof SpcEnquiryMeta> = [
   "imo",
+  "port",
   "lostReason",
+  "supplierLostReason",
+  "supplierLostReasonDetails",
+  "supplierLostReasonUpdatedAt",
+  "supplierLostReasonUpdatedByUsername",
+  "supplierLostReasonUpdatedByDisplayName",
+  "spcComments",
+  "spcCommentsUpdatedAt",
+  "spcCommentsUpdatedByUsername",
+  "spcCommentsUpdatedByDisplayName",
   "stemSupplierTraderUsername",
   "stemSupplierTraderDisplayName",
   "outcomeAt",
@@ -157,6 +178,23 @@ function lowerText(value: string | null | undefined) {
     .toLowerCase()
 }
 
+function upperText(value: string | null | undefined) {
+  return oneLine(value)
+    .replace(/[–—]/g, "-")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase()
+}
+
+export function normalizeSpcPort(value: string | null | undefined) {
+  const cleaned = oneLine(value).replace(/^(?:port|location)\s*[:#-]?\s*/i, "").trim()
+  if (!cleaned) return "SG"
+  if (/^(?:singapore|spore|sing|sgp|sin|sg|新加坡)$/i.test(cleaned)) return "SG"
+  return upperText(cleaned)
+}
+
 function isImoToken(value: string) {
   return isValidImo(value.trim())
 }
@@ -227,7 +265,9 @@ export function extractExplicitSpcFuelFields(rawValue: string): ExplicitSpcFuelF
 }
 
 function vlsfoRemarks(value: string) {
-  const remarks: string[] = []
+  const remarks: VlsfoMaxRemark[] = []
+  if (/\b80\s*cst\s*min\b/i.test(value)) remarks.push("80cst min")
+  if (/\b80\s*cst\s*max\b/i.test(value)) remarks.push("80cst max")
   if (/\b180\s*cst\b/i.test(value)) remarks.push("180cst max")
   if (/\b120\s*cst\b/i.test(value)) remarks.push("120cst max")
   return remarks
@@ -239,6 +279,7 @@ function mergeVlsfoMaxRemarks(...remarkGroups: VlsfoMaxRemark[][]) {
 
 function stripVlsfoMaxRemarks(value: string) {
   return value
+    .replace(/\b80\s*cst\s*min\b/gi, "")
     .replace(/\b80\s*cst\s*max\b/gi, "")
     .replace(/\b180\s*cst\s*max\b/gi, "")
     .replace(/\b120\s*cst\s*max\b/gi, "")
@@ -287,17 +328,24 @@ export function formatSpcFuelSegment(
 ) {
   const cleaned = cleanSpcFuelValue(value, fuel)
   if (!cleaned) return ""
-  if (fuel === "hsfo") return `HSFO ${cleaned}`
-  if (fuel === "lsmgo") return `lsmgo ${cleaned}`
+  const quantity = stripVlsfoMaxRemarks(cleaned)
+    .replace(/(\d)\s*mts\b/i, "$1 MT")
+    .toUpperCase()
+  if (fuel === "hsfo") return `${quantity} HSFO RMG380 (3.5%)`
+  if (fuel === "lsmgo") return `${quantity} LSMGO (0.1%)`
 
   const remarks = mergeVlsfoMaxRemarks(detectVlsfoMaxRemarks(cleaned), manualVlsfoRemarks)
-  const quantity = stripVlsfoMaxRemarks(cleaned)
-  return ["vlsfo", ...remarks.map(formatVlsfoMaxRemark), quantity].filter(Boolean).join(" ")
+  return [quantity, "VLSFO (0.5%)", ...remarks.map(formatVlsfoMaxRemark)].filter(Boolean).join(" ")
+}
+
+function replaceSpcHsfoWithRmk(value: string) {
+  return replaceHsfoWithRmk(value).replace(/\bRMK\s+RMG380\s*\(3\.5%\)/gi, "RMK")
 }
 
 export function buildSpcStandardEnquiry(input: {
   vesselName?: string | null
   imo?: string | null
+  port?: string | null
   eta?: string | null
   hsfo?: string | null
   vlsfo?: string | null
@@ -305,14 +353,16 @@ export function buildSpcStandardEnquiry(input: {
   remarks?: string | null
   vlsfoMaxRemarks?: VlsfoMaxRemark[]
 }) {
+  const vessel = upperText(input.vesselName)
+  const imo = oneLine(input.imo)
   return [
-    lowerText(input.vesselName),
-    lowerText(input.imo),
-    lowerText(input.eta),
+    vessel && imo ? `${vessel} (${imo})` : vessel,
+    normalizeSpcPort(input.port),
+    upperText(input.eta).replace(/^(?:SINGAPORE|SPORE|SING|SGP|SIN|SG)\s+/i, ""),
     formatSpcFuelSegment("hsfo", input.hsfo),
     formatSpcFuelSegment("vlsfo", input.vlsfo, input.vlsfoMaxRemarks || []),
     formatSpcFuelSegment("lsmgo", input.lsmgo),
-    lowerText(input.remarks),
+    upperText(input.remarks),
   ].filter(Boolean).join(" / ")
 }
 
@@ -349,7 +399,10 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
     .filter(Boolean)
 
   const vesselName = parts[0] || ""
-  let imo = ""
+  const vesselIdentity = vesselName.match(/^(.*?)\s*\((\d{7})\)\s*$/)
+  const parsedVesselName = vesselIdentity?.[1]?.trim() || vesselName
+  let imo = vesselIdentity?.[2] || ""
+  let port = ""
   let eta = ""
   let hsfo = ""
   let vlsfo = ""
@@ -361,6 +414,13 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
     if (!imo && isImoToken(part)) {
       imo = part
       return
+    }
+    if (!port) {
+      const detectedPort = extractEnquiryPort(part)
+      if (detectedPort && !looksLikeDateWindow(part) && !looksLikeFuel(part)) {
+        port = normalizeSpcPort(detectedPort)
+        return
+      }
     }
     if (!eta && looksLikeDateWindow(part)) {
       eta = lowerText(part)
@@ -380,8 +440,9 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
   })
 
   const builtStandardText = buildSpcStandardEnquiry({
-    vesselName,
+    vesselName: parsedVesselName,
     imo,
+    port,
     eta,
     hsfo,
     vlsfo,
@@ -389,17 +450,18 @@ function parseDelimitedSpcEnquiryText(rawValue: string, manualVlsfoRemarks: Vlsf
     remarks: remarks.join(" / "),
     vlsfoMaxRemarks: manualVlsfoRemarks,
   })
-  const title = [lowerText(vesselName) || "new enquiry", eta].filter(Boolean).join(" / ")
+  const title = [upperText(parsedVesselName) || "NEW ENQUIRY", eta].filter(Boolean).join(" / ")
 
   const standardText = RMK_PRODUCT_PATTERN.test(rawText)
-    ? replaceHsfoWithRmk(builtStandardText)
+    ? replaceSpcHsfoWithRmk(builtStandardText)
     : builtStandardText
 
   return {
     rawText,
     title,
-    vesselName: lowerText(vesselName),
+    vesselName: upperText(parsedVesselName),
     imo,
+    port: normalizeSpcPort(port),
     eta,
     hsfo,
     vlsfo,
@@ -420,6 +482,7 @@ export function parseSpcEnquiryText(
       title: "",
       vesselName: "",
       imo: "",
+      port: "SG",
       eta: "",
       hsfo: "",
       vlsfo: "",
@@ -431,10 +494,9 @@ export function parseSpcEnquiryText(
 
   const delimited = parseDelimitedSpcEnquiryText(rawText, manualVlsfoRemarks)
   const guess = parseEnquiryWorksheetGuess(rawText, { detectBuyer: false })
-  const vesselName = lowerText(guess.vesselName || delimited.vesselName)
+  const vesselName = upperText(guess.vesselName || delimited.vesselName)
   const imo = guess.imo || delimited.imo
-  const isSingaporeEnquiry = guess.port.trim().toLowerCase() === "singapore" ||
-    /(?:^|[^a-z0-9])(?:sgp|sin|sg)(?=\s*\d{1,2})/i.test(rawText)
+  const port = normalizeSpcPort(guess.port || delimited.port || extractEnquiryPort(rawText))
   const shortened = buildShortenedEnquiry(
     rawText,
     guess.vesselName || delimited.vesselName,
@@ -443,32 +505,38 @@ export function parseSpcEnquiryText(
     { autoDetectVlsfoRemarks: false, includePort: false },
   )
   const shortenedParts = shortened ? parseDelimitedSpcEnquiryText(shortened, manualVlsfoRemarks) : null
-  const parsedEta = shortenedParts?.eta || delimited.eta
-  const eta = isSingaporeEnquiry ? ensureSpcSingaporeEta(parsedEta) : parsedEta
+  const eta = (shortenedParts?.eta || delimited.eta)
+    .replace(/^(?:singapore|spore|sing|sgp|sin|sg)\s+/i, "")
+    .trim()
   const hsfo = shortenedParts?.hsfo || delimited.hsfo
   const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
   const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo
   const remarks = ""
+  const explicitVlsfoRemarks = /\b80\s*cst\s*min\b/i.test(delimited.vlsfo)
+    ? (["80cst min"] as VlsfoMaxRemark[])
+    : []
   const builtStandardText = buildSpcStandardEnquiry({
     vesselName,
     imo,
+    port,
     eta,
     hsfo,
     vlsfo,
     lsmgo,
     remarks,
-    vlsfoMaxRemarks: manualVlsfoRemarks,
+    vlsfoMaxRemarks: mergeVlsfoMaxRemarks(manualVlsfoRemarks, explicitVlsfoRemarks),
   })
 
   const standardText = RMK_PRODUCT_PATTERN.test(rawText)
-    ? replaceHsfoWithRmk(builtStandardText)
+    ? replaceSpcHsfoWithRmk(builtStandardText)
     : builtStandardText
 
   return {
     rawText,
-    title: [vesselName || "new enquiry", eta].filter(Boolean).join(" / "),
+    title: [vesselName || "NEW ENQUIRY", eta].filter(Boolean).join(" / "),
     vesselName,
     imo,
+    port,
     eta,
     hsfo,
     vlsfo,
@@ -483,8 +551,9 @@ export function restoreStoredSpcEnquiryFields(input: StoredSpcEnquiryFieldsInput
   const meta = input.meta || {}
   return {
     ...parsed,
-    vesselName: lowerText(input.vesselName || parsed.vesselName),
+    vesselName: upperText(input.vesselName || parsed.vesselName),
     imo: cleanMetaValue(meta.imo) || parsed.imo,
+    port: normalizeSpcPort(cleanMetaValue(meta.port) || parsed.port),
     eta: cleanMetaValue(meta.eta) || parsed.eta,
     hsfo: cleanMetaValue(meta.hsfo) || parsed.hsfo,
     vlsfo: cleanMetaValue(meta.vlsfo) || parsed.vlsfo,

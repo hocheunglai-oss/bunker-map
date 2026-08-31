@@ -162,6 +162,7 @@ const TABLES: TableConfig[] = [
   { key: "spcEnquiries", table: "spc_enquiries", order: [{ column: "id", ascending: true }] },
   { key: "spcFixtures", table: "spc_fixtures", order: [{ column: "id", ascending: true }] },
   { key: "spcSuppliers", table: "spc_suppliers", order: [{ column: "key", ascending: true }] },
+  { key: "spcLostReasonOptions", table: "spc_lost_reason_options", order: [{ column: "audience", ascending: true }, { column: "sort_order", ascending: true }, { column: "reason", ascending: true }] },
   { key: "parserReports", table: "parser_reports", order: [{ column: "id", ascending: true }] },
   { key: "openAiUsageEvents", table: "openai_usage_events", order: [{ column: "id", ascending: true }] },
   { key: "spcPresentationChunks", table: "spc_presentation_chunks", order: [{ column: "id", ascending: true }] },

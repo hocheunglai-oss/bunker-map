@@ -15,6 +15,7 @@ import {
   type SpcEnquiryOutcome,
 } from "@/lib/spcEnquiries"
 import { enqueueSpcMobileEnquiry, processPendingSpcMobileDeliveries } from "@/lib/spcMobileEnquiries"
+import { listSpcLostReasons } from "@/lib/spcLostReasons"
 
 type EnquiryPayload = {
   title?: string
@@ -42,7 +43,7 @@ function errorResponse(error: unknown, fallback: string) {
       ? 401
       : message === "Forbidden"
         ? 403
-        : message.includes("required")
+        : message.includes("required") || message.startsWith("Select a valid")
           ? 400
           : 500
   return NextResponse.json({ message }, { status })
@@ -134,6 +135,9 @@ export async function GET(request: Request) {
     const supplierTradersPromise = bootstrap && hasSpcPagePermission(session, "spc-buyer-enquiries", "edit")
       ? listSupplierTraderOptions()
       : Promise.resolve([])
+    const buyerLostReasonsPromise = bootstrap && hasSpcPagePermission(session, "spc-buyer-enquiries", "edit")
+      ? listSpcLostReasons(session, request, "BUYER TRADER")
+      : Promise.resolve([])
     const enquiries = await listSpcEnquiries(session, {
       status,
       limit,
@@ -143,8 +147,9 @@ export async function GET(request: Request) {
       createdByUsername,
     })
     // Read the compact snapshot after the change page so inserts cannot be skipped by cursor advancement.
-    const [supplierTraders, activeIds] = await Promise.all([
+    const [supplierTraders, buyerLostReasons, activeIds] = await Promise.all([
       supplierTradersPromise,
+      buyerLostReasonsPromise,
       updatedAfter
         ? listSpcEnquiryIds(session, {
             status,
@@ -163,7 +168,7 @@ export async function GET(request: Request) {
         cursor,
         sessionKey: session.username,
         ...(activeIds ? { activeIds } : {}),
-        ...(bootstrap ? { supplierTraders } : {}),
+        ...(bootstrap ? { supplierTraders, buyerLostReasons } : {}),
       },
       {
         headers: {
@@ -283,6 +288,11 @@ export async function PATCH(request: Request) {
         ? payload.outcome
         : null
     if (!outcome) throw new Error("Outcome is required.")
+    if (outcome === "lost") {
+      const lostReason = typeof payload.lostReason === "string" ? payload.lostReason.trim() : ""
+      const validLostReasons = await listSpcLostReasons(session, request, "BUYER TRADER")
+      if (!validLostReasons.includes(lostReason)) throw new Error("Select a valid buyer lost reason.")
+    }
 
     const enquiry = await updateSpcEnquiryOutcome(
       id,
