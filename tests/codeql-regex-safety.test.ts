@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { normalizeEmailList } from "@/lib/emailAddress"
+import { isValidEmailAddress, normalizeEmailList } from "@/lib/emailAddress"
 import { slugifyEmailTemplate } from "@/lib/emailTemplateSlug"
 import { safeFileName } from "@/lib/spcPresentation"
 
@@ -50,4 +50,11 @@ test("email normalization rejects long adversarial non-addresses without backtra
 
   assert.doesNotMatch(normalizeEmailList.toString(), /\.match\(\/<\(/)
   assert.doesNotMatch(normalizeEmailList.toString(), /\^\[\^\\s@\]\+@/)
+})
+
+test("single email validation is bounded and rejects list or display-name input", () => {
+  assert.equal(isValidEmailAddress("identity@example.com"), true)
+  assert.equal(isValidEmailAddress("Identity <identity@example.com>"), false)
+  assert.equal(isValidEmailAddress("one@example.com;two@example.com"), false)
+  assert.equal(isValidEmailAddress(`a@${".".repeat(120_000)}`), false)
 })
