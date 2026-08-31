@@ -201,6 +201,12 @@ test("OIDC login continuation admits only a same-origin authorize request", () =
   assert.equal(normaliseOidcAuthorizeReturnTo("/api/spc/fcuno-login", origin), "/api/spc/fcuno-login")
 })
 
+test("OIDC authorization accepts Supabase code flow without a nonce", () => {
+  assert.match(authorizeSource, /const nonce = params\.has\("nonce"\) \? parameter\(params, "nonce"\) : null/)
+  assert.match(authorizeSource, /nonce !== null && \(nonce\.length < 16 \|\| nonce\.length > 512\)/)
+  assert.doesNotMatch(authorizeSource, /const nonce = parameter\(params, "nonce"\)/)
+})
+
 test("stale OIDC authentication cannot loop through the long-lived admin session", () => {
   assert.match(authorizeSource, /if \(!isFreshOidcAuthentication\(session\.authTime\)\)/)
   assert.match(authorizeSource, /await clearAdminSession\(\)/)
