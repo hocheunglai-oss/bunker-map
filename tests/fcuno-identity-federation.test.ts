@@ -21,6 +21,10 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260831090000_fcuno_identity_federation.sql", import.meta.url),
   "utf8",
 )
+const oidcDigestFixMigration = readFileSync(
+  new URL("../supabase/migrations/20260831090100_fix_oidc_pkce_digest_schema.sql", import.meta.url),
+  "utf8",
+)
 const syncSource = readFileSync(
   new URL("../lib/fcunoIdentitySync.ts", import.meta.url),
   "utf8",
@@ -150,6 +154,13 @@ test("federation storage is service-only and preserves application data boundari
   assert.match(migration, /'is_active', false,[\s\S]*?'use_fcos', false/)
   assert.match(migration, /FCUNO owns linked identity sign-in; SPC retains operational roles, offices, routes, permissions, and history/)
   assert.doesNotMatch(migration, /update public\.spc_users/)
+})
+
+test("OIDC code consumption uses the schema-qualified pgcrypto digest", () => {
+  assert.match(oidcDigestFixMigration, /extensions\.digest\(convert_to\(p_code_verifier, 'UTF8'\), 'sha256'\)/)
+  assert.match(oidcDigestFixMigration, /set search_path = pg_catalog, public, pg_temp/)
+  assert.match(oidcDigestFixMigration, /grant execute on function public\.consume_oidc_authorization_code\(text, text, text, text\)[\s\S]*?to service_role/)
+  assert.doesNotMatch(oidcDigestFixMigration, /encode\(digest\(/)
 })
 
 test("FCUNO User Management owns identity email and application entitlements", () => {
