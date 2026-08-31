@@ -55,8 +55,12 @@ export async function GET(request: Request) {
     if (state !== null && (state.length < 1 || state.length > 1024)) return redirectError(redirectUri, "invalid_request", null)
     if (parameter(params, "response_type") !== "code") return redirectError(redirectUri, "unsupported_response_type", state)
     const scope = normaliseScope(parameter(params, "scope"))
-    const nonce = parameter(params, "nonce")
-    if (nonce.length < 16 || nonce.length > 512) return redirectError(redirectUri, "invalid_request", state)
+    // OIDC nonce is optional in the authorization-code flow. Supabase Auth
+    // protects this hand-off with state and S256 PKCE but does not send a
+    // nonce for custom providers, so require nonce quality only when the
+    // relying party supplies one.
+    const nonce = params.has("nonce") ? parameter(params, "nonce") : null
+    if (nonce !== null && (nonce.length < 16 || nonce.length > 512)) return redirectError(redirectUri, "invalid_request", state)
     if (parameter(params, "code_challenge_method") !== "S256") return redirectError(redirectUri, "invalid_request", state)
     const codeChallenge = parameter(params, "code_challenge")
     if (!validatePkceChallenge(codeChallenge)) return redirectError(redirectUri, "invalid_request", state)
