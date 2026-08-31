@@ -23,6 +23,13 @@ export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
     matchPrefixes: ["/buyer", "/spc/buyer", "/enquiries", "/spc/enquiries"],
   },
   {
+    id: "spc-today-enquiries",
+    label: "TODAY'S ENQUIRIES",
+    group: "trading",
+    path: "/spc/today-enquiries",
+    matchPrefixes: ["/today-enquiries", "/spc/today-enquiries"],
+  },
+  {
     id: "spc-chrome-extension",
     label: "WHATSAPP EXTENSION",
     group: "trading",
@@ -163,6 +170,10 @@ export function constrainSpcPermissionForRole(
     return roleId === "ADMIN" ? "edit" : "none"
   }
 
+  if (pageId === "spc-today-enquiries") {
+    return roleId === "ADMIN" || roleId === "SUPPLIER TRADER" ? permission : "none"
+  }
+
   if (pageId === "spc-audit-log") {
     return roleId === "ADMIN"
       ? "edit"
@@ -214,7 +225,7 @@ export function getDefaultSpcPermissionsForRole(
 
   if (roleId === "BUYER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
-      const permission = page.id === "spc-parser-reports"
+      const permission = page.id === "spc-parser-reports" || page.id === "spc-today-enquiries"
         ? "none"
         : page.id === "spc-readme" ? "view" : "edit"
       permissions[page.id] = constrainSpcPermissionForRole(
@@ -229,7 +240,7 @@ export function getDefaultSpcPermissionsForRole(
   if (roleId === "SUPPLIER TRADER") {
     return pages.reduce<SpcPagePermissionMap>((permissions, page) => {
       const permission =
-        page.id === "spc-feedback"
+        page.id === "spc-feedback" || page.id === "spc-today-enquiries"
           ? "edit"
           : page.id === "spc-buyer-enquiries" ||
               page.id === "spc-chrome-extension" ||
@@ -278,6 +289,7 @@ export function getSpcPageByPath(pathname: string) {
 
 export function getDefaultSpcLandingPath(permissions: SpcPagePermissionMap | null | undefined) {
   const priority = [
+    "spc-today-enquiries",
     "spc-buyer-enquiries",
     "spc-chrome-extension",
     "spc-feedback",

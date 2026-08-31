@@ -59,6 +59,7 @@ type SupplierTrader = {
 type EnquiriesResponse = {
   enquiries?: SpcEnquiry[]
   supplierTraders?: SupplierTrader[]
+  buyerLostReasons?: string[]
   sessionKey?: string
   message?: string
 }
@@ -101,6 +102,7 @@ type DraftFieldKey = "vesselName" | "imo" | "eta" | "fuel"
 type ParserAiFields = {
   vesselName?: string
   imo?: string
+  port?: string
   eta?: string
   hsfo?: string
   vlsfo?: string
@@ -133,7 +135,7 @@ type ParserAiSuggestion = {
   appliedAt: string
 }
 
-const LOST_REASONS = [
+const FALLBACK_BUYER_LOST_REASONS = [
   "MINIMUM MARGIN",
   "CREDIT OR PAYMENT TERMS",
   "COVERAGE (SUPPLIER NOT COVERED)",
@@ -144,13 +146,14 @@ const LOST_REASONS = [
   "UNKNOWN",
 ] as const
 
-const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["80cst max", "120cst max", "180cst max"]
+const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["80cst min", "120cst max", "180cst max"]
 
 const emptyDraft: DraftEnquiry = {
   rawText: "",
   title: "",
   vesselName: "",
   imo: "",
+  port: "SG",
   eta: "",
   hsfo: "",
   vlsfo: "",
@@ -200,14 +203,14 @@ function enquiryStatusClass(enquiry: SpcEnquiry) {
 }
 
 function standardTextForDraft(
-  draft: Pick<DraftEnquiry, "vesselName" | "imo" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">,
+  draft: Pick<DraftEnquiry, "vesselName" | "imo" | "port" | "eta" | "hsfo" | "vlsfo" | "lsmgo" | "remarks">,
   vlsfoMaxRemarks: VlsfoMaxRemark[] = [],
 ) {
   return buildSpcStandardEnquiry({ ...draft, vlsfoMaxRemarks })
 }
 
 function rmkStandardText(text: string) {
-  return replaceHsfoWithRmk(text)
+  return replaceHsfoWithRmk(text).replace(/RMK\s+RMG380\s*\(3\.5%\)/i, "RMK")
 }
 
 function normaliseDraft(rawText: string, vlsfoMaxRemarks: VlsfoMaxRemark[] = []): DraftEnquiry {
@@ -233,7 +236,7 @@ function cleanAiVlsfoMaxRemarks(value: ParserAiResponse["vlsfoMaxRemarks"]) {
   return Array.from(
     new Set(
       value.filter((item): item is VlsfoMaxRemark =>
-        item === "80cst max" || item === "120cst max" || item === "180cst max",
+        item === "80cst min" || item === "80cst max" || item === "120cst max" || item === "180cst max",
       ),
     ),
   )
@@ -253,6 +256,7 @@ function draftFromAiResponse(
     rawText,
     vesselName: fields.vesselName || parsed.vesselName,
     imo: fields.imo || parsed.imo,
+    port: fields.port || parsed.port || "SG",
     eta: fields.eta || parsed.eta,
     hsfo: spcFuelInputValue(fields.hsfo || parsed.hsfo, "hsfo"),
     vlsfo: spcFuelInputValue(fields.vlsfo || parsed.vlsfo, "vlsfo"),
@@ -367,6 +371,7 @@ export default function SpcEnquiriesPage() {
   const [draft, setDraft] = useState<DraftEnquiry>(emptyDraft)
   const [enquiries, setEnquiries] = useState<SpcEnquiry[]>([])
   const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
+  const [buyerLostReasons, setBuyerLostReasons] = useState<string[]>([...FALLBACK_BUYER_LOST_REASONS])
   const [outcomeDraft, setOutcomeDraft] = useState<OutcomeDraft | null>(null)
   const [reofferDraft, setReofferDraft] = useState<ReofferDraft | null>(null)
   const [enquiryEditorMode, setEnquiryEditorMode] = useState<"reoffer" | "amend">("reoffer")
@@ -455,6 +460,9 @@ export default function SpcEnquiriesPage() {
       }
       setEnquiries(data.enquiries || [])
       if (Array.isArray(data.supplierTraders)) setSupplierTraders(data.supplierTraders)
+      if (Array.isArray(data.buyerLostReasons) && data.buyerLostReasons.length > 0) {
+        setBuyerLostReasons(data.buyerLostReasons)
+      }
     } catch (error) {
       reportEnquiryError(error, "Failed to load enquiries.")
     } finally {
@@ -474,6 +482,7 @@ export default function SpcEnquiriesPage() {
     enquiryLoadSequence.current += 1
     setEnquiries([])
     setSupplierTraders([])
+    setBuyerLostReasons([...FALLBACK_BUYER_LOST_REASONS])
   }, [username])
 
   useEffect(() => {
@@ -595,6 +604,24 @@ export default function SpcEnquiriesPage() {
     })
   }
 
+  function toggleDraftRemark(remark: "COQ REQUIRED" | "30D QUALITY TIME BAR") {
+    setDraft((current) => {
+      const values = current.remarks
+        .split(/\s*\/\s*/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+      const active = values.some((item) => item.toUpperCase() === remark)
+      const nextRemarks = active
+        ? values.filter((item) => item.toUpperCase() !== remark).join(" / ")
+        : [...values, remark].join(" / ")
+      const next = { ...current, remarks: nextRemarks }
+      next.standardText = rmkMode
+        ? rmkStandardText(standardTextForDraft(next, vlsfoMaxRemarks))
+        : standardTextForDraft(next, vlsfoMaxRemarks)
+      return next
+    })
+  }
+
   function clearDraft() {
     setDraft(emptyDraft)
     setRmkMode(false)
@@ -708,6 +735,7 @@ export default function SpcEnquiriesPage() {
           fields: {
             vesselName: targetDraft.vesselName,
             imo: targetDraft.imo,
+            port: targetDraft.port,
             eta: targetDraft.eta,
             hsfo: targetDraft.hsfo,
             vlsfo: targetDraft.vlsfo,
@@ -829,9 +857,11 @@ export default function SpcEnquiriesPage() {
     const payload = {
       title: draft.title || draft.vesselName || standardText.slice(0, 80),
       vesselName: draft.vesselName,
+      port: draft.port,
       product: productTextForDraft(draft, finalVlsfoMaxRemarks),
       notes: writeSpcEnquiryNotes(standardText, {
         imo: draft.imo,
+        port: draft.port,
         eta: draft.eta,
         hsfo: draft.hsfo,
         vlsfo: draft.vlsfo,
@@ -867,7 +897,7 @@ export default function SpcEnquiriesPage() {
     setOutcomeDraft({
       id: enquiry.id,
       type,
-      lostReason: LOST_REASONS[0],
+      lostReason: buyerLostReasons[0] || "UNKNOWN",
       supplierTraderUsername: supplierTraders[0]?.username || "",
     })
   }
@@ -969,9 +999,11 @@ export default function SpcEnquiriesPage() {
           mode: enquiryEditorMode,
           title: reofferDraft.title || reofferDraft.vesselName || standardText.slice(0, 80),
           vesselName: reofferDraft.vesselName,
+          port: reofferDraft.port,
           product: productTextForDraft(reofferDraft, finalVlsfoMaxRemarks),
           notes: writeSpcEnquiryNotes(standardText, {
             imo: reofferDraft.imo,
+            port: reofferDraft.port,
             eta: reofferDraft.eta,
             hsfo: reofferDraft.hsfo,
             vlsfo: reofferDraft.vlsfo,
@@ -1066,7 +1098,7 @@ export default function SpcEnquiriesPage() {
                     disabled={!canEdit}
                   />
                 </label>
-                <div className="spc-vlsfo-remark-row" aria-label="VLSFO max viscosity controls">
+                <div className="spc-vlsfo-remark-row" aria-label="Fuel and enquiry requirement controls">
                   <button
                     type="button"
                     className={rmkMode ? "is-active" : ""}
@@ -1093,6 +1125,14 @@ export default function SpcEnquiriesPage() {
                       </button>
                     )
                   })}
+                  {(["COQ REQUIRED", "30D QUALITY TIME BAR"] as const).map((remark) => {
+                    const active = draft.remarks.toUpperCase().split(/\s*\/\s*/).includes(remark)
+                    return (
+                      <button key={remark} type="button" className={active ? "is-active" : ""} aria-pressed={active} onClick={() => toggleDraftRemark(remark)} disabled={!canEdit}>
+                        {remark}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div className="spc-enquiry-command-row">
                   <button type="button" className="spc-blue-action" onClick={() => void runParserAi("new-enquiry")} disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}>AI FIX</button>
@@ -1116,6 +1156,7 @@ export default function SpcEnquiriesPage() {
                 <div className="spc-enquiry-fields">
                   <label className={shouldShowDraftMissing("vesselName") ? "is-missing" : ""}><span>Vessel</span><input value={draft.vesselName} onChange={(event) => updateDraft("vesselName", event.target.value)} disabled={!canEdit} /></label>
                   <div className={`spc-field-block${shouldShowDraftMissing("imo") ? " is-missing" : ""}`}><div className="spc-field-label-row"><label htmlFor="spc-enquiry-imo">IMO</label>{!draft.imo.trim() && imoSearchUrl ? <a className="spc-imo-lookup" href={imoSearchUrl} target="_blank" rel="noreferrer">Google search</a> : null}</div><input id="spc-enquiry-imo" value={draft.imo} onChange={(event) => updateDraft("imo", event.target.value)} disabled={!canEdit} inputMode="numeric" maxLength={7} /></div>
+                  <label><span>Port</span><input value={draft.port} onChange={(event) => updateDraft("port", event.target.value)} disabled={!canEdit} /></label>
                   <label className={shouldShowDraftMissing("eta") ? "is-missing" : ""}><span>ETA</span><input value={draft.eta} onChange={(event) => updateDraft("eta", event.target.value)} disabled={!canEdit} /></label>
                   <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>HSFO</span><input value={draft.hsfo} onChange={(event) => updateDraft("hsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
                   <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>VLSFO</span><input value={draft.vlsfo} onChange={(event) => updateDraft("vlsfo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
@@ -1211,7 +1252,7 @@ export default function SpcEnquiriesPage() {
                     )
                   }
                 >
-                  {LOST_REASONS.map((reason) => (
+                  {buyerLostReasons.map((reason) => (
                     <option key={reason} value={reason}>{reason}</option>
                   ))}
                 </select>
@@ -1280,6 +1321,10 @@ export default function SpcEnquiriesPage() {
                 <label className={shouldShowReofferMissing("imo") ? "is-missing" : ""}>
                   <span>IMO</span>
                   <input value={reofferDraft.imo} onChange={(event) => updateReofferDraft("imo", event.target.value)} disabled={saving} inputMode="numeric" maxLength={7} />
+                </label>
+                <label>
+                  <span>Port</span>
+                  <input value={reofferDraft.port} onChange={(event) => updateReofferDraft("port", event.target.value)} disabled={saving} />
                 </label>
                 <label className={shouldShowReofferMissing("eta") ? "is-missing" : ""}>
                   <span>ETA</span>

@@ -4485,6 +4485,159 @@ body {
   opacity: 0.55;
 }
 
+.spc-lost-record-toolbar {
+  justify-content: flex-end;
+}
+
+.spc-ledger-notice {
+  margin-right: auto;
+  color: #087443;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.spc-lost-record-table .spc-lost-record-editor-cell {
+  overflow: visible;
+}
+
+.spc-lost-record-editor {
+  display: grid;
+  gap: 2px;
+}
+
+.spc-table.spc-fixture-table .spc-lost-record-editor-cell input,
+.spc-table.spc-fixture-table .spc-lost-record-editor-cell select {
+  height: 20px;
+  min-height: 20px;
+  border-color: #d7dde5;
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.spc-lost-reasons-dialog {
+  width: min(860px, 100%);
+}
+
+.spc-lost-reasons-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+}
+
+.spc-lost-reasons-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--fc-admin-heading);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.spc-lost-reasons-grid textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  border: 1px solid var(--fc-input-border);
+  border-radius: 7px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-tool-input-text);
+  outline: none;
+  padding: 10px;
+  font: 700 12px/1.6 Roboto, Arial, sans-serif;
+  text-transform: uppercase;
+}
+
+.spc-lost-reasons-grid textarea:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
+}
+
+.spc-lost-reasons-grid small {
+  color: var(--fc-admin-muted);
+  font-size: 9px;
+}
+
+.spc-lost-reasons-grid .spc-blue-action {
+  justify-self: start;
+  min-height: 32px;
+  border: 1px solid #0071e3;
+  border-radius: 999px;
+  background: #0071e3;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.spc-today-enquiries-toolbar {
+  justify-content: flex-end;
+}
+
+.spc-ledger-message {
+  margin-right: auto;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.spc-ledger-message.is-error {
+  color: #b42318;
+}
+
+.spc-today-selection-count {
+  color: #526174;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.spc-today-copy-button {
+  min-height: 28px;
+  border: 1px solid #0071e3;
+  border-radius: 999px;
+  background: #0071e3;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.spc-today-copy-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.spc-table.spc-today-enquiries-table tbody tr:not(.spc-fixture-section-row):not(.spc-fixture-empty-row) {
+  cursor: pointer;
+}
+
+.spc-table.spc-today-enquiries-table tr.is-selected td {
+  background: #dbeafe;
+  box-shadow: inset 0 1px 0 #93c5fd, inset 0 -1px 0 #93c5fd;
+}
+
+.spc-table.spc-today-enquiries-table td.has-history {
+  background: #eefbf4;
+  color: #08653d;
+  font-weight: 700;
+}
+
+.spc-table.spc-today-enquiries-table td.has-history.is-lost {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.spc-table.spc-today-enquiries-table input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  min-height: 15px;
+  accent-color: #0071e3;
+}
+
 body:has(.spc-fixture-ledger-panel) .spc-main {
   width: min(1760px, 100%);
   padding: 6px 18px 18px;
@@ -8755,6 +8908,10 @@ body:has(.spc-statistics-page) .spc-main {
 
   .spc-fixture-ledger-toolbar {
     min-height: 44px;
+  }
+
+  .spc-lost-reasons-grid {
+    grid-template-columns: 1fr;
   }
 
   .spc-fixture-ledger-toolbar::before,

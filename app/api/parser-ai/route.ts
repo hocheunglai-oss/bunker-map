@@ -93,7 +93,7 @@ const PARSER_AI_SCHEMA = {
     remarks: { type: "string" },
     vlsfoMaxRemarks: {
       type: "array",
-      items: { type: "string", enum: ["80cst max", "120cst max", "180cst max"] },
+      items: { type: "string", enum: ["80cst min", "80cst max", "120cst max", "180cst max"] },
     },
     confidence: { type: "number" },
     warnings: { type: "array", items: { type: "string" } },
@@ -170,7 +170,7 @@ function cleanVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
   return Array.from(
     new Set(
       value.filter((item): item is VlsfoMaxRemark =>
-        item === "80cst max" || item === "120cst max" || item === "180cst max",
+        item === "80cst min" || item === "80cst max" || item === "120cst max" || item === "180cst max",
       ),
     ),
   )
@@ -422,7 +422,7 @@ function getHongKongDateKey() {
 function buildInstructions(source: ParserAiSource) {
   const today = getHongKongDateKey()
   const sourceRule = source === "spc"
-    ? "SPC correctedOutput and eta must include sg immediately before the delivery date when the raw enquiry port is Singapore, including SG, SGP, SIN, and 新加坡, e.g. vessel / imo / sg 16 - 18 aug / vlsfo 110mts. Omit every non-Singapore port from SPC output. Leave the port field, buyer, and remarks empty. Do not auto-detect SPC remarks."
+    ? "SPC correctedOutput must be uppercase and follow VESSEL (IMO) / PORT / DATE / QUANTITY MT HSFO RMG380 (3.5%) / QUANTITY MT VLSFO (0.5%) / QUANTITY MT LSMGO (0.1%). Recognize Singapore, Spore, Sing, SG, SGP, SIN, and 新加坡 as SG. Default the port field to SG only when no port is present. Keep a recognized non-Singapore port. Leave buyer empty. Do not auto-detect SPC remarks."
     : "Enquiryworksheet output must include port when known, including Singapore. Combine port and date into one slash segment, e.g. vessel / imo / taichung 10 - 14 jul / vlsfo 80mts, never vessel / imo / taichung / 10 - 14 jul / vlsfo 80mts. Return buyer only in the buyer field, not inside correctedOutput."
 
   return [
@@ -434,10 +434,10 @@ function buildInstructions(source: ParserAiSource) {
     "The raw enquiry is authoritative. If current fields or parser output conflict with the raw enquiry, correct them from the raw enquiry instead of preserving the existing field.",
     "Never use an explicit port name as the vessel name or as the vessel name for IMO lookup. A standalone ship-like name immediately before a labelled port field is the vessel name.",
     "For IMO, first extract it from the input. If no IMO is written but the vessel name is clear, you may provide the IMO from strong vessel knowledge only when highly confident; otherwise leave IMO empty and add a warning.",
-    "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
+    source === "spc" ? "Use uppercase throughout SPC correctedOutput." : "Use lower-case vessel, port, eta, vlsfo, and lsmgo in correctedOutput. Use HSFO uppercase.",
     "Remove generic MV, M/V, MT, and M/T prefixes from the vessel name in correctedOutput.",
     "For enquiryworksheet, use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
-    "The Chinese place name 新加坡 explicitly means Singapore. For SPC, render it as sg before the date; do not warn that the port is missing when it appears.",
+    "The Chinese place name 新加坡 explicitly means Singapore. For SPC, render it as the separate SG port segment; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
     "Normalize mass quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts. Preserve explicit KL as kl and CBM as cbm; never convert a volume unit into mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
@@ -455,7 +455,7 @@ function buildInstructions(source: ParserAiSource) {
     "RMG 380 with explicit 0.5% sulphur is VLSFO, never HSFO.",
     "Classify HSFO/HFO/IFO/3.5 as HSFO only when explicitly present as a fuel/spec, not when 3 or 5 appears in dates or quantities.",
     "Classify LSMGO/MGO/MDO/DMA/DMB/LEMGO/GAS OIL as lsmgo. Order fuel segments as HSFO, vlsfo, then lsmgo regardless of their order in the raw enquiry.",
-    "Do not infer or add 80CST MAX, 120CST MAX or 180CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO max remarks; the user controls these manually.",
+    "Do not infer or add 80CST MIN, 80CST MAX, 120CST MAX or 180CST MAX automatically. Preserve only values explicitly listed in Manual VLSFO remarks; the user controls these manually.",
     "If RMK, CBM, or KL appears, add a warning.",
     "Return vlsfoMaxRemarks as lower-case enum values only.",
   ].join("\n")
@@ -476,6 +476,7 @@ function buildFallbackOutput(
     const standard = buildSpcStandardEnquiry({
       vesselName: draft.vesselName,
       imo: draft.imo,
+      port: draft.port,
       eta: draft.eta,
       hsfo: draft.hsfo,
       vlsfo: draft.vlsfo,
@@ -646,6 +647,7 @@ function correctedOutputWithImo(
       buildSpcStandardEnquiry({
         vesselName: nextDraft.vesselName,
         imo,
+        port: nextDraft.port,
         eta: nextDraft.eta,
         hsfo: nextDraft.hsfo,
         vlsfo: nextDraft.vlsfo,

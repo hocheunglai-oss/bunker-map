@@ -43,6 +43,7 @@ export type SpcUserManagementAuditEventInput = {
 
 const SPC_PAGE_LABELS: Record<string, string> = {
   "spc-buyer-enquiries": "SPC ENQUIRIES",
+  "spc-today-enquiries": "SPC TODAY'S ENQUIRIES",
   "spc-chrome-extension": "SPC WHATSAPP EXTENSION",
   "spc-readme": "SPC PRESENTATION",
   "spc-feedback": "SPC FEEDBACK",
