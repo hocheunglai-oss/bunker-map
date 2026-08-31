@@ -9,6 +9,10 @@ function hasEmailShape(value: string, rejectAngles = false) {
   return dot >= 0 && dot < value.length - 1
 }
 
+export function isValidEmailAddress(value: unknown) {
+  return typeof value === "string" && value.length <= 254 && hasEmailShape(value, true)
+}
+
 function extractAngleAddress(value: string) {
   let start = -1
 
