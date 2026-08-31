@@ -223,3 +223,8 @@ test("stale OIDC authentication cannot loop through the long-lived admin session
   assert.match(authorizeSource, /await clearAdminSession\(\)/)
   assert.match(authorizeSource, /return interactiveLoginRedirect\(request\)/)
 })
+
+test("an explicit OIDC login prompt requires fresh FCUNO account entry", () => {
+  assert.match(authorizeSource, /prompts\.includes\("login"\) \|\| prompts\.includes\("select_account"\)/)
+  assert.match(authorizeSource, /if \(promptRequiresFreshLogin\(params\)\) \{[\s\S]*?await clearAdminSession\(\)[\s\S]*?return interactiveLoginRedirect\(request\)/)
+})

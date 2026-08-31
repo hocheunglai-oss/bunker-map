@@ -32,6 +32,13 @@ function promptIsNone(params: URLSearchParams) {
   return values.length === 1 && values[0].trim().split(/\s+/).includes("none")
 }
 
+function promptRequiresFreshLogin(params: URLSearchParams) {
+  const values = params.getAll("prompt")
+  if (values.length !== 1) return false
+  const prompts = values[0].trim().split(/\s+/)
+  return prompts.includes("login") || prompts.includes("select_account")
+}
+
 function interactiveLoginRedirect(request: Request) {
   const current = new URL(request.url)
   const returnTo = `${current.pathname}${current.search}`
@@ -69,6 +76,10 @@ export async function GET(request: Request) {
       return promptIsNone(params)
         ? redirectError(redirectUri, "login_required", state)
         : interactiveLoginRedirect(request)
+    }
+    if (promptRequiresFreshLogin(params)) {
+      await clearAdminSession()
+      return interactiveLoginRedirect(request)
     }
     if (!isFreshOidcAuthentication(session.authTime)) {
       if (promptIsNone(params)) return redirectError(redirectUri, "login_required", state)
