@@ -16,6 +16,7 @@ import {
 } from "@/lib/fcunoOidc"
 import { normaliseOidcAuthorizeReturnTo } from "@/lib/fcunoOidcContinuation"
 import { isFcosIdentitySyncEnabled, isFcunoOidcEnabled } from "@/lib/fcunoFederationFlags"
+import { ADMIN_PAGE_DEFINITIONS } from "@/lib/adminPages"
 
 const migration = readFileSync(
   new URL("../supabase/migrations/20260831090000_fcuno_identity_federation.sql", import.meta.url),
@@ -171,6 +172,14 @@ test("FCUNO User Management owns identity email and application entitlements", (
   assert.match(adminUsersSource, /update_admin_user_identity_with_password_and_revoke_sessions/)
   assert.match(migration, /create or replace function public\.update_admin_user_identity_with_password_and_revoke_sessions/)
   assert.match(migration, /revoke all on function public\.update_admin_user_identity_with_password_and_revoke_sessions/)
+})
+
+test("the FCOS sidebar entry uses the application name while retaining its stable identity and URL", () => {
+  const fcosPage = ADMIN_PAGE_DEFINITIONS.find((page) => page.id === "salesforce-data")
+  assert.ok(fcosPage)
+  assert.equal(fcosPage.label, "FCOS")
+  assert.equal(fcosPage.path, "https://fcos.fcuno.com/")
+  assert.equal(fcosPage.external, true)
 })
 
 test("linked SPC users use FCUNO identity while SPC keeps operational authority", () => {
