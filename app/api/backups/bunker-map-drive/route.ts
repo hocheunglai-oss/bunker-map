@@ -18,7 +18,7 @@ import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 300
+export const maxDuration = 800
 
 const RETAINED_VERIFIED_BACKUP_COUNT = 2
 const CRON_RETRY_COVERAGE_HOURS = 6
@@ -624,9 +624,13 @@ async function getBackupInventory(
   const unregistered = [...liveTables]
     .filter((table) => !registeredTables.has(table))
     .sort()
-  const missingRequired = tableConfigs
-    .filter((config) => !config.optional && !liveTables.has(config.table))
-    .map((config) => config.table)
+  const missingRequired = [
+    ...tableConfigs
+      .filter((config) => !config.optional)
+      .map((config) => config.table),
+    ...explicitlyEphemeralTables,
+  ]
+    .filter((table) => !liveTables.has(table))
     .sort()
   const missingTruth = [...TRUTH_MANAGED_TABLES]
     .filter((table) => !liveTables.has(table))

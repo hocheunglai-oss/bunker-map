@@ -100,6 +100,10 @@ test("short-lived OIDC state is explicitly ephemeral in every consumer", () => {
     consumers[0],
     /key: "oidcAuthorizationCodes"|key: "oidcTokenRevocations"/
   )
+  assert.match(
+    consumers[0],
+    /const missingRequired = \[[\s\S]*\.\.\.explicitlyEphemeralTables,[\s\S]*\.filter\(\(table\) => !liveTables\.has\(table\)\)/
+  )
 })
 
 test("durable identity tables participate in the backup mutation epoch", () => {

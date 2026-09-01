@@ -50,6 +50,16 @@ test("System Health keeps enough runtime for full backup-chain byte verification
   assert.ok(noticeDurationSeconds * 1_000 >= backupTimeoutMs + 30_000)
 })
 
+test("daily backup has enough runtime to export and verify the current database", () => {
+  const backupDurationSeconds = numericConstant(
+    backupRouteSource,
+    "maxDuration"
+  )
+
+  assert.ok(backupDurationSeconds >= 600)
+  assert.ok(backupDurationSeconds < 15 * 60)
+})
+
 test("Attendance Sync remains visible in System Health without sending email notices", () => {
   assert.match(
     healthSource,
