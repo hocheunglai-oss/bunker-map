@@ -421,12 +421,6 @@ export default function SpcLoginPage() {
               {submitting ? "Signing In" : "Log In"}
             </button>
 
-            {fcunoSpcLoginEnabled ? (
-              <a className="spc-login-use-password" href="/api/spc/fcuno-login">
-                FCUNO staff sign in
-              </a>
-            ) : null}
-
             {message ? <p className="spc-login-message" role="alert">{message}</p> : null}
           </form>
         )}

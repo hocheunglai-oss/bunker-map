@@ -248,6 +248,7 @@ test("SPC silently resumes an active FCUNO session without showing an extra butt
   assert.match(spcPageSource, /fetch\("\/api\/spc\/fcuno-login\?silent=1"/)
   assert.match(spcPageSource, /window\.location\.replace\("\/spc"\)/)
   assert.doesNotMatch(spcPageSource, />\s*Continue with FCUNO\s*</)
+  assert.doesNotMatch(spcPageSource, /FCUNO staff sign in/)
 })
 
 test("OIDC authorization accepts Supabase code flow without a nonce", () => {
