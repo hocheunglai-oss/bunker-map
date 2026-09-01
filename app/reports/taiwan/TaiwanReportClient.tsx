@@ -12,6 +12,7 @@ import {
   buildTaiwanOperationalNoticeMessage,
   isTaiwanOperationalNoticeReady,
 } from "@/lib/taiwanOperationalNotice"
+import { getTaiwanSpecialNoticeLines } from "@/lib/taiwanSpecialNotice"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -181,6 +182,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
   const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
   const showOperationalNotice = isTaiwanOperationalNoticeReady(operationalNotice)
   const operationalNoticeMessage = buildTaiwanOperationalNoticeMessage(operationalNotice)
+  const specialNoticeLines = getTaiwanSpecialNoticeLines(specialNotice)
   const displayReportDate = showOperationalNotice ? formatHongKongToday() : reportDate
 
   useEffect(() => {
@@ -535,7 +537,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
           </div>
         </div>
 
-        {specialNotice.trim() && (
+        {specialNoticeLines.length > 0 && (
           <div
             style={{
               ...cardStyle,
@@ -560,7 +562,9 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
               Special Notice
             </div>
             <div style={{ color: "#ffe7c2", fontSize: "13px", lineHeight: 1.55, fontWeight: 700 }}>
-              {specialNotice.trim()}
+              {specialNoticeLines.map((line, index) => (
+                <div key={`${index}-${line}`}>{line}</div>
+              ))}
             </div>
           </div>
         )}
