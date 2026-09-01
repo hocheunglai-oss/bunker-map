@@ -1,0 +1,25 @@
+{
+  "iss": "https://fcuno.com",
+  "sub": "66b28753-ce73-4bb7-8785-b80457b753a4",
+  "aud": "fcos-identity-sync",
+  "iat": 1788164400,
+  "exp": 1788164700,
+  "jti": "7b2bf1c2-803d-46ed-b317-e5b15b5019e8",
+  "typ": "fcuno.identity-sync+jwt",
+  "event_id": "7b2bf1c2-803d-46ed-b317-e5b15b5019e8",
+  "event_type": "fcuno.identity.v1",
+  "occurred_at": "2026-08-31T11:00:00.000Z",
+  "identity": {
+    "sub": "66b28753-ce73-4bb7-8785-b80457b753a4",
+    "email": "trader@example.com",
+    "email_verified": true,
+    "username": "trader@example.com",
+    "display_name": "Example Trader",
+    "is_active": false,
+    "use_fcos": false,
+    "use_spc": false,
+    "identity_revision": 5,
+    "credential_revision": 2,
+    "revoked_before": "2026-08-31T10:59:59.000Z"
+  }
+}

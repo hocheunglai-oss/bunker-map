@@ -1,5 +1,6 @@
 import { cookies } from "next/headers"
 import {
+  getFcunoLinkedSpcAccess,
   getDatabaseSpcUserById,
   type AuthenticatedSpcUser,
   validateDatabaseSpcUser,
@@ -44,7 +45,10 @@ export async function validateSpcCredentials(
   username: string,
   password: string,
 ): Promise<AuthenticatedSpcUser | null> {
-  return validateDatabaseSpcUser(normaliseUsername(username), password)
+  const user = await validateDatabaseSpcUser(normaliseUsername(username), password)
+  if (!user) return null
+  const linkedAccess = await getFcunoLinkedSpcAccess(user.id)
+  return linkedAccess.linked ? null : user
 }
 
 function cookieOptions(expiresAt: string) {
@@ -190,7 +194,15 @@ async function resolveSpcSession(refreshCookie: boolean): Promise<SpcSession> {
       return unauthenticatedSession()
     }
 
+    const linkedAccess = await getFcunoLinkedSpcAccess(databaseUser.id)
+    if (linkedAccess.linked && !linkedAccess.authorized) {
+      await revokeDatabaseSpcSession(token)
+      clearSpcCookies(cookieStore)
+      return unauthenticatedSession()
+    }
+
     if (
+      !linkedAccess.linked &&
       requiresSpcWhatsappLoginMfa(databaseUser.username) &&
       !databaseSession.mfaVerifiedAt
     ) {
@@ -214,7 +226,7 @@ async function resolveSpcSession(refreshCookie: boolean): Promise<SpcSession> {
       displayName: databaseUser.displayName,
       role: normaliseSpcRole(databaseUser.role),
       office: databaseUser.office,
-      mustChangePassword: databaseUser.mustChangePassword,
+      mustChangePassword: linkedAccess.linked ? false : databaseUser.mustChangePassword,
       mfaVerifiedAt: databaseSession.mfaVerifiedAt,
       permissions: databaseUser.permissions,
     }

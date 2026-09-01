@@ -153,6 +153,7 @@ type ResolvedAdminSession = {
   publicSession: AdminSession
   adminUserId: string | null
   sessionId: string | null
+  authTime: string | null
   expiresAt: string | null
 }
 
@@ -163,6 +164,7 @@ function unresolvedAdminSession(
     publicSession: unauthenticatedSession(pages),
     adminUserId: null,
     sessionId: null,
+    authTime: null,
     expiresAt: null,
   }
 }
@@ -197,6 +199,7 @@ async function resolveAdminSessionToken(
     },
     adminUserId: databaseUser.id,
     sessionId: databaseSession.id,
+    authTime: databaseSession.createdAt,
     expiresAt: databaseSession.expiresAt,
   }
 }
@@ -310,6 +313,31 @@ export async function requireAdminSession() {
   return requireAuthenticatedResolvedSession(
     await resolveAdminSession(),
   ).publicSession
+}
+
+// OIDC uses the same opaque FCUNO admin session as the application.  The
+// session creation time is intentionally retained so the provider can enforce
+// a short authentication age without changing normal FCUNO session lifetime.
+export async function requireAdminSessionForOidc() {
+  const resolved = requireAuthenticatedResolvedSession(
+    await resolveAdminSession(),
+  )
+  if (!resolved.adminUserId || !resolved.authTime) throw new Error("Unauthorized")
+  return {
+    adminUserId: resolved.adminUserId,
+    authTime: resolved.authTime,
+  }
+}
+
+export async function requireAdminIdentitySession() {
+  const resolved = requireAuthenticatedResolvedSession(
+    await resolveAdminSession(),
+  )
+  if (!resolved.adminUserId) throw new Error("Unauthorized")
+  return {
+    ...resolved.publicSession,
+    adminUserId: resolved.adminUserId,
+  }
 }
 
 export async function requireAdminSessionForRequest(request: Request) {

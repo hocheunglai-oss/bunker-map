@@ -13,6 +13,7 @@ import {
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
+import { isValidEmailAddress } from "@/lib/emailAddress"
 
 const scryptAsync = promisify(scrypt)
 const ADMIN_ROLE_METADATA_KEY = "__adminRole"
@@ -26,9 +27,13 @@ type AdminUserRow = {
   id: string
   username: string
   display_name: string | null
+  email: string | null
+  email_verified: boolean
   role: string
   password_hash: string
   is_active: boolean
+  use_fcos: boolean
+  use_spc: boolean
   password_reset_required: boolean
   permissions: Record<string, unknown> | null
   created_at: string
@@ -58,9 +63,13 @@ export type ManagedAdminUser = {
   id: string
   username: string
   displayName: string
+  email: string
+  emailVerified: boolean
   role: string
   attendanceGroup: AdminAttendanceGroup | null
   isActive: boolean
+  useFcos: boolean
+  useSpc: boolean
   passwordResetRequired: boolean
   permissions: AdminPagePermissionMap
   createdAt: string
@@ -93,6 +102,11 @@ export type SaveAdminUserInput = {
   id?: string
   username: string
   displayName?: string
+  email?: string
+  emailVerified?: boolean
+  isActive?: boolean
+  useFcos?: boolean
+  useSpc?: boolean
   role?: string
   attendanceGroup?: AdminAttendanceGroup | null
   password?: string
@@ -562,9 +576,13 @@ function mapAdminUser(
     id: row.id,
     username: row.username,
     displayName: row.display_name || row.username,
+    email: row.email || "",
+    emailVerified: row.email_verified === true,
     role,
     attendanceGroup: getStoredAdminAttendanceGroup(row),
     isActive: row.is_active !== false,
+    useFcos: row.use_fcos === true,
+    useSpc: row.use_spc === true,
     passwordResetRequired: row.password_reset_required === true,
     permissions,
     createdAt: row.created_at,
@@ -920,6 +938,18 @@ export async function saveManagedAdminUser(
 ) {
   const username = normaliseUsername(input.username)
   if (!username) throw new Error("Username is required.")
+  const email = input.email?.trim().toLowerCase() || ""
+  const emailVerified = input.emailVerified === true
+  const isActive = input.isActive !== false
+  const useFcos = input.useFcos === true
+  const useSpc = input.useSpc === true
+  if (email && !isValidEmailAddress(email)) {
+    throw new Error("Enter a valid identity email address.")
+  }
+  if (emailVerified && !email) throw new Error("A verified identity requires an email address.")
+  if ((useFcos || useSpc) && (!isActive || !emailVerified)) {
+    throw new Error("FCOS or SPC access requires an active user with a verified email.")
+  }
 
   const role = normaliseAdminRole(input.role)
   const roleDefault = getRoleDefaultMap(roleDefaults)[role]
@@ -958,6 +988,11 @@ export async function saveManagedAdminUser(
     const payload: Record<string, unknown> = {
       username,
       display_name: input.displayName?.trim() || username,
+      email: email || null,
+      email_verified: emailVerified,
+      is_active: isActive,
+      use_fcos: useFcos,
+      use_spc: useSpc,
       role: getDatabaseRole(role, useLegacyRoles),
       permissions: {
         ...permissions,
@@ -981,10 +1016,15 @@ export async function saveManagedAdminUser(
 
     if (passwordHash && input.id) {
       const { data, error } = await supabase
-        .rpc("update_admin_user_with_password_and_revoke_sessions", {
+        .rpc("update_admin_user_identity_with_password_and_revoke_sessions", {
           p_admin_user_id: input.id,
           p_username: payload.username,
           p_display_name: payload.display_name,
+          p_email: payload.email,
+          p_email_verified: payload.email_verified,
+          p_is_active: payload.is_active,
+          p_use_fcos: payload.use_fcos,
+          p_use_spc: payload.use_spc,
           p_role: payload.role,
           p_permissions: payload.permissions,
           p_new_password_hash: passwordHash,

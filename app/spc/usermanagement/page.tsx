@@ -29,6 +29,7 @@ type ManagedSpcUser = {
   isSupplierTrader: boolean
   permissions: SpcPagePermissionMap
   isActive: boolean
+  identitySource: "external" | "fcuno"
   createdAt: string
   updatedAt: string
 }
@@ -91,6 +92,7 @@ type UserDraft = {
   mustChangePassword: boolean
   isSupplierTrader: boolean
   isActive: boolean
+  identitySource: "external" | "fcuno"
 }
 
 const USER_TABS: Array<{ id: UserTab; label: string }> = [
@@ -125,6 +127,7 @@ function createDraft(role: Exclude<UserTab, "OFFICE">, office: string): UserDraf
     mustChangePassword: true,
     isSupplierTrader: role === "SUPPLIER TRADER",
     isActive: true,
+    identitySource: "external",
   }
 }
 
@@ -145,6 +148,7 @@ function userToDraft(user: ManagedSpcUser, fallbackOffice: string): UserDraft {
     mustChangePassword: user.mustChangePassword,
     isSupplierTrader: user.isSupplierTrader,
     isActive: user.isActive,
+    identitySource: user.identitySource,
   }
 }
 
@@ -666,6 +670,7 @@ export default function SpcUserManagementPage() {
                           ? ` · ${deliveryRoutes.find((route) => route.id === user.deliveryRouteId)?.label || "ROUTE"}`
                           : " · NO ROUTE"}
                         {user.role !== activeTab ? ` · ${user.roleLabel || roleLabel(user.role)}` : ""}
+                        {user.identitySource === "fcuno" ? " · FCUNO" : " · EXTERNAL"}
                       </small>
                     </span>
                     <div>
@@ -676,7 +681,7 @@ export default function SpcUserManagementPage() {
                         type="button"
                         className="is-danger"
                         onClick={() => void deleteUser(user)}
-                        disabled={saving || !canEdit || user.username === username}
+                        disabled={saving || !canEdit || user.username === username || user.identitySource === "fcuno"}
                       >
                         Remove
                       </button>
@@ -890,6 +895,7 @@ export default function SpcUserManagementPage() {
                   onChange={(event) => updateDraft("username", event.target.value)}
                   autoComplete="username"
                   required
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
               </label>
               <label>
@@ -897,6 +903,7 @@ export default function SpcUserManagementPage() {
                 <input
                   value={userDraft.displayName}
                   onChange={(event) => updateDraft("displayName", event.target.value)}
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
               </label>
               <label>
@@ -908,6 +915,7 @@ export default function SpcUserManagementPage() {
                   placeholder="+65 9145 6766"
                   autoComplete="tel"
                   required={userDraft.isActive}
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
               </label>
               <label>
@@ -958,6 +966,7 @@ export default function SpcUserManagementPage() {
                   minLength={PASSWORD_MIN_LENGTH}
                   maxLength={PASSWORD_MAX_LENGTH}
                   required={!userDraft.id}
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
               </label>
               {userDraft.role === "ADMIN" ? (
@@ -975,6 +984,7 @@ export default function SpcUserManagementPage() {
                   type="checkbox"
                   checked={userDraft.mustChangePassword}
                   onChange={(event) => updateDraft("mustChangePassword", event.target.checked)}
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
                 <span>Change password on next login</span>
               </label>
@@ -983,9 +993,13 @@ export default function SpcUserManagementPage() {
                   type="checkbox"
                   checked={userDraft.isActive}
                   onChange={(event) => updateDraft("isActive", event.target.checked)}
+                  disabled={userDraft.identitySource === "fcuno"}
                 />
                 <span>Active account</span>
               </label>
+              {userDraft.identitySource === "fcuno" ? (
+                <p className="spc-empty">Identity and sign-in are managed in FCUNO. SPC role, office, route, and page authority remain editable here.</p>
+              ) : null}
               {userDraft.id && userDraft.isSupplierTrader ? (
                 <div className={`spc-backup-mode-admin${backupMode?.enabled ? " is-active" : ""}`}>
                   <span>

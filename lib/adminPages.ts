@@ -55,7 +55,7 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
   },
   {
     id: "salesforce-data",
-    label: "SALESFORCE DATA",
+    label: "FCOS",
     group: "trading",
     path: "https://fcos.fcuno.com/",
     external: true,

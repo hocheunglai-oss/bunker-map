@@ -1,0 +1,18 @@
+{
+  "contractVersion": "1.0",
+  "aggregateSha256": "7fc54e7c3bd79fb014ad81dc6d9190d021549d9428486ef85ed78fdff95d7cc2",
+  "files": [
+    {
+      "path": "identity-sync-event.schema.json",
+      "sha256": "27be3e98e50e0223b4c21ff14d681b2441159bba98cea8df2318b468fe7bfbd6"
+    },
+    {
+      "path": "oidc-claims.schema.json",
+      "sha256": "a2852774fb10cc2c6092fd305161671a8ffa1129097ea17dbadfc3263707a951"
+    },
+    {
+      "path": "release-manifest.schema.json",
+      "sha256": "ab42202b1878b5d37b1cb3cee56cac871a5a232479afb222439052093fe2ce81"
+    }
+  ]
+}
