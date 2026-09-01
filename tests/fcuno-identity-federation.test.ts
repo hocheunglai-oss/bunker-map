@@ -66,6 +66,14 @@ const spcLoginSource = readFileSync(
   new URL("../app/api/spc/fcuno-login/route.ts", import.meta.url),
   "utf8",
 )
+const spcLoginMethodSource = readFileSync(
+  new URL("../app/api/spc/login-method/route.ts", import.meta.url),
+  "utf8",
+)
+const spcLoginDiscoveryMigration = readFileSync(
+  new URL("../supabase/migrations/20260901031712_add_spc_login_discovery_rate_limit.sql", import.meta.url),
+  "utf8",
+)
 const adminAuthSource = readFileSync(
   new URL("../lib/adminAuth.ts", import.meta.url),
   "utf8",
@@ -249,6 +257,21 @@ test("SPC silently resumes an active FCUNO session without showing an extra butt
   assert.match(spcPageSource, /window\.location\.replace\("\/spc"\)/)
   assert.doesNotMatch(spcPageSource, />\s*Continue with FCUNO\s*</)
   assert.doesNotMatch(spcPageSource, /FCUNO staff sign in/)
+})
+
+test("SPC uses protected username-first routing for FCUNO and external identities", () => {
+  assert.match(spcLoginMethodSource, /isSameOriginSpcWhatsappLoginMfaRequest/)
+  assert.match(spcLoginMethodSource, /beginSpcLoginDiscovery/)
+  assert.match(spcLoginMethodSource, /getSpcLoginMethod\(username\)/)
+  assert.match(spcLoginMethodSource, /"Cache-Control": "private, no-store"/)
+  assert.match(spcPageSource, /fetch\("\/api\/spc\/login-method"/)
+  assert.match(spcPageSource, /setLoginMethod\("password"\)/)
+  assert.match(spcPageSource, /target\.searchParams\.set\("login_hint", loginUsername\.trim\(\)\)/)
+  assert.match(spcLoginSource, /login\.searchParams\.set\("loginHint", loginHint\)/)
+  assert.match(spcLoginDiscoveryMigration, /create table if not exists private\.spc_login_discovery_attempts/)
+  assert.match(spcLoginDiscoveryMigration, /security definer/)
+  assert.match(spcLoginDiscoveryMigration, /revoke all on function public\.begin_spc_login_discovery/)
+  assert.match(spcLoginDiscoveryMigration, /grant execute on function public\.begin_spc_login_discovery[\s\S]*?to service_role/)
 })
 
 test("OIDC authorization accepts Supabase code flow without a nonce", () => {

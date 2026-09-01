@@ -952,6 +952,32 @@ export async function getFcunoLinkedSpcAccess(spcUserId: string) {
   }
 }
 
+export async function getSpcLoginMethod(
+  usernameInput: string,
+): Promise<"fcuno" | "password"> {
+  const username = normaliseUsername(usernameInput)
+  if (!username || username.length > 320) return "password"
+
+  const supabase = getServiceClient()
+  const { data: user, error: userError } = await supabase
+    .from("spc_users")
+    .select("id")
+    .eq("username", username)
+    .eq("is_active", true)
+    .maybeSingle()
+  if (userError) throw userError
+  if (!user) return "password"
+
+  const { data: link, error: linkError } = await supabase
+    .from("spc_identity_links")
+    .select("spc_user_id")
+    .eq("spc_user_id", user.id)
+    .maybeSingle()
+  if (linkError) throw linkError
+
+  return link ? "fcuno" : "password"
+}
+
 export async function getFcunoLinkedSpcUser(adminUserId: string) {
   const supabase = getServiceClient()
   const { data: identity, error: identityError } = await supabase

@@ -429,6 +429,8 @@ export default function AdminPage() {
 
   useEffect(() => {
     document.title = "Admin - FC Uno"
+    const loginHint = new URLSearchParams(window.location.search).get("loginHint")?.trim() || ""
+    if (loginHint.length <= 320) setUsername(loginHint)
   }, [])
 
   useEffect(() => {

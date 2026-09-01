@@ -63,6 +63,9 @@ export default function SpcLoginPage() {
   } = useSpcAuth()
   const [loginUsername, setLoginUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [loginMethod, setLoginMethod] = useState<"username" | "password">(
+    fcunoSpcLoginEnabled ? "username" : "password",
+  )
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [checkingFcuno, setCheckingFcuno] = useState(fcunoSpcLoginEnabled)
@@ -71,6 +74,7 @@ export default function SpcLoginPage() {
   const [mfaCode, setMfaCode] = useState("")
   const [mfaSecondsRemaining, setMfaSecondsRemaining] = useState(0)
   const usernameInputRef = useRef<HTMLInputElement>(null)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const mfaCodeInputRef = useRef<HTMLInputElement>(null)
   const usePasswordButtonRef = useRef<HTMLButtonElement>(null)
   const focusUsernameAfterCancel = useRef(false)
@@ -158,6 +162,33 @@ export default function SpcLoginPage() {
     setMessage("")
 
     try {
+      if (loginMethod === "username") {
+        const response = await fetch("/api/spc/login-method", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: loginUsername }),
+        })
+        const data = (await response.json().catch(() => ({}))) as {
+          method?: "fcuno" | "password"
+          message?: string
+        }
+
+        if (!response.ok) {
+          setMessage(data.message || LOGIN_UNAVAILABLE_MESSAGE)
+          return
+        }
+        if (data.method === "fcuno") {
+          const target = new URL("/api/spc/fcuno-login", window.location.origin)
+          target.searchParams.set("login_hint", loginUsername.trim())
+          window.location.assign(target.toString())
+          return
+        }
+
+        setLoginMethod("password")
+        window.requestAnimationFrame(() => passwordInputRef.current?.focus())
+        return
+      }
+
       const response = await fetch("/api/spc/login", {
         method: "POST",
         headers: {
@@ -370,8 +401,15 @@ export default function SpcLoginPage() {
                   ref={usernameInputRef}
                   name="username"
                   value={loginUsername}
-                  onChange={(event) => setLoginUsername(event.target.value)}
+                  onChange={(event) => {
+                    setLoginUsername(event.target.value)
+                    if (fcunoSpcLoginEnabled && loginMethod === "password") {
+                      setLoginMethod("username")
+                      setPassword("")
+                    }
+                  }}
                   autoComplete="username"
+                  placeholder="USERNAME OR EMAIL"
                   aria-label="Username"
                   autoCapitalize="none"
                   spellCheck={false}
@@ -381,44 +419,49 @@ export default function SpcLoginPage() {
               </span>
             </label>
 
-            <label className="spc-login-field">
-              <span className="spc-login-hidden-label">Password</span>
-              <span className="spc-password-wrap">
-                <span className="spc-field-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M7 10V8a5 5 0 0 1 10 0v2" />
-                    <path d="M6 10h12v10H6V10Z" />
-                    <path d="M12 14.2v2.6" />
-                  </svg>
+            {loginMethod === "password" ? (
+              <label className="spc-login-field">
+                <span className="spc-login-hidden-label">Password</span>
+                <span className="spc-password-wrap">
+                  <span className="spc-field-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M7 10V8a5 5 0 0 1 10 0v2" />
+                      <path d="M6 10h12v10H6V10Z" />
+                      <path d="M12 14.2v2.6" />
+                    </svg>
+                  </span>
+                  <input
+                    ref={passwordInputRef}
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                    aria-label="Password"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={256}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3.5 12s3-5 8.5-5 8.5 5 8.5 5-3 5-8.5 5-8.5-5-8.5-5Z" />
+                      <circle cx="12" cy="12" r="2.6" />
+                    </svg>
+                  </button>
                 </span>
-                <input
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  aria-label="Password"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  maxLength={256}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  title={showPassword ? "Hide password" : "Show password"}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3.5 12s3-5 8.5-5 8.5 5 8.5 5-3 5-8.5 5-8.5-5-8.5-5Z" />
-                    <circle cx="12" cy="12" r="2.6" />
-                  </svg>
-                </button>
-              </span>
-            </label>
+              </label>
+            ) : null}
 
             <button type="submit" disabled={submitting || loading} className="spc-login-submit">
-              {submitting ? "Signing In" : "Log In"}
+              {submitting
+                ? loginMethod === "username" ? "Checking" : "Signing In"
+                : loginMethod === "username" ? "Continue" : "Log In"}
             </button>
 
             {message ? <p className="spc-login-message" role="alert">{message}</p> : null}
