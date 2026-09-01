@@ -65,6 +65,7 @@ export default function SpcLoginPage() {
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [checkingFcuno, setCheckingFcuno] = useState(fcunoSpcLoginEnabled)
   const [message, setMessage] = useState("")
   const [mfaChallenge, setMfaChallenge] = useState<SpcMfaChallenge | null>(null)
   const [mfaCode, setMfaCode] = useState("")
@@ -82,6 +83,28 @@ export default function SpcLoginPage() {
   useEffect(() => {
     document.title = "Singapore Purchasing Center"
   }, [])
+
+  useEffect(() => {
+    if (!fcunoSpcLoginEnabled || loading || authenticated) return
+
+    const controller = new AbortController()
+    fetch("/api/spc/fcuno-login?silent=1", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (response.ok) {
+          window.location.replace("/spc")
+          return
+        }
+        setCheckingFcuno(false)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCheckingFcuno(false)
+      })
+
+    return () => controller.abort()
+  }, [loading, authenticated])
 
   useEffect(() => {
     if (!mfaChallenge) return
@@ -260,6 +283,10 @@ export default function SpcLoginPage() {
     )
   }
 
+  if (loading || checkingFcuno) {
+    return <div className="spc-loading">Loading...</div>
+  }
+
   return (
     <div className="spc-login-page">
       <section
@@ -330,19 +357,6 @@ export default function SpcLoginPage() {
           </form>
         ) : (
           <form onSubmit={handleLogin} className="spc-login-form">
-            {fcunoSpcLoginEnabled ? (
-              <>
-                <button
-                  type="button"
-                  className="spc-login-submit"
-                  onClick={() => window.location.assign("/api/spc/fcuno-login")}
-                  disabled={submitting || loading}
-                >
-                  Continue with FCUNO
-                </button>
-                <p className="spc-login-mfa-help">External SPC users can continue with their SPC password below.</p>
-              </>
-            ) : null}
             <label className="spc-login-field">
               <span className="spc-login-hidden-label">Username</span>
               <span className="spc-input-wrap">
@@ -406,6 +420,12 @@ export default function SpcLoginPage() {
             <button type="submit" disabled={submitting || loading} className="spc-login-submit">
               {submitting ? "Signing In" : "Log In"}
             </button>
+
+            {fcunoSpcLoginEnabled ? (
+              <a className="spc-login-use-password" href="/api/spc/fcuno-login">
+                FCUNO staff sign in
+              </a>
+            ) : null}
 
             {message ? <p className="spc-login-message" role="alert">{message}</p> : null}
           </form>

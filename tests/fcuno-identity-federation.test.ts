@@ -74,6 +74,10 @@ const spcUserManagementSource = readFileSync(
   new URL("../app/spc/usermanagement/page.tsx", import.meta.url),
   "utf8",
 )
+const spcPageSource = readFileSync(
+  new URL("../app/spc/page.tsx", import.meta.url),
+  "utf8",
+)
 
 test("OIDC codes are random, SHA-256 stored, short lived, and PKCE S256-bound", () => {
   const code = createAuthorizationCode()
@@ -236,6 +240,14 @@ test("FCUNO shares only its admin identity cookie for the trusted SPC handoff", 
   assert.match(adminAuthSource, /expiredHostOnlyCookieOptions/)
   assert.match(spcLoginSource, /new URL\("\/admin", "https:\/\/fcuno\.com"\)/)
   assert.match(spcLoginSource, /new URL\("\/api\/spc\/fcuno-login", request\.url\)\.toString\(\)/)
+})
+
+test("SPC silently resumes an active FCUNO session without showing an extra button", () => {
+  assert.match(spcLoginSource, /searchParams\.get\("silent"\) === "1"/)
+  assert.match(spcLoginSource, /NextResponse\.json\(\{ authenticated: false \}, \{ status: 401 \}\)/)
+  assert.match(spcPageSource, /fetch\("\/api\/spc\/fcuno-login\?silent=1"/)
+  assert.match(spcPageSource, /window\.location\.replace\("\/spc"\)/)
+  assert.doesNotMatch(spcPageSource, />\s*Continue with FCUNO\s*</)
 })
 
 test("OIDC authorization accepts Supabase code flow without a nonce", () => {
