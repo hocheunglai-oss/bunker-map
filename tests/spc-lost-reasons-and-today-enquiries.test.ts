@@ -89,10 +89,14 @@ test("buyer outcome validation and SPC quick controls use the managed contracts"
   assert.doesNotMatch(enquiriesPage, /const vlsfoRemarkOptions[^\n]*"80cst max"/)
 })
 
-test("Today's Enquiries is restricted to supplier traders and admins", () => {
+test("Daily Briefing is restricted to supplier traders and admins", () => {
+  const enquiryPage = SPC_PAGE_DEFINITIONS.find((definition) => definition.id === "spc-buyer-enquiries")
   const page = SPC_PAGE_DEFINITIONS.find((definition) => definition.id === "spc-today-enquiries")
-  assert.equal(page?.label, "TODAY'S ENQUIRIES")
+  assert.equal(enquiryPage?.label, "NEW ENQUIRY")
+  assert.equal(page?.label, "DAILY BRIEFING")
   assert.equal(page?.path, "/spc/today-enquiries")
+  assert.match(enquiriesPage, /SPC NEW ENQUIRY/)
+  assert.match(todayPage, /SPC DAILY BRIEFING/)
 
   const supplierPermissions = getDefaultSpcPermissionsForRole("SUPPLIER TRADER")
   const adminPermissions = getDefaultSpcPermissionsForRole("ADMIN")
@@ -104,7 +108,7 @@ test("Today's Enquiries is restricted to supplier traders and admins", () => {
   assert.match(todayRoute, /role !== "SUPPLIER TRADER" && role !== "ADMIN"/)
 })
 
-test("Today's Enquiries is chronological, matches IMO before vessel, and supports bulk copy", () => {
+test("Daily Briefing is chronological, matches IMO before vessel, and supports bulk copy", () => {
   assert.match(todayLibrary, /\.gte\("created_at", start\)[\s\S]*?\.order\("created_at", \{ ascending: true \}\)/)
   assert.match(todayLibrary, /return \[imo\.length === 7 \? `imo:\$\{imo\}` : "", vessel \? `vessel:\$\{vessel\}` : ""\]/)
   assert.match(todayLibrary, /previousFixture: firstPreviousSpcIdentityMatch\(fixtureByIdentity, keys, row\.created_at\)/)
@@ -118,7 +122,7 @@ test("Today's Enquiries is chronological, matches IMO before vessel, and support
   assert.match(todayPage, /Asia\/Hong_Kong/)
 })
 
-test("Today's Enquiries prefers an earlier IMO match over a newer vessel-name match", () => {
+test("Daily Briefing prefers an earlier IMO match over a newer vessel-name match", () => {
   const matches = new Map([
     ["imo:1234567", [{ at: Date.parse("2026-08-20T01:00:00Z"), value: "IMO MATCH" }]],
     ["vessel:test vessel", [{ at: Date.parse("2026-08-20T02:00:00Z"), value: "VESSEL MATCH" }]],

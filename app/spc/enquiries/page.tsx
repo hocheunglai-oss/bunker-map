@@ -471,7 +471,7 @@ export default function SpcEnquiriesPage() {
   }, [canView, username])
 
   useEffect(() => {
-    document.title = "SPC Enquiries"
+    document.title = "SPC NEW ENQUIRY"
   }, [])
 
   useEffect(() => {
@@ -1046,7 +1046,7 @@ export default function SpcEnquiriesPage() {
   }
 
   return (
-    <SpcShell title="SPC Enquiries">
+    <SpcShell title="SPC NEW ENQUIRY">
       <div className="spc-enquiries-layout">
         <section className="spc-panel spc-enquiry-entry-panel">
             <div className="spc-panel-header">

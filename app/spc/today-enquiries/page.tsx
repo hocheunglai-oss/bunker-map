@@ -118,7 +118,7 @@ export default function SpcTodayEnquiriesPage() {
   }, [canView])
 
   useEffect(() => {
-    document.title = "SPC TODAY'S ENQUIRIES"
+    document.title = "SPC DAILY BRIEFING"
   }, [])
 
   useEffect(() => {
@@ -165,7 +165,7 @@ export default function SpcTodayEnquiriesPage() {
   }
 
   return (
-    <SpcShell title="SPC TODAY'S ENQUIRIES">
+    <SpcShell title="SPC DAILY BRIEFING">
       <section className="spc-panel spc-fixture-ledger-panel spc-today-enquiries-panel">
         <div className="spc-fixture-ledger-toolbar spc-today-enquiries-toolbar">
           {message ? <span className="spc-ledger-message is-error">{message}</span> : null}

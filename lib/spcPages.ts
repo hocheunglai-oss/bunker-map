@@ -17,14 +17,14 @@ export type SpcPageDefinition = {
 export const SPC_PAGE_DEFINITIONS: SpcPageDefinition[] = [
   {
     id: "spc-buyer-enquiries",
-    label: "ENQUIRIES",
+    label: "NEW ENQUIRY",
     group: "trading",
     path: "/spc/enquiries",
     matchPrefixes: ["/buyer", "/spc/buyer", "/enquiries", "/spc/enquiries"],
   },
   {
     id: "spc-today-enquiries",
-    label: "TODAY'S ENQUIRIES",
+    label: "DAILY BRIEFING",
     group: "trading",
     path: "/spc/today-enquiries",
     matchPrefixes: ["/today-enquiries", "/spc/today-enquiries"],
