@@ -85,3 +85,11 @@ test("SPC presentation adds a responsive live demonstration warm-up before the f
   assert.match(globalStyles, /\.spc-readme-motion-layout\.is-warm-up \{[\s\S]*?linear-gradient/)
   assert.match(globalStyles, /\.spc-readme-workspace\.is-activity:not\(\.is-editing\)/)
 })
+
+test("SPC live demonstration uses a neutral box colourway", () => {
+  const warmUpStyles = globalStyles.match(/\.spc-readme-motion-layout\.is-warm-up \{[\s\S]*?\n\}/)?.[0] || ""
+
+  assert.match(warmUpStyles, /#efefec[\s\S]*?#faf9f7[\s\S]*?#f2f1ee/)
+  assert.doesNotMatch(warmUpStyles, /#eaf3ff|#f7faff|#eef3f8|rgba\(11, 112, 224/)
+  assert.match(globalStyles, /\.spc-readme-warm-up-details > span \{[\s\S]*?background: #f3f4f6;[\s\S]*?color: #374151;/)
+})
