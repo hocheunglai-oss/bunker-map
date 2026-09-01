@@ -111,4 +111,6 @@ test("SPC warm-up follows the original enquiry format and includes a manual coun
   assert.match(motionScene, />PAUSE<\/button>/)
   assert.match(motionScene, />RESET<\/button>/)
   assert.match(globalStyles, /\.spc-readme-warm-up-countdown-actions button \{[\s\S]*?min-height: 44px;/)
+  assert.match(globalStyles, /progress::-webkit-progress-value \{[\s\S]*?background: #374151;/)
+  assert.match(globalStyles, /progress::-webkit-progress-value,[\s\S]*?progress::-moz-progress-bar \{[\s\S]*?background: #e2492f;/)
 })

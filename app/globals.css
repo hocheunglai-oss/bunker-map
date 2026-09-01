@@ -6462,7 +6462,24 @@ body:has(.spc-statistics-page) .spc-main {
   overflow: hidden;
   border: 0;
   border-radius: 999px;
+  appearance: none;
+  background: #e5e7eb;
   accent-color: #374151;
+}
+
+.spc-readme-warm-up-countdown > progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.spc-readme-warm-up-countdown > progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: #374151;
+}
+
+.spc-readme-warm-up-countdown > progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: #374151;
 }
 
 .spc-readme-warm-up-countdown > small {
@@ -6485,6 +6502,11 @@ body:has(.spc-statistics-page) .spc-main {
 
 .spc-readme-warm-up-countdown.is-ending > progress {
   accent-color: #e2492f;
+}
+
+.spc-readme-warm-up-countdown.is-ending > progress::-webkit-progress-value,
+.spc-readme-warm-up-countdown.is-ending > progress::-moz-progress-bar {
+  background: #e2492f;
 }
 
 .spc-readme-warm-up-countdown-actions {
