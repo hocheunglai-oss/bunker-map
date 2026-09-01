@@ -52,6 +52,15 @@ export function getMarketDateKey(recordedAt: string) {
   return isoDate || value
 }
 
+export function formatMarketDateNumeric(recordedAt: string | null) {
+  if (!recordedAt) return "-"
+
+  const match = getMarketDateKey(recordedAt).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return "-"
+
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
+
 export function getNextMarketDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number)
   const date = new Date(Date.UTC(year, month - 1, day + 1))

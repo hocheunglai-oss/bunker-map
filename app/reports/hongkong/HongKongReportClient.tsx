@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { type HongKongReportRow } from "@/lib/hongKongReport"
-import { formatReportDate } from "@/lib/taiwanReport"
+import { formatMarketDateNumeric } from "@/lib/priceHistoryRecords"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
@@ -76,28 +76,6 @@ const fuelAccentStyles = {
     glow: "rgba(255,209,102,0.16)",
   },
 } as const
-
-function shortDate(value: string | null) {
-  if (!value) return "-"
-  const [day, month, year] = formatReportDate(value).split(" ")
-  const monthNumber =
-    {
-      Jan: "01",
-      Feb: "02",
-      Mar: "03",
-      Apr: "04",
-      May: "05",
-      Jun: "06",
-      Jul: "07",
-      Aug: "08",
-      Sep: "09",
-      Oct: "10",
-      Nov: "11",
-      Dec: "12",
-    }[month] || month
-
-  return `${day}/${monthNumber}/${year}`
-}
 
 type HongKongReportPayload = PublicReportPayloadByKey["hongkong"]
 
@@ -334,7 +312,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
                           letterSpacing: "0.03em",
                         }}
                       >
-                        {shortDate(row.todayDate)}
+                        {formatMarketDateNumeric(row.todayDate)}
                       </td>
                       <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.hsfo.glow}` }}>{formatFuel(row.hsfo.today, row.port, "hsfo")}</td>
                       <td style={{ padding: "15px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.16)", fontWeight: 800, color: "#ffffff", background: "rgba(255,255,255,0.06)", textShadow: "0 8px 20px rgba(4,16,29,0.22)", boxShadow: `inset 0 1px 0 ${fuelAccentStyles.vlsfo.glow}` }}>{formatFuel(row.vlsfo.today, row.port, "vlsfo")}</td>
@@ -368,7 +346,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {shortDate(row.last1Date)}
+                        {formatMarketDateNumeric(row.last1Date)}
                       </td>
                       <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.hsfo.last1, row.port, "hsfo")}</td>
                       <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.vlsfo.last1, row.port, "vlsfo")}</td>
@@ -401,7 +379,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {shortDate(row.last2Date)}
+                        {formatMarketDateNumeric(row.last2Date)}
                       </td>
                       <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.hsfo.last2, row.port, "hsfo")}</td>
                       <td style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.12)" }}>{formatFuel(row.vlsfo.last2, row.port, "vlsfo")}</td>

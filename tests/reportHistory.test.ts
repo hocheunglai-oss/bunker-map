@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { buildHongKongReportRows } from "@/lib/hongKongReport"
-import { getMarketDateKey } from "@/lib/priceHistoryRecords"
+import {
+  formatMarketDateNumeric,
+  getMarketDateKey,
+} from "@/lib/priceHistoryRecords"
 import { buildTaiwanReportRows, formatReportDate } from "@/lib/taiwanReport"
 
 test("Taiwan compares the newest market date with the previous distinct date", () => {
@@ -54,4 +57,18 @@ test("market dates are stable for database timestamps and timezone-aware input",
   assert.equal(getMarketDateKey("2026-07-13T12:00:00"), "2026-07-13")
   assert.equal(getMarketDateKey("2026-07-12T16:30:00.000Z"), "2026-07-13")
   assert.equal(formatReportDate("2026-07-12T16:30:00.000Z"), "13 Jul 2026")
+})
+
+test("market history dates always use numeric day/month/year formatting", () => {
+  for (let month = 1; month <= 12; month += 1) {
+    const monthText = String(month).padStart(2, "0")
+    assert.equal(
+      formatMarketDateNumeric(`2026-${monthText}-15T12:00:00`),
+      `15/${monthText}/2026`,
+    )
+  }
+
+  assert.equal(formatMarketDateNumeric("2026-08-31T16:30:00.000Z"), "01/09/2026")
+  assert.equal(formatMarketDateNumeric(null), "-")
+  assert.equal(formatMarketDateNumeric("not-a-date"), "-")
 })
