@@ -44,7 +44,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.2.1",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/leaflet": "^1.9.21",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.18",
