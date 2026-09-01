@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
+import { isVerifiedBackupActive } from "@/lib/backupMaintenance"
 import { isFcosIdentitySyncEnabled } from "@/lib/fcunoFederationFlags"
 import { processFcunoIdentitySyncOutbox } from "@/lib/fcunoIdentitySync"
 
@@ -25,6 +26,17 @@ export async function GET(request: Request) {
     )
   }
   try {
+    if (await isVerifiedBackupActive()) {
+      return NextResponse.json(
+        {
+          success: true,
+          deferred: true,
+          reason: "Verified daily backup in progress",
+          processed: 0,
+        },
+        { headers: { "Cache-Control": "private, no-store" } },
+      )
+    }
     return NextResponse.json({ success: true, ...(await processFcunoIdentitySyncOutbox()) }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {
     console.error("FCOS identity sync failed", error)

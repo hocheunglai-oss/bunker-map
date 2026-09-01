@@ -98,6 +98,7 @@ test("high-frequency cron writers defer while a verified backup owns the lease",
   const guardedCronSources = [
     source("../app/api/event-calendar/google-sync/route.ts"),
     source("../app/api/cron/attendance-sync/route.ts"),
+    source("../app/api/cron/fcos-identity-sync/route.ts"),
     source("../app/api/cron/spc-mobile-deliveries/route.ts"),
   ]
   for (const cronSource of guardedCronSources) {
