@@ -8,6 +8,7 @@ import {
 import {
   SPC_SESSION_DURATION_SECONDS,
   createDatabaseSpcSession,
+  createDatabaseSpcSessionFromFcuno,
   createDatabaseSpcSessionFromAssuredSession,
   getDatabaseSpcSession,
   isPlausibleSpcSessionToken,
@@ -87,19 +88,34 @@ function clearSpcCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
 export async function setSpcSession(user: {
   id: string
   credentialUpdatedAt: string
-}, options: { preserveMfaFromCurrentSession?: boolean } = {}) {
+}, options: {
+  preserveMfaFromCurrentSession?: boolean
+  fcunoAdminSessionId?: string
+} = {}) {
   const cookieStore = await cookies()
   const previousToken = cookieStore.get(SPC_COOKIE_NAME)?.value
-  const session = options.preserveMfaFromCurrentSession
-    ? await createDatabaseSpcSessionFromAssuredSession(
-        user.id,
-        user.credentialUpdatedAt,
-        previousToken || "",
-      )
-    : await createDatabaseSpcSession(
-        user.id,
-        user.credentialUpdatedAt,
-      )
+  if (options.preserveMfaFromCurrentSession && options.fcunoAdminSessionId) {
+    throw new Error("Conflicting SPC session assurances were supplied.")
+  }
+  let session: { id: string; token: string; expiresAt: string }
+  if (options.fcunoAdminSessionId) {
+    session = await createDatabaseSpcSessionFromFcuno(
+      options.fcunoAdminSessionId,
+      user.id,
+      user.credentialUpdatedAt,
+    )
+  } else if (options.preserveMfaFromCurrentSession) {
+    session = await createDatabaseSpcSessionFromAssuredSession(
+      user.id,
+      user.credentialUpdatedAt,
+      previousToken || "",
+    )
+  } else {
+    session = await createDatabaseSpcSession(
+      user.id,
+      user.credentialUpdatedAt,
+    )
+  }
 
   cookieStore.set(
     SPC_COOKIE_NAME,

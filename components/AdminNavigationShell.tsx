@@ -334,7 +334,13 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
     setCollapsed(false)
     setMobileOpen(false)
     window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY)
-    await fetch("/api/admin/logout", { method: "POST" }).catch(() => undefined)
+    const loggedOut = await fetch("/api/admin/logout", { method: "POST" })
+      .then((response) => response.ok)
+      .catch(() => false)
+    if (!loggedOut) {
+      window.alert("Unable to log out. Please try again.")
+      return
+    }
     clearAdminClientCache()
     window.localStorage.removeItem("bunker_admin_actor")
     window.location.assign("/admin")

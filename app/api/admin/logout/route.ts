@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server"
-import { clearAdminSession } from "@/lib/adminAuth"
+import { clearAdminAndLinkedSpcSessions } from "@/lib/adminAuth"
 
 export async function POST() {
   try {
-    await clearAdminSession()
+    await clearAdminAndLinkedSpcSessions()
   } catch {
     return NextResponse.json(
       {

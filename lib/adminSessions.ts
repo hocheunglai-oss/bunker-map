@@ -196,6 +196,20 @@ export async function revokeDatabaseAdminSession(token: string) {
   return Boolean(data?.length)
 }
 
+export async function revokeDatabaseAdminSessionAndLinkedSpcSessions(
+  token: string,
+) {
+  if (!isPlausibleSessionToken(token)) return false
+
+  const { data, error } = await getServiceClient().rpc(
+    "revoke_fcuno_session_and_linked_spc_sessions",
+    { p_token_hash: hashAdminSessionToken(token) },
+  )
+
+  if (error) throw error
+  return data === true
+}
+
 export async function revokeAllDatabaseAdminSessions(adminUserId: string) {
   const { error } = await getServiceClient()
     .from("admin_sessions")

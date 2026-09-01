@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   if (!user) {
     return new Response("This FCUNO identity is not authorized for SPC.", { status: 403 })
   }
-  await setSpcSession(user)
+  await setSpcSession(user, { fcunoAdminSessionId: session.sessionId })
   if (silent) {
     return NextResponse.json({ authenticated: true })
   }

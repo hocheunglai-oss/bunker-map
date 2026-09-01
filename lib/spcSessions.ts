@@ -115,6 +115,41 @@ export async function createDatabaseSpcSession(
   }
 }
 
+export async function createDatabaseSpcSessionFromFcuno(
+  adminSessionId: string,
+  spcUserId: string,
+  observedUserUpdatedAt: string,
+) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      adminSessionId,
+    ) ||
+    !observedUserUpdatedAt ||
+    !Number.isFinite(Date.parse(observedUserUpdatedAt))
+  ) {
+    throw new Error("The verified FCUNO-linked SPC session is invalid.")
+  }
+
+  const token = createSpcSessionToken()
+  const { data, error } = await getServiceClient()
+    .rpc("create_fcuno_linked_spc_session", {
+      p_admin_session_id: adminSessionId,
+      p_spc_user_id: spcUserId,
+      p_observed_user_updated_at: observedUserUpdatedAt,
+      p_token_hash: hashSpcSessionToken(token),
+    })
+    .select("id,expires_at")
+    .single()
+
+  if (error) throw error
+
+  return {
+    id: String(data.id),
+    token,
+    expiresAt: String(data.expires_at),
+  }
+}
+
 export async function createDatabaseSpcSessionFromAssuredSession(
   spcUserId: string,
   observedUserUpdatedAt: string,

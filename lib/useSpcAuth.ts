@@ -36,7 +36,6 @@ let sharedSessionVersion = 0
 const SPC_ACTOR_STORAGE_KEY = "spc_actor"
 const SPC_SESSION_CHANGED_EVENT = "spc-session-changed"
 const SPC_SESSION_CACHE_MS = 30_000
-const SPC_SESSION_ACTIVITY_REFRESH_MS = 60 * 60 * 1000
 const SPC_SESSION_BACKGROUND_REFRESH_MS = 12 * 60 * 60 * 1000
 
 function emitSpcSessionChanged() {
@@ -208,7 +207,7 @@ function useSpcAuthState(): SpcAuthState {
     }
 
     function refreshActiveSession() {
-      void checkSession(SPC_SESSION_ACTIVITY_REFRESH_MS)
+      void checkSession(0)
     }
 
     function handleVisibilityChange() {

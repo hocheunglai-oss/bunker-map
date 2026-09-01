@@ -18,6 +18,7 @@ import {
   createDatabaseAdminSession,
   getDatabaseAdminSession,
   revokeDatabaseAdminSession,
+  revokeDatabaseAdminSessionAndLinkedSpcSessions,
 } from "@/lib/adminSessions"
 
 export const ADMIN_COOKIE_NAME = "bunker_admin_auth"
@@ -148,6 +149,14 @@ export async function clearAdminSession() {
   const token = cookieStore.get(ADMIN_COOKIE_NAME)?.value
 
   if (token) await revokeDatabaseAdminSession(token)
+  await clearAdminCookies()
+}
+
+export async function clearAdminAndLinkedSpcSessions() {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(ADMIN_COOKIE_NAME)?.value
+
+  if (token) await revokeDatabaseAdminSessionAndLinkedSpcSessions(token)
   await clearAdminCookies()
 }
 
@@ -350,10 +359,11 @@ export async function requireAdminIdentitySession() {
   const resolved = requireAuthenticatedResolvedSession(
     await resolveAdminSession(),
   )
-  if (!resolved.adminUserId) throw new Error("Unauthorized")
+  if (!resolved.adminUserId || !resolved.sessionId) throw new Error("Unauthorized")
   return {
     ...resolved.publicSession,
     adminUserId: resolved.adminUserId,
+    sessionId: resolved.sessionId,
   }
 }
 
