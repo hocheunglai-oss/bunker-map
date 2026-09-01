@@ -35,8 +35,9 @@ const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
-const SUPABASE_TRUTH_RPC_ATTEMPTS = 3
-const SUPABASE_TRUTH_RPC_RETRY_DELAY_MS = 1_000
+const SUPABASE_BACKUP_READ_ATTEMPTS = 6
+const SUPABASE_BACKUP_READ_RETRY_DELAY_MS = 2_000
+const SUPABASE_BACKUP_READ_MAX_RETRY_DELAY_MS = 30_000
 // Vercel functions provide 512 MiB of writable /tmp storage. Keep 32 MiB free
 // for runtime overhead while allowing the compressed database stage to grow
 // with the audit ledger. The final JSON is streamed to Drive and never stored
@@ -551,16 +552,16 @@ async function streamTableRows(
   appendRows: (rows: unknown[]) => Promise<void>
 ) {
   for (let from = 0; ; from += BACKUP_EXPORT_PAGE_SIZE) {
-    let query = supabase
-      .from(config.table)
-      .select("*")
-      .range(from, from + BACKUP_EXPORT_PAGE_SIZE - 1)
-    for (const item of config.order || []) {
-      query = query.order(item.column, { ascending: item.ascending })
-    }
-
-    const { data, error } = await query
-    if (error) throw error
+    const data = await retrySupabaseRead(() => {
+      let query = supabase
+        .from(config.table)
+        .select("*")
+        .range(from, from + BACKUP_EXPORT_PAGE_SIZE - 1)
+      for (const item of config.order || []) {
+        query = query.order(item.column, { ascending: item.ascending })
+      }
+      return query
+    }, `export ${config.table} rows ${from}-${from + BACKUP_EXPORT_PAGE_SIZE - 1}`)
 
     const batch = (data || []).map((row) =>
       sanitizeBackupTableRow(config, row as Record<string, unknown>)
@@ -573,8 +574,10 @@ async function streamTableRows(
 async function getBackupInventory(
   supabase: ReturnType<typeof getSupabaseClient>
 ) {
-  const { data, error } = await supabase.rpc("get_bunker_map_backup_inventory")
-  if (error) throw error
+  const data = await retrySupabaseRead(
+    () => supabase.rpc("get_bunker_map_backup_inventory"),
+    "rpc get_bunker_map_backup_inventory"
+  )
   const inventory = asRecord(data, "Backup database inventory")
   if (inventory.schema !== BACKUP_INVENTORY_SCHEMA) {
     throw new Error("Backup database inventory returned an unsupported schema.")
@@ -656,6 +659,79 @@ async function getBackupInventory(
   }
 }
 
+function isRetryableSupabaseReadError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase()
+  return (
+    /\b(408|425|429|500|502|503|504|520|521|522|523|524)\b/.test(message) ||
+    message.includes("fetch failed") ||
+    message.includes("network") ||
+    message.includes("connection timeout") ||
+    message.includes("web server is down")
+  )
+}
+
+function summarizeOperationalError(error: unknown) {
+  const message = getErrorMessage(error)
+  const status = message.match(
+    /\b(408|425|429|500|502|503|504|520|521|522|523|524)\b/
+  )?.[1]
+  if (/<(?:!doctype|html)\b/i.test(message)) {
+    return `An upstream service returned HTTP ${status || "5xx"}.`
+  }
+  return message.replace(/\s+/g, " ").slice(0, 500)
+}
+
+function summarizeSupabaseReadError(error: unknown) {
+  const message = getErrorMessage(error)
+  if (/<(?:!doctype|html)\b/i.test(message)) {
+    const status = message.match(
+      /\b(408|425|429|500|502|503|504|520|521|522|523|524)\b/
+    )?.[1]
+    return `Supabase returned transient HTTP ${status || "5xx"}.`
+  }
+  return summarizeOperationalError(error)
+}
+
+async function retrySupabaseRead<T>(
+  operation: () => PromiseLike<{ data: T; error: unknown }>,
+  operationName: string
+) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= SUPABASE_BACKUP_READ_ATTEMPTS; attempt += 1) {
+    try {
+      const { data, error } = await operation()
+      if (!error) return data
+      lastError = error
+    } catch (error) {
+      lastError = error
+    }
+
+    if (
+      !isRetryableSupabaseReadError(lastError) ||
+      attempt === SUPABASE_BACKUP_READ_ATTEMPTS
+    ) {
+      throw lastError
+    }
+
+    const retryDelayMs = Math.min(
+      SUPABASE_BACKUP_READ_RETRY_DELAY_MS * 2 ** (attempt - 1),
+      SUPABASE_BACKUP_READ_MAX_RETRY_DELAY_MS
+    )
+    console.warn(JSON.stringify({
+      level: "warning",
+      message: "Retrying transient Supabase backup read",
+      route: "/api/backups/bunker-map-drive",
+      operation: operationName,
+      attempt,
+      retryDelayMs,
+      error: summarizeSupabaseReadError(lastError),
+    }))
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+  }
+
+  throw lastError
+}
+
 async function callTruthRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   functionName:
@@ -663,35 +739,20 @@ async function callTruthRpc(
     | "get_outlook_exchange_truth_checkpoint"
     | "verify_outlook_template_recipient_truth"
 ) {
-  let lastError: unknown
-  for (let attempt = 1; attempt <= SUPABASE_TRUTH_RPC_ATTEMPTS; attempt += 1) {
-    const { data, error } = await supabase.rpc(functionName)
-    if (!error) return asRecord(data, functionName)
-
-    lastError = error
-    const message = getErrorMessage(error).toLowerCase()
-    const retryable =
-      /\b(408|425|429|500|502|503|504|520|521|522|523|524)\b/.test(message) ||
-      message.includes("fetch failed") ||
-      message.includes("network") ||
-      message.includes("web server is down")
-    if (!retryable || attempt === SUPABASE_TRUTH_RPC_ATTEMPTS) throw error
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, SUPABASE_TRUTH_RPC_RETRY_DELAY_MS * attempt)
-    )
-  }
-
-  throw lastError
+  const data = await retrySupabaseRead(
+    () => supabase.rpc(functionName),
+    `rpc ${functionName}`
+  )
+  return asRecord(data, functionName)
 }
 
 async function getBackupExportEpoch(
   supabase: ReturnType<typeof getSupabaseClient>
 ) {
-  const { data, error } = await supabase.rpc(
-    "get_bunker_map_backup_export_fence"
+  const data = await retrySupabaseRead(
+    () => supabase.rpc("get_bunker_map_backup_export_fence"),
+    "rpc get_bunker_map_backup_export_fence"
   )
-  if (error) throw error
   const fence = asRecord(data, "Backup export fence")
   if (
     fence.schema !== "bunker-map.backup-export-fence/v1" ||
@@ -1059,14 +1120,16 @@ async function buildBackupFile(
       let scannedLedgerHeadSequence = 0
       let scannedLedgerHeadSha256 = ""
       while (scannedLedgerHeadSequence < checkpointBefore.headSequence) {
-        const { data, error } = await supabase
-          .from("outlook_exchange_truth_ledger")
-          .select("*")
-          .gt("ledger_sequence", scannedLedgerHeadSequence)
-          .lte("ledger_sequence", checkpointBefore.headSequence)
-          .order("ledger_sequence", { ascending: true })
-          .limit(BACKUP_EXPORT_PAGE_SIZE)
-        if (error) throw error
+        const data = await retrySupabaseRead(
+          () => supabase
+            .from("outlook_exchange_truth_ledger")
+            .select("*")
+            .gt("ledger_sequence", scannedLedgerHeadSequence)
+            .lte("ledger_sequence", checkpointBefore.headSequence)
+            .order("ledger_sequence", { ascending: true })
+            .limit(BACKUP_EXPORT_PAGE_SIZE),
+          `scan outlook_exchange_truth_ledger after ${scannedLedgerHeadSequence}`
+        )
 
         const batch = (data || []) as Array<Record<string, unknown>>
         if (!batch.length) break
@@ -1202,14 +1265,16 @@ async function buildBackupFile(
         isFirstSection,
         async (appendRows) => {
           while (exportedLedgerHeadSequence < checkpointBefore.headSequence) {
-            const { data, error } = await supabase
-              .from("outlook_exchange_truth_ledger")
-              .select("*")
-              .gt("ledger_sequence", exportedLedgerHeadSequence)
-              .lte("ledger_sequence", checkpointBefore.headSequence)
-              .order("ledger_sequence", { ascending: true })
-              .limit(BACKUP_EXPORT_PAGE_SIZE)
-            if (error) throw error
+            const data = await retrySupabaseRead(
+              () => supabase
+                .from("outlook_exchange_truth_ledger")
+                .select("*")
+                .gt("ledger_sequence", exportedLedgerHeadSequence)
+                .lte("ledger_sequence", checkpointBefore.headSequence)
+                .order("ledger_sequence", { ascending: true })
+                .limit(BACKUP_EXPORT_PAGE_SIZE),
+              `export outlook_exchange_truth_ledger after ${exportedLedgerHeadSequence}`
+            )
 
             const batch = (data || []) as Array<Record<string, unknown>>
             if (!batch.length) break
@@ -1251,7 +1316,7 @@ async function buildBackupFile(
       }
     } catch (error) {
       throw new Error(
-        `Backup failed while exporting the bounded Exchange truth evidence: ${getErrorMessage(error)}`
+        `Backup failed while exporting the bounded Exchange truth evidence: ${summarizeSupabaseReadError(error)}`
       )
     }
 
@@ -2075,7 +2140,7 @@ async function createBackup(provenance: BackupProvenance) {
       backupRunId: provenance.backupRunId,
       source: provenance.source,
       durationMs: Date.now() - startedAt,
-      error: getErrorMessage(error),
+      error: summarizeOperationalError(error),
     }))
     if (drive && uploadedFileId && !uploadVerified) {
       try {
@@ -2088,7 +2153,7 @@ async function createBackup(provenance: BackupProvenance) {
       }
     }
     return NextResponse.json(
-      { message: getErrorMessage(error) },
+      { message: summarizeOperationalError(error) },
       { status: 500 }
     )
   } finally {
@@ -2108,7 +2173,7 @@ async function createBackup(provenance: BackupProvenance) {
       } catch (error) {
         console.error(
           "Failed to release the serialized backup lock:",
-          getErrorMessage(error)
+          summarizeSupabaseReadError(error)
         )
       }
     }

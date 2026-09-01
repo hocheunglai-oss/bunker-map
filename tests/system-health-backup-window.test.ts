@@ -121,18 +121,38 @@ test("high-frequency cron writers defer while a verified backup owns the lease",
   assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/)
 })
 
-test("backup truth rechecks retry transient Supabase edge failures", () => {
+test("backup table and truth reads retry transient Supabase edge failures", () => {
   const attempts = numericConstant(
     backupRouteSource,
-    "SUPABASE_TRUTH_RPC_ATTEMPTS",
+    "SUPABASE_BACKUP_READ_ATTEMPTS",
   )
 
-  assert.ok(attempts >= 3)
+  assert.ok(attempts >= 6)
   assert.match(backupRouteSource, /\b521\b/)
   assert.match(backupRouteSource, /message\.includes\("web server is down"\)/)
   assert.match(
     backupRouteSource,
-    /setTimeout\(resolve, SUPABASE_TRUTH_RPC_RETRY_DELAY_MS \* attempt\)/,
+    /setTimeout\(resolve, retryDelayMs\)/,
+  )
+  assert.match(
+    backupRouteSource,
+    /async function streamTableRows[\s\S]*?retrySupabaseRead\(/,
+  )
+  assert.match(
+    backupRouteSource,
+    /async function getBackupInventory[\s\S]*?retrySupabaseRead\([\s\S]*?get_bunker_map_backup_inventory/,
+  )
+  assert.match(
+    backupRouteSource,
+    /async function getBackupExportEpoch[\s\S]*?retrySupabaseRead\([\s\S]*?get_bunker_map_backup_export_fence/,
+  )
+  assert.match(
+    backupRouteSource,
+    /retrySupabaseRead\([\s\S]*?scan outlook_exchange_truth_ledger/,
+  )
+  assert.match(
+    backupRouteSource,
+    /retrySupabaseRead\([\s\S]*?export outlook_exchange_truth_ledger/,
   )
 })
 
