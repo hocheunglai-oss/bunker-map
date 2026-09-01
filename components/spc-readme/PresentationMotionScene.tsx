@@ -1,4 +1,7 @@
+"use client"
+
 import type { SpcPresentationVisualText } from "@/lib/spcPresentation"
+import { useEffect, useRef, useState } from "react"
 
 type PresentationMotionSceneProps = {
   scene: string
@@ -22,6 +25,15 @@ const promptLines = [
   "A human must verify every message before sending.",
   "Suggest one small, practical first improvement.",
 ] as const
+
+const WARM_UP_DURATION_SECONDS = 2 * 60
+const WARM_UP_DURATION_MS = WARM_UP_DURATION_SECONDS * 1000
+
+function formatCountdown(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+}
 
 function SceneHeader({ label }: { label: string; title: string }) {
   return (
@@ -223,12 +235,16 @@ function WarmUpEnquiryScene({
   title: string
   visualCopy: SpcPresentationVisualText[]
 }) {
+  const [remainingSeconds, setRemainingSeconds] = useState(WARM_UP_DURATION_SECONDS)
+  const [timerState, setTimerState] = useState<"ready" | "running" | "paused" | "finished">("ready")
+  const timerDeadlineRef = useRef<number | null>(null)
+  const timerRemainingMsRef = useRef(WARM_UP_DURATION_MS)
   const vessel = visualText(visualCopy, "vessel", "Raven Arrow")
   const details = [
-    ["VESSEL", vessel],
+    ["Vessel", vessel],
     ["IMO", visualText(visualCopy, "imo", "9574858")],
-    ["PORT", visualText(visualCopy, "port", "SGP")],
-    ["AGENT", visualText(visualCopy, "agent", "TBA")],
+    ["Port", visualText(visualCopy, "port", "SGP")],
+    ["Agent", visualText(visualCopy, "agent", "TBA")],
     ["ETA", visualText(visualCopy, "eta", "21ST - 23RD SEPTEMBER 2026")],
   ] as const
   const notes = [
@@ -258,6 +274,65 @@ function WarmUpEnquiryScene({
       "Note: In ports where procedures permit the vessel must receive a Certificate of Quality (COQ) for each supply of VLSFO.",
     ),
   ]
+  const timerEnding = remainingSeconds > 0 && remainingSeconds <= 15
+  const timerFinished = remainingSeconds === 0
+  const timerStatus = timerFinished
+    ? "TIME UP"
+    : timerState === "running"
+      ? "COUNTING DOWN"
+      : timerState === "paused"
+        ? "PAUSED"
+        : "READY"
+
+  useEffect(() => {
+    if (timerState !== "running" || timerDeadlineRef.current === null) return
+
+    const updateCountdown = () => {
+      const deadline = timerDeadlineRef.current
+      if (deadline === null) return
+      const nextMilliseconds = Math.max(0, deadline - Date.now())
+      const nextSeconds = Math.ceil(nextMilliseconds / 1000)
+      timerRemainingMsRef.current = nextMilliseconds
+      setRemainingSeconds(nextSeconds)
+      if (nextSeconds === 0) {
+        timerDeadlineRef.current = null
+        setTimerState("finished")
+      }
+    }
+
+    updateCountdown()
+    const timer = window.setInterval(updateCountdown, 250)
+    return () => window.clearInterval(timer)
+  }, [timerState])
+
+  function startCountdown() {
+    const startingMilliseconds = timerRemainingMsRef.current <= 0
+      ? WARM_UP_DURATION_MS
+      : timerRemainingMsRef.current
+    timerRemainingMsRef.current = startingMilliseconds
+    setRemainingSeconds(Math.ceil(startingMilliseconds / 1000))
+    timerDeadlineRef.current = Date.now() + startingMilliseconds
+    setTimerState("running")
+  }
+
+  function pauseCountdown() {
+    const deadline = timerDeadlineRef.current
+    const pausedMilliseconds = deadline === null
+      ? timerRemainingMsRef.current
+      : Math.max(0, deadline - Date.now())
+    const pausedSeconds = Math.ceil(pausedMilliseconds / 1000)
+    timerRemainingMsRef.current = pausedMilliseconds
+    setRemainingSeconds(pausedSeconds)
+    timerDeadlineRef.current = null
+    setTimerState(pausedSeconds === 0 ? "finished" : "paused")
+  }
+
+  function resetCountdown() {
+    timerDeadlineRef.current = null
+    timerRemainingMsRef.current = WARM_UP_DURATION_MS
+    setRemainingSeconds(WARM_UP_DURATION_SECONDS)
+    setTimerState("ready")
+  }
 
   return (
     <div className="spc-readme-motion-layout is-warm-up">
@@ -265,35 +340,59 @@ function WarmUpEnquiryScene({
         <span>LIVE DEMONSTRATION</span>
         <strong>{title || "WARM UP ACTIVITY"}</strong>
       </header>
-      <article className="spc-readme-warm-up-document" aria-label={`${vessel} bunker enquiry`}>
-        <div className="spc-readme-warm-up-details">
-          <dl>
-            {details.map(([label, value]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
+      <div className="spc-readme-warm-up-content">
+        <article className="spc-readme-warm-up-document" aria-label={`${vessel} bunker enquiry`}>
+          <div className="spc-readme-warm-up-details">
+            <dl>
+              {details.map(([label, value]) => (
+                <div className={label === "Port" ? "is-new-block" : ""} key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <section className="spc-readme-warm-up-notes">
+            <h3>Operational Notes</h3>
+            {notes.map((note, index) => (
+              <p className={index < 2 ? "is-priority" : ""} key={note}>{note}</p>
             ))}
-          </dl>
-          <span>BUNKER ENQUIRY</span>
-        </div>
-        <section className="spc-readme-warm-up-notes">
-          <h3>OPERATIONAL NOTES</h3>
-          {notes.map((note, index) => (
-            <p className={index < 2 ? "is-priority" : ""} key={note}>{note}</p>
-          ))}
-        </section>
-        <table className="spc-readme-warm-up-grades">
-          <caption>GRADES AND QUANTITIES</caption>
-          <thead><tr><th>SPEC</th><th>QUANTITY</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>{visualText(visualCopy, "spec", "ISO 8217 2017 VLSFO RMG 380 0.50%")}</td>
-              <td>{visualText(visualCopy, "quantity", "300 - 400 METRIC TONS")}</td>
-            </tr>
-          </tbody>
-        </table>
-      </article>
+          </section>
+          <table className="spc-readme-warm-up-grades">
+            <caption>Grades and Quantities</caption>
+            <thead><tr><th>Spec</th><th>Quantity</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>{visualText(visualCopy, "spec", "ISO 8217 2017 VLSFO RMG 380 0.50%")}</td>
+                <td>{visualText(visualCopy, "quantity", "300 - 400 METRIC TONS")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+        <aside
+          className={`spc-readme-warm-up-countdown${timerEnding || timerFinished ? " is-ending" : ""}`}
+          aria-label="Warm-up countdown"
+        >
+          <span>TIME REMAINING</span>
+          <strong role="timer" aria-label={`${remainingSeconds} seconds remaining`}>
+            {formatCountdown(remainingSeconds)}
+          </strong>
+          <progress
+            aria-label="Countdown progress"
+            max={WARM_UP_DURATION_SECONDS}
+            value={remainingSeconds}
+          />
+          <small aria-live="polite">{timerStatus}</small>
+          <i className="spc-readme-warm-up-countdown-announcement" aria-live="polite">
+            {timerFinished ? "Time up" : remainingSeconds === 15 ? "15 seconds remaining" : ""}
+          </i>
+          <div className="spc-readme-warm-up-countdown-actions">
+            <button type="button" onClick={startCountdown} disabled={timerState === "running"}>START</button>
+            <button type="button" onClick={pauseCountdown} disabled={timerState !== "running"}>PAUSE</button>
+            <button type="button" onClick={resetCountdown}>RESET</button>
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }
@@ -319,7 +418,7 @@ export function PresentationMotionScene({
 
   return (
     <div
-      className={`spc-readme-motion-scene${compact ? " is-compact" : ""}`}
+      className={`spc-readme-motion-scene${compact ? " is-compact" : ""}${scene === "warm-up-enquiry" ? " is-warm-up-scene" : ""}`}
       role={scene === "warm-up-enquiry" ? "region" : "img"}
       aria-label={title}
     >
