@@ -66,6 +66,10 @@ const spcLoginSource = readFileSync(
   new URL("../app/api/spc/fcuno-login/route.ts", import.meta.url),
   "utf8",
 )
+const adminAuthSource = readFileSync(
+  new URL("../lib/adminAuth.ts", import.meta.url),
+  "utf8",
+)
 const spcUserManagementSource = readFileSync(
   new URL("../app/spc/usermanagement/page.tsx", import.meta.url),
   "utf8",
@@ -210,7 +214,7 @@ test("FCOS outbox uses a short ES256 JWT whose jti is the idempotency event id",
   assert.match(syncSource, /redirect: "error"/)
 })
 
-test("OIDC login continuation admits only a same-origin authorize request", () => {
+test("OIDC login continuation admits only local requests and the exact SPC handoff", () => {
   const origin = "https://fcuno.example"
   const valid = "/api/oidc/authorize?client_id=fcos&state=preserved"
   assert.equal(normaliseOidcAuthorizeReturnTo(valid, origin), valid)
@@ -219,6 +223,19 @@ test("OIDC login continuation admits only a same-origin authorize request", () =
   assert.equal(normaliseOidcAuthorizeReturnTo("/admin?returnTo=evil", origin), null)
   assert.equal(normaliseOidcAuthorizeReturnTo("/api/oidc/authorize?x=1#fragment", origin), null)
   assert.equal(normaliseOidcAuthorizeReturnTo("/api/spc/fcuno-login", origin), "/api/spc/fcuno-login")
+  assert.equal(
+    normaliseOidcAuthorizeReturnTo("https://spc.fcuno.com/api/spc/fcuno-login", "https://fcuno.com"),
+    "https://spc.fcuno.com/api/spc/fcuno-login",
+  )
+  assert.equal(normaliseOidcAuthorizeReturnTo("http://spc.fcuno.com/api/spc/fcuno-login", "https://fcuno.com"), null)
+  assert.equal(normaliseOidcAuthorizeReturnTo("https://spc.fcuno.com/api/spc/fcuno-login?next=evil", "https://fcuno.com"), null)
+})
+
+test("FCUNO shares only its admin identity cookie for the trusted SPC handoff", () => {
+  assert.match(adminAuthSource, /domain: "\.fcuno\.com"/)
+  assert.match(adminAuthSource, /expiredHostOnlyCookieOptions/)
+  assert.match(spcLoginSource, /new URL\("\/admin", "https:\/\/fcuno\.com"\)/)
+  assert.match(spcLoginSource, /new URL\("\/api\/spc\/fcuno-login", request\.url\)\.toString\(\)/)
 })
 
 test("OIDC authorization accepts Supabase code flow without a nonce", () => {

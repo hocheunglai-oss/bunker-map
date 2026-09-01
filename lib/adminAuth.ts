@@ -65,12 +65,24 @@ function cookieOptions(expiresAt?: string) {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
+    ...(process.env.NODE_ENV === "production" ? { domain: ".fcuno.com" } : {}),
     maxAge: ADMIN_SESSION_DURATION_SECONDS,
     ...(expiresAt ? { expires: new Date(expiresAt) } : {}),
   }
 }
 
 function expiredCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    ...(process.env.NODE_ENV === "production" ? { domain: ".fcuno.com" } : {}),
+    maxAge: 0,
+  }
+}
+
+function expiredHostOnlyCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -106,8 +118,11 @@ export function expiredOutlookAddinCookieOptions() {
 async function clearAdminCookies() {
   const cookieStore = await cookies()
   const options = expiredCookieOptions()
+  const hostOnlyOptions = expiredHostOnlyCookieOptions()
   cookieStore.set(ADMIN_COOKIE_NAME, "", options)
   cookieStore.set(ADMIN_USER_COOKIE_NAME, "", options)
+  cookieStore.set(ADMIN_COOKIE_NAME, "", hostOnlyOptions)
+  cookieStore.set(ADMIN_USER_COOKIE_NAME, "", hostOnlyOptions)
 }
 
 export async function setAdminSession(user: {
@@ -119,6 +134,7 @@ export async function setAdminSession(user: {
     user.credentialUpdatedAt,
   )
   const cookieStore = await cookies()
+  cookieStore.set(ADMIN_COOKIE_NAME, "", expiredHostOnlyCookieOptions())
   cookieStore.set(
     ADMIN_COOKIE_NAME,
     session.token,
@@ -298,6 +314,7 @@ export async function getRefreshedAdminSession(): Promise<AdminSession> {
     const cookieStore = await cookies()
     const token = cookieStore.get(ADMIN_COOKIE_NAME)?.value
     if (token) {
+      cookieStore.set(ADMIN_COOKIE_NAME, "", expiredHostOnlyCookieOptions())
       cookieStore.set(
         ADMIN_COOKIE_NAME,
         token,

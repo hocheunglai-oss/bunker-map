@@ -14,8 +14,11 @@ export async function GET(request: Request) {
   try {
     session = await requireAdminIdentitySession()
   } catch {
-    const login = new URL("/admin", request.url)
-    login.searchParams.set("returnTo", "/api/spc/fcuno-login")
+    const login = new URL("/admin", "https://fcuno.com")
+    login.searchParams.set(
+      "returnTo",
+      new URL("/api/spc/fcuno-login", request.url).toString(),
+    )
     return NextResponse.redirect(login, { status: 302 })
   }
   const user = await getFcunoLinkedSpcUser(session.adminUserId)
