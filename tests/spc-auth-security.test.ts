@@ -300,11 +300,11 @@ test("SPC sessions are explicitly ephemeral across the backup contract", () => {
   }
   assert.match(
     backupRoute,
-    /inventory\.unfencedTables[\s\S]*EXPLICITLY_EPHEMERAL_TABLES\.has\(table\)/,
+    /inventory\.unfencedTables[\s\S]*explicitlyEphemeralTables\.has\(table\)/,
   )
   assert.match(
     systemHealth,
-    /inventoryUnfencedTables\.filter\([\s\S]*!BACKUP_EPHEMERAL_TABLES\.includes\(table\)/,
+    /inventoryUnfencedTables\.filter\([\s\S]*!backupContract\.ephemeralTables\.includes\(table\)/,
   )
 })
 

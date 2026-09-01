@@ -31,6 +31,7 @@ const BACKUP_STREAM_VERIFICATION_SCHEMA =
   "bunker-map-backup-stream-verification/v1"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
+const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
@@ -69,6 +70,7 @@ type TableConfig = {
   order?: OrderConfig[]
   optional?: boolean
   omitColumns?: string[]
+  introducedAt?: string
 }
 
 type BackupSectionManifest = Record<
@@ -129,6 +131,24 @@ const TABLES: TableConfig[] = [
     table: "admin_users",
     order: [{ column: "id", ascending: true }],
     omitColumns: ["password_hash"],
+  },
+  {
+    key: "fcunoIdentityAudit",
+    table: "fcuno_identity_audit",
+    order: [{ column: "id", ascending: true }],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "fcunoIdentitySyncOutbox",
+    table: "fcuno_identity_sync_outbox",
+    order: [{ column: "id", ascending: true }],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "spcIdentityLinks",
+    table: "spc_identity_links",
+    order: [{ column: "admin_user_id", ascending: true }],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
   },
   { key: "adminRoleDefaults", table: "admin_role_defaults", order: [{ column: "role", ascending: true }], optional: true },
   { key: "auditLogs", table: "audit_logs", order: [{ column: "id", ascending: true }] },
@@ -193,12 +213,31 @@ const TRUTH_MANAGED_TABLES = new Set([
   "outlook_exchange_truth_ledger",
 ])
 
-const EXPLICITLY_EPHEMERAL_TABLES = new Set([
+const BASE_EXPLICITLY_EPHEMERAL_TABLES = [
   "outlook_exchange_sync_lock",
   "bunker_map_backup_lock",
   "admin_sessions",
   "spc_sessions",
-])
+]
+const FCUNO_IDENTITY_EPHEMERAL_TABLES = [
+  "oidc_authorization_codes",
+  "oidc_token_revocations",
+]
+
+function getApplicableTableConfigs(migrationHead: string) {
+  return TABLES.filter(
+    (config) => !config.introducedAt || migrationHead >= config.introducedAt
+  )
+}
+
+function getExplicitlyEphemeralTables(migrationHead: string) {
+  return new Set([
+    ...BASE_EXPLICITLY_EPHEMERAL_TABLES,
+    ...(migrationHead >= FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD
+      ? FCUNO_IDENTITY_EPHEMERAL_TABLES
+      : []),
+  ])
+}
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -545,6 +584,8 @@ async function getBackupInventory(
   if (!/^\d{14}$/.test(migrationHead)) {
     throw new Error("Backup database inventory did not return a valid live migration head.")
   }
+  const tableConfigs = getApplicableTableConfigs(migrationHead)
+  const explicitlyEphemeralTables = getExplicitlyEphemeralTables(migrationHead)
   if (
     !Array.isArray(inventory.tables) ||
     inventory.tables.some((table) => typeof table !== "string" || !table)
@@ -562,7 +603,7 @@ async function getBackupInventory(
     )
   }
   const unfencedTables = (inventory.unfencedTables as string[]).filter(
-    (table) => !EXPLICITLY_EPHEMERAL_TABLES.has(table)
+    (table) => !explicitlyEphemeralTables.has(table)
   )
   if (unfencedTables.length > 0) {
     throw new Error(
@@ -576,14 +617,14 @@ async function getBackupInventory(
     "Backup database catalog SHA-256"
   )
   const registeredTables = new Set([
-    ...TABLES.map((config) => config.table),
+    ...tableConfigs.map((config) => config.table),
     ...TRUTH_MANAGED_TABLES,
-    ...EXPLICITLY_EPHEMERAL_TABLES,
+    ...explicitlyEphemeralTables,
   ])
   const unregistered = [...liveTables]
     .filter((table) => !registeredTables.has(table))
     .sort()
-  const missingRequired = TABLES
+  const missingRequired = tableConfigs
     .filter((config) => !config.optional && !liveTables.has(config.table))
     .map((config) => config.table)
     .sort()
@@ -605,8 +646,9 @@ async function getBackupInventory(
     migrationHead,
     catalogSha256,
     liveTables,
+    tableConfigs,
     registeredTables: [...registeredTables].sort(),
-    explicitlyEphemeralTables: [...EXPLICITLY_EPHEMERAL_TABLES].sort(),
+    explicitlyEphemeralTables: [...explicitlyEphemeralTables].sort(),
   }
 }
 
@@ -980,7 +1022,7 @@ async function buildBackupFile(
     await writeDataChunk(writer, "{")
     let isFirstSection = true
 
-    for (const tableConfig of TABLES) {
+    for (const tableConfig of inventory.tableConfigs) {
       try {
         await writeBackupSection(
           writer,

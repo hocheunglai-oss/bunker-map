@@ -56,6 +56,7 @@ const SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD = "20260813070206"
 const SPC_GROUP_DISPATCHER_MIGRATION_HEAD = "20260817034459"
 const SPC_DELIVERY_ROUTES_MIGRATION_HEAD = "20260819025850"
 const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
+const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -71,6 +72,21 @@ const SUPABASE_HEALTH_PAGE_SIZE = 1_000
 const BACKUP_TABLE_SECTIONS = [
   { key: "admins", table: "admins" },
   { key: "adminUsers", table: "admin_users" },
+  {
+    key: "fcunoIdentityAudit",
+    table: "fcuno_identity_audit",
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "fcunoIdentitySyncOutbox",
+    table: "fcuno_identity_sync_outbox",
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "spcIdentityLinks",
+    table: "spc_identity_links",
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
   { key: "adminRoleDefaults", table: "admin_role_defaults", optional: true },
   { key: "auditLogs", table: "audit_logs" },
   { key: "officeCalendarStore", table: "office_calendar_store" },
@@ -233,24 +249,16 @@ const BACKUP_EXTERNAL_SECTION_KEYS = [
   "googleContacts",
   "googleCalendarEvents",
 ] as const
-const BACKUP_EPHEMERAL_TABLES = [
+const BACKUP_BASE_EPHEMERAL_TABLES = [
   "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
   "spc_sessions",
-].sort()
-const BACKUP_REGISTERED_TABLES = [
-  ...BACKUP_TABLE_SECTIONS.map(({ table }) => table),
-  ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
-  ...BACKUP_EPHEMERAL_TABLES,
-].sort()
-const BACKUP_REQUIRED_LIVE_TABLES = [
-  ...BACKUP_TABLE_SECTIONS
-    .filter((section) => !("optional" in section && section.optional))
-    .map(({ table }) => table),
-  ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
-  ...BACKUP_EPHEMERAL_TABLES,
-].sort()
+]
+const FCUNO_IDENTITY_EPHEMERAL_TABLES = [
+  "oidc_authorization_codes",
+  "oidc_token_revocations",
+]
 const BACKUP_EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",
   "spc_users.password_hash",
@@ -290,6 +298,12 @@ function getBackupArtifactContract(migrationHead: string) {
       !("introducedAt" in section) ||
       migrationHead >= section.introducedAt
   )
+  const ephemeralTables = [
+    ...BACKUP_BASE_EPHEMERAL_TABLES,
+    ...(migrationHead >= FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD
+      ? FCUNO_IDENTITY_EPHEMERAL_TABLES
+      : []),
+  ].sort()
   const requiredSectionKeys = [
     ...tableSections.map(({ key }) => key),
     ...BACKUP_TRUTH_SECTIONS.map(({ key }) => key),
@@ -302,14 +316,14 @@ function getBackupArtifactContract(migrationHead: string) {
   const registeredTables = [
     ...tableSections.map(({ table }) => table),
     ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
-    ...BACKUP_EPHEMERAL_TABLES,
+    ...ephemeralTables,
   ].sort()
   const requiredLiveTables = [
     ...tableSections
       .filter((section) => !("optional" in section && section.optional))
       .map(({ table }) => table),
     ...BACKUP_TRUTH_SECTIONS.map(({ table }) => table),
-    ...BACKUP_EPHEMERAL_TABLES,
+    ...ephemeralTables,
   ].sort()
 
   return {
@@ -317,6 +331,7 @@ function getBackupArtifactContract(migrationHead: string) {
     requiredDataKeys,
     registeredTables,
     requiredLiveTables,
+    ephemeralTables,
   }
 }
 
@@ -1163,6 +1178,7 @@ async function getCurrentBackupInventory() {
   if (!/^\d{14}$/.test(migrationHead)) {
     throw new Error("Live backup database inventory has no migration head.")
   }
+  const backupContract = getBackupArtifactContract(migrationHead)
   const liveTables = requireSortedUniqueStrings(
     inventory.tables,
     "Live backup database tables"
@@ -1172,17 +1188,17 @@ async function getCurrentBackupInventory() {
     "Live mutation-unfenced backup tables"
   )
   const unfencedTables = inventoryUnfencedTables.filter(
-    (table) => !BACKUP_EPHEMERAL_TABLES.includes(table)
+    (table) => !backupContract.ephemeralTables.includes(table)
   )
   const catalogSha256 = requireSha256(
     inventory.catalogSha256,
     "Live backup database catalog SHA-256"
   )
-  const missingRequired = BACKUP_REQUIRED_LIVE_TABLES.filter(
+  const missingRequired = backupContract.requiredLiveTables.filter(
     (table) => !liveTables.includes(table)
   )
   const unregistered = liveTables.filter(
-    (table) => !BACKUP_REGISTERED_TABLES.includes(table)
+    (table) => !backupContract.registeredTables.includes(table)
   )
   if (
     missingRequired.length ||
@@ -1829,7 +1845,7 @@ function verifyBackupArtifact(
   )
   if (
     !sameStringSet(registeredTables, backupContract.registeredTables) ||
-    !sameStringSet(ephemeralTables, BACKUP_EPHEMERAL_TABLES) ||
+    !sameStringSet(ephemeralTables, backupContract.ephemeralTables) ||
     !sameStringSet(
       excludedCredentialFields,
       BACKUP_EXCLUDED_CREDENTIAL_FIELDS

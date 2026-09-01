@@ -18,7 +18,10 @@ const ATTENDANCE_WORK_MODE_MIGRATION_HEAD = "20260810082031"
 const EVENT_CALENDAR_GOOGLE_SYNC_JOBS_MIGRATION_HEAD = "20260811125141"
 const SPC_FEEDBACK_MIGRATION_HEAD = "20260812095000"
 const SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD = "20260813070206"
+const SPC_GROUP_DISPATCHER_MIGRATION_HEAD = "20260817034459"
+const SPC_DELIVERY_ROUTES_MIGRATION_HEAD = "20260819025850"
 const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
+const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -28,6 +31,24 @@ const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
 const TABLE_SECTIONS = [
   { key: "admins", table: "admins", primaryKey: ["id"] },
   { key: "adminUsers", table: "admin_users", primaryKey: ["id"] },
+  {
+    key: "fcunoIdentityAudit",
+    table: "fcuno_identity_audit",
+    primaryKey: ["id"],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "fcunoIdentitySyncOutbox",
+    table: "fcuno_identity_sync_outbox",
+    primaryKey: ["id"],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
+  {
+    key: "spcIdentityLinks",
+    table: "spc_identity_links",
+    primaryKey: ["admin_user_id"],
+    introducedAt: FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD,
+  },
   {
     key: "adminRoleDefaults",
     table: "admin_role_defaults",
@@ -120,6 +141,30 @@ const TABLE_SECTIONS = [
     table: "spc_mobile_enquiry_deliveries",
     primaryKey: ["id"],
     introducedAt: SPC_MOBILE_ENQUIRY_DELIVERY_MIGRATION_HEAD,
+  },
+  {
+    key: "spcEnquiryRevisions",
+    table: "spc_enquiry_revisions",
+    primaryKey: ["id"],
+    introducedAt: SPC_GROUP_DISPATCHER_MIGRATION_HEAD,
+  },
+  {
+    key: "spcGroupDispatchers",
+    table: "spc_group_dispatchers",
+    primaryKey: ["id"],
+    introducedAt: SPC_GROUP_DISPATCHER_MIGRATION_HEAD,
+  },
+  {
+    key: "spcGroupDeliveryJobs",
+    table: "spc_group_delivery_jobs",
+    primaryKey: ["id"],
+    introducedAt: SPC_GROUP_DISPATCHER_MIGRATION_HEAD,
+  },
+  {
+    key: "spcDeliveryRoutes",
+    table: "spc_delivery_routes",
+    primaryKey: ["id"],
+    introducedAt: SPC_DELIVERY_ROUTES_MIGRATION_HEAD,
   },
   {
     key: "attendancePeople",
@@ -220,11 +265,15 @@ const EXTERNAL_SECTIONS = [
 
 const OPTIONAL_DATA_SECTIONS = ["googleCalendarMetadata"]
 const TRUTH_MANAGED_TABLES = TRUTH_SECTIONS.map((section) => section.table)
-const EXPLICITLY_EPHEMERAL_TABLES = [
+const BASE_EXPLICITLY_EPHEMERAL_TABLES = [
   "admin_sessions",
   "bunker_map_backup_lock",
   "outlook_exchange_sync_lock",
   "spc_sessions",
+]
+const FCUNO_IDENTITY_EPHEMERAL_TABLES = [
+  "oidc_authorization_codes",
+  "oidc_token_revocations",
 ]
 const EXCLUDED_CREDENTIAL_FIELDS = [
   "admin_users.password_hash",
@@ -236,6 +285,12 @@ function getBackupContract(migrationHead) {
     (section) =>
       !section.introducedAt || migrationHead >= section.introducedAt
   )
+  const explicitlyEphemeralTables = [
+    ...BASE_EXPLICITLY_EPHEMERAL_TABLES,
+    ...(migrationHead >= FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD
+      ? FCUNO_IDENTITY_EPHEMERAL_TABLES
+      : []),
+  ].sort()
   const sectionSpecs = [
     ...tableSections,
     ...TRUTH_SECTIONS,
@@ -249,14 +304,14 @@ function getBackupContract(migrationHead) {
   const expectedRegisteredTables = [
     ...tableSections.map((section) => section.table),
     ...TRUTH_MANAGED_TABLES,
-    ...EXPLICITLY_EPHEMERAL_TABLES,
+    ...explicitlyEphemeralTables,
   ].sort()
   const requiredLiveTables = [
     ...tableSections
       .filter((section) => !section.optionalTable)
       .map((section) => section.table),
     ...TRUTH_MANAGED_TABLES,
-    ...EXPLICITLY_EPHEMERAL_TABLES,
+    ...explicitlyEphemeralTables,
   ].sort()
 
   return {
@@ -265,6 +320,7 @@ function getBackupContract(migrationHead) {
     expectedDataSections,
     expectedRegisteredTables,
     requiredLiveTables,
+    explicitlyEphemeralTables,
   }
 }
 
@@ -1089,7 +1145,7 @@ function validateDatabaseInventory(backup, errors) {
       errors,
       "databaseInventory.explicitlyEphemeralTables: expected sorted unique table names"
     )
-  } else if (!sameStrings(ephemeralTables, EXPLICITLY_EPHEMERAL_TABLES)) {
+  } else if (!sameStrings(ephemeralTables, contract.explicitlyEphemeralTables)) {
     addError(
       errors,
       "databaseInventory.explicitlyEphemeralTables: does not match the v2 exclusion contract"
@@ -1515,6 +1571,43 @@ function validateSections(backup, errors, warnings) {
   const whatsappConversationIds = idSet(data, "whatsappConversations")
   const attendancePersonIds = idSet(data, "attendancePeople")
   const attendanceRawPunchIds = idSet(data, "attendanceRawPunches")
+
+  checkReferences(
+    rows(data, "fcunoIdentityAudit"),
+    "admin_user_id",
+    adminUserIds,
+    "fcunoIdentityAudit.admin_user_id",
+    errors
+  )
+  checkReferences(
+    rows(data, "fcunoIdentitySyncOutbox"),
+    "admin_user_id",
+    adminUserIds,
+    "fcunoIdentitySyncOutbox.admin_user_id",
+    errors,
+    { required: true }
+  )
+  checkReferences(
+    rows(data, "spcIdentityLinks"),
+    "admin_user_id",
+    adminUserIds,
+    "spcIdentityLinks.admin_user_id",
+    errors,
+    { required: true }
+  )
+  checkReferences(
+    rows(data, "spcIdentityLinks"),
+    "spc_user_id",
+    spcUserIds,
+    "spcIdentityLinks.spc_user_id",
+    errors,
+    { required: true }
+  )
+  checkDuplicateValues(
+    rows(data, "spcIdentityLinks").map((row) => row?.spc_user_id),
+    "spcIdentityLinks.spc_user_id",
+    errors
+  )
 
   checkReferences(
     rows(data, "attendancePeople"),
