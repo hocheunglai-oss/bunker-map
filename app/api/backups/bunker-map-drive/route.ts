@@ -1878,6 +1878,7 @@ async function trashBackupFile(
 
 async function createBackup(provenance: BackupProvenance) {
   const supabase = getSupabaseClient()
+  const startedAt = Date.now()
   let lockAcquired = false
   let tempDirectory: string | null = null
   let drive: drive_v3.Drive | null = null
@@ -2035,6 +2036,17 @@ async function createBackup(provenance: BackupProvenance) {
 
     const pruned = await pruneOldDriveBackups(drive, dailyFolderId, sharedDriveId)
 
+    console.info(JSON.stringify({
+      level: "info",
+      message: "Daily backup completed",
+      route: "/api/backups/bunker-map-drive",
+      backupRunId: provenance.backupRunId,
+      source: provenance.source,
+      durationMs: Date.now() - startedAt,
+      fileByteLength: streamed.fileByteLength,
+      pruned,
+    }))
+
     return NextResponse.json({
       success: true,
       file: verifiedFile,
@@ -2056,6 +2068,15 @@ async function createBackup(provenance: BackupProvenance) {
       pruned,
     })
   } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      message: "Daily backup failed",
+      route: "/api/backups/bunker-map-drive",
+      backupRunId: provenance.backupRunId,
+      source: provenance.source,
+      durationMs: Date.now() - startedAt,
+      error: getErrorMessage(error),
+    }))
     if (drive && uploadedFileId && !uploadVerified) {
       try {
         await trashBackupFile(drive, uploadedFileId)
