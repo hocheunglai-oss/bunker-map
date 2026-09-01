@@ -198,6 +198,7 @@ export default function SpcReadmePage() {
   const selectedMedia = presenterMode
     ? presenterMediaSource.chunkId === selected?.id ? presenterMediaSource : EMPTY_MEDIA_SOURCE
     : mediaSource.chunkId === selected?.id ? mediaSource : EMPTY_MEDIA_SOURCE
+  const isWarmUpActivity = selected?.visualKind === "warm-up-enquiry"
 
   const loadChunks = useCallback(async () => {
     if (!authenticated || !canView) return
@@ -676,7 +677,7 @@ export default function SpcReadmePage() {
           ))}
         </nav>
 
-        <div className={`spc-readme-workspace${editorMode && canEdit ? " is-editing" : ""}`}>
+        <div className={`spc-readme-workspace${editorMode && canEdit ? " is-editing" : ""}${isWarmUpActivity ? " is-activity" : ""}`}>
           {editorMode && canEdit ? (
             <nav className="spc-readme-chunk-list" aria-label="Presentation sections">
               <div className="spc-readme-chunk-list-header">
@@ -719,6 +720,7 @@ export default function SpcReadmePage() {
                       scene={selected.visualKind}
                       title={selected.title}
                       keyPoints={selected.keyPoints}
+                      visualCopy={selected.visualCopy}
                     />
                   )}
                 </div>
@@ -826,7 +828,7 @@ export default function SpcReadmePage() {
                 </button>
               </div>
             </aside>
-          ) : selected ? (
+          ) : selected && !isWarmUpActivity ? (
             <aside className="spc-readme-reference">
               <div className="spc-readme-reference-heading">SCRIPT</div>
               <div className="spc-readme-script">{selected.narration}</div>
@@ -869,7 +871,12 @@ export default function SpcReadmePage() {
                 startLabel={presenterMode === "chapter" ? "START CHAPTER" : "START PRESENTATION"}
               />
             ) : (
-              <PresentationMotionScene scene={selected.visualKind} title={selected.title} keyPoints={selected.keyPoints} />
+              <PresentationMotionScene
+                scene={selected.visualKind}
+                title={selected.title}
+                keyPoints={selected.keyPoints}
+                visualCopy={selected.visualCopy}
+              />
             )}
             {playbackBlocked ? (
               <button type="button" className="spc-readme-playback-start" onClick={() => void startBlockedPlayback()}>

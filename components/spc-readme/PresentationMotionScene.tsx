@@ -1,7 +1,10 @@
+import type { SpcPresentationVisualText } from "@/lib/spcPresentation"
+
 type PresentationMotionSceneProps = {
   scene: string
   title: string
   keyPoints: string[]
+  visualCopy?: SpcPresentationVisualText[]
   compact?: boolean
 }
 
@@ -205,7 +208,103 @@ function TakeawayScene({ title, keyPoints }: { title: string; keyPoints: string[
   )
 }
 
-export function PresentationMotionScene({ scene, title, keyPoints, compact = false }: PresentationMotionSceneProps) {
+function visualText(
+  visualCopy: SpcPresentationVisualText[],
+  id: string,
+  fallback: string,
+) {
+  return visualCopy.find((item) => item.id === id)?.text || fallback
+}
+
+function WarmUpEnquiryScene({
+  title,
+  visualCopy,
+}: {
+  title: string
+  visualCopy: SpcPresentationVisualText[]
+}) {
+  const vessel = visualText(visualCopy, "vessel", "Raven Arrow")
+  const details = [
+    ["VESSEL", vessel],
+    ["IMO", visualText(visualCopy, "imo", "9574858")],
+    ["PORT", visualText(visualCopy, "port", "SGP")],
+    ["AGENT", visualText(visualCopy, "agent", "TBA")],
+    ["ETA", visualText(visualCopy, "eta", "21ST - 23RD SEPTEMBER 2026")],
+  ] as const
+  const notes = [
+    visualText(
+      visualCopy,
+      "operational-note-1",
+      "IF UNABLE TO OFFER FOR A DELIVERY 1 JANUARY, PLS OFFER BASED ON YR EARLIEST DELIVERY DATE.",
+    ),
+    visualText(
+      visualCopy,
+      "operational-note-2",
+      "OFFICIAL SAMPLES FOR DISPUTE RESOLUTION ARE TO BE TAKEN AT THE RECEIVING VESSELS MANIFOLD.",
+    ),
+    visualText(
+      visualCopy,
+      "operational-note-3",
+      "Buyer will appoint Lintec/Intertek to perform a Bunker Quantity Survey on this delivery.",
+    ),
+    visualText(
+      visualCopy,
+      "operational-note-4",
+      "The Bunker delivery is NOT to commence until the Surveyor is present and has performed pre delivery checks.",
+    ),
+    visualText(
+      visualCopy,
+      "operational-note-5",
+      "Note: In ports where procedures permit the vessel must receive a Certificate of Quality (COQ) for each supply of VLSFO.",
+    ),
+  ]
+
+  return (
+    <div className="spc-readme-motion-layout is-warm-up">
+      <header className="spc-readme-warm-up-heading">
+        <span>LIVE DEMONSTRATION</span>
+        <strong>{title || "WARM UP ACTIVITY"}</strong>
+      </header>
+      <article className="spc-readme-warm-up-document" aria-label={`${vessel} bunker enquiry`}>
+        <div className="spc-readme-warm-up-details">
+          <dl>
+            {details.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <span>BUNKER ENQUIRY</span>
+        </div>
+        <section className="spc-readme-warm-up-notes">
+          <h3>OPERATIONAL NOTES</h3>
+          {notes.map((note, index) => (
+            <p className={index < 2 ? "is-priority" : ""} key={note}>{note}</p>
+          ))}
+        </section>
+        <table className="spc-readme-warm-up-grades">
+          <caption>GRADES AND QUANTITIES</caption>
+          <thead><tr><th>SPEC</th><th>QUANTITY</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>{visualText(visualCopy, "spec", "ISO 8217 2017 VLSFO RMG 380 0.50%")}</td>
+              <td>{visualText(visualCopy, "quantity", "300 - 400 METRIC TONS")}</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </div>
+  )
+}
+
+export function PresentationMotionScene({
+  scene,
+  title,
+  keyPoints,
+  visualCopy = [],
+  compact = false,
+}: PresentationMotionSceneProps) {
   let content: React.ReactNode
   if (scene === "chapter-intro") content = <ChapterIntroScene />
   else if (scene === "daily-pressure") content = <DailyPressureScene title={title} />
@@ -215,10 +314,15 @@ export function PresentationMotionScene({ scene, title, keyPoints, compact = fal
   else if (scene === "live-prompt") content = <LivePromptScene title={title} />
   else if (scene === "ai-response") content = <AiResponseScene title={title} />
   else if (scene === "human-review") content = <HumanReviewScene title={title} />
+  else if (scene === "warm-up-enquiry") content = <WarmUpEnquiryScene title={title} visualCopy={visualCopy} />
   else content = <TakeawayScene title={title} keyPoints={keyPoints} />
 
   return (
-    <div className={`spc-readme-motion-scene${compact ? " is-compact" : ""}`} role="img" aria-label={title}>
+    <div
+      className={`spc-readme-motion-scene${compact ? " is-compact" : ""}`}
+      role={scene === "warm-up-enquiry" ? "region" : "img"}
+      aria-label={title}
+    >
       {content}
       <div className="spc-readme-motion-brand"><span>FRATELLI COSULICH</span><strong>SINGAPORE PURCHASING CENTER</strong></div>
     </div>

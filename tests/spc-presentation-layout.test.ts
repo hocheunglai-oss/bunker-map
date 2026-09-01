@@ -13,6 +13,14 @@ const presentationRoute = readFileSync(
 )
 const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
 const nextConfig = readFileSync(new URL("../next.config.js", import.meta.url), "utf8")
+const motionScene = readFileSync(
+  new URL("../components/spc-readme/PresentationMotionScene.tsx", import.meta.url),
+  "utf8",
+)
+const liveDemonstrationMigration = readFileSync(
+  new URL("../supabase/migrations/20260901045509_add_spc_live_demonstration.sql", import.meta.url),
+  "utf8",
+)
 
 test("SPC presentation uses the renamed route without changing its permission id", () => {
   const page = SPC_PAGE_DEFINITIONS.find((item) => item.id === "spc-readme")
@@ -60,4 +68,20 @@ test("SPC presentation gives the video a larger polished workspace", () => {
     globalStyles,
     /\.spc-readme-toolbar > div:first-child strong \{[\s\S]*?font-size: clamp\(18px, 1\.7vw, 22px\);/,
   )
+})
+
+test("SPC presentation adds a responsive live demonstration warm-up before the final chapter", () => {
+  assert.match(liveDemonstrationMigration, /50,[\s\S]*?'LIVE DEMONSTRATION',[\s\S]*?'WARM UP ACTIVITY'/)
+  assert.match(liveDemonstrationMigration, /'warm-up-enquiry'/)
+  assert.doesNotMatch(liveDemonstrationMigration, /LIVE DEMOSTRATION/)
+  assert.match(liveDemonstrationMigration, /'Raven Arrow'/)
+  assert.match(liveDemonstrationMigration, /'9574858'/)
+  assert.match(liveDemonstrationMigration, /'300 - 400 METRIC TONS'/)
+  assert.match(motionScene, /function WarmUpEnquiryScene/)
+  assert.match(motionScene, /<dl>/)
+  assert.match(motionScene, /<table className="spc-readme-warm-up-grades">/)
+  assert.match(motionScene, /scene === "warm-up-enquiry" \? "region" : "img"/)
+  assert.equal((presentationPage.match(/visualCopy=\{selected\.visualCopy\}/g) || []).length, 2)
+  assert.match(globalStyles, /\.spc-readme-motion-layout\.is-warm-up \{[\s\S]*?linear-gradient/)
+  assert.match(globalStyles, /\.spc-readme-workspace\.is-activity:not\(\.is-editing\)/)
 })
