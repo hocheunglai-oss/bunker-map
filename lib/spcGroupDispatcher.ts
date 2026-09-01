@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
+import { isVerifiedBackupActive } from "@/lib/backupMaintenance"
 import { SPC_GROUP_DISPATCHER_VERSION } from "@/lib/spcGroupDispatcherVersion"
 
 export { SPC_GROUP_DISPATCHER_VERSION }
@@ -412,17 +413,23 @@ export async function heartbeatSpcGroupDispatcher(token: string, extensionVersio
   const authenticated = await authenticatedDispatcher(token)
   if (!authenticated) return null
   const now = new Date().toISOString()
-  const { error } = await authenticated.supabase
-    .from("spc_group_dispatchers")
-    .update({
-      last_seen_at: now,
-      extension_version: cleanText(extensionVersion, 30) || authenticated.row.extension_version,
-      last_error: null,
-      updated_at: now,
-    })
-    .eq("id", authenticated.row.id)
-    .eq("active", true)
-  if (error) throw error
+  // The desktop polls frequently. Keep authentication and delivery claiming
+  // available during backup, but defer this disposable presence write so it
+  // cannot continuously invalidate a six-minute consistent export.
+  const backupActive = await isVerifiedBackupActive().catch(() => true)
+  if (!backupActive) {
+    const { error } = await authenticated.supabase
+      .from("spc_group_dispatchers")
+      .update({
+        last_seen_at: now,
+        extension_version: cleanText(extensionVersion, 30) || authenticated.row.extension_version,
+        last_error: null,
+        updated_at: now,
+      })
+      .eq("id", authenticated.row.id)
+      .eq("active", true)
+    if (error) throw error
+  }
   return {
     id: authenticated.row.id,
     groupName: authenticated.row.group_name,

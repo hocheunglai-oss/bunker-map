@@ -1575,6 +1575,8 @@ language plpgsql
 security invoker
 set search_path = ''
 as $$
+declare
+  candidate_id uuid;
 begin
   if p_claim_token_hash !~ '^[0-9a-f]{64}$' then
     raise exception 'Invalid claim token hash.';
@@ -1584,25 +1586,29 @@ begin
     raise exception 'Invalid claim lease.';
   end if;
 
-  return query
-  with candidate as (
-    select jobs.id
-    from public.spc_group_delivery_jobs as jobs
-    where (
-      jobs.status in ('queued', 'failed')
-      or (
-        jobs.status = 'claimed'
-        and jobs.lease_expires_at is not null
-        and jobs.lease_expires_at <= clock_timestamp()
-      )
+  select jobs.id
+  into candidate_id
+  from public.spc_group_delivery_jobs as jobs
+  where (
+    jobs.status in ('queued', 'failed')
+    or (
+      jobs.status = 'claimed'
+      and jobs.lease_expires_at is not null
+      and jobs.lease_expires_at <= clock_timestamp()
     )
-      and jobs.available_at <= clock_timestamp()
-      and jobs.attempt_count < 20
-      and nullif(btrim(jobs.destination_group_name), '') is not null
-    order by jobs.created_at, jobs.id
-    for update skip locked
-    limit 1
   )
+    and jobs.available_at <= clock_timestamp()
+    and jobs.attempt_count < 20
+    and nullif(btrim(jobs.destination_group_name), '') is not null
+  order by jobs.created_at, jobs.id
+  for update skip locked
+  limit 1;
+
+  if candidate_id is null then
+    return;
+  end if;
+
+  return query
   update public.spc_group_delivery_jobs as jobs
   set status = 'claimed',
       attempt_count = jobs.attempt_count + 1,
@@ -1611,8 +1617,7 @@ begin
       lease_expires_at = clock_timestamp() + make_interval(secs => p_lease_seconds),
       last_error = null,
       updated_at = clock_timestamp()
-  from candidate
-  where jobs.id = candidate.id
+  where jobs.id = candidate_id
   returning jobs.*;
 end;
 $$;

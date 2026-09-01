@@ -121,6 +121,31 @@ test("high-frequency cron writers defer while a verified backup owns the lease",
   assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/)
 })
 
+test("SPC dispatcher presence writes defer without pausing delivery during backup", () => {
+  const dispatcherSource = source("../lib/spcGroupDispatcher.ts")
+  assert.match(
+    dispatcherSource,
+    /export async function heartbeatSpcGroupDispatcher[\s\S]*await isVerifiedBackupActive\(\)\.catch\(\(\) => true\)[\s\S]*if \(!backupActive\) \{[\s\S]*\.from\("spc_group_dispatchers"\)[\s\S]*\.update\(/,
+  )
+  assert.match(
+    dispatcherSource,
+    /export async function claimSpcGroupDelivery[\s\S]*heartbeatSpcGroupDispatcher[\s\S]*rpc\("claim_spc_group_delivery_job"/,
+  )
+  const idleClaimMigration = source(
+    "../supabase/migrations/20260901034308_skip_idle_spc_dispatcher_writes.sql",
+  )
+  assert.match(idleClaimMigration, /select jobs\.id[\s\S]*into candidate_id/)
+  assert.match(idleClaimMigration, /for update skip locked/)
+  assert.match(
+    idleClaimMigration,
+    /if candidate_id is null then[\s\S]*return;[\s\S]*end if;/,
+  )
+  assert.match(
+    idleClaimMigration,
+    /update public\.spc_group_delivery_jobs[\s\S]*where jobs\.id = candidate_id/,
+  )
+})
+
 test("backup table and truth reads retry transient Supabase edge failures", () => {
   const attempts = numericConstant(
     backupRouteSource,
