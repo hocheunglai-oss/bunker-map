@@ -53,7 +53,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.3.0",
     "tailwindcss": "^4.2.1",
-    "tsx": "^4.23.1",
+    "tsx": "^4.23.12",
     "typescript": "^5.9.3"
   },
   "overrides": {
