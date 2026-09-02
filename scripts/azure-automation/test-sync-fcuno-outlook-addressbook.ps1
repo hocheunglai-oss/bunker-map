@@ -2496,6 +2496,8 @@ $script:setMailContactCalls = 0
 $script:setContactCalls = 0
 $script:lastSetContactIdentity = ""
 $script:lastGetContactFilter = ""
+$script:lastGetContactIdentity = ""
+$script:forceGraphContactFilterFallback = $false
 $script:setContactError = ""
 $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
@@ -2516,8 +2518,14 @@ function Get-Contact {
   [CmdletBinding()]
   param($Identity, $Filter, $RecipientTypeDetails, $ResultSize)
   if ($Filter) { $script:lastGetContactFilter = Clean-Text $Filter }
-  if ($Filter -like "Guid -eq '11111111-1111-1111-1111-111111111111'") { return $script:noOpContactProfile }
-  if ($Identity -in @("11111111-1111-1111-1111-111111111111", "CN=Profile Unchanged Contact,OU=Contacts,DC=example,DC=com")) { return $script:noOpContactProfile }
+  if ($Filter -like "Guid -eq '11111111-1111-1111-1111-111111111111'") {
+    if ($script:forceGraphContactFilterFallback) { throw "Required field ExternalDirectoryObjectId was not returned from Graph API." }
+    return $script:noOpContactProfile
+  }
+  if ($Identity -in @("11111111-1111-1111-1111-111111111111", "CN=Profile Unchanged Contact,OU=Contacts,DC=example,DC=com")) {
+    $script:lastGetContactIdentity = Clean-Text $Identity
+    return $script:noOpContactProfile
+  }
   return $null
 }
 function Set-MailContact {
@@ -2692,6 +2700,13 @@ Assert-Equal 1 $script:setContactCalls "Incremental contact processing must reta
 Assert-Equal "11111111-1111-1111-1111-111111111111" $script:lastSetContactIdentity "Contact profile updates must target the exact resolved Get-Contact GUID"
 Assert-Equal "Guid -eq '11111111-1111-1111-1111-111111111111'" $script:lastGetContactFilter "Get-Contact discovery must use the documented exact GUID filter, never the unsupported Alias filter"
 Assert-Equal 1 $incrementalContactStats.updatedContacts "Incremental contact processing must still report its update"
+
+$script:forceGraphContactFilterFallback = $true
+$script:lastGetContactIdentity = ""
+$graphFallbackProfile = Resolve-ExchangeContactProfileForMailContact $script:noOpMailContact "Graph-invalid filter contact" 1
+Assert-True ([object]::ReferenceEquals($script:noOpContactProfile, $graphFallbackProfile)) "A Graph-invalid immutable filter must fall back to the same immutable direct identity"
+Assert-Equal "11111111-1111-1111-1111-111111111111" $script:lastGetContactIdentity "The Graph fallback must use the mail contact's immutable GUID, never email or alias"
+$script:forceGraphContactFilterFallback = $false
 
 $staleProfileHint = [pscustomobject]@{
   Identity = "CN=Stale Snapshot Profile,OU=Contacts,DC=example,DC=com"

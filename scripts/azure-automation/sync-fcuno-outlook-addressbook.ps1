@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.5"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.6"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -532,7 +532,20 @@ function Resolve-ExchangeContactProfileForMailContact($MailContact, $Label, [int
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
     Renew-ExchangeSyncLockIfDue
-    $profiles = @(Get-Contact -Filter $profileFilter -RecipientTypeDetails MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    $profiles = @()
+    try {
+      $profiles = @(Get-Contact -Filter $profileFilter -RecipientTypeDetails MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    } catch {
+      $filterError = Clean-Text $_.Exception.Message
+      if ($filterError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+      # Some Exchange Online Graph-backed filter reads reject a valid legacy
+      # mail contact when ExternalDirectoryObjectId is omitted from the Graph
+      # response. Retry the same immutable GUID/DN through -Identity, then keep
+      # the normal immutable correlation check below before accepting it.
+      Write-Warning ("{0} immutable filter lookup was rejected by Exchange Graph; retrying the same {1} through direct identity." -f $Label, $filterProperty)
+      $profileCandidate = Get-Contact -Identity $filterValue -ErrorAction Stop
+      $profiles = @($profileCandidate | Where-Object { $null -ne $_ })
+    }
     Renew-ExchangeSyncLockIfDue
     if ($profiles.Count -gt 1) {
       throw "$Label profile resolution found $($profiles.Count) Exchange contact profiles for immutable $filterProperty '$filterValue'."
