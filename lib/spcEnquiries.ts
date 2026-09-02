@@ -440,14 +440,25 @@ export async function updateSpcEnquiryOutcome(
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
   requireEnquiryOwner(existing, session)
+
+  if (outcome === "cancel") {
+    const { data, error } = await supabase
+      .from("spc_enquiries")
+      .delete()
+      .eq("id", enquiryId)
+      .select("*")
+      .single()
+
+    if (error) throw error
+    return mapEnquiry(data as SpcEnquiryRow)
+  }
+
   const status =
     outcome === "stem"
       ? "quoted"
       : outcome === "lost"
         ? "cancelled"
-        : outcome === "cancel"
-          ? "closed"
-          : existing.status || "sent"
+        : existing.status || "sent"
   const now = new Date().toISOString()
   const currentText = formatSpcEnquiry(existing)
   const nextMeta: SpcEnquiryMeta = {
@@ -472,13 +483,6 @@ export async function updateSpcEnquiryOutcome(
   } else if (outcome === "postpone") {
     nextMeta.postponedAt = now
     nextMeta.cancelledAt = undefined
-  } else {
-    nextMeta.outcomeAt = now
-    nextMeta.lostReason = undefined
-    nextMeta.stemSupplierTraderUsername = undefined
-    nextMeta.stemSupplierTraderDisplayName = undefined
-    nextMeta.postponedAt = undefined
-    nextMeta.cancelledAt = now
   }
 
   const nextNotes = writeSpcEnquiryNotes(currentText, nextMeta)

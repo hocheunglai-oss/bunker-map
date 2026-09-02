@@ -90,14 +90,15 @@ test("SPC web outcome, amendment, and reoffer mutations enforce enquiry ownershi
   )
 })
 
-test("SPC cancellation preserves the shared record for Speed Board status updates", () => {
+test("SPC cancellation permanently removes the enquiry record", () => {
   const outcomeStart = enquiriesStore.indexOf("export async function updateSpcEnquiryOutcome")
   const outcomeEnd = enquiriesStore.indexOf("export async function reofferSpcEnquiry", outcomeStart)
   const outcomeSource = enquiriesStore.slice(outcomeStart, outcomeEnd)
 
-  assert.match(outcomeSource, /outcome === "cancel"[\s\S]*?\? "closed"/)
-  assert.match(outcomeSource, /nextMeta\.cancelledAt = now/)
-  assert.doesNotMatch(outcomeSource, /\.delete\(\)/)
+  assert.match(outcomeSource, /if \(outcome === "cancel"\) \{[\s\S]*?\.from\("spc_enquiries"\)[\s\S]*?\.delete\(\)/)
+  assert.match(outcomeSource, /\.eq\("id", enquiryId\)[\s\S]*?\.select\("\*"\)[\s\S]*?\.single\(\)/)
+  assert.doesNotMatch(outcomeSource, /outcome === "cancel"[\s\S]*?\? "closed"/)
+  assert.doesNotMatch(outcomeSource, /nextMeta\.cancelledAt = now/)
 })
 
 test("SPC reoffers remain atomic and group delivery is optional", () => {
