@@ -2773,11 +2773,18 @@ $managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailCon
 $liveProfileResolutionIndex = $upsertContactFunctionText.IndexOf('Resolve-ExchangeContactProfileForMailContact $existing')
 $profileResolutionRecreationIndex = $upsertContactFunctionText.IndexOf('Managed contact recreation after profile-resolution failure')
 $graphInvalidUpdateGateIndex = $upsertContactFunctionText.IndexOf('required field ExternalDirectoryObjectId was not returned from Graph API')
+$updateErrorIndex = $upsertContactFunctionText.IndexOf('$updateError = Clean-Text $_.Exception.Message')
+$updateRecreateDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity', $updateErrorIndex)
+$updateRecreateConfirmationIndex = $upsertContactFunctionText.IndexOf('Confirm-ExchangeMailContactDeletion $reread $email $sourceKey', $updateRecreateDeleteIndex)
+$updateRecreateNewIndex = $upsertContactFunctionText.IndexOf('$newContact = New-MailContact', $updateRecreateDeleteIndex)
 Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
 Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
 Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A stale managed owner must be deleted and recreated before Graph contact-profile resolution"
 Assert-True ($profileResolutionRecreationIndex -gt $liveProfileResolutionIndex) "A managed Graph-profile failure must enter the exact verified recreation path"
 Assert-True ($graphInvalidUpdateGateIndex -gt $liveProfileResolutionIndex) "A managed Set-Contact Graph identity failure must pass the narrow invalid-object recreation gate"
+Assert-True ($updateRecreateDeleteIndex -gt $updateErrorIndex) "A managed Set-Contact invalid-object failure must remove only the reread immutable contact"
+Assert-True ($updateRecreateConfirmationIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must confirm exact deletion after removal"
+Assert-True ($updateRecreateNewIndex -gt $updateRecreateConfirmationIndex) "A managed Set-Contact invalid-object recreation must confirm absence before New-MailContact"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock

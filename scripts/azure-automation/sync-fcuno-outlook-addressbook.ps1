@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.4"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.5"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -3253,6 +3253,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
         if (-not $removeIdentity) { throw "Managed contact recreation was blocked because the invalid object's immutable identity could not be verified. Original error: $updateError" }
         Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
         Renew-ExchangeSyncLockIfDue
+        Confirm-ExchangeMailContactDeletion $reread $email $sourceKey
       }
       Write-Warning ("Existing managed Exchange contact {0} is absent or narrowly confirmed invalid; recreating it. Original error: {1}" -f $email, $updateError)
       $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
