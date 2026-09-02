@@ -1,6 +1,14 @@
 import type { SpcSession } from "@/lib/spcAuth"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { formatSpcEnquiry, readSpcEnquiryMeta, type SpcEnquiryMeta } from "@/lib/spcEnquiryText"
+import {
+  addSpcHistoricalMatch,
+  firstPreviousSpcIdentityMatch,
+  spcVesselIdentityKeys,
+  type SpcHistoricalMatch,
+} from "@/lib/spcVesselIdentity"
+
+export { firstPreviousSpcIdentityMatch } from "@/lib/spcVesselIdentity"
 
 type EnquiryRow = {
   id: string
@@ -81,48 +89,6 @@ function dayStartIso(date = new Date()) {
   return new Date(`${hongKongDateKey(date)}T00:00:00+08:00`).toISOString()
 }
 
-function normalizedVessel(value: string | null | undefined) {
-  return String(value || "")
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/gi, " ")
-    .trim()
-    .toLowerCase()
-}
-
-function identityKeys(vesselName: string | null | undefined, notes: string | null | undefined) {
-  const meta = readSpcEnquiryMeta(notes)
-  const imo = String(meta.imo || "").replace(/\D/g, "")
-  const vessel = normalizedVessel(vesselName)
-  return [imo.length === 7 ? `imo:${imo}` : "", vessel ? `vessel:${vessel}` : ""].filter(Boolean)
-}
-
-export type SpcHistoricalMatch<T> = {
-  at: number
-  value: T
-}
-
-function addHistoricalMatch<T>(map: Map<string, SpcHistoricalMatch<T>[]>, keys: string[], match: SpcHistoricalMatch<T>) {
-  for (const key of keys) {
-    const matches = map.get(key) || []
-    matches.push(match)
-    map.set(key, matches)
-  }
-}
-
-export function firstPreviousSpcIdentityMatch<T>(
-  map: Map<string, SpcHistoricalMatch<T>[]>,
-  keys: string[],
-  before: string,
-) {
-  const beforeTime = Date.parse(before)
-  for (const key of keys) {
-    const candidates = [...(map.get(key) || [])].sort((left, right) => right.at - left.at)
-    const match = candidates.find((candidate) => candidate.at < beforeTime)
-    if (match) return match.value
-  }
-  return null
-}
-
 function fixtureResult(row: FixtureRow): SpcTodayPreviousFixture {
   return {
     date: row.fixture_date || row.completed_at,
@@ -192,20 +158,20 @@ export async function listSpcTodayEnquiries(session: SpcSession, request: Reques
 
   const fixtureByIdentity = new Map<string, SpcHistoricalMatch<SpcTodayPreviousFixture>[]>()
   ;((fixtureResultSet.data || []) as unknown as FixtureRow[]).forEach((row) => {
-    const keys = identityKeys(row.enquiry?.vessel_name || row.vessel_name, row.enquiry?.notes)
+    const keys = spcVesselIdentityKeys(row.enquiry?.vessel_name || row.vessel_name, row.enquiry?.notes)
     const at = Date.parse(row.completed_at || row.created_at || row.fixture_date || "")
-    if (Number.isFinite(at)) addHistoricalMatch(fixtureByIdentity, keys, { at, value: fixtureResult(row) })
+    if (Number.isFinite(at)) addSpcHistoricalMatch(fixtureByIdentity, keys, { at, value: fixtureResult(row) })
   })
 
   const lostByIdentity = new Map<string, SpcHistoricalMatch<SpcTodayPreviousLost>[]>()
   ;((lostResultSet.data || []) as EnquiryRow[]).forEach((row) => {
-    const keys = identityKeys(row.vessel_name, row.notes)
+    const keys = spcVesselIdentityKeys(row.vessel_name, row.notes)
     const at = Date.parse(readSpcEnquiryMeta(row.notes).outcomeAt || row.updated_at || row.created_at)
-    if (Number.isFinite(at)) addHistoricalMatch(lostByIdentity, keys, { at, value: lostResult(row) })
+    if (Number.isFinite(at)) addSpcHistoricalMatch(lostByIdentity, keys, { at, value: lostResult(row) })
   })
 
   return ((todayResult.data || []) as EnquiryRow[]).map<SpcTodayEnquiry>((row) => {
-    const keys = identityKeys(row.vessel_name, row.notes)
+    const keys = spcVesselIdentityKeys(row.vessel_name, row.notes)
     return {
       id: row.id,
       enquiryNumber: row.enquiry_number,

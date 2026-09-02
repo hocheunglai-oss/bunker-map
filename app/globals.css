@@ -3514,6 +3514,89 @@ body {
   margin: 0;
 }
 
+.spc-enquiry-entry-header {
+  min-height: 72px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.spc-enquiry-entry-header .spc-enquiry-heading-copy {
+  align-content: center;
+  flex: 0 0 auto;
+}
+
+.spc-vessel-history-summary {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 460px;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.spc-vessel-history-card {
+  min-width: min(250px, 100%);
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475467;
+  padding: 8px 10px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.spc-vessel-history-card.is-fixed {
+  border-color: #99d8b7;
+  background: #e8f7f1;
+  color: #006b4f;
+}
+
+.spc-vessel-history-card.is-lost,
+.spc-vessel-history-card.is-unavailable {
+  border-color: #f0b8c0;
+  background: #fff0ef;
+  color: #b42318;
+}
+
+.spc-vessel-history-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spc-vessel-history-label svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spc-vessel-history-label strong {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.035em;
+}
+
+.spc-vessel-history-records {
+  display: grid;
+  gap: 2px;
+  padding-left: 24px;
+}
+
+.spc-vessel-history-records span {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 .spc-enquiry-parser-pane,
 .spc-enquiry-details-pane {
   display: grid;
@@ -3651,14 +3734,51 @@ body {
 }
 
 .spc-enquiry-command-row button {
-  min-height: 34px;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   border: 1px solid var(--fc-admin-primary-button-bg);
   border-radius: 7px;
   background: var(--fc-admin-primary-button-bg);
   color: var(--fc-admin-primary-button-text);
   cursor: pointer;
-  font-size: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
   font-weight: 900;
+  letter-spacing: 0.015em;
+}
+
+.spc-enquiry-command-row .spc-enquiry-command-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spc-enquiry-command-row .spc-enquiry-command-button.is-ai {
+  border-color: #1683e8;
+  background: #e7f3ff;
+  color: #0a5bd3;
+  box-shadow: 0 4px 12px rgba(10, 91, 211, 0.12);
+}
+
+.spc-enquiry-command-row .spc-enquiry-command-button.is-report {
+  border-color: #d49b22;
+  background: #fff8e6;
+  color: #8a5a00;
+  box-shadow: 0 4px 12px rgba(138, 90, 0, 0.11);
+}
+
+.spc-enquiry-command-row .spc-enquiry-command-button.is-report.is-sent {
+  border-color: #7bc49c;
+  background: #e8f7f1;
+  color: #006b4f;
 }
 
 .spc-enquiry-command-row button:disabled {
@@ -3670,6 +3790,11 @@ body {
   background: linear-gradient(135deg, #0071e3, #005ec5) !important;
   color: #ffffff !important;
   box-shadow: 0 5px 14px rgba(0, 113, 227, 0.23);
+}
+
+.spc-enquiry-command-row button:focus-visible {
+  outline: 3px solid rgba(10, 132, 255, 0.36);
+  outline-offset: 2px;
 }
 
 .spc-preview-label-row {
@@ -9295,6 +9420,21 @@ body:has(.spc-statistics-page) .spc-main {
   .spc-enquiry-entry-panel,
   .spc-sent-enquiries-panel {
     height: auto;
+  }
+
+  .spc-enquiry-entry-header {
+    align-items: stretch;
+  }
+
+  .spc-vessel-history-summary {
+    width: 100%;
+    flex: 1 0 100%;
+    flex-direction: column;
+    margin-left: 0;
+  }
+
+  .spc-vessel-history-card {
+    width: 100%;
   }
 
   .spc-enquiry-entry-form {

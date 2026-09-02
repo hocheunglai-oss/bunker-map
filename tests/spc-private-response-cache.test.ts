@@ -31,6 +31,7 @@ test("sensitive SPC routes use the private response boundary on success and erro
     "../app/api/spc/password/route.ts",
     "../app/api/spc/audit-logs/route.ts",
     "../app/api/spc/users/route.ts",
+    "../app/api/spc/enquiry-history/route.ts",
     "../app/api/spc/chrome-extension/download/route.ts",
     "../app/api/spc/login/mfa/verify/route.ts",
     "../app/api/spc/login/mfa/cancel/route.ts",
@@ -61,7 +62,7 @@ test("sensitive SPC routes use the private response boundary on success and erro
   }
 
   assert.match(
-    routes[5],
+    routes[6],
     /"Cache-Control": "private, no-store"/,
     "the protected extension download itself should also be private and no-store",
   )

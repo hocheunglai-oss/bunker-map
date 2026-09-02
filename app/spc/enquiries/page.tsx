@@ -64,6 +64,27 @@ type EnquiriesResponse = {
   message?: string
 }
 
+type VesselHistoryResponse = {
+  fixed?: Array<{
+    id: string
+    date: string | null
+    supplier: string
+    supplierTrader: string
+  }>
+  lost?: Array<{
+    id: string
+    date: string
+    reason: string
+  }>
+  visibility?: {
+    fixtures: boolean
+    lost: boolean
+  }
+  message?: string
+}
+
+type VesselHistoryStatus = "idle" | "loading" | "loaded" | "failed"
+
 type EnquiryOutcome = "stem" | "lost" | "postpone" | "cancel"
 
 type DraftEnquiry = ParsedSpcEnquiry & {
@@ -182,6 +203,18 @@ function displayDate(value: string | null) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
+  }).format(date)
+}
+
+function displayHistoryDate(value: string | null) {
+  if (!value) return "DATE NOT SET"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   }).format(date)
 }
 
@@ -343,6 +376,67 @@ function recordLine(match: SpcEnquiry) {
   return parts.filter(Boolean).join(" · ")
 }
 
+function EnquiryCommandIcon({ kind }: { kind: "ai" | "report" | "send" | "sent" }) {
+  if (kind === "ai") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="m14.6 5.1 4.3 4.3L9.1 19.2H4.8v-4.3l9.8-9.8Z" />
+        <path d="M6 2.8v4.4M3.8 5h4.4M18.8 14.8v4.4M16.6 17h4.4" />
+      </svg>
+    )
+  }
+
+  if (kind === "report") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M5 21V4.2M5 5h11l-1.8 3L16 11H5" />
+      </svg>
+    )
+  }
+
+  if (kind === "sent") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="m5 12.5 4.2 4.2L19 7" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M3.8 11.2 19.1 4.1c.9-.4 1.8.5 1.4 1.4l-7.1 15.3c-.4.9-1.7.7-1.9-.3l-1.4-6.4-6.4-1.4c-1-.2-1.2-1.5-.3-1.9Z" />
+      <path d="m10.4 13.7 4.2-4.2" />
+    </svg>
+  )
+}
+
+function VesselHistoryIcon({ kind }: { kind: "fixed" | "lost" | "neutral" }) {
+  if (kind === "fixed") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8 12.2 2.6 2.6 5.6-6" />
+      </svg>
+    )
+  }
+
+  if (kind === "lost") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3.5 21 20H3L12 3.5Z" />
+        <path d="M12 9v5M12 17.2v.2" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m16.2 16.2 4.1 4.1M8.5 11h5" />
+    </svg>
+  )
+}
+
 function reportEnquiryError(error: unknown, fallback: string) {
   console.error(error instanceof Error ? error.message : fallback)
 }
@@ -392,10 +486,24 @@ export default function SpcEnquiriesPage() {
   const [parserAiTarget, setParserAiTarget] = useState<ParserReportDialog["context"] | "">("")
   const [parserAiMessage, setParserAiMessage] = useState("")
   const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
+  const [vesselHistory, setVesselHistory] = useState<VesselHistoryResponse>({ fixed: [], lost: [] })
+  const [vesselHistoryStatus, setVesselHistoryStatus] = useState<VesselHistoryStatus>("idle")
+  const [vesselHistoryLookupKey, setVesselHistoryLookupKey] = useState("")
   const enquiryLoadSequence = useRef(0)
+  const vesselHistoryLoadSequence = useRef(0)
 
   const canView = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "view")
   const canEdit = authenticated && canAccessSpcPage(permissions, "spc-buyer-enquiries", "edit")
+  const currentVesselHistoryLookupKey = `${draft.imo.replace(/\D/g, "")}|${normaliseVesselName(draft.vesselName)}`
+  const visibleVesselHistoryStatus =
+    vesselHistoryLookupKey === currentVesselHistoryLookupKey ? vesselHistoryStatus : "idle"
+  const showVesselHistorySummary =
+    visibleVesselHistoryStatus !== "idle" &&
+    !(
+      visibleVesselHistoryStatus === "loaded" &&
+      !vesselHistory.visibility?.fixtures &&
+      !vesselHistory.visibility?.lost
+    )
   const activeEnquiries = useMemo(
     () => sortByLatest(enquiries.filter((enquiry) => enquiry.status === "sent" && !enquiry.meta?.postponedAt)),
     [enquiries],
@@ -421,7 +529,6 @@ export default function SpcEnquiriesPage() {
     () => (reofferDraft ? missingDraftFields(reofferDraft) : new Set<DraftFieldKey>()),
     [reofferDraft],
   )
-  const draftPreviousMatches = useMemo(() => matchesForVesselName(draft.vesselName), [draft.vesselName, outcomeMatchesByVessel])
   const imoSearchUrl = useMemo(() => googleImoSearchUrl(draft), [draft])
   const cautionTerms = detectSpcCautionTerms(draft.rawText)
   const attentionTerms = detectAttentionTerms(draft.rawText).filter((term) => term !== "RMK")
@@ -488,6 +595,54 @@ export default function SpcEnquiriesPage() {
   useEffect(() => {
     void loadEnquiries()
   }, [loadEnquiries])
+
+  useEffect(() => {
+    const vesselName = draft.vesselName.trim()
+    const imo = draft.imo.replace(/\D/g, "")
+    const lookupKey = `${imo}|${normaliseVesselName(vesselName)}`
+    const canLookup = imo.length === 7 || normaliseVesselName(vesselName).length >= 3
+    const sequence = ++vesselHistoryLoadSequence.current
+    const resetTimer = window.setTimeout(() => {
+      if (sequence !== vesselHistoryLoadSequence.current) return
+      setVesselHistoryLookupKey(lookupKey)
+      setVesselHistory({ fixed: [], lost: [] })
+      setVesselHistoryStatus(canView && canLookup ? "loading" : "idle")
+    }, 0)
+
+    if (!canView || !canLookup) {
+      return () => window.clearTimeout(resetTimer)
+    }
+
+    const controller = new AbortController()
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ vesselName, imo })
+        const response = await fetch(`/api/spc/enquiry-history?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        })
+        const data = (await response.json()) as VesselHistoryResponse
+        if (!response.ok) throw new Error(data.message || "Failed to load vessel history.")
+        if (sequence !== vesselHistoryLoadSequence.current) return
+        setVesselHistoryLookupKey(lookupKey)
+        setVesselHistory(data)
+        setVesselHistoryStatus("loaded")
+      } catch (error) {
+        if (controller.signal.aborted || sequence !== vesselHistoryLoadSequence.current) return
+        reportEnquiryError(error, "Failed to load vessel history.")
+        setVesselHistoryLookupKey(lookupKey)
+        setVesselHistory({ fixed: [], lost: [] })
+        setVesselHistoryStatus("failed")
+      }
+    }, 300)
+
+    return () => {
+      window.clearTimeout(resetTimer)
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [canView, draft.imo, draft.vesselName])
 
   function dismissDraftMissingField(field: DraftFieldKey) {
     setDismissedDraftMissingFields((current) => new Set(current).add(field))
@@ -1049,11 +1204,62 @@ export default function SpcEnquiriesPage() {
     <SpcShell title="SPC NEW ENQUIRY">
       <div className="spc-enquiries-layout">
         <section className="spc-panel spc-enquiry-entry-panel">
-            <div className="spc-panel-header">
+            <div className="spc-panel-header spc-enquiry-entry-header">
               <div className="spc-enquiry-heading-copy">
                 <span>ENQUIRY WORKSPACE</span>
                 <h2>New Enquiry</h2>
               </div>
+              {showVesselHistorySummary ? (
+                <div className="spc-vessel-history-summary" role="status" aria-live="polite">
+                  {visibleVesselHistoryStatus === "loading" ? (
+                    <div className="spc-vessel-history-card is-neutral">
+                      <div className="spc-vessel-history-label"><VesselHistoryIcon kind="neutral" /><strong>CHECKING VESSEL HISTORY</strong></div>
+                    </div>
+                  ) : null}
+                  {visibleVesselHistoryStatus === "failed" ? (
+                    <div className="spc-vessel-history-card is-unavailable">
+                      <div className="spc-vessel-history-label"><VesselHistoryIcon kind="lost" /><strong>HISTORY CHECK UNAVAILABLE</strong></div>
+                    </div>
+                  ) : null}
+                  {visibleVesselHistoryStatus === "loaded" && (vesselHistory.fixed?.length || 0) > 0 ? (
+                    <div className="spc-vessel-history-card is-fixed">
+                      <div className="spc-vessel-history-label"><VesselHistoryIcon kind="fixed" /><strong>PREVIOUSLY FIXED</strong></div>
+                      <div className="spc-vessel-history-records">
+                        {vesselHistory.fixed?.slice(0, 3).map((record) => (
+                          <span key={record.id}>{[displayHistoryDate(record.date), record.supplier, record.supplierTrader].filter(Boolean).join(" · ")}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {visibleVesselHistoryStatus === "loaded" && (vesselHistory.lost?.length || 0) > 0 ? (
+                    <div className="spc-vessel-history-card is-lost">
+                      <div className="spc-vessel-history-label"><VesselHistoryIcon kind="lost" /><strong>PREVIOUSLY LOST</strong></div>
+                      <div className="spc-vessel-history-records">
+                        {vesselHistory.lost?.slice(0, 3).map((record) => (
+                          <span key={record.id}>{displayHistoryDate(record.date)} · {record.reason}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {visibleVesselHistoryStatus === "loaded" &&
+                  (vesselHistory.fixed?.length || 0) === 0 &&
+                  (vesselHistory.lost?.length || 0) === 0 &&
+                  (vesselHistory.visibility?.fixtures || vesselHistory.visibility?.lost) ? (
+                    <div className="spc-vessel-history-card is-neutral">
+                      <div className="spc-vessel-history-label">
+                        <VesselHistoryIcon kind="neutral" />
+                        <strong>
+                          {vesselHistory.visibility?.fixtures && vesselHistory.visibility?.lost
+                            ? "NO PREVIOUS FIXED / LOST RECORD"
+                            : vesselHistory.visibility?.fixtures
+                              ? "NO PREVIOUS FIXED RECORD"
+                              : "NO PREVIOUS LOST RECORD"}
+                        </strong>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <form onSubmit={sendEnquiry} className="spc-enquiry-entry-form" noValidate>
               <div className="spc-enquiry-parser-pane">
@@ -1135,16 +1341,23 @@ export default function SpcEnquiriesPage() {
                   })}
                 </div>
                 <div className="spc-enquiry-command-row">
-                  <button type="button" className="spc-blue-action" onClick={() => void runParserAi("new-enquiry")} disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}>AI FIX</button>
+                  <button type="button" className="spc-blue-action spc-enquiry-command-button is-ai" onClick={() => void runParserAi("new-enquiry")} disabled={!canEdit || !draft.rawText.trim() || parserAiStatus === "loading"}>
+                    <EnquiryCommandIcon kind="ai" />
+                    <span>AI FIX</span>
+                  </button>
                   <button
                     type="button"
-                    className="spc-blue-action"
+                    className={`spc-blue-action spc-enquiry-command-button is-report${reportButtonState === "new-enquiry" ? " is-sent" : ""}`}
                     onClick={openDraftParserReport}
                     disabled={!canEdit || !draft.rawText.trim() || Boolean(reportButtonState)}
                   >
-                    {reportButtonState === "new-enquiry" ? "SENT" : "REPORT"}
+                    <EnquiryCommandIcon kind={reportButtonState === "new-enquiry" ? "sent" : "report"} />
+                    <span>{reportButtonState === "new-enquiry" ? "SENT" : "REPORT"}</span>
                   </button>
-                  <button type="submit" className="spc-send-enquiry-button" disabled={saving || !canEdit}>{saving ? "Sending..." : "SEND"}</button>
+                  <button type="submit" className="spc-send-enquiry-button spc-enquiry-command-button is-send" disabled={saving || !canEdit}>
+                    <EnquiryCommandIcon kind="send" />
+                    <span>{saving ? "Sending..." : "SEND"}</span>
+                  </button>
                 </div>
                 {sendError ? <p className="spc-parser-report-error" role="alert">{sendError}</p> : null}
                 {parserAiMessage && parserAiTarget === "new-enquiry" ? <p className={parserAiStatus === "failed" ? "spc-parser-report-error" : "spc-parser-report-status"}>{parserAiMessage}</p> : null}
@@ -1163,7 +1376,6 @@ export default function SpcEnquiriesPage() {
                   <label className={shouldShowDraftMissing("fuel") ? "is-missing" : ""}><span>LSMGO</span><input value={draft.lsmgo} onChange={(event) => updateDraft("lsmgo", event.target.value)} disabled={!canEdit} inputMode="numeric" pattern="[0-9-]*" /></label>
                   <label className="spc-enquiry-remarks"><span>Remarks</span><input value={draft.remarks} onChange={(event) => updateDraft("remarks", event.target.value)} disabled={!canEdit} /></label>
                 </div>
-                {draftPreviousMatches.length > 0 ? <div className="spc-enquiry-match is-new-panel"><strong>RECORD</strong>{draftPreviousMatches.slice(0, 3).map((match) => <span key={match.id}>{recordLine(match)}</span>)}</div> : null}
               </div>
             </form>
           </section>

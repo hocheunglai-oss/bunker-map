@@ -24,6 +24,7 @@ const enquiriesPage = source("../app/spc/enquiries/page.tsx")
 const enquiriesRoute = source("../app/api/spc/enquiries/route.ts")
 const todayPage = source("../app/spc/today-enquiries/page.tsx")
 const todayLibrary = source("../lib/spcTodayEnquiries.ts")
+const vesselIdentityLibrary = source("../lib/spcVesselIdentity.ts")
 const todayRoute = source("../app/api/spc/today-enquiries/route.ts")
 
 test("lost reason defaults preserve the approved buyer and supplier dictionaries", () => {
@@ -110,10 +111,10 @@ test("Daily Briefing is restricted to supplier traders and admins", () => {
 
 test("Daily Briefing is chronological, matches IMO before vessel, and supports bulk copy", () => {
   assert.match(todayLibrary, /\.gte\("created_at", start\)[\s\S]*?\.order\("created_at", \{ ascending: true \}\)/)
-  assert.match(todayLibrary, /return \[imo\.length === 7 \? `imo:\$\{imo\}` : "", vessel \? `vessel:\$\{vessel\}` : ""\]/)
+  assert.match(vesselIdentityLibrary, /return \[cleanImo \? `imo:\$\{cleanImo\}` : "", vessel \? `vessel:\$\{vessel\}` : ""\]/)
   assert.match(todayLibrary, /previousFixture: firstPreviousSpcIdentityMatch\(fixtureByIdentity, keys, row\.created_at\)/)
   assert.match(todayLibrary, /previousLost: firstPreviousSpcIdentityMatch\(lostByIdentity, keys, row\.created_at\)/)
-  assert.match(todayLibrary, /candidate\.at < beforeTime/)
+  assert.match(vesselIdentityLibrary, /candidate\.at < beforeTime/)
   assert.doesNotMatch(todayLibrary, /\.lt\("created_at", start\)/)
   assert.match(todayPage, /COPY SELECTED/)
   assert.match(todayPage, /selectedEnquiries\.map\(\(enquiry\) => enquiry\.formattedText\)\.join\("\\n\\n"\)/)
