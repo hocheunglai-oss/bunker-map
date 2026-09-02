@@ -97,23 +97,29 @@ try {
 }
 Assert-True (-not (Test-ExchangeTemporaryServerError $unrelatedExchangeError)) "A real validation mismatch must never be suppressed as temporary"
 $script:temporaryRetryAttempts = 0
-$temporaryRetryResult = ""
+$temporaryRetryResult = @()
 Set-Item Function:Start-Sleep -Value { param($Seconds) }
 try {
-  $temporaryRetryResult = Invoke-ExchangeOperationWithTemporaryRetry `
-    "Temporary retry unit test" `
-    {
-      $script:temporaryRetryAttempts += 1
-      if ($script:temporaryRetryAttempts -eq 1) { throw $temporaryExchangeMessage }
-      return "recovered"
-    } `
-    3 `
-    0
+  $temporaryRetryResult = @(
+    Invoke-ExchangeOperationWithTemporaryRetry `
+      "Temporary retry unit test" `
+      {
+        $script:temporaryRetryAttempts += 1
+        if ($script:temporaryRetryAttempts -eq 1) {
+          Write-Output "discarded partial result"
+          throw $temporaryExchangeMessage
+        }
+        return "recovered"
+      } `
+      3 `
+      0
+  )
 } finally {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
 Assert-Equal 2 $script:temporaryRetryAttempts "A temporary Exchange error must retry once and stop after recovery"
-Assert-Equal "recovered" $temporaryRetryResult "A recovered temporary Exchange operation must return its successful result"
+Assert-Equal 1 $temporaryRetryResult.Count "A retry must discard every partial success-stream record emitted by a failed attempt"
+Assert-Equal "recovered" $temporaryRetryResult[0] "A recovered temporary Exchange operation must return only its successful result"
 $script:nonTemporaryRetryAttempts = 0
 $nonTemporaryRetryFailedClosed = $false
 try {
@@ -2955,10 +2961,16 @@ $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.
 Assert-True ($fullSyncFunctionText -match 'Get-ExchangeMailContactExactNoOpHint \$contact') "Full reconciliation must treat its bulk contact lookup only as a non-authoritative exact-no-op optimization"
 Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$noOpHint\s*$') "Full reconciliation may reuse a bulk contact hint only when the exact-no-op probe succeeds"
 $initialProjectionReleaseIndex = $fullSyncFunctionText.IndexOf('$exchangeMailContacts = $null')
+$initialGroupSnapshotIndex = $fullSyncFunctionText.IndexOf('"Managed group projection snapshot"')
 $finalContactSnapshotIndex = $fullSyncFunctionText.IndexOf('"Final managed contact snapshot"')
 $initialProjectionCollectIndex = $fullSyncFunctionText.IndexOf('[System.GC]::Collect()', $initialProjectionReleaseIndex)
 Assert-True ($initialProjectionReleaseIndex -ge 0 -and $initialProjectionReleaseIndex -lt $finalContactSnapshotIndex) "Full reconciliation must release its initial deserialized Exchange projection before materializing the independent final snapshot"
 Assert-True ($initialProjectionCollectIndex -gt $initialProjectionReleaseIndex -and $initialProjectionCollectIndex -lt $finalContactSnapshotIndex) "Full reconciliation must collect the released initial projection before the final Exchange snapshot"
+Assert-True ($initialGroupSnapshotIndex -gt $initialProjectionCollectIndex) "Full reconciliation must release and collect contact snapshots before materializing the group projection"
+$finalProjectionConfirmationIndex = $fullSyncFunctionText.IndexOf('Confirm-FinalExchangeProjection')
+$finalProjectionReleaseIndex = $fullSyncFunctionText.IndexOf('$finalMailContacts = $null', $finalProjectionConfirmationIndex)
+$membershipConfirmationIndex = $fullSyncFunctionText.IndexOf('Confirm-FinalExchangeGroupMemberships')
+Assert-True ($finalProjectionReleaseIndex -gt $finalProjectionConfirmationIndex -and $finalProjectionReleaseIndex -lt $membershipConfirmationIndex) "Full reconciliation must release final projection snapshots after exact verification and before membership certification"
 Assert-True ($upsertContactFunctionText -match 'Resolve-ExchangeMailContactFromLiveRead \$Contact') "A stale bulk contact hint that needs mutation must be replaced by a fresh targeted read with a narrow Graph fallback"
 Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
 $confirmContactDeletionFunctionText = (Get-Item Function:Confirm-ExchangeMailContactDeletion).ScriptBlock.ToString()
@@ -3366,9 +3378,10 @@ Assert-True $ambiguousGroupProfileFailedClosed "Two distinct strong group-profil
 
 $savedGroupRepairGetDistributionGroup = (Get-Item Function:Get-DistributionGroup).ScriptBlock
 try {
+  $script:groupRepairSnapshot = @($script:noOpDistributionGroup)
   Set-Item Function:Get-DistributionGroup -Value {
     param($Filter, $ResultSize, $Identity)
-    if (-not $Filter -and -not $Identity) { return @($script:noOpDistributionGroup) }
+    if (-not $Filter -and -not $Identity) { return @($script:groupRepairSnapshot) }
     return $null
   }
   $exactGroupRepairCandidate = Get-ExchangeDistributionGroupForRecreation `
@@ -3377,6 +3390,27 @@ try {
     "Exact managed group repair test"
   Assert-True ([object]::ReferenceEquals($script:noOpDistributionGroup, $exactGroupRepairCandidate)) "A Graph-invalid group may be repaired only after a fresh snapshot proves its exact immutable identity, source key, alias, and display name"
 
+  $sameDnReplacementGroup = [pscustomobject]@{
+    Identity = "replacement-unchanged-group"
+    Guid = "99999999-9999-4999-8999-999999999999"
+    ExternalDirectoryObjectId = "external-replacement-unchanged-group"
+    DistinguishedName = $script:noOpDistributionGroup.DistinguishedName
+    DisplayName = $script:noOpDistributionGroup.DisplayName
+    Alias = $script:noOpDistributionGroup.Alias
+    PrimarySmtpAddress = $script:noOpDistributionGroup.PrimarySmtpAddress
+    CustomAttribute1 = $script:noOpDistributionGroup.CustomAttribute1
+    CustomAttribute2 = $script:noOpDistributionGroup.CustomAttribute2
+  }
+  $script:groupRepairSnapshot = @($sameDnReplacementGroup)
+  $sameDnReplacementFailedClosed = $false
+  try {
+    Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Same-DN replacement group repair test" | Out-Null
+  } catch {
+    $sameDnReplacementFailedClosed = $_.Exception.Message -match "immutable identity"
+  }
+  Assert-True $sameDnReplacementFailedClosed "A same-DN replacement with a different stronger Exchange identity must never be accepted for destructive group recreation"
+
+  $script:groupRepairSnapshot = @($script:noOpDistributionGroup)
   $savedGroupRepairMarker = $script:noOpDistributionGroup.CustomAttribute1
   $script:noOpDistributionGroup.CustomAttribute1 = ""
   $unmanagedGroupRepairFailedClosed = $false
@@ -3388,6 +3422,7 @@ try {
   Assert-True $unmanagedGroupRepairFailedClosed "A distribution group without the FCUNO management marker must never enter destructive profile repair"
   $script:noOpDistributionGroup.CustomAttribute1 = $savedGroupRepairMarker
 } finally {
+  $script:groupRepairSnapshot = $null
   Set-Item Function:Get-DistributionGroup -Value $savedGroupRepairGetDistributionGroup
 }
 

@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.14"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.15"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -699,19 +699,28 @@ function Invoke-ExchangeOperationWithTemporaryRetry(
 ) {
   if (-not $Operation) { throw "$Label has no Exchange operation to run." }
   if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+  $collectBeforeAttempt = $false
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ($collectBeforeAttempt) {
+      # Collect only after leaving the previous catch scope, where its ErrorRecord
+      # can keep a failed remoting graph rooted. The operation output is buffered
+      # below so no partial snapshot can escape into the caller before a retry.
+      [System.GC]::Collect()
+      [System.GC]::WaitForPendingFinalizers()
+      [System.GC]::Collect()
+      $collectBeforeAttempt = $false
+    }
+    $attemptOutput = $null
     try {
-      return & $Operation
+      $attemptOutput = @(& $Operation)
+      return $attemptOutput
     } catch {
+      $attemptOutput = $null
       if (-not (Test-ExchangeTemporaryServerError $_) -or $attempt -ge $MaxAttempts) { throw }
       $message = Clean-Text $_.Exception.Message
       Write-Warning ("{0} received a temporary Microsoft Exchange error on attempt {1} of {2}; retrying without publishing a failure notice: {3}" -f $Label, $attempt, $MaxAttempts, $message)
       Renew-ExchangeSyncLockIfDue
-      # A failed Exchange remoting response can leave a partially deserialized
-      # object graph pending collection. Reclaim it before retrying so a bounded
-      # transient retry does not turn into a local deserialization OOM.
-      [System.GC]::Collect()
-      [System.GC]::WaitForPendingFinalizers()
+      $collectBeforeAttempt = $true
       if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
     }
   }
@@ -3275,6 +3284,17 @@ function Remove-ExchangeMailContactWithVerifiedAbsence($Existing, $Email, $Sourc
 
 function Get-ExchangeDistributionGroupForRecreation($Expected, $Group, $Label) {
   if (-not $Expected -or -not $Group) { throw "$Label has no expected Exchange distribution group." }
+  $identityProperty = ""
+  $identity = ""
+  foreach ($propertyName in @("Guid", "ExternalDirectoryObjectId", "DistinguishedName")) {
+    $propertyValue = Clean-Text $Expected.$propertyName
+    if ($propertyValue -and $propertyValue -ne "00000000-0000-0000-0000-000000000000") {
+      $identityProperty = $propertyName
+      $identity = $propertyValue
+      break
+    }
+  }
+  if (-not $identity) { throw "$Label has no immutable identity for an exact reread." }
   $sourceKey = Clean-Text $Group.SourceKey
   $alias = (Clean-Text $Group.Alias).ToLowerInvariant()
   $displayName = Clean-Text $Group.GroupName
@@ -3285,17 +3305,19 @@ function Get-ExchangeDistributionGroupForRecreation($Expected, $Group, $Label) {
   Renew-ExchangeSyncLockIfDue
   $groups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
-  $identityMatches = @($groups | Where-Object { Test-ExchangeObjectsShareImmutableIdentity $Expected $_ })
+  $identityMatches = @($groups | Where-Object {
+    (Clean-Text $_.$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)
+  })
   if ($identityMatches.Count -ne 1) {
-    throw "$Label immutable identity resolved to $($identityMatches.Count) Exchange distribution groups."
+    throw "$Label immutable identity '$identity' resolved to $($identityMatches.Count) Exchange distribution groups."
   }
   $candidate = $identityMatches[0]
   $sourceMatches = @($groups | Where-Object { (Clean-Text $_.CustomAttribute2) -eq $sourceKey })
   $aliasMatches = @($groups | Where-Object { (Clean-Text $_.Alias).ToLowerInvariant() -eq $alias })
-  if ($sourceMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $sourceMatches[0])) {
+  if ($sourceMatches.Count -ne 1 -or -not (Clean-Text $sourceMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange distribution group."
   }
-  if ($aliasMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $aliasMatches[0])) {
+  if ($aliasMatches.Count -ne 1 -or -not (Clean-Text $aliasMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label alias '$alias' no longer belongs uniquely to the immutable Exchange distribution group."
   }
   if (
@@ -6051,14 +6073,8 @@ function Invoke-FullExchangeSync {
   Renew-ExchangeSyncLockIfDue
   $exchangeContactProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Contact profile projection snapshot" { Get-Contact -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $exchangeDistributionGroups = @(Invoke-ExchangeOperationWithTemporaryRetry "Managed group projection snapshot" { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop })
-  Renew-ExchangeSyncLockIfDue
-  $exchangeGroupProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Group profile projection snapshot" { Get-Group -ResultSize Unlimited -ErrorAction Stop })
-  Renew-ExchangeSyncLockIfDue
   $mailContactLookup = New-ExchangeMailContactLookup $exchangeMailContacts
   $contactProfileLookup = New-ExchangeContactProfileLookup $exchangeContactProfiles
-  $distributionGroupLookup = New-ExchangeDistributionGroupLookup $exchangeDistributionGroups
-  $groupProfileLookup = New-ExchangeGroupProfileLookup $exchangeGroupProfiles
 
   $contactPosition = 0
   foreach ($contact in @($exchangeRows.Contacts)) {
@@ -6085,6 +6101,28 @@ function Invoke-FullExchangeSync {
     }
   }
 
+  # Contacts and groups are independent bulk-reconciliation phases. Release the
+  # contact remoting graphs before loading the group projection so the Azure
+  # Automation sandbox never retains both complete initial projections.
+  $exchangeMailContacts = $null
+  $exchangeContactProfiles = $null
+  $mailContactLookup = $null
+  $contactProfileLookup = $null
+  $noOpHint = $null
+  $existingHint = $null
+  $existingProfileHint = $null
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
+  [System.GC]::Collect()
+
+  Renew-ExchangeSyncLockIfDue -Force
+  $exchangeDistributionGroups = @(Invoke-ExchangeOperationWithTemporaryRetry "Managed group projection snapshot" { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop })
+  Renew-ExchangeSyncLockIfDue
+  $exchangeGroupProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Group profile projection snapshot" { Get-Group -ResultSize Unlimited -ErrorAction Stop })
+  Renew-ExchangeSyncLockIfDue
+  $distributionGroupLookup = New-ExchangeDistributionGroupLookup $exchangeDistributionGroups
+  $groupProfileLookup = New-ExchangeGroupProfileLookup $exchangeGroupProfiles
+
   $groupPosition = 0
   foreach ($group in @($exchangeRows.Groups)) {
     $groupPosition += 1
@@ -6106,18 +6144,13 @@ function Invoke-FullExchangeSync {
   }
 
   # The final certification intentionally takes a second independent Exchange
-  # projection. Release the first projection and its lookup indexes before that
-  # read; retaining both complete deserialized graphs can exhaust the Azure
-  # Automation sandbox while PSSerializer materializes the final response.
-  $exchangeMailContacts = $null
-  $exchangeContactProfiles = $null
+  # projection. Release the group phase and its lookup indexes before that read;
+  # retaining both graphs can exhaust the Azure Automation sandbox while
+  # PSSerializer materializes the final response.
   $exchangeDistributionGroups = $null
   $exchangeGroupProfiles = $null
-  $mailContactLookup = $null
-  $contactProfileLookup = $null
   $distributionGroupLookup = $null
   $groupProfileLookup = $null
-  $noOpHint = $null
   $existingHint = $null
   $existingProfileHint = $null
   $members = $null
@@ -6135,7 +6168,21 @@ function Invoke-FullExchangeSync {
   $finalGroupProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Final group profile snapshot" { Get-Group -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
   Confirm-FinalExchangeProjection $exchangeRows $finalMailContacts $finalContactProfiles $finalDistributionGroups $finalGroupProfiles $stats
+
+  # Projection verification has consumed the four authoritative snapshots.
+  # Release them before the per-group membership reads and final source reread.
+  $finalMailContacts = $null
+  $finalContactProfiles = $null
+  $finalDistributionGroups = $null
+  $finalGroupProfiles = $null
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
+  [System.GC]::Collect()
+
   Confirm-FinalExchangeGroupMemberships $exchangeRows $stats
+
+  $groupShadowPlaceholders = @($exchangeRows.SkippedInvalidContacts)
+  $exchangeRows = $null
 
   Renew-ExchangeSyncLockIfDue -Force
   $script:CanonicalExchangeRows = $null
@@ -6144,6 +6191,9 @@ function Invoke-FullExchangeSync {
   $latestProjectionFingerprint = Get-Sha256Hex $latestProjectionCanonicalJson
   $latestQueueHighWater = Get-ExchangeQueueHighWater
   $sourceDrift = @(Get-ExchangeSourceCertificationDrift $initialProjectionFingerprint $initialQueueHighWater $latestProjectionFingerprint $latestQueueHighWater)
+  $latestExchangeRows = $null
+  $latestProjectionCanonicalJson = $null
+  $script:CanonicalExchangeRows = $null
   if ($sourceDrift.Count -gt 0) {
     Add-FullSyncFailure `
       $stats `
@@ -6162,7 +6212,7 @@ function Invoke-FullExchangeSync {
     $sourceDrift | Out-Null
 
   $groupShadowPlaceholdersCertified = [bool]$stats.fullCertificationCommitted
-  foreach ($placeholder in @($exchangeRows.SkippedInvalidContacts)) {
+  foreach ($placeholder in $groupShadowPlaceholders) {
     Add-FullSyncGroupShadowPlaceholderDetail $stats $placeholder $groupShadowPlaceholdersCertified
   }
 
