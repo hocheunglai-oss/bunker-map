@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.16"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.17"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -531,20 +531,30 @@ function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKe
   $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
   $escapedEmail = Escape-ExchangeFilterValue $email
   Renew-ExchangeSyncLockIfDue
-  $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-  Renew-ExchangeSyncLockIfDue
   $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
-  if ($sourceMatches.Count -ne 1 -or -not (Clean-Text $sourceMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange mail contact."
-  }
+  # Query the authoritative source key last. The object returned by this later
+  # read is the only candidate allowed to authorize a destructive operation.
+  $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  Renew-ExchangeSyncLockIfDue
   if ($emailMatches.Count -ne 1 -or -not (Clean-Text $emailMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label email '$email' no longer belongs uniquely to the immutable Exchange mail contact."
+  }
+  if ($sourceMatches.Count -ne 1 -or -not (Clean-Text $sourceMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange mail contact."
   }
   if (-not (Test-ExchangeObjectsRepresentSameRecipient $sourceMatches[0] $emailMatches[0])) {
     throw "$Label source key '$sourceKey' and email '$email' no longer resolve to the same immutable Exchange mail contact."
   }
-  return $sourceMatches[0]
+  $candidate = $sourceMatches[0]
+  if (
+    (Clean-Text $candidate.CustomAttribute1) -ne $ManagedMarker -or
+    (Clean-Text $candidate.CustomAttribute2) -ne $sourceKey -or
+    (Normalize-Email (Get-RecipientEmail $candidate)) -ne $email
+  ) {
+    throw "$Label exact managed source/email ownership changed before recreation."
+  }
+  return $candidate
 }
 
 function Resolve-ExchangeMailContactFromLiveRead($Contact) {
@@ -3300,29 +3310,28 @@ function Get-ExchangeDistributionGroupForRecreation($Expected, $Group, $Label) {
     throw "$Label has no exact source-key, alias, and display-name ownership proof."
   }
 
+  $escapedAlias = Escape-ExchangeFilterValue $alias
   Renew-ExchangeSyncLockIfDue
+  $aliasMatches = @(Get-DistributionGroup -Filter "Alias -eq '$escapedAlias'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  Renew-ExchangeSyncLockIfDue
+  # Query the authoritative source key last and authorize recreation only from
+  # that latest object, never from the earlier alias observation.
   $sourceMatches = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
-  $aliasCandidate = $null
-  try {
-    $aliasCandidate = Get-DistributionGroup -Identity $alias -ErrorAction Stop
-  } catch {
-    if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+  if ($aliasMatches.Count -ne 1 -or -not (Clean-Text $aliasMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Label alias '$alias' no longer belongs uniquely to the immutable Exchange distribution group."
   }
-  Renew-ExchangeSyncLockIfDue
   if ($sourceMatches.Count -ne 1 -or -not (Clean-Text $sourceMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange distribution group."
   }
   $candidate = $sourceMatches[0]
-  if (-not $aliasCandidate -or -not (Clean-Text $aliasCandidate.$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "$Label alias '$alias' no longer belongs uniquely to the immutable Exchange distribution group."
-  }
   if (
     (Clean-Text $candidate.CustomAttribute1) -ne $ManagedMarker -or
     (Clean-Text $candidate.CustomAttribute2) -ne $sourceKey -or
+    (Clean-Text $candidate.Alias).ToLowerInvariant() -ne $alias -or
     (Clean-Text $candidate.DisplayName) -ne $displayName
   ) {
-    throw "$Label exact managed source/display ownership changed before recreation."
+    throw "$Label exact managed source/alias/display ownership changed before recreation."
   }
   return $candidate
 }

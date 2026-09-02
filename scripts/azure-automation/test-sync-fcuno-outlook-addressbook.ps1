@@ -2510,6 +2510,8 @@ $script:setContactError = ""
 $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
+$script:mailContactOwnershipProofOrder = @()
+$script:mailContactSourceProofOverride = $null
 $script:forceGraphMailContactFilterFallback = $false
 $script:forceGraphMailContactSnapshotFailure = $false
 $script:removeGraphErrorMode = ""
@@ -2531,10 +2533,13 @@ function Get-MailContact {
     return $script:noOpMailContact
   }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'") {
+    $script:mailContactOwnershipProofOrder += "source"
+    if ($script:mailContactSourceProofOverride) { return @($script:mailContactSourceProofOverride) }
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
     return @($script:liveMailContactSnapshot | Where-Object { (Clean-Text $_.CustomAttribute2) -eq "FCUNO_CONTACT:c-unchanged" })
   }
   if ($Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") {
+    $script:mailContactOwnershipProofOrder += "email"
     return @($script:liveMailContactSnapshot | Where-Object { (Normalize-Email (Get-RecipientEmail $_)) -eq "unchanged@example.com" })
   }
   if (-not $Filter -and -not $Identity) {
@@ -2773,8 +2778,30 @@ Assert-True ([object]::ReferenceEquals($script:noOpMailContact, $graphInvalidMai
 Assert-Equal 1 $script:unfilteredMailContactCalls "A Graph-invalid targeted lookup must take exactly one unfiltered fallback snapshot"
 $script:forceGraphMailContactFilterFallback = $false
 
+$script:mailContactOwnershipProofOrder = @()
 $strictImmutableReread = Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Strict immutable reread"
 Assert-True ([object]::ReferenceEquals($script:noOpMailContact, $strictImmutableReread)) "A destructive immutable reread must return the sole current email/source-key owner"
+Assert-Equal "email,source" ($script:mailContactOwnershipProofOrder -join ",") "A destructive contact proof must read canonical email first and authoritative source ownership last"
+$laterUnmanagedSourceContact = [pscustomobject]@{
+  Identity = $script:noOpMailContact.Identity
+  Guid = $script:noOpMailContact.Guid
+  ExternalDirectoryObjectId = $script:noOpMailContact.ExternalDirectoryObjectId
+  DistinguishedName = $script:noOpMailContact.DistinguishedName
+  ExternalEmailAddress = "SMTP:changed-after-email-proof@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = $script:noOpMailContact.CustomAttribute2
+}
+$script:mailContactSourceProofOverride = $laterUnmanagedSourceContact
+$script:mailContactOwnershipProofOrder = @()
+$laterContactOwnershipFailedClosed = $false
+try {
+  Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Later contact ownership change" | Out-Null
+} catch {
+  $laterContactOwnershipFailedClosed = $_.Exception.Message -match "managed source/email ownership changed"
+}
+Assert-True $laterContactOwnershipFailedClosed "A later source-key read whose canonical email changed must block destructive contact recreation"
+Assert-Equal "email,source" ($script:mailContactOwnershipProofOrder -join ",") "The latest contact ownership observation must remain the authoritative source-key read"
+$script:mailContactSourceProofOverride = $null
 $duplicateSourceOwner = [pscustomobject]@{
   Identity = "duplicate-source-owner"
   Guid = "22222222-2222-4222-8222-222222222222"
@@ -3379,12 +3406,21 @@ Assert-True $ambiguousGroupProfileFailedClosed "Two distinct strong group-profil
 $savedGroupRepairGetDistributionGroup = (Get-Item Function:Get-DistributionGroup).ScriptBlock
 try {
   $script:groupRepairSnapshot = @($script:noOpDistributionGroup)
+  $script:groupRepairOwnershipProofOrder = @()
+  $script:groupRepairSourceProofOverride = $null
   Set-Item Function:Get-DistributionGroup -Value {
     param($Filter, $ResultSize, $Identity)
+    if ($Filter -like "Alias -eq 'unchanged-group'") {
+      $script:groupRepairOwnershipProofOrder += "alias"
+      return @($script:groupRepairSnapshot | Where-Object { (Clean-Text $_.Alias).ToLowerInvariant() -eq "unchanged-group" })
+    }
     if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-unchanged'") {
+      $script:groupRepairOwnershipProofOrder += "source"
+      if ($script:groupRepairSourceProofOverride) { return @($script:groupRepairSourceProofOverride) }
       return @($script:groupRepairSnapshot | Where-Object { (Clean-Text $_.CustomAttribute2) -eq "FCUNO_GROUP:g-unchanged" })
     }
     if ($Identity -eq "unchanged-group") {
+      $script:groupRepairOwnershipProofOrder += "identity"
       return @($script:groupRepairSnapshot | Where-Object { (Clean-Text $_.Alias).ToLowerInvariant() -eq "unchanged-group" } | Select-Object -First 1)
     }
     return $null
@@ -3394,11 +3430,35 @@ try {
     $desiredNoOpGroup `
     "Exact managed group repair test"
   Assert-True ([object]::ReferenceEquals($script:noOpDistributionGroup, $exactGroupRepairCandidate)) "A Graph-invalid group may be repaired only after a fresh snapshot proves its exact immutable identity, source key, alias, and display name"
+  Assert-Equal "alias,source" ($script:groupRepairOwnershipProofOrder -join ",") "A destructive group proof must read exact alias first and authoritative source ownership last"
+
+  $laterUnmanagedSourceGroup = [pscustomobject]@{
+    Identity = $script:noOpDistributionGroup.Identity
+    Guid = $script:noOpDistributionGroup.Guid
+    ExternalDirectoryObjectId = $script:noOpDistributionGroup.ExternalDirectoryObjectId
+    DistinguishedName = $script:noOpDistributionGroup.DistinguishedName
+    DisplayName = $script:noOpDistributionGroup.DisplayName
+    Alias = "changed-after-alias-proof"
+    PrimarySmtpAddress = $script:noOpDistributionGroup.PrimarySmtpAddress
+    CustomAttribute1 = $ManagedMarker
+    CustomAttribute2 = $script:noOpDistributionGroup.CustomAttribute2
+  }
+  $script:groupRepairSourceProofOverride = $laterUnmanagedSourceGroup
+  $script:groupRepairOwnershipProofOrder = @()
+  $laterGroupOwnershipFailedClosed = $false
+  try {
+    Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Later group ownership change" | Out-Null
+  } catch {
+    $laterGroupOwnershipFailedClosed = $_.Exception.Message -match "managed source/alias/display ownership changed"
+  }
+  Assert-True $laterGroupOwnershipFailedClosed "A later source-key read whose canonical alias changed must block destructive group recreation"
+  Assert-Equal "alias,source" ($script:groupRepairOwnershipProofOrder -join ",") "The latest group ownership observation must remain the authoritative source-key read"
+  $script:groupRepairSourceProofOverride = $null
 
   $sameDnReplacementGroup = [pscustomobject]@{
     Identity = "replacement-unchanged-group"
     Guid = "99999999-9999-4999-8999-999999999999"
-    ExternalDirectoryObjectId = "external-replacement-unchanged-group"
+    ExternalDirectoryObjectId = $script:noOpDistributionGroup.ExternalDirectoryObjectId
     DistinguishedName = $script:noOpDistributionGroup.DistinguishedName
     DisplayName = $script:noOpDistributionGroup.DisplayName
     Alias = $script:noOpDistributionGroup.Alias
@@ -3411,7 +3471,7 @@ try {
   try {
     Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Same-DN replacement group repair test" | Out-Null
   } catch {
-    $sameDnReplacementFailedClosed = $_.Exception.Message -match "(immutable identity|source key.*no longer belongs uniquely)"
+    $sameDnReplacementFailedClosed = $_.Exception.Message -match "no longer belongs uniquely"
   }
   Assert-True $sameDnReplacementFailedClosed "A same-DN replacement with a different stronger Exchange identity must never be accepted for destructive group recreation"
 
@@ -3422,12 +3482,13 @@ try {
   try {
     Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Unmanaged group repair test" | Out-Null
   } catch {
-    $unmanagedGroupRepairFailedClosed = $_.Exception.Message -match "managed source/display ownership changed"
+    $unmanagedGroupRepairFailedClosed = $_.Exception.Message -match "managed source/alias/display ownership changed"
   }
   Assert-True $unmanagedGroupRepairFailedClosed "A distribution group without the FCUNO management marker must never enter destructive profile repair"
   $script:noOpDistributionGroup.CustomAttribute1 = $savedGroupRepairMarker
 } finally {
   $script:groupRepairSnapshot = $null
+  $script:groupRepairSourceProofOverride = $null
   Set-Item Function:Get-DistributionGroup -Value $savedGroupRepairGetDistributionGroup
 }
 
