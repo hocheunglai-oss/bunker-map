@@ -2634,6 +2634,7 @@ Assert-True (-not (Test-ExchangeManagedContactOwnershipTransferRequired $orphane
 $orphanedManagedEmailOwner.CustomAttribute1 = $ManagedMarker
 $orphanedManagedEmailOwner.CustomAttribute2 = $desiredNoOpContact.SourceKey
 Assert-True (-not (Test-ExchangeManagedContactOwnershipTransferRequired $orphanedManagedEmailOwner $desiredNoOpContact)) "A managed contact already owned by the canonical FCUNO source must not be recreated"
+Assert-True (Test-ExchangeRecreateEligibleError "Required field ExternalDirectoryObjectId was not returned from Graph API.") "An Exchange managed contact whose Graph profile is invalid must be eligible for exact verified recreation"
 
 $legitimateDuplicateContact = [pscustomobject]@{
   DisplayName = "Newest"
@@ -2770,9 +2771,11 @@ $upsertContactFunctionText = (Get-Item Function:Upsert-ExchangeMailContact).Scri
 $managedTransferDecisionIndex = $upsertContactFunctionText.IndexOf('$managedOwnershipTransfer = Test-ExchangeManagedContactOwnershipTransferRequired')
 $managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity')
 $liveProfileResolutionIndex = $upsertContactFunctionText.IndexOf('Resolve-ExchangeContactProfileForMailContact $existing')
+$profileResolutionRecreationIndex = $upsertContactFunctionText.IndexOf('Managed contact recreation after profile-resolution failure')
 Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
 Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
 Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A stale managed owner must be deleted and recreated before Graph contact-profile resolution"
+Assert-True ($profileResolutionRecreationIndex -gt $liveProfileResolutionIndex) "A managed Graph-profile failure must enter the exact verified recreation path"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock

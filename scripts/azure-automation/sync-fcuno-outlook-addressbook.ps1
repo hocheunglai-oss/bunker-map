@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.2"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.3"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -3116,7 +3116,7 @@ function Get-FullGroupMutationFieldChanges($Existing, $Profile, $Group, [bool]$C
 
 function Test-ExchangeRecreateEligibleError($Message) {
   $text = Clean-Text $Message
-  return $text -match "(?i)(ManagementObjectNotFoundException|object[^.]*could not be found|object[^.]*couldn't be found|object[^.]*does not exist|invalid (recipient )?object|recipient object is invalid)"
+  return $text -match "(?i)(ManagementObjectNotFoundException|object[^.]*could not be found|object[^.]*couldn't be found|object[^.]*does not exist|invalid (recipient )?object|recipient object is invalid|required field ExternalDirectoryObjectId was not returned from Graph API)"
 }
 
 function Test-ExchangeManagedContactOwnershipTransferRequired($Existing, $Contact) {
@@ -3187,7 +3187,37 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     $ExistingProfileHint = $correlatedProfileHint
   }
   if ($existing -and -not $ExistingProfileHint) {
-    $ExistingProfileHint = Resolve-ExchangeContactProfileForMailContact $existing "Exchange contact $email" 1
+    try {
+      $ExistingProfileHint = Resolve-ExchangeContactProfileForMailContact $existing "Exchange contact $email" 1
+    } catch {
+      $profileResolutionError = Clean-Text $_.Exception.Message
+      if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $profileResolutionError)) { throw }
+
+      Renew-ExchangeSyncLockIfDue
+      $rereadMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+      Renew-ExchangeSyncLockIfDue
+      if ($rereadMatches.Count -ne 1) {
+        throw "Managed contact recreation after profile-resolution failure was blocked because source key $sourceKey resolved to $($rereadMatches.Count) objects. Original error: $profileResolutionError"
+      }
+      $reread = $rereadMatches[0]
+      if (-not (Test-ExchangeObjectsShareImmutableIdentity $existing $reread)) {
+        throw "Managed contact recreation after profile-resolution failure was blocked because source-key ownership changed. Original error: $profileResolutionError"
+      }
+      if ((Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or (Normalize-Email (Get-RecipientEmail $reread)) -ne $email) {
+        throw "Managed contact recreation after profile-resolution failure was blocked because the exact managed email projection changed. Original error: $profileResolutionError"
+      }
+      $removeIdentity = Get-ExchangeStrongCommandIdentity $reread
+      if (-not $removeIdentity) {
+        throw "Managed contact recreation after profile-resolution failure was blocked because the invalid object's immutable identity could not be verified. Original error: $profileResolutionError"
+      }
+      Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
+      Renew-ExchangeSyncLockIfDue
+      Confirm-ExchangeMailContactDeletion $reread $email $sourceKey
+      Write-Warning ("Recreating managed Exchange contact {0} because its authoritative profile cannot be resolved. Original error: {1}" -f $email, $profileResolutionError)
+      $existing = $null
+      $ExistingProfileHint = $null
+      $managedOwnershipTransfer = $true
+    }
   }
   $fullMutationAction = ""
   if ($existing -and $SkipNoOpWrites -and (Test-ExchangeMailContactMatches $existing $Contact $ExistingProfileHint)) {
