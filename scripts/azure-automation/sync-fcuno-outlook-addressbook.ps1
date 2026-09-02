@@ -5,7 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ManagedMarker = "FCUNO_SHARED_ADDRESSBOOK"
-$DefaultExchangeOnlineManagementVersion = "3.4.0"
+$LegacyExchangeOnlineManagementVersion = "3.4.0"
+$PowerShell74ExchangeOnlineManagementVersion = "3.9.2"
+$DefaultExchangeOnlineManagementVersion = "3.10.1"
 $CanonicalExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
@@ -41,10 +43,13 @@ function Get-OptionalAutomationSetting($Name) {
 function Get-ExchangeOnlineManagementImportVersion {
   $configuredVersion = Clean-Text (Get-OptionalAutomationSetting "EXCHANGE_ONLINE_MANAGEMENT_VERSION")
   if ($configuredVersion) { return $configuredVersion }
-  if ($PSVersionTable.PSVersion.Major -eq 7 -and $PSVersionTable.PSVersion -lt [version]"7.4.0") {
-    return $DefaultExchangeOnlineManagementVersion
+  if ($PSVersionTable.PSVersion -lt [version]"7.4.0") {
+    return $LegacyExchangeOnlineManagementVersion
   }
-  return ""
+  if ($PSVersionTable.PSVersion -lt [version]"7.6.0") {
+    return $PowerShell74ExchangeOnlineManagementVersion
+  }
+  return $DefaultExchangeOnlineManagementVersion
 }
 
 function Import-ExchangeOnlineManagementModule {
@@ -66,7 +71,7 @@ function Import-ExchangeOnlineManagementModule {
     Import-Module -Name ExchangeOnlineManagement -Force -ErrorAction Stop
   } catch {
     if ($requiredVersion) {
-      throw "Could not import ExchangeOnlineManagement. The runbook is using PowerShell $($PSVersionTable.PSVersion), so this script expects ExchangeOnlineManagement $requiredVersion. Import that exact module version into the Automation account for this runtime, or move the runbook to PowerShell 7.4 and import a current ExchangeOnlineManagement module. Also upload PowerShellGet and PackageManagement for ExchangeOnlineManagement 3.x in Azure Automation. Original error: $($_.Exception.Message)"
+      throw "Could not import ExchangeOnlineManagement. The runbook is using PowerShell $($PSVersionTable.PSVersion), so this script expects ExchangeOnlineManagement $requiredVersion. Import that exact module version into the Automation runtime, using PowerShell 7.6 with ExchangeOnlineManagement 3.10.1 for the current FCUNO worker. Also upload PowerShellGet and PackageManagement for ExchangeOnlineManagement 3.x in Azure Automation. Original error: $($_.Exception.Message)"
     }
     throw "Could not import ExchangeOnlineManagement. Import ExchangeOnlineManagement, PowerShellGet, and PackageManagement into the Automation account for this runtime. Original error: $($_.Exception.Message)"
   }
