@@ -7,11 +7,12 @@ const fixturesPage = readFileSync(new URL("../app/spc/fixtures/page.tsx", import
 const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
 
 test("fixture search matches requested fields without case or punctuation sensitivity", () => {
-  const values = ["LANA-SG", "OTTO LAI-HK", "CHINA STEEL BRILLIANCE", "BP MARINE"]
+  const values = ["LANA-SG", "OTTO LAI-HK", "CHINA STEEL BRILLIANCE", "9730878", "BP MARINE"]
 
   assert.equal(matchesSpcFixtureSearch("lana", values), true)
   assert.equal(matchesSpcFixtureSearch("otto hk", values), true)
   assert.equal(matchesSpcFixtureSearch("china-steel", values), true)
+  assert.equal(matchesSpcFixtureSearch("9730878", values), true)
   assert.equal(matchesSpcFixtureSearch("bp marine", values), true)
   assert.equal(matchesSpcFixtureSearch("lana china bp", values), true)
   assert.equal(matchesSpcFixtureSearch("michelle", values), false)
@@ -37,12 +38,13 @@ test("fixtures page shows one simple toolbar search and applies it to both secti
   assert.match(styles, /\.spc-fixture-search-input\s*\{[^}]*width:\s*min\(320px, calc\(100% - 100px\)\)/)
 })
 
-test("fixture search is limited to traders, vessel, and supplier values", () => {
+test("fixture search is limited to traders, vessel, IMO, and supplier values", () => {
   const searchBlock = fixturesPage.match(/return matchesSpcFixtureSearch\(fixtureSearchQuery, \[([\s\S]*?)\n\s*\]\)/)?.[1] || ""
 
   assert.match(searchBlock, /supplierTrader/)
   assert.match(searchBlock, /buyerTrader/)
   assert.match(searchBlock, /vesselName/)
+  assert.match(searchBlock, /vesselImo/)
   assert.match(searchBlock, /supplierSearchValues\(fixture\.supplierName\)/)
   assert.match(searchBlock, /supplierSearchValues\(draft\.supplierName\)/)
   assert.doesNotMatch(searchBlock, /fixtureDate|earliestEta|account|price|barging/)

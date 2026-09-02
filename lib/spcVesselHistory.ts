@@ -26,6 +26,7 @@ type HistoryFixtureRow = {
   fixture_status: string
   fixture_date: string | null
   vessel_name: string | null
+  vessel_imo: string | null
   supplier_name: string | null
   supplier_trader_display_name: string | null
   completed_at: string | null
@@ -74,6 +75,7 @@ const FIXTURE_SELECT = `
   fixture_status,
   fixture_date,
   vessel_name,
+  vessel_imo,
   supplier_name,
   supplier_trader_display_name,
   completed_at,
@@ -162,6 +164,7 @@ async function listCandidateEnquiries(
 async function listCandidateFixtures(
   supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
   vesselName: string,
+  imo: string,
   enquiryIds: string[],
 ) {
   const namePattern = vesselSearchPattern(vesselName)
@@ -177,6 +180,22 @@ async function listCandidateFixtures(
             .select(FIXTURE_SELECT)
             .eq("fixture_status", "completed")
             .ilike("vessel_name", namePattern)
+            .order("completed_at", { ascending: false, nullsFirst: false })
+            .order("id", { ascending: true })
+            .range(from, to)
+          return {
+            data: (result.data || []) as unknown as HistoryFixtureRow[],
+            error: result.error,
+          }
+        })
+      : Promise.resolve([] as HistoryFixtureRow[]),
+    imo
+      ? collectCandidatePages<HistoryFixtureRow>(async (from, to) => {
+          const result = await supabase
+            .from("spc_fixtures")
+            .select(FIXTURE_SELECT)
+            .eq("fixture_status", "completed")
+            .eq("vessel_imo", imo)
             .order("completed_at", { ascending: false, nullsFirst: false })
             .order("id", { ascending: true })
             .range(from, to)
@@ -236,14 +255,14 @@ export async function listSpcVesselHistory(
   )
 
   const fixtures = visibility.fixtures
-    ? await listCandidateFixtures(supabase, vesselName, matchingEnquiries.map((row) => row.id))
+    ? await listCandidateFixtures(supabase, vesselName, imo, matchingEnquiries.map((row) => row.id))
     : []
 
   const fixed = fixtures
     .filter((row) => {
-      const keys = spcVesselIdentityKeys(
-        row.enquiry?.vessel_name || row.vessel_name,
-        row.enquiry?.notes,
+      const keys = spcVesselIdentityKeysFromValues(
+        row.vessel_name || row.enquiry?.vessel_name,
+        row.vessel_imo,
       )
       return spcVesselIdentitiesMatch(targetKeys, keys)
     })

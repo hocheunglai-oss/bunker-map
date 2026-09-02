@@ -35,6 +35,7 @@ const lostRecordColumnWidths = [
   116, // date
   128, // buyer trader
   230, // vessel
+  90, // IMO
   136, // ETA
   190, // buyer reason
   228, // supplier reason
@@ -42,6 +43,7 @@ const lostRecordColumnWidths = [
   82, // action
 ] as const
 
+const lostRecordColumnSpan = lostRecordColumnWidths.length
 const lostRecordTableWidth = lostRecordColumnWidths.reduce((total, width) => total + width, 0)
 
 function displayDate(value: string | null | undefined) {
@@ -239,6 +241,7 @@ export default function SpcLostRecordPage() {
                 <th>DATE</th>
                 <th>BUYER TRADER</th>
                 <th>VESSEL NAME</th>
+                <th>IMO</th>
                 <th>ETA</th>
                 <th>BUYER LOST REASON</th>
                 <th>SUPPLIER LOST REASON</th>
@@ -248,11 +251,11 @@ export default function SpcLostRecordPage() {
             </thead>
             <tbody>
               <tr className="spc-fixture-section-row">
-                <td colSpan={8}>LOST RECORD</td>
+                <td colSpan={lostRecordColumnSpan}>LOST RECORD</td>
               </tr>
               {message ? (
                 <tr className="spc-fixture-status-row is-error">
-                  <td colSpan={8}>{message.toUpperCase()}</td>
+                  <td colSpan={lostRecordColumnSpan}>{message.toUpperCase()}</td>
                 </tr>
               ) : null}
               {tableRows.map((enquiry) => {
@@ -265,6 +268,7 @@ export default function SpcLostRecordPage() {
                     <td>{displayDate(enquiry.meta?.outcomeAt || enquiry.updatedAt || enquiry.createdAt)}</td>
                     <td>{enquiry.createdByDisplayName || "-"}</td>
                     <td title={enquiry.formattedText}><strong>{enquiry.vesselName || enquiry.title || "-"}</strong></td>
+                    <td>{enquiry.meta?.imo || "-"}</td>
                     <td>{enquiry.meta?.eta || enquiry.deliveryDate || "-"}</td>
                     <td title={enquiry.meta?.lostReason || "UNKNOWN"}>{enquiry.meta?.lostReason || "UNKNOWN"}</td>
                     <td className="spc-lost-record-editor-cell">
@@ -296,7 +300,7 @@ export default function SpcLostRecordPage() {
                 )
               })}
               {!loading && enquiries.length === 0 ? (
-                <tr className="spc-fixture-empty-row"><td colSpan={8}>No lost enquiries yet.</td></tr>
+                <tr className="spc-fixture-empty-row"><td colSpan={lostRecordColumnSpan}>No lost enquiries yet.</td></tr>
               ) : null}
             </tbody>
           </table>

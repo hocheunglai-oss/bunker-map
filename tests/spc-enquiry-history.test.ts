@@ -13,8 +13,12 @@ function source(path: string) {
 const historyRoute = source("../app/api/spc/enquiry-history/route.ts")
 const historyLibrary = source("../lib/spcVesselHistory.ts")
 const enquiriesPage = source("../app/spc/enquiries/page.tsx")
+const fixturesPage = source("../app/spc/fixtures/page.tsx")
+const fixturesLibrary = source("../lib/spcFixtures.ts")
 const globalStyles = source("../app/globals.css")
 const techStack = source("../app/spc/techstack/page.tsx")
+const fixtureImoMigration = source("../supabase/migrations/20260902044945_add_spc_fixture_vessel_imo.sql")
+const baselineSchema = source("../supabase/spc_schema.sql")
 
 test("vessel history uses IMO first and normalized vessel fallback for legacy fixtures", () => {
   const target = spcVesselIdentityKeysFromValues("Cabo-Fuji", "9730878")
@@ -57,6 +61,23 @@ test("history reads completed fixtures and lost enquiries instead of the current
   assert.match(historyLibrary, /\.range\(from, to\)/)
   assert.doesNotMatch(historyLibrary, /\.limit\(100\)/)
   assert.doesNotMatch(enquiriesPage, /draftPreviousMatches/)
+})
+
+test("future fixtures snapshot IMO while legacy fixtures remain on vessel-name fallback", () => {
+  for (const sql of [fixtureImoMigration, baselineSchema]) {
+    assert.match(sql, /vessel_imo text/)
+    assert.match(sql, /vessel_imo is null or vessel_imo ~ '\^\[0-9\]\{7\}\$'/)
+    assert.match(sql, /spc_fixtures_vessel_imo_idx/)
+  }
+  assert.doesNotMatch(fixtureImoMigration, /\bupdate\s+public\.spc_fixtures\b/i)
+  assert.match(fixturesLibrary, /vessel_imo: cleanSpcImo\(meta\.imo \|\| parsed\.imo\) \|\| existingFixture\?\.vessel_imo \|\| null/)
+  assert.match(fixturesLibrary, /vesselImo: row\.vessel_imo/)
+  assert.match(historyLibrary, /\.eq\("vessel_imo", imo\)/)
+  assert.match(historyLibrary, /spcVesselIdentityKeysFromValues\([\s\S]*?row\.vessel_imo,[\s\S]*?\)/)
+  assert.doesNotMatch(historyLibrary, /row\.vessel_imo \|\| readSpcEnquiryMeta/)
+  assert.match(fixturesPage, /<th>VESSEL<\/th>[\s\S]*?<th>IMO<\/th>/)
+  assert.match(fixturesPage, /<td>\{fixture\.vesselImo \|\| "-"\}<\/td>/)
+  assert.match(techStack, /FIXTURE IMO SNAPSHOT/)
 })
 
 test("new enquiry debounces and cancels stale vessel-history lookups", () => {

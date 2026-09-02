@@ -7,6 +7,7 @@ import {
 } from "@/lib/spcEnquiryText"
 import { displaySupplierName, supplierKey } from "@/lib/spcSupplierKeys"
 import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
+import { cleanSpcImo } from "@/lib/spcVesselIdentity"
 
 export type SpcFixtureStatus = "pending" | "completed" | "cancelled"
 
@@ -27,6 +28,7 @@ export type SpcFixture = {
   commission: string | null
   earliestEta: string | null
   vesselName: string | null
+  vesselImo: string | null
   hsfo: string | null
   vlsfo: string | null
   lsmgo: string | null
@@ -92,6 +94,7 @@ type SpcFixtureRow = {
   commission: string | null
   earliest_eta: string | null
   vessel_name: string | null
+  vessel_imo: string | null
   hsfo: string | null
   vlsfo: string | null
   lsmgo: string | null
@@ -388,6 +391,7 @@ function mapFixture(row: SpcFixtureRow): SpcFixture {
     commission: row.commission,
     earliestEta: row.earliest_eta,
     vesselName: row.vessel_name,
+    vesselImo: row.vessel_imo,
     hsfo: row.hsfo,
     vlsfo: row.vlsfo,
     lsmgo: row.lsmgo,
@@ -451,12 +455,13 @@ export async function ensurePendingSpcFixtureForEnquiry(
 
   const { data: existing, error: existingError } = await supabase
     .from("spc_fixtures")
-    .select("id, fixture_status")
+    .select("id, fixture_status, vessel_imo")
     .eq("enquiry_id", enquiry.id)
     .maybeSingle()
 
   if (existingError) throw existingError
-  if ((existing as { fixture_status?: string } | null)?.fixture_status === "completed") return
+  const existingFixture = existing as { fixture_status?: string; vessel_imo?: string | null } | null
+  if (existingFixture?.fixture_status === "completed") return
 
   const initialSupplierName = normalizeSupplierField(meta.fixtureSupplier || enquiry.supplier_name)
   const initialPrimarySupplier = primarySupplierName(initialSupplierName)
@@ -474,6 +479,7 @@ export async function ensurePendingSpcFixtureForEnquiry(
     account: buyerTrader?.office || null,
     earliest_eta: optionalString(meta.eta || parsed.eta || enquiry.delivery_date),
     vessel_name: optionalString(enquiry.vessel_name || parsed.vesselName || enquiry.title),
+    vessel_imo: cleanSpcImo(meta.imo || parsed.imo) || existingFixture?.vessel_imo || null,
     hsfo: optionalString(meta.hsfo || parsed.hsfo || extractInitialFuel(text, ["hsfo", "ifo"])),
     vlsfo: optionalString(meta.vlsfo || parsed.vlsfo || extractInitialFuel(text, ["vlsfo", "lsfo"])),
     lsmgo: optionalString(meta.lsmgo || parsed.lsmgo || extractInitialFuel(text, ["lsmgo", "mgo"])),

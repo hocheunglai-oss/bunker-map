@@ -26,6 +26,7 @@ type SpcFixture = {
   commission: string | null
   earliestEta: string | null
   vesselName: string | null
+  vesselImo: string | null
   hsfo: string | null
   vlsfo: string | null
   lsmgo: string | null
@@ -101,6 +102,7 @@ const fixtureColumnWidths = [
   104, // account
   226, // ETA
   220, // vessel
+  90, // IMO
   97, // HSFO
   97, // VLSFO
   97, // LSMGO
@@ -516,6 +518,7 @@ export default function SpcFixturesPage() {
       traderCode(buyerTrader, buyerTraderDisplay),
       fixture.vesselName,
       draft.vesselName,
+      fixture.vesselImo,
       ...supplierSearchValues(fixture.supplierName),
       ...supplierSearchValues(draft.supplierName),
     ])
@@ -1183,6 +1186,7 @@ export default function SpcFixturesPage() {
             <td>{accountSelect(fixture, draft, editing)}</td>
             <td>{etaEditor(fixture, draft, editing)}</td>
             <td><strong>{staticOrInput(fixture, draft, "vesselName", editing)}</strong></td>
+            <td>{fixture.vesselImo || "-"}</td>
             {fuelColumns.map(({ key }) => (
               <td key={key}>
                 {fuelRow.key === key || (!fuelRow.key && editing)
@@ -1240,6 +1244,7 @@ export default function SpcFixturesPage() {
                 <th>ACCT</th>
                 <th>ETA</th>
                 <th>VESSEL</th>
+                <th>IMO</th>
                 <th>HSFO</th>
                 <th>VLSFO</th>
                 <th>LSMGO</th>

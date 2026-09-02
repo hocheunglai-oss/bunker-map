@@ -322,6 +322,8 @@ create table if not exists public.spc_fixtures (
   commission text,
   earliest_eta text,
   vessel_name text,
+  vessel_imo text
+    check (vessel_imo is null or vessel_imo ~ '^[0-9]{7}$'),
   hsfo text,
   vlsfo text,
   lsmgo text,
@@ -342,11 +344,18 @@ create table if not exists public.spc_fixtures (
     foreign key (buyer_trader_user_id) references public.spc_users(id) on delete set null
 );
 
+comment on column public.spc_fixtures.vessel_imo is
+'IMO snapshot copied from the enquiry when the fixture is created; legacy fixtures remain null.';
+
 create unique index if not exists spc_fixtures_enquiry_id_key
 on public.spc_fixtures(enquiry_id);
 
 create index if not exists spc_fixtures_status_created_idx
 on public.spc_fixtures(fixture_status, created_at desc);
+
+create index if not exists spc_fixtures_vessel_imo_idx
+on public.spc_fixtures(vessel_imo)
+where vessel_imo is not null;
 
 create index if not exists spc_fixtures_supplier_key_idx
 on public.spc_fixtures(supplier_key);

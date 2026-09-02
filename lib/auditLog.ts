@@ -335,6 +335,7 @@ const FIELD_LABELS: Record<string, string> = {
   assigned_to: "assigned to",
   enquiry_number: "enquiry number",
   vessel_name: "vessel name",
+  vessel_imo: "vessel IMO",
   supplier_name: "supplier",
   bdn_entries: "BDN rows",
   contact: "contact",

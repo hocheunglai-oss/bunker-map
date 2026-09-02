@@ -5,6 +5,7 @@ import {
   addSpcHistoricalMatch,
   firstPreviousSpcIdentityMatch,
   spcVesselIdentityKeys,
+  spcVesselIdentityKeysFromValues,
   type SpcHistoricalMatch,
 } from "@/lib/spcVesselIdentity"
 
@@ -34,6 +35,7 @@ type FixtureRow = {
   supplier_trader_display_name: string
   buyer_trader_display_name: string
   vessel_name: string | null
+  vessel_imo: string | null
   supplier_name: string | null
   price: string | null
   barging: string | null
@@ -134,6 +136,7 @@ export async function listSpcTodayEnquiries(session: SpcSession, request: Reques
         supplier_trader_display_name,
         buyer_trader_display_name,
         vessel_name,
+        vessel_imo,
         supplier_name,
         price,
         barging,
@@ -158,7 +161,10 @@ export async function listSpcTodayEnquiries(session: SpcSession, request: Reques
 
   const fixtureByIdentity = new Map<string, SpcHistoricalMatch<SpcTodayPreviousFixture>[]>()
   ;((fixtureResultSet.data || []) as unknown as FixtureRow[]).forEach((row) => {
-    const keys = spcVesselIdentityKeys(row.enquiry?.vessel_name || row.vessel_name, row.enquiry?.notes)
+    const keys = spcVesselIdentityKeysFromValues(
+      row.vessel_name || row.enquiry?.vessel_name,
+      row.vessel_imo,
+    )
     const at = Date.parse(row.completed_at || row.created_at || row.fixture_date || "")
     if (Number.isFinite(at)) addSpcHistoricalMatch(fixtureByIdentity, keys, { at, value: fixtureResult(row) })
   })
