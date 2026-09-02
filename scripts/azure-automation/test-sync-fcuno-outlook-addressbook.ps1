@@ -2532,10 +2532,10 @@ function Get-MailContact {
   }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'") {
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
-    return $script:noOpMailContact
+    return @($script:liveMailContactSnapshot | Where-Object { (Clean-Text $_.CustomAttribute2) -eq "FCUNO_CONTACT:c-unchanged" })
   }
   if ($Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") {
-    return $script:noOpMailContact
+    return @($script:liveMailContactSnapshot | Where-Object { (Normalize-Email (Get-RecipientEmail $_)) -eq "unchanged@example.com" })
   }
   if (-not $Filter -and -not $Identity) {
     $script:unfilteredMailContactCalls += 1
@@ -2805,7 +2805,7 @@ $sameDnReplacementFailedClosed = $false
 try {
   Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Same-DN replacement reread" | Out-Null
 } catch {
-  $sameDnReplacementFailedClosed = $_.Exception.Message -match "resolved to 0 Exchange mail contacts"
+  $sameDnReplacementFailedClosed = $_.Exception.Message -match "no longer belongs uniquely"
 }
 Assert-True $sameDnReplacementFailedClosed "A destructive reread must reject a replacement with a new GUID even when its distinguished name is reused"
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
@@ -2848,7 +2848,7 @@ Assert-True $typedVerificationErrorPreserved "An ambiguous removal must preserve
 
 $script:setContactError = "Required field ExternalDirectoryObjectId was not returned from Graph API."
 $script:setContactFailed = $false
-$script:forceGraphMailContactSnapshotFailure = $true
+$script:forceGraphMailContactFilterFallback = $true
 $script:removeCalled = $false
 $unreadableOwnershipFailedClosed = $false
 try {
@@ -2860,7 +2860,7 @@ Assert-True $unreadableOwnershipFailedClosed "An unreadable current ownership sn
 Assert-True (-not $script:removeCalled) "An unreadable current ownership snapshot must never authorize Remove-MailContact"
 $script:setContactError = ""
 $script:setContactFailed = $false
-$script:forceGraphMailContactSnapshotFailure = $false
+$script:forceGraphMailContactFilterFallback = $false
 
 $staleProfileHint = [pscustomobject]@{
   Identity = "CN=Stale Snapshot Profile,OU=Contacts,DC=example,DC=com"
@@ -2908,7 +2908,7 @@ $replacementRaceFailedClosed = $false
 try {
   Upsert-ExchangeMailContact $desiredNoOpContact @{}
 } catch {
-  $replacementRaceFailedClosed = $_.Exception.Message -match "resolved to 0 Exchange mail contacts"
+  $replacementRaceFailedClosed = $_.Exception.Message -match "no longer belongs uniquely"
 }
 Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the immutable identity reread no longer resolves to the original contact"
 Assert-True (-not $script:removeCalled) "A replacement contact must never be deleted after an update/recreate race"
@@ -3381,7 +3381,12 @@ try {
   $script:groupRepairSnapshot = @($script:noOpDistributionGroup)
   Set-Item Function:Get-DistributionGroup -Value {
     param($Filter, $ResultSize, $Identity)
-    if (-not $Filter -and -not $Identity) { return @($script:groupRepairSnapshot) }
+    if ($Filter -like "CustomAttribute2 -eq 'FCUNO_GROUP:g-unchanged'") {
+      return @($script:groupRepairSnapshot | Where-Object { (Clean-Text $_.CustomAttribute2) -eq "FCUNO_GROUP:g-unchanged" })
+    }
+    if ($Identity -eq "unchanged-group") {
+      return @($script:groupRepairSnapshot | Where-Object { (Clean-Text $_.Alias).ToLowerInvariant() -eq "unchanged-group" } | Select-Object -First 1)
+    }
     return $null
   }
   $exactGroupRepairCandidate = Get-ExchangeDistributionGroupForRecreation `
@@ -3406,7 +3411,7 @@ try {
   try {
     Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Same-DN replacement group repair test" | Out-Null
   } catch {
-    $sameDnReplacementFailedClosed = $_.Exception.Message -match "immutable identity"
+    $sameDnReplacementFailedClosed = $_.Exception.Message -match "(immutable identity|source key.*no longer belongs uniquely)"
   }
   Assert-True $sameDnReplacementFailedClosed "A same-DN replacement with a different stronger Exchange identity must never be accepted for destructive group recreation"
 
