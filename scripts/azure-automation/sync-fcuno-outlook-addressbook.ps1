@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.12"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.14"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -512,7 +512,7 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
   return ""
 }
 
-function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label, [bool]$AllowPostMutationEmailDrift = $false) {
+function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label) {
   if (-not $Expected) { throw "$Label has no expected Exchange mail contact." }
   $identityProperty = ""
   $identity = ""
@@ -529,27 +529,7 @@ function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKe
   $sourceKey = Clean-Text $SourceKey
   if (-not $email -or -not $sourceKey) { throw "$Label has no exact email/source-key ownership pair for a destructive reread." }
   Renew-ExchangeSyncLockIfDue
-  $contacts = @()
-  try {
-    $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-  } catch {
-    $snapshotError = Clean-Text $_.Exception.Message
-    if ($snapshotError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
-    # The mutation can expose the same legacy Graph defect on the immediate
-    # post-write bulk read. The object below was resolved from fresh source/email
-    # reads immediately before mutation and is still addressed by immutable ID.
-    # Retain that bounded proof only for this exact defect and only while its
-    # FCUNO marker/source ownership remains intact.
-    if (
-      (Clean-Text $Expected.CustomAttribute1) -ne $ManagedMarker -or
-      (Clean-Text $Expected.CustomAttribute2) -ne $sourceKey -or
-      (-not $AllowPostMutationEmailDrift -and (Normalize-Email (Get-RecipientEmail $Expected)) -ne $email)
-    ) {
-      throw "$Label could not use the pre-mutation immutable contact because its FCUNO marker, source key, or email evidence does not match."
-    }
-    Write-Warning ("{0} post-mutation bulk verification was rejected by Exchange Graph; retaining the immediately preceding immutable FCUNO ownership proof for exact recreation." -f $Label)
-    return $Expected
-  }
+  $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
   $identityMatches = @($contacts | Where-Object {
     (Clean-Text $_.$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)
@@ -727,6 +707,11 @@ function Invoke-ExchangeOperationWithTemporaryRetry(
       $message = Clean-Text $_.Exception.Message
       Write-Warning ("{0} received a temporary Microsoft Exchange error on attempt {1} of {2}; retrying without publishing a failure notice: {3}" -f $Label, $attempt, $MaxAttempts, $message)
       Renew-ExchangeSyncLockIfDue
+      # A failed Exchange remoting response can leave a partially deserialized
+      # object graph pending collection. Reclaim it before retrying so a bounded
+      # transient retry does not turn into a local deserialization OOM.
+      [System.GC]::Collect()
+      [System.GC]::WaitForPendingFinalizers()
       if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
     }
   }
@@ -3254,6 +3239,105 @@ function Test-ExchangeManagedContactOwnershipTransferRequired($Existing, $Contac
   )
 }
 
+function Remove-ExchangeMailContactWithVerifiedAbsence($Existing, $Email, $SourceKey, $Label) {
+  if (-not $Existing) { throw "$Label has no Exchange mail contact to remove." }
+  $removeIdentity = Get-ExchangeStrongCommandIdentity $Existing
+  if (-not $removeIdentity) { throw "$Label has no immutable Exchange identity for removal." }
+
+  $ambiguousGraphError = ""
+  Renew-ExchangeSyncLockIfDue
+  try {
+    Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
+  } catch {
+    $removeError = Clean-Text $_.Exception.Message
+    if ($removeError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+    # Exchange can apply a mutation and then fail while serializing the malformed
+    # legacy recipient response. Treat only this exact error as an ambiguous
+    # result; independent absence verification below remains mandatory.
+    $ambiguousGraphError = $removeError
+    Write-Warning ("{0} returned an ambiguous Exchange Graph response; verifying exact deletion before accepting the operation." -f $Label)
+  }
+  Renew-ExchangeSyncLockIfDue
+
+  try {
+    Confirm-ExchangeMailContactDeletion $Existing $Email $SourceKey
+  } catch {
+    if ($ambiguousGraphError) {
+      Write-Warning ("{0} returned an ambiguous Exchange Graph response and exact deletion could not be verified; preserving the verification error for bounded retry classification." -f $Label)
+    }
+    throw
+  }
+
+  if ($ambiguousGraphError) {
+    Write-Warning ("{0} exact deletion was independently verified after the ambiguous Exchange Graph response." -f $Label)
+  }
+}
+
+function Get-ExchangeDistributionGroupForRecreation($Expected, $Group, $Label) {
+  if (-not $Expected -or -not $Group) { throw "$Label has no expected Exchange distribution group." }
+  $sourceKey = Clean-Text $Group.SourceKey
+  $alias = (Clean-Text $Group.Alias).ToLowerInvariant()
+  $displayName = Clean-Text $Group.GroupName
+  if (-not $sourceKey -or -not $alias -or -not $displayName) {
+    throw "$Label has no exact source-key, alias, and display-name ownership proof."
+  }
+
+  Renew-ExchangeSyncLockIfDue
+  $groups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  Renew-ExchangeSyncLockIfDue
+  $identityMatches = @($groups | Where-Object { Test-ExchangeObjectsShareImmutableIdentity $Expected $_ })
+  if ($identityMatches.Count -ne 1) {
+    throw "$Label immutable identity resolved to $($identityMatches.Count) Exchange distribution groups."
+  }
+  $candidate = $identityMatches[0]
+  $sourceMatches = @($groups | Where-Object { (Clean-Text $_.CustomAttribute2) -eq $sourceKey })
+  $aliasMatches = @($groups | Where-Object { (Clean-Text $_.Alias).ToLowerInvariant() -eq $alias })
+  if ($sourceMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $sourceMatches[0])) {
+    throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange distribution group."
+  }
+  if ($aliasMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $aliasMatches[0])) {
+    throw "$Label alias '$alias' no longer belongs uniquely to the immutable Exchange distribution group."
+  }
+  if (
+    (Clean-Text $candidate.CustomAttribute1) -ne $ManagedMarker -or
+    (Clean-Text $candidate.CustomAttribute2) -ne $sourceKey -or
+    (Clean-Text $candidate.DisplayName) -ne $displayName
+  ) {
+    throw "$Label exact managed source/display ownership changed before recreation."
+  }
+  return $candidate
+}
+
+function Remove-ExchangeDistributionGroupWithVerifiedAbsence($Existing, $Alias, $SourceKey, $Label) {
+  if (-not $Existing) { throw "$Label has no Exchange distribution group to remove." }
+  $removeIdentity = Get-ExchangeStrongCommandIdentity $Existing
+  if (-not $removeIdentity) { throw "$Label has no immutable Exchange identity for removal." }
+
+  $ambiguousGraphError = ""
+  Renew-ExchangeSyncLockIfDue
+  try {
+    Remove-DistributionGroup -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
+  } catch {
+    $removeError = Clean-Text $_.Exception.Message
+    if ($removeError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+    $ambiguousGraphError = $removeError
+    Write-Warning ("{0} returned an ambiguous Exchange Graph response; verifying exact deletion before accepting the operation." -f $Label)
+  }
+  Renew-ExchangeSyncLockIfDue
+
+  try {
+    Confirm-ExchangeDistributionGroupDeletion $Existing $Alias $SourceKey
+  } catch {
+    if ($ambiguousGraphError) {
+      Write-Warning ("{0} returned an ambiguous Exchange Graph response and exact deletion could not be verified; preserving the verification error for bounded retry classification." -f $Label)
+    }
+    throw
+  }
+  if ($ambiguousGraphError) {
+    Write-Warning ("{0} exact deletion was independently verified after the ambiguous Exchange Graph response." -f $Label)
+  }
+}
+
 function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingHint = $null, [bool]$UseExistingHint = $false, $ExistingProfileHint = $null) {
   Renew-ExchangeSyncLockIfDue
   if (-not $Contact) {
@@ -3288,10 +3372,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     if (-not $removeIdentity) {
       throw "Managed contact ownership transfer for $email was blocked because the existing object has no immutable identity."
     }
-    Renew-ExchangeSyncLockIfDue
-    Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
-    Renew-ExchangeSyncLockIfDue
-    Confirm-ExchangeMailContactDeletion $existing $email $previousOwnerKey
+    Remove-ExchangeMailContactWithVerifiedAbsence $existing $email $previousOwnerKey "Managed contact ownership transfer for $email"
     Write-Warning ("Recreating managed Exchange contact {0} to transfer FCUNO source ownership from {1} to {2}." -f $email, $previousOwnerKey, $sourceKey)
     $existing = $null
     $ExistingProfileHint = $null
@@ -3321,9 +3402,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       if (-not $removeIdentity) {
         throw "Managed contact recreation after profile-resolution failure was blocked because the invalid object's immutable identity could not be verified. Original error: $profileResolutionError"
       }
-      Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
-      Confirm-ExchangeMailContactDeletion $reread $email $sourceKey
+      Remove-ExchangeMailContactWithVerifiedAbsence $reread $email $sourceKey "Managed contact recreation after profile-resolution failure for $email"
       Write-Warning ("Recreating managed Exchange contact {0} because its authoritative profile cannot be resolved. Original error: {1}" -f $email, $profileResolutionError)
       $existing = $null
       $ExistingProfileHint = $null
@@ -3348,15 +3427,12 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $updateError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $updateError)) { throw }
 
-      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after update failure" $true
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after update failure"
       if ($reread) {
-        # A successful current reread already proved the desired email uniquely.
-        # The exact Graph-invalid fallback instead proves the fresh pre-mutation
-        # marker/source ownership because Set-MailContact may already have changed
-        # the email before Set-Contact exposed the legacy profile defect.
         if (
           (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
-          (Clean-Text $reread.CustomAttribute2) -ne $sourceKey
+          (Clean-Text $reread.CustomAttribute2) -ne $sourceKey -or
+          (Normalize-Email (Get-RecipientEmail $reread)) -ne $email
         ) {
           throw "Managed contact recreation was blocked because the exact managed email projection changed after the update error. Original error: $updateError"
         }
@@ -3365,9 +3441,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
         }
         $removeIdentity = Get-ExchangeStrongCommandIdentity $reread
         if (-not $removeIdentity) { throw "Managed contact recreation was blocked because the invalid object's immutable identity could not be verified. Original error: $updateError" }
-        Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
-        Renew-ExchangeSyncLockIfDue
-        Confirm-ExchangeMailContactDeletion $reread $email $sourceKey
+        Remove-ExchangeMailContactWithVerifiedAbsence $reread $email $sourceKey "Managed contact recreation after update failure for $email"
       }
       Write-Warning ("Existing managed Exchange contact {0} is absent or narrowly confirmed invalid; recreating it. Original error: {1}" -f $email, $updateError)
       $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
@@ -3578,11 +3652,8 @@ function Remove-ManagedExchangeMailContact($Email, $Alias, [hashtable]$Stats, $S
     throw "Exchange contact $($existing.DisplayName) was not deleted because its immutable Exchange identity could not be resolved for exact verification."
   }
 
-  Renew-ExchangeSyncLockIfDue
-  Remove-MailContact -Identity $deleteIdentity -Confirm:$false -ErrorAction Stop
-  Renew-ExchangeSyncLockIfDue
   $verificationSourceKey = if ($existingOwnerKey) { $existingOwnerKey } else { $sourceKey }
-  Confirm-ExchangeMailContactDeletion $existing $email $verificationSourceKey
+  Remove-ExchangeMailContactWithVerifiedAbsence $existing $email $verificationSourceKey "Managed contact deletion for $($existing.DisplayName)"
   Increment-Stat $Stats "removedContacts"
   Increment-Stat $Stats "verifiedQueueRows"
 }
@@ -3629,23 +3700,36 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
   if ($existing -and -not $existingIdentity) {
     throw "Existing Exchange group $alias has no immutable identity, so the update was blocked without mutation."
   }
+  $existingBeforeMutation = $existing
+  $profileBeforeMutation = $ExistingProfileHint
+  $managedRecreation = $false
   if (-not $existing) {
     $ExistingProfileHint = $null
   } elseif ($ExistingProfileHint) {
     $ExistingProfileHint = Resolve-ExchangeGroupProfileHint $existing (New-ExchangeGroupProfileLookup @($ExistingProfileHint))
   }
   if ($existing -and -not $ExistingProfileHint) {
-    $ExistingProfileHint = Resolve-ExchangeGroupProfileForDistributionGroup `
-      $existing `
-      "Exchange group $alias" `
-      $ExchangeGroupPropagationMaxAttempts `
-      $ExchangeGroupPropagationDelaySeconds
+    try {
+      $ExistingProfileHint = Resolve-ExchangeGroupProfileForDistributionGroup `
+        $existing `
+        "Exchange group $alias" `
+        $ExchangeGroupPropagationMaxAttempts `
+        $ExchangeGroupPropagationDelaySeconds
+    } catch {
+      $profileResolutionError = Clean-Text $_.Exception.Message
+      if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $profileResolutionError)) { throw }
+      $reread = Get-ExchangeDistributionGroupForRecreation $existing $Group "Managed group recreation after profile-resolution failure"
+      Remove-ExchangeDistributionGroupWithVerifiedAbsence $reread $alias $sourceKey "Managed group recreation after profile-resolution failure for $alias"
+      Write-Warning ("Recreating managed Exchange group {0} because its authoritative profile cannot be resolved. Original error: {1}" -f $alias, $profileResolutionError)
+      $existing = $null
+      $ExistingProfileHint = $null
+      $managedRecreation = $true
+    }
   }
   if ($existing -and -not $ExistingProfileHint) {
     throw "Existing Exchange group $alias has no authoritative group profile joined through the same immutable identity, so the update was blocked without mutation."
   }
-  $existingBeforeMutation = $existing
-  $profileBeforeMutation = $ExistingProfileHint
+  if ($ExistingProfileHint) { $profileBeforeMutation = $ExistingProfileHint }
   $fullMutationAction = ""
   if ($existing -and $SkipNoOpWrites -and (Test-ExchangeDistributionGroupMatches $existing $Group $ExistingProfileHint)) {
     Increment-Stat $Stats "verifiedQueueRows"
@@ -3659,7 +3743,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     Renew-ExchangeSyncLockIfDue
     Increment-Stat $Stats "updatedGroups"
   } else {
-    $fullMutationAction = "Create group"
+    $fullMutationAction = $(if ($managedRecreation) { "Recreate group" } else { "Create group" })
     $newGroup = New-DistributionGroup `
       -Name (Get-ExchangeGroupDirectoryName $Group) `
       -DisplayName $Group.GroupName `
@@ -3717,7 +3801,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     throw "Exchange group $($Group.GroupName) differs after bounded verification for: $($verificationMismatches -join ', ')."
   }
   if ($SkipNoOpWrites -and $fullMutationAction) {
-    $created = $fullMutationAction -eq "Create group"
+    $created = $fullMutationAction -in @("Create group", "Recreate group")
     Add-FullSyncMutationDetail `
       $Stats `
       $fullMutationAction `
@@ -5760,9 +5844,7 @@ function Remove-StaleManagedExchangeContacts($ManagedContacts, $ExchangeRows, [h
     try {
       $deleteIdentity = Get-ExchangeStrongCommandIdentity $managedContact
       if (-not $deleteIdentity) { throw "The stale managed contact has no immutable Exchange identity, so deletion was blocked." }
-      Remove-MailContact -Identity $deleteIdentity -Confirm:$false -ErrorAction Stop
-      Renew-ExchangeSyncLockIfDue
-      Confirm-ExchangeMailContactDeletion $managedContact $email $sourceKey
+      Remove-ExchangeMailContactWithVerifiedAbsence $managedContact $email $sourceKey "Stale managed contact deletion for $($managedContact.DisplayName)"
       Increment-Stat $Stats "removedContacts"
       Add-FullSyncMutationDetail `
         $Stats `
@@ -5939,6 +6021,8 @@ function Invoke-FullExchangeSync {
   }
 
   $failedDirectoryPrerequisites = Sync-ExchangeGroupDirectoryNamePrerequisites $exchangeRows $stats $failedStaleDirectoryCleanup
+  $preCleanupManagedContacts = $null
+  $preCleanupManagedGroups = $null
 
   $aliasCounts = @{}
   foreach ($recipient in @($exchangeRows.Contacts) + @($exchangeRows.Groups)) {
@@ -6020,6 +6104,26 @@ function Invoke-FullExchangeSync {
       Write-Warning ("Full reconciliation failed for group {0} at runbook line {1}: {2}" -f $group.GroupName, $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
     }
   }
+
+  # The final certification intentionally takes a second independent Exchange
+  # projection. Release the first projection and its lookup indexes before that
+  # read; retaining both complete deserialized graphs can exhaust the Azure
+  # Automation sandbox while PSSerializer materializes the final response.
+  $exchangeMailContacts = $null
+  $exchangeContactProfiles = $null
+  $exchangeDistributionGroups = $null
+  $exchangeGroupProfiles = $null
+  $mailContactLookup = $null
+  $contactProfileLookup = $null
+  $distributionGroupLookup = $null
+  $groupProfileLookup = $null
+  $noOpHint = $null
+  $existingHint = $null
+  $existingProfileHint = $null
+  $members = $null
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
+  [System.GC]::Collect()
 
   Renew-ExchangeSyncLockIfDue -Force
   $finalMailContacts = @(Invoke-ExchangeOperationWithTemporaryRetry "Final managed contact snapshot" { Get-MailContact -ResultSize Unlimited -ErrorAction Stop })

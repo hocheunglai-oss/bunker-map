@@ -2506,6 +2506,7 @@ $script:rereadReplacementContact = $null
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
 $script:forceGraphMailContactFilterFallback = $false
 $script:forceGraphMailContactSnapshotFailure = $false
+$script:removeGraphErrorMode = ""
 $script:unfilteredMailContactCalls = 0
 function Get-MailContact {
   [CmdletBinding()]
@@ -2513,6 +2514,11 @@ function Get-MailContact {
   $script:getMailContactCalls += 1
   if ($Filter -and $script:forceGraphMailContactFilterFallback) {
     throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+  }
+  if ($script:removeGraphErrorMode -eq "absent") {
+    if ($Identity -in @($script:noOpMailContact.Guid, $script:noOpMailContact.DistinguishedName, $script:noOpMailContact.ExternalDirectoryObjectId)) { return $null }
+    if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'") { return $null }
+    if ($Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") { return $null }
   }
   if ($Identity -in @($script:noOpMailContact.Guid, $script:noOpMailContact.DistinguishedName, $script:noOpMailContact.ExternalDirectoryObjectId)) {
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
@@ -2573,6 +2579,15 @@ function New-MailContact {
   [CmdletBinding()]
   param($Name, $DisplayName, $ExternalEmailAddress, $Alias)
   throw "New-MailContact must not be called for an existing no-op contact."
+}
+
+function Remove-MailContact {
+  [CmdletBinding(SupportsShouldProcess)]
+  param($Identity)
+  $script:removeCalled = $true
+  if ($script:removeGraphErrorMode -in @("absent", "present")) {
+    throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+  }
 }
 
 $fullNoOpContactStats = @{}
@@ -2789,21 +2804,56 @@ try {
 Assert-True $sameDnReplacementFailedClosed "A destructive reread must reject a replacement with a new GUID even when its distinguished name is reused"
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
 
-$preMutationEmailContact = [pscustomobject]@{}
-foreach ($property in $script:noOpMailContact.PSObject.Properties) {
-  $preMutationEmailContact | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
-}
-$preMutationEmailContact.ExternalEmailAddress = "SMTP:before-update@example.com"
-$script:forceGraphMailContactSnapshotFailure = $true
-$postMutationGraphFallback = Get-ExchangeMailContactByImmutableIdentity $preMutationEmailContact "after-update@example.com" "FCUNO_CONTACT:c-unchanged" "Post-mutation Graph fallback" $true
-Assert-True ([object]::ReferenceEquals($preMutationEmailContact, $postMutationGraphFallback)) "The exact post-mutation Graph defect may retain the fresh immutable FCUNO source ownership proof when the email write may already have applied"
-$preMutationEmailFallbackBlocked = $false
+$script:removeCalled = $false
+$script:removeGraphErrorMode = "absent"
+Remove-ExchangeMailContactWithVerifiedAbsence $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Ambiguous remove success test"
+Assert-True $script:removeCalled "An exact Graph-invalid Remove-MailContact response must still attempt the immutable deletion"
+
+$savedPropagationAttempts = $ExchangeGroupPropagationMaxAttempts
+$ExchangeGroupPropagationMaxAttempts = 1
+$script:removeCalled = $false
+$script:removeGraphErrorMode = "present"
+$ambiguousRemovalFailedClosed = $false
 try {
-  Get-ExchangeMailContactByImmutableIdentity $preMutationEmailContact "after-update@example.com" "FCUNO_CONTACT:c-unchanged" "Pre-mutation Graph fallback" | Out-Null
+  Remove-ExchangeMailContactWithVerifiedAbsence $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Ambiguous remove failure test"
 } catch {
-  $preMutationEmailFallbackBlocked = $_.Exception.Message -match "could not use the pre-mutation immutable contact"
+  $ambiguousRemovalFailedClosed = $_.Exception.Message -match "Could not verify deletion"
 }
-Assert-True $preMutationEmailFallbackBlocked "A Graph-invalid bulk reread before a confirmed mutation must still reject mismatched email evidence"
+$ExchangeGroupPropagationMaxAttempts = $savedPropagationAttempts
+Assert-True $ambiguousRemovalFailedClosed "An ambiguous Graph response must block recreation while the exact contact still exists"
+Assert-True $script:removeCalled "The ambiguous removal fail-closed test must exercise Remove-MailContact"
+$script:removeGraphErrorMode = ""
+
+$savedConfirmContactDeletion = (Get-Item Function:Confirm-ExchangeMailContactDeletion).ScriptBlock
+Set-Item Function:Confirm-ExchangeMailContactDeletion -Value {
+  param($Existing, $Email, $SourceKey)
+  throw [System.TimeoutException]::new("Simulated typed deletion verification timeout.")
+}
+$script:removeGraphErrorMode = "present"
+$typedVerificationErrorPreserved = $false
+try {
+  Remove-ExchangeMailContactWithVerifiedAbsence $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Ambiguous typed verification test"
+} catch {
+  $typedVerificationErrorPreserved = Test-ExchangeTemporaryServerError $_
+}
+Set-Item Function:Confirm-ExchangeMailContactDeletion -Value $savedConfirmContactDeletion
+$script:removeGraphErrorMode = ""
+Assert-True $typedVerificationErrorPreserved "An ambiguous removal must preserve a typed temporary verification error for the outer bounded retry"
+
+$script:setContactError = "Required field ExternalDirectoryObjectId was not returned from Graph API."
+$script:setContactFailed = $false
+$script:forceGraphMailContactSnapshotFailure = $true
+$script:removeCalled = $false
+$unreadableOwnershipFailedClosed = $false
+try {
+  Upsert-ExchangeMailContact $desiredNoOpContact @{}
+} catch {
+  $unreadableOwnershipFailedClosed = $_.Exception.Message -match "ExternalDirectoryObjectId"
+}
+Assert-True $unreadableOwnershipFailedClosed "An unreadable current ownership snapshot must fail closed"
+Assert-True (-not $script:removeCalled) "An unreadable current ownership snapshot must never authorize Remove-MailContact"
+$script:setContactError = ""
+$script:setContactFailed = $false
 $script:forceGraphMailContactSnapshotFailure = $false
 
 $staleProfileHint = [pscustomobject]@{
@@ -2882,13 +2932,14 @@ Assert-Equal $contactSetBaseline $script:setMailContactCalls "An identityless ex
 
 $upsertContactFunctionText = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock.ToString()
 $managedTransferDecisionIndex = $upsertContactFunctionText.IndexOf('$managedOwnershipTransfer = Test-ExchangeManagedContactOwnershipTransferRequired')
-$managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity')
+$managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-ExchangeMailContactWithVerifiedAbsence $existing')
 $liveProfileResolutionIndex = $upsertContactFunctionText.IndexOf('Resolve-ExchangeContactProfileForMailContact $existing')
 $profileResolutionRecreationIndex = $upsertContactFunctionText.IndexOf('Managed contact recreation after profile-resolution failure')
 $graphInvalidUpdateGateIndex = $upsertContactFunctionText.IndexOf('required field ExternalDirectoryObjectId was not returned from Graph API')
 $updateErrorIndex = $upsertContactFunctionText.IndexOf('$updateError = Clean-Text $_.Exception.Message')
-$updateRecreateDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity', $updateErrorIndex)
-$updateRecreateConfirmationIndex = $upsertContactFunctionText.IndexOf('Confirm-ExchangeMailContactDeletion $reread $email $sourceKey', $updateRecreateDeleteIndex)
+$updateRecreateDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-ExchangeMailContactWithVerifiedAbsence $reread', $updateErrorIndex)
+$verifiedRemovalFunctionText = (Get-Item Function:Remove-ExchangeMailContactWithVerifiedAbsence).ScriptBlock.ToString()
+$updateRecreateConfirmationIndex = $verifiedRemovalFunctionText.IndexOf('Confirm-ExchangeMailContactDeletion $Existing $Email $SourceKey')
 $updateRecreateNewIndex = $upsertContactFunctionText.IndexOf('$newContact = New-MailContact', $updateRecreateDeleteIndex)
 Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
 Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
@@ -2896,12 +2947,18 @@ Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A sta
 Assert-True ($profileResolutionRecreationIndex -gt $liveProfileResolutionIndex) "A managed Graph-profile failure must enter the exact verified recreation path"
 Assert-True ($graphInvalidUpdateGateIndex -gt $liveProfileResolutionIndex) "A managed Set-Contact Graph identity failure must pass the narrow invalid-object recreation gate"
 Assert-True ($updateRecreateDeleteIndex -gt $updateErrorIndex) "A managed Set-Contact invalid-object failure must remove only the reread immutable contact"
-Assert-True ($updateRecreateConfirmationIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must confirm exact deletion after removal"
-Assert-True ($updateRecreateNewIndex -gt $updateRecreateConfirmationIndex) "A managed Set-Contact invalid-object recreation must confirm absence before New-MailContact"
+Assert-True ($updateRecreateConfirmationIndex -ge 0) "Every managed contact recreation helper must confirm exact deletion after removal"
+Assert-True ($updateRecreateNewIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must call the verified-removal helper before New-MailContact"
+Assert-True ($verifiedRemovalFunctionText -match 'ambiguous Exchange Graph response') "An exact Graph-invalid removal response must be treated only as an ambiguous result"
 
 $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
 Assert-True ($fullSyncFunctionText -match 'Get-ExchangeMailContactExactNoOpHint \$contact') "Full reconciliation must treat its bulk contact lookup only as a non-authoritative exact-no-op optimization"
 Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$noOpHint\s*$') "Full reconciliation may reuse a bulk contact hint only when the exact-no-op probe succeeds"
+$initialProjectionReleaseIndex = $fullSyncFunctionText.IndexOf('$exchangeMailContacts = $null')
+$finalContactSnapshotIndex = $fullSyncFunctionText.IndexOf('"Final managed contact snapshot"')
+$initialProjectionCollectIndex = $fullSyncFunctionText.IndexOf('[System.GC]::Collect()', $initialProjectionReleaseIndex)
+Assert-True ($initialProjectionReleaseIndex -ge 0 -and $initialProjectionReleaseIndex -lt $finalContactSnapshotIndex) "Full reconciliation must release its initial deserialized Exchange projection before materializing the independent final snapshot"
+Assert-True ($initialProjectionCollectIndex -gt $initialProjectionReleaseIndex -and $initialProjectionCollectIndex -lt $finalContactSnapshotIndex) "Full reconciliation must collect the released initial projection before the final Exchange snapshot"
 Assert-True ($upsertContactFunctionText -match 'Resolve-ExchangeMailContactFromLiveRead \$Contact') "A stale bulk contact hint that needs mutation must be replaced by a fresh targeted read with a narrow Graph fallback"
 Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
 $confirmContactDeletionFunctionText = (Get-Item Function:Confirm-ExchangeMailContactDeletion).ScriptBlock.ToString()
@@ -3306,6 +3363,40 @@ try {
   $ambiguousGroupProfileFailedClosed = $_.Exception.Message -match "More than one authoritative Exchange group profile"
 }
 Assert-True $ambiguousGroupProfileFailedClosed "Two distinct strong group-profile matches must fail closed"
+
+$savedGroupRepairGetDistributionGroup = (Get-Item Function:Get-DistributionGroup).ScriptBlock
+try {
+  Set-Item Function:Get-DistributionGroup -Value {
+    param($Filter, $ResultSize, $Identity)
+    if (-not $Filter -and -not $Identity) { return @($script:noOpDistributionGroup) }
+    return $null
+  }
+  $exactGroupRepairCandidate = Get-ExchangeDistributionGroupForRecreation `
+    $script:noOpDistributionGroup `
+    $desiredNoOpGroup `
+    "Exact managed group repair test"
+  Assert-True ([object]::ReferenceEquals($script:noOpDistributionGroup, $exactGroupRepairCandidate)) "A Graph-invalid group may be repaired only after a fresh snapshot proves its exact immutable identity, source key, alias, and display name"
+
+  $savedGroupRepairMarker = $script:noOpDistributionGroup.CustomAttribute1
+  $script:noOpDistributionGroup.CustomAttribute1 = ""
+  $unmanagedGroupRepairFailedClosed = $false
+  try {
+    Get-ExchangeDistributionGroupForRecreation $script:noOpDistributionGroup $desiredNoOpGroup "Unmanaged group repair test" | Out-Null
+  } catch {
+    $unmanagedGroupRepairFailedClosed = $_.Exception.Message -match "managed source/display ownership changed"
+  }
+  Assert-True $unmanagedGroupRepairFailedClosed "A distribution group without the FCUNO management marker must never enter destructive profile repair"
+  $script:noOpDistributionGroup.CustomAttribute1 = $savedGroupRepairMarker
+} finally {
+  Set-Item Function:Get-DistributionGroup -Value $savedGroupRepairGetDistributionGroup
+}
+
+$groupUpsertRepairText = (Get-Item Function:Upsert-ExchangeDistributionGroup).ScriptBlock.ToString()
+$groupProfileResolutionIndex = $groupUpsertRepairText.IndexOf('Resolve-ExchangeGroupProfileForDistributionGroup')
+$groupRepairRereadIndex = $groupUpsertRepairText.IndexOf('Get-ExchangeDistributionGroupForRecreation')
+$groupRepairDeleteIndex = $groupUpsertRepairText.IndexOf('Remove-ExchangeDistributionGroupWithVerifiedAbsence')
+Assert-True ($groupProfileResolutionIndex -ge 0 -and $groupRepairRereadIndex -gt $groupProfileResolutionIndex -and $groupRepairDeleteIndex -gt $groupRepairRereadIndex) "A Graph-invalid managed group profile must be freshly re-read with exact ownership guards before verified deletion/recreation"
+
 Upsert-ExchangeDistributionGroup $desiredNoOpGroup $fullNoOpGroupStats $true $script:noOpDistributionGroup $true $resolvedNoOpGroupProfile
 Assert-Equal 0 $script:getDistributionGroupCalls "Full reconciliation must use its collision-checked group hint without a per-group read"
 Assert-Equal 0 $script:getGroupCalls "Full reconciliation must use its bulk authoritative group profile without a per-group read"
