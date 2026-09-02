@@ -74,6 +74,7 @@ type VesselHistoryResponse = {
   lost?: Array<{
     id: string
     date: string
+    operator: string
     reason: string
   }>
   visibility?: {
@@ -1236,7 +1237,7 @@ export default function SpcEnquiriesPage() {
                       <div className="spc-vessel-history-label"><VesselHistoryIcon kind="lost" /><strong>PREVIOUSLY LOST</strong></div>
                       <div className="spc-vessel-history-records">
                         {vesselHistory.lost?.slice(0, 3).map((record) => (
-                          <span key={record.id}>{displayHistoryDate(record.date)} · {record.reason}</span>
+                          <span key={record.id}>{displayHistoryDate(record.date)} · {record.operator} · {record.reason}</span>
                         ))}
                       </div>
                     </div>

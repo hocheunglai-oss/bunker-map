@@ -16,6 +16,8 @@ type HistoryEnquiryRow = {
   status: string
   notes: string | null
   supplier_name: string | null
+  created_by_username: string
+  created_by_display_name: string
   created_at: string
   updated_at: string
 }
@@ -47,6 +49,7 @@ export type SpcPreviousFixedRecord = {
 export type SpcPreviousLostRecord = {
   id: string
   date: string
+  operator: string
   reason: string
 }
 
@@ -65,6 +68,8 @@ const ENQUIRY_SELECT = `
   status,
   notes,
   supplier_name,
+  created_by_username,
+  created_by_display_name,
   created_at,
   updated_at
 `
@@ -288,6 +293,7 @@ export async function listSpcVesselHistory(
           return {
             id: row.id,
             date: meta.outcomeAt || row.updated_at || row.created_at,
+            operator: row.created_by_display_name || row.created_by_username || "UNKNOWN OPERATOR",
             reason: meta.lostReason || "UNKNOWN",
           }
         })

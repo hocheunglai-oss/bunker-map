@@ -63,6 +63,19 @@ test("history reads completed fixtures and lost enquiries instead of the current
   assert.doesNotMatch(enquiriesPage, /draftPreviousMatches/)
 })
 
+test("lost history identifies the buyer trader who marked the enquiry lost", () => {
+  assert.match(historyLibrary, /created_by_username,/)
+  assert.match(historyLibrary, /created_by_display_name,/)
+  assert.match(
+    historyLibrary,
+    /operator: row\.created_by_display_name \|\| row\.created_by_username \|\| "UNKNOWN OPERATOR"/,
+  )
+  assert.match(
+    enquiriesPage,
+    /displayHistoryDate\(record\.date\)} · \{record\.operator} · \{record\.reason}/,
+  )
+})
+
 test("future fixtures snapshot IMO while legacy fixtures remain on vessel-name fallback", () => {
   for (const sql of [fixtureImoMigration, baselineSchema]) {
     assert.match(sql, /vessel_imo text/)
