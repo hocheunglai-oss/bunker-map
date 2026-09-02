@@ -4870,19 +4870,63 @@ body:has(.spc-fixture-ledger-panel) .spc-main {
 
 .spc-fixture-eta-editor {
   display: grid;
-  grid-template-columns: 34px 44px 34px 44px;
+  grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr);
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
+  padding: 0 2px;
 }
 
-.spc-table.spc-fixture-table .spc-fixture-eta-editor select {
+.spc-fixture-eta-date {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  min-width: 0;
+  height: 20px;
+  overflow: hidden;
+  border: 1px solid #c8ced8;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.78);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.spc-fixture-eta-date:hover,
+.spc-fixture-eta-date:focus-within {
+  border-color: #0071e3;
+  background: #ffffff;
+}
+
+.spc-fixture-eta-date:focus-within {
+  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.16);
+}
+
+.spc-table.spc-fixture-table .spc-fixture-eta-date select {
   height: 18px;
   min-height: 18px;
-  border-radius: 5px;
-  background: #eef0f3;
-  padding: 0 2px;
-  font-size: 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-overflow: clip;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-eta-date select.spc-fixture-eta-day {
+  border-right: 1px solid #d8dde5;
+}
+
+.spc-table.spc-fixture-table .spc-fixture-eta-date select:disabled {
+  color: #8a919c;
+  opacity: 0.72;
+}
+
+.spc-fixture-eta-separator {
+  color: #646b76;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
 }
 
 .spc-table.spc-fixture-table .spc-fixture-section-row td {

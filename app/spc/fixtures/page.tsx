@@ -98,7 +98,7 @@ const fixtureColumnWidths = [
   96, // supplier trader
   96, // buyer trader
   104, // account
-  184, // ETA
+  226, // ETA
   220, // vessel
   97, // HSFO
   97, // VLSFO
@@ -892,40 +892,49 @@ export default function SpcFixturesPage() {
     const updateEta = (next: typeof parts) => updateDraft(fixture.id, "earliestEta", etaFromParts(next))
     return (
       <div className="spc-fixture-eta-editor">
-        <select
-          aria-label="ETA start day"
-          value={parts.startDay}
-          onChange={(event) => updateEta({ ...parts, startDay: event.target.value })}
-          disabled={!canEdit}
-        >
-          <option value="">DD</option>
-          {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
-        </select>
-        <select
-          aria-label="ETA start month"
-          value={parts.startMonth}
-          onChange={(event) => updateEta({ ...parts, startMonth: event.target.value, endMonth: parts.endDay ? event.target.value : parts.endMonth })}
-          disabled={!canEdit}
-        >
-          {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
-        </select>
-        <select
-          aria-label="ETA end day"
-          value={parts.endDay}
-          onChange={(event) => updateEta({ ...parts, endDay: event.target.value })}
-          disabled={!canEdit}
-        >
-          <option value="">-</option>
-          {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
-        </select>
-        <select
-          aria-label="ETA end month"
-          value={parts.endMonth}
-          onChange={(event) => updateEta({ ...parts, endMonth: event.target.value })}
-          disabled={!canEdit || !parts.endDay}
-        >
-          {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
-        </select>
+        <div className="spc-fixture-eta-date" role="group" aria-label="ETA start date">
+          <select
+            className="spc-fixture-eta-day"
+            aria-label="ETA start day"
+            value={parts.startDay}
+            onChange={(event) => updateEta({ ...parts, startDay: event.target.value })}
+            disabled={!canEdit}
+          >
+            <option value="">DD</option>
+            {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+          <select
+            className="spc-fixture-eta-month"
+            aria-label="ETA start month"
+            value={parts.startMonth}
+            onChange={(event) => updateEta({ ...parts, startMonth: event.target.value, endMonth: parts.endDay ? event.target.value : parts.endMonth })}
+            disabled={!canEdit}
+          >
+            {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
+          </select>
+        </div>
+        <span className="spc-fixture-eta-separator" aria-hidden="true">–</span>
+        <div className="spc-fixture-eta-date" role="group" aria-label="ETA end date">
+          <select
+            className="spc-fixture-eta-day"
+            aria-label="ETA end day"
+            value={parts.endDay}
+            onChange={(event) => updateEta({ ...parts, endDay: event.target.value })}
+            disabled={!canEdit}
+          >
+            <option value="">DD</option>
+            {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+          <select
+            className="spc-fixture-eta-month"
+            aria-label="ETA end month"
+            value={parts.endMonth}
+            onChange={(event) => updateEta({ ...parts, endMonth: event.target.value })}
+            disabled={!canEdit || !parts.endDay}
+          >
+            {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
+          </select>
+        </div>
       </div>
     )
   }
