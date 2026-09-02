@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.8"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.9"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -512,18 +512,58 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
   return ""
 }
 
-function Get-ExchangeMailContactByImmutableIdentity($Expected, $Label) {
+function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label) {
   if (-not $Expected) { throw "$Label has no expected Exchange mail contact." }
   $identity = Get-ExchangeStrongCommandIdentity $Expected
   if (-not $identity) { throw "$Label has no immutable identity for an exact reread." }
+  $email = Normalize-Email $Email
+  $sourceKey = Clean-Text $SourceKey
+  if (-not $email -or -not $sourceKey) { throw "$Label has no exact email/source-key ownership pair for a destructive reread." }
   Renew-ExchangeSyncLockIfDue
-  $candidate = Get-MailContact -Identity $identity -ErrorAction Stop
+  $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
-  if (-not $candidate) { throw "$Label immutable identity '$identity' returned no Exchange mail contact." }
-  if (-not (Test-ExchangeObjectsShareImmutableIdentity $Expected $candidate)) {
-    throw "$Label immutable identity '$identity' resolved to a different Exchange mail contact."
+  $identityMatches = @($contacts | Where-Object { Test-ExchangeObjectsShareImmutableIdentity $Expected $_ })
+  if ($identityMatches.Count -ne 1) {
+    throw "$Label immutable identity '$identity' resolved to $($identityMatches.Count) Exchange mail contacts."
+  }
+  $candidate = $identityMatches[0]
+  $sourceMatches = @($contacts | Where-Object { (Clean-Text $_.CustomAttribute2) -eq $sourceKey })
+  $emailMatches = @($contacts | Where-Object { (Normalize-Email (Get-RecipientEmail $_)) -eq $email })
+  if ($sourceMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $sourceMatches[0])) {
+    throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange mail contact."
+  }
+  if ($emailMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $emailMatches[0])) {
+    throw "$Label email '$email' no longer belongs uniquely to the immutable Exchange mail contact."
   }
   return $candidate
+}
+
+function Resolve-ExchangeMailContactFromLiveRead($Contact) {
+  $sourceKey = Clean-Text $Contact.SourceKey
+  $email = Normalize-Email $Contact.ExternalEmailAddress
+  $escapedSourceKey = Escape-ExchangeFilterValue $sourceKey
+  $escapedEmail = Escape-ExchangeFilterValue $email
+  $sourceMatches = @()
+  $emailMatches = @()
+  try {
+    if ($sourceKey) {
+      $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    }
+    $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    Renew-ExchangeSyncLockIfDue
+  } catch {
+    $filterError = Clean-Text $_.Exception.Message
+    if ($filterError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+    # A legacy Graph-invalid contact can make a targeted Exchange filter fail.
+    # Fall back only for that exact error, then filter one fresh snapshot locally.
+    Write-Warning ("Exchange contact {0} targeted lookup was rejected by Exchange Graph; resolving source/email ownership from one fresh unfiltered snapshot." -f $email)
+    Renew-ExchangeSyncLockIfDue
+    $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    Renew-ExchangeSyncLockIfDue
+    $sourceMatches = if ($sourceKey) { @($contacts | Where-Object { (Clean-Text $_.CustomAttribute2) -eq $sourceKey }) } else { @() }
+    $emailMatches = if ($email) { @($contacts | Where-Object { (Normalize-Email (Get-RecipientEmail $_)) -eq $email }) } else { @() }
+  }
+  return Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
 }
 
 function Resolve-ExchangeContactProfileForMailContact($MailContact, $Label, [int]$MaxAttempts = 1) {
@@ -3184,13 +3224,10 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
   if ($UseExistingHint) {
     $existing = $ExistingHint
   } else {
-    $sourceMatches = @()
-    if ($sourceKey) {
-      $sourceMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-    }
-    $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$escapedEmail'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-    Renew-ExchangeSyncLockIfDue
-    $existing = Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
+    # Any mutation-bound bulk hint may be stale after an earlier contact changed
+    # email/ownership, so resolve again from live targeted reads. Only the exact
+    # legacy Graph error is allowed to fall back to one unfiltered live snapshot.
+    $existing = Resolve-ExchangeMailContactFromLiveRead $Contact
   }
 
   if ($existing -and -not (Get-ExchangeStrongCommandIdentity $existing)) {
@@ -3226,7 +3263,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $profileResolutionError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $profileResolutionError)) { throw }
 
-      $reread = Get-ExchangeMailContactByImmutableIdentity $existing "Managed contact recreation after profile-resolution failure"
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after profile-resolution failure"
       if (
         (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
         (Clean-Text $reread.CustomAttribute2) -ne $sourceKey -or
@@ -3265,7 +3302,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $updateError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $updateError)) { throw }
 
-      $reread = Get-ExchangeMailContactByImmutableIdentity $existing "Managed contact recreation after update failure"
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after update failure"
       if ($reread) {
         if (
           (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
@@ -5892,11 +5929,7 @@ function Invoke-FullExchangeSync {
           }
           $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
           $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
-          # The bulk mail-contact snapshot is already collision checked. Keep using
-          # that immutable object even when its Get-Contact profile is Graph-invalid;
-          # a filtered reread of that same legacy object can fail before the narrow
-          # verified recreation path has a chance to run.
-          $useExistingHint = $null -ne $existingHint
+          $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
           Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
         } | Out-Null
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }

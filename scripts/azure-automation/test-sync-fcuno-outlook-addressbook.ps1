@@ -2503,10 +2503,16 @@ $script:graphFallbackIdentityNotFoundRemaining = 0
 $script:setContactError = ""
 $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
+$script:liveMailContactSnapshot = @($script:noOpMailContact)
+$script:forceGraphMailContactFilterFallback = $false
+$script:unfilteredMailContactCalls = 0
 function Get-MailContact {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
   $script:getMailContactCalls += 1
+  if ($Filter -and $script:forceGraphMailContactFilterFallback) {
+    throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+  }
   if ($Identity -in @($script:noOpMailContact.Guid, $script:noOpMailContact.DistinguishedName, $script:noOpMailContact.ExternalDirectoryObjectId)) {
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
     return $script:noOpMailContact
@@ -2517,6 +2523,11 @@ function Get-MailContact {
   }
   if ($Filter -like "ExternalEmailAddress -eq 'unchanged@example.com'") {
     return $script:noOpMailContact
+  }
+  if (-not $Filter -and -not $Identity) {
+    $script:unfilteredMailContactCalls += 1
+    if ($script:setContactFailed -and $script:rereadReplacementContact) { return @($script:rereadReplacementContact) }
+    return @($script:liveMailContactSnapshot)
   }
   return $null
 }
@@ -2725,6 +2736,33 @@ Assert-Equal 2 $script:getContactIdentityCalls "A propagation-time direct identi
 $script:graphFallbackIdentityNotFoundRemaining = 0
 $script:forceGraphContactFilterFallback = $false
 
+$script:forceGraphMailContactFilterFallback = $true
+$script:unfilteredMailContactCalls = 0
+$graphInvalidMailContactResolved = Resolve-ExchangeMailContactFromLiveRead $desiredNoOpContact
+Assert-True ([object]::ReferenceEquals($script:noOpMailContact, $graphInvalidMailContactResolved)) "An exact Graph-invalid targeted mail-contact lookup must resolve ownership from a fresh unfiltered snapshot"
+Assert-Equal 1 $script:unfilteredMailContactCalls "A Graph-invalid targeted lookup must take exactly one unfiltered fallback snapshot"
+$script:forceGraphMailContactFilterFallback = $false
+
+$strictImmutableReread = Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Strict immutable reread"
+Assert-True ([object]::ReferenceEquals($script:noOpMailContact, $strictImmutableReread)) "A destructive immutable reread must return the sole current email/source-key owner"
+$duplicateSourceOwner = [pscustomobject]@{
+  Identity = "duplicate-source-owner"
+  Guid = "22222222-2222-4222-8222-222222222222"
+  DistinguishedName = "CN=Duplicate Source Owner,OU=Contacts,DC=example,DC=com"
+  ExternalEmailAddress = "SMTP:duplicate-source@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-unchanged"
+}
+$script:liveMailContactSnapshot = @($script:noOpMailContact, $duplicateSourceOwner)
+$duplicateSourceRereadFailedClosed = $false
+try {
+  Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Duplicate source-key reread" | Out-Null
+} catch {
+  $duplicateSourceRereadFailedClosed = $_.Exception.Message -match "no longer belongs uniquely"
+}
+Assert-True $duplicateSourceRereadFailedClosed "A destructive immutable reread must fail before deletion when another contact acquires the same source key"
+$script:liveMailContactSnapshot = @($script:noOpMailContact)
+
 $staleProfileHint = [pscustomobject]@{
   Identity = "CN=Stale Snapshot Profile,OU=Contacts,DC=example,DC=com"
   Guid = "77777777-7777-4777-8777-777777777777"
@@ -2771,9 +2809,9 @@ $replacementRaceFailedClosed = $false
 try {
   Upsert-ExchangeMailContact $desiredNoOpContact @{}
 } catch {
-  $replacementRaceFailedClosed = $_.Exception.Message -match "resolved to a different Exchange mail contact"
+  $replacementRaceFailedClosed = $_.Exception.Message -match "resolved to 0 Exchange mail contacts"
 }
-Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the immutable identity reread resolves to a different contact"
+Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the immutable identity reread no longer resolves to the original contact"
 Assert-True (-not $script:removeCalled) "A replacement contact must never be deleted after an update/recreate race"
 $script:setContactError = ""
 $script:setContactFailed = $false
@@ -2819,7 +2857,8 @@ Assert-True ($updateRecreateConfirmationIndex -gt $updateRecreateDeleteIndex) "A
 Assert-True ($updateRecreateNewIndex -gt $updateRecreateConfirmationIndex) "A managed Set-Contact invalid-object recreation must confirm absence before New-MailContact"
 
 $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
-Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$existingHint\s*$') "Full reconciliation must keep a collision-checked immutable contact hint even when its Graph profile is invalid"
+Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$existingHint -and \$null -ne \$existingProfileHint -and \(Test-ExchangeMailContactMatches') "Full reconciliation may reuse a bulk contact hint only for an exact no-op"
+Assert-True ($upsertContactFunctionText -match 'Resolve-ExchangeMailContactFromLiveRead \$Contact') "A stale bulk contact hint that needs mutation must be replaced by a fresh targeted read with a narrow Graph fallback"
 Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
