@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.9"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.10"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -514,7 +514,16 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
 
 function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label) {
   if (-not $Expected) { throw "$Label has no expected Exchange mail contact." }
-  $identity = Get-ExchangeStrongCommandIdentity $Expected
+  $identityProperty = ""
+  $identity = ""
+  foreach ($propertyName in @("Guid", "ExternalDirectoryObjectId", "DistinguishedName")) {
+    $propertyValue = Clean-Text $Expected.$propertyName
+    if ($propertyValue -and $propertyValue -ne "00000000-0000-0000-0000-000000000000") {
+      $identityProperty = $propertyName
+      $identity = $propertyValue
+      break
+    }
+  }
   if (-not $identity) { throw "$Label has no immutable identity for an exact reread." }
   $email = Normalize-Email $Email
   $sourceKey = Clean-Text $SourceKey
@@ -522,17 +531,19 @@ function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKe
   Renew-ExchangeSyncLockIfDue
   $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
   Renew-ExchangeSyncLockIfDue
-  $identityMatches = @($contacts | Where-Object { Test-ExchangeObjectsShareImmutableIdentity $Expected $_ })
+  $identityMatches = @($contacts | Where-Object {
+    (Clean-Text $_.$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)
+  })
   if ($identityMatches.Count -ne 1) {
     throw "$Label immutable identity '$identity' resolved to $($identityMatches.Count) Exchange mail contacts."
   }
   $candidate = $identityMatches[0]
   $sourceMatches = @($contacts | Where-Object { (Clean-Text $_.CustomAttribute2) -eq $sourceKey })
   $emailMatches = @($contacts | Where-Object { (Normalize-Email (Get-RecipientEmail $_)) -eq $email })
-  if ($sourceMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $sourceMatches[0])) {
+  if ($sourceMatches.Count -ne 1 -or -not (Clean-Text $sourceMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label source key '$sourceKey' no longer belongs uniquely to the immutable Exchange mail contact."
   }
-  if ($emailMatches.Count -ne 1 -or -not (Test-ExchangeObjectsShareImmutableIdentity $candidate $emailMatches[0])) {
+  if ($emailMatches.Count -ne 1 -or -not (Clean-Text $emailMatches[0].$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label email '$email' no longer belongs uniquely to the immutable Exchange mail contact."
   }
   return $candidate
@@ -918,6 +929,21 @@ function Resolve-ExchangeMailContactHint($Contact, $Lookup) {
   $email = Normalize-Email $Contact.ExternalEmailAddress
   $emailMatches = if ($email) { @($Lookup.ByEmail[$email]) } else { @() }
   return Resolve-ExchangeMailContactCandidates $Contact $sourceMatches $emailMatches
+}
+
+function Get-ExchangeMailContactExactNoOpHint($Contact, $MailContactLookup, $ContactProfileLookup) {
+  try {
+    $existing = Resolve-ExchangeMailContactHint $Contact $MailContactLookup
+    if (-not $existing) { return $null }
+    $profile = Resolve-ExchangeContactProfileHint $existing $ContactProfileLookup
+    if (-not $profile -or -not (Test-ExchangeMailContactMatches $existing $Contact $profile)) { return $null }
+    return [pscustomobject]@{ Contact = $existing; Profile = $profile }
+  } catch {
+    # Bulk evidence can become internally inconsistent after an earlier contact
+    # changes source/email ownership. Treat it only as an unusable optimization;
+    # the caller will perform fresh targeted reads and re-apply every hard guard.
+    return $null
+  }
 }
 
 function New-ExchangeDistributionGroupLookup($Groups) {
@@ -5927,9 +5953,10 @@ function Invoke-FullExchangeSync {
           if (Has-MapKey $failedDirectoryPrerequisites $contactDirectoryBase) {
             throw "Contact reconciliation was blocked because its collision-safe group directory prerequisite failed: $($failedDirectoryPrerequisites[$contactDirectoryBase])"
           }
-          $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
-          $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
-          $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
+          $noOpHint = Get-ExchangeMailContactExactNoOpHint $contact $mailContactLookup $contactProfileLookup
+          $existingHint = if ($noOpHint) { $noOpHint.Contact } else { $null }
+          $existingProfileHint = if ($noOpHint) { $noOpHint.Profile } else { $null }
+          $useExistingHint = $null -ne $noOpHint
           Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
         } | Out-Null
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }

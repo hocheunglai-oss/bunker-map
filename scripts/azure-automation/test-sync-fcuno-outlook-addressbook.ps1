@@ -2700,6 +2700,11 @@ try {
   $splitCandidateFailedClosed = $_.Exception.Message -match "resolve to different contact objects"
 }
 Assert-True $splitCandidateFailedClosed "A bulk source-key/email split must fail closed without mutating either contact"
+$staleSplitNoOpHint = Get-ExchangeMailContactExactNoOpHint `
+  $desiredNoOpContact `
+  (New-ExchangeMailContactLookup @($desiredSourceObject, $desiredEmailObject)) `
+  (New-ExchangeContactProfileLookup @())
+Assert-True ($null -eq $staleSplitNoOpHint) "A stale bulk source/email split must be discarded so the mutation path can resolve fresh live ownership"
 
 $script:getMailContactCalls = 0
 $script:setMailContactCalls = 0
@@ -2761,6 +2766,23 @@ try {
   $duplicateSourceRereadFailedClosed = $_.Exception.Message -match "no longer belongs uniquely"
 }
 Assert-True $duplicateSourceRereadFailedClosed "A destructive immutable reread must fail before deletion when another contact acquires the same source key"
+$sameDnReplacement = [pscustomobject]@{
+  Identity = "same-dn-replacement"
+  Guid = "99999999-9999-4999-8999-999999999999"
+  ExternalDirectoryObjectId = "replacement-external-contact"
+  DistinguishedName = $script:noOpMailContact.DistinguishedName
+  ExternalEmailAddress = $script:noOpMailContact.ExternalEmailAddress
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = $script:noOpMailContact.CustomAttribute2
+}
+$script:liveMailContactSnapshot = @($sameDnReplacement)
+$sameDnReplacementFailedClosed = $false
+try {
+  Get-ExchangeMailContactByImmutableIdentity $script:noOpMailContact "unchanged@example.com" "FCUNO_CONTACT:c-unchanged" "Same-DN replacement reread" | Out-Null
+} catch {
+  $sameDnReplacementFailedClosed = $_.Exception.Message -match "resolved to 0 Exchange mail contacts"
+}
+Assert-True $sameDnReplacementFailedClosed "A destructive reread must reject a replacement with a new GUID even when its distinguished name is reused"
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
 
 $staleProfileHint = [pscustomobject]@{
@@ -2857,7 +2879,8 @@ Assert-True ($updateRecreateConfirmationIndex -gt $updateRecreateDeleteIndex) "A
 Assert-True ($updateRecreateNewIndex -gt $updateRecreateConfirmationIndex) "A managed Set-Contact invalid-object recreation must confirm absence before New-MailContact"
 
 $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
-Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$existingHint -and \$null -ne \$existingProfileHint -and \(Test-ExchangeMailContactMatches') "Full reconciliation may reuse a bulk contact hint only for an exact no-op"
+Assert-True ($fullSyncFunctionText -match 'Get-ExchangeMailContactExactNoOpHint \$contact') "Full reconciliation must treat its bulk contact lookup only as a non-authoritative exact-no-op optimization"
+Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$noOpHint\s*$') "Full reconciliation may reuse a bulk contact hint only when the exact-no-op probe succeeds"
 Assert-True ($upsertContactFunctionText -match 'Resolve-ExchangeMailContactFromLiveRead \$Contact') "A stale bulk contact hint that needs mutation must be replaced by a fresh targeted read with a narrow Graph fallback"
 Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
 
