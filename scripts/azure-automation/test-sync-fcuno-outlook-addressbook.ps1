@@ -2505,6 +2505,7 @@ $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
 $script:forceGraphMailContactFilterFallback = $false
+$script:forceGraphMailContactSnapshotFailure = $false
 $script:unfilteredMailContactCalls = 0
 function Get-MailContact {
   [CmdletBinding()]
@@ -2526,6 +2527,9 @@ function Get-MailContact {
   }
   if (-not $Filter -and -not $Identity) {
     $script:unfilteredMailContactCalls += 1
+    if ($script:forceGraphMailContactSnapshotFailure) {
+      throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+    }
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return @($script:rereadReplacementContact) }
     return @($script:liveMailContactSnapshot)
   }
@@ -2785,6 +2789,23 @@ try {
 Assert-True $sameDnReplacementFailedClosed "A destructive reread must reject a replacement with a new GUID even when its distinguished name is reused"
 $script:liveMailContactSnapshot = @($script:noOpMailContact)
 
+$preMutationEmailContact = [pscustomobject]@{}
+foreach ($property in $script:noOpMailContact.PSObject.Properties) {
+  $preMutationEmailContact | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+}
+$preMutationEmailContact.ExternalEmailAddress = "SMTP:before-update@example.com"
+$script:forceGraphMailContactSnapshotFailure = $true
+$postMutationGraphFallback = Get-ExchangeMailContactByImmutableIdentity $preMutationEmailContact "after-update@example.com" "FCUNO_CONTACT:c-unchanged" "Post-mutation Graph fallback" $true
+Assert-True ([object]::ReferenceEquals($preMutationEmailContact, $postMutationGraphFallback)) "The exact post-mutation Graph defect may retain the fresh immutable FCUNO source ownership proof when the email write may already have applied"
+$preMutationEmailFallbackBlocked = $false
+try {
+  Get-ExchangeMailContactByImmutableIdentity $preMutationEmailContact "after-update@example.com" "FCUNO_CONTACT:c-unchanged" "Pre-mutation Graph fallback" | Out-Null
+} catch {
+  $preMutationEmailFallbackBlocked = $_.Exception.Message -match "could not use the pre-mutation immutable contact"
+}
+Assert-True $preMutationEmailFallbackBlocked "A Graph-invalid bulk reread before a confirmed mutation must still reject mismatched email evidence"
+$script:forceGraphMailContactSnapshotFailure = $false
+
 $staleProfileHint = [pscustomobject]@{
   Identity = "CN=Stale Snapshot Profile,OU=Contacts,DC=example,DC=com"
   Guid = "77777777-7777-4777-8777-777777777777"
@@ -2883,6 +2904,10 @@ Assert-True ($fullSyncFunctionText -match 'Get-ExchangeMailContactExactNoOpHint 
 Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$noOpHint\s*$') "Full reconciliation may reuse a bulk contact hint only when the exact-no-op probe succeeds"
 Assert-True ($upsertContactFunctionText -match 'Resolve-ExchangeMailContactFromLiveRead \$Contact') "A stale bulk contact hint that needs mutation must be replaced by a fresh targeted read with a narrow Graph fallback"
 Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
+$confirmContactDeletionFunctionText = (Get-Item Function:Confirm-ExchangeMailContactDeletion).ScriptBlock.ToString()
+Assert-True ($confirmContactDeletionFunctionText -match '\$ExchangeGroupPropagationMaxAttempts') "Contact deletion verification must use the bounded Exchange propagation window"
+Assert-True ($confirmContactDeletionFunctionText -match 'legacy Graph-invalid contact by immutable identity') "Contact deletion verification must retry the exact legacy Graph-invalid identity read instead of declaring absence"
+Assert-True ($confirmContactDeletionFunctionText -match 'legacy Graph-invalid contact to filtered reads') "Contact deletion verification must retry the exact legacy Graph-invalid filtered read instead of declaring absence"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock

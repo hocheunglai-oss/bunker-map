@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.10"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.11"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -512,7 +512,7 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
   return ""
 }
 
-function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label) {
+function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKey, $Label, [bool]$AllowPostMutationEmailDrift = $false) {
   if (-not $Expected) { throw "$Label has no expected Exchange mail contact." }
   $identityProperty = ""
   $identity = ""
@@ -529,7 +529,27 @@ function Get-ExchangeMailContactByImmutableIdentity($Expected, $Email, $SourceKe
   $sourceKey = Clean-Text $SourceKey
   if (-not $email -or -not $sourceKey) { throw "$Label has no exact email/source-key ownership pair for a destructive reread." }
   Renew-ExchangeSyncLockIfDue
-  $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  $contacts = @()
+  try {
+    $contacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+  } catch {
+    $snapshotError = Clean-Text $_.Exception.Message
+    if ($snapshotError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+    # The mutation can expose the same legacy Graph defect on the immediate
+    # post-write bulk read. The object below was resolved from fresh source/email
+    # reads immediately before mutation and is still addressed by immutable ID.
+    # Retain that bounded proof only for this exact defect and only while its
+    # FCUNO marker/source ownership remains intact.
+    if (
+      (Clean-Text $Expected.CustomAttribute1) -ne $ManagedMarker -or
+      (Clean-Text $Expected.CustomAttribute2) -ne $sourceKey -or
+      (-not $AllowPostMutationEmailDrift -and (Normalize-Email (Get-RecipientEmail $Expected)) -ne $email)
+    ) {
+      throw "$Label could not use the pre-mutation immutable contact because its FCUNO marker, source key, or email evidence does not match."
+    }
+    Write-Warning ("{0} post-mutation bulk verification was rejected by Exchange Graph; retaining the immediately preceding immutable FCUNO ownership proof for exact recreation." -f $Label)
+    return $Expected
+  }
   Renew-ExchangeSyncLockIfDue
   $identityMatches = @($contacts | Where-Object {
     (Clean-Text $_.$identityProperty).Equals($identity, [StringComparison]::OrdinalIgnoreCase)
@@ -3328,12 +3348,15 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $updateError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $updateError)) { throw }
 
-      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after update failure"
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing $email $sourceKey "Managed contact recreation after update failure" $true
       if ($reread) {
+        # A successful current reread already proved the desired email uniquely.
+        # The exact Graph-invalid fallback instead proves the fresh pre-mutation
+        # marker/source ownership because Set-MailContact may already have changed
+        # the email before Set-Contact exposed the legacy profile defect.
         if (
           (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
-          (Clean-Text $reread.CustomAttribute2) -ne $sourceKey -or
-          (Normalize-Email (Get-RecipientEmail $reread)) -ne $email
+          (Clean-Text $reread.CustomAttribute2) -ne $sourceKey
         ) {
           throw "Managed contact recreation was blocked because the exact managed email projection changed after the update error. Original error: $updateError"
         }
@@ -3431,22 +3454,34 @@ function Confirm-ExchangeMailContactDeletion($Existing, $Email, $SourceKey) {
   if (-not $deleteIdentity) { throw "The deleted Exchange contact had no immutable identity for verification." }
   $deletionVerified = $false
   $verificationFailure = "the exact immutable Exchange contact still exists"
-  for ($attempt = 1; $attempt -le 4; $attempt += 1) {
-    if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+  for ($attempt = 1; $attempt -le $ExchangeGroupPropagationMaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds $ExchangeGroupPropagationDelaySeconds }
     Renew-ExchangeSyncLockIfDue
     $verifiedByIdentity = $null
     try {
       $verifiedByIdentity = Get-MailContact -Identity $deleteIdentity -ErrorAction Stop
     } catch {
-      if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+      if (-not (Test-ExchangeIdentityNotFoundError $_)) {
+        $identityReadError = Clean-Text $_.Exception.Message
+        if ($identityReadError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+        $verificationFailure = "Exchange still returned the legacy Graph-invalid contact by immutable identity"
+        continue
+      }
     }
     $verifiedBySource = @()
-    if ($sourceKey) {
-      $verifiedBySource = @(Get-MailContact -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-    }
     $verifiedByEmail = @()
-    if ($email) {
-      $verifiedByEmail = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$(Escape-ExchangeFilterValue $email)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    try {
+      if ($sourceKey) {
+        $verifiedBySource = @(Get-MailContact -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+      }
+      if ($email) {
+        $verifiedByEmail = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$(Escape-ExchangeFilterValue $email)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+      }
+    } catch {
+      $filterReadError = Clean-Text $_.Exception.Message
+      if ($filterReadError -notmatch "(?i)required field ExternalDirectoryObjectId was not returned from Graph API") { throw }
+      $verificationFailure = "Exchange still exposed the legacy Graph-invalid contact to filtered reads"
+      continue
     }
     Renew-ExchangeSyncLockIfDue
     $exactObjectStillExists = $verifiedByIdentity -and (Test-ExchangeObjectsShareImmutableIdentity $Existing $verifiedByIdentity)
