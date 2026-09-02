@@ -2497,7 +2497,9 @@ $script:setContactCalls = 0
 $script:lastSetContactIdentity = ""
 $script:lastGetContactFilter = ""
 $script:lastGetContactIdentity = ""
+$script:getContactIdentityCalls = 0
 $script:forceGraphContactFilterFallback = $false
+$script:graphFallbackIdentityNotFoundRemaining = 0
 $script:setContactError = ""
 $script:setContactFailed = $false
 $script:rereadReplacementContact = $null
@@ -2524,6 +2526,11 @@ function Get-Contact {
   }
   if ($Identity -in @("11111111-1111-1111-1111-111111111111", "CN=Profile Unchanged Contact,OU=Contacts,DC=example,DC=com")) {
     $script:lastGetContactIdentity = Clean-Text $Identity
+    $script:getContactIdentityCalls += 1
+    if ($script:graphFallbackIdentityNotFoundRemaining -gt 0) {
+      $script:graphFallbackIdentityNotFoundRemaining -= 1
+      throw "The operation couldn't be performed because object '$Identity' couldn't be found."
+    }
     return $script:noOpContactProfile
   }
   return $null
@@ -2706,6 +2713,12 @@ $script:lastGetContactIdentity = ""
 $graphFallbackProfile = Resolve-ExchangeContactProfileForMailContact $script:noOpMailContact "Graph-invalid filter contact" 1
 Assert-True ([object]::ReferenceEquals($script:noOpContactProfile, $graphFallbackProfile)) "A Graph-invalid immutable filter must fall back to the same immutable direct identity"
 Assert-Equal "11111111-1111-1111-1111-111111111111" $script:lastGetContactIdentity "The Graph fallback must use the mail contact's immutable GUID, never email or alias"
+$script:getContactIdentityCalls = 0
+$script:graphFallbackIdentityNotFoundRemaining = 1
+$graphFallbackAfterPropagationMiss = Resolve-ExchangeContactProfileForMailContact $script:noOpMailContact "Graph-invalid propagating contact" 2
+Assert-True ([object]::ReferenceEquals($script:noOpContactProfile, $graphFallbackAfterPropagationMiss)) "A direct immutable identity that is briefly not found must be retried before contact recreation is considered"
+Assert-Equal 2 $script:getContactIdentityCalls "A propagation-time direct identity miss must consume the resolver retry instead of escaping after one attempt"
+$script:graphFallbackIdentityNotFoundRemaining = 0
 $script:forceGraphContactFilterFallback = $false
 
 $staleProfileHint = [pscustomobject]@{

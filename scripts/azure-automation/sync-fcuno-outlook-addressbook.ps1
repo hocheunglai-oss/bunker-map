@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.6"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.7"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -543,7 +543,13 @@ function Resolve-ExchangeContactProfileForMailContact($MailContact, $Label, [int
       # response. Retry the same immutable GUID/DN through -Identity, then keep
       # the normal immutable correlation check below before accepting it.
       Write-Warning ("{0} immutable filter lookup was rejected by Exchange Graph; retrying the same {1} through direct identity." -f $Label, $filterProperty)
-      $profileCandidate = Get-Contact -Identity $filterValue -ErrorAction Stop
+      try {
+        $profileCandidate = Get-Contact -Identity $filterValue -ErrorAction Stop
+      } catch {
+        if (-not (Test-ExchangeIdentityNotFoundError $_)) { throw }
+        $lastResult = "the direct immutable $filterProperty identity '$filterValue' was not yet visible"
+        continue
+      }
       $profiles = @($profileCandidate | Where-Object { $null -ne $_ })
     }
     Renew-ExchangeSyncLockIfDue
