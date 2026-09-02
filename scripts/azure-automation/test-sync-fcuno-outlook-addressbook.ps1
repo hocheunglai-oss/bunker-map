@@ -2772,10 +2772,12 @@ $managedTransferDecisionIndex = $upsertContactFunctionText.IndexOf('$managedOwne
 $managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity')
 $liveProfileResolutionIndex = $upsertContactFunctionText.IndexOf('Resolve-ExchangeContactProfileForMailContact $existing')
 $profileResolutionRecreationIndex = $upsertContactFunctionText.IndexOf('Managed contact recreation after profile-resolution failure')
+$graphInvalidUpdateGateIndex = $upsertContactFunctionText.IndexOf('required field ExternalDirectoryObjectId was not returned from Graph API')
 Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
 Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
 Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A stale managed owner must be deleted and recreated before Graph contact-profile resolution"
 Assert-True ($profileResolutionRecreationIndex -gt $liveProfileResolutionIndex) "A managed Graph-profile failure must enter the exact verified recreation path"
+Assert-True ($graphInvalidUpdateGateIndex -gt $liveProfileResolutionIndex) "A managed Set-Contact Graph identity failure must pass the narrow invalid-object recreation gate"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock

@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.3"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.4"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -3246,7 +3246,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
         if (-not (Test-ExchangeObjectsShareImmutableIdentity $existing $reread)) {
           throw "Managed contact recreation was blocked because source-key ownership changed after the update error. Original error: $updateError"
         }
-        if ($updateError -notmatch "(?i)(invalid (recipient )?object|recipient object is invalid)") {
+        if ($updateError -notmatch "(?i)(invalid (recipient )?object|recipient object is invalid|required field ExternalDirectoryObjectId was not returned from Graph API)") {
           throw "Managed contact recreation was blocked because the immutable contact still exists; the update will retry without deletion. Original error: $updateError"
         }
         $removeIdentity = Get-ExchangeStrongCommandIdentity $reread
