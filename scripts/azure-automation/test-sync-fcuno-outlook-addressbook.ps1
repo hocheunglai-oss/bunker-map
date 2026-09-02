@@ -2608,6 +2608,7 @@ Assert-True $duplicateContactFailedClosed "A bulk contact snapshot must fail clo
 $foreignEmailOwner = [pscustomobject]@{
   Identity = "foreign-owner"
   ExternalEmailAddress = "unchanged@example.com"
+  CustomAttribute1 = ""
   CustomAttribute2 = "FCUNO_CONTACT:c-foreign"
 }
 $foreignOwnerLookup = New-ExchangeMailContactLookup @($foreignEmailOwner)
@@ -2618,6 +2619,15 @@ try {
   $foreignOwnerFailedClosed = $_.Exception.Message -match "ownership was not transferred"
 }
 Assert-True $foreignOwnerFailedClosed "A bulk email fallback must not transfer an unrelated immutable source owner"
+
+$orphanedManagedEmailOwner = [pscustomobject]@{
+  Identity = "orphaned-managed-owner"
+  ExternalEmailAddress = "unchanged@example.com"
+  CustomAttribute1 = $ManagedMarker
+  CustomAttribute2 = "FCUNO_CONTACT:c-deleted"
+}
+$resolvedOrphanedManagedOwner = Resolve-ExchangeMailContactHint $desiredNoOpContact (New-ExchangeMailContactLookup @($orphanedManagedEmailOwner))
+Assert-Equal "orphaned-managed-owner" $resolvedOrphanedManagedOwner.Identity "A canonical FCUNO contact may adopt the exact-email projection left by a deleted FCUNO source card"
 
 $legitimateDuplicateContact = [pscustomobject]@{
   DisplayName = "Newest"
@@ -3680,6 +3690,63 @@ $desiredNoOpGroupMembers = @(
   [pscustomobject]@{ MemberEmail = "existing@example.com" },
   [pscustomobject]@{ MemberEmail = "missing@example.com" }
 )
+
+$savedGetContactExchangeRowFromSource = (Get-Item Function:Get-ContactExchangeRowFromSource).ScriptBlock
+$savedSyncExchangeAliasPeers = (Get-Item Function:Sync-ExchangeAliasPeers).ScriptBlock
+$savedSyncExchangeDirectoryNamePeers = (Get-Item Function:Sync-ExchangeDirectoryNamePeers).ScriptBlock
+$savedUpsertExchangeMailContact = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock
+$savedGetManagedExchangeMailContactBySourceKey = (Get-Item Function:Get-ManagedExchangeMailContactBySourceKey).ScriptBlock
+$script:memberPrerequisiteEvents = @()
+function Get-ContactExchangeRowFromSource {
+  param($SourceContactId)
+  if ((Clean-Text $SourceContactId) -ne "c-external-member") { return $null }
+  return [pscustomobject]@{
+    SourceContactId = "c-external-member"
+    SourceKey = "FCUNO_CONTACT:c-external-member"
+    DisplayName = "External Member"
+    BaseAlias = "external-member"
+    Alias = "external-member"
+    ExternalEmailAddress = "external-member@example.com"
+    AllowedOwnerSourceKeys = @("FCUNO_CONTACT:c-external-member")
+  }
+}
+function Sync-ExchangeAliasPeers {
+  param($BaseAlias, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, [bool]$IncludeSinglePeer = $false)
+  $script:memberPrerequisiteEvents += "alias:$BaseAlias"
+}
+function Sync-ExchangeDirectoryNamePeers {
+  param($DisplayName, [hashtable]$Stats, $ExcludeSourceKey = "", [bool]$IncludeSinglePeer = $false)
+  $script:memberPrerequisiteEvents += "name:$DisplayName"
+}
+function Upsert-ExchangeMailContact {
+  param($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingHint = $null, [bool]$UseExistingHint = $false, $ExistingProfileHint = $null)
+  Assert-True $SkipNoOpWrites "A group-member prerequisite must avoid rewriting an already exact contact"
+  $script:memberPrerequisiteEvents += "upsert:$($Contact.SourceKey)"
+}
+function Get-ManagedExchangeMailContactBySourceKey {
+  param($SourceKey, $Email, $Label, [int]$MaxAttempts = 1)
+  Assert-Equal "FCUNO_CONTACT:c-external-member" $SourceKey "Group-member lookup must use the canonical FCUNO source key"
+  Assert-Equal "external-member@example.com" $Email "Group-member lookup must use the normalized canonical email"
+  Assert-Equal 4 $MaxAttempts "Group-member lookup must allow bounded Exchange propagation"
+  $script:memberPrerequisiteEvents += "resolve:$SourceKey"
+  return [pscustomobject]@{ Guid = "12345678-1234-4234-8234-123456789abc" }
+}
+try {
+  $resolvedMemberIdentity = Resolve-ExchangeGroupMemberCommandIdentity `
+    ([pscustomobject]@{ MemberEmail = "external-member@example.com"; SourceContactId = "c-external-member" }) `
+    @{}
+  Assert-Equal "12345678-1234-4234-8234-123456789abc" $resolvedMemberIdentity "An external group member must use its immutable Exchange GUID"
+  Assert-Equal `
+    "alias:external-member,name:External Member,upsert:FCUNO_CONTACT:c-external-member,resolve:FCUNO_CONTACT:c-external-member" `
+    ($script:memberPrerequisiteEvents -join ",") `
+    "Incremental membership must settle and resolve the external contact before mutation"
+} finally {
+  Set-Item Function:Get-ContactExchangeRowFromSource -Value $savedGetContactExchangeRowFromSource
+  Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncExchangeAliasPeers
+  Set-Item Function:Sync-ExchangeDirectoryNamePeers -Value $savedSyncExchangeDirectoryNamePeers
+  Set-Item Function:Upsert-ExchangeMailContact -Value $savedUpsertExchangeMailContact
+  Set-Item Function:Get-ManagedExchangeMailContactBySourceKey -Value $savedGetManagedExchangeMailContactBySourceKey
+}
 $script:memberState = @{
   "existing@example.com" = $true
   "unexpected@example.com" = $true
@@ -3888,9 +3955,22 @@ $script:attemptedMemberAdds = @()
 $script:removedMemberEmails = @()
 $script:getDistributionGroupMemberCalls = 0
 $incrementalMemberStats = @{}
-Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers $incrementalMemberStats
+$savedResolveExchangeGroupMemberCommandIdentity = (Get-Item Function:Resolve-ExchangeGroupMemberCommandIdentity).ScriptBlock
+$script:resolvedIncrementalMemberEmails = @()
+function Resolve-ExchangeGroupMemberCommandIdentity {
+  param($Member, [hashtable]$Stats)
+  $email = Normalize-Email $Member.MemberEmail
+  $script:resolvedIncrementalMemberEmails += $email
+  return $email
+}
+try {
+  Sync-ExchangeGroupMembers $desiredNoOpGroup $desiredNoOpGroupMembers $incrementalMemberStats
+} finally {
+  Set-Item Function:Resolve-ExchangeGroupMemberCommandIdentity -Value $savedResolveExchangeGroupMemberCommandIdentity
+}
 Assert-Equal 2 $script:getDistributionGroupMemberCalls "Incremental membership processing must retain its live cleanup and verification reads"
 Assert-Equal 2 @($script:attemptedMemberAdds).Count "Incremental membership processing must retain its current add-attempt behavior"
+Assert-Equal "existing@example.com,missing@example.com" ($script:resolvedIncrementalMemberEmails -join ",") "Incremental membership must resolve every desired recipient through the hardened command-identity path"
 Assert-True ($script:attemptedMemberAdds -contains "existing@example.com") "Incremental membership processing must still tolerate an already-present member"
 Assert-Equal 1 $incrementalMemberStats.addedMembers "Incremental membership processing must still count only a newly added member"
 

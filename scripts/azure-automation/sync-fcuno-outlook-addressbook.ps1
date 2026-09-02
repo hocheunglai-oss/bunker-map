@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-08-19.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.1"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -819,7 +819,8 @@ function Resolve-ExchangeMailContactCandidates($Contact, $SourceMatches, $EmailM
     $emailOwnerKey = Clean-Text $emailCandidate.CustomAttribute2
     if ($emailOwnerKey -and $emailOwnerKey -ne $sourceKey) {
       $allowedOwnerKeys = @($Contact.AllowedOwnerSourceKeys | ForEach-Object { Clean-Text $_ })
-      if ($allowedOwnerKeys -notcontains $emailOwnerKey) {
+      $emailOwnerIsManaged = (Clean-Text $emailCandidate.CustomAttribute1) -eq $ManagedMarker
+      if (-not $emailOwnerIsManaged -and $allowedOwnerKeys -notcontains $emailOwnerKey) {
         throw "Exchange email $email belongs to source key $emailOwnerKey, not $sourceKey, so ownership was not transferred."
       }
     }
@@ -3686,6 +3687,40 @@ function Get-ExchangeGroupMembershipMismatches($DesiredMembers, $ActualMembers) 
   return $mismatches
 }
 
+function Resolve-ExchangeGroupMemberCommandIdentity($Member, [hashtable]$Stats) {
+  $email = Normalize-Email $Member.MemberEmail
+  if (-not (Test-ValidEmail $email)) {
+    throw "Exchange group member has invalid email '$email'."
+  }
+
+  $sourceContactId = Clean-Text $Member.SourceContactId
+  if (-not $sourceContactId) { return $email }
+  $contact = Get-ContactExchangeRowFromSource $sourceContactId
+  if (-not $contact) {
+    # Internal FCUNO contacts resolve to tenant recipients instead of managed
+    # MailContact objects, so their unique SMTP address remains authoritative.
+    return $email
+  }
+
+  # An incremental contact save can require this group before a later contact
+  # queue row has run. Settle the exact canonical member first, then use its
+  # immutable Exchange identity so directory propagation cannot make the
+  # external target address temporarily unresolvable.
+  Sync-ExchangeAliasPeers $contact.BaseAlias $Stats $true $true
+  Sync-ExchangeDirectoryNamePeers $contact.DisplayName $Stats $contact.SourceKey $false
+  Upsert-ExchangeMailContact $contact $Stats $true
+  $managedContact = Get-ManagedExchangeMailContactBySourceKey `
+    $contact.SourceKey `
+    $email `
+    "Exchange group member $email" `
+    4
+  $commandIdentity = Get-ExchangeStrongCommandIdentity $managedContact
+  if (-not $commandIdentity) {
+    throw "Exchange group member $email has no immutable identity, so membership mutation was blocked."
+  }
+  return $commandIdentity
+}
+
 function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingGroupHint = $null, [bool]$UseExistingGroupHint = $false, $ExistingGroupProfileHint = $null) {
   Renew-ExchangeSyncLockIfDue
   $pendingFullMembershipDetails = @()
@@ -3716,7 +3751,12 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
   $desiredMembers = @{}
   foreach ($member in @($Members)) {
     $email = Normalize-Email $member.MemberEmail
-    if ($email) { $desiredMembers[$email] = $true }
+    if (-not $email -or (Has-MapKey $desiredMembers $email)) { continue }
+    $desiredMembers[$email] = $(if ($SkipNoOpWrites) {
+      $email
+    } else {
+      Resolve-ExchangeGroupMemberCommandIdentity $member $Stats
+    })
   }
 
   $currentMembers = @()
@@ -3743,7 +3783,7 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
     Renew-ExchangeSyncLockIfDue
     $addSucceeded = $false
     try {
-      Add-DistributionGroupMember -Identity $groupIdentity -Member $email -ErrorAction Stop
+      Add-DistributionGroupMember -Identity $groupIdentity -Member $desiredMembers[$email] -ErrorAction Stop
       $addSucceeded = $true
     } catch {
       $addError = Clean-Text $_.Exception.Message
