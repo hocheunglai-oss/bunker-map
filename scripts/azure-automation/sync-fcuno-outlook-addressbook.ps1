@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.2"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -3119,6 +3119,22 @@ function Test-ExchangeRecreateEligibleError($Message) {
   return $text -match "(?i)(ManagementObjectNotFoundException|object[^.]*could not be found|object[^.]*couldn't be found|object[^.]*does not exist|invalid (recipient )?object|recipient object is invalid)"
 }
 
+function Test-ExchangeManagedContactOwnershipTransferRequired($Existing, $Contact) {
+  if (-not $Existing -or -not $Contact) { return $false }
+  $existingEmail = Normalize-Email (Get-RecipientEmail $Existing)
+  $desiredEmail = Normalize-Email $Contact.ExternalEmailAddress
+  $existingOwnerKey = Clean-Text $Existing.CustomAttribute2
+  $desiredOwnerKey = Clean-Text $Contact.SourceKey
+  return (
+    $existingEmail -and
+    $existingEmail -eq $desiredEmail -and
+    (Clean-Text $Existing.CustomAttribute1) -eq $ManagedMarker -and
+    $existingOwnerKey -and
+    $desiredOwnerKey -and
+    $existingOwnerKey -ne $desiredOwnerKey
+  )
+}
+
 function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOpWrites = $false, $ExistingHint = $null, [bool]$UseExistingHint = $false, $ExistingProfileHint = $null) {
   Renew-ExchangeSyncLockIfDue
   if (-not $Contact) {
@@ -3147,6 +3163,23 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
   if ($existing -and -not (Get-ExchangeStrongCommandIdentity $existing)) {
     throw "Existing Exchange contact $email has no immutable identity, so the update was blocked without mutation."
   }
+  $existingBeforeMutation = $existing
+  $profileBeforeMutation = $ExistingProfileHint
+  $managedOwnershipTransfer = Test-ExchangeManagedContactOwnershipTransferRequired $existing $Contact
+  if ($managedOwnershipTransfer) {
+    $previousOwnerKey = Clean-Text $existing.CustomAttribute2
+    $removeIdentity = Get-ExchangeStrongCommandIdentity $existing
+    if (-not $removeIdentity) {
+      throw "Managed contact ownership transfer for $email was blocked because the existing object has no immutable identity."
+    }
+    Renew-ExchangeSyncLockIfDue
+    Remove-MailContact -Identity $removeIdentity -Confirm:$false -ErrorAction Stop
+    Renew-ExchangeSyncLockIfDue
+    Confirm-ExchangeMailContactDeletion $existing $email $previousOwnerKey
+    Write-Warning ("Recreating managed Exchange contact {0} to transfer FCUNO source ownership from {1} to {2}." -f $email, $previousOwnerKey, $sourceKey)
+    $existing = $null
+    $ExistingProfileHint = $null
+  }
   if (-not $existing) {
     $ExistingProfileHint = $null
   } elseif ($ExistingProfileHint) {
@@ -3156,8 +3189,6 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
   if ($existing -and -not $ExistingProfileHint) {
     $ExistingProfileHint = Resolve-ExchangeContactProfileForMailContact $existing "Exchange contact $email" 1
   }
-  $existingBeforeMutation = $existing
-  $profileBeforeMutation = $ExistingProfileHint
   $fullMutationAction = ""
   if ($existing -and $SkipNoOpWrites -and (Test-ExchangeMailContactMatches $existing $Contact $ExistingProfileHint)) {
     Increment-Stat $Stats "verifiedQueueRows"
@@ -3207,7 +3238,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     }
     Increment-Stat $Stats "updatedContacts"
   } else {
-    $fullMutationAction = "Create contact"
+    $fullMutationAction = $(if ($managedOwnershipTransfer) { "Recreate contact" } else { "Create contact" })
     Renew-ExchangeSyncLockIfDue
     $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
     Renew-ExchangeSyncLockIfDue
@@ -3218,7 +3249,11 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
     $createdContact = Get-ManagedExchangeMailContactBySourceKey $sourceKey $email "New Exchange contact $email" 4
     $createdProfile = Resolve-ExchangeContactProfileForMailContact $createdContact "New Exchange contact $email" 4
     Set-ExchangeContactProfile (Get-ExchangeContactProfileCommandIdentity $createdProfile) $Contact
-    Increment-Stat $Stats "createdContacts"
+    if ($managedOwnershipTransfer) {
+      Increment-Stat $Stats "updatedContacts"
+    } else {
+      Increment-Stat $Stats "createdContacts"
+    }
   }
 
   $verified = $null
@@ -3749,14 +3784,12 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
   }
 
   $desiredMembers = @{}
+  $desiredMemberRows = @{}
   foreach ($member in @($Members)) {
     $email = Normalize-Email $member.MemberEmail
     if (-not $email -or (Has-MapKey $desiredMembers $email)) { continue }
-    $desiredMembers[$email] = $(if ($SkipNoOpWrites) {
-      $email
-    } else {
-      Resolve-ExchangeGroupMemberCommandIdentity $member $Stats
-    })
+    $desiredMemberRows[$email] = $member
+    $desiredMembers[$email] = $(if ($SkipNoOpWrites) { $email } else { Resolve-ExchangeGroupMemberCommandIdentity $member $Stats })
   }
 
   $currentMembers = @()
@@ -3780,10 +3813,15 @@ function Sync-ExchangeGroupMembers($Group, $Members, [hashtable]$Stats, [bool]$S
 
   foreach ($email in @($desiredMembers.Keys | Sort-Object)) {
     if ($SkipNoOpWrites -and (Has-MapKey $currentMembershipState.EmailCounts $email)) { continue }
+    $memberIdentity = $(if ($SkipNoOpWrites) {
+      Resolve-ExchangeGroupMemberCommandIdentity $desiredMemberRows[$email] $Stats
+    } else {
+      $desiredMembers[$email]
+    })
     Renew-ExchangeSyncLockIfDue
     $addSucceeded = $false
     try {
-      Add-DistributionGroupMember -Identity $groupIdentity -Member $desiredMembers[$email] -ErrorAction Stop
+      Add-DistributionGroupMember -Identity $groupIdentity -Member $memberIdentity -ErrorAction Stop
       $addSucceeded = $true
     } catch {
       $addError = Clean-Text $_.Exception.Message
@@ -5722,9 +5760,17 @@ function Invoke-FullExchangeSync {
   # Delete only source/alias-certified stale managed recipients before any desired object
   # claims a newly freed directory Name, then take fresh bulk snapshots below.
   Renew-ExchangeSyncLockIfDue -Force
-  $preCleanupManagedContacts = @(Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $preCleanupManagedContacts = @(
+    Invoke-ExchangeOperationWithTemporaryRetry "Pre-cleanup managed contact snapshot" {
+      Get-MailContact -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop
+    }
+  )
   Renew-ExchangeSyncLockIfDue
-  $preCleanupManagedGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop)
+  $preCleanupManagedGroups = @(
+    Invoke-ExchangeOperationWithTemporaryRetry "Pre-cleanup managed group snapshot" {
+      Get-DistributionGroup -ResultSize Unlimited -Filter "CustomAttribute1 -eq '$ManagedMarker'" -ErrorAction Stop
+    }
+  )
   Renew-ExchangeSyncLockIfDue
   $failedStaleDirectoryCleanup = @{}
   foreach ($failureMap in @(
@@ -5760,13 +5806,13 @@ function Invoke-FullExchangeSync {
   }
 
   Renew-ExchangeSyncLockIfDue -Force
-  $exchangeMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeMailContacts = @(Invoke-ExchangeOperationWithTemporaryRetry "Managed contact projection snapshot" { Get-MailContact -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $exchangeContactProfiles = @(Get-Contact -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeContactProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Contact profile projection snapshot" { Get-Contact -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $exchangeDistributionGroups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeDistributionGroups = @(Invoke-ExchangeOperationWithTemporaryRetry "Managed group projection snapshot" { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $exchangeGroupProfiles = @(Get-Group -ResultSize Unlimited -ErrorAction Stop)
+  $exchangeGroupProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Group profile projection snapshot" { Get-Group -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
   $mailContactLookup = New-ExchangeMailContactLookup $exchangeMailContacts
   $contactProfileLookup = New-ExchangeContactProfileLookup $exchangeContactProfiles
@@ -5818,13 +5864,13 @@ function Invoke-FullExchangeSync {
   }
 
   Renew-ExchangeSyncLockIfDue -Force
-  $finalMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)
+  $finalMailContacts = @(Invoke-ExchangeOperationWithTemporaryRetry "Final managed contact snapshot" { Get-MailContact -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $finalContactProfiles = @(Get-Contact -ResultSize Unlimited -ErrorAction Stop)
+  $finalContactProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Final contact profile snapshot" { Get-Contact -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $finalDistributionGroups = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop)
+  $finalDistributionGroups = @(Invoke-ExchangeOperationWithTemporaryRetry "Final managed group snapshot" { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
-  $finalGroupProfiles = @(Get-Group -ResultSize Unlimited -ErrorAction Stop)
+  $finalGroupProfiles = @(Invoke-ExchangeOperationWithTemporaryRetry "Final group profile snapshot" { Get-Group -ResultSize Unlimited -ErrorAction Stop })
   Renew-ExchangeSyncLockIfDue
   Confirm-FinalExchangeProjection $exchangeRows $finalMailContacts $finalContactProfiles $finalDistributionGroups $finalGroupProfiles $stats
   Confirm-FinalExchangeGroupMemberships $exchangeRows $stats

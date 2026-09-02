@@ -2628,6 +2628,12 @@ $orphanedManagedEmailOwner = [pscustomobject]@{
 }
 $resolvedOrphanedManagedOwner = Resolve-ExchangeMailContactHint $desiredNoOpContact (New-ExchangeMailContactLookup @($orphanedManagedEmailOwner))
 Assert-Equal "orphaned-managed-owner" $resolvedOrphanedManagedOwner.Identity "A canonical FCUNO contact may adopt the exact-email projection left by a deleted FCUNO source card"
+Assert-True (Test-ExchangeManagedContactOwnershipTransferRequired $orphanedManagedEmailOwner $desiredNoOpContact) "A managed exact-email contact with an obsolete FCUNO source owner must be recreated before profile mutation"
+$orphanedManagedEmailOwner.CustomAttribute1 = ""
+Assert-True (-not (Test-ExchangeManagedContactOwnershipTransferRequired $orphanedManagedEmailOwner $desiredNoOpContact)) "An unmanaged exact-email contact must never enter the ownership-transfer recreation path"
+$orphanedManagedEmailOwner.CustomAttribute1 = $ManagedMarker
+$orphanedManagedEmailOwner.CustomAttribute2 = $desiredNoOpContact.SourceKey
+Assert-True (-not (Test-ExchangeManagedContactOwnershipTransferRequired $orphanedManagedEmailOwner $desiredNoOpContact)) "A managed contact already owned by the canonical FCUNO source must not be recreated"
 
 $legitimateDuplicateContact = [pscustomobject]@{
   DisplayName = "Newest"
@@ -2759,6 +2765,14 @@ try {
 }
 Assert-True $identitylessContactFailedClosed "An existing contact without a strong Exchange identity must fail before profile or marker mutation"
 Assert-Equal $contactSetBaseline $script:setMailContactCalls "An identityless existing contact must not be retagged through its mutable alias"
+
+$upsertContactFunctionText = (Get-Item Function:Upsert-ExchangeMailContact).ScriptBlock.ToString()
+$managedTransferDecisionIndex = $upsertContactFunctionText.IndexOf('$managedOwnershipTransfer = Test-ExchangeManagedContactOwnershipTransferRequired')
+$managedTransferDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-MailContact -Identity $removeIdentity')
+$liveProfileResolutionIndex = $upsertContactFunctionText.IndexOf('Resolve-ExchangeContactProfileForMailContact $existing')
+Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
+Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
+Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A stale managed owner must be deleted and recreated before Graph contact-profile resolution"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock
@@ -3675,16 +3689,18 @@ Assert-True (-not $script:recreatedGroupRemoved) "A legacy managed group with no
 Assert-Equal 0 $legacyDesiredAliasStats.removedGroups "A preserved legacy desired-alias group must not be counted as stale"
 
 $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
-$fullPreCleanupSnapshotIndex = $fullSyncFunctionText.IndexOf('$preCleanupManagedContacts = @(Get-MailContact')
+$fullPreCleanupSnapshotIndex = $fullSyncFunctionText.IndexOf('Pre-cleanup managed contact snapshot')
 $fullStaleContactCleanupIndex = $fullSyncFunctionText.IndexOf('Remove-StaleManagedExchangeContacts $preCleanupManagedContacts')
 $fullDirectoryPrerequisiteIndex = $fullSyncFunctionText.IndexOf('Sync-ExchangeGroupDirectoryNamePrerequisites $exchangeRows')
-$fullFreshRecipientSnapshotIndex = $fullSyncFunctionText.IndexOf('$exchangeMailContacts = @(Get-MailContact -ResultSize Unlimited -ErrorAction Stop)')
+$fullFreshRecipientSnapshotIndex = $fullSyncFunctionText.IndexOf('Managed contact projection snapshot')
 $fullDesiredContactLoopIndex = $fullSyncFunctionText.IndexOf('$contactPosition = 0')
 Assert-True ($fullPreCleanupSnapshotIndex -ge 0) "Full sync must take the managed-recipient cleanup snapshot"
 Assert-True ($fullPreCleanupSnapshotIndex -lt $fullStaleContactCleanupIndex) "Full sync must snapshot before exact stale cleanup"
 Assert-True ($fullStaleContactCleanupIndex -lt $fullDirectoryPrerequisiteIndex) "Full sync must delete verified stale recipients before collision-safe directory prerequisites"
 Assert-True ($fullDirectoryPrerequisiteIndex -lt $fullFreshRecipientSnapshotIndex) "Full sync must finish directory and alias prepasses before taking lookup snapshots"
 Assert-True ($fullFreshRecipientSnapshotIndex -lt $fullDesiredContactLoopIndex) "Desired upserts must use a fresh post-prepass Exchange snapshot"
+Assert-True ($fullSyncFunctionText.IndexOf('Final managed contact snapshot') -ge 0) "Final contact certification reads must use bounded temporary-error retry"
+Assert-True ($fullSyncFunctionText.IndexOf('Final managed group snapshot') -ge 0) "Final group certification reads must use bounded temporary-error retry"
 
 $desiredNoOpGroupMembers = @(
   [pscustomobject]@{ MemberEmail = "existing@example.com" },
@@ -3740,6 +3756,13 @@ try {
     "alias:external-member,name:External Member,upsert:FCUNO_CONTACT:c-external-member,resolve:FCUNO_CONTACT:c-external-member" `
     ($script:memberPrerequisiteEvents -join ",") `
     "Incremental membership must settle and resolve the external contact before mutation"
+
+  $groupMembershipFunctionText = (Get-Item Function:Sync-ExchangeGroupMembers).ScriptBlock.ToString()
+  $fullMissingMemberBranchIndex = $groupMembershipFunctionText.IndexOf('if ($SkipNoOpWrites)')
+  $fullMissingMemberResolveIndex = $groupMembershipFunctionText.IndexOf('Resolve-ExchangeGroupMemberCommandIdentity $desiredMemberRows[$email] $Stats')
+  $memberAddIndex = $groupMembershipFunctionText.IndexOf('Add-DistributionGroupMember -Identity $groupIdentity -Member $memberIdentity')
+  Assert-True ($fullMissingMemberResolveIndex -gt $fullMissingMemberBranchIndex) "Full reconciliation must resolve a missing external member after its initial no-op comparison"
+  Assert-True ($fullMissingMemberResolveIndex -lt $memberAddIndex) "Full reconciliation must address a missing external member by settled immutable identity"
 } finally {
   Set-Item Function:Get-ContactExchangeRowFromSource -Value $savedGetContactExchangeRowFromSource
   Set-Item Function:Sync-ExchangeAliasPeers -Value $savedSyncExchangeAliasPeers
