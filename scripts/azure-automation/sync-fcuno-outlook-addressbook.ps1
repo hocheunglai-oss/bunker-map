@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.11"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.12"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -5997,7 +5997,7 @@ function Invoke-FullExchangeSync {
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }
     } catch {
       Add-FullSyncFailure $stats "Contact" $contact.DisplayName $contact.ExternalEmailAddress $_.Exception.Message
-      Write-Warning ("Full reconciliation failed for contact {0}: {1}" -f $contact.DisplayName, $_.Exception.Message)
+      Write-Warning ("Full reconciliation failed for contact {0} at runbook line {1}: {2}" -f $contact.DisplayName, $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
     }
   }
 
@@ -6017,7 +6017,7 @@ function Invoke-FullExchangeSync {
         } | Out-Null
     } catch {
       Add-FullSyncFailure $stats "Group" $group.GroupName $group.Alias $_.Exception.Message
-      Write-Warning ("Full reconciliation failed for group {0}: {1}" -f $group.GroupName, $_.Exception.Message)
+      Write-Warning ("Full reconciliation failed for group {0} at runbook line {1}: {2}" -f $group.GroupName, $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
     }
   }
 
