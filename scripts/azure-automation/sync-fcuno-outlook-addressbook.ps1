@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.17"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.18"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -3240,6 +3240,199 @@ function Test-ExchangeRecreateEligibleError($Message) {
   return $text -match "(?i)(ManagementObjectNotFoundException|object[^.]*could not be found|object[^.]*couldn't be found|object[^.]*does not exist|invalid (recipient )?object|recipient object is invalid|required field ExternalDirectoryObjectId was not returned from Graph API)"
 }
 
+function Test-ExchangeGraphIncompleteRecipientError($Message) {
+  return (Clean-Text $Message) -match "(?i)^Required field ExternalDirectoryObjectId was not returned from Graph API\.?$"
+}
+
+function New-ExchangeMailContactWithGraphRecovery($Contact, $Label) {
+  if (-not $Contact) { throw "$Label has no desired FCUNO contact." }
+  $directoryName = Get-ExchangeContactDirectoryName $Contact
+  $displayName = Clean-Text $Contact.DisplayName
+  $alias = (Clean-Text $Contact.Alias).ToLowerInvariant()
+  $email = Normalize-Email $Contact.ExternalEmailAddress
+  if (-not $displayName -or -not $alias -or -not (Test-ValidEmail $email)) {
+    throw "$Label has no exact name, alias, and email creation proof."
+  }
+
+  $ambiguousResult = ""
+  $created = $null
+  Renew-ExchangeSyncLockIfDue
+  try {
+    $created = New-MailContact `
+      -Name $directoryName `
+      -DisplayName $displayName `
+      -ExternalEmailAddress $email `
+      -Alias $alias `
+      -ErrorAction Stop
+  } catch {
+    $createError = Clean-Text $_.Exception.Message
+    if (-not (Test-ExchangeGraphIncompleteRecipientError $createError)) { throw }
+    $ambiguousResult = $createError
+  }
+  Renew-ExchangeSyncLockIfDue
+  if ($created -and (Get-ExchangeStrongCommandIdentity $created)) { return $created }
+  if (-not $ambiguousResult) {
+    $ambiguousResult = "$Label did not return an immutable Exchange identity."
+  }
+
+  # New-MailContact can commit and then fail while Exchange serializes its
+  # response. This recovery is operation-bound: before the command, normal
+  # reconciliation proved the canonical email absent. Accept only the exact
+  # bare object just requested, joined by two fresh reads to the same immutable
+  # Exchange identity. Never claim a pre-existing or already owned recipient.
+  Write-Warning ("{0} returned an ambiguous Exchange response; verifying the exact new contact before continuing." -f $Label)
+  $lastResult = "the exact new mail contact was not yet visible"
+  for ($attempt = 1; $attempt -le $ExchangeGroupPropagationMaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds $ExchangeGroupPropagationDelaySeconds }
+    Renew-ExchangeSyncLockIfDue
+    $identityCandidate = $null
+    try {
+      $identityCandidate = Get-MailContact -Identity $directoryName -ErrorAction Stop
+    } catch {
+      if (Test-ExchangeIdentityNotFoundError $_) {
+        $lastResult = "the directory name '$directoryName' was not yet visible"
+        continue
+      }
+      if (Test-ExchangeGraphIncompleteRecipientError $_.Exception.Message) {
+        $lastResult = "Exchange still returned the incomplete Graph recipient for directory name '$directoryName'"
+        continue
+      }
+      throw
+    }
+    Renew-ExchangeSyncLockIfDue
+
+    $emailMatches = @()
+    try {
+      $emailMatches = @(Get-MailContact -Filter "ExternalEmailAddress -eq '$(Escape-ExchangeFilterValue $email)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    } catch {
+      if (Test-ExchangeGraphIncompleteRecipientError $_.Exception.Message) {
+        $lastResult = "Exchange still returned the incomplete Graph recipient for email '$email'"
+        continue
+      }
+      throw
+    }
+    Renew-ExchangeSyncLockIfDue
+    if ($emailMatches.Count -gt 1) { throw "$Label recovery found $($emailMatches.Count) Exchange contacts for email $email." }
+    if (-not $identityCandidate -or $emailMatches.Count -eq 0) {
+      $lastResult = "the exact directory-name/email pair was not yet visible"
+      continue
+    }
+    $candidate = $emailMatches[0]
+    if (-not (Get-ExchangeStrongCommandIdentity $identityCandidate) -or -not (Get-ExchangeStrongCommandIdentity $candidate)) {
+      $lastResult = "the new contact was visible without two immutable Exchange identities"
+      continue
+    }
+    if (-not (Test-ExchangeObjectsShareImmutableIdentity $identityCandidate $candidate)) {
+      throw "$Label recovery directory name and email resolve to different immutable Exchange contacts."
+    }
+    if (
+      (Clean-Text $candidate.Name) -cne $directoryName -or
+      (Clean-Text $candidate.DisplayName) -cne $displayName -or
+      (Clean-Text $candidate.Alias).ToLowerInvariant() -cne $alias -or
+      (Normalize-Email (Get-RecipientEmail $candidate)) -cne $email -or
+      (Clean-Text $candidate.CustomAttribute1) -or
+      (Clean-Text $candidate.CustomAttribute2)
+    ) {
+      throw "$Label recovery found an Exchange contact that is not the exact unowned object requested; no FCUNO marker was applied."
+    }
+    Write-Warning ("{0} exact new contact was independently recovered after the ambiguous Exchange response." -f $Label)
+    return $candidate
+  }
+  throw "$Label could not safely recover from the ambiguous Exchange response after $ExchangeGroupPropagationMaxAttempts attempt(s): $lastResult. Original result: $ambiguousResult"
+}
+
+function New-ExchangeDistributionGroupWithGraphRecovery($Group, $Label) {
+  if (-not $Group) { throw "$Label has no desired FCUNO group." }
+  $directoryName = Get-ExchangeGroupDirectoryName $Group
+  $displayName = Clean-Text $Group.GroupName
+  $alias = (Clean-Text $Group.Alias).ToLowerInvariant()
+  $smtpAddress = Get-ExpectedExchangeGroupSmtpAddress $Group
+  if (-not $displayName -or -not $alias -or -not (Test-ValidEmail $smtpAddress)) {
+    throw "$Label has no exact name, alias, and SMTP creation proof."
+  }
+
+  $ambiguousResult = ""
+  $created = $null
+  Renew-ExchangeSyncLockIfDue
+  try {
+    $created = New-DistributionGroup `
+      -Name $directoryName `
+      -DisplayName $displayName `
+      -Alias $alias `
+      -PrimarySmtpAddress $smtpAddress `
+      -ErrorAction Stop
+  } catch {
+    $createError = Clean-Text $_.Exception.Message
+    if (-not (Test-ExchangeGraphIncompleteRecipientError $createError)) { throw }
+    $ambiguousResult = $createError
+  }
+  Renew-ExchangeSyncLockIfDue
+  if ($created -and (Get-ExchangeStrongCommandIdentity $created)) { return $created }
+  if (-not $ambiguousResult) {
+    $ambiguousResult = "$Label did not return an immutable Exchange identity."
+  }
+
+  Write-Warning ("{0} returned an ambiguous Exchange response; verifying the exact new group before continuing." -f $Label)
+  $lastResult = "the exact new distribution group was not yet visible"
+  for ($attempt = 1; $attempt -le $ExchangeGroupPropagationMaxAttempts; $attempt += 1) {
+    if ($attempt -gt 1) { Start-Sleep -Seconds $ExchangeGroupPropagationDelaySeconds }
+    Renew-ExchangeSyncLockIfDue
+    $smtpCandidate = $null
+    try {
+      $smtpCandidate = Get-DistributionGroup -Identity $smtpAddress -ErrorAction Stop
+    } catch {
+      if (Test-ExchangeIdentityNotFoundError $_) {
+        $lastResult = "the SMTP address '$smtpAddress' was not yet visible"
+        continue
+      }
+      if (Test-ExchangeGraphIncompleteRecipientError $_.Exception.Message) {
+        $lastResult = "Exchange still returned the incomplete Graph recipient for SMTP address '$smtpAddress'"
+        continue
+      }
+      throw
+    }
+    Renew-ExchangeSyncLockIfDue
+
+    $aliasMatches = @()
+    try {
+      $aliasMatches = @(Get-DistributionGroup -Filter "Alias -eq '$(Escape-ExchangeFilterValue $alias)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+    } catch {
+      if (Test-ExchangeGraphIncompleteRecipientError $_.Exception.Message) {
+        $lastResult = "Exchange still returned the incomplete Graph recipient for alias '$alias'"
+        continue
+      }
+      throw
+    }
+    Renew-ExchangeSyncLockIfDue
+    if ($aliasMatches.Count -gt 1) { throw "$Label recovery found $($aliasMatches.Count) Exchange groups for alias $alias." }
+    if (-not $smtpCandidate -or $aliasMatches.Count -eq 0) {
+      $lastResult = "the exact SMTP/alias pair was not yet visible"
+      continue
+    }
+    $candidate = $aliasMatches[0]
+    if (-not (Get-ExchangeStrongCommandIdentity $smtpCandidate) -or -not (Get-ExchangeStrongCommandIdentity $candidate)) {
+      $lastResult = "the new group was visible without two immutable Exchange identities"
+      continue
+    }
+    if (-not (Test-ExchangeObjectsShareImmutableIdentity $smtpCandidate $candidate)) {
+      throw "$Label recovery SMTP address and alias resolve to different immutable Exchange groups."
+    }
+    if (
+      (Clean-Text $candidate.Name) -cne $directoryName -or
+      (Clean-Text $candidate.DisplayName) -cne $displayName -or
+      (Clean-Text $candidate.Alias).ToLowerInvariant() -cne $alias -or
+      (Normalize-Email $candidate.PrimarySmtpAddress) -cne $smtpAddress -or
+      (Clean-Text $candidate.CustomAttribute1) -or
+      (Clean-Text $candidate.CustomAttribute2)
+    ) {
+      throw "$Label recovery found an Exchange group that is not the exact unowned object requested; no FCUNO marker was applied."
+    }
+    Write-Warning ("{0} exact new group was independently recovered after the ambiguous Exchange response." -f $Label)
+    return $candidate
+  }
+  throw "$Label could not safely recover from the ambiguous Exchange response after $ExchangeGroupPropagationMaxAttempts attempt(s): $lastResult. Original result: $ambiguousResult"
+}
+
 function Test-ExchangeManagedContactOwnershipTransferRequired($Existing, $Contact) {
   if (-not $Existing -or -not $Contact) { return $false }
   $existingEmail = Normalize-Email (Get-RecipientEmail $Existing)
@@ -3472,7 +3665,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
         Remove-ExchangeMailContactWithVerifiedAbsence $reread $email $sourceKey "Managed contact recreation after update failure for $email"
       }
       Write-Warning ("Existing managed Exchange contact {0} is absent or narrowly confirmed invalid; recreating it. Original error: {1}" -f $email, $updateError)
-      $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
+      $newContact = New-ExchangeMailContactWithGraphRecovery $Contact "Recreated Exchange contact $email"
       Renew-ExchangeSyncLockIfDue
       $identity = Get-ExchangeStrongCommandIdentity $newContact
       if (-not $identity) { throw "Recreated Exchange contact $email did not return an immutable identity, so profile/marker mutation was blocked." }
@@ -3487,7 +3680,7 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
   } else {
     $fullMutationAction = $(if ($managedOwnershipTransfer) { "Recreate contact" } else { "Create contact" })
     Renew-ExchangeSyncLockIfDue
-    $newContact = New-MailContact -Name (Get-ExchangeContactDirectoryName $Contact) -DisplayName $Contact.DisplayName -ExternalEmailAddress $email -Alias $Contact.Alias -ErrorAction Stop
+    $newContact = New-ExchangeMailContactWithGraphRecovery $Contact "New Exchange contact $email"
     Renew-ExchangeSyncLockIfDue
     $contactIdentity = Get-ExchangeStrongCommandIdentity $newContact
     if (-not $contactIdentity) { throw "New Exchange contact $email did not return an immutable identity, so profile/marker mutation was blocked." }
@@ -3772,12 +3965,7 @@ function Upsert-ExchangeDistributionGroup($Group, [hashtable]$Stats, [bool]$Skip
     Increment-Stat $Stats "updatedGroups"
   } else {
     $fullMutationAction = $(if ($managedRecreation) { "Recreate group" } else { "Create group" })
-    $newGroup = New-DistributionGroup `
-      -Name (Get-ExchangeGroupDirectoryName $Group) `
-      -DisplayName $Group.GroupName `
-      -Alias $alias `
-      -PrimarySmtpAddress (Get-ExpectedExchangeGroupSmtpAddress $Group) `
-      -ErrorAction Stop
+    $newGroup = New-ExchangeDistributionGroupWithGraphRecovery $Group "New Exchange group $alias"
     Renew-ExchangeSyncLockIfDue
     $newGroupIdentity = Get-ExchangeStrongCommandIdentity $newGroup
     if (-not $newGroupIdentity) { throw "New Exchange group $alias did not return an immutable identity, so Notes/marker mutation was blocked." }

@@ -2973,7 +2973,7 @@ $updateErrorIndex = $upsertContactFunctionText.IndexOf('$updateError = Clean-Tex
 $updateRecreateDeleteIndex = $upsertContactFunctionText.IndexOf('Remove-ExchangeMailContactWithVerifiedAbsence $reread', $updateErrorIndex)
 $verifiedRemovalFunctionText = (Get-Item Function:Remove-ExchangeMailContactWithVerifiedAbsence).ScriptBlock.ToString()
 $updateRecreateConfirmationIndex = $verifiedRemovalFunctionText.IndexOf('Confirm-ExchangeMailContactDeletion $Existing $Email $SourceKey')
-$updateRecreateNewIndex = $upsertContactFunctionText.IndexOf('$newContact = New-MailContact', $updateRecreateDeleteIndex)
+$updateRecreateNewIndex = $upsertContactFunctionText.IndexOf('$newContact = New-ExchangeMailContactWithGraphRecovery', $updateRecreateDeleteIndex)
 Assert-True ($managedTransferDecisionIndex -ge 0) "Contact upsert must detect an exact managed source-owner transfer"
 Assert-True ($managedTransferDecisionIndex -lt $managedTransferDeleteIndex) "Contact ownership transfer must be proven before deleting the old managed projection"
 Assert-True ($managedTransferDeleteIndex -lt $liveProfileResolutionIndex) "A stale managed owner must be deleted and recreated before Graph contact-profile resolution"
@@ -2981,7 +2981,7 @@ Assert-True ($profileResolutionRecreationIndex -gt $liveProfileResolutionIndex) 
 Assert-True ($graphInvalidUpdateGateIndex -gt $liveProfileResolutionIndex) "A managed Set-Contact Graph identity failure must pass the narrow invalid-object recreation gate"
 Assert-True ($updateRecreateDeleteIndex -gt $updateErrorIndex) "A managed Set-Contact invalid-object failure must remove only the reread immutable contact"
 Assert-True ($updateRecreateConfirmationIndex -ge 0) "Every managed contact recreation helper must confirm exact deletion after removal"
-Assert-True ($updateRecreateNewIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must call the verified-removal helper before New-MailContact"
+Assert-True ($updateRecreateNewIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must call the verified-removal helper before operation-bound contact creation recovery"
 Assert-True ($verifiedRemovalFunctionText -match 'ambiguous Exchange Graph response') "An exact Graph-invalid removal response must be treated only as an ambiguous result"
 
 $fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
@@ -4547,5 +4547,131 @@ try {
 } finally {
   Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
 }
+
+$savedAmbiguousCreateNewMailContact = (Get-Item Function:New-MailContact).ScriptBlock
+$savedAmbiguousCreateGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
+$savedAmbiguousCreateNewDistributionGroup = (Get-Item Function:New-DistributionGroup).ScriptBlock
+$savedAmbiguousCreateGetDistributionGroup = (Get-Item Function:Get-DistributionGroup).ScriptBlock
+$ambiguousCreateContact = [pscustomobject]@{
+  DirectoryName = "Ambiguous Create Contact"
+  DisplayName = "AMBIGUOUS CREATE CONTACT"
+  ExternalEmailAddress = "ambiguous-create@example.com"
+  Alias = "ambiguous-create-contact"
+  SourceKey = "FCUNO_CONTACT:ambiguous-create"
+}
+$script:ambiguousCreatedContact = [pscustomobject]@{
+  Identity = "ambiguous-create-contact"
+  Guid = "5d7353bc-3507-4292-8b40-4a0c6fdeddd9"
+  ExternalDirectoryObjectId = "external-ambiguous-create-contact"
+  DistinguishedName = "CN=Ambiguous Create Contact,OU=Contacts,DC=example,DC=com"
+  Name = $ambiguousCreateContact.DirectoryName
+  DisplayName = $ambiguousCreateContact.DisplayName
+  ExternalEmailAddress = "SMTP:$($ambiguousCreateContact.ExternalEmailAddress)"
+  Alias = $ambiguousCreateContact.Alias
+  CustomAttribute1 = ""
+  CustomAttribute2 = ""
+  HiddenFromAddressListsEnabled = $false
+}
+$ambiguousCreateGroup = [pscustomobject]@{
+  DirectoryName = "Ambiguous Create Group"
+  GroupName = "AMBIGUOUS CREATE GROUP"
+  Alias = "ambiguous-create-group"
+  SmtpAddress = "ambiguous-create-group@cosulich1.onmicrosoft.com"
+  SourceKey = "FCUNO_GROUP:ambiguous-create"
+}
+$script:ambiguousCreatedGroup = [pscustomobject]@{
+  Identity = "ambiguous-create-group"
+  Guid = "7e8679c0-737d-47c8-b8f9-3c34e98dfb00"
+  ExternalDirectoryObjectId = "external-ambiguous-create-group"
+  DistinguishedName = "CN=Ambiguous Create Group,OU=Groups,DC=example,DC=com"
+  Name = $ambiguousCreateGroup.DirectoryName
+  DisplayName = $ambiguousCreateGroup.GroupName
+  Alias = $ambiguousCreateGroup.Alias
+  PrimarySmtpAddress = $ambiguousCreateGroup.SmtpAddress
+  CustomAttribute1 = ""
+  CustomAttribute2 = ""
+  HiddenFromAddressListsEnabled = $false
+}
+$script:ambiguousCreateContactReads = @()
+$script:ambiguousCreateGroupReads = @()
+Set-Item Function:New-MailContact -Value {
+  [CmdletBinding()]
+  param($Name, $DisplayName, $ExternalEmailAddress, $Alias)
+  throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+}
+Set-Item Function:Get-MailContact -Value {
+  [CmdletBinding()]
+  param($Filter, $ResultSize, $Identity)
+  if ($Identity -eq $script:ambiguousCreatedContact.Name) {
+    $script:ambiguousCreateContactReads += "identity"
+    return $script:ambiguousCreatedContact
+  }
+  if ($Filter -like "ExternalEmailAddress -eq 'ambiguous-create@example.com'") {
+    $script:ambiguousCreateContactReads += "email"
+    return @($script:ambiguousCreatedContact)
+  }
+  return $null
+}
+Set-Item Function:New-DistributionGroup -Value {
+  [CmdletBinding()]
+  param($Name, $DisplayName, $Alias, $PrimarySmtpAddress)
+  throw "Required field ExternalDirectoryObjectId was not returned from Graph API."
+}
+Set-Item Function:Get-DistributionGroup -Value {
+  [CmdletBinding()]
+  param($Filter, $ResultSize, $Identity)
+  if ($Identity -eq $script:ambiguousCreatedGroup.PrimarySmtpAddress) {
+    $script:ambiguousCreateGroupReads += "smtp"
+    return $script:ambiguousCreatedGroup
+  }
+  if ($Filter -like "Alias -eq 'ambiguous-create-group'") {
+    $script:ambiguousCreateGroupReads += "alias"
+    return @($script:ambiguousCreatedGroup)
+  }
+  return $null
+}
+Set-Item Function:Start-Sleep -Value { param($Seconds) }
+try {
+  $recoveredAmbiguousContact = New-ExchangeMailContactWithGraphRecovery $ambiguousCreateContact "Ambiguous contact create test"
+  Assert-True ([object]::ReferenceEquals($script:ambiguousCreatedContact, $recoveredAmbiguousContact)) "An exact contact created before Graph response serialization failed must be recovered"
+  Assert-Equal "identity,email" ($script:ambiguousCreateContactReads -join ",") "Ambiguous contact creation recovery must join two fresh targeted reads"
+
+  $recoveredAmbiguousGroup = New-ExchangeDistributionGroupWithGraphRecovery $ambiguousCreateGroup "Ambiguous group create test"
+  Assert-True ([object]::ReferenceEquals($script:ambiguousCreatedGroup, $recoveredAmbiguousGroup)) "An exact group created before Graph response serialization failed must be recovered"
+  Assert-Equal "smtp,alias" ($script:ambiguousCreateGroupReads -join ",") "Ambiguous group creation recovery must join two fresh targeted reads"
+
+  $script:ambiguousCreatedContact.CustomAttribute2 = "FCUNO_CONTACT:foreign-owner"
+  $foreignAmbiguousContactRejected = $false
+  try {
+    New-ExchangeMailContactWithGraphRecovery $ambiguousCreateContact "Foreign ambiguous contact create test" | Out-Null
+  } catch {
+    $foreignAmbiguousContactRejected = $_.Exception.Message -match "not the exact unowned object requested"
+  }
+  Assert-True $foreignAmbiguousContactRejected "Ambiguous contact creation recovery must never claim an already owned Exchange recipient"
+  $script:ambiguousCreatedContact.CustomAttribute2 = ""
+
+  $script:ambiguousCreatedGroup.CustomAttribute1 = $ManagedMarker
+  $managedAmbiguousGroupRejected = $false
+  try {
+    New-ExchangeDistributionGroupWithGraphRecovery $ambiguousCreateGroup "Managed ambiguous group create test" | Out-Null
+  } catch {
+    $managedAmbiguousGroupRejected = $_.Exception.Message -match "not the exact unowned object requested"
+  }
+  Assert-True $managedAmbiguousGroupRejected "Ambiguous group creation recovery must never adopt a pre-existing managed Exchange recipient"
+  $script:ambiguousCreatedGroup.CustomAttribute1 = ""
+} finally {
+  Remove-Item Function:Start-Sleep -ErrorAction SilentlyContinue
+  Set-Item Function:New-MailContact -Value $savedAmbiguousCreateNewMailContact
+  Set-Item Function:Get-MailContact -Value $savedAmbiguousCreateGetMailContact
+  Set-Item Function:New-DistributionGroup -Value $savedAmbiguousCreateNewDistributionGroup
+  Set-Item Function:Get-DistributionGroup -Value $savedAmbiguousCreateGetDistributionGroup
+}
+
+$ambiguousContactCreateHelperText = (Get-Item Function:New-ExchangeMailContactWithGraphRecovery).ScriptBlock.ToString()
+$ambiguousGroupCreateHelperText = (Get-Item Function:New-ExchangeDistributionGroupWithGraphRecovery).ScriptBlock.ToString()
+Assert-True ($ambiguousContactCreateHelperText -notmatch '(?m)Get-MailContact\s+-ResultSize') "Ambiguous contact creation recovery must never use a broad unfiltered Exchange snapshot"
+Assert-True ($ambiguousGroupCreateHelperText -notmatch '(?m)Get-DistributionGroup\s+-ResultSize') "Ambiguous group creation recovery must never use a broad unfiltered Exchange snapshot"
+Assert-True ($ambiguousContactCreateHelperText -match 'Test-ExchangeObjectsShareImmutableIdentity') "Ambiguous contact creation recovery must correlate its two reads through immutable identity"
+Assert-True ($ambiguousGroupCreateHelperText -match 'Test-ExchangeObjectsShareImmutableIdentity') "Ambiguous group creation recovery must correlate its two reads through immutable identity"
 
 Write-Output "Exchange address book runbook tests passed."
