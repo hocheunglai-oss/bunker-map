@@ -446,6 +446,7 @@ export default function SpcFixturesPage() {
   const { loading: authLoading, authenticated, role, permissions } = useSpcAuth()
   const fixtureTableRef = useRef<HTMLDivElement | null>(null)
   const fixtureCanvasRef = useRef<HTMLDivElement | null>(null)
+  const supplierMenuFocusSuppressionRef = useRef("")
   const initialPeriod = useMemo(() => hongKongYearMonth(), [])
   const [fixtures, setFixtures] = useState<SpcFixture[]>([])
   const [users, setUsers] = useState<SpcUserOption[]>([])
@@ -454,6 +455,7 @@ export default function SpcFixturesPage() {
   const [editingId, setEditingId] = useState("")
   const [actionPositions, setActionPositions] = useState<Record<string, number>>({})
   const [supplierMenuKey, setSupplierMenuKey] = useState("")
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
   const [fixtureMonthFilter, setFixtureMonthFilter] = useState("")
   const [loading, setLoading] = useState(false)
@@ -944,49 +946,95 @@ export default function SpcFixturesPage() {
     const value = gradeValue(draft.supplierName, key)
     if (editing) {
       const pickerKey = `${fixture.id}:${key || "all"}`
-      const query = value.toLowerCase()
+      const menuId = `spc-fixture-supplier-menu-${fixture.id}-${key || "all"}`
+      const query = supplierSearchQuery.trim().toLowerCase()
       const matches = supplierOptions
         .filter((supplier) => !query || supplier.toLowerCase().includes(query))
-        .slice(0, 8)
+        .slice(0, 50)
+      const menuIsOpen = supplierMenuKey === pickerKey
       return (
-        <div className="spc-fixture-supplier-picker">
+        <div
+          className={`spc-fixture-supplier-picker${menuIsOpen ? " is-open" : ""}`}
+          onBlur={(event) => {
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+            setSupplierMenuKey((current) => (current === pickerKey ? "" : current))
+            setSupplierSearchQuery("")
+          }}
+        >
           <input
             type="text"
             autoComplete="off"
             className="is-sheet-pill spc-fixture-supplier-input"
             value={value}
-            onFocus={() => setSupplierMenuKey(pickerKey)}
+            role="combobox"
+            aria-label={`${key ? fuelLabels[key] : "Fixture"} supplier`}
+            aria-expanded={menuIsOpen}
+            aria-controls={menuId}
+            aria-autocomplete="list"
+            onFocus={() => {
+              if (supplierMenuFocusSuppressionRef.current === pickerKey) {
+                supplierMenuFocusSuppressionRef.current = ""
+                return
+              }
+              if (supplierMenuKey !== pickerKey) setSupplierSearchQuery("")
+              setSupplierMenuKey(pickerKey)
+            }}
             onChange={(event) => {
               updateGradeDraft(fixture.id, "supplierName", key, event.target.value)
+              if (supplierMenuKey !== pickerKey) setSupplierSearchQuery("")
               setSupplierMenuKey(pickerKey)
             }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") setSupplierMenuKey("")
+              if (event.key === "Escape") {
+                setSupplierMenuKey("")
+                setSupplierSearchQuery("")
+              }
             }}
-            onBlur={() => window.setTimeout(() => setSupplierMenuKey((current) => (current === pickerKey ? "" : current)), 120)}
             disabled={!canEdit}
           />
-          {supplierMenuKey === pickerKey ? (
-            <div className="spc-fixture-supplier-menu" role="listbox">
-              {matches.length > 0 ? (
-                matches.map((supplier) => (
-                  <div
-                    key={supplier}
-                    className="spc-fixture-supplier-option"
-                    role="option"
-                    aria-selected={supplier.toLowerCase() === value.toLowerCase()}
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      updateGradeDraft(fixture.id, "supplierName", key, supplier)
-                      setSupplierMenuKey("")
-                    }}
-                  >
-                    {supplier}
-                  </div>
-                ))
-              ) : (
-                <div className="spc-fixture-supplier-empty">NO MATCHES</div>
-              )}
+          {menuIsOpen ? (
+            <div className="spc-fixture-supplier-menu">
+              <input
+                type="search"
+                className="spc-fixture-supplier-search"
+                aria-label="Search suppliers"
+                placeholder="SEARCH SUPPLIERS"
+                value={supplierSearchQuery}
+                onChange={(event) => setSupplierSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    const supplierInput = event.currentTarget
+                      .closest(".spc-fixture-supplier-picker")
+                      ?.querySelector<HTMLInputElement>(".spc-fixture-supplier-input")
+                    supplierMenuFocusSuppressionRef.current = pickerKey
+                    setSupplierMenuKey("")
+                    setSupplierSearchQuery("")
+                    window.requestAnimationFrame(() => supplierInput?.focus())
+                  }
+                }}
+              />
+              <div id={menuId} className="spc-fixture-supplier-options" role="listbox" aria-label="Supplier options">
+                {matches.length > 0 ? (
+                  matches.map((supplier) => (
+                    <button
+                      type="button"
+                      key={supplier}
+                      className="spc-fixture-supplier-option"
+                      role="option"
+                      aria-selected={supplier.toLowerCase() === value.toLowerCase()}
+                      onClick={() => {
+                        updateGradeDraft(fixture.id, "supplierName", key, supplier)
+                        setSupplierMenuKey("")
+                        setSupplierSearchQuery("")
+                      }}
+                    >
+                      {supplier}
+                    </button>
+                  ))
+                ) : (
+                  <div className="spc-fixture-supplier-empty">NO MATCHES</div>
+                )}
+              </div>
             </div>
           ) : null}
         </div>
