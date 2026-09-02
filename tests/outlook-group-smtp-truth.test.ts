@@ -60,7 +60,7 @@ test("group SMTP identity is projected, written, and certified exactly", async (
   assert.match(worker, /-PrimarySmtpAddress \$smtpAddress/)
   assert.match(
     worker,
-    /-PrimarySmtpAddress \(Get-ExpectedExchangeGroupSmtpAddress \$Group\)/,
+    /\$smtpAddress = Get-ExpectedExchangeGroupSmtpAddress \$Group/,
   )
   assert.match(
     worker,
