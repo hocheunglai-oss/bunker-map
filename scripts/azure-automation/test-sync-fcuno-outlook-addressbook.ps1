@@ -4592,6 +4592,8 @@ $script:ambiguousCreatedGroup = [pscustomobject]@{
   CustomAttribute2 = ""
   HiddenFromAddressListsEnabled = $false
 }
+$script:ambiguousCreatedContactIdentityRead = $script:ambiguousCreatedContact
+$script:ambiguousCreatedGroupIdentityRead = $script:ambiguousCreatedGroup
 $script:ambiguousCreateContactReads = @()
 $script:ambiguousCreateGroupReads = @()
 Set-Item Function:New-MailContact -Value {
@@ -4604,7 +4606,7 @@ Set-Item Function:Get-MailContact -Value {
   param($Filter, $ResultSize, $Identity)
   if ($Identity -eq $script:ambiguousCreatedContact.Name) {
     $script:ambiguousCreateContactReads += "identity"
-    return $script:ambiguousCreatedContact
+    return $script:ambiguousCreatedContactIdentityRead
   }
   if ($Filter -like "ExternalEmailAddress -eq 'ambiguous-create@example.com'") {
     $script:ambiguousCreateContactReads += "email"
@@ -4622,7 +4624,7 @@ Set-Item Function:Get-DistributionGroup -Value {
   param($Filter, $ResultSize, $Identity)
   if ($Identity -eq $script:ambiguousCreatedGroup.PrimarySmtpAddress) {
     $script:ambiguousCreateGroupReads += "smtp"
-    return $script:ambiguousCreatedGroup
+    return $script:ambiguousCreatedGroupIdentityRead
   }
   if ($Filter -like "Alias -eq 'ambiguous-create-group'") {
     $script:ambiguousCreateGroupReads += "alias"
@@ -4639,6 +4641,62 @@ try {
   $recoveredAmbiguousGroup = New-ExchangeDistributionGroupWithGraphRecovery $ambiguousCreateGroup "Ambiguous group create test"
   Assert-True ([object]::ReferenceEquals($script:ambiguousCreatedGroup, $recoveredAmbiguousGroup)) "An exact group created before Graph response serialization failed must be recovered"
   Assert-Equal "smtp,alias" ($script:ambiguousCreateGroupReads -join ",") "Ambiguous group creation recovery must join two fresh targeted reads"
+
+  $script:ambiguousCreatedContactIdentityRead = [pscustomobject]@{
+    Identity = $script:ambiguousCreatedContact.Identity
+    Guid = "131b8c46-6767-4c49-bf2d-2f247899ca12"
+    ExternalDirectoryObjectId = $script:ambiguousCreatedContact.ExternalDirectoryObjectId
+    DistinguishedName = $script:ambiguousCreatedContact.DistinguishedName
+    Name = $script:ambiguousCreatedContact.Name
+    DisplayName = $script:ambiguousCreatedContact.DisplayName
+    ExternalEmailAddress = $script:ambiguousCreatedContact.ExternalEmailAddress
+    Alias = $script:ambiguousCreatedContact.Alias
+    CustomAttribute1 = ""
+    CustomAttribute2 = ""
+  }
+  $reusedContactIdentityRejected = $false
+  try {
+    New-ExchangeMailContactWithGraphRecovery $ambiguousCreateContact "Reused contact identity test" | Out-Null
+  } catch {
+    $reusedContactIdentityRejected = $_.Exception.Message -match "different immutable Exchange contacts"
+  }
+  Assert-True $reusedContactIdentityRejected "Ambiguous contact creation recovery must reject a different GUID even when lower-priority immutable properties are reused"
+  $script:ambiguousCreatedContactIdentityRead = $script:ambiguousCreatedContact
+
+  $script:ambiguousCreatedContactIdentityRead = [pscustomobject]@{
+    Identity = $script:ambiguousCreatedContact.Identity
+    Guid = $script:ambiguousCreatedContact.Guid
+    ExternalDirectoryObjectId = "different-lower-priority-contact-id"
+    DistinguishedName = "CN=Different Lower Priority Contact,OU=Contacts,DC=example,DC=com"
+    Name = $script:ambiguousCreatedContact.Name
+  }
+  $strongGuidRecoveredContact = New-ExchangeMailContactWithGraphRecovery $ambiguousCreateContact "Strong contact GUID test"
+  Assert-True ([object]::ReferenceEquals($script:ambiguousCreatedContact, $strongGuidRecoveredContact)) "Matching GUIDs must remain authoritative when lower-priority immutable properties differ"
+  $script:ambiguousCreatedContactIdentityRead = $script:ambiguousCreatedContact
+
+  $savedAmbiguousGroupGuid = $script:ambiguousCreatedGroup.Guid
+  $script:ambiguousCreatedGroup.Guid = ""
+  $script:ambiguousCreatedGroupIdentityRead = [pscustomobject]@{
+    Identity = $script:ambiguousCreatedGroup.Identity
+    Guid = ""
+    ExternalDirectoryObjectId = "different-external-ambiguous-create-group"
+    DistinguishedName = $script:ambiguousCreatedGroup.DistinguishedName
+    Name = $script:ambiguousCreatedGroup.Name
+    DisplayName = $script:ambiguousCreatedGroup.DisplayName
+    Alias = $script:ambiguousCreatedGroup.Alias
+    PrimarySmtpAddress = $script:ambiguousCreatedGroup.PrimarySmtpAddress
+    CustomAttribute1 = ""
+    CustomAttribute2 = ""
+  }
+  $reusedGroupIdentityRejected = $false
+  try {
+    New-ExchangeDistributionGroupWithGraphRecovery $ambiguousCreateGroup "Reused group identity test" | Out-Null
+  } catch {
+    $reusedGroupIdentityRejected = $_.Exception.Message -match "different immutable Exchange groups"
+  }
+  Assert-True $reusedGroupIdentityRejected "Ambiguous group creation recovery must reject a different external directory ID when only the distinguished name is reused"
+  $script:ambiguousCreatedGroup.Guid = $savedAmbiguousGroupGuid
+  $script:ambiguousCreatedGroupIdentityRead = $script:ambiguousCreatedGroup
 
   $script:ambiguousCreatedContact.CustomAttribute2 = "FCUNO_CONTACT:foreign-owner"
   $foreignAmbiguousContactRejected = $false
@@ -4671,7 +4729,7 @@ $ambiguousContactCreateHelperText = (Get-Item Function:New-ExchangeMailContactWi
 $ambiguousGroupCreateHelperText = (Get-Item Function:New-ExchangeDistributionGroupWithGraphRecovery).ScriptBlock.ToString()
 Assert-True ($ambiguousContactCreateHelperText -notmatch '(?m)Get-MailContact\s+-ResultSize') "Ambiguous contact creation recovery must never use a broad unfiltered Exchange snapshot"
 Assert-True ($ambiguousGroupCreateHelperText -notmatch '(?m)Get-DistributionGroup\s+-ResultSize') "Ambiguous group creation recovery must never use a broad unfiltered Exchange snapshot"
-Assert-True ($ambiguousContactCreateHelperText -match 'Test-ExchangeObjectsShareImmutableIdentity') "Ambiguous contact creation recovery must correlate its two reads through immutable identity"
-Assert-True ($ambiguousGroupCreateHelperText -match 'Test-ExchangeObjectsShareImmutableIdentity') "Ambiguous group creation recovery must correlate its two reads through immutable identity"
+Assert-True ($ambiguousContactCreateHelperText -match 'Test-ExchangeObjectsShareStrongestImmutableIdentity') "Ambiguous contact creation recovery must correlate its two reads through the strongest immutable identity"
+Assert-True ($ambiguousGroupCreateHelperText -match 'Test-ExchangeObjectsShareStrongestImmutableIdentity') "Ambiguous group creation recovery must correlate its two reads through the strongest immutable identity"
 
 Write-Output "Exchange address book runbook tests passed."

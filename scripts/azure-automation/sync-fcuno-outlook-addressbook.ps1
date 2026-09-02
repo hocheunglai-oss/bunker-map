@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.18"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.19"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -499,6 +499,24 @@ function Test-ExchangeObjectsShareImmutableIdentity($First, $Second) {
   foreach ($key in @(Get-ExchangeImmutableGroupJoinKeys $First)) { $firstKeys[$key] = $true }
   foreach ($key in @(Get-ExchangeImmutableGroupJoinKeys $Second)) {
     if (Has-MapKey $firstKeys $key) { return $true }
+  }
+  return $false
+}
+
+function Test-ExchangeObjectsShareStrongestImmutableIdentity($First, $Second) {
+  if (-not $First -or -not $Second) { return $false }
+  foreach ($propertyName in @("Guid", "ExternalDirectoryObjectId", "DistinguishedName")) {
+    $firstValue = Clean-Text $First.$propertyName
+    $secondValue = Clean-Text $Second.$propertyName
+    if ($firstValue -eq "00000000-0000-0000-0000-000000000000") { $firstValue = "" }
+    if ($secondValue -eq "00000000-0000-0000-0000-000000000000") { $secondValue = "" }
+    if ($firstValue -or $secondValue) {
+      return (
+        $firstValue -and
+        $secondValue -and
+        $firstValue.Equals($secondValue, [StringComparison]::OrdinalIgnoreCase)
+      )
+    }
   }
   return $false
 }
@@ -3322,7 +3340,7 @@ function New-ExchangeMailContactWithGraphRecovery($Contact, $Label) {
       $lastResult = "the new contact was visible without two immutable Exchange identities"
       continue
     }
-    if (-not (Test-ExchangeObjectsShareImmutableIdentity $identityCandidate $candidate)) {
+    if (-not (Test-ExchangeObjectsShareStrongestImmutableIdentity $identityCandidate $candidate)) {
       throw "$Label recovery directory name and email resolve to different immutable Exchange contacts."
     }
     if (
@@ -3414,7 +3432,7 @@ function New-ExchangeDistributionGroupWithGraphRecovery($Group, $Label) {
       $lastResult = "the new group was visible without two immutable Exchange identities"
       continue
     }
-    if (-not (Test-ExchangeObjectsShareImmutableIdentity $smtpCandidate $candidate)) {
+    if (-not (Test-ExchangeObjectsShareStrongestImmutableIdentity $smtpCandidate $candidate)) {
       throw "$Label recovery SMTP address and alias resolve to different immutable Exchange groups."
     }
     if (
