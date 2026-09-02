@@ -6,6 +6,7 @@ import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
 import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
+import { matchesSpcFixtureSearch } from "@/lib/spcFixtureSearch"
 import { displaySupplierName } from "@/lib/spcSupplierKeys"
 
 type SpcFixtureStatus = "pending" | "completed" | "cancelled"
@@ -223,6 +224,12 @@ function serializeGradeValues(map: Partial<Record<FuelKey, string>>) {
     })
     .filter(Boolean)
     .join(" / ")
+}
+
+function supplierSearchValues(value: string | null | undefined) {
+  const parsed = parseGradeValues(value)
+  if (!parsed.encoded) return [value]
+  return fuelColumns.map(({ key }) => parsed.map[key])
 }
 
 function gradeValue(value: string | null | undefined, key: FuelKey | null, fallbackPlain = true) {
@@ -446,7 +453,6 @@ export default function SpcFixturesPage() {
   const { loading: authLoading, authenticated, role, permissions } = useSpcAuth()
   const fixtureTableRef = useRef<HTMLDivElement | null>(null)
   const fixtureCanvasRef = useRef<HTMLDivElement | null>(null)
-  const supplierMenuFocusSuppressionRef = useRef("")
   const initialPeriod = useMemo(() => hongKongYearMonth(), [])
   const [fixtures, setFixtures] = useState<SpcFixture[]>([])
   const [users, setUsers] = useState<SpcUserOption[]>([])
@@ -455,7 +461,8 @@ export default function SpcFixturesPage() {
   const [editingId, setEditingId] = useState("")
   const [actionPositions, setActionPositions] = useState<Record<string, number>>({})
   const [supplierMenuKey, setSupplierMenuKey] = useState("")
-  const [supplierSearchQuery, setSupplierSearchQuery] = useState("")
+  const [supplierOptionQuery, setSupplierOptionQuery] = useState("")
+  const [fixtureSearchQuery, setFixtureSearchQuery] = useState("")
   const [fixtureYearFilter, setFixtureYearFilter] = useState(initialPeriod.year)
   const [fixtureMonthFilter, setFixtureMonthFilter] = useState("")
   const [loading, setLoading] = useState(false)
@@ -476,6 +483,47 @@ export default function SpcFixturesPage() {
     () => fixtures.filter((fixture) => fixture.fixtureStatus === "completed"),
     [fixtures],
   )
+  const fixtureMatchesSearch = useCallback((fixture: SpcFixture) => {
+    const draft = drafts[fixture.id] || draftFromFixture(fixture)
+    const supplierTrader = activeTraderResolver.resolveUser(
+      fixture.supplierTraderUsername,
+      fixture.supplierTraderDisplayName,
+    )
+    const buyerTrader = activeTraderResolver.resolveUser(
+      fixture.buyerTraderUsername,
+      fixture.buyerTraderDisplayName,
+    )
+    const supplierTraderDisplay = activeTraderResolver.displayNameOrRetired(
+      fixture.supplierTraderUsername,
+      fixture.supplierTraderDisplayName,
+    )
+    const buyerTraderDisplay = activeTraderResolver.displayNameOrRetired(
+      fixture.buyerTraderUsername,
+      fixture.buyerTraderDisplayName,
+      fixture.account,
+    )
+
+    return matchesSpcFixtureSearch(fixtureSearchQuery, [
+      fixture.supplierTraderUsername,
+      fixture.supplierTraderDisplayName,
+      supplierTrader?.username,
+      supplierTrader?.displayName,
+      traderCode(supplierTrader, supplierTraderDisplay),
+      fixture.buyerTraderUsername,
+      fixture.buyerTraderDisplayName,
+      buyerTrader?.username,
+      buyerTrader?.displayName,
+      traderCode(buyerTrader, buyerTraderDisplay),
+      fixture.vesselName,
+      draft.vesselName,
+      ...supplierSearchValues(fixture.supplierName),
+      ...supplierSearchValues(draft.supplierName),
+    ])
+  }, [activeTraderResolver, drafts, fixtureSearchQuery])
+  const filteredPendingFixtures = useMemo(
+    () => pendingFixtures.filter(fixtureMatchesSearch),
+    [fixtureMatchesSearch, pendingFixtures],
+  )
   const fixtureYearOptions = useMemo(() => {
     const years = new Set<string>([initialPeriod.year])
     completedFixtures.forEach((fixture) => {
@@ -490,9 +538,9 @@ export default function SpcFixturesPage() {
         const date = cleanText(fixture.fixtureDate)
         const yearMatches = !fixtureYearFilter || date.slice(0, 4) === fixtureYearFilter
         const monthMatches = !fixtureMonthFilter || date.slice(5, 7) === fixtureMonthFilter
-        return yearMatches && monthMatches
+        return yearMatches && monthMatches && fixtureMatchesSearch(fixture)
       }),
-    [completedFixtures, fixtureMonthFilter, fixtureYearFilter],
+    [completedFixtures, fixtureMatchesSearch, fixtureMonthFilter, fixtureYearFilter],
   )
 
   const supplierOptions = useMemo(() => {
@@ -582,7 +630,7 @@ export default function SpcFixturesPage() {
       editing: boolean
       missing: string[]
     }> = []
-    pendingFixtures.forEach((fixture) => {
+    filteredPendingFixtures.forEach((fixture) => {
       if (!canEditFixture(fixture, "pending")) return
       const draft = drafts[fixture.id] || draftFromFixture(fixture)
       const missing = prepareDraftForSubmit(draft, true).errors
@@ -608,7 +656,7 @@ export default function SpcFixturesPage() {
       }
     }
     return rows
-  }, [drafts, editingId, filteredCompletedFixtures, pendingFixtures, role, canEdit, officeOptions])
+  }, [drafts, editingId, filteredCompletedFixtures, filteredPendingFixtures, role, canEdit, officeOptions])
 
   useLayoutEffect(() => {
     function measureActions() {
@@ -956,7 +1004,7 @@ export default function SpcFixturesPage() {
     if (editing) {
       const pickerKey = `${fixture.id}:${key || "all"}`
       const menuId = `spc-fixture-supplier-menu-${fixture.id}-${key || "all"}`
-      const query = supplierSearchQuery.trim().toLowerCase()
+      const query = supplierOptionQuery.trim().toLowerCase()
       const matches = supplierOptions
         .filter((supplier) => !query || supplier.toLowerCase().includes(query))
         .slice(0, 50)
@@ -967,7 +1015,7 @@ export default function SpcFixturesPage() {
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
             setSupplierMenuKey((current) => (current === pickerKey ? "" : current))
-            setSupplierSearchQuery("")
+            setSupplierOptionQuery("")
           }}
         >
           <input
@@ -981,47 +1029,24 @@ export default function SpcFixturesPage() {
             aria-controls={menuId}
             aria-autocomplete="list"
             onFocus={() => {
-              if (supplierMenuFocusSuppressionRef.current === pickerKey) {
-                supplierMenuFocusSuppressionRef.current = ""
-                return
-              }
-              if (supplierMenuKey !== pickerKey) setSupplierSearchQuery("")
+              if (supplierMenuKey !== pickerKey) setSupplierOptionQuery("")
               setSupplierMenuKey(pickerKey)
             }}
             onChange={(event) => {
               updateGradeDraft(fixture.id, "supplierName", key, event.target.value)
-              if (supplierMenuKey !== pickerKey) setSupplierSearchQuery("")
+              setSupplierOptionQuery(event.target.value)
               setSupplierMenuKey(pickerKey)
             }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 setSupplierMenuKey("")
-                setSupplierSearchQuery("")
+                setSupplierOptionQuery("")
               }
             }}
             disabled={!canEdit}
           />
           {menuIsOpen ? (
             <div className="spc-fixture-supplier-menu">
-              <input
-                type="search"
-                className="spc-fixture-supplier-search"
-                aria-label="Search suppliers"
-                placeholder="SEARCH SUPPLIERS"
-                value={supplierSearchQuery}
-                onChange={(event) => setSupplierSearchQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    const supplierInput = event.currentTarget
-                      .closest(".spc-fixture-supplier-picker")
-                      ?.querySelector<HTMLInputElement>(".spc-fixture-supplier-input")
-                    supplierMenuFocusSuppressionRef.current = pickerKey
-                    setSupplierMenuKey("")
-                    setSupplierSearchQuery("")
-                    window.requestAnimationFrame(() => supplierInput?.focus())
-                  }
-                }}
-              />
               <div id={menuId} className="spc-fixture-supplier-options" role="listbox" aria-label="Supplier options">
                 {matches.length > 0 ? (
                   matches.map((supplier) => (
@@ -1034,7 +1059,7 @@ export default function SpcFixturesPage() {
                       onClick={() => {
                         updateGradeDraft(fixture.id, "supplierName", key, supplier)
                         setSupplierMenuKey("")
-                        setSupplierSearchQuery("")
+                        setSupplierOptionQuery("")
                       }}
                     >
                       {supplier}
@@ -1182,6 +1207,15 @@ export default function SpcFixturesPage() {
     <SpcShell title="SPC FIXTURES">
       <section className="spc-panel spc-fixture-ledger-panel">
         <div className="spc-fixture-ledger-toolbar">
+          <input
+            type="search"
+            className="spc-fixture-search-input"
+            aria-label="Search fixtures"
+            placeholder="SEARCH"
+            value={fixtureSearchQuery}
+            onChange={(event) => setFixtureSearchQuery(event.target.value)}
+            autoComplete="off"
+          />
           <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
             {loading ? "REFRESHING..." : "REFRESH"}
           </button>
@@ -1218,9 +1252,13 @@ export default function SpcFixturesPage() {
               <tr className="spc-fixture-section-row">
                 <td colSpan={fixtureColumnSpan}>NEW STEMS</td>
               </tr>
-              {renderFixtureRows(pendingFixtures, "pending")}
-              {!loading && pendingFixtures.length === 0 ? (
-                <tr className="spc-fixture-empty-row"><td colSpan={fixtureColumnSpan}>No new stems.</td></tr>
+              {renderFixtureRows(filteredPendingFixtures, "pending")}
+              {!loading && filteredPendingFixtures.length === 0 ? (
+                <tr className="spc-fixture-empty-row">
+                  <td colSpan={fixtureColumnSpan}>
+                    {fixtureSearchQuery.trim() ? "No new stems match your search." : "No new stems."}
+                  </td>
+                </tr>
               ) : null}
               {message ? (
                 <tr className={messageIsError ? "spc-fixture-status-row is-error" : "spc-fixture-status-row"}>
@@ -1268,7 +1306,13 @@ export default function SpcFixturesPage() {
               </tr>
               {renderFixtureRows(filteredCompletedFixtures, "completed")}
               {!loading && filteredCompletedFixtures.length === 0 ? (
-                <tr className="spc-fixture-empty-row"><td colSpan={fixtureColumnSpan}>No completed fixtures for selected period.</td></tr>
+                <tr className="spc-fixture-empty-row">
+                  <td colSpan={fixtureColumnSpan}>
+                    {fixtureSearchQuery.trim()
+                      ? "No completed fixtures match your search and selected period."
+                      : "No completed fixtures for selected period."}
+                  </td>
+                </tr>
               ) : null}
             </tbody>
           </table>
