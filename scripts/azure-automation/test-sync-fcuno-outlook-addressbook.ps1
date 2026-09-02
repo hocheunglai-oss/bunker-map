@@ -43,7 +43,9 @@ $runbookSource = Get-Content (Join-Path $PSScriptRoot "sync-fcuno-outlook-addres
 Assert-True ($runbookSource -match '\$LegacyExchangeOnlineManagementVersion\s*=\s*"3\.4\.0"') "The legacy PowerShell runtime must retain its compatible Exchange module pin"
 Assert-True ($runbookSource -match '\$PowerShell74ExchangeOnlineManagementVersion\s*=\s*"3\.9\.2"') "PowerShell 7.4 must retain its compatible Exchange module pin"
 Assert-True ($runbookSource -match '\$DefaultExchangeOnlineManagementVersion\s*=\s*"3\.10\.1"') "The current PowerShell 7.6 runtime must pin ExchangeOnlineManagement 3.10.1"
-Assert-True ($runbookSource -match '\$PSVersionTable\.PSVersion\s+-lt\s+\[version\]"7\.6\.0"') "The runbook must select the current module pin only on PowerShell 7.6 or newer"
+Assert-True ($runbookSource -match '\$powerShellMajor\s*=\s*\[int\]\$PSVersionTable\.PSVersion\.Major') "The module compatibility check must use the runtime major version without prerelease ordering"
+Assert-True ($runbookSource -match '\$powerShellMinor\s*=\s*\[int\]\$PSVersionTable\.PSVersion\.Minor') "The module compatibility check must use the runtime minor version without prerelease ordering"
+Assert-True ($runbookSource -notmatch '\$PSVersionTable\.PSVersion\s+-lt\s+\[version\]"7\.6\.0"') "A PowerShell 7.6 preview runtime must not be misclassified as PowerShell 7.4"
 $invalidAddressBookDomainRejected = $false
 try {
   Get-NormalizedExchangeAddressBookDomain "not a domain" | Out-Null

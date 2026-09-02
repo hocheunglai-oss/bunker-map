@@ -15,7 +15,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.19"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.20"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -43,10 +43,12 @@ function Get-OptionalAutomationSetting($Name) {
 function Get-ExchangeOnlineManagementImportVersion {
   $configuredVersion = Clean-Text (Get-OptionalAutomationSetting "EXCHANGE_ONLINE_MANAGEMENT_VERSION")
   if ($configuredVersion) { return $configuredVersion }
-  if ($PSVersionTable.PSVersion -lt [version]"7.4.0") {
+  $powerShellMajor = [int]$PSVersionTable.PSVersion.Major
+  $powerShellMinor = [int]$PSVersionTable.PSVersion.Minor
+  if ($powerShellMajor -lt 7 -or ($powerShellMajor -eq 7 -and $powerShellMinor -lt 4)) {
     return $LegacyExchangeOnlineManagementVersion
   }
-  if ($PSVersionTable.PSVersion -lt [version]"7.6.0") {
+  if ($powerShellMajor -eq 7 -and $powerShellMinor -lt 6) {
     return $PowerShell74ExchangeOnlineManagementVersion
   }
   return $DefaultExchangeOnlineManagementVersion
