@@ -13,7 +13,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.7"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.8"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -510,6 +510,20 @@ function Get-ExchangeStrongCommandIdentity($ExchangeObject) {
     if ($value -and $value -ne "00000000-0000-0000-0000-000000000000") { return $value }
   }
   return ""
+}
+
+function Get-ExchangeMailContactByImmutableIdentity($Expected, $Label) {
+  if (-not $Expected) { throw "$Label has no expected Exchange mail contact." }
+  $identity = Get-ExchangeStrongCommandIdentity $Expected
+  if (-not $identity) { throw "$Label has no immutable identity for an exact reread." }
+  Renew-ExchangeSyncLockIfDue
+  $candidate = Get-MailContact -Identity $identity -ErrorAction Stop
+  Renew-ExchangeSyncLockIfDue
+  if (-not $candidate) { throw "$Label immutable identity '$identity' returned no Exchange mail contact." }
+  if (-not (Test-ExchangeObjectsShareImmutableIdentity $Expected $candidate)) {
+    throw "$Label immutable identity '$identity' resolved to a different Exchange mail contact."
+  }
+  return $candidate
 }
 
 function Resolve-ExchangeContactProfileForMailContact($MailContact, $Label, [int]$MaxAttempts = 1) {
@@ -3212,17 +3226,12 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $profileResolutionError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $profileResolutionError)) { throw }
 
-      Renew-ExchangeSyncLockIfDue
-      $rereadMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-      Renew-ExchangeSyncLockIfDue
-      if ($rereadMatches.Count -ne 1) {
-        throw "Managed contact recreation after profile-resolution failure was blocked because source key $sourceKey resolved to $($rereadMatches.Count) objects. Original error: $profileResolutionError"
-      }
-      $reread = $rereadMatches[0]
-      if (-not (Test-ExchangeObjectsShareImmutableIdentity $existing $reread)) {
-        throw "Managed contact recreation after profile-resolution failure was blocked because source-key ownership changed. Original error: $profileResolutionError"
-      }
-      if ((Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or (Normalize-Email (Get-RecipientEmail $reread)) -ne $email) {
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing "Managed contact recreation after profile-resolution failure"
+      if (
+        (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
+        (Clean-Text $reread.CustomAttribute2) -ne $sourceKey -or
+        (Normalize-Email (Get-RecipientEmail $reread)) -ne $email
+      ) {
         throw "Managed contact recreation after profile-resolution failure was blocked because the exact managed email projection changed. Original error: $profileResolutionError"
       }
       $removeIdentity = Get-ExchangeStrongCommandIdentity $reread
@@ -3256,14 +3265,14 @@ function Upsert-ExchangeMailContact($Contact, [hashtable]$Stats, [bool]$SkipNoOp
       $updateError = Clean-Text $_.Exception.Message
       if ((Clean-Text $existing.CustomAttribute1) -ne $ManagedMarker -or -not (Test-ExchangeRecreateEligibleError $updateError)) { throw }
 
-      Renew-ExchangeSyncLockIfDue
-      $rereadMatches = @(Get-MailContact -Filter "CustomAttribute2 -eq '$escapedSourceKey'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
-      Renew-ExchangeSyncLockIfDue
-      if ($rereadMatches.Count -gt 1) { throw "Managed contact recreation was blocked because more than one object now has source key $sourceKey. Original error: $updateError" }
-      if ($rereadMatches.Count -eq 1) {
-        $reread = $rereadMatches[0]
-        if (-not (Test-ExchangeObjectsShareImmutableIdentity $existing $reread)) {
-          throw "Managed contact recreation was blocked because source-key ownership changed after the update error. Original error: $updateError"
+      $reread = Get-ExchangeMailContactByImmutableIdentity $existing "Managed contact recreation after update failure"
+      if ($reread) {
+        if (
+          (Clean-Text $reread.CustomAttribute1) -ne $ManagedMarker -or
+          (Clean-Text $reread.CustomAttribute2) -ne $sourceKey -or
+          (Normalize-Email (Get-RecipientEmail $reread)) -ne $email
+        ) {
+          throw "Managed contact recreation was blocked because the exact managed email projection changed after the update error. Original error: $updateError"
         }
         if ($updateError -notmatch "(?i)(invalid (recipient )?object|recipient object is invalid|required field ExternalDirectoryObjectId was not returned from Graph API)") {
           throw "Managed contact recreation was blocked because the immutable contact still exists; the update will retry without deletion. Original error: $updateError"
@@ -5883,7 +5892,11 @@ function Invoke-FullExchangeSync {
           }
           $existingHint = Resolve-ExchangeMailContactHint $contact $mailContactLookup
           $existingProfileHint = if ($null -ne $existingHint) { Resolve-ExchangeContactProfileHint $existingHint $contactProfileLookup } else { $null }
-          $useExistingHint = $null -ne $existingHint -and $null -ne $existingProfileHint -and (Test-ExchangeMailContactMatches $existingHint $contact $existingProfileHint)
+          # The bulk mail-contact snapshot is already collision checked. Keep using
+          # that immutable object even when its Get-Contact profile is Graph-invalid;
+          # a filtered reread of that same legacy object can fail before the narrow
+          # verified recreation path has a chance to run.
+          $useExistingHint = $null -ne $existingHint
           Upsert-ExchangeMailContact $contact $stats $true $existingHint $useExistingHint $existingProfileHint
         } | Out-Null
       if ($contactPosition % 100 -eq 0) { Write-Host ("Reconciled {0} of {1} FCUNO contacts." -f $contactPosition, @($exchangeRows.Contacts).Count) }

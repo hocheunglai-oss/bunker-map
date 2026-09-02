@@ -2507,6 +2507,10 @@ function Get-MailContact {
   [CmdletBinding()]
   param($Filter, $ResultSize, $Identity)
   $script:getMailContactCalls += 1
+  if ($Identity -in @($script:noOpMailContact.Guid, $script:noOpMailContact.DistinguishedName, $script:noOpMailContact.ExternalDirectoryObjectId)) {
+    if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
+    return $script:noOpMailContact
+  }
   if ($Filter -like "CustomAttribute2 -eq 'FCUNO_CONTACT:c-unchanged'") {
     if ($script:setContactFailed -and $script:rereadReplacementContact) { return $script:rereadReplacementContact }
     return $script:noOpMailContact
@@ -2767,9 +2771,9 @@ $replacementRaceFailedClosed = $false
 try {
   Upsert-ExchangeMailContact $desiredNoOpContact @{}
 } catch {
-  $replacementRaceFailedClosed = $_.Exception.Message -match "source-key ownership changed"
+  $replacementRaceFailedClosed = $_.Exception.Message -match "resolved to a different Exchange mail contact"
 }
-Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the same mutable alias/source key now resolves to a different immutable contact"
+Assert-True $replacementRaceFailedClosed "An update/recreate race must fail closed when the immutable identity reread resolves to a different contact"
 Assert-True (-not $script:removeCalled) "A replacement contact must never be deleted after an update/recreate race"
 $script:setContactError = ""
 $script:setContactFailed = $false
@@ -2813,6 +2817,10 @@ Assert-True ($graphInvalidUpdateGateIndex -gt $liveProfileResolutionIndex) "A ma
 Assert-True ($updateRecreateDeleteIndex -gt $updateErrorIndex) "A managed Set-Contact invalid-object failure must remove only the reread immutable contact"
 Assert-True ($updateRecreateConfirmationIndex -gt $updateRecreateDeleteIndex) "A managed Set-Contact invalid-object recreation must confirm exact deletion after removal"
 Assert-True ($updateRecreateNewIndex -gt $updateRecreateConfirmationIndex) "A managed Set-Contact invalid-object recreation must confirm absence before New-MailContact"
+
+$fullSyncFunctionText = (Get-Item Function:Invoke-FullExchangeSync).ScriptBlock.ToString()
+Assert-True ($fullSyncFunctionText -match '(?m)^\s*\$useExistingHint = \$null -ne \$existingHint\s*$') "Full reconciliation must keep a collision-checked immutable contact hint even when its Graph profile is invalid"
+Assert-True ($upsertContactFunctionText -match 'Get-ExchangeMailContactByImmutableIdentity \$existing') "A Graph-invalid managed contact must be reread by immutable identity before exact recreation"
 
 $savedGetMailContact = (Get-Item Function:Get-MailContact).ScriptBlock
 $savedGetContact = (Get-Item Function:Get-Contact).ScriptBlock
