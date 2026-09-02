@@ -9,13 +9,16 @@ $LegacyExchangeOnlineManagementVersion = "3.4.0"
 $PowerShell74ExchangeOnlineManagementVersion = "3.9.2"
 $DefaultExchangeOnlineManagementVersion = "3.10.1"
 $CanonicalExchangeAddressBookDomain = "cosulich1.onmicrosoft.com"
+$ExchangeDirectoryNameCollisionSourceKeys = @(
+  "FCUNO_CONTACT:3f7e1efa4cff782afea6f0e0e672a90f1824cfa8"
+)
 $ExchangeGroupPropagationMaxAttempts = 9
 $ExchangeGroupPropagationDelaySeconds = 5
 $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.20"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.21"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -1157,6 +1160,14 @@ function Get-UniqueExchangeDirectoryName($DisplayName, [hashtable]$SeenNames, $S
   throw "Could not allocate a unique deterministic Exchange directory name for '$baseName'."
 }
 
+function Test-ExchangeDirectoryNameRequiresStableSuffix($SourceKey) {
+  $candidate = Clean-Text $SourceKey
+  if (-not $candidate) { return $false }
+  return @($ExchangeDirectoryNameCollisionSourceKeys | Where-Object {
+    (Clean-Text $_).Equals($candidate, [StringComparison]::OrdinalIgnoreCase)
+  }).Count -gt 0
+}
+
 function Is-InternalEmail($Email) {
   # cosulich.com.sg is hosted outside this Exchange tenant and FC-GENERAL rows
   # on that domain must remain managed mail contacts. Explicit FC-INTERNAL
@@ -1329,7 +1340,10 @@ function Build-ExchangeRows($Contacts, $Groups, $Members) {
   $seenDirectoryNames = @{}
   foreach ($contactRow in @($contactRows)) {
     $baseName = Get-ExchangeDirectoryNameBase $contactRow.DisplayName
-    $forceStableSuffix = [int]$directoryNameCounts[$baseName.ToLowerInvariant()] -gt 1
+    $forceStableSuffix = (
+      [int]$directoryNameCounts[$baseName.ToLowerInvariant()] -gt 1 -or
+      (Test-ExchangeDirectoryNameRequiresStableSuffix $contactRow.SourceKey)
+    )
     $directoryName = Get-UniqueExchangeDirectoryName $contactRow.DisplayName $seenDirectoryNames $contactRow.SourceKey $forceStableSuffix
     $contactRow | Add-Member -NotePropertyName DirectoryName -NotePropertyValue $directoryName -Force
   }

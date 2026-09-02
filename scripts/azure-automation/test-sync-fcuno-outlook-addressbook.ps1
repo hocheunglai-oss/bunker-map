@@ -243,6 +243,15 @@ Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -co
 Assert-True ($built.ContactByEmail["dup@example.com"].AllowedOwnerSourceKeys -contains "FCUNO_CONTACT:c-new") "A canonical duplicate must record its current eligible source owner"
 Assert-Equal "Group One" $built.GroupById["g-1"].DirectoryName "A non-colliding group must retain its exact FCUNO name as its Exchange directory name"
 
+$knownExchangeDirectoryCollisionRows = Build-ExchangeRows @(
+  [pscustomobject]@{ id = "3f7e1efa4cff782afea6f0e0e672a90f1824cfa8"; source_book = "FC-GENERAL"; display_name = "AICC-CHARLIE GE"; primary_email = "cge@med-ocean.net"; nickname = $null; first_name = ""; last_name = ""; updated_at = "2026-09-02T08:37:46Z" }
+) @() @()
+$knownExchangeDirectoryCollisionContact = $knownExchangeDirectoryCollisionRows.ContactByEmail["cge@med-ocean.net"]
+Assert-Equal "AICC-CHARLIE GE" $knownExchangeDirectoryCollisionContact.DisplayName "The known Exchange directory-name collision must not alter the visible FCUNO display name"
+Assert-Equal "AICC-CHARLIE GE [4436da0b]" $knownExchangeDirectoryCollisionContact.DirectoryName "The known invisible Exchange collision must use its deterministic source-key suffix"
+Assert-True (Test-ExchangeDirectoryNameRequiresStableSuffix $knownExchangeDirectoryCollisionContact.SourceKey) "Only an explicitly registered Exchange directory-name collision may force the stable suffix"
+Assert-True (-not (Test-ExchangeDirectoryNameRequiresStableSuffix "FCUNO_CONTACT:unrelated")) "Unrelated FCUNO contacts must retain the normal directory-name allocation"
+
 $singaporeExternalRows = Build-ExchangeRows @(
   [pscustomobject]@{ id = "fcbs-bunker"; source_book = "FC-GENERAL"; display_name = "FCBS"; primary_email = "bunker@cosulich.com.sg"; nickname = "FCBS"; first_name = ""; last_name = ""; updated_at = "2026-07-22T03:00:00Z" }
 ) @() @()
