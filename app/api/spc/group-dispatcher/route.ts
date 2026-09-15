@@ -9,6 +9,7 @@ import {
   heartbeatSpcGroupDispatcher,
   listRecentSpcGroupDeliveries,
   pairSpcGroupDispatcher,
+  prepareSpcGroupDelivery,
   revokeSpcGroupDispatcher,
 } from "@/lib/spcGroupDispatcher"
 import { getSpcGroupDeliveryHealth } from "@/lib/spcDeliveryRoutes"
@@ -95,6 +96,18 @@ export async function POST(request: Request) {
     if (action === "latest") {
       const job = await getLatestSpcGroupDelivery(token)
       return privateJson({ success: true, job })
+    }
+
+    if (action === "prepare_send") {
+      const prepared = await prepareSpcGroupDelivery({
+        token,
+        extensionVersion,
+        jobId: typeof payload.jobId === "string" ? payload.jobId : "",
+        claimToken: typeof payload.claimToken === "string" ? payload.claimToken : "",
+      })
+      return prepared
+        ? privateJson({ success: true, job: prepared })
+        : privateJson({ message: "Delivery claim expired or was already prepared. Sending was stopped." }, 409)
     }
 
     if (action === "history") {

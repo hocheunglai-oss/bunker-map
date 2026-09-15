@@ -10,32 +10,44 @@ const backgroundSource = fs.readFileSync(path.join(__dirname, "background.js"), 
 const updaterBridgeSource = fs.readFileSync(path.join(__dirname, "updater-bridge.js"), "utf8")
 const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8")
 const logo = fs.readFileSync(path.join(__dirname, "spc-sidebar-logo.png"))
+const extensionVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "manifest.json"), "utf8")).version
 const groupName = "FCUNO - SPC TRADING GROUP"
 const message = "*AMENDED - REV 2*\n\nlong pu 16 / 8357588 / 10 - 18 aug / lsmgo 230mts\n\n*ETA:* *10 - 18 aug* (was 8 - 10 aug)"
 
-function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, claimNetworkFailure = false) {
+function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, claimNetworkFailure = false, fixture = {}) {
+  const fixtureGroupName = fixture.name || groupName
+  const displayName = fixture.directionMarks ? `\u200e${fixtureGroupName.replaceAll(" ", "\u00a0")}\u200f` : fixtureGroupName
+  const title = fixture.highlighted
+    ? `<span dir="auto">${displayName.replace("Long", "<mark>Long</mark>")}</span>`
+    : `<span dir="auto" title="${displayName}">${displayName}</span>`
+  const metadata = fixture.metadata ? '<span dir="auto" title="Unread messages">1</span>' : ''
+  const rowAttributes = fixture.focusable ? 'tabindex="-1"' : 'data-testid="cell-frame-container"'
+  const innerAttributes = fixture.focusable ? 'role="gridcell" tabindex="0"' : 'role="row"'
+
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:Arial}#side{float:left;width:340px;height:700px}#search{margin:12px;width:280px;padding:8px}
     .row{display:none;padding:14px;border-top:1px solid #ddd;cursor:pointer}#main{margin-left:340px;min-height:700px}
     header{height:56px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #ddd}.messages{height:520px}
     #composeLine{display:flex;align-items:flex-end;gap:8px;margin:10px}#composer{min-height:60px;flex:1;padding:10px;border:1px solid #ccc;white-space:pre-wrap}
-    #send{width:44px;height:44px}
+    #send{width:44px;height:44px;${fixture.noSend ? 'display:none' : ''}}
     ${styles.replaceAll("</style>", "<\\/style>")}
   </style></head><body>
     <div id="side"><input id="search" type="text" aria-label="Search input textbox" />
-      <div id="exact" class="row" data-testid="cell-frame-container" onclick="if(window.nativeClick)window.openGroup()"><div role="row"><span title="${groupName}">${groupName}</span></div></div>
-      ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${groupName}">${groupName}</span></div></div>` : ""}
-      <div id="partial" class="row" role="row"><span title="${groupName} OLD">${groupName} OLD</span></div>
+      <div id="exact" class="row" ${rowAttributes} onclick="if(window.nativeClick)window.openGroup()"><div ${innerAttributes}>${metadata}${title}</div></div>
+      ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${fixtureGroupName}">${fixtureGroupName}</span></div></div>` : ""}
+      <div id="partial" class="row" role="row"><span title="${fixtureGroupName} OLD">${fixtureGroupName} OLD</span></div>
     </div>
     <div id="main"><header><button><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
       <div class="messages" id="messages"></div><div id="composeLine"><div id="composer" contenteditable="true" role="textbox"></div><button id="send" aria-label="Send" data-testid="compose-btn-send"><span data-icon="wds-ic-send-filled">Send</span></button></div>
     </div>
     <script>
-      window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
+      window.fixture = ${JSON.stringify(fixture)}; window.prepares = []; window.nativeInputs = []; window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
       window.initiallyPaired = ${initiallyPaired ? "true" : "false"}; window.pairRequests = 0;
       window.appendOutgoing = (text) => {
         const row=document.createElement('div');row.dataset.testid='msg-container';
-        row.innerHTML='<span aria-label="You:"></span><span data-testid="selectable-text"></span><span aria-label="Sent"></span>';
+        row.innerHTML='<span aria-label="You:"></span><span data-testid="selectable-text"></span><span aria-label="'+(window.fixture.pending?'Pending':'Sent')+'"></span>';
+        if(window.fixture.timedAck)row.lastElementChild.setAttribute('aria-label','10:45 AM Delivered');
+        if(window.fixture.readIcon){row.lastElementChild.removeAttribute('aria-label');row.lastElementChild.dataset.icon='wds-ic-read';}
         row.querySelector('[data-testid="selectable-text"]').textContent=text;
         document.getElementById('messages').appendChild(row);window.sent.push(text);
       };
@@ -43,38 +55,48 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
       oldMessage.innerHTML='<span aria-label="You:"></span><span data-testid="selectable-text"></span><span aria-label="Delivered"></span>';
       oldMessage.querySelector('[data-testid="selectable-text"]').textContent=${JSON.stringify(message)};
       document.getElementById('messages').appendChild(oldMessage);
-      window.openGroup = () => { const title=document.getElementById('chatTitle'); title.textContent=${JSON.stringify(groupName)}; title.title=${JSON.stringify(groupName)}; document.getElementById('composer').focus(); };
+      window.openGroup = () => { const title=document.getElementById('chatTitle'); title.textContent=${JSON.stringify(displayName)}; title.title=${JSON.stringify(displayName)}; if(window.fixture.existingDraft)document.getElementById('composer').textContent='My existing draft'; document.getElementById('composer').focus(); };
       window.applyText = (text) => {
         const active=document.activeElement;
         if(active===document.getElementById('search')){
           active.value=String(text||''); window.searches.push(active.value);
-          const show=active.value===${JSON.stringify(groupName)};
-          document.querySelectorAll('.row').forEach(row=>row.style.display=show?'block':'none'); return true;
+          const show=active.value===${JSON.stringify(fixtureGroupName)};
+          document.querySelectorAll('.row').forEach(row=>row.style.display=show && !(window.fixture.noExact && row.id==='exact')?'block':'none'); return true;
         }
         if(active===document.getElementById('composer')){active.textContent=String(text||''); return true;} return false;
       };
-      window.chrome={runtime:{lastError:null,getManifest:()=>({version:'1.3.1'}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
+      window.performSubmit = (kind, request) => {
+        window.nativeInputs.push({kind, jobId:request.jobId, claimToken:request.claimToken});
+        if(window.prepares.length!==1)return {ok:false,message:'Missing one-shot preparation'};
+        if(window.fixture.rerenderOld){const old=document.getElementById('old-message');old.replaceWith(old.cloneNode(true));document.getElementById('composer').replaceChildren();return {ok:true};}
+        if(window.fixture.changeChat){document.getElementById('chatTitle').title='ANOTHER GROUP';document.getElementById('chatTitle').textContent='ANOTHER GROUP';return {ok:true};}
+        const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';
+        if((kind==='click' || ${enterSubmits ? "true" : "false"}) && !${ambiguous ? "true" : "false"} && text){window.appendOutgoing(text);if(!window.fixture.retainDraft)c.replaceChildren();}
+        return window.fixture.sendError?{ok:false,message:'Debugger disconnected after submit'}:{ok:true};
+      };
+      window.chrome={runtime:{lastError:null,getManifest:()=>({version:${JSON.stringify(extensionVersion)}}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
         if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
         if(request.type==='dispatcher-history'){callback({ok:true,jobs:[]});return;}
         if(request.type==='dispatcher-claim'){
-          if(window.claimed){callback(${claimNetworkFailure ? "{ok:false,message:'Failed to fetch'}" : `{ok:true,dispatcher:{groupName:${JSON.stringify(groupName)}},job:null}`});return;}
-          window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(groupName)},messageText:${JSON.stringify(message)}}});return;
+          if(window.claimed){callback(${claimNetworkFailure ? "{ok:false,message:'Failed to fetch'}" : `{ok:true,dispatcher:{groupName:${JSON.stringify(fixtureGroupName)}},job:null}`});return;}
+          window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',attemptCount:window.fixture.retry?2:1,revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(fixtureGroupName)},messageText:${JSON.stringify(message)}}});return;
         }
-        if(request.type==='dispatcher-complete'){window.completions.push(request);callback({ok:true});return;}
+        if(request.type==='dispatcher-prepare'){window.prepares.push(request);callback(window.fixture.prepareError?{ok:false,message:'Claim expired'}:{ok:true,job:{leaseExpiresAt:new Date(Date.now()+(window.fixture.leaseExpired?-1000:90000)).toISOString()}});return;}
+        if(request.type==='dispatcher-complete'){
+          window.completions.push(request);
+          if(window.fixture.completeError && request.result==='sent'){callback({ok:false,message:'Failed to fetch'});return;}
+          callback(window.fixture.terminal?{ok:true,job:{status:'manual_review',lastError:'Retry limit reached'}}:{ok:true,job:{status:request.result}});return;
+        }
         if(request.type==='native-replace-text'){callback({ok:window.applyText(request.text)});return;}
         if(request.type==='native-click'){
           const target=document.elementFromPoint(Number(request.x),Number(request.y));window.nativeClick=true;
           target?.closest('.row')?.click();
-          if(target?.closest('#send')){const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';if(text){window.appendOutgoing(text);c.replaceChildren();}}
-          window.nativeClick=false;callback({ok:true});return;
+          const result=target?.closest('#send')?window.performSubmit('click',request):{ok:true};
+          window.nativeClick=false;callback(result);return;
         }
-        if(request.type==='native-enter'){
-          const c=document.getElementById('composer');const text=c.innerText||c.textContent||'';
-          if(${enterSubmits ? "true" : "false"} && !${ambiguous ? "true" : "false"} && text){window.appendOutgoing(text);c.replaceChildren();}
-          callback({ok:true});return;
-        }
+        if(request.type==='native-enter'){callback(window.performSubmit('enter',request));return;}
         if(request.type==='dispatcher-set-paused'||request.type==='dispatcher-set-collapsed'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
       }}};
     </script><script>${source.replaceAll("</script>", "<\\/script>")}</script>
@@ -380,7 +402,7 @@ async function withServer(callback) {
     const initiallyPaired = requestUrl.searchParams.get("unpaired") !== "1"
     const enterSubmits = requestUrl.searchParams.get("enterFallback") !== "1"
     const claimNetworkFailure = requestUrl.searchParams.get("networkFail") === "1"
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired, enterSubmits, claimNetworkFailure))
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); response.end(html(ambiguous, initiallyPaired, enterSubmits, claimNetworkFailure, Object.fromEntries(requestUrl.searchParams)))
   })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   try { await callback(`http://127.0.0.1:${server.address().port}/`) }
@@ -415,9 +437,9 @@ async function main() {
       assert.equal(sent.completions[0].result, "sent")
       assert.equal(sent.title, groupName)
       assert.deepEqual(sent.searches.slice(0, 2), [groupName, ""])
-      assert.match(sent.panelText, /REDELIVERY\s+v1\.3\.1/)
+      assert.ok(sent.panelText.replace(/\s+/g, " ").includes(`REDELIVERY v${extensionVersion}`))
       assert.match(sent.panelText, /REV 1 · SENT/)
-      assert.match(sent.panelText, /Delivered · last 24 hours\s+1/i)
+      assert.match(sent.panelText, /Sent · last 24 hours\s+1/i)
       assert.match(sent.panelText, /long pu 16 \/ 8357588/)
       assert.match(sent.panelText, /To FCUNO - SPC TRADING GROUP/)
       assert.doesNotMatch(sent.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
@@ -456,7 +478,7 @@ async function main() {
       assert.doesNotMatch(interrupted.panelText, /Enquiry retained for review/)
 
       const fallbackPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
-      await fallbackPage.goto(`${url}?enterFallback=1`, { waitUntil: "domcontentloaded" })
+      await fallbackPage.goto(`${url}?noSend=1`, { waitUntil: "domcontentloaded" })
       await fallbackPage.waitForFunction(() => window.completions.length === 1, null, { timeout: 30000 })
       const fallback = await fallbackPage.evaluate(() => ({ completions: window.completions, sent: window.sent }))
       assert.equal(fallback.sent.length, 1, JSON.stringify(fallback))
@@ -484,6 +506,92 @@ async function main() {
       assert.equal(autoPaired.sent.length, 1, JSON.stringify(autoPaired))
       assert.equal(autoPaired.completions[0].result, "sent")
       assert.doesNotMatch(autoPaired.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
+
+      async function runFixture(fixture, expectedCompletions = 1) {
+        const fixturePage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+        try {
+          await fixturePage.goto(`${url}?${new URLSearchParams(fixture)}`, { waitUntil: "domcontentloaded" })
+          await fixturePage.waitForFunction((count) => window.completions.length >= count, expectedCompletions, { timeout: 30000 })
+          return await fixturePage.evaluate(() => ({
+            completions: window.completions,
+            sent: window.sent,
+            prepares: window.prepares,
+            nativeInputs: window.nativeInputs,
+            draft: document.getElementById("composer").textContent,
+            panelText: document.getElementById("fcuno-spc-group-dispatcher").innerText,
+          }))
+        } finally {
+          await fixturePage.close()
+        }
+      }
+
+      const [metadata, modern, directionMarks, timedAck, readIcon, noExact, expired, stalePermission, pending, pendingDraft, interruptedSend, interruptedRecord, changedChat, oldRerender, existingDraft, retried, terminal, terminalSent] = await Promise.all([
+        runFixture({ name: "Vu Long (FCBHK) SG Enqs", metadata: "1" }),
+        runFixture({ name: "Vu Long (FCBHK) SG Enqs", focusable: "1", highlighted: "1", metadata: "1" }),
+        runFixture({ name: "Vu Long (FCBHK) SG Enqs", directionMarks: "1" }),
+        runFixture({ timedAck: "1" }),
+        runFixture({ readIcon: "1" }),
+        runFixture({ noExact: "1" }),
+        runFixture({ prepareError: "1" }),
+        runFixture({ leaseExpired: "1" }),
+        runFixture({ pending: "1" }),
+        runFixture({ pending: "1", retainDraft: "1" }),
+        runFixture({ sendError: "1" }),
+        runFixture({ completeError: "1" }, 2),
+        runFixture({ changeChat: "1" }),
+        runFixture({ rerenderOld: "1" }),
+        runFixture({ existingDraft: "1" }),
+        runFixture({ retry: "1" }),
+        runFixture({ noExact: "1", terminal: "1" }),
+        runFixture({ terminal: "1" }, 2),
+      ])
+      for (const result of [metadata, modern, directionMarks, timedAck, readIcon]) {
+        assert.equal(result.completions[0].result, "sent", JSON.stringify(result))
+        assert.equal(result.sent.length, 1, JSON.stringify(result))
+        assert.equal(result.prepares.length, 1, JSON.stringify(result))
+        assert.equal(result.prepares[0].jobId, "job-1")
+        assert.equal(result.prepares[0].claimToken, "claim")
+        assert.equal(result.nativeInputs.length, 1)
+        assert.equal(result.nativeInputs[0].jobId, "job-1")
+        assert.equal(result.nativeInputs[0].claimToken, "claim")
+      }
+      assert.equal(noExact.sent.length, 0)
+      assert.equal(noExact.completions[0].result, "failed")
+      assert.match(noExact.completions[0].error, /Exact WhatsApp group not found/)
+      assert.equal(expired.sent.length, 0)
+      assert.equal(expired.nativeInputs.length, 0)
+      assert.equal(expired.completions[0].result, "manual_review")
+      assert.equal(stalePermission.sent.length, 0)
+      assert.equal(stalePermission.nativeInputs.length, 0)
+      assert.equal(stalePermission.completions[0].result, "manual_review")
+      assert.equal(pendingDraft.sent.length, 1)
+      assert.equal(pendingDraft.nativeInputs.length, 1)
+      assert.equal(pendingDraft.completions[0].result, "manual_review")
+      assert.equal(pending.sent.length, 1)
+      assert.equal(pending.nativeInputs.length, 1)
+      assert.equal(pending.completions[0].result, "manual_review")
+      assert.equal(interruptedSend.sent.length, 1)
+      assert.equal(interruptedSend.completions[0].result, "manual_review")
+      assert.equal(interruptedRecord.sent.length, 1)
+      assert.deepEqual(interruptedRecord.completions.map((completion) => completion.result), ["sent", "manual_review"])
+      assert.equal(changedChat.sent.length, 0)
+      assert.equal(changedChat.nativeInputs.length, 1)
+      assert.equal(changedChat.completions[0].result, "manual_review")
+      assert.equal(oldRerender.sent.length, 0)
+      assert.equal(oldRerender.completions[0].result, "manual_review")
+      assert.equal(existingDraft.sent.length, 0)
+      assert.equal(existingDraft.draft, "My existing draft")
+      assert.equal(existingDraft.completions[0].result, "manual_review")
+      assert.equal(retried.sent.length, 0)
+      assert.equal(retried.prepares.length, 0)
+      assert.equal(retried.completions[0].result, "manual_review")
+      assert.equal(terminal.sent.length, 0)
+      assert.match(terminal.panelText, /Enquiry retained for review/)
+      assert.match(terminal.panelText, /Retry limit reached/)
+      assert.doesNotMatch(terminal.panelText, /Delivery will retry automatically/)
+      assert.equal(terminalSent.sent.length, 1)
+      assert.match(terminalSent.panelText, /Enquiry retained for review/)
+      assert.doesNotMatch(terminalSent.panelText, /REV 1 · SENT/)
     } finally {
       await browser.close()
     }

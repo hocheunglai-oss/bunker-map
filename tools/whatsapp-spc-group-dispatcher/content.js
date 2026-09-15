@@ -28,6 +28,14 @@
     return cleanText(value).replace(/\*/g, "").toLowerCase()
   }
 
+  function chatNameKey(value) {
+    // WhatsApp adds direction controls around some search highlights. They are
+    // presentation metadata, not part of the configured group name.
+    return cleanText(String(value || "").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ""))
+      .normalize("NFC")
+      .toLowerCase()
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -128,7 +136,7 @@
         <span>To ${escapeHtml(item.groupName)}</span>
       </article>
     `).join("")
-    return rows || '<p class="fcuno-spc-dispatcher-history-empty">No confirmed deliveries in the last 24 hours.</p>'
+    return rows || '<p class="fcuno-spc-dispatcher-history-empty">No confirmed sends in the last 24 hours.</p>'
   }
 
   function render() {
@@ -162,7 +170,7 @@
           </section>
           <p class="fcuno-spc-dispatcher-empty" data-role="empty">Waiting for the next enquiry.</p>
           <section class="fcuno-spc-dispatcher-history">
-            <h2>Delivered · last 24 hours <span data-role="history-count"></span></h2>
+            <h2>Sent · last 24 hours <span data-role="history-count"></span></h2>
             <div data-role="history"></div>
           </section>
         </main>
@@ -243,8 +251,8 @@
   }
 
   function exactChatIsOpen(groupName) {
-    const expected = cleanText(groupName).toLowerCase()
-    return currentChatNames().some((candidate) => candidate.toLowerCase() === expected)
+    const expected = chatNameKey(groupName)
+    return Boolean(expected) && currentChatNames().some((candidate) => chatNameKey(candidate) === expected)
   }
 
   function findSearchBox() {
@@ -269,17 +277,28 @@
     return editableText(element) === text
   }
 
-  function visibleChatRows() {
+  function exactVisibleChatRows(groupName) {
     const pane = document.querySelector("#pane-side") || document.querySelector("#side")
     if (!pane) return []
-    const rows = Array.from(pane.querySelectorAll("[data-testid='cell-frame-container'], [role='listitem'], [role='row']"))
+    const expected = chatNameKey(groupName)
+    if (!expected) return []
+    // Find the exact visible name first. The first text in a chat row can be an
+    // avatar label, unread badge, or accessibility metadata; it is not reliably
+    // the chat title. Current WhatsApp also uses focusable gridcells without
+    // the older cell-frame-container test id.
+    const names = Array.from(pane.querySelectorAll("span[title], div[title], [dir='auto']"))
       .filter(isVisible)
-      .filter((row) => !row.closest("[role='search']"))
-    return rows.filter((row, index) => rows.indexOf(row) === index)
-  }
-
-  function rowPrimaryName(row) {
-    return textCandidates(row)[0] || ""
+      .filter((element) => !element.closest("[role='search'], [role='textbox'], [contenteditable='true']"))
+      .filter((element) => chatNameKey(element.getAttribute("title") || element.textContent) === expected)
+    const rows = names.map((element) => (
+      element.closest("[data-testid='cell-frame-container']")
+      || element.closest("[role='listitem']")
+      || element.closest("[role='row']")
+      || element.closest("[role='gridcell'][tabindex]")
+      || element.closest("div[tabindex='0'], div[tabindex='-1']")
+    ))
+      .filter((row) => row && row !== pane && pane.contains(row) && isVisible(row))
+    return uniqueVisualChatRows(rows)
   }
 
   function sameVisualChatRow(left, right) {
@@ -312,11 +331,12 @@
     }, [])
   }
 
-  async function nativeClick(element) {
+  async function nativeClick(element, sendFence = {}) {
     element.scrollIntoView({ block: "center", inline: "nearest" })
     const rect = element.getBoundingClientRect()
     await runtimeMessage({
       type: "native-click",
+      ...sendFence,
       x: rect.left + rect.width / 2,
       y: rect.top + rect.height / 2,
     })
@@ -330,13 +350,16 @@
 
     for (const delay of [500, 900, 1400, 2200]) {
       await new Promise((resolve) => setTimeout(resolve, delay))
-      const exactRows = uniqueVisualChatRows(visibleChatRows().filter(
-        (row) => rowPrimaryName(row).toLowerCase() === groupName.toLowerCase(),
-      ))
+      const exactRows = exactVisibleChatRows(groupName)
       if (exactRows.length > 1) throw new Error("STOP_REVIEW: More than one exact WhatsApp group match was found.")
       if (exactRows.length !== 1) continue
       await new Promise((resolve) => setTimeout(resolve, 500))
-      await nativeClick(exactRows[0])
+      // Search results can change during the settling delay. Never click a
+      // stale DOM node or a result that has become ambiguous.
+      const settledRows = exactVisibleChatRows(groupName)
+      if (settledRows.length > 1) throw new Error("STOP_REVIEW: More than one exact WhatsApp group match was found.")
+      if (settledRows.length !== 1) continue
+      await nativeClick(settledRows[0])
       for (const verifyDelay of [700, 1200, 1800, 2600]) {
         await new Promise((resolve) => setTimeout(resolve, verifyDelay))
         if (exactChatIsOpen(groupName)) {
@@ -446,6 +469,13 @@
     return candidates[0]
   }
 
+  function hasOutgoingAcknowledgement(row) {
+    const labels = Array.from(row.querySelectorAll("[aria-label]"))
+      .map((element) => cleanText(element.getAttribute("aria-label")).toLowerCase())
+    return labels.some((label) => /^(?:\d{1,2}:\d{2}(?:\s*[ap]m)?\s+)?(sent|delivered|read|已发送|已傳送|已送达|已送達|已读|已讀)$/.test(label))
+      || Boolean(row.querySelector("[data-icon='msg-check'], [data-icon='msg-dblcheck'], [data-icon='msg-dblcheck-ack'], [data-testid='msg-check'], [data-testid='msg-dblcheck'], [data-icon='wds-ic-read'], [aria-label='wds-ic-read'], [alt='wds-ic-read']"))
+  }
+
   function matchingOutgoingMessageRows(message) {
     const target = comparable(message)
     if (!target) return []
@@ -470,7 +500,7 @@
           .map((element) => cleanText(element.getAttribute("aria-label")).toLowerCase())
           .filter(Boolean)
         const authoredByCurrentUser = labels.some((label) => /^(you|you:|你|你:|您|您:)$/.test(label))
-        const hasOutgoingState = labels.some((label) => /^(sent|delivered|read|pending)$/.test(label))
+        const hasOutgoingState = hasOutgoingAcknowledgement(container) || labels.some((label) => label === "pending")
         return authoredByCurrentUser && hasOutgoingState
       })
     return rows.filter((row) => comparable(row.innerText || row.textContent).includes(target))
@@ -494,24 +524,32 @@
   }
 
   function hasNewOutgoingMessage(message, before) {
-    return matchingOutgoingMessageRows(message).some((row) => {
+    const rows = matchingOutgoingMessageRows(message)
+    return rows.some((row) => {
+      // A pending bubble only proves that WhatsApp queued a local message.
+      // Require its sent/read acknowledgement before recording success.
+      if (!hasOutgoingAcknowledgement(row)) return false
       const identity = outgoingMessageIdentity(row)
       if (identity) return !before.identities.has(identity)
-      return !before.rows.has(row)
+      // React can replace a historical bubble with a new DOM element. Without
+      // a stable message id, replacement alone is not evidence of a new send.
+      return rows.length > before.rows.size && !before.rows.has(row)
     })
   }
 
-  async function waitForOutgoingMessage(message, beforeSnapshot, delays) {
+  async function waitForOutgoingMessage(message, groupName, beforeSnapshot, delays) {
     for (const delay of delays) {
       await new Promise((resolve) => setTimeout(resolve, delay))
+      if (!exactChatIsOpen(groupName)) throw new Error("SEND_UNCERTAIN: WhatsApp changed chats while confirming the send.")
       if (hasNewOutgoingMessage(message, beforeSnapshot)) return true
     }
     return false
   }
 
-  async function sendAndVerify(message, groupName) {
+  async function sendAndVerify(message, groupName, sendFence) {
     const composer = findComposer()
     if (!composer) throw new Error("WhatsApp message box is unavailable.")
+    if (composerText(composer)) throw new Error("STOP_REVIEW: WhatsApp already has an unsent draft in this group.")
     const beforeSnapshot = outgoingMessageSnapshot(message)
     replaceComposerText(composer, message)
 
@@ -535,18 +573,29 @@
       throw new Error("SEND_UNCERTAIN: WhatsApp changed the staged enquiry text.")
     }
 
-    await runtimeMessage({ type: "native-enter" })
-    if (await waitForOutgoingMessage(message, beforeSnapshot, [500, 900, 1400])) return true
-
-    const remainingComposer = findComposer()
-    const remainingTextIsExact = comparable(composerText(remainingComposer)) === comparable(message)
-    if (remainingTextIsExact) {
-      sendButton = findSendButton(remainingComposer)
-      if (sendButton) {
-        await nativeClick(sendButton)
-        if (await waitForOutgoingMessage(message, beforeSnapshot, [500, 900, 1400, 2200, 3500])) return true
+    try {
+      const prepared = await runtimeMessage({ type: "dispatcher-prepare", ...sendFence })
+      if (!(Date.parse(prepared.job?.leaseExpiresAt || "") > Date.now())) {
+        throw new Error("The prepared delivery permission expired.")
       }
+    } catch (error) {
+      throw new Error(`SEND_UNCERTAIN: SPC could not confirm permission to submit this enquiry: ${error instanceof Error ? error.message : String(error)}`)
     }
+    if (!exactChatIsOpen(groupName) || comparable(composerText(findComposer())) !== comparable(message)) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp changed the prepared chat or enquiry text.")
+    }
+    const preparedComposer = findComposer()
+    preparedComposer.focus()
+    sendButton = findSendButton(preparedComposer)
+    try {
+      // Exactly one submit action per prepared job. A slow acknowledgement or
+      // retained composer must never trigger a second press of Send/Enter.
+      if (sendButton) await nativeClick(sendButton, sendFence)
+      else await runtimeMessage({ type: "native-enter", ...sendFence })
+    } catch (error) {
+      throw new Error(`SEND_UNCERTAIN: WhatsApp send input was interrupted: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (await waitForOutgoingMessage(message, groupName, beforeSnapshot, [500, 900, 1400, 2200, 3500])) return true
     throw new Error("SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message.")
   }
 
@@ -554,6 +603,7 @@
     if (!state.paired || state.busy) return
     state.busy = true
     let claim = null
+    let sendConfirmed = false
     try {
       claim = await runtimeMessage({ type: "dispatcher-claim" })
       if (state.errorType === "connection") {
@@ -576,29 +626,30 @@
       render()
       await openExactGroup(claim.job.groupName)
       if (claim.job.attemptCount > 1 && outgoingMessageCount(claim.job.messageText) > 0) {
-        await runtimeMessage({
-          type: "dispatcher-complete",
-          jobId: claim.job.id,
-          claimToken: claim.claimToken,
-          result: "sent",
-        })
-        state.phase = "sent"
-        state.status = "Enquiry sent"
-        recordSentActivity(claim.job)
-        return
+        throw new Error("STOP_REVIEW: A matching outgoing enquiry already exists; verify delivery before retrying.")
       }
-      await sendAndVerify(claim.job.messageText, claim.job.groupName)
-      await runtimeMessage({
+      await sendAndVerify(claim.job.messageText, claim.job.groupName, {
+        jobId: claim.job.id,
+        claimToken: claim.claimToken,
+      })
+      sendConfirmed = true
+      const completion = await runtimeMessage({
         type: "dispatcher-complete",
         jobId: claim.job.id,
         claimToken: claim.claimToken,
         result: "sent",
       })
+      if (completion.job?.status !== "sent") {
+        throw new Error(completion.job?.lastError || "SPC retained this delivery for review.")
+      }
       state.phase = "sent"
       state.status = "Enquiry sent"
       recordSentActivity(claim.job)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const originalMessage = error instanceof Error ? error.message : String(error)
+      const message = sendConfirmed
+        ? `SEND_UNCERTAIN: WhatsApp showed the outgoing enquiry, but SPC did not confirm its delivery record: ${originalMessage}`
+        : originalMessage
       const requiresReview = /^(SEND_UNCERTAIN|STOP_REVIEW):/.test(message)
       const queueConnectionFailure = !claim?.job && !requiresReview
       state.phase = queueConnectionFailure ? "connecting" : "error"
@@ -612,13 +663,20 @@
         state.activity = { ...claim.job, status: requiresReview ? "manual_review" : "failed" }
       }
       if (claim?.job && claim?.claimToken) {
-        await runtimeMessage({
+        const completion = await runtimeMessage({
           type: "dispatcher-complete",
           jobId: claim.job.id,
           claimToken: claim.claimToken,
           result: requiresReview ? "manual_review" : "failed",
           error: message,
-        }).catch(() => {})
+        }).catch(() => null)
+        if (completion?.job?.status === "manual_review") {
+          state.errorType = "review"
+          state.activity = { ...claim.job, ...completion.job, status: "manual_review" }
+          if (completion.job.lastError) {
+            state.error = completion.job.lastError.replace(/^(SEND_UNCERTAIN|STOP_REVIEW):\s*/, "Manual review required: ")
+          }
+        }
       }
     } finally {
       state.busy = false

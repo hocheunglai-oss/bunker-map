@@ -445,7 +445,7 @@ export async function claimSpcGroupDelivery(token: string, extensionVersion: str
   const dispatcher = await heartbeatSpcGroupDispatcher(token, extensionVersion)
   if (!dispatcher) return null
   const claimToken = randomBytes(32).toString("base64url")
-  const { data, error } = await serviceClient().rpc("claim_spc_group_delivery_job", {
+  const { data, error } = await serviceClient().rpc("claim_spc_group_delivery_job_v2", {
     p_dispatcher_id: dispatcher.id,
     p_claim_token_hash: tokenHash(claimToken),
     p_lease_seconds: 90,
@@ -455,6 +455,31 @@ export async function claimSpcGroupDelivery(token: string, extensionVersion: str
   return row
     ? { dispatcher, claimToken, job: mapJob(row as DeliveryJobRow) }
     : { dispatcher, claimToken: "", job: null }
+}
+
+export async function prepareSpcGroupDelivery(input: {
+  token: string
+  extensionVersion: string
+  jobId: string
+  claimToken: string
+}) {
+  if (cleanText(input.extensionVersion, 30) !== SPC_GROUP_DISPATCHER_VERSION) {
+    throw new Error(`Update the SPC Group Dispatcher to v${SPC_GROUP_DISPATCHER_VERSION} before sending.`)
+  }
+  const authenticated = await authenticatedDispatcher(input.token)
+  if (!authenticated) return null
+  const { data, error } = await authenticated.supabase.rpc("prepare_spc_group_delivery_job", {
+    p_job_id: input.jobId,
+    p_dispatcher_id: authenticated.row.id,
+    p_claim_token_hash: tokenHash(input.claimToken),
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : null
+  return row ? {
+    ...mapActivity(row as DeliveryActivityRow),
+    leaseExpiresAt: (row as { lease_expires_at: string }).lease_expires_at,
+    serverNow: new Date().toISOString(),
+  } : null
 }
 
 export async function getLatestSpcGroupDelivery(token: string) {
@@ -522,5 +547,5 @@ export async function completeSpcGroupDelivery(input: {
   })
   if (error) throw error
   const row = Array.isArray(data) ? data[0] : null
-  return row ? mapJob(row as DeliveryJobRow) : null
+  return row ? mapActivity(row as DeliveryActivityRow) : null
 }

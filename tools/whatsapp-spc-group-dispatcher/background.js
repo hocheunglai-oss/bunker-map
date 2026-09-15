@@ -3,6 +3,7 @@ const STORAGE_KEY = "fcunoSpcGroupDispatcherV1"
 const UPDATE_PENDING_KEY = "fcunoSpcGroupDispatcherUpdatePendingV1"
 const VERSION = chrome.runtime.getManifest().version
 const debuggerQueues = new Map()
+const submissionPermits = new Map()
 
 function chromeCall(invoke) {
   return new Promise((resolve, reject) => {
@@ -51,9 +52,10 @@ function enqueueDebuggerAction(tabId, action) {
   const previous = debuggerQueues.get(tabId) || Promise.resolve()
   const current = previous.catch(() => {}).then(action)
   debuggerQueues.set(tabId, current)
-  current.finally(() => {
+  const clearQueue = () => {
     if (debuggerQueues.get(tabId) === current) debuggerQueues.delete(tabId)
-  })
+  }
+  void current.then(clearQueue, clearQueue)
   return current
 }
 
@@ -71,18 +73,28 @@ async function withDebugger(tabId, action) {
   }
 }
 
-async function nativeClick(tabId, x, y) {
+function consumeSubmissionPermit(tabId, fence) {
+  const permit = submissionPermits.get(tabId)
+  submissionPermits.delete(tabId)
+  if (!permit || permit.jobId !== fence.jobId || permit.claimToken !== fence.claimToken
+      || performance.now() >= permit.deadline) {
+    throw new Error("SEND_UNCERTAIN: Submission permit expired or was already used. Check WhatsApp before sending again.")
+  }
+}
+
+async function nativeClick(tabId, x, y, sendFence) {
   return withDebugger(tabId, async (target) => {
-    await clickWithTarget(target, x, y)
+    await clickWithTarget(target, x, y, sendFence ? () => consumeSubmissionPermit(tabId, sendFence) : undefined)
   })
 }
 
-async function clickWithTarget(target, x, y) {
+async function clickWithTarget(target, x, y, beforePress) {
   for (const event of [
     { type: "mouseMoved", button: "none", buttons: 0 },
     { type: "mousePressed", button: "left", buttons: 1, clickCount: 1 },
     { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1 },
   ]) {
+    if (event.type === "mousePressed") beforePress?.()
     await chromeCall((callback) => chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
       ...event,
       x,
@@ -165,8 +177,11 @@ async function enterWithTarget(target) {
   }, callback))
 }
 
-async function nativeEnter(tabId) {
-  return withDebugger(tabId, enterWithTarget)
+async function nativeEnter(tabId, sendFence) {
+  return withDebugger(tabId, async (target) => {
+    consumeSubmissionPermit(tabId, sendFence)
+    return enterWithTarget(target)
+  })
 }
 
 async function focusVisibleComposer(target) {
@@ -342,7 +357,7 @@ async function apiRequest(body, token = "") {
   return data
 }
 
-async function handleApiMessage(message) {
+async function handleApiMessage(message, sender) {
   const state = await readState()
   if (message.type === "dispatcher-state") return state
   if (message.type === "dispatcher-pair") {
@@ -366,6 +381,29 @@ async function handleApiMessage(message) {
   }
   if (message.type === "dispatcher-claim") {
     return apiRequest({ action: "claim" }, state.token)
+  }
+  if (message.type === "dispatcher-prepare") {
+    const tabId = sender?.tab?.id
+    if (!Number.isInteger(tabId)) throw new Error("A WhatsApp tab is required to prepare a submission.")
+    submissionPermits.delete(tabId)
+    const startedAt = performance.now()
+    const data = await apiRequest({
+      action: "prepare_send",
+      jobId: message.jobId,
+      claimToken: message.claimToken,
+    }, state.token)
+    // Start the monotonic deadline before the request so network latency is
+    // deducted and a slow local clock cannot extend the database lease.
+    const remaining = Math.min(90000, Date.parse(data.job?.leaseExpiresAt) - Date.parse(data.job?.serverNow))
+    if (!Number.isFinite(remaining) || remaining <= 0 || performance.now() >= startedAt + remaining) {
+      throw new Error("SEND_UNCERTAIN: Submission permit expired before WhatsApp could send.")
+    }
+    submissionPermits.set(tabId, {
+      jobId: message.jobId,
+      claimToken: message.claimToken,
+      deadline: startedAt + remaining,
+    })
+    return data
   }
   if (message.type === "dispatcher-latest") {
     return apiRequest({ action: "latest" }, state.token)
@@ -403,11 +441,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return respond(finishInPlaceUpdate(sender))
   }
   if (String(message?.type || "").startsWith("dispatcher-")) {
-    return respond(handleApiMessage(message))
+    return respond(handleApiMessage(message, sender))
   }
   if (!tabId) return false
   if (message?.type === "native-click") {
-    return respond(enqueueDebuggerAction(tabId, () => nativeClick(tabId, Number(message.x), Number(message.y))))
+    const sendFence = message.jobId || message.claimToken ? message : undefined
+    return respond(enqueueDebuggerAction(tabId, () => nativeClick(tabId, Number(message.x), Number(message.y), sendFence)))
   }
   if (message?.type === "native-replace-text") {
     return respond(enqueueDebuggerAction(tabId, () => nativeReplaceText(tabId, message.text)))
@@ -416,7 +455,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return respond(enqueueDebuggerAction(tabId, () => nativeInsertText(tabId, message.text)))
   }
   if (message?.type === "native-enter") {
-    return respond(enqueueDebuggerAction(tabId, () => nativeEnter(tabId)))
+    return respond(enqueueDebuggerAction(tabId, () => nativeEnter(tabId, message)))
   }
   if (message?.type === "native-send-text") {
     return respond(enqueueDebuggerAction(tabId, () => nativeSendText(tabId, message.text)))

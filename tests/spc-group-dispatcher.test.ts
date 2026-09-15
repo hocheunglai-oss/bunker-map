@@ -183,13 +183,13 @@ test("SPC group delivery migration is idempotent, leased, and service-role only"
   }
 })
 
-test("the dedicated dispatcher exact-matches groups and stops uncertain sends", async () => {
+// Group matching, submission count, expiry and completion outcomes are exercised
+// behaviorally in content.browser-test.cjs and the queue/background test suites.
+test("the dedicated dispatcher preserves sidebar and distribution integration", async () => {
   const content = await readFile(
     new URL("../tools/whatsapp-spc-group-dispatcher/content.js", import.meta.url),
     "utf8",
   )
-  assert.match(content, /rowPrimaryName\(row\)\.toLowerCase\(\) === groupName\.toLowerCase\(\)/)
-  assert.match(content, /currentChatNames\(\)\.some\(\(candidate\) => candidate\.toLowerCase\(\) === expected\)/)
   assert.match(content, /More than one exact WhatsApp group match was found/)
   assert.match(content, /SEND_UNCERTAIN: WhatsApp did not confirm a new outgoing message/)
   assert.match(content, /SEND_UNCERTAIN: WhatsApp did not stage the exact enquiry text/)
@@ -201,14 +201,12 @@ test("the dedicated dispatcher exact-matches groups and stops uncertain sends", 
   assert.match(content, /storedRevision - 1/)
   assert.match(content, /return `REV \$\{amendmentNumber\(activity\)\}`/)
   assert.match(content, /replaceComposerText\(composer, message\)/)
-  assert.match(content, /await runtimeMessage\(\{ type: "native-enter" \}\)/)
-  assert.match(content, /await nativeClick\(sendButton\)/)
   assert.doesNotMatch(content, /type: "native-send-text"/)
   assert.match(content, /REDELIVERY/)
   assert.match(content, /data-role="activity-message"/)
   assert.match(content, /dispatcher-latest/)
   assert.match(content, /dispatcher-history/)
-  assert.match(content, /Delivered · last 24 hours/)
+  assert.match(content, /Sent · last 24 hours/)
   assert.match(content, /dispatcher-set-collapsed/)
   assert.doesNotMatch(content, /Checking for enquiries/)
   assert.match(content, /result: requiresReview \? "manual_review" : "failed"/)
