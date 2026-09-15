@@ -1281,9 +1281,6 @@ export async function saveManagedSpcUser(
     ? existingRow.is_active !== false
     : input.isActive !== false
   const deliveryRouteId = input.deliveryRouteId?.trim() || ""
-  if (isActive && role !== "SUPPLIER TRADER" && !deliveryRouteId) {
-    throw new Error("An active enquiry delivery route is required for this user.")
-  }
   const whatsappPhone = linkedIdentity && existingRow
     ? existingRow.whatsapp_phone || ""
     : normaliseSpcWhatsappPhoneForAccount(input.whatsappPhone, isActive)

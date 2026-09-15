@@ -940,11 +940,10 @@ export default function SpcUserManagementPage() {
                 </select>
               </label>
               <label>
-                <span>Enquiry Route{userDraft.isActive && userDraft.role !== "SUPPLIER TRADER" ? " *" : ""}</span>
+                <span>Enquiry Route</span>
                 <select
                   value={userDraft.deliveryRouteId}
                   onChange={(event) => updateDraft("deliveryRouteId", event.target.value)}
-                  required={userDraft.isActive && userDraft.role !== "SUPPLIER TRADER"}
                 >
                   <option value="">Not assigned</option>
                   {deliveryRoutes
