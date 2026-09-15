@@ -21,7 +21,9 @@ Installing or reloading a dispatcher update automatically refreshes open WhatsAp
 
 The dispatcher never sends to a partial group-name match. Group comparisons normalize whitespace and invisible direction marks on both the configured name and the visible title, while preserving the stored route name. Nested WhatsApp wrappers for one visible result are treated as one chat. Delivery requires one exact search result and the same exact title after opening; genuinely separate exact results, a different opened title, or uncertain sends stop for manual review. Search, open, compose, and send steps use pauses for reliability.
 
-Version 1.3.2 reserves submission on the server immediately before sending. Only one job can be in flight across the dispatcher's WhatsApp tabs. Once submission is reserved, an interrupted or uncertain attempt is retained for manual review instead of automatically sent again. An older identical message is never proof that the current enquiry was sent. Update the existing installed folder to 1.3.2 before resuming delivery.
+Submission is reserved on the server immediately before sending. Only one job can be in flight across the dispatcher's WhatsApp tabs. Once submission is reserved, an interrupted or uncertain attempt is retained for manual review instead of automatically sent again. An older identical message is never proof that the current enquiry was sent. Update the existing installed folder to 1.3.3 before resuming delivery.
+
+Version 1.3.3 reserves space for the sidebar in WhatsApp's app layout and checks whether its Send button is actually exposed before using it. The chat, staged text, and input target are verified again after Chrome attaches the debugger, because its banner can move the controls. A covered button uses one focused Enter submission; failure to confirm a new outgoing message still requires manual review. The updater also coordinates its restart paths to refresh each WhatsApp tab once.
 
 ## Retry timing
 

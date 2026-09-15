@@ -30,8 +30,11 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
     header{height:56px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #ddd}.messages{height:520px}
     #composeLine{display:flex;align-items:flex-end;gap:8px;margin:10px}#composer{min-height:60px;flex:1;padding:10px;border:1px solid #ccc;white-space:pre-wrap}
     #send{width:44px;height:44px;${fixture.noSend ? 'display:none' : ''}}
+    ${fixture.occludedSend ? '#composeLine{position:fixed;bottom:20px;left:350px;right:10px}' : ''}
+    ${fixture.fixedApp ? '#appSurface{position:fixed;inset:0}' : ''}
     ${styles.replaceAll("</style>", "<\\/style>")}
   </style></head><body>
+    ${fixture.fixedApp ? '<div id="app"><div id="appSurface">' : ''}
     <div id="side"><input id="search" type="text" aria-label="Search input textbox" />
       <div id="exact" class="row" ${rowAttributes} onclick="if(window.nativeClick)window.openGroup()"><div ${innerAttributes}>${metadata}${title}</div></div>
       ${ambiguous ? `<div id="duplicate" class="row" data-testid="cell-frame-container"><div role="row"><span title="${fixtureGroupName}">${fixtureGroupName}</span></div></div>` : ""}
@@ -40,8 +43,9 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
     <div id="main"><header><button><span dir="auto" title="+65 8453 0317, +852 6995 0950, +65 9679 1141">+65 8453 0317, +852 6995 0950, +65 9679 1141</span><span id="chatTitle" title="OTHER GROUP">OTHER GROUP</span></button></header>
       <div class="messages" id="messages"></div><div id="composeLine"><div id="composer" contenteditable="true" role="textbox"></div><button id="send" aria-label="Send" data-testid="compose-btn-send"><span data-icon="wds-ic-send-filled">Send</span></button></div>
     </div>
+    ${fixture.fixedApp ? '</div></div>' : ''}
     <script>
-      window.fixture = ${JSON.stringify(fixture)}; window.prepares = []; window.nativeInputs = []; window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
+      window.fixture = ${JSON.stringify(fixture)}; window.prepares = []; window.nativeInputs = []; window.nativeRequests = []; window.claimed = false; window.nativeClick = false; window.completions = []; window.searches = []; window.sent = [];
       window.initiallyPaired = ${initiallyPaired ? "true" : "false"}; window.pairRequests = 0;
       window.appendOutgoing = (text) => {
         const row=document.createElement('div');row.dataset.testid='msg-container';
@@ -75,7 +79,7 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
         return window.fixture.sendError?{ok:false,message:'Debugger disconnected after submit'}:{ok:true};
       };
       window.chrome={runtime:{lastError:null,getManifest:()=>({version:${JSON.stringify(extensionVersion)}}),getURL:(asset)=>new URL(asset,location.href).href,sendMessage:(request,callback)=>{
-        if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false});return;}
+        if(request.type==='dispatcher-state'){callback({ok:true,token:window.initiallyPaired?'paired':'',deviceLabel:'TEST DESKTOP',paused:false,collapsed:Boolean(window.fixture.collapsed)});return;}
         if(request.type==='dispatcher-pair'){window.pairRequests+=1;window.initiallyPaired=true;callback({ok:true,token:'paired',deviceLabel:'SPC Trading Desktop'});return;}
         if(request.type==='dispatcher-latest'){callback({ok:true,job:null});return;}
         if(request.type==='dispatcher-history'){callback({ok:true,jobs:[]});return;}
@@ -83,7 +87,13 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
           if(window.claimed){callback(${claimNetworkFailure ? "{ok:false,message:'Failed to fetch'}" : `{ok:true,dispatcher:{groupName:${JSON.stringify(fixtureGroupName)}},job:null}`});return;}
           window.claimed=true;callback({ok:true,dispatcher:{},claimToken:'claim',job:{id:'job-1',attemptCount:window.fixture.retry?2:1,revisionNumber:2,eventType:'amended',routeLabel:'TEST ROUTE',groupName:${JSON.stringify(fixtureGroupName)},messageText:${JSON.stringify(message)}}});return;
         }
-        if(request.type==='dispatcher-prepare'){window.prepares.push(request);callback(window.fixture.prepareError?{ok:false,message:'Claim expired'}:{ok:true,job:{leaseExpiresAt:new Date(Date.now()+(window.fixture.leaseExpired?-1000:90000)).toISOString()}});return;}
+        if(request.type==='dispatcher-prepare'){
+          window.prepares.push(request);
+          if(window.fixture.occludeOnPrepare)document.getElementById('composeLine').style.cssText='position:fixed;bottom:20px;left:350px;right:10px';
+          const button=document.getElementById('send'),rect=button.getBoundingClientRect();
+          window.sendCoveredAtPrepare=!button.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));
+          callback(window.fixture.prepareError?{ok:false,message:'Claim expired'}:{ok:true,job:{leaseExpiresAt:new Date(Date.now()+(window.fixture.leaseExpired?-1000:90000)).toISOString()}});return;
+        }
         if(request.type==='dispatcher-complete'){
           window.completions.push(request);
           if(window.fixture.completeError && request.result==='sent'){callback({ok:false,message:'Failed to fetch'});return;}
@@ -91,19 +101,20 @@ function html(ambiguous = false, initiallyPaired = true, enterSubmits = true, cl
         }
         if(request.type==='native-replace-text'){callback({ok:window.applyText(request.text)});return;}
         if(request.type==='native-click'){
+          if(request.jobId)window.nativeRequests.push({type:request.type,jobId:request.jobId,claimToken:request.claimToken});
           const target=document.elementFromPoint(Number(request.x),Number(request.y));window.nativeClick=true;
           target?.closest('.row')?.click();
           const result=target?.closest('#send')?window.performSubmit('click',request):{ok:true};
           window.nativeClick=false;callback(result);return;
         }
-        if(request.type==='native-enter'){callback(window.performSubmit('enter',request));return;}
+        if(request.type==='native-enter'){window.nativeRequests.push({type:request.type,jobId:request.jobId,claimToken:request.claimToken});callback(document.activeElement===document.getElementById('composer')?window.performSubmit('enter',request):{ok:false,message:'Composer not focused'});return;}
         if(request.type==='dispatcher-set-paused'||request.type==='dispatcher-set-collapsed'){callback({ok:true});return;}callback({ok:false,message:'unexpected '+request.type});
       }}};
     </script><script>${source.replaceAll("</script>", "<\\/script>")}</script>
   </body></html>`
 }
 
-function verifyUpdateReloadsWhatsApp() {
+async function verifyUpdateReloadsWhatsApp() {
   let installedListener = null
   const queries = []
   const reloads = []
@@ -118,12 +129,12 @@ function verifyUpdateReloadsWhatsApp() {
       query: (query, callback) => { queries.push(query); callback([{ id: 14 }, { id: null }]) },
       reload: (tabId, callback) => { reloads.push(tabId); callback() },
     },
-    storage: { local: { get: () => {}, set: () => {} } },
+    storage: { local: { get: () => {}, set: () => {}, remove: (_keys, callback) => callback() } },
     debugger: { attach: () => {}, detach: () => {}, sendCommand: () => {} },
   }
   vm.runInNewContext(backgroundSource, { chrome, fetch: async () => ({ ok: true, json: async () => ({}) }) })
   assert.equal(typeof installedListener, "function")
-  installedListener({ reason: "update" })
+  await installedListener({ reason: "update" })
   assert.equal(queries.length, 1)
   assert.equal(queries[0].url, "https://web.whatsapp.com/*")
   assert.deepEqual(reloads, [14])
@@ -410,7 +421,7 @@ async function withServer(callback) {
 }
 
 async function main() {
-  verifyUpdateReloadsWhatsApp()
+  await verifyUpdateReloadsWhatsApp()
   await verifyUnpairedBackgroundState()
   await verifyAtomicNativeSend()
   await verifyGuardedEnterFallback()
@@ -508,7 +519,7 @@ async function main() {
       assert.doesNotMatch(autoPaired.panelText, /DEVICE|CURRENT ROUTE|PAIR|PAUSE/)
 
       async function runFixture(fixture, expectedCompletions = 1) {
-        const fixturePage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+        const fixturePage = await browser.newPage({ viewport: { width: Number(fixture.viewportWidth) || 1400, height: 800 } })
         try {
           await fixturePage.goto(`${url}?${new URLSearchParams(fixture)}`, { waitUntil: "domcontentloaded" })
           await fixturePage.waitForFunction((count) => window.completions.length >= count, expectedCompletions, { timeout: 30000 })
@@ -517,7 +528,15 @@ async function main() {
             sent: window.sent,
             prepares: window.prepares,
             nativeInputs: window.nativeInputs,
-            draft: document.getElementById("composer").textContent,
+            nativeRequests: window.nativeRequests,
+            sendCoveredAtPrepare: window.sendCoveredAtPrepare,
+            layout: document.getElementById("app") ? {
+              appRight: document.getElementById("app").getBoundingClientRect().right,
+              surfaceRight: document.getElementById("appSurface").getBoundingClientRect().right,
+              sendRight: document.getElementById("send").getBoundingClientRect().right,
+              sidebarLeft: document.getElementById("fcuno-spc-group-dispatcher").getBoundingClientRect().left,
+            } : null,
+            draft: document.getElementById("composer").innerText,
             panelText: document.getElementById("fcuno-spc-group-dispatcher").innerText,
           }))
         } finally {
@@ -525,7 +544,7 @@ async function main() {
         }
       }
 
-      const [metadata, modern, directionMarks, timedAck, readIcon, noExact, expired, stalePermission, pending, pendingDraft, interruptedSend, interruptedRecord, changedChat, oldRerender, existingDraft, retried, terminal, terminalSent] = await Promise.all([
+      const [metadata, modern, directionMarks, timedAck, readIcon, noExact, expired, stalePermission, pending, pendingDraft, interruptedSend, interruptedRecord, changedChat, oldRerender, existingDraft, retried, terminal, terminalSent, occludedSend, collapsedOcclusion, lateOcclusion, occludedEnterDisabled, fixedExpanded, fixedCollapsed] = await Promise.all([
         runFixture({ name: "Vu Long (FCBHK) SG Enqs", metadata: "1" }),
         runFixture({ name: "Vu Long (FCBHK) SG Enqs", focusable: "1", highlighted: "1", metadata: "1" }),
         runFixture({ name: "Vu Long (FCBHK) SG Enqs", directionMarks: "1" }),
@@ -544,6 +563,12 @@ async function main() {
         runFixture({ retry: "1" }),
         runFixture({ noExact: "1", terminal: "1" }),
         runFixture({ terminal: "1" }, 2),
+        runFixture({ occludedSend: "1" }),
+        runFixture({ occludedSend: "1", collapsed: "1" }),
+        runFixture({ occludeOnPrepare: "1" }),
+        runFixture({ occludedSend: "1", enterFallback: "1" }),
+        runFixture({ fixedApp: "1", occludedSend: "1", viewportWidth: "1200" }),
+        runFixture({ fixedApp: "1", occludedSend: "1", collapsed: "1", viewportWidth: "1800" }),
       ])
       for (const result of [metadata, modern, directionMarks, timedAck, readIcon]) {
         assert.equal(result.completions[0].result, "sent", JSON.stringify(result))
@@ -592,6 +617,27 @@ async function main() {
       assert.equal(terminalSent.sent.length, 1)
       assert.match(terminalSent.panelText, /Enquiry retained for review/)
       assert.doesNotMatch(terminalSent.panelText, /REV 1 · SENT/)
+      for (const result of [occludedSend, collapsedOcclusion, lateOcclusion]) {
+        assert.equal(result.sendCoveredAtPrepare, true, JSON.stringify(result))
+        assert.equal(result.completions[0].result, "sent", JSON.stringify(result))
+        assert.equal(result.sent.length, 1)
+        assert.equal(result.prepares.length, 1)
+        assert.deepEqual(result.nativeRequests, [{type:"native-enter",jobId:"job-1",claimToken:"claim"}])
+      }
+      assert.equal(occludedEnterDisabled.sendCoveredAtPrepare, true)
+      assert.equal(occludedEnterDisabled.sent.length, 0)
+      assert.equal(occludedEnterDisabled.prepares.length, 1)
+      assert.deepEqual(occludedEnterDisabled.nativeRequests, [{type:"native-enter",jobId:"job-1",claimToken:"claim"}])
+      assert.equal(occludedEnterDisabled.completions[0].result, "manual_review")
+      assert.equal(occludedEnterDisabled.draft.replace(/\s+/g," "), message.replace(/\s+/g," "))
+      for (const result of [fixedExpanded, fixedCollapsed]) {
+        assert.equal(result.sendCoveredAtPrepare, false, JSON.stringify(result))
+        assert.equal(result.completions[0].result, "sent", JSON.stringify(result))
+        assert.equal(result.layout.appRight, result.layout.sidebarLeft)
+        assert.equal(result.layout.surfaceRight, result.layout.sidebarLeft)
+        assert.ok(result.layout.sendRight < result.layout.sidebarLeft)
+        assert.deepEqual(result.nativeRequests, [{type:"native-click",jobId:"job-1",claimToken:"claim"}])
+      }
     } finally {
       await browser.close()
     }

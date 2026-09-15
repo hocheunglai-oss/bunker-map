@@ -1,11 +1,26 @@
 body.fcuno-spc-dispatcher-active {
+  --fcuno-spc-dispatcher-width: 330px;
   padding-right: 330px !important;
   box-sizing: border-box !important;
 }
 
 body.fcuno-spc-dispatcher-collapsed {
+  --fcuno-spc-dispatcher-width: 46px;
   padding-right: 46px !important;
   box-sizing: border-box !important;
+}
+
+/* WhatsApp's fixed app surface ignores body padding. Give its known root a
+   bounded containing block so fixed descendants share the reserved space. */
+body.fcuno-spc-dispatcher-active #app,
+body.fcuno-spc-dispatcher-collapsed #app {
+  position: relative !important;
+  width: calc(100vw - var(--fcuno-spc-dispatcher-width)) !important;
+  max-width: calc(100vw - var(--fcuno-spc-dispatcher-width)) !important;
+  min-width: 0 !important;
+  height: 100dvh !important;
+  margin: 0 !important;
+  contain: layout !important;
 }
 
 #fcuno-spc-group-dispatcher {

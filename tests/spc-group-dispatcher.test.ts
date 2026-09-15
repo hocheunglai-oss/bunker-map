@@ -224,7 +224,7 @@ test("the dedicated dispatcher preserves sidebar and distribution integration", 
     new URL("../tools/whatsapp-spc-group-dispatcher/background.js", import.meta.url),
     "utf8",
   )
-  assert.match(background, /chrome\.runtime\.onInstalled\.addListener\(reloadOpenWhatsAppTabs\)/)
+  assert.match(background, /chrome\.runtime\.onInstalled\.addListener\(/)
   assert.match(background, /chrome\.tabs\.query\(\{ url: "https:\/\/web\.whatsapp\.com\/\*" \}/)
   assert.match(background, /chrome\.tabs\.reload\(tab\.id/)
   assert.ok(

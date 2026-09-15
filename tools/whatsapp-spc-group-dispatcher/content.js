@@ -331,14 +331,25 @@
     }, [])
   }
 
+  function unobscuredCenter(element) {
+    if (!element?.isConnected || !isVisible(element)) return null
+    const rect = element.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    const hit = document.elementFromPoint(x, y)
+    // WhatsApp may position its app relative to the viewport, ignoring body
+    // padding. A non-empty rectangle can then sit beneath the dispatcher.
+    return hit && (hit === element || element.contains(hit)) ? { x, y } : null
+  }
+
   async function nativeClick(element, sendFence = {}) {
     element.scrollIntoView({ block: "center", inline: "nearest" })
-    const rect = element.getBoundingClientRect()
+    const point = unobscuredCenter(element)
+    if (!point) throw new Error("WhatsApp control is covered or outside the visible page.")
     await runtimeMessage({
       type: "native-click",
       ...sendFence,
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
+      ...point,
     })
   }
 
@@ -458,6 +469,7 @@
       .filter((element, index, all) => all.indexOf(element) === index)
       .filter(isVisible)
       .filter(isSendButton)
+      .filter(unobscuredCenter)
       .filter((element) => {
         const rect = element.getBoundingClientRect()
         const verticallyAligned = rect.bottom >= composerRect.top - 20
@@ -586,12 +598,18 @@
     }
     const preparedComposer = findComposer()
     preparedComposer.focus()
+    if (document.activeElement !== preparedComposer) {
+      throw new Error("SEND_UNCERTAIN: WhatsApp could not focus the prepared enquiry.")
+    }
     sendButton = findSendButton(preparedComposer)
+    const submissionFence = { ...sendFence, expectedMessage: message, groupName }
     try {
       // Exactly one submit action per prepared job. A slow acknowledgement or
       // retained composer must never trigger a second press of Send/Enter.
-      if (sendButton) await nativeClick(sendButton, sendFence)
-      else await runtimeMessage({ type: "native-enter", ...sendFence })
+      // A covered Send control is unusable; submit through the already-focused
+      // composer instead of clicking the sidebar that covers its coordinates.
+      if (sendButton) await nativeClick(sendButton, submissionFence)
+      else await runtimeMessage({ type: "native-enter", ...submissionFence })
     } catch (error) {
       throw new Error(`SEND_UNCERTAIN: WhatsApp send input was interrupted: ${error instanceof Error ? error.message : String(error)}`)
     }

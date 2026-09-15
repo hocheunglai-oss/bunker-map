@@ -4,6 +4,7 @@ const UPDATE_PENDING_KEY = "fcunoSpcGroupDispatcherUpdatePendingV1"
 const VERSION = chrome.runtime.getManifest().version
 const debuggerQueues = new Map()
 const submissionPermits = new Map()
+let updateReloadPromise = null
 
 function chromeCall(invoke) {
   return new Promise((resolve, reject) => {
@@ -25,7 +26,25 @@ function reloadOpenWhatsAppTabs() {
   })
 }
 
-chrome.runtime.onInstalled.addListener(reloadOpenWhatsAppTabs)
+function reloadWhatsAppAfterUpdateOnce() {
+  if (!updateReloadPromise) {
+    updateReloadPromise = chromeCall((callback) => chrome.storage.local.remove([UPDATE_PENDING_KEY], callback))
+      .then(() => {
+        reloadOpenWhatsAppTabs()
+        return { refreshedWhatsApp: true }
+      })
+      .catch((error) => {
+        updateReloadPromise = null
+        throw error
+      })
+  }
+  return updateReloadPromise
+}
+
+// The install event and the refreshed SPC updater page can both arrive after
+// one extension reload. Share the same operation and consume the persisted
+// legacy pending flag so a later page-ready event cannot interrupt a new claim.
+chrome.runtime.onInstalled.addListener(() => reloadWhatsAppAfterUpdateOnce().catch(() => {}))
 
 function isTrustedSpcPage(sender) {
   const senderUrl = String(sender?.url || sender?.tab?.url || "")
@@ -43,9 +62,7 @@ async function finishInPlaceUpdate(sender) {
   if (!isTrustedSpcPage(sender)) return {}
   const result = await chromeCall((callback) => chrome.storage.local.get([UPDATE_PENDING_KEY], callback))
   if (!result?.[UPDATE_PENDING_KEY]) return {}
-  await chromeCall((callback) => chrome.storage.local.remove([UPDATE_PENDING_KEY], callback))
-  reloadOpenWhatsAppTabs()
-  return { refreshedWhatsApp: true }
+  return reloadWhatsAppAfterUpdateOnce()
 }
 
 function enqueueDebuggerAction(tabId, action) {
@@ -83,8 +100,73 @@ function consumeSubmissionPermit(tabId, fence) {
 }
 
 async function nativeClick(tabId, x, y, sendFence) {
+  if (sendFence) return nativeSubmit(tabId, sendFence)
   return withDebugger(tabId, async (target) => {
-    await clickWithTarget(target, x, y, sendFence ? () => consumeSubmissionPermit(tabId, sendFence) : undefined)
+    await clickWithTarget(target, x, y)
+  })
+}
+
+async function preparedSubmissionTarget(target, fence) {
+  if (!fence.groupName || !fence.expectedMessage) {
+    throw new Error("SEND_UNCERTAIN: The prepared chat and enquiry text are required.")
+  }
+  const evaluation = await chromeCall((callback) => chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+    expression: `(() => {
+      const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+      const chatKey = (value) => clean(String(value || "").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")).normalize("NFC").toLowerCase();
+      const textKey = (value) => clean(value).replace(/\\*/g, "").toLowerCase();
+      const visible = (element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      };
+      const main = document.querySelector("#main") || document.querySelector("[role='main']");
+      if (!main) return { verified: false };
+      const names = Array.from(main.querySelector("header")?.querySelectorAll("span[title], div[title], [dir='auto']") || [])
+        .filter(visible).map(element => chatKey(element.getAttribute("title") || element.textContent));
+      if (!names.includes(chatKey(${JSON.stringify(fence.groupName)}))) return { verified: false };
+      const composers = Array.from(main.querySelectorAll("[contenteditable='true'][role='textbox'], [contenteditable='true']")).filter(visible);
+      const composer = composers[composers.length - 1];
+      if (!composer || textKey(composer.innerText || composer.textContent) !== textKey(${JSON.stringify(fence.expectedMessage)})) return { verified: false };
+      composer.focus();
+      if (document.activeElement !== composer) return { verified: false };
+      const composerRect = composer.getBoundingClientRect();
+      const controls = [];
+      for (const element of main.querySelectorAll("[data-testid='compose-btn-send'], [data-testid='send'], [data-testid='wds-ic-send-filled'], [data-icon='send'], [data-icon='send-filled'], [data-icon='wds-ic-send-filled'], button[aria-label='Send'], [role='button'][aria-label='Send']")) {
+        const control = element.closest("button, [role='button']") || element;
+        const rect = control.getBoundingClientRect();
+        const aligned = rect.bottom >= composerRect.top - 20 && rect.top <= composerRect.bottom + 40 && rect.left >= composerRect.right - 180;
+        if (aligned && !control.hasAttribute("disabled") && control.getAttribute("aria-disabled") !== "true" && visible(control) && !controls.includes(control)) controls.push(control);
+      }
+      if (controls.length === 1) {
+        const rect = controls[0].getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit === controls[0] || controls[0].contains(hit))) return { verified: true, method: "click", x, y };
+      }
+      return { verified: true, method: "enter" };
+    })()`,
+    returnByValue: true,
+  }, callback))
+  const value = evaluation?.result?.value
+  if (!value?.verified || !["click", "enter"].includes(value.method)) {
+    throw new Error("SEND_UNCERTAIN: WhatsApp changed the prepared chat, message, or composer focus.")
+  }
+  return value
+}
+
+async function nativeSubmit(tabId, sendFence) {
+  return withDebugger(tabId, async (target) => {
+    // Attaching the debugger can move the whole page when Chrome displays its
+    // banner. Resolve the real target now; content-script coordinates are stale.
+    const submission = await preparedSubmissionTarget(target, sendFence)
+    if (submission.method === "click") {
+      await clickWithTarget(target, submission.x, submission.y, () => consumeSubmissionPermit(tabId, sendFence))
+    } else {
+      consumeSubmissionPermit(tabId, sendFence)
+      await enterWithTarget(target)
+    }
   })
 }
 
@@ -178,10 +260,7 @@ async function enterWithTarget(target) {
 }
 
 async function nativeEnter(tabId, sendFence) {
-  return withDebugger(tabId, async (target) => {
-    consumeSubmissionPermit(tabId, sendFence)
-    return enterWithTarget(target)
-  })
+  return nativeSubmit(tabId, sendFence)
 }
 
 async function focusVisibleComposer(target) {
