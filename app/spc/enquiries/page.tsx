@@ -169,6 +169,11 @@ const FALLBACK_BUYER_LOST_REASONS = [
 ] as const
 
 const vlsfoRemarkOptions: VlsfoMaxRemark[] = ["80cst min", "120cst max", "180cst max"]
+const draftRemarkOptions = [
+  { label: "COQ REQUIRED", value: "COQ REQUIRED" },
+  { label: "30D QUALITY TIME BAR", value: "30D QUALITY TIME BAR" },
+  { label: "BIMCO", value: "BIMCO TERMS" },
+] as const
 
 const emptyDraft: DraftEnquiry = {
   rawText: "",
@@ -760,7 +765,7 @@ export default function SpcEnquiriesPage() {
     })
   }
 
-  function toggleDraftRemark(remark: "COQ REQUIRED" | "30D QUALITY TIME BAR") {
+  function toggleDraftRemark(remark: (typeof draftRemarkOptions)[number]["value"]) {
     setDraft((current) => {
       const values = current.remarks
         .split(/\s*\/\s*/)
@@ -1332,11 +1337,11 @@ export default function SpcEnquiriesPage() {
                       </button>
                     )
                   })}
-                  {(["COQ REQUIRED", "30D QUALITY TIME BAR"] as const).map((remark) => {
-                    const active = draft.remarks.toUpperCase().split(/\s*\/\s*/).includes(remark)
+                  {draftRemarkOptions.map(({ label, value }) => {
+                    const active = draft.remarks.toUpperCase().split(/\s*\/\s*/).includes(value)
                     return (
-                      <button key={remark} type="button" className={active ? "is-active" : ""} aria-pressed={active} onClick={() => toggleDraftRemark(remark)} disabled={!canEdit}>
-                        {remark}
+                      <button key={value} type="button" className={active ? "is-active" : ""} aria-pressed={active} onClick={() => toggleDraftRemark(value)} disabled={!canEdit}>
+                        {label}
                       </button>
                     )
                   })}

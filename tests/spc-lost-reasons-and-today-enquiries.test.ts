@@ -89,7 +89,8 @@ test("buyer outcome validation and SPC quick controls use the managed contracts"
   assert.match(enquiriesRoute, /listSpcLostReasons\(session, request, "BUYER TRADER"\)/)
   assert.match(enquiriesRoute, /Select a valid buyer lost reason/)
   assert.match(enquiriesPage, /const vlsfoRemarkOptions: VlsfoMaxRemark\[\] = \["80cst min", "120cst max", "180cst max"\]/)
-  assert.match(enquiriesPage, /"COQ REQUIRED", "30D QUALITY TIME BAR"/)
+  assert.match(enquiriesPage, /label: "COQ REQUIRED", value: "COQ REQUIRED"/)
+  assert.match(enquiriesPage, /label: "30D QUALITY TIME BAR", value: "30D QUALITY TIME BAR"/)
   assert.doesNotMatch(enquiriesPage, /const vlsfoRemarkOptions[^\n]*"80cst max"/)
 })
 
