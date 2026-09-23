@@ -5,8 +5,17 @@
 Application alert policy implemented and tested locally; production activation
 is pending the coordinated release checklist below. The Cloud Run runner has
 been deployed and its scheduler is enabled for 02:00–05:00 Hong Kong time.
-The recovery execution and application rollout must be verified separately;
-accepting a deployment or execution request is not evidence of backup completion.
+The September 23 recovery completed successfully: 6,331 files verified, one
+uploaded, 6,330 unchanged, zero failed, with a verified Drive publication receipt.
+The previously missing file's GCS generation, size and MD5 were independently
+checked. No backup objects were deleted.
+
+Application release is held at PR #27: the Vercel preview and GitHub production
+build passed, as did security/federation tests, but the existing lockfile fails
+the dependency security audit (including Next.js, Nodemailer and Sharp).
+Dependency remediation requires a separately tested update; the failing gate
+has not been bypassed. The alert-state migration is not yet applied and the
+new notification policy is not live.
 
 Local validation: application production build, TypeScript, targeted ESLint,
 health policy tests, incremental runner/lease tests, notification delivery tests,
