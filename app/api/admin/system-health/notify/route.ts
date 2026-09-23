@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
+import { randomUUID } from "node:crypto"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
 import { getErrorMessage, getSystemHealth, type HealthCheck } from "@/lib/systemHealth"
+import { buildHealthAlertHtml, deliverHealthAlerts } from "@/lib/systemHealthAlerts"
+import { createHealthAlertStore } from "@/lib/systemHealthAlertStore"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -16,60 +19,6 @@ function hasCronAccess(request: Request) {
   const secret = process.env.CRON_SECRET
   if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true
   return false
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-}
-
-function formatDetails(details: HealthCheck["details"]) {
-  if (!details || Object.keys(details).length === 0) return ""
-
-  const rows = Object.entries(details)
-    .filter(([, value]) => value !== null && value !== "")
-    .map(([key, value]) => `
-      <tr>
-        <td style="padding:4px 8px;border-bottom:1px solid #e3edf5;color:#5f7384">${escapeHtml(key)}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #e3edf5">${escapeHtml(String(value))}</td>
-      </tr>
-    `)
-    .join("")
-
-  if (!rows) return ""
-
-  return `
-    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-top:8px;font-size:12px">
-      <tbody>${rows}</tbody>
-    </table>
-  `
-}
-
-function buildAlertHtml(unhealthyChecks: HealthCheck[], checkedAt: string) {
-  const rows = unhealthyChecks
-    .map((check) => `
-      <div style="padding:12px 0;border-bottom:1px solid #dbe8f2">
-        <p style="margin:0 0 4px;font-weight:700">${escapeHtml(check.label)}: ${escapeHtml(check.status.toUpperCase())}</p>
-        <p style="margin:0;color:#334e68">${escapeHtml(check.message)}</p>
-        ${formatDetails(check.details)}
-      </div>
-    `)
-    .join("")
-
-  return `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.45">
-      <h2 style="margin:0 0 10px">FC Uno System Health Alert</h2>
-      <p style="margin:0 0 12px;color:#5f7384">Checked at ${escapeHtml(checkedAt)}</p>
-      ${rows}
-      <p style="margin:14px 0 0">
-        <a href="https://fcuno.com/admin/systemhealth" style="color:#0a73c9">Open System Health</a>
-      </p>
-    </div>
-  `
 }
 
 function isNonAlertingCheck(check: HealthCheck) {
@@ -93,41 +42,44 @@ export async function GET(request: Request) {
 
   try {
     const health = await getSystemHealth()
-    const unhealthyChecks = health.checks.filter((check) => check.status !== "ok" && !isNonAlertingCheck(check))
-
-    if (unhealthyChecks.length === 0) {
-      return NextResponse.json({
-        success: true,
-        sent: false,
-        status: health.status,
-        checkedAt: health.checkedAt,
-      })
-    }
-
     const recipients = normalizeEmailList(
       process.env.SYSTEM_HEALTH_EMAIL_RECIPIENTS ||
       process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS
     )
 
     if (!recipients.length) {
-      return NextResponse.json(
-        { message: "SYSTEM_HEALTH_EMAIL_RECIPIENTS or EVENT_CALENDAR_EMAIL_RECIPIENTS is not configured." },
-        { status: 500 }
-      )
+      throw new Error("SYSTEM_HEALTH_EMAIL_RECIPIENTS or EVENT_CALENDAR_EMAIL_RECIPIENTS is not configured.")
     }
-
-    await sendCalendarEmail({
-      to: recipients,
-      subject: `***** FC Uno System Health ${health.status.toUpperCase()}`,
-      html: buildAlertHtml(unhealthyChecks, health.checkedAt),
-    })
+    // Each recipient has independent delivery state: one rejected mailbox must
+    // not cause duplicates for colleagues or permanently miss its own alert.
+    const deliveries = await Promise.allSettled(recipients.map((recipient) => deliverHealthAlerts({
+      checks: health.checks,
+      muted: isNonAlertingCheck,
+      token: randomUUID(),
+      store: createHealthAlertStore(recipient),
+      async send(checks) {
+        const status = checks.some((check) => check.status === "error") ? "ERROR" : "WARNING"
+        const result = await sendCalendarEmail({
+          to: [recipient],
+          subject: `***** FC Uno System Health ${status}`,
+          html: buildHealthAlertHtml(checks, health.checkedAt),
+        })
+        if (!result.accepted.length) throw new Error("No System Health email recipients were accepted.")
+      },
+    })))
+    const failed = deliveries.find((delivery) => delivery.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+    const notifiedChecks = [...new Map(deliveries.flatMap((delivery) =>
+      delivery.status === "fulfilled" ? delivery.value.map((check) => [check.id, check] as const) : [],
+    )).values()]
 
     return NextResponse.json({
       success: true,
-      sent: true,
+      sent: notifiedChecks.length > 0,
       status: health.status,
+      checkedAt: health.checkedAt,
       recipients: recipients.length,
-      checks: unhealthyChecks.map((check) => ({
+      checks: notifiedChecks.map((check) => ({
         id: check.id,
         label: check.label,
         status: check.status,

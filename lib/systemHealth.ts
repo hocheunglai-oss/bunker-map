@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 import type { drive_v3 } from "googleapis"
 import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { evaluateDriveFileBackupHealth, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -35,7 +36,6 @@ const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const DRIVE_FILE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
 const DRIVE_FILE_MANIFEST_PREFIX = "drive-file-backup-manifest"
 const DAILY_BACKUP_WARNING_AGE_HOURS = 36
-const DRIVE_FILE_BACKUP_WARNING_AGE_HOURS = 8 * 24
 const EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS = 36
 const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
@@ -63,7 +63,6 @@ const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
   "fcuno.outlook-template-recipient-truth/v2"
 const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
-const DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT = 80
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const CHECK_TIMEOUT_MS = 12_000
 const BACKUP_CHECK_TIMEOUT_MS = 180_000
@@ -416,6 +415,15 @@ async function runCheck(
       checkedAt,
       status: "error",
       message: getErrorMessage(error),
+      ...(id === "drive-file-content-backup" ? {
+        details: {
+          alertKey: "drive-file-backup",
+          alertLevel: 1,
+          notificationEligible: true,
+          incidentResolved: false,
+          action: "Check backup access and the Cloud Run execution logs; backup health could not be verified.",
+        },
+      } : {}),
     }
   } finally {
     if (timeout) clearTimeout(timeout)
@@ -1212,16 +1220,16 @@ async function getCurrentBackupInventory() {
   return { migrationHead, liveTables, catalogSha256 }
 }
 
-async function listActiveDriveFileIds(
+async function listActiveDriveBackupFiles(
   supabase: ReturnType<typeof getSupabaseClient>,
   table: "cc_company_files" | "cc_entry_files",
 ) {
-  const fileIds: string[] = []
+  const files: ActiveDriveBackupFile[] = []
 
   for (let from = 0; ; from += SUPABASE_HEALTH_PAGE_SIZE) {
     const { data, error } = await supabase
       .from(table)
-      .select("id,drive_file_id")
+      .select("id,drive_file_id,file_name,created_at,updated_at")
       .not("drive_file_id", "is", null)
       .is("deleted_at", null)
       .order("id", { ascending: true })
@@ -1230,16 +1238,21 @@ async function listActiveDriveFileIds(
     if (error) throw error
 
     const rows = data || []
-    fileIds.push(
+    files.push(
       ...rows
-        .map((row) => row.drive_file_id)
-        .filter((fileId): fileId is string => typeof fileId === "string" && Boolean(fileId)),
+        .filter((row) => typeof row.drive_file_id === "string" && Boolean(row.drive_file_id))
+        .map((row) => ({
+          id: String(row.drive_file_id),
+          name: String(row.file_name || row.drive_file_id),
+          createdAt: typeof row.created_at === "string" ? row.created_at : null,
+          updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+        })),
     )
 
     if (rows.length < SUPABASE_HEALTH_PAGE_SIZE) break
   }
 
-  return fileIds
+  return files
 }
 
 async function checkSupabase(): Promise<HealthCheckResult> {
@@ -2764,19 +2777,33 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
 
 async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const supabase = getSupabaseClient()
-  const [companyFileIds, entryFileIds] = await Promise.all([
-    listActiveDriveFileIds(supabase, "cc_company_files"),
-    listActiveDriveFileIds(supabase, "cc_entry_files"),
+  const [companyFiles, entryFiles] = await Promise.all([
+    listActiveDriveBackupFiles(supabase, "cc_company_files"),
+    listActiveDriveBackupFiles(supabase, "cc_entry_files"),
   ])
-  const companyFileCount = companyFileIds.length
-  const entryFileCount = entryFileIds.length
+  const companyFileCount = companyFiles.length
+  const entryFileCount = entryFiles.length
   const total = companyFileCount + entryFileCount
+  const evaluate = (manifests: DriveBackupManifest[]): HealthCheckResult & { details: NonNullable<HealthCheckResult["details"]> } => {
+    const result = evaluateDriveFileBackupHealth({ activeFiles: [...companyFiles, ...entryFiles], manifests })
+    return {
+      ...result,
+      details: {
+        ...result.details,
+        activeCompanyFiles: companyFileCount,
+        activeEntryFiles: entryFileCount,
+      },
+    }
+  }
 
   if (!total) {
     return {
       status: "ok",
       message: "No active Google Drive upload records found",
       details: {
+        alertKey: "drive-file-backup",
+        notificationEligible: false,
+        incidentResolved: true,
         activeCompanyFiles: companyFileCount,
         activeEntryFiles: entryFileCount,
       },
@@ -2790,142 +2817,64 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
   const backupRoot = await findDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
   if (!backupRoot?.id) {
-    return {
-      status: "warning",
-      message: "Drive file backup has not run yet",
-      details: {
-        activeCompanyFiles: companyFileCount,
-        activeEntryFiles: entryFileCount,
-        firstBackupMissing: true,
-        missingFolder: BACKUP_FOLDER_NAME,
-      },
-    }
+    const result = evaluate([])
+    return { ...result, details: { ...result.details, missingFolder: BACKUP_FOLDER_NAME } }
   }
 
   const manifestFolder = await findDriveFolder(drive, backupRoot.id, DRIVE_FILE_MANIFEST_FOLDER_NAME, sharedDriveId)
   if (!manifestFolder?.id) {
-    return {
-      status: "warning",
-      message: "Drive file backup has not run yet",
-      details: {
-        activeCompanyFiles: companyFileCount,
-        activeEntryFiles: entryFileCount,
-        firstBackupMissing: true,
-        missingFolder: DRIVE_FILE_MANIFEST_FOLDER_NAME,
-      },
-    }
+    const result = evaluate([])
+    return { ...result, details: { ...result.details, missingFolder: DRIVE_FILE_MANIFEST_FOLDER_NAME } }
   }
 
   const latestManifest = await drive.files.list({
     q: `trashed = false and '${manifestFolder.id}' in parents and name contains '${DRIVE_FILE_MANIFEST_PREFIX}'`,
     fields: "files(id,name,createdTime,webViewLink)",
     orderBy: "createdTime desc",
-    pageSize: 1,
+    pageSize: 10,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
     corpora: sharedDriveId ? "drive" : undefined,
     driveId: sharedDriveId || undefined,
   })
   const latest = latestManifest.data.files?.[0]
-  if (!latest?.createdTime) {
-    return {
-      status: "warning",
-      message: "Drive file backup has not run yet",
-      details: {
-        activeCompanyFiles: companyFileCount,
-        activeEntryFiles: entryFileCount,
-        firstBackupMissing: true,
-      },
+  if (!latest) return evaluate([])
+  // Keep enough completed evidence to distinguish a retry from a lost backup.
+  // A failed read is not treated as recovery, even if older evidence is healthy.
+  const readCandidate = async (file: drive_v3.Schema$File) => {
+    if (!file.id) return { manifest: null, error: "Manifest file has no ID" }
+    try {
+      const { value } = await readDriveJsonFile(drive, file.id)
+      return { manifest: value as DriveBackupManifest, error: null }
+    } catch (error) {
+      return { manifest: null, error: getErrorMessage(error) }
     }
   }
-
-  const ageHours = Math.round((Date.now() - new Date(latest.createdTime).getTime()) / 36_000) / 100
-  const stale = ageHours > DRIVE_FILE_BACKUP_WARNING_AGE_HOURS
-  let manifestCounts: Record<string, unknown> = {}
-  let manifestGcs: Record<string, unknown> = {}
-  let manifestFileIds = new Set<string>()
-
-  try {
-    if (latest.id) {
-      const { value: manifest } = await readDriveJsonFile(drive, latest.id)
-      manifestCounts = (manifest.counts || {}) as Record<string, unknown>
-      manifestGcs = (manifest.gcs || {}) as Record<string, unknown>
-      const manifestFiles = Array.isArray(manifest.files) ? manifest.files : []
-      manifestFileIds = new Set(
-        manifestFiles
-          .map((file) => (file && typeof file === "object" ? String((file as Record<string, unknown>).id || "") : ""))
-          .filter(Boolean)
-      )
-    }
-  } catch (error) {
-    return {
-      status: "warning",
-      message: "Latest Drive file backup manifest could not be read",
-      details: {
-        activeCompanyFiles: companyFileCount,
-        activeEntryFiles: entryFileCount,
-        name: latest.name || "",
-        createdTime: latest.createdTime,
-        ageHours,
-        webViewLink: latest.webViewLink || "",
-        error: getErrorMessage(error),
-      },
-    }
+  const firstCandidate = await readCandidate(latest)
+  // Healthy daily checks download one manifest. Only failed/running attempts
+  // need older evidence, keeping the normal dashboard path inexpensive.
+  const candidates = [firstCandidate]
+  const olderFiles = (latestManifest.data.files || []).slice(1)
+  for (let from = 0; from < olderFiles.length; from += 3) {
+    if (candidates.some((candidate) => candidate.manifest && isVerifiedDriveBackupManifest(candidate.manifest))) break
+    candidates.push(...await Promise.all(olderFiles.slice(from, from + 3).map(readCandidate)))
   }
-
-  const failedFiles = Number(manifestCounts.failed || 0)
-  const totalFiles = Number(manifestCounts.totalFiles || 0)
-  const uploadedFiles = Number(manifestCounts.uploaded || 0)
-  const skippedFiles = Number(manifestCounts.skipped || 0)
-  const estimatedStorageBytes = Number(manifestCounts.estimatedCurrentStorageBytes || 0)
-  const freeTierLimitBytes = Number(manifestGcs.freeTierStorageLimitBytes || 0)
-  const estimatedStorageGiB = Math.round((estimatedStorageBytes / 1024 / 1024 / 1024) * 1000) / 1000
-  const freeTierLimitGiB = Math.round((freeTierLimitBytes / 1024 / 1024 / 1024) * 1000) / 1000
-  const freeTierRemainingGiB = Math.round(((freeTierLimitBytes - estimatedStorageBytes) / 1024 / 1024 / 1024) * 1000) / 1000
-  const freeTierUsedPercent = freeTierLimitBytes
-    ? Math.round((estimatedStorageBytes / freeTierLimitBytes) * 10_000) / 100
-    : 0
-  const storageNearFreeTier = freeTierLimitBytes > 0 && freeTierUsedPercent >= DRIVE_FILE_BACKUP_STORAGE_WARNING_PERCENT
-  const freeTierUnavailable = freeTierLimitBytes <= 0
-  const activeFileIds = [...companyFileIds, ...entryFileIds]
-  const coveredFiles = activeFileIds.filter((fileId) => manifestFileIds.has(fileId)).length
-  const missingFiles = activeFileIds.length - coveredFiles
-  const coverageComplete = missingFiles === 0
-
+  const result = evaluate(candidates.flatMap((candidate) => candidate.manifest ? [candidate.manifest] : []))
+  if (candidates[0]?.error) {
+    result.status = "warning"
+    result.message = "Latest Drive file backup evidence could not be read"
+    result.details.notificationEligible = true
+    result.details.incidentResolved = false
+  }
   return {
-    status: stale || failedFiles > 0 || !coverageComplete || storageNearFreeTier || freeTierUnavailable ? "warning" : "ok",
-    message:
-      failedFiles > 0
-        ? "Latest Drive file backup completed with file errors"
-        : !coverageComplete
-          ? "Drive file backup does not cover every active CCINFO file"
-        : stale
-          ? "Latest Drive file backup is older than expected"
-          : freeTierUnavailable
-            ? "Drive file backup bucket is not in a Cloud Storage Always Free storage region"
-            : storageNearFreeTier
-              ? "Drive file backup storage is close to the free-tier storage limit"
-              : "Latest Drive file backup manifest found",
+    ...result,
     details: {
-      activeCompanyFiles: companyFileCount,
-      activeEntryFiles: entryFileCount,
-      activeFiles: activeFileIds.length,
-      coveredFiles,
-      missingFiles,
-      coverage: `${coveredFiles} / ${activeFileIds.length}`,
-      totalFiles,
-      uploadedFiles,
-      skippedFiles,
-      failedFiles,
-      estimatedStorageGiB,
-      freeTierLimitGiB,
-      freeTierRemainingGiB,
-      freeTierUsedPercent,
-      gcsLocation: String(manifestGcs.location || ""),
+      ...result.details,
       name: latest.name || "",
-      createdTime: latest.createdTime,
-      ageHours,
+      createdTime: latest.createdTime || "",
       webViewLink: latest.webViewLink || "",
+      manifestReadErrors: candidates.filter((candidate) => candidate.error).length,
+      ...(candidates[0]?.error ? { error: candidates[0].error } : {}),
     },
   }
 }
@@ -3186,7 +3135,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       checkDriveBackup,
       BACKUP_CHECK_TIMEOUT_MS
     ),
-    runCheck("drive-file-content-backup", "Drive File Content Backup", checkDriveFileContentBackup),
+    runCheck("drive-file-content-backup", "Drive File Content Backup", checkDriveFileContentBackup, 45_000),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth),

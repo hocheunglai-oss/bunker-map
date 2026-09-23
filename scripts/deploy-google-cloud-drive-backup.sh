@@ -47,8 +47,8 @@ require_value() {
   local key="$1"
   local value
   value="$(read_env "$key")"
-  if [[ -z "$value" ]]; then
-    echo "Missing required value: $key" >&2
+  if [[ -z "$value" || "$value" == "redacted" || "$value" == "REDACTED" ]]; then
+    echo "Missing or redacted required value: $key" >&2
     exit 1
   fi
   printf "%s" "$value"
@@ -58,8 +58,8 @@ upsert_secret() {
   local secret_name="$1"
   local secret_value="$2"
 
-  if [[ -z "$secret_value" ]]; then
-    echo "Refusing to create empty secret: $secret_name" >&2
+  if [[ -z "$secret_value" || "$secret_value" == "redacted" || "$secret_value" == "REDACTED" ]]; then
+    echo "Refusing to create empty or redacted secret: $secret_name" >&2
     exit 1
   fi
 
@@ -88,11 +88,20 @@ require_command gcloud
 require_command git
 require_command node
 
-PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
+PROJECT_ID="${GCP_PROJECT_ID:-}"
 if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "(unset)" ]]; then
-  echo "Set GCP_PROJECT_ID or run: gcloud config set project YOUR_PROJECT_ID" >&2
+  echo "Set GCP_PROJECT_ID to the verified FCUNO backup project; the active CLI project is not inferred." >&2
   exit 1
 fi
+DEPLOY_ACCOUNT="${GCP_DEPLOY_ACCOUNT:-}"
+ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)')"
+if [[ -z "$DEPLOY_ACCOUNT" || "$ACTIVE_ACCOUNT" != "$DEPLOY_ACCOUNT" ]]; then
+  echo "Set GCP_DEPLOY_ACCOUNT to the verified account already active in gcloud; account mismatch or missing expectation." >&2
+  exit 1
+fi
+# Scope all following CLI calls without changing machine-wide gcloud configuration.
+export CLOUDSDK_CORE_ACCOUNT="$DEPLOY_ACCOUNT"
+gcloud projects describe "$PROJECT_ID" --account "$DEPLOY_ACCOUNT" --format='value(projectId)' >/dev/null
 
 REGION="${GCP_REGION:-us-central1}"
 SCHEDULER_LOCATION="${GCP_SCHEDULER_LOCATION:-$REGION}"
@@ -102,12 +111,20 @@ GCS_BACKUP_PREFIX="${GCS_BACKUP_PREFIX:-ccinfo-drive}"
 ARTIFACT_REPO="${GCP_ARTIFACT_REPO:-bunker-map}"
 JOB_NAME="${DRIVE_FILE_BACKUP_JOB_NAME:-bunker-map-drive-file-backup}"
 SCHEDULER_NAME="${DRIVE_FILE_BACKUP_SCHEDULER_NAME:-${JOB_NAME}-weekly}"
-SCHEDULE="${DRIVE_FILE_BACKUP_SCHEDULE:-0 0 * * *}"
-TIME_ZONE="${DRIVE_FILE_BACKUP_TIME_ZONE:-Etc/UTC}"
+SCHEDULE="${DRIVE_FILE_BACKUP_SCHEDULE:-0 2-5 * * *}"
+TIME_ZONE="${DRIVE_FILE_BACKUP_TIME_ZONE:-Asia/Hong_Kong}"
+if [[ "$SCHEDULE" != "0 2-5 * * *" || "$TIME_ZONE" != "Asia/Hong_Kong" ]]; then
+  echo "Schedule must match the System Health contract: 0 2-5 * * * in Asia/Hong_Kong." >&2
+  exit 1
+fi
 SERVICE_ACCOUNT_NAME="${DRIVE_FILE_BACKUP_SERVICE_ACCOUNT:-bunker-map-drive-backup}"
 SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 SECRET_PREFIX="${DRIVE_FILE_BACKUP_SECRET_PREFIX:-bunker-map-drive-backup}"
-TASK_TIMEOUT="${DRIVE_FILE_BACKUP_TASK_TIMEOUT:-3600s}"
+TASK_TIMEOUT="${DRIVE_FILE_BACKUP_TASK_TIMEOUT:-3300s}"
+if [[ "$TASK_TIMEOUT" != "3300s" ]]; then
+  echo "Task timeout must be 3300s, below the 56-minute duplicate-execution lease." >&2
+  exit 1
+fi
 MEMORY="${DRIVE_FILE_BACKUP_MEMORY:-1Gi}"
 CPU="${DRIVE_FILE_BACKUP_CPU:-1}"
 SHORT_SHA="$(git rev-parse --short HEAD)"
@@ -192,6 +209,7 @@ append_env_var GOOGLE_DRIVE_COMPANY_FOLDER_ID "$GOOGLE_DRIVE_COMPANY_FOLDER_ID"
 append_env_var GOOGLE_OAUTH_REDIRECT_URI "$GOOGLE_OAUTH_REDIRECT_URI"
 append_env_var GOOGLE_DRIVE_BACKUP_FOLDER_ID "$GOOGLE_DRIVE_BACKUP_FOLDER_ID"
 append_env_var GOOGLE_DRIVE_SHARED_DRIVE_ID "$GOOGLE_DRIVE_SHARED_DRIVE_ID"
+append_env_var DRIVE_FILE_BACKUP_SCHEDULED "1"
 
 gcloud run jobs deploy "$JOB_NAME" \
   --project "$PROJECT_ID" \
@@ -200,7 +218,7 @@ gcloud run jobs deploy "$JOB_NAME" \
   --service-account "$SERVICE_ACCOUNT_EMAIL" \
   --tasks 1 \
   --parallelism 1 \
-  --max-retries 1 \
+  --max-retries 0 \
   --task-timeout "$TASK_TIMEOUT" \
   --memory "$MEMORY" \
   --cpu "$CPU" \
@@ -216,6 +234,8 @@ if gcloud scheduler jobs describe "$SCHEDULER_NAME" --project "$PROJECT_ID" --lo
     --time-zone "$TIME_ZONE" \
     --uri "$RUN_URI" \
     --http-method POST \
+    --max-retry-attempts 0 \
+    --max-retry-duration 0s \
     --oauth-service-account-email "$SERVICE_ACCOUNT_EMAIL" \
     --oauth-token-scope "https://www.googleapis.com/auth/cloud-platform"
 else
@@ -226,15 +246,20 @@ else
     --time-zone "$TIME_ZONE" \
     --uri "$RUN_URI" \
     --http-method POST \
+    --max-retry-attempts 0 \
+    --max-retry-duration 0s \
     --oauth-service-account-email "$SERVICE_ACCOUNT_EMAIL" \
     --oauth-token-scope "https://www.googleapis.com/auth/cloud-platform"
 fi
 
-if [[ "${EXECUTE_NOW:-1}" == "1" ]]; then
-  gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait
+if [[ "${EXECUTE_NOW:-0}" == "1" ]]; then
+  # Execution-only override: explicit manual recovery must not be skipped outside the night window.
+  gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" \
+    --update-env-vars DRIVE_FILE_BACKUP_ALLOW_OUTSIDE_WINDOW=1 --wait
 fi
 
 echo "Google Cloud Drive file backup is configured."
 echo "Bucket: gs://${GCS_BACKUP_BUCKET}/${GCS_BACKUP_PREFIX}"
 echo "Cloud Run Job: ${JOB_NAME}"
 echo "Cloud Scheduler Job: ${SCHEDULER_NAME}"
+echo "Schedule: ${SCHEDULE} (${TIME_ZONE}); 02:00 primary attempt, 03:00/04:00/05:00 retries if needed."
