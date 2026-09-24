@@ -98,6 +98,13 @@ test("Tech Stack documents recovery limits and separates dated external checks f
   assert.match(pageSource, /THIS IS NOT AN INFRASTRUCTURE VERIFICATION TIME/)
   assert.match(pageSource, /THIS PAGE DOES NOT CERTIFY ROLLOUT COMPLETION/)
   assert.match(pageSource, /A CLOUD RUN SPEND CAP DOES NOT CAP STORAGE CHARGES/)
+  assert.match(pageSource, /CLOUD RUN MONTHLY SPEND CAP HKD77\.50: CONFIGURED, NOT CURRENTLY ENFORCED/)
+  assert.match(pageSource, /MAY PAUSE NEW BACKUP JOBS UNTIL MANUALLY LIFTED/)
+  assert.match(pageSource, /EIGHT PHYSICAL RESTORE POINTS LISTED FOR SEPTEMBER 17–24/)
+  assert.match(pageSource, /PITR IS NOT ENABLED/)
+  assert.match(pageSource, /MANAGED DATABASE BACKUPS EXCLUDE STORAGE OBJECT BYTES/)
+  assert.match(pageSource, /NO RESTORE WAS RUN/)
+  assert.doesNotMatch(pageSource, /CAP IS NOT YET ACTIVATED/)
   assert.match(pageSource, /02:00 HKT; RETRIES 03:00 \/ 04:00 \/ 05:00; STOP 06:00/)
   const runbook = readFileSync(new URL("../scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1", import.meta.url), "utf8")
   const version = /\$ExchangeTruthWorkerVersion = "([^"]+)"/.exec(runbook)?.[1]
