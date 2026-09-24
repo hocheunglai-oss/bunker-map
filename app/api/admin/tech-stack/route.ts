@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
+import vercelConfiguration from "@/vercel.json"
+
+export const dynamic = "force-dynamic"
 
 const VERCEL_KEYS = [
   "ADMIN_USERNAME",
@@ -32,9 +36,11 @@ const VERCEL_KEYS = [
   "MICROSOFT_GRAPH_REDIRECT_BASE_URL",
   "MICROSOFT_GRAPH_CONSENT_STATE",
   "GEMINI_API_KEY",
+  "GEMINI_ADMIN_MODEL",
   "OPENAI_API_KEY",
   "OPENAI_ADMIN_MODEL",
   "OPENAI_PARSER_MODEL",
+  "OPENAI_IMO_LOOKUP_MODEL",
   "AI_PROVIDER",
   "EMAIL_NOTICE_FROM",
   "EXCHANGE_SMTP_HOST",
@@ -46,6 +52,25 @@ const VERCEL_KEYS = [
   "CRON_SECRET",
   "DINGTALK_CLIENT_ID",
   "DINGTALK_CLIENT_SECRET",
+  "FCUNO_OIDC_ENABLED",
+  "FCUNO_FCOS_IDENTITY_SYNC_ENABLED",
+  "FCUNO_OIDC_ISSUER",
+  "FCUNO_OIDC_CLIENTS_JSON",
+  "FCUNO_OIDC_ES256_CURRENT_PRIVATE_KEY",
+  "FCUNO_OIDC_ES256_CURRENT_KID",
+  "FCUNO_OIDC_ES256_NEXT_PRIVATE_KEY",
+  "FCUNO_OIDC_ES256_NEXT_KID",
+  "FCOS_IDENTITY_SYNC_URL",
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_GRAPH_API_VERSION",
+  "WHATSAPP_VERIFY_TOKEN",
+  "SPC_WHATSAPP_LOGIN_MFA_ALL_ENABLED",
+  "SPC_WHATSAPP_LOGIN_MFA_SECRET",
+  "SPC_WHATSAPP_LOGIN_MFA_PHONE_NUMBER_ID",
+  "SPC_WHATSAPP_LOGIN_MFA_DISALLOWED_PHONE_NUMBER_ID",
+  "SPC_MOBILE_MODE_TEMPLATE_NAME",
+  "SPC_MOBILE_ENQUIRY_TEMPLATE_LANGUAGE",
 ] as const
 
 const DEFAULTED_VERCEL_KEYS: Partial<Record<(typeof VERCEL_KEYS)[number], string>> = {
@@ -61,6 +86,7 @@ const AZURE_AUTOMATION_KEYS = [
   "EXCHANGE_APP_ID",
   "EXCHANGE_TENANT_ID",
   "EXCHANGE_ORGANIZATION",
+  "EXCHANGE_ADDRESSBOOK_DOMAIN",
   "EXCHANGE_CERT_PFX_BASE64",
   "EXCHANGE_CERT_PASSWORD",
   "EXCHANGE_ONLINE_MANAGEMENT_VERSION",
@@ -74,12 +100,17 @@ const AZURE_AUTOMATION_KEYS = [
 
 function secretInventory() {
   const vercel = VERCEL_KEYS.map((name) => {
-    const hasExplicitValue = Boolean(process.env[name])
+    const explicitValue = process.env[name]?.trim() || ""
+    const hasExplicitValue = Boolean(explicitValue)
+    const isPlaceholder = /^(?:\[?redacted\]?|masked|\*+|<[^>]+>|(?:your|replace)[_-].*)$/i.test(explicitValue)
     const hasDefaultValue = Boolean(DEFAULTED_VERCEL_KEYS[name])
 
     return {
       name,
-      configured: hasExplicitValue || hasDefaultValue,
+      configured: !isPlaceholder && (hasExplicitValue || hasDefaultValue),
+      status: isPlaceholder ? "PLACEHOLDER — NOT VALIDATED"
+        : hasExplicitValue ? "PRESENT — NOT VALIDATED"
+          : hasDefaultValue ? "APP DEFAULT — NOT VALIDATED" : "NOT PRESENT",
       storage: hasExplicitValue ? "VERCEL ENVIRONMENT VARIABLES" : hasDefaultValue ? "APP DEFAULT" : "VERCEL ENVIRONMENT VARIABLES",
       value: "MASKED",
     }
@@ -88,6 +119,7 @@ function secretInventory() {
   const azure = AZURE_AUTOMATION_KEYS.map((name) => ({
     name,
     configured: null,
+    status: "VERIFY IN AZURE",
     storage: "AZURE AUTOMATION - VERIFY IN AZURE",
     value: "MASKED",
   }))
@@ -129,6 +161,7 @@ async function getDatabaseInventory() {
     schema: inventory.schema,
     migrationHead: inventory.migrationHead,
     tables: [...inventory.tables].sort(),
+    checkedAt: new Date().toISOString(),
   }
 }
 
@@ -148,16 +181,24 @@ export async function GET() {
       generatedAt: new Date().toISOString(),
       deployment: {
         platform: "VERCEL",
-        project: "bunker-map-c2ks",
-        productionUrl: "https://fcuno.com",
-        gitRepository: "hocheunglai-oss/bunker-map",
-        branch: process.env.VERCEL_GIT_COMMIT_REF || "main",
+        project: fcunoConnectionPolicy.vercel.project,
+        productionUrl: fcunoConnectionPolicy.vercel.productionOrigins[0],
+        gitRepository: fcunoConnectionPolicy.github.repository,
+        environment: process.env.VERCEL_ENV || "unknown",
+        branch: process.env.VERCEL_GIT_COMMIT_REF || "unknown",
         commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
-        functionRegion: process.env.VERCEL_REGION || "bom1",
+        functionRegion: process.env.VERCEL_REGION || "unknown",
+        configuredRegions: vercelConfiguration.regions,
       },
+      verification: {
+        responseTimeOnly: true,
+        externalServices: "Not checked by this endpoint; dated audit records are shown separately.",
+        environmentValues: "Presence only; credentials are not validated. Optional settings may be absent.",
+      },
+      schedules: vercelConfiguration.crons,
       databaseInventory,
       secrets: secretInventory(),
-    })
+    }, { headers: { "Cache-Control": "private, no-store, max-age=0" } })
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not load tech stack." },

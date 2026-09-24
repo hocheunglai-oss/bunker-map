@@ -71,7 +71,7 @@ test("Attendance Sync remains visible in System Health without sending email not
   )
   assert.match(
     noticeRouteSource,
-    /check\.status !== "ok" && !isNonAlertingCheck\(check\)/,
+    /muted: isNonAlertingCheck/,
   )
 })
 
@@ -130,7 +130,7 @@ test("SPC dispatcher presence writes defer without pausing delivery during backu
   )
   assert.match(
     dispatcherSource,
-    /export async function claimSpcGroupDelivery[\s\S]*heartbeatSpcGroupDispatcher[\s\S]*rpc\("claim_spc_group_delivery_job"/,
+    /export async function claimSpcGroupDelivery[\s\S]*heartbeatSpcGroupDispatcher[\s\S]*rpc\("claim_spc_group_delivery_job_v2"/,
   )
   const idleClaimMigration = source(
     "../supabase/migrations/20260901034308_skip_idle_spc_dispatcher_writes.sql",

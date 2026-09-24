@@ -1,0 +1,9 @@
+# Only upload the files required by the Drive backup image. Never send local
+# credentials, browser state, database exports, application builds or caches.
+**
+!Dockerfile.drive-backup
+!cloudbuild.drive-backup.yaml
+!package.json
+!package-lock.json
+!scripts/
+!scripts/backup-google-drive-files-to-gcs.mjs

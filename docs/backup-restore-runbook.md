@@ -2,6 +2,10 @@
 
 Last audited: 2026-07-29
 
+Verification and coverage wording reviewed: 2026-09-24. This documentation
+review did not perform a restore rehearsal; see the
+[dated backup assessment](backup-evaluation-2026-09-24.md).
+
 ## Recovery contract
 
 FCUNO is the source of truth for the shared address book. The authoritative
@@ -38,9 +42,10 @@ external anchors below are part of the recovery contract.
 ## Daily off-site artifact
 
 Vercel calls `/api/backups/bunker-map-drive` every day at `19:02` UTC
-(`03:02` the following day in Hong Kong), after the 03:00 attendance sync has
-finished. It stores backup-format-v2 JSON files
-in Google Drive under:
+(`03:02` the following day in Hong Kong), with retry opportunities at `20:02`
+and `21:02` UTC (`04:02` and `05:02` HKT). Cron attempts skip when a recent
+verified backup already covers the live schema. It stores backup-format-v2
+JSON files in Google Drive under:
 
 ```text
 Bunker Map Backups / Daily Supabase Backups
@@ -50,15 +55,19 @@ Only files named
 `bunker-map-backup-*.json` are retention-managed. The newest two verified
 files are retained, preserving the latest artifact and its immediate
 verification predecessor. Older verified files are permanently deleted only
-after the new artifact completes every verification. An
-authorized administrator can also create a copy immediately from System Health
-using `BACK UP NOW`.
+after the new artifact passes the route's export checks and upload-receipt
+verification described below. An authorized administrator can also create a
+copy immediately from System Health using `BACK UP NOW`.
 
 The route uses `SUPABASE_SERVICE_ROLE_KEY` to read the backup data. It does not
-fall back to the public anonymous key. A backup is only published as successful
-after its uploaded bytes are downloaded from Drive and their SHA-256 is
-rechecked. Retention pruning happens only after that verification succeeds.
-During export, the paged data body is held in a bounded gzip-compressed
+fall back to the public anonymous key. Before publishing a new backup as
+successful, the route compares Drive's returned MD5 checksum and byte length
+with the values calculated from the outgoing JSON stream. It then marks that
+artifact complete and prunes older verified files. The new artifact is not
+downloaded and SHA-256 rechecked by that route before pruning. The route does
+download and SHA-256 check its existing predecessor before starting a new
+export; System Health performs the later full-byte checks described below.
+During export, the paged data body is held in a bounded Brotli-compressed
 temporary staging file and decompressed directly into the Drive upload stream.
 The published artifact remains ordinary JSON, so existing validators and
 restore evidence remain compatible while temporary storage no longer grows at
@@ -164,6 +173,13 @@ The JSON cannot recreate those file bytes. The independent Google Cloud Storage
 copy is documented in
 [google-cloud-drive-file-backup.md](google-cloud-drive-file-backup.md), and its
 latest manifest is monitored by System Health.
+
+SPC presentation video and narration bytes are stored separately in the private
+Supabase bucket `spc-presentation-media`. The JSON exports their table metadata,
+not their bytes, and the Drive-to-GCS job does not copy that bucket. On
+2026-09-24 the live inventory contained 15 objects totaling 224,309,367 bytes;
+an independent backup and restore test for those bytes was not established by
+this review. Do not treat a healthy Drive backup as proof of their recovery.
 
 Google Calendar and Google Contacts remain their own live systems, although a
 current API export is included for investigation. Google Drive remains the live
