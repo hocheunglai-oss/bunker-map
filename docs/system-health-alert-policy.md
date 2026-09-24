@@ -80,7 +80,7 @@ the endpoint returns an error rather than falling back to uncontrolled emails.
    `google-cloud-drive-file-backup.md`, preserving the existing bucket/prefix
    and secrets. Explicit manual recovery must finish and publish verified
    evidence before the new daily health policy is promoted.
-4. Apply `20260923110417_system_health_alert_incidents.sql` to the FCUNO
+4. Apply `20260924022019_system_health_alert_incidents.sql` to the FCUNO
    Supabase project. Verify service-role execution, browser-role denial and
    that `get_bunker_map_backup_inventory()` has no new public/unregistered
    table. Run database advisors. Do not apply this migration to FCOS.

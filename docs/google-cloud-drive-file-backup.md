@@ -1,6 +1,6 @@
 # Google Cloud Drive File Backup
 
-This backs up all CCINFO file contents under `GOOGLE_DRIVE_COMPANY_FOLDER_ID` to Google Cloud Storage. It is the dependable business backup and does not rely on a local workstation.
+This copies supported CCINFO file contents under `GOOGLE_DRIVE_COMPANY_FOLDER_ID` to Google Cloud Storage without relying on a local workstation. Root-level backup output and Drive shortcuts are excluded; unsupported Workspace file types fail the run. This job does not copy Supabase Storage media or the daily database JSON. See the [2026-09-24 backup assessment](backup-evaluation-2026-09-24.md) for recovery gaps and verification scope.
 
 ## Architecture
 
@@ -108,8 +108,21 @@ Before scanning, the job publishes a `running` manifest to Google Drive; it upda
 
 The job writes timestamped manifests and `ccinfo-drive/manifests/latest.json` for the latest completed attempt in GCS. `latest-successful.json` advances only after all object checks pass and the completed Drive manifest is read back and verified. It retains the previous success after a failed attempt. These are file-content backup manifests, not the database backup retention policy: the existing two verified database backups are unchanged, and this job does not delete file objects or older generations.
 
-System Health reads the latest manifest and shows estimated current backup size against the 5 GB Cloud Storage Always Free storage limit. It warns at 80% usage, and Google Cloud Billing has a separate 10 HKD budget alert for the project.
+The live bucket policy checked on 2026-09-24 has Object Versioning enabled,
+a lifecycle `Delete` rule with `age: 30` and `isLive: false`, and a seven-day
+soft-delete duration (`604800` seconds). The lifecycle age is measured from a
+generation's creation, not when it is replaced. A generation already over 30
+days old can therefore become eligible for deletion as soon as it becomes
+noncurrent; this is not a promise of 30 days' history after every replacement.
+Soft delete provides a separate seven-day recovery interval after an eligible
+generation is deleted. Lifecycle execution is asynchronous, not an exact
+deletion-time guarantee. See Google's [lifecycle conditions](https://docs.cloud.google.com/storage/docs/lifecycle#age)
+and [soft-delete documentation](https://docs.cloud.google.com/storage/docs/soft-delete).
+The deploy helper enables versioning but does not encode this live lifecycle
+or soft-delete policy; check both explicitly during recovery or redeployment.
 
-The size in a manifest estimates current source bytes, not billable usage including older GCS generations. Verify actual bucket storage and billing before concluding a project is under the free allocation.
+System Health reads the latest manifest and shows estimated current backup size against the 5 GB Cloud Storage Always Free storage limit. It warns at 80% usage. Google Cloud Billing has a separate budget alert; inspect its live amount and scope rather than treating the storage indicator or an alert as a hard spending limit.
+
+The size in a manifest estimates current source bytes, not billable usage including older or soft-deleted GCS generations, manifests, or abandoned live paths after renames. Verify actual bucket storage and billing before concluding a project is under the free allocation. Noncurrent-only lifecycle cleanup does not remove those abandoned live objects.
 
 Scheduler retry semantics and task timeout behavior are documented by Google: [Cloud Scheduler retries](https://docs.cloud.google.com/scheduler/docs/configuring/retry-jobs), [Cloud Run task timeout](https://docs.cloud.google.com/run/docs/configuring/task-timeout), and [GCS generation preconditions](https://docs.cloud.google.com/storage/docs/request-preconditions).

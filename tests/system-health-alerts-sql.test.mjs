@@ -17,7 +17,7 @@ test("System Health alert migration executes correctly in isolated PostgreSQL", 
   skip: pglite ? false : "Set PGLITE_MODULE_PATH to run optional SQL integration tests",
 }, async (t) => {
   const db = new pglite.PGlite()
-  const sql = readFileSync(new URL("../supabase/migrations/20260923110417_system_health_alert_incidents.sql", import.meta.url), "utf8")
+  const sql = readFileSync(new URL("../supabase/migrations/20260924022019_system_health_alert_incidents.sql", import.meta.url), "utf8")
   const recipientA = "a".repeat(64)
   const recipientB = "b".repeat(64)
   const id = "drive-file-content-backup"

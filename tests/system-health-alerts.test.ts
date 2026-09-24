@@ -83,7 +83,7 @@ test("email is concise, uses HKT, escapes file names, and omits technical dump",
 })
 
 test("notification state is private, service-only, and not a new business-backup table", () => {
-  const sql = readFileSync(new URL("../supabase/migrations/20260923110417_system_health_alert_incidents.sql", import.meta.url), "utf8")
+  const sql = readFileSync(new URL("../supabase/migrations/20260924022019_system_health_alert_incidents.sql", import.meta.url), "utf8")
   assert.match(sql, /create table private\.system_health_alert_incidents/)
   assert.match(sql, /enable row level security/)
   assert.match(sql, /security invoker set search_path = ''/)
