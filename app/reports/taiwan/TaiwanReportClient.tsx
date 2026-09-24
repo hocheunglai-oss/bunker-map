@@ -85,7 +85,7 @@ const fuelAccentStyles = {
 const taiwanMinimumQuantityRows = [
   { port: "Kaohsiung", oilFenceCharge: "89 OR 338", deliveryMode: "BARGE", hsfo: "30", vlsfo: "60", lsmgo: "25", mgoSulfur: "0.1" },
   { port: "Keelung", oilFenceCharge: "208", deliveryMode: "BARGE", hsfo: "NA", vlsfo: "60", lsmgo: "20", mgoSulfur: "0.1" },
-  { port: "Taichung", oilFenceCharge: "475", deliveryMode: "BARGE", hsfo: "NA", vlsfo: "60", lsmgo: "20", mgoSulfur: "0.1" },
+  { port: "Taichung", oilFenceCharge: "438", deliveryMode: "BARGE", hsfo: "NA", vlsfo: "60", lsmgo: "20", mgoSulfur: "0.1" },
   { port: "Suao", oilFenceCharge: "NA", deliveryMode: "RTW", hsfo: "NA", vlsfo: "19", lsmgo: "10", mgoSulfur: "0.5" },
   { port: "Hualien", oilFenceCharge: "NA", deliveryMode: "RTW / PIPELINE", hsfo: "NA", vlsfo: "19", lsmgo: "20", mgoSulfur: "0.5" },
 ]
