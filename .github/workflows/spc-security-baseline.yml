@@ -79,6 +79,13 @@ jobs:
           set -o pipefail
           npm run test:federation 2>&1 | tee federation-tests.tap
 
+      - name: Run attendance import and FCUNO calendar regression tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:attendance 2>&1 | tee attendance-tests.tap
+
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -117,6 +124,7 @@ jobs:
           path: |
             security-tests.tap
             federation-tests.tap
+            attendance-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt

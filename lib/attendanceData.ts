@@ -1,6 +1,7 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
+import { inferUnclassifiedAttendanceDirections } from "@/lib/attendanceUnclassifiedPunches"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   listManagedAdminUsers,
@@ -36,6 +37,7 @@ import {
   ATTENDANCE_MONTHLY_CODES,
   ATTENDANCE_SCHEDULES,
   type AttendanceCheckType,
+  type AttendanceRawCheckType,
   type AttendanceLeaveCode,
   type AttendanceLeavePortion,
   type AttendanceMonthlyCode,
@@ -84,7 +86,7 @@ export type AttendancePerson = {
 
 export type AttendancePunch = {
   id: string
-  checkType: AttendanceCheckType
+  checkType: AttendanceRawCheckType
   punchTime: string
   sourceType: string | null
   deviceSn: string | null
@@ -296,7 +298,7 @@ function mapPunch(value: unknown): AttendancePunch {
   const rawPayload = asRow(row.raw_payload)
   return {
     id: String(row.id),
-    checkType: String(row.check_type) as AttendanceCheckType,
+    checkType: String(row.check_type) as AttendanceRawCheckType,
     punchTime: String(row.punch_time),
     sourceType: stringOrNull(row.source_type),
     deviceSn: stringOrNull(row.device_sn),
@@ -589,7 +591,7 @@ type AttendancePunchRow = {
 
 const ATTENDANCE_EVENT_CALENDAR_EFFECTIVE_DATE = "2026-09-01"
 
-function buildAttendanceRecord(
+export function buildAttendanceRecord(
   person: AttendancePerson,
   workDate: string,
   rawPunchRows: AttendancePunchRow[],
@@ -640,6 +642,21 @@ function buildAttendanceRecord(
   const punches = personPunchRows
     .map(({ punch }) => punch)
     .filter((punch) => !excludedPunchIds.has(punch.id))
+  const team = resolveAttendanceTeamForDate(
+    person.id,
+    workDate,
+    person.team,
+    teamAssignments,
+  )
+  const inferredDirections = inferUnclassifiedAttendanceDirections({
+    workDate,
+    team,
+    hasAfternoonLeave,
+    punches,
+    manualSignIn: personOverrides.find(
+      (entry) => entry.action === "replace" && entry.checkType === "OnDuty",
+    )?.punchTime,
+  })
 
   const effectiveTime = (checkType: AttendanceCheckType) => {
     const replacement = personOverrides.find(
@@ -656,7 +673,8 @@ function buildAttendanceRecord(
     const matching = punches
       .filter(
         (punch) =>
-          punch.checkType === checkType &&
+          (punch.checkType === checkType ||
+            inferredDirections.get(punch.id) === checkType) &&
           (checkType !== "OffDuty" ||
             hasAfternoonLeave ||
             isOfficialAttendanceSignOut(workDate, punch.punchTime)),
@@ -679,12 +697,6 @@ function buildAttendanceRecord(
     teamAssignments,
   )
   const hasTeamHistory = hasAttendanceTeamHistory(person.id, teamAssignments)
-  const team = resolveAttendanceTeamForDate(
-    person.id,
-    workDate,
-    person.team,
-    teamAssignments,
-  )
   const schedule = ATTENDANCE_SCHEDULES[team]
   // Empty legacy cells were explicitly certified as on-time by the source
   // workbook. Keep the requested display time (09:30), but evaluate that
