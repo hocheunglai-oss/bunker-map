@@ -6,6 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { getAuditChangeSummary, getAuditSubject, isCcinfoAuditLog } from "@/lib/auditDisplay"
 import { buildPostgrestCountryMatchFilter } from "@/lib/queryEscaping"
+import SimpleTable from "@/components/ccinfo/SimpleTable"
 
 type RecordKind = "company" | "country" | "port"
 
@@ -1079,263 +1080,6 @@ function BlockTextBlock({
   )
 }
 
-function SimpleTable({
-  table,
-  columnWidths,
-  rowUpdates,
-  onSave,
-  readOnly = false,
-}: {
-  table: string[][]
-  columnWidths?: number[]
-  rowUpdates?: string[]
-  onSave?: (table: string[][], columnWidths: number[], rowUpdates: string[]) => void
-  readOnly?: boolean
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draftRows, setDraftRows] = useState<string[][]>(table.length ? table : [["", ""], ["", ""]])
-  const [draftWidths, setDraftWidths] = useState<number[]>(columnWidths || [])
-  const [draftRowUpdates, setDraftRowUpdates] = useState<string[]>(rowUpdates || [])
-  const [selectedCell, setSelectedCell] = useState({ row: 0, column: 0 })
-  const [copied, setCopied] = useState(false)
-  const tableRef = useRef<HTMLTableElement | null>(null)
-  const dragStateRef = useRef<{ startX: number; startWidths: number[]; index: number; tableWidth: number } | null>(null)
-  useEffect(() => {
-    setDraftRows(table.length ? table : [["", ""], ["", ""]])
-    setDraftWidths(columnWidths || [])
-    setDraftRowUpdates(rowUpdates || [])
-    setSelectedCell({ row: 0, column: 0 })
-  }, [table, columnWidths, rowUpdates])
-  useEffect(() => {
-    function handleMove(event: MouseEvent) {
-      const state = dragStateRef.current
-      if (!state) return
-      const deltaPercent = (event.clientX - state.startX) / Math.max(state.tableWidth, 1) * 100
-      const next = [...state.startWidths]
-      const current = next[state.index] || 0
-      const neighbor = next[state.index + 1] || 0
-      const currentNext = Math.max(8, Math.min(current + deltaPercent, current + neighbor - 8))
-      const neighborNext = current + neighbor - currentNext
-      next[state.index] = Math.round(currentNext)
-      next[state.index + 1] = Math.round(neighborNext)
-      setDraftWidths(next)
-    }
-    function handleUp() {
-      dragStateRef.current = null
-    }
-    window.addEventListener("mousemove", handleMove)
-    window.addEventListener("mouseup", handleUp)
-    return () => {
-      window.removeEventListener("mousemove", handleMove)
-      window.removeEventListener("mouseup", handleUp)
-    }
-  }, [])
-  const rows = editing ? draftRows : table.length ? table : [["", ""], ["", ""]]
-  const dataRowCount = Math.max(rows.length - 1, 0)
-  const columnCount = Math.max(2, ...rows.map((row) => row.length))
-  const widths = Array.from({ length: columnCount }).map((_, index) => (editing ? draftWidths[index] : columnWidths?.[index]) || Math.round(100 / columnCount))
-  const displayRowUpdates = editing ? draftRowUpdates : rowUpdates || []
-  const activeRow = Math.min(selectedCell.row, Math.max(rows.length - 1, 0))
-  const activeColumn = Math.min(selectedCell.column, Math.max(columnCount - 1, 0))
-  const normalizeWidths = (nextWidths: number[]) => {
-    const safeWidths = nextWidths.map((width) => Math.max(6, Number.isFinite(width) ? width : 0))
-    const total = safeWidths.reduce((sum, width) => sum + width, 0)
-    if (!total) return Array.from({ length: Math.max(nextWidths.length, 1) }).map(() => Math.round(100 / Math.max(nextWidths.length, 1)))
-    return safeWidths.map((width) => Number((width / total * 100).toFixed(2)))
-  }
-  const beginEditing = () => {
-    setDraftRows(rows.map((row) => [...row]))
-    setDraftWidths(widths)
-    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setSelectedCell({ row: activeRow, column: activeColumn })
-    setEditing(true)
-  }
-  const updateRowTimestamp = (rowIndex: number, source: string[] = draftRowUpdates) => {
-    const nextUpdates = [...source]
-    nextUpdates[rowIndex] = new Date().toISOString()
-    setDraftRowUpdates(nextUpdates)
-    return nextUpdates
-  }
-  const updateCell = (rowIndex: number, columnIndex: number, value: string) => {
-    const next = rows.map((row) => [...row])
-    while (next[rowIndex].length < columnCount) next[rowIndex].push("")
-    next[rowIndex][columnIndex] = value
-    setDraftRows(next)
-    setSelectedCell({ row: rowIndex, column: columnIndex })
-    updateRowTimestamp(rowIndex)
-  }
-  const insertRow = (placement: "above" | "below") => {
-    const insertAt = placement === "above" ? activeRow : activeRow + 1
-    const nextRows = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || ""))
-    nextRows.splice(insertAt, 0, Array.from({ length: columnCount }, () => ""))
-    const nextUpdates = [...displayRowUpdates]
-    nextUpdates.splice(insertAt, 0, new Date().toISOString())
-    setDraftRows(nextRows)
-    setDraftRowUpdates(nextUpdates)
-    setSelectedCell({ row: insertAt, column: activeColumn })
-  }
-  const insertColumn = (placement: "left" | "right") => {
-    const nextCount = columnCount + 1
-    const insertAt = placement === "left" ? activeColumn : activeColumn + 1
-    setDraftRows(rows.map((row) => {
-      const nextRow = Array.from({ length: columnCount }).map((_, index) => row[index] || "")
-      nextRow.splice(insertAt, 0, "")
-      return nextRow
-    }))
-    const nextWidths = [...widths]
-    const currentWidth = nextWidths[activeColumn] || Math.round(100 / columnCount)
-    const splitWidth = Math.max(6, currentWidth / 2)
-    nextWidths[activeColumn] = splitWidth
-    nextWidths.splice(insertAt, 0, splitWidth)
-    setDraftWidths(normalizeWidths(nextWidths.slice(0, nextCount)))
-    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setSelectedCell({ row: activeRow, column: insertAt })
-  }
-  const deleteSelectedRow = () => {
-    if (rows.length <= 1) return
-    const nextRows = rows.filter((_, index) => index !== activeRow)
-    setDraftRows(nextRows)
-    setDraftRowUpdates(displayRowUpdates.filter((_, index) => index !== activeRow))
-    setSelectedCell({ row: Math.max(0, Math.min(activeRow, nextRows.length - 1)), column: activeColumn })
-  }
-  const deleteColumn = () => {
-    if (columnCount <= 1) return
-    const nextCount = columnCount - 1
-    setDraftRows(rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").filter((_, index) => index !== activeColumn)))
-    const nextWidths = [...widths]
-    const removedWidth = nextWidths[activeColumn] || 0
-    nextWidths.splice(activeColumn, 1)
-    const absorbIndex = Math.max(0, Math.min(activeColumn, nextWidths.length - 1))
-    nextWidths[absorbIndex] = (nextWidths[absorbIndex] || 0) + removedWidth
-    setDraftWidths(normalizeWidths(nextWidths.slice(0, nextCount)))
-    setDraftRowUpdates(displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => ""))
-    setSelectedCell({ row: activeRow, column: Math.max(0, Math.min(activeColumn, nextCount - 1)) })
-  }
-  const copyTable = async () => {
-    const text = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || "").join("\t")).join("\n")
-    await navigator.clipboard?.writeText(text)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
-  const pasteTable = async () => {
-    const text = await navigator.clipboard?.readText()
-    if (!text?.trim()) return
-    const incomingRows = text
-      .trimEnd()
-      .split(/\r?\n/)
-      .map((line) => line.split("\t"))
-    const nextRows = rows.map((row) => Array.from({ length: columnCount }).map((_, index) => row[index] || ""))
-    const requiredRows = activeRow + incomingRows.length
-    const requiredColumns = activeColumn + Math.max(...incomingRows.map((row) => row.length))
-    while (nextRows.length < requiredRows) nextRows.push(Array.from({ length: Math.max(columnCount, requiredColumns) }, () => ""))
-    const nextColumnCount = Math.max(columnCount, requiredColumns)
-    const now = new Date().toISOString()
-    const nextUpdates = displayRowUpdates.length ? [...displayRowUpdates] : rows.map(() => "")
-    for (let rowIndex = 0; rowIndex < nextRows.length; rowIndex += 1) {
-      while (nextRows[rowIndex].length < nextColumnCount) nextRows[rowIndex].push("")
-    }
-    incomingRows.forEach((incomingRow, rowOffset) => {
-      const targetRow = activeRow + rowOffset
-      incomingRow.forEach((cell, columnOffset) => {
-        nextRows[targetRow][activeColumn + columnOffset] = cell
-      })
-      nextUpdates[targetRow] = now
-    })
-    setDraftRows(nextRows)
-    setDraftWidths(normalizeWidths(Array.from({ length: nextColumnCount }).map((_, index) => widths[index] || Math.round(100 / nextColumnCount))))
-    setDraftRowUpdates(nextUpdates)
-    setSelectedCell({ row: activeRow, column: activeColumn })
-  }
-  const save = () => {
-    onSave?.(draftRows, widths, draftRowUpdates)
-    setEditing(false)
-  }
-  return (
-    <div
-      data-ccinfo-table-row-count={dataRowCount}
-      style={{ display: "grid", gap: "8px", width: "100%", minWidth: 0, overflowX: "auto", overflowY: "visible" }}
-    >
-      <table ref={tableRef} style={{ width: "100%", height: "max-content", borderCollapse: "collapse", fontSize: "12px", tableLayout: "fixed" }}>
-        <colgroup>
-          {widths.map((width, index) => <col key={`col-${index}`} style={{ width: `${width}%` }} />)}
-        </colgroup>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={`table-row-${rowIndex}`}>
-              {Array.from({ length: columnCount }).map((_, columnIndex) => {
-                const selected = editing && rowIndex === activeRow && columnIndex === activeColumn
-                return (
-                <td key={`table-cell-${rowIndex}-${columnIndex}`} onClick={() => setSelectedCell({ row: rowIndex, column: columnIndex })} style={{ border: selected ? "1px solid var(--fc-admin-link)" : "1px solid var(--fc-admin-selected-border)", padding: 0, background: selected ? "#e7f2ff" : rowIndex === 0 ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-panel-soft-bg)", position: "relative" }}>
-                  <input
-                    value={row[columnIndex] || ""}
-                    disabled={readOnly || !editing}
-                    onFocus={() => setSelectedCell({ row: rowIndex, column: columnIndex })}
-                    onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                    style={{ width: "100%", border: "none", background: selected ? "#e7f2ff" : "#ffffff", color: "var(--fc-admin-panel-text)", padding: "7px 8px", outline: "none", boxSizing: "border-box", fontSize: "12px", fontWeight: rowIndex === 0 ? 800 : 500 }}
-                  />
-                      {!readOnly && editing && rowIndex === 0 && columnIndex < columnCount - 1 ? (
-                        <span
-                          onMouseDown={(event) => {
-                            if (!tableRef.current) return
-                            dragStateRef.current = {
-                              startX: event.clientX,
-                              startWidths: [...widths],
-                              index: columnIndex,
-                              tableWidth: tableRef.current.getBoundingClientRect().width,
-                            }
-                            event.preventDefault()
-                          }}
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            right: "-3px",
-                            width: "6px",
-                            height: "100%",
-                            cursor: "col-resize",
-                            background: "transparent",
-                            zIndex: 2,
-                          }}
-                        />
-                      ) : null}
-                </td>
-                )
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!readOnly && editing && (
-        <div style={{ display: "grid", gap: "8px" }}>
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-            <button type="button" onClick={() => insertRow("above")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Row Above</button>
-            <button type="button" onClick={() => insertRow("below")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Row Below</button>
-            <button type="button" onClick={() => insertColumn("left")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Col Left</button>
-            <button type="button" onClick={() => insertColumn("right")} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Col Right</button>
-            <button type="button" onClick={deleteSelectedRow} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Row</button>
-            <button type="button" onClick={deleteColumn} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Delete Column</button>
-            <button type="button" onClick={() => void pasteTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Paste</button>
-            <button type="button" onClick={save} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)" }}>Save</button>
-            <button type="button" onClick={() => setEditing(false)} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Cancel</button>
-            <span aria-live="polite" style={{ alignSelf: "center", marginLeft: "auto", color: "var(--fc-admin-muted)", fontSize: "9px", lineHeight: 1.2 }}>
-              {dataRowCount} {dataRowCount === 1 ? "row" : "rows"}
-            </span>
-          </div>
-          <div style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>Drag the header borders to resize columns.</div>
-        </div>
-      )}
-      {!readOnly && !editing && (
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button type="button" onClick={beginEditing} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px" }}>Edit</button>
-          <button type="button" onClick={() => void copyTable()} style={{ ...buttonStyle, padding: "4px 9px", fontSize: "10px", background: copied ? "var(--fc-admin-success-bg)" : buttonStyle.background, color: copied ? "var(--fc-admin-success-text)" : buttonStyle.color }}>{copied ? "Copied" : "Copy Table"}</button>
-          <span aria-live="polite" style={{ alignSelf: "center", marginLeft: "auto", color: "var(--fc-admin-muted)", fontSize: "9px", lineHeight: 1.2 }}>
-            {dataRowCount} {dataRowCount === 1 ? "row" : "rows"}
-          </span>
-        </div>
-      )}
-    </div>
-  )
-}
-
 async function fetchEntryFiles(kind: RecordKind, id: string) {
   const withFolderPath = await supabase
     .from("cc_entry_files")
@@ -2176,19 +1920,19 @@ export default function CountryCompanyInfoPage() {
     setEditingMainSectionBlock(null)
   }
 
-  function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
+  async function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
     const nextSections = mainSections.map((section, index) => (index === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section))
+    await persistMainSections(nextSections)
     setMainSections(nextSections)
-    void persistMainSections(nextSections)
   }
 
-  function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
+  async function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
     const nextHighlights = highlights.map((tab, index) => {
       if (index !== tabIndex) return tab
       return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section)) }
     })
+    await persistHighlights(nextHighlights)
     setHighlights(nextHighlights)
-    void persistHighlights(nextHighlights)
   }
 
   async function deleteMainSectionBlock(sectionIndex: number, blockId: string) {
@@ -4301,7 +4045,7 @@ export default function CountryCompanyInfoPage() {
                             </div>
                             <div>
                               {section.table ? (
-                                <SimpleTable table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateMainSectionTable(sectionIndex, table, widths, rowUpdates)} />
+                                <SimpleTable title={section.title || "table"} table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateMainSectionTable(sectionIndex, table, widths, rowUpdates)} />
                               ) : (
                                 <BlockTextBlock
                                   blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}
@@ -4366,7 +4110,7 @@ export default function CountryCompanyInfoPage() {
                                   </div>
                                   <div>
                                     {section.table ? (
-                                      <SimpleTable table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateNestedSectionTable(index, sectionIndex, table, widths, rowUpdates)} />
+                                      <SimpleTable title={section.title || "table"} table={section.table} columnWidths={section.column_widths} rowUpdates={section.table_row_updates} onSave={(table, widths, rowUpdates) => updateNestedSectionTable(index, sectionIndex, table, widths, rowUpdates)} />
                                     ) : (
                                       <BlockTextBlock
                                         blocks={section.blocks?.length ? section.blocks : textToBlocks(section.info || "", section.line_updates || {}, currentRecord.updated_at)}

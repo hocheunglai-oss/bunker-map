@@ -86,6 +86,13 @@ jobs:
           set -o pipefail
           npm run test:attendance 2>&1 | tee attendance-tests.tap
 
+      - name: Verify CCINFO table save and failure handling
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/ccinfo-table-persistence.test.ts 2>&1 | tee ccinfo-table-tests.tap
+
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -125,6 +132,7 @@ jobs:
             security-tests.tap
             federation-tests.tap
             attendance-tests.tap
+            ccinfo-table-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt
