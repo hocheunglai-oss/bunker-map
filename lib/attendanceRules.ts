@@ -4,6 +4,9 @@ export const ATTENDANCE_START_GRACE_MINUTES = 1
 
 export type AttendanceTeam = "BT" | "BS" | "AC"
 export type AttendanceCheckType = "OnDuty" | "OffDuty"
+// Imported machine scans can lack a direction when DingTalk applies its own
+// rest calendar. Keep that uncertainty in raw data; manual edits stay IN/OUT.
+export type AttendanceRawCheckType = AttendanceCheckType | "Unclassified"
 export type AttendanceLeavePortion = "full" | "am" | "pm"
 export type AttendanceLeaveCode =
   | "ALS"

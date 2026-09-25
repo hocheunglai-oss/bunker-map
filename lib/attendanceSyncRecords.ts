@@ -11,7 +11,7 @@ export function isImportableDingTalkPunch(punchTime: string) {
   const value = Date.parse(punchTime)
   return Number.isFinite(value) && value >= DINGTALK_ATTENDANCE_IMPORT_CUTOFF.getTime()
 }
-import { hktDateFromTimestamp } from "@/lib/attendanceRules"
+import { hktDateFromTimestamp, type AttendanceRawCheckType } from "@/lib/attendanceRules"
 
 export type AttendanceSyncPerson = {
   id: string
@@ -23,7 +23,7 @@ export type NormalizedRawPunch = {
   source_record_key: string
   source_record_id: string | null
   dingtalk_user_id: string
-  check_type: "OnDuty" | "OffDuty"
+  check_type: AttendanceRawCheckType
   punch_time: string
   work_date: string
   source_type: string | null
@@ -64,12 +64,21 @@ export function normalizeDingTalkPunch(
 ): NormalizedRawPunch | null {
   const userId = cleanString(record.userId, 128)
   const person = userId ? personByDingTalkId.get(userId) : undefined
-  const checkType = record.checkType
+  const sourceCheckType = cleanString(record.checkType, 32)
+  // This is an explicit upstream calendar rejection, not a generic invalid
+  // punch. Never bypass Security, second-confirmation or unknown exceptions.
+  const restDayMachinePunch =
+    !sourceCheckType &&
+    record.sourceType === "ATM" &&
+    record.invalidRecordType === "Other" &&
+    record.invalidRecordMsg === "今日休息，打卡需申请"
+  const checkType = restDayMachinePunch ? "Unclassified" : record.checkType
   const timestamp = Number(record.userCheckTime)
   if (
     !userId ||
     !person ||
-    (checkType !== "OnDuty" && checkType !== "OffDuty") ||
+    (checkType !== "OnDuty" && checkType !== "OffDuty" && checkType !== "Unclassified") ||
+    (checkType === "Unclassified" && !restDayMachinePunch) ||
     !Number.isFinite(timestamp) ||
     timestamp <= 0
   ) {
@@ -100,12 +109,19 @@ export function normalizeDingTalkPunch(
     raw_payload: {
       id: sourceRecordId,
       userId,
-      checkType,
+      checkType: restDayMachinePunch ? null : checkType,
       userCheckTime: timestamp,
       sourceType,
       deviceSN: deviceSn,
       timeResult,
       locationResult,
+      ...(restDayMachinePunch
+        ? {
+            normalizationReason: "dingtalk-rest-day",
+            invalidRecordType: "Other",
+            invalidRecordMsg: "今日休息，打卡需申请",
+          }
+        : {}),
     },
   }
 }
