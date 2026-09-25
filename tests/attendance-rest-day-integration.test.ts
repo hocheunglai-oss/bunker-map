@@ -237,6 +237,20 @@ test("a manual arrival supplies evidence for PM-leave departure inference", () =
   assert.equal(record.status, "partial-leave")
 })
 
+test("a later manual arrival prevents an inferred departure before the corrected IN", () => {
+  const pmRecord = build([punch("superseded-in", "10:00"), punch("lunchtime", "11:30")], {
+    leaves: [leave("pm")], overrides: [override({ punchTime: time("12:00") })],
+  })
+  assert.equal(pmRecord.effectiveSignIn, time("12:00"))
+  assert.equal(pmRecord.effectiveSignOut, null)
+
+  const normalRecord = build([punch("superseded-in", "10:00"), punch("out", "19:00")], {
+    overrides: [override({ punchTime: time("19:30") })],
+  })
+  assert.equal(normalRecord.effectiveSignIn, time("19:30"))
+  assert.equal(normalRecord.effectiveSignOut, null)
+})
+
 test("FCUNO weekends remain rest days even when physical scans are present", () => {
   const workDate = "2026-09-26"
   const record = build([

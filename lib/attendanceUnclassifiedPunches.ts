@@ -60,19 +60,24 @@ export function inferUnclassifiedAttendanceDirections(input: {
   // or after that cutoff must never fill both the IN and OUT cells.
   const manualArrival = sameDayTime(input.manualSignIn)
   const earlierArrival = input.hasAfternoonLeave
-    ? [
-        ...(arrival ? [arrival.timestamp] : []),
-        ...(manualArrival !== null ? [manualArrival] : []),
-        ...punches
-          .filter((punch) => punch.checkType === "OnDuty")
-          .map((punch) => punch.timestamp),
-      ].filter((timestamp) => timestamp < boundaryTime)
+    ? (manualArrival !== null
+        ? [manualArrival]
+        : [
+            ...(arrival ? [arrival.timestamp] : []),
+            ...punches
+              .filter((punch) => punch.checkType === "OnDuty")
+              .map((punch) => punch.timestamp),
+          ]
+      ).filter((timestamp) => timestamp < boundaryTime)
     : []
   if (input.hasAfternoonLeave && !earlierArrival.length) return directions
 
   const departure = unclassified.findLast((punch) =>
     punch.timestamp >= boundaryTime &&
     punch.id !== arrival?.id &&
+    // A corrected IN supersedes raw arrival evidence. Never manufacture an
+    // OUT at or before the administrator's authoritative arrival time.
+    (manualArrival === null || punch.timestamp > manualArrival) &&
     (!input.hasAfternoonLeave || earlierArrival.some((time) => time < punch.timestamp)),
   )
   if (departure) directions.set(departure.id, "OffDuty")

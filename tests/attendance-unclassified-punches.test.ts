@@ -121,6 +121,35 @@ test("PM-leave departure can rely on an earlier typed or manual arrival", () => 
   })], [["unknown-out", "OffDuty"]])
 })
 
+test("a corrected PM-leave arrival supersedes earlier raw and typed arrival evidence", () => {
+  for (const checkType of ["OnDuty", "Unclassified"] as const) {
+    const rows = [punch("original-in", "09:59", checkType), punch("lunch-scan", "11:30")]
+    for (const manualSignIn of [time("11:30"), time("12:00")]) {
+      const directions = infer(rows, { hasAfternoonLeave: true, manualSignIn })
+      assert.equal(directions.has("lunch-scan"), false)
+      assert.equal([...directions.values()].includes("OffDuty"), false)
+    }
+    assert.equal(infer(rows, {
+      hasAfternoonLeave: true, manualSignIn: time("11:29:59"),
+    }).get("lunch-scan"), "OffDuty")
+  }
+})
+
+test("normal-day inferred OUT must be strictly after a corrected IN even with earlier raw or typed scans", () => {
+  for (const checkType of ["OnDuty", "Unclassified"] as const) {
+    const rows = [punch("original-in", "10:00", checkType), punch("evening-scan", "19:00")]
+    for (const manualSignIn of [time("19:00"), time("19:30")]) {
+      assert.equal(infer(rows, { manualSignIn }).has("evening-scan"), false)
+    }
+    assert.equal(infer(rows, { manualSignIn: time("18:59:59") }).get("evening-scan"), "OffDuty")
+    const laterDeparture = infer([...rows, punch("later-out", "19:45")], {
+      manualSignIn: time("19:30"),
+    })
+    assert.equal(laterDeparture.has("evening-scan"), false)
+    assert.equal(laterDeparture.get("later-out"), "OffDuty")
+  }
+})
+
 test("a typed sign-out, invalid manual time, or manual arrival at cutoff is not PM arrival evidence", () => {
   assert.deepEqual([...infer([
     punch("typed-out", "10:00", "OffDuty"), punch("unknown", "11:31"),

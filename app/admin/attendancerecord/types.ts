@@ -39,7 +39,7 @@ export type ApiAttendanceSchedule = {
 
 export type ApiAttendancePunch = {
   id: string
-  checkType: "OnDuty" | "OffDuty"
+  checkType: "OnDuty" | "OffDuty" | "Unclassified"
   punchTime: string
   sourceType: string | null
   deviceSn: string | null
