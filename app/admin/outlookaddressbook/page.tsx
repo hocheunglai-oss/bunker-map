@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import type { AuditLogRecord } from "@/lib/auditLog"
+import { normalizeOutlookContactFields, validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
@@ -48,6 +49,7 @@ type OutlookAddressBookBootstrap = {
 }
 
 type SaveState = "idle" | "saving" | "saved" | "failed"
+const CONTACT_EDIT_FIELDS = ["display_name", "primary_email", "source_book", "nickname", "first_name", "last_name"] as const
 type ActiveView = "contacts" | "groups"
 type CreateDraftType = "contact" | "group"
 type DirectoryItem =
@@ -514,9 +516,11 @@ export default function OutlookAddressBookPage() {
   const [exchangeSyncing, setExchangeSyncing] = useState(false)
   const [exchangeButtonLabel, setExchangeButtonLabel] = useState("Sync now")
   const [exchangeSyncStartedAt, setExchangeSyncStartedAt] = useState<string | null>(null)
-  const contactDraftsRef = useRef<Record<string, SharedContact>>({})
+  const [contactDraft, setContactDraft] = useState<SharedContact | null>(null)
+  const [contactBusy, setContactBusy] = useState(false)
+  const [contactNotice, setContactNotice] = useState("")
+  const contactBusyRef = useRef(false)
   const groupDraftsRef = useRef<Record<string, SharedGroup>>({})
-  const contactSaveChainsRef = useRef<Record<string, Promise<void>>>({})
   const groupSaveChainsRef = useRef<Record<string, Promise<void>>>({})
   const createMenuHideTimerRef = useRef<number | null>(null)
 
@@ -577,7 +581,36 @@ export default function OutlookAddressBookPage() {
   }, [selectedGroupId])
 
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId) || null
+  const editedContact = contactDraft?.id === selectedContactId ? contactDraft : selectedContact
+  const contactDirty = Boolean(selectedContact && editedContact && (
+    contactSourceAdding || CONTACT_EDIT_FIELDS.some((field) => (editedContact[field] || "") !== (selectedContact[field] || ""))
+  ))
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null
+
+  useEffect(() => {
+    if (!contactDirty && !contactBusy) return
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    const beforeNavigate = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.target === "_blank" || anchor.hasAttribute("download") || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      if (contactBusyRef.current || !window.confirm("Discard unsaved contact changes and leave this page?")) {
+        event.preventDefault()
+        event.stopPropagation()
+      } else {
+        setContactDraft(null)
+        setContactSourceAdding(false)
+      }
+    }
+    window.addEventListener("beforeunload", beforeUnload)
+    document.addEventListener("click", beforeNavigate, true)
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload)
+      document.removeEventListener("click", beforeNavigate, true)
+    }
+  }, [contactDirty, contactBusy])
 
   const groupMemberIds = useMemo(
     () => new Set(members.filter((member) => member.group_id === selectedGroupId).map((member) => member.contact_id)),
@@ -733,9 +766,8 @@ export default function OutlookAddressBookPage() {
         OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
         "/api/outlook-addressbook/bootstrap",
       )
-      contactDraftsRef.current = {}
+      setContactDraft(null)
       groupDraftsRef.current = {}
-      contactSaveChainsRef.current = {}
       groupSaveChainsRef.current = {}
       setContacts((payload.contacts || []) as SharedContact[])
       setGroups((payload.groups || []) as SharedGroup[])
@@ -773,7 +805,9 @@ export default function OutlookAddressBookPage() {
   }
 
   async function undoActivity(logId: string) {
-    if (!logId) return
+    if (!logId || !leaveContactEditor()) return
+    contactBusyRef.current = true
+    setContactBusy(true)
     setUndoingActivityId(logId)
     setMessage("")
     try {
@@ -793,6 +827,8 @@ export default function OutlookAddressBookPage() {
       setMessage(error instanceof Error ? error.message : "Unable to undo recent activity.")
     } finally {
       setUndoingActivityId("")
+      contactBusyRef.current = false
+      setContactBusy(false)
     }
   }
 
@@ -810,34 +846,73 @@ export default function OutlookAddressBookPage() {
 
   async function waitForPendingSaves() {
     while (true) {
-      const pending = [...Object.values(contactSaveChainsRef.current), ...Object.values(groupSaveChainsRef.current)]
+      const pending = Object.values(groupSaveChainsRef.current)
       if (pending.length === 0) return
       await Promise.all(pending)
     }
   }
 
-  function latestContacts() {
-    return contacts.map((contact) => contactDraftsRef.current[contact.id] || contact)
+  function cancelContactEdit() {
+    if (contactBusyRef.current) return
+    setContactDraft(null)
+    setContactSourceAdding(false)
+    setContactSourceDraft("")
+    setContactNotice("")
+    setMessage("")
   }
 
-  async function saveContact(partial: Partial<SharedContact>) {
-    if (!selectedContact) return
-    const nextContact = { ...(contactDraftsRef.current[selectedContact.id] || selectedContact), ...partial }
-    contactDraftsRef.current[selectedContact.id] = nextContact
-    setContacts((current) => current.map((contact) => (contact.id === nextContact.id ? nextContact : contact)))
-    markExchangeNeedsSync()
+  function leaveContactEditor() {
+    if (contactBusyRef.current) return false
+    if (contactDirty && !window.confirm("Discard unsaved contact changes?")) return false
+    cancelContactEdit()
+    return true
+  }
+
+  function editContact(partial: Partial<OutlookContactFields>) {
+    if (!selectedContact || contactBusyRef.current) return
+    setContactDraft((current) => ({ ...(current?.id === selectedContact.id ? current : selectedContact), ...partial }))
+    setContactNotice("")
+    setMessage("")
+  }
+
+  async function saveContact() {
+    if (!selectedContact || !editedContact || !contactDirty || contactBusyRef.current) return
+    const fields = normalizeOutlookContactFields({ ...editedContact, source_book: contactSourceAdding ? contactSourceDraft : editedContact.source_book })
+    const validationError = validateOutlookContactFields(fields)
+    if (validationError) {
+      setMessage(validationError)
+      return
+    }
+    // PATCH only editable, changed fields; never upsert a deleted contact or replace its identity/memberships.
+    const changes = Object.fromEntries(CONTACT_EDIT_FIELDS.filter((field) => fields[field] !== selectedContact[field]).map((field) => [field, fields[field]]))
+    if (!Object.keys(changes).length) {
+      cancelContactEdit()
+      return
+    }
+    const contactId = selectedContact.id
+    contactBusyRef.current = true
+    setContactBusy(true)
     setSaving("saving")
     setMessage("")
-    void queueEntitySave(contactSaveChainsRef, nextContact.id, async () => {
-      const contactToSave = contactDraftsRef.current[nextContact.id] || nextContact
-      const { error } = await supabase.from("shared_addressbook_contacts").upsert(contactToSave, { onConflict: "id" })
-      if (error) {
-        setSaving("failed")
-        setMessage(error.message)
-        throw error
-      }
+    try {
+      const { data, error } = await supabase.from("shared_addressbook_contacts").update(changes).eq("id", contactId).select("id").single()
+      if (error) throw new Error(error.message)
+      if (!data || data.id !== contactId) throw new Error("This contact no longer exists. Your changes have not been saved; refresh the directory before trying again.")
+      setContacts((current) => current.map((contact) => contact.id === contactId ? { ...contact, ...changes } : contact))
+      setContactDraft(null)
+      setContactSourceAdding(false)
+      setContactSourceDraft("")
+      markExchangeNeedsSync()
       setSaving("saved")
-    }).catch(() => undefined)
+      setContactNotice("Contact saved. Exchange will update automatically within the next hour, or select Sync now.")
+      void loadRecentActivities()
+    } catch (error) {
+      setSaving("failed")
+      setMessage(error instanceof Error ? error.message : "Could not save the contact. Your changes are still here; try Save again.")
+    } finally {
+      contactBusyRef.current = false
+      setContactBusy(false)
+    }
   }
 
   async function saveGroup(partial: Partial<SharedGroup>) {
@@ -872,6 +947,7 @@ export default function OutlookAddressBookPage() {
   }
 
   function beginCreate(type: CreateDraftType) {
+    if (!leaveContactEditor()) return
     clearCreateMenuHideTimer()
     const defaultSource = selectedSourceBook !== SOURCE_ALL
       ? selectedSourceBook
@@ -886,6 +962,7 @@ export default function OutlookAddressBookPage() {
   }
 
   function cancelCreate() {
+    if (contactBusyRef.current) return
     setCreateDraftType(null)
     setCreateNewSourceBook("")
     setCreateName("")
@@ -897,10 +974,9 @@ export default function OutlookAddressBookPage() {
   }
 
   function contactSourceBookValue() {
-    if (!selectedContact) return ""
+    if (!editedContact) return ""
     if (contactSourceAdding) return SOURCE_NEW
-    const sourceBook = cleanText(selectedContact.source_book)
-    return sourceBook && sourceBookOptions.includes(sourceBook) ? sourceBook : SOURCE_NEW
+    return cleanText(editedContact.source_book) || SOURCE_NEW
   }
 
   function groupSourceBookValue() {
@@ -911,6 +987,7 @@ export default function OutlookAddressBookPage() {
   }
 
   async function applyContactSourceBook(value: string) {
+    if (contactBusyRef.current) return
     if (value === SOURCE_NEW) {
       setContactSourceAdding(true)
       setContactSourceDraft("")
@@ -918,7 +995,7 @@ export default function OutlookAddressBookPage() {
     }
     setContactSourceAdding(false)
     setContactSourceDraft("")
-    await saveContact({ source_book: value })
+    editContact({ source_book: value })
   }
 
   async function applyGroupSourceBook(value: string) {
@@ -932,15 +1009,6 @@ export default function OutlookAddressBookPage() {
     await saveGroup({ source_book: value })
   }
 
-  async function commitContactSourceBook() {
-    const sourceBook = cleanText(contactSourceDraft)
-    if (!sourceBook) return
-    await saveContact({ source_book: sourceBook })
-    setSelectedSourceBook(SOURCE_ALL)
-    setContactSourceDraft("")
-    setContactSourceAdding(false)
-  }
-
   async function commitGroupSourceBook() {
     const sourceBook = cleanText(groupSourceDraft)
     if (!sourceBook) return
@@ -951,51 +1019,61 @@ export default function OutlookAddressBookPage() {
   }
 
   async function submitCreate() {
+    if (contactBusyRef.current) return
     const sourceBook = resolvedCreateSourceBook()
     if (!sourceBook) {
       setMessage("Select or enter a Source Book before creating.")
       return
     }
-    if (createDraftType === "contact") {
-      await createContact(sourceBook, createName, createEmail)
-      cancelCreate()
-      return
+    contactBusyRef.current = true
+    setContactBusy(true)
+    setMessage("")
+    let created = false
+    try {
+      if (createDraftType === "contact") created = await createContact(sourceBook, createName, createEmail)
+      if (createDraftType === "group") created = await createGroup(sourceBook, createName)
+    } catch (error) {
+      setSaving("failed")
+      setMessage(error instanceof Error ? error.message : "Could not create the record. Your details are still here; try again.")
+    } finally {
+      contactBusyRef.current = false
+      setContactBusy(false)
     }
-    if (createDraftType === "group") {
-      await createGroup(sourceBook, createName)
-      cancelCreate()
-    }
+    if (created) cancelCreate()
   }
 
-  async function createContact(sourceBook: string, displayName = "NEW CONTACT", email = "") {
+  async function createContact(sourceBook: string, displayName: string, email: string) {
+    const fields = normalizeOutlookContactFields({ source_book: sourceBook, display_name: displayName, primary_email: email, nickname: null, first_name: null, last_name: null })
+    const validationError = validateOutlookContactFields(fields)
+    if (validationError) {
+      setMessage(validationError)
+      return false
+    }
     const id = newId("contact")
     const contact: SharedContact = {
+      ...fields,
       id,
-      source_book: sourceBook,
       source_card: id,
-      display_name: cleanText(displayName) || "NEW CONTACT",
-      primary_email: normalized(email),
-      nickname: null,
-      first_name: null,
-      last_name: null,
       vcard: null,
       properties: {},
     }
-    markExchangeNeedsSync()
     setSaving("saving")
     const { error } = await supabase.from("shared_addressbook_contacts").insert(contact)
     if (error) {
       setSaving("failed")
       setMessage(error.message)
-      return
+      return false
     }
-    contactDraftsRef.current[id] = contact
+    markExchangeNeedsSync()
+    setContactDraft(null)
     setContacts((current) => [contact, ...current])
     setSelectedSourceBook(SOURCE_ALL)
     setActiveView("contacts")
     setSelectedContactId(id)
     setSaving("saved")
+    setContactNotice("Contact created. Exchange will update automatically within the next hour, or select Sync now.")
     void loadRecentActivities()
+    return true
   }
 
   async function createGroup(sourceBook: string, name = "NEW GROUP") {
@@ -1015,7 +1093,7 @@ export default function OutlookAddressBookPage() {
     if (error) {
       setSaving("failed")
       setMessage(error.message)
-      return
+      return false
     }
     groupDraftsRef.current[id] = group
     setGroups((current) => [group, ...current])
@@ -1024,26 +1102,36 @@ export default function OutlookAddressBookPage() {
     setSelectedGroupId(id)
     setSaving("saved")
     void loadRecentActivities()
+    return true
   }
 
   async function deleteContact() {
-    if (!selectedContact) return
+    if (!selectedContact || contactBusyRef.current || contactDirty) return
     if (!confirm(`Delete contact ${selectedContact.display_name}?`)) return
     const deletedContact = selectedContact
-    markExchangeNeedsSync()
+    contactBusyRef.current = true
+    setContactBusy(true)
     setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_contacts").delete().eq("id", deletedContact.id)
-    if (error) {
+    setMessage("")
+    try {
+      const { error } = await supabase.from("shared_addressbook_contacts").delete().eq("id", deletedContact.id)
+      if (error) throw new Error(error.message)
+      markExchangeNeedsSync()
+      setContactDraft(null)
+      setContactNotice("")
+      setMembers((current) => current.filter((member) => member.contact_id !== deletedContact.id))
+      setContacts((current) => current.filter((contact) => contact.id !== deletedContact.id))
+      setSelectedSourceBook(SOURCE_ALL)
+      setSelectedContactId(contacts.find((contact) => contact.id !== deletedContact.id)?.id || "")
+      setSaving("saved")
+      void loadRecentActivities()
+    } catch (error) {
       setSaving("failed")
-      setMessage(error.message)
-      return
+      setMessage(error instanceof Error ? error.message : "Could not delete the contact.")
+    } finally {
+      contactBusyRef.current = false
+      setContactBusy(false)
     }
-    setMembers((current) => current.filter((member) => member.contact_id !== deletedContact.id))
-    setContacts((current) => current.filter((contact) => contact.id !== deletedContact.id))
-    setSelectedSourceBook(SOURCE_ALL)
-    setSelectedContactId(contacts.find((contact) => contact.id !== deletedContact.id)?.id || "")
-    setSaving("saved")
-    void loadRecentActivities()
   }
 
   async function deleteGroup() {
@@ -1115,13 +1203,17 @@ export default function OutlookAddressBookPage() {
   }
 
   async function syncExchange() {
+    if (contactBusyRef.current || contactDirty) {
+      setMessage("Save or Cancel your contact changes before syncing Exchange.")
+      return
+    }
     const startedAt = new Date().toISOString()
     setExchangeSyncStartedAt(startedAt)
     setExchangeSyncing(true)
     setExchangeButtonLabel("Syncing")
     try {
       await waitForPendingSaves()
-      const missingEmailExamples = latestContacts()
+      const missingEmailExamples = contacts
         .filter((contact) => cleanText(contact.display_name) && !cleanText(contact.primary_email))
         .slice(0, 3)
         .map((contact) => contact.display_name)
@@ -1172,15 +1264,15 @@ export default function OutlookAddressBookPage() {
       <header style={{ maxWidth: "1680px", margin: "0 auto 12px", display: "flex", alignItems: "end", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-            Changes sync to Exchange automatically every hour.
+            Saved changes sync to Exchange automatically every hour.
           </div>
-          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing}>
+          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing || contactBusy}>
             {exchangeButtonLabel}
           </button>
         </div>
       </header>
 
-      {message ? <div style={{ maxWidth: "1680px", margin: "0 auto 12px", color: "var(--fc-error)", fontWeight: 800 }}>{message}</div> : null}
+      {message && !createDraftType ? <div role="alert" style={{ maxWidth: "1680px", margin: "0 auto 12px", color: "var(--fc-error)", fontWeight: 800 }}>{message}</div> : null}
 
       <div style={{ maxWidth: "1680px", margin: "0 auto", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(250px, 0.65fr) minmax(340px, 0.95fr) minmax(0, 1.65fr)", gap: "10px", alignItems: "start" }}>
         <aside style={{ ...panelStyle, padding: "12px", display: "grid", gap: "10px", boxShadow: "none", opacity: 0.86 }}>
@@ -1208,7 +1300,7 @@ export default function OutlookAddressBookPage() {
                     <button
                       type="button"
                       onClick={() => void undoActivity(entry.id)}
-                      disabled={undoingActivityId === entry.id}
+                      disabled={Boolean(undoingActivityId) || contactBusy}
                       title="Undo"
                       aria-label="Undo activity"
                       style={{ ...buttonStyle, minHeight: "22px", padding: "2px 7px", fontSize: "9px", opacity: undoingActivityId === entry.id ? 0.55 : 0.72 }}
@@ -1235,7 +1327,7 @@ export default function OutlookAddressBookPage() {
               onMouseEnter={clearCreateMenuHideTimer}
               onMouseLeave={scheduleCreateMenuHide}
             >
-              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group" data-admin-button-style="preserve">
+              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} disabled={contactBusy || Boolean(undoingActivityId)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group" data-admin-button-style="preserve">
                 +
               </button>
               {createMenuOpen ? (
@@ -1284,7 +1376,9 @@ export default function OutlookAddressBookPage() {
                   key={`${item.type}-${item.id}`}
                   type="button"
                   data-admin-button-style="preserve"
+                  disabled={contactBusy || Boolean(undoingActivityId)}
                   onClick={() => {
+                    if (active || !leaveContactEditor()) return
                     if (item.type === "contact") {
                       setActiveView("contacts")
                       setSelectedContactId(item.id)
@@ -1339,25 +1433,26 @@ export default function OutlookAddressBookPage() {
           <div style={headerStyle}>
             <div style={titleStyle}>{activeView === "contacts" ? "Contact Editor" : "Group Editor"}</div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={activeView === "contacts" ? !selectedContact : !selectedGroup}>Delete</button>
+              <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={contactBusy || (activeView === "contacts" ? !selectedContact || contactDirty : !selectedGroup)}>Delete</button>
             </div>
           </div>
           <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
             {activeView === "contacts" ? (
             <section style={{ display: "grid", gap: "10px", maxWidth: "760px" }}>
               <div style={titleStyle}>Contact Details</div>
-              {selectedContact ? (
+              {editedContact ? (
                 <>
-                  <label><div style={fieldLabelStyle}>Display Name</div><input value={selectedContact.display_name || ""} onChange={(event) => void saveContact({ display_name: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Email</div><input value={selectedContact.primary_email || ""} onChange={(event) => void saveContact({ primary_email: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Nickname</div><input value={selectedContact.nickname || ""} onChange={(event) => void saveContact({ nickname: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Display Name</div><input value={editedContact.display_name || ""} disabled={contactBusy} onChange={(event) => editContact({ display_name: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Email</div><input value={editedContact.primary_email || ""} disabled={contactBusy} type="email" autoCapitalize="none" spellCheck={false} onChange={(event) => editContact({ primary_email: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Nickname</div><input value={editedContact.nickname || ""} disabled={contactBusy} onChange={(event) => editContact({ nickname: event.target.value })} style={inputStyle} /></label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                    <label><div style={fieldLabelStyle}>First Name</div><input value={selectedContact.first_name || ""} onChange={(event) => void saveContact({ first_name: event.target.value })} style={inputStyle} /></label>
-                    <label><div style={fieldLabelStyle}>Last Name</div><input value={selectedContact.last_name || ""} onChange={(event) => void saveContact({ last_name: event.target.value })} style={inputStyle} /></label>
+                    <label><div style={fieldLabelStyle}>First Name</div><input value={editedContact.first_name || ""} disabled={contactBusy} onChange={(event) => editContact({ first_name: event.target.value })} style={inputStyle} /></label>
+                    <label><div style={fieldLabelStyle}>Last Name</div><input value={editedContact.last_name || ""} disabled={contactBusy} onChange={(event) => editContact({ last_name: event.target.value })} style={inputStyle} /></label>
                   </div>
                   <label>
                     <div style={fieldLabelStyle}>Source Book</div>
-                    <select value={contactSourceBookValue()} onChange={(event) => void applyContactSourceBook(event.target.value)} style={inputStyle}>
+                    <select value={contactSourceBookValue()} disabled={contactBusy} onChange={(event) => void applyContactSourceBook(event.target.value)} style={inputStyle}>
+                      {editedContact.source_book && !sourceBookOptions.includes(editedContact.source_book) ? <option value={editedContact.source_book}>{editedContact.source_book}</option> : null}
                       {sourceBookOptions.map((sourceBook) => (
                         <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
                       ))}
@@ -1365,14 +1460,18 @@ export default function OutlookAddressBookPage() {
                     </select>
                   </label>
                   {contactSourceBookValue() === SOURCE_NEW ? (
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) auto", gap: "8px", alignItems: "end" }}>
+                    <div>
                       <label>
                         <div style={fieldLabelStyle}>New Source Book</div>
-                        <input value={contactSourceDraft} onChange={(event) => setContactSourceDraft(event.target.value.toUpperCase())} style={inputStyle} />
+                        <input value={contactSourceDraft} disabled={contactBusy} onChange={(event) => { setContactSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
                       </label>
-                      <button type="button" onClick={() => void commitContactSourceBook()} style={primaryButtonStyle}>Apply</button>
                     </div>
                   ) : null}
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => void saveContact()} disabled={!contactDirty || contactBusy} style={primaryButtonStyle}>{contactBusy ? "Saving..." : "Save"}</button>
+                    <button type="button" onClick={cancelContactEdit} disabled={!contactDirty || contactBusy} style={buttonStyle}>Cancel</button>
+                    <span role="status" style={{ fontSize: "12px", color: "var(--fc-admin-muted)" }}>{contactDirty ? "Unsaved changes — select Save when finished." : contactNotice || "Edit the details, then select Save."}</span>
+                  </div>
                 </>
               ) : (
                 <div style={{ color: "var(--fc-muted)" }}>Select or create a contact.</div>
@@ -1465,15 +1564,15 @@ export default function OutlookAddressBookPage() {
         <div style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", padding: "18px", background: "rgba(15, 23, 42, 0.38)" }} onMouseDown={(event) => {
           if (event.target === event.currentTarget) cancelCreate()
         }}>
-          <section style={{ ...panelStyle, width: "min(620px, 100%)", padding: "14px", display: "grid", gap: "12px", boxShadow: "0 24px 60px #00000038" }}>
+          <section role="dialog" aria-modal="true" aria-label={createDraftType === "contact" ? "New Contact" : "New Group"} style={{ ...panelStyle, width: "min(620px, 100%)", padding: "14px", display: "grid", gap: "12px", boxShadow: "0 24px 60px #00000038" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
               <div style={{ ...titleStyle, color: "var(--fc-admin-link)" }}>{createDraftType === "contact" ? "New Contact" : "New Group"}</div>
-              <button type="button" onClick={cancelCreate} style={{ ...buttonStyle, minWidth: "34px", padding: "6px 10px" }}>x</button>
+              <button type="button" onClick={cancelCreate} disabled={contactBusy} aria-label="Close create dialog" style={{ ...buttonStyle, minWidth: "34px", padding: "6px 10px" }}>x</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: "8px" }}>
               <label>
                 <div style={fieldLabelStyle}>Source Book</div>
-                <select value={createSourceBook} onChange={(event) => setCreateSourceBook(event.target.value)} style={inputStyle}>
+                <select value={createSourceBook} disabled={contactBusy} onChange={(event) => setCreateSourceBook(event.target.value)} style={inputStyle}>
                   {sourceBookOptions.length === 0 ? <option value={DEFAULT_SOURCE_BOOK}>{DEFAULT_SOURCE_BOOK}</option> : null}
                   {sourceBookOptions.map((sourceBook) => (
                     <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
@@ -1484,25 +1583,26 @@ export default function OutlookAddressBookPage() {
               {createSourceBook === SOURCE_NEW ? (
                 <label>
                   <div style={fieldLabelStyle}>New Source Book</div>
-                  <input value={createNewSourceBook} onChange={(event) => setCreateNewSourceBook(event.target.value.toUpperCase())} style={inputStyle} autoFocus />
+                  <input value={createNewSourceBook} disabled={contactBusy} onChange={(event) => setCreateNewSourceBook(event.target.value.toUpperCase())} style={inputStyle} autoFocus />
                 </label>
               ) : null}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: isMobile || createDraftType === "group" ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: "8px" }}>
               <label>
                 <div style={fieldLabelStyle}>{createDraftType === "contact" ? "Display Name" : "Group Name"}</div>
-                <input value={createName} onChange={(event) => setCreateName(event.target.value)} style={inputStyle} />
+                <input value={createName} disabled={contactBusy} onChange={(event) => setCreateName(event.target.value)} style={inputStyle} />
               </label>
               {createDraftType === "contact" ? (
                 <label>
                   <div style={fieldLabelStyle}>Email</div>
-                  <input value={createEmail} onChange={(event) => setCreateEmail(event.target.value)} style={inputStyle} />
+                  <input value={createEmail} disabled={contactBusy} type="email" autoCapitalize="none" spellCheck={false} onChange={(event) => setCreateEmail(event.target.value)} style={inputStyle} />
                 </label>
               ) : null}
             </div>
+            {message ? <div role="alert" style={{ color: "var(--fc-error)", fontSize: "13px" }}>{message}</div> : null}
             <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button type="button" onClick={cancelCreate} style={buttonStyle}>Cancel</button>
-              <button type="button" onClick={() => void submitCreate()} style={{ ...addButtonStyle, minWidth: "auto", fontSize: "12px", padding: "8px 14px" }}>Create</button>
+              <button type="button" onClick={cancelCreate} disabled={contactBusy} style={buttonStyle}>Cancel</button>
+              <button type="button" onClick={() => void submitCreate()} disabled={contactBusy} style={{ ...addButtonStyle, minWidth: "auto", fontSize: "12px", padding: "8px 14px" }}>{contactBusy ? "Creating..." : "Create"}</button>
             </div>
           </section>
         </div>

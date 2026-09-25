@@ -93,6 +93,13 @@ jobs:
           set -o pipefail
           npx --no-install tsx --test tests/ccinfo-table-persistence.test.ts 2>&1 | tee ccinfo-table-tests.tap
 
+      - name: Verify Outlook contact validation and atomic update boundary
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/outlook-contact-validation.test.ts 2>&1 | tee outlook-contact-tests.tap
+
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -133,6 +140,7 @@ jobs:
             federation-tests.tap
             attendance-tests.tap
             ccinfo-table-tests.tap
+            outlook-contact-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt
