@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
   pricesetter: new Set(["ports", "price_history", "remarks"]),
@@ -34,6 +35,8 @@ const PAGE_AUDIT_CONTEXT: Record<string, { label: string; path: string }> = {
   "email-templates": { label: "OUTLOOK TEMPLATES", path: "/admin/outlooktemplates" },
 }
 
+class OutlookContactValidationError extends Error {}
+
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Database action failed."
   const status =
@@ -41,7 +44,7 @@ function errorResponse(error: unknown) {
       ? 401
       : message === "Forbidden"
         ? 403
-        : message.startsWith("Select an existing phonebook company:")
+        : error instanceof OutlookContactValidationError || message.startsWith("Select an existing phonebook company:")
           ? 400
           : 500
   return NextResponse.json({ message }, { status })
@@ -94,6 +97,31 @@ async function validatePhonebookContactCompanies(body: ArrayBuffer, serviceKey: 
   const missing = companyNames.filter((company) => !existing.has(company))
   if (missing.length > 0) {
     throw new Error(`Select an existing phonebook company: ${missing.join(", ")}`)
+  }
+}
+
+function validateOutlookContacts(body: ArrayBuffer, method: string) {
+  let payload: unknown
+  try {
+    payload = JSON.parse(new TextDecoder().decode(body))
+  } catch {
+    throw new OutlookContactValidationError("Contact details must be valid JSON.")
+  }
+
+  if (method === "PATCH" && Array.isArray(payload)) {
+    throw new OutlookContactValidationError("Contact changes must be a single object.")
+  }
+  const rows = Array.isArray(payload) ? payload : [payload]
+  if (rows.length === 0) throw new OutlookContactValidationError("Contact details are required.")
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new OutlookContactValidationError("Contact details must be an object.")
+    }
+    const error = validateOutlookContactFields(
+      row as Partial<OutlookContactFields>,
+      method === "POST" ? "create" : "update",
+    )
+    if (error) throw new OutlookContactValidationError(error)
   }
 }
 
@@ -151,6 +179,14 @@ async function proxyRequest(request: Request) {
       requestBody
     ) {
       await validatePhonebookContactCompanies(requestBody, serviceKey)
+    }
+
+    if (
+      table === "shared_addressbook_contacts" &&
+      ["POST", "PATCH"].includes(request.method) &&
+      requestBody
+    ) {
+      validateOutlookContacts(requestBody, request.method)
     }
 
     const response = await fetch(target, {
