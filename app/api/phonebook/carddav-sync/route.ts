@@ -1,14 +1,49 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { createHash } from "node:crypto"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const MANAGED_PREFIX = "bunker-map-"
-const FULL_REBUILD_BATCH_SIZE = 250
+const SYNC_BATCH_SIZE = 2
 const CARDDAV_WRITE_ATTEMPTS = 3
 const CARDDAV_RETRY_BASE_MS = 300
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const maxDuration = 300
+
+type SyncStage = "input" | "configuration" | "source-read" | "source-check" | "upload" | "delete" | "verification"
+
+class SyncError extends Error {
+  constructor(message: string, readonly stage: SyncStage, readonly status?: number, readonly retryable = false) {
+    super(message)
+  }
+}
+
+function safeSyncError(error: unknown, stage: SyncStage): SyncError {
+  if (error instanceof SyncError) return error
+  return new SyncError(
+    stage === "source-read" || stage === "source-check"
+      ? "Unable to read the saved phonebook. Please retry."
+      : "The CardDAV connection failed or timed out. Please retry.",
+    stage,
+    undefined,
+    stage !== "source-read" && stage !== "source-check",
+  )
+}
+
+function httpSyncError(stage: SyncStage, status: number) {
+  const retryable = status === 408 || status === 429 || status >= 500
+  return new SyncError(`CardDAV ${stage} failed (HTTP ${status}).`, stage, status, retryable)
+}
+
+function logSyncFailure(id: string | undefined, error: SyncError) {
+  // Do not log contact fields, credentials, URLs, or upstream response bodies.
+  console.error("phonebook_carddav_sync_failure", {
+    ...(id ? { contactId: id } : {}),
+    stage: error.stage,
+    ...(error.status ? { status: error.status } : {}),
+  })
+}
 
 type PhonebookContact = {
   id: string
@@ -40,7 +75,7 @@ type PhonebookCompany = {
 
 function requireEnv(name: string) {
   const value = process.env[name]
-  if (!value) throw new Error(`${name} is not configured.`)
+  if (!value) throw new SyncError("Phonebook sync is not configured. Please contact an administrator.", "configuration")
   return value
 }
 
@@ -74,7 +109,7 @@ function buildDisplayName(contact: PhonebookContact) {
     .replace(/\s+/g, " ")
     .trim()
 
-  if (/[A-Z0-9]/i.test(stripped)) return stripped
+  if (/[\p{L}\p{N}]/u.test(stripped)) return stripped
 
   const company = normalizeText(contact.company)
   if (company) return `${company} CONTACT`
@@ -92,12 +127,18 @@ function escapeVCard(value: string | null | undefined) {
 }
 
 function foldVCardLine(line: string) {
-  if (line.length <= 73) return line
   const parts: string[] = []
-  let current = line
-  while (current.length > 73) {
-    parts.push(current.slice(0, 73))
-    current = ` ${current.slice(73)}`
+  let current = ""
+  let byteLength = 0
+  for (const character of line) {
+    const size = Buffer.byteLength(character, "utf8")
+    if (byteLength + size > 75) {
+      parts.push(current)
+      current = " "
+      byteLength = 1
+    }
+    current += character
+    byteLength += size
   }
   parts.push(current)
   return parts.join("\r\n")
@@ -155,7 +196,7 @@ function buildVCard(contact: PhonebookContact, syncHash = buildContactSyncHash(c
     `PRODID:-//Bunker Map//Phonebook CardDAV//EN`,
     `UID:${uid}`,
     ...vcardLine("FN", displayName),
-    `N:${escapeVCard(displayName)};;;;`,
+    foldVCardLine(`N:${escapeVCard(displayName)};;;;`),
     ...vcardLine("ORG", contact.company || undefined),
     ...vcardLine("TITLE", contact.position || undefined),
     ...vcardLine("TEL;TYPE=WORK", normalizeDialablePhone(contact.company_phone)),
@@ -202,53 +243,56 @@ async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) {
   return response
 }
 
-async function loadManagedCardHrefs() {
-  const body = `<?xml version="1.0" encoding="utf-8" ?>
-<d:propfind xmlns:d="DAV:">
-  <d:prop><d:getetag /></d:prop>
-</d:propfind>`
-  const response = await cardDavRequest("", {
-    method: "PROPFIND",
-    headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
-    body,
-  })
-  if (!response.ok && response.status !== 207) throw new Error(`CardDAV PROPFIND failed (${response.status}).`)
-  const text = await response.text()
-  const hrefs = Array.from(text.matchAll(/<[^:>]*:?href>(.*?)<\/[^:>]*:?href>/g)).map((match) =>
-    match[1].replace(/&amp;/g, "&"),
-  )
-  return hrefs.filter((href) => decodeURIComponent(href.split("/").pop() || "").startsWith(MANAGED_PREFIX))
+async function assertContactAbsent(supabase: SupabaseClient, contactId: string) {
+  try {
+    const { data, error } = await supabase.from("phonebook_contacts").select("id").eq("id", contactId).maybeSingle()
+    if (error) throw safeSyncError(error, "source-check")
+    if (data) throw new SyncError("Contact exists in the phonebook. Sync its current details instead of deleting it.", "source-check")
+  } catch (error) {
+    throw safeSyncError(error, "source-check")
+  }
 }
 
-async function deleteCard(href: string) {
-  let lastError: unknown = null
+async function deleteCard(supabase: SupabaseClient, contactId: string) {
+  let lastError = new SyncError("CardDAV delete failed.", "delete")
+  const href = cardHref(contactId)
 
   for (let attempt = 1; attempt <= CARDDAV_WRITE_ATTEMPTS; attempt += 1) {
+    // A queued deletion may outlive an undo/restore. Never delete a currently
+    // authoritative contact. Recheck before each retry, not only the first one.
+    await assertContactAbsent(supabase, contactId)
+    let stage: SyncStage = "delete"
     try {
       const response = await cardDavRequest(href, {
         method: "DELETE",
         cache: "no-store",
       })
       if (!response.ok && response.status !== 404) {
-        throw new Error(`CardDAV delete failed (${response.status}).`)
+        throw httpSyncError("delete", response.status)
       }
 
+      stage = "verification"
       const verification = await cardDavRequest(href, {
         method: "GET",
         headers: { "Cache-Control": "no-cache" },
         cache: "no-store",
       })
-      if (verification.status === 404) return
-      throw new Error(`CardDAV delete verification failed (${verification.status}).`)
+      if (verification.status === 404) {
+        await assertContactAbsent(supabase, contactId)
+        return
+      }
+      if (!verification.ok) throw httpSyncError("verification", verification.status)
+      throw new SyncError("CardDAV deletion has not been verified. Please retry.", "verification", verification.status, true)
     } catch (error) {
-      lastError = error
+      lastError = safeSyncError(error, stage)
+      if (!lastError.retryable) throw lastError
       if (attempt < CARDDAV_WRITE_ATTEMPTS) {
         await wait(CARDDAV_RETRY_BASE_MS * 2 ** (attempt - 1))
       }
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("CardDAV delete failed.")
+  throw lastError
 }
 
 function wait(ms: number) {
@@ -266,24 +310,27 @@ async function verifyContact(contact: PhonebookContact, syncHash: string) {
   })
 
   if (!response.ok) {
-    throw new Error(`CardDAV verification failed (${response.status}) for ${contact.full_name}.`)
+    // A successful PUT can take a moment to become visible to reads.
+    if (response.status === 404) throw new SyncError("CardDAV contact is not yet visible for verification.", "verification", 404, true)
+    throw httpSyncError("verification", response.status)
   }
 
-  const card = await response.text()
-  if (!card.includes(`X-BUNKER-MAP-CONTACT-ID:${contact.id}`)) {
-    throw new Error(`CardDAV verification returned the wrong contact for ${contact.full_name}.`)
+  const lines = (await response.text()).replace(/\r?\n[ \t]/g, "").split(/\r?\n/)
+  if (!lines.includes(`X-BUNKER-MAP-CONTACT-ID:${contact.id}`)) {
+    throw new SyncError("CardDAV verification returned a different contact.", "verification", undefined, true)
   }
-  if (!card.includes(`X-BUNKER-MAP-SYNC-HASH:${syncHash}`)) {
-    throw new Error(`CardDAV verification found stale data for ${contact.full_name}.`)
+  if (!lines.includes(`X-BUNKER-MAP-SYNC-HASH:${syncHash}`)) {
+    throw new SyncError("CardDAV verification found stale data. Please retry.", "verification", undefined, true)
   }
 }
 
-async function putContact(contact: PhonebookContact) {
+async function putContact(supabase: SupabaseClient, contact: PhonebookContact) {
   const syncHash = buildContactSyncHash(contact)
   const card = buildVCard(contact, syncHash)
-  let lastError: unknown = null
+  let lastError = new SyncError("CardDAV upload failed.", "upload")
 
   for (let attempt = 1; attempt <= CARDDAV_WRITE_ATTEMPTS; attempt += 1) {
+    let stage: SyncStage = "upload"
     try {
       const response = await cardDavRequest(cardHref(contact.id), {
         method: "PUT",
@@ -295,25 +342,29 @@ async function putContact(contact: PhonebookContact) {
         cache: "no-store",
       })
       if (!response.ok && response.status !== 201 && response.status !== 204) {
-        throw new Error(`CardDAV upload failed (${response.status}) for ${contact.full_name}.`)
+        throw httpSyncError("upload", response.status)
       }
 
+      stage = "verification"
       await verifyContact(contact, syncHash)
+      const current = await fetchContacts(supabase, { contactIds: [contact.id] })
+      if (current.contacts.length !== 1 || buildContactSyncHash(current.contacts[0]) !== syncHash) {
+        throw new SyncError("The saved contact changed during sync. Retry to sync its latest details.", "source-check")
+      }
       return
     } catch (error) {
-      lastError = error
+      lastError = safeSyncError(error, stage)
+      if (!lastError.retryable) throw lastError
       if (attempt < CARDDAV_WRITE_ATTEMPTS) {
         await wait(CARDDAV_RETRY_BASE_MS * 2 ** (attempt - 1))
       }
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`CardDAV sync failed for ${contact.full_name}.`)
+  throw lastError
 }
 
-async function loadCompanyPhoneMap(supabase: any, companyNames?: string[]) {
+async function loadCompanyPhoneMap(supabase: SupabaseClient, companyNames?: string[]) {
   const rows: PhonebookCompany[] = []
   const pageSize = 1000
   const normalizedCompanyNames = Array.from(
@@ -361,155 +412,162 @@ async function loadCompanyPhoneMap(supabase: any, companyNames?: string[]) {
 }
 
 async function fetchContacts(
-  supabase: any,
+  supabase: SupabaseClient,
   options: {
     company?: string | null
     contactIds?: string[]
+    cursor?: number
   } = {},
 ) {
-  const rows: PhonebookContact[] = []
-  const pageSize = 1000
-  let from = 0
   const contactIds = Array.from(new Set((options.contactIds || []).filter(Boolean)))
+  const cursor = options.cursor || 0
+  let query = supabase
+    .from("phonebook_contacts")
+    .select("id,full_name,company,title,position,department,direct_line,mobile_1,mobile_2,personal_email,general_email,private_email,notes", { count: "exact" })
+    .order("id", { ascending: true })
+    .range(cursor, cursor + SYNC_BATCH_SIZE - 1)
 
-  while (true) {
-    let query = supabase
-      .from("phonebook_contacts")
-      .select("id,full_name,company,title,position,department,direct_line,mobile_1,mobile_2,personal_email,general_email,private_email,notes")
-      .order("favorite", { ascending: false })
-      .order("full_name", { ascending: true })
-      .range(from, from + pageSize - 1)
+  if (options.company) query = query.eq("company", options.company)
+  if (contactIds.length > 0) query = query.in("id", contactIds)
 
-    if (options.company) query = query.eq("company", options.company)
-    if (contactIds.length > 0) query = query.in("id", contactIds)
-
-    const { data, error } = await query
-    if (error) throw error
-
-    const batch = (data || []) as Omit<PhonebookContact, "company_phone" | "company_other_name">[]
-    rows.push(...batch.map((contact) => ({
-      ...contact,
-      company_phone: null,
-      company_other_name: null,
-    })))
-    if (batch.length < pageSize) break
-    from += pageSize
-  }
+  const { data, error, count } = await query
+  if (error) throw safeSyncError(error, "source-read")
+  const rows = (data || []) as Omit<PhonebookContact, "company_phone" | "company_other_name">[]
 
   const companyNames = Array.from(
     new Set(rows.map((contact) => normalizeText(contact.company)).filter(Boolean)),
   )
-  const companyPhoneMap = await loadCompanyPhoneMap(supabase, companyNames)
+  let companyPhoneMap: Awaited<ReturnType<typeof loadCompanyPhoneMap>>
+  try {
+    companyPhoneMap = await loadCompanyPhoneMap(supabase, companyNames)
+  } catch (error) {
+    throw safeSyncError(error, "source-read")
+  }
 
-  return rows.map((contact) => ({
-    ...contact,
-    company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.phone || null,
-    company_other_name: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.otherName || null,
-  }))
+  return {
+    contacts: rows.map((contact) => ({
+      ...contact,
+      company_phone: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.phone || null,
+      company_other_name: companyPhoneMap.get(normalizeCompanyKey(contact.company))?.otherName || null,
+    })),
+    total: count ?? rows.length,
+  }
+}
+
+function validateSyncRequest(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new SyncError("A phonebook sync scope is required.", "input")
+  }
+  const body = value as Record<string, unknown>
+  for (const key of ["contactIds", "deleteContactIds"]) {
+    if (body[key] == null) continue
+    const ids = body[key]
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !UUID_PATTERN.test(id))) {
+      throw new SyncError("Contact IDs must be valid UUIDs.", "input")
+    }
+    if (ids.length > SYNC_BATCH_SIZE) throw new SyncError(`Sync at most ${SYNC_BATCH_SIZE} contact IDs per request. Refresh Phonebook and try again.`, "input")
+  }
+  if (body.selectedCompany != null && typeof body.selectedCompany !== "string") {
+    throw new SyncError("The company sync scope must be text.", "input")
+  }
+  if (body.fullRebuild != null && typeof body.fullRebuild !== "boolean") {
+    throw new SyncError("The full sync option must be true or false.", "input")
+  }
+  if (body.cursor != null && (!Number.isSafeInteger(body.cursor) || Number(body.cursor) < 0)) {
+    throw new SyncError("The sync cursor must be a non-negative integer.", "input")
+  }
+  const contactIds = Array.from(new Set((body.contactIds || []) as string[]))
+  const deleteContactIds = Array.from(new Set((body.deleteContactIds || []) as string[]))
+  const company = normalizeText(body.selectedCompany as string | undefined)
+  const fullRebuild = body.fullRebuild === true
+  const scopes = [contactIds.length > 0, deleteContactIds.length > 0, Boolean(company), fullRebuild].filter(Boolean)
+  if (scopes.length !== 1) throw new SyncError("Choose one sync scope: contacts, deleted contacts, company, or full resync.", "input")
+  const cursor = Number(body.cursor || 0)
+  if ((contactIds.length > 0 || deleteContactIds.length > 0) && cursor !== 0) {
+    throw new SyncError("Explicit contact batches must start at cursor zero.", "input")
+  }
+  return { contactIds, deleteContactIds, company, fullRebuild, cursor, explicitCursor: body.cursor != null }
 }
 
 export async function POST(request: Request) {
   try {
     await requireAdminPagePermission("phonebook", "edit")
-
+    const body = validateSyncRequest(await request.json().catch(() => null))
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
     )
-    const body = (await request.json().catch(() => ({}))) as {
-      selectedCompany?: string
-      fullRebuild?: boolean
-      contactIds?: string[]
-      deleteContactIds?: string[]
-      cursor?: number
-      phase?: "delete" | "upload"
-    }
-
-    const deleteIds = Array.isArray(body.deleteContactIds) ? body.deleteContactIds.filter(Boolean) : []
-    if (deleteIds.length > 0) {
-      for (const contactId of deleteIds) await deleteCard(cardHref(contactId))
-      return NextResponse.json({ message: `Deleted ${deleteIds.length} CardDAV contact entries.`, failed: [] })
-    }
-
-    const company = normalizeText(body.selectedCompany) || null
-    const contactIds = Array.isArray(body.contactIds) ? body.contactIds.filter(Boolean) : []
-    let contacts = await fetchContacts(supabase, {
-      company,
-      contactIds,
-    })
-
-    if (contacts.length === 0) {
-      return NextResponse.json({ message: "No contacts to sync.", failed: [] }, { status: 400 })
-    }
-
-    const total = contacts.length
-    const cursor = Number.isFinite(body.cursor) ? Math.max(0, Number(body.cursor)) : 0
-    const phase = body.fullRebuild ? (body.phase === "upload" ? "upload" : "delete") : "upload"
-
-    if (body.fullRebuild && phase === "delete") {
-      const hrefs = await loadManagedCardHrefs()
-      const batch = hrefs.slice(cursor, cursor + FULL_REBUILD_BATCH_SIZE)
-      for (const href of batch) await deleteCard(href)
-
-      const deletedCount = Math.min(cursor + batch.length, hrefs.length)
-      const deleteDone = deletedCount >= hrefs.length
-      return NextResponse.json({
-        message: deleteDone
-          ? "Deleted existing CardDAV contacts. Starting upload..."
-          : `Deleting existing CardDAV contacts ${deletedCount}/${hrefs.length}...`,
-        failed: [],
-        total: deleteDone ? total : hrefs.length,
-        done: false,
-        nextCursor: deleteDone ? 0 : deletedCount,
-        syncedCount: 0,
-        phase: deleteDone ? "upload" : "delete",
+    getCardDavConfig()
+    const failed: Array<{ id: string; label: string; error: string; stage: SyncStage; status?: number }> = []
+    const verifiedIds: string[] = []
+    const recordFailure = (id: string, error: unknown, stage: SyncStage) => {
+      const safeError = safeSyncError(error, stage)
+      logSyncFailure(id, safeError)
+      failed.push({
+        id,
+        label: `CONTACT ${id.slice(0, 8)}`,
+        error: safeError.message,
+        stage: safeError.stage,
+        ...(safeError.status ? { status: safeError.status } : {}),
       })
     }
-
-    if (body.fullRebuild) {
-      contacts = contacts.slice(cursor, cursor + FULL_REBUILD_BATCH_SIZE)
-    }
-
-    const failed: Array<{ id: string; label: string; error?: string }> = []
-    if (contactIds.length > 0) {
-      const foundIds = new Set(contacts.map((contact) => contact.id))
-      for (const contactId of contactIds) {
-        if (!foundIds.has(contactId)) {
-          failed.push({
-            id: contactId,
-            label: `CONTACT ${contactId.slice(0, 8)}`,
-            error: "Contact was not found in Supabase.",
-          })
+    if (body.deleteContactIds.length > 0) {
+      for (const id of body.deleteContactIds) {
+        try {
+          await deleteCard(supabase, id)
+          verifiedIds.push(id)
+        } catch (error) {
+          recordFailure(id, error, "delete")
         }
       }
+      return NextResponse.json({
+        message: failed.length ? `Verified ${verifiedIds.length} deletions. ${failed.length} contacts still need attention.` : `Verified ${verifiedIds.length} CardDAV deletions.`,
+        failed,
+        verifiedIds,
+        verifiedCount: verifiedIds.length,
+        syncedCount: verifiedIds.length,
+        total: body.deleteContactIds.length,
+        done: true,
+        nextCursor: null,
+        phase: "delete",
+      }, { status: failed.length ? 207 : 200 })
     }
 
-    let synced = 0
+    const { contacts, total: sourceTotal } = await fetchContacts(supabase, body)
+    // Old company-sync clients do not follow cursors. Fail before any write,
+    // rather than silently claiming a two-contact partial sync is complete.
+    if (body.company && sourceTotal > SYNC_BATCH_SIZE && !body.explicitCursor) {
+      throw new SyncError("Refresh Phonebook and try Sync selected company again.", "input")
+    }
+    const total = body.contactIds.length || sourceTotal
+    const foundIds = new Set(contacts.map((contact) => contact.id))
+    for (const id of body.contactIds) {
+      if (!foundIds.has(id)) recordFailure(id, new SyncError("Contact was not found in the saved phonebook.", "source-read"), "source-read")
+    }
     for (const contact of contacts) {
       try {
-        await putContact(contact)
-        synced += 1
+        await putContact(supabase, contact)
+        verifiedIds.push(contact.id)
       } catch (error) {
-        failed.push({
-          id: contact.id,
-          label: `${contact.full_name || "UNKNOWN"} @ ${contact.company || "NO COMPANY"}`,
-          error: error instanceof Error ? error.message : "CardDAV verification failed.",
-        })
+        recordFailure(contact.id, error, "upload")
       }
     }
-
+    // Legacy fullRebuild/phase:"delete" is intentionally a non-destructive
+    // upsert pass. An interrupted resync must never erase the shared book.
+    const done = body.contactIds.length > 0 || body.cursor + contacts.length >= total
     return NextResponse.json({
       message: failed.length
-        ? `Verified ${synced} CardDAV contacts. ${failed.length} contacts still need retry.`
-        : `Verified ${synced} contacts in CardDAV.`,
-      failed: failed.slice(0, 20),
-      verifiedCount: synced,
+        ? `Verified ${verifiedIds.length} CardDAV contacts. ${failed.length} contacts still need retry.`
+        : `Verified ${verifiedIds.length} contacts in CardDAV.`,
+      failed,
+      verifiedIds,
+      verifiedCount: verifiedIds.length,
       total,
-      done: !body.fullRebuild || cursor + contacts.length >= total,
-      nextCursor: body.fullRebuild && cursor + contacts.length < total ? cursor + contacts.length : null,
-      syncedCount: synced,
+      done,
+      nextCursor: done ? null : body.cursor + contacts.length,
+      syncedCount: verifiedIds.length,
       phase: "upload",
-    })
+    }, { status: failed.length ? 207 : 200 })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
@@ -517,10 +575,11 @@ export async function POST(request: Request) {
         { status: error.message === "Unauthorized" ? 401 : 403 }
       )
     }
-    console.error("phonebook carddav sync failed", error)
+    const safeError = safeSyncError(error, "source-read")
+    logSyncFailure(undefined, safeError)
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "CardDAV sync failed." },
-      { status: 500 },
+      { message: safeError.message, stage: safeError.stage },
+      { status: safeError.stage === "input" ? 400 : 503 },
     )
   }
 }
