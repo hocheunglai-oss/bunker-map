@@ -100,6 +100,13 @@ jobs:
           set -o pipefail
           npx --no-install tsx --test tests/outlook-contact-validation.test.ts 2>&1 | tee outlook-contact-tests.tap
 
+      - name: Verify phonebook delivery, retry and failure reporting
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/phonebook-*.test.ts 2>&1 | tee phonebook-sync-tests.tap
+
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -141,6 +148,7 @@ jobs:
             attendance-tests.tap
             ccinfo-table-tests.tap
             outlook-contact-tests.tap
+            phonebook-sync-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt

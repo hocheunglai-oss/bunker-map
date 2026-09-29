@@ -4,6 +4,14 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import {
+  enqueuePhonebookSync,
+  loadPhonebookSyncScope,
+  readPhonebookSyncRetries,
+  runPhonebookSync,
+  stagePhonebookSync,
+  type PendingPhonebookSync,
+} from "@/lib/phonebookSyncClient"
 
 type Contact = {
   id: string
@@ -87,7 +95,6 @@ type ChangeLogEntry = {
   after: Contact | Company | null
 }
 
-const LAST_CONTACT_SYNC_FAILED_KEY = "phonebook_last_carddav_sync_failed"
 const CONTACT_ORDER_STORAGE_KEY = "phonebook_contact_order_by_company"
 const PHONEBOOK_CHANGE_LOG_KEY = "phonebook_change_log"
 const PHONEBOOK_CACHE_DB_NAME = "phonebook-cache"
@@ -99,23 +106,6 @@ const INITIAL_RENDERED_COMPANIES = 120
 const COMPANY_RENDER_STEP = 120
 const MAX_SEARCH_RENDERED_COMPANIES = 300
 const MAX_RENDERED_CONTACTS = 400
-
-type ContactSyncFailure = {
-  id: string
-  label: string
-  error?: string
-}
-
-type ContactSyncResponse = {
-  message?: string
-  failed?: ContactSyncFailure[]
-  total?: number
-  done?: boolean
-  nextCursor?: number | null
-  syncedCount?: number
-  verifiedCount?: number
-  phase?: "delete" | "upload"
-}
 
 type PerfStats = {
   sessionMs: number | null
@@ -559,6 +549,8 @@ export default function PhonebookPage() {
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
+  const contactSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const queuedContactSyncsRef = useRef(0)
   const [contactsLoading, setContactsLoading] = useState(false)
   const [searchResultsLimited, setSearchResultsLimited] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -568,6 +560,15 @@ export default function PhonebookPage() {
   useEffect(() => {
     document.title = "Phonebook - FC Uno"
   }, [])
+  useEffect(() => {
+    if (!contactSyncing) return
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warnBeforeLeaving)
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving)
+  }, [contactSyncing])
   const [companySuggestOpen, setCompanySuggestOpen] = useState(false)
   const [draggingContactId, setDraggingContactId] = useState("")
   const [dragOverContactId, setDragOverContactId] = useState("")
@@ -822,7 +823,10 @@ export default function PhonebookPage() {
     if (!response.ok) {
       throw new Error(payload.message || "Unable to load company contacts.")
     }
-    return normalizeLoadedContacts(payload.contacts || [])
+    if (!Array.isArray(payload.contacts) || payload.contacts.some((contact) => !contact || typeof contact.id !== "string" || !contact.id)) {
+      throw new Error("The complete company contact list could not be verified. Please refresh and retry.")
+    }
+    return normalizeLoadedContacts(payload.contacts)
   }
 
   async function loadAllContactsForCache() {
@@ -834,6 +838,9 @@ export default function PhonebookPage() {
     }
     if (!response.ok) {
       throw new Error(payload.message || "Unable to load phonebook contacts.")
+    }
+    if (!Array.isArray(payload.contacts) || payload.contacts.some((contact) => !contact || typeof contact.id !== "string" || !contact.id)) {
+      throw new Error("The complete phonebook contact list could not be verified. Please refresh and retry.")
     }
 
     const normalizeStartedAt = performance.now()
@@ -1273,11 +1280,10 @@ export default function PhonebookPage() {
       setEditing(false)
       setCreatingContact(false)
       setContactModalOpen(false)
-      const synced = await syncPhoneContacts(false, [nextContact.id], {
+      await syncPhoneContacts(false, [nextContact.id], {
         successMessage: "Saved and verified on CardDAV.",
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
-      if (synced) setMessage("Saved and verified on CardDAV.")
       setSaving(false)
       return
     }
@@ -1302,11 +1308,10 @@ export default function PhonebookPage() {
     setContacts((prev) => prev.map((item) => (item.id === draft.id ? updatedContact : item)))
     setCurrent((prev) => (prev ? updatedContact : prev))
     setEditing(false)
-    const synced = await syncPhoneContacts(false, [draft.id], {
+    await syncPhoneContacts(false, [draft.id], {
       successMessage: "Saved and verified on CardDAV.",
       failureMessage: "Saved locally, but CardDAV sync failed.",
     })
-    if (synced) setMessage("Saved and verified on CardDAV.")
     setSaving(false)
   }
 
@@ -1601,11 +1606,10 @@ export default function PhonebookPage() {
     }
 
     if (syncedContactIds.length > 0) {
-      const synced = await syncPhoneContacts(false, syncedContactIds, {
+      await syncPhoneContacts(false, syncedContactIds, {
         successMessage: "Saved and verified on CardDAV.",
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
-      if (synced) setMessage("Saved and verified on CardDAV.")
     }
   }
 
@@ -1881,11 +1885,10 @@ export default function PhonebookPage() {
     setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
     setDraft(nextDraft)
     setEditing(false)
-    const synced = await syncPhoneContacts(false, [draft.id], {
+    await syncPhoneContacts(false, [draft.id], {
       successMessage: "Archived and synced.",
       failureMessage: "Archived locally, but CardDAV sync failed.",
     })
-    if (synced) setMessage("Archived and synced.")
     setSaving(false)
   }
 
@@ -1925,7 +1928,7 @@ export default function PhonebookPage() {
   }
 
   async function confirmAndRunFullRebuild() {
-    if (!confirm("Run Full Rebuild for CardDAV? This will replace Bunker Map contacts in the CardDAV address book.")) {
+    if (!confirm("Resync all contacts to CardDAV? Existing contacts will be kept while current FC Uno details are uploaded and verified. Keep this page open until it finishes.")) {
       return
     }
     await syncPhoneContacts(true)
@@ -1939,122 +1942,83 @@ export default function PhonebookPage() {
       successMessage?: string
       failureMessage?: string
       silentFailure?: boolean
+      retryEntries?: PendingPhonebookSync[]
     },
   ) {
-    setContactSyncing(true)
-    setContactSyncLabel(fullRebuild ? "Starting rebuild..." : "Syncing")
-    if (!options?.silentFailure) setMessage("")
+    const companyToSync = selectedCompany
+    let entries: PendingPhonebookSync[] | undefined = options?.retryEntries
+    // Persist explicitly saved/deleted IDs immediately, even if another sync is
+    // running. Each token prevents that older request clearing this newer edit.
     try {
-      if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !selectedCompany) {
-        setMessage("Select a company first, or use Full Rebuild from the menu.")
+      if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !entries && !companyToSync) {
+        setMessage("Select a company first, or use Resync all contacts from the menu.")
         return false
       }
+      if (!entries && (contactIds?.length || options?.deleteContactIds?.length)) {
+        entries = stagePhonebookSync(localStorage, [
+          ...(contactIds || []).map((id) => ({ id, operation: "upsert" as const })),
+          ...(options?.deleteContactIds || []).map((id) => ({ id, operation: "delete" as const })),
+        ])
+      }
+    } catch (error) {
+      setMessage([options?.failureMessage, error instanceof Error ? error.message : "Unable to save CardDAV retry information."].filter(Boolean).join(" "))
+      return false
+    }
 
-      const accumulatedFailed: ContactSyncFailure[] = []
-      let cursor = 0
-      let lastPayload: ContactSyncResponse = {}
-      let phase: "delete" | "upload" = fullRebuild ? "delete" : "upload"
-
-      while (true) {
-        const response = await fetch("/api/phonebook/carddav-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            selectedCompany:
-              fullRebuild || contactIds?.length || options?.deleteContactIds?.length
-                ? null
-                : selectedCompany || null,
-            fullRebuild,
-            contactIds: contactIds?.length ? contactIds : null,
-            deleteContactIds: options?.deleteContactIds?.length ? options.deleteContactIds : null,
-            cursor: fullRebuild ? cursor : null,
-            phase: fullRebuild ? phase : null,
-          }),
-        })
-
-        const payload = (await response.json().catch(() => ({}))) as ContactSyncResponse
-        lastPayload = payload
-        if (!response.ok) {
-          if (options?.failureMessage) {
-            setMessage(payload.message ? `${options.failureMessage} ${payload.message}` : options.failureMessage)
-          } else if (!options?.silentFailure) {
-            setMessage(payload.message || "Unable to sync CardDAV.")
-          }
+    queuedContactSyncsRef.current += 1
+    setContactSyncing(true)
+    setContactSyncLabel(queuedContactSyncsRef.current > 1 ? "Sync queued" : "Preparing sync...")
+    return enqueuePhonebookSync(contactSyncQueueRef, async () => {
+      if (!options?.silentFailure) setMessage("")
+      try {
+        if (!entries) {
+          // These endpoints load every matching row from the server; the visible
+          // search results and local cache are deliberately not the sync scope.
+          const operations = await loadPhonebookSyncScope(fullRebuild ? null : companyToSync)
+          entries = stagePhonebookSync(localStorage, operations)
+        }
+        if (entries.length === 0) {
+          setMessage("No contacts to sync.")
           return false
         }
-
-        if (payload.failed?.length) {
-          accumulatedFailed.push(...payload.failed)
+        const result = await runPhonebookSync({
+          entries,
+          storage: localStorage,
+          fullResync: fullRebuild,
+          onProgress: (completed, total) => setContactSyncLabel(`Checking ${completed}/${total}`),
+        })
+        if (result.failed.length > 0) {
+          const detail = result.failed[0].error || result.failed[0].label
+          setMessage(`${options?.failureMessage || "CardDAV sync was not fully verified."} ${result.failed.length} contact(s) remain queued for Retry Failed. ${detail}`)
+          return false
         }
-
-        if (!fullRebuild) {
-          break
-        }
-
-        const total = payload.total ?? contacts.length
-        const completed = Math.min(payload.nextCursor ?? total, total)
-        if (payload.phase === "delete") {
-          setContactSyncLabel(`Deleting ${completed}/${total}`)
-          setMessage(payload.message || `Deleting existing CardDAV contacts ${completed}/${total}...`)
-        } else {
-          setContactSyncLabel(`Syncing ${completed}/${total}`)
-          setMessage(payload.message || `Syncing CardDAV ${completed}/${total}...`)
-        }
-
-        if (payload.done || payload.nextCursor == null) {
-          break
-        }
-
-        cursor = payload.nextCursor
-        phase = payload.phase === "upload" ? "upload" : "delete"
-      }
-
-      const uniqueFailed = Array.from(
-        new Map(accumulatedFailed.map((failure) => [failure.id, failure])).values(),
-      )
-      localStorage.setItem(LAST_CONTACT_SYNC_FAILED_KEY, JSON.stringify(uniqueFailed.slice(0, 50)))
-      if (uniqueFailed.length > 0) {
-        const firstFailure = uniqueFailed[0]
-        const failurePrefix = options?.failureMessage || "CardDAV sync verification failed."
-        const failureDetail = firstFailure.error || firstFailure.label
-        setMessage(`${failurePrefix} ${failureDetail}`)
+        const remaining = readPhonebookSyncRetries(localStorage).length
+        setMessage(`${options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`}${remaining ? ` ${remaining} other saved operation(s) still need Retry Failed.` : ""}`)
+        return true
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unverified contacts remain queued for retry."
+        setMessage(`${options?.failureMessage || "CardDAV sync was not confirmed."} ${detail}`)
         return false
+      } finally {
+        queuedContactSyncsRef.current -= 1
+        setContactSyncing(queuedContactSyncsRef.current > 0)
+        setContactSyncLabel(queuedContactSyncsRef.current > 0 ? "Sync queued" : "")
+        setMenuOpen(false)
       }
-
-      setMessage(options?.successMessage || lastPayload.message || "CardDAV synced.")
-      return true
-    } catch (error) {
-      if (options?.failureMessage) {
-        const fallback = error instanceof Error ? error.message : ""
-        setMessage(fallback ? `${options.failureMessage} ${fallback}` : options.failureMessage)
-      } else if (!options?.silentFailure) {
-        setMessage("Unable to sync CardDAV.")
-      }
-      return false
-    } finally {
-      setContactSyncing(false)
-      setContactSyncLabel("")
-      setMenuOpen(false)
-    }
+    })
   }
 
   async function retryFailedPhoneContacts() {
-    const raw = localStorage.getItem(LAST_CONTACT_SYNC_FAILED_KEY)
-    const failedEntries = raw ? (JSON.parse(raw) as ContactSyncFailure[]) : []
-    if (failedEntries.length > 0) {
-      const ids = failedEntries.map((entry) => entry.id).filter(Boolean)
-
-      if (ids.length === 0) {
-        setMessage("Unable to find the failed contacts in phonebook.")
-        setMenuOpen(false)
-        return
+    try {
+      const entries = readPhonebookSyncRetries(localStorage)
+      if (entries.length > 0) {
+        await syncPhoneContacts(false, null, { retryEntries: entries, successMessage: "Saved CardDAV operations were retried and verified." })
+      } else {
+        setMessage("No pending CardDAV operations to retry in this browser.")
       }
-
-      await syncPhoneContacts(false, ids, { successMessage: "Retried failed CardDAV contacts." })
-      return
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to read CardDAV retry information.")
     }
-
-    setMessage("No failed CardDAV contacts to retry.")
     setMenuOpen(false)
   }
 
@@ -2126,7 +2090,7 @@ export default function PhonebookPage() {
                 border: "1px solid var(--fc-admin-selected-border)",
               }}
             >
-              {contactSyncing ? contactSyncLabel || "Syncing" : `Synced ${perfStats.contactCount} Contacts`}
+              {contactSyncing ? contactSyncLabel || "Syncing" : "Sync selected company"}
             </button>
             <button
               type="button"
@@ -2156,7 +2120,7 @@ export default function PhonebookPage() {
                   disabled={contactSyncing}
                   style={buttonStyle}
                 >
-                  Full Rebuild
+                  Resync all contacts
                 </button>
                 <div style={{ display: "grid", gap: "8px" }}>
                   <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 800 }}>Log</div>

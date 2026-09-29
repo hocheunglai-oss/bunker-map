@@ -12,6 +12,7 @@ import {
 } from "@/lib/adminAudit"
 import { mutateEventCalendarStore } from "@/lib/eventCalendarStore"
 import { recordOpenAiUsage } from "@/lib/openAiUsage"
+import { syncPhonebookFromWorkbench } from "@/lib/phonebookSyncServer"
 
 export const maxDuration = 60
 
@@ -770,34 +771,7 @@ function contactPayload(
 }
 
 async function syncCardDav(request: Request, contactIds: string[]) {
-  if (!contactIds.length) return null
-
-  try {
-    const response = await fetch(new URL("/api/phonebook/carddav-sync", request.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        cookie: request.headers.get("cookie") || "",
-      },
-      body: JSON.stringify({ contactIds }),
-      cache: "no-store",
-    })
-    const payload = await response.json().catch(() => ({}))
-    return {
-      ok: response.ok,
-      message: cleanText((payload as Record<string, unknown>).message) ||
-        (response.ok ? "CardDAV sync completed." : "CardDAV sync failed."),
-      failed: Array.isArray((payload as Record<string, unknown>).failed)
-        ? (payload as Record<string, unknown>).failed
-        : [],
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : "CardDAV sync failed.",
-      failed: [],
-    }
-  }
+  return syncPhonebookFromWorkbench(request, contactIds)
 }
 
 async function applyPhonebook(
