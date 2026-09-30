@@ -22,6 +22,7 @@ const SPC_GROUP_DISPATCHER_MIGRATION_HEAD = "20260817034459"
 const SPC_DELIVERY_ROUTES_MIGRATION_HEAD = "20260819025850"
 const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
 const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
+const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -86,6 +87,18 @@ const TABLE_SECTIONS = [
   },
   { key: "phonebookContacts", table: "phonebook_contacts", primaryKey: ["id"] },
   { key: "phonebookCompanies", table: "phonebook_companies", primaryKey: ["id"] },
+  {
+    key: "phonebookCarddavQueue",
+    table: "phonebook_carddav_queue",
+    primaryKey: ["contact_id"],
+    introducedAt: PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD,
+  },
+  {
+    key: "phonebookCarddavQuarantine",
+    table: "phonebook_carddav_quarantine",
+    primaryKey: ["id"],
+    introducedAt: PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD,
+  },
   { key: "ccCompanies", table: "cc_companies", primaryKey: ["id"] },
   { key: "ccCountries", table: "cc_countries", primaryKey: ["id"] },
   { key: "ccPorts", table: "cc_ports", primaryKey: ["id"] },

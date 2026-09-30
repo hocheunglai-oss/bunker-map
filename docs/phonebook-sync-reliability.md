@@ -23,10 +23,33 @@
 
 ## Operational limits
 
-- The retry list is local to the browser, not a durable server-side background job. Keep the page open during a sync. After interruption, return to the same browser and use **Retry Failed**; clearing browser storage loses that retry list, not the saved FCUNO contact data.
-- Other browsers/devices do not share the retry list. Concurrent edits in separate browsers are not protected by a global database lock; a detected source change requires retry.
-- A full resync can take time for a large directory and does not remove orphaned remote cards. Use a selected-company sync for an affected company first. Do not delete/recreate contacts as routine recovery.
+- The browser retry list is immediate feedback, not the only delivery mechanism. Database triggers also record contact/company changes transactionally in a service-only server queue, including deletions. Closing the page or clearing local storage does not discard that work.
+- Manual writes and the background reconciler share a database lease. A busy writer returns a retryable failure rather than running a conflicting upload/deletion. The background worker reads current saved data and acknowledges only the exact queue version it processed.
+- A full resync remains an upload-only pass; it never wipes the book. The separate five-minute reconciler repairs missing contacts and removes backed-up extras. A large backlog or provider outage can require multiple runs. Do not delete/recreate contacts as routine recovery.
 - CardDAV readback proves server delivery, not immediate appearance on every phone. If readback is verified but a phone remains stale, inspect that phone's configured account and refresh behavior separately.
+
+## Authoritative mirror and recoverable cleanup (30 September 2026)
+
+The account owner explicitly requested removal of the five unmanaged cards and an exact FCUNO mirror. This dedicated address book is therefore an output of the saved FCUNO Phonebook, not a second editable master. Add/edit contacts in FCUNO; records added directly by a phone or another CardDAV client are outside the authoritative list and may be quarantined and removed.
+
+The incident inventory showed 5,214 saved and matched IDs, zero missing/orphaned managed IDs, and five unmanaged resources: GOKSU METE, two LAM CHUN FU (CARGO OFFICER) cards, NIKOS KASOURIDIS, and Leon Green. Current and historical FCUNO writers use deterministic `bunker-map-UUID.vcf` resources with explicit FCUNO identity markers. The original writer of those five cards is **not established** by the count evidence.
+
+A separate, reproduced flaw allowed an in-flight upload to recreate a contact after a concurrent deletion. Shared writer serialization and durable desired-state delivery address that race. Scheduled exact-ID reconciliation also detects missing/orphaned/unknown resources independently of browser activity.
+
+The authenticated cron is `/api/cron/phonebook-carddav-reconcile`, scheduled every five minutes. It requires the existing `CRON_SECRET`, defers during a verified database backup, and has bounded execution. It does not send new reminder emails.
+
+Cleanup safeguards:
+
+- Obtain a complete remote inventory and stable, nonempty source ID set; repair missing authoritative cards before deleting extras.
+- Restrict remote requests to direct members of the configured address book, never another origin, collection, or nested path.
+- Read each proposed extra, preserve its complete vCard, strong ETag and content hash in `phonebook_carddav_quarantine`, and verify the saved backup before deletion.
+- Delete conditionally using the original ETag. A changed card, incomplete inventory, unavailable database, failed backup, or unsafe large deletion set stops cleanup.
+- Verify remote absence and record deletion time. Finally compare identities and total counts again; partial work is not a verified match.
+- Keep quarantine inaccessible to browser roles and included in the ordinary verified database backups. Do not purge quarantine as part of the worker.
+
+Recovery is an administrator operation: retrieve the original vCard from the service-only quarantine, review it, and preferably create the desired contact in FCUNO. Restoring an unmanaged card straight into the output book without changing the authoritative policy would cause it to be quarantined again. Never overwrite an existing remote resource blindly.
+
+The job provides automatic convergence, not an instantaneous count guarantee on offline phones. A client with write permission can still create extras between runs. Strong prevention at the provider requires a separately verified read-only phone account and an independent writer account; do not claim those provider permissions were changed unless they were actually inspected and tested.
 
 ## Verification
 
@@ -36,4 +59,4 @@ Before closing an incident: save a named affected contact, verify CardDAV readba
 
 ## Investigating a device count difference
 
-Refresh the inventory on the authenticated Phonebook page. Compare the returned `carddavTotalCount` with the device's count for this account, not its combined list of all accounts. `carddavOtherCount` identifies entries outside FCUNO's managed filenames; do not assume they are duplicates or delete them. `carddavMissingCount` and `carddavOrphanCount` compare the actual managed UUID sets. Use the bounded logged UUID samples to correlate missing/orphaned cards with the database and audit history before repairing individual records. The inventory never writes to either system. Matching identities establishes presence, not current field contents or the phone's local cache state.
+Refresh the inventory on the authenticated Phonebook page. Compare the returned `carddavTotalCount` with the device's count for this account, not its combined list of all accounts. `carddavOtherCount` identifies entries outside FCUNO's managed filenames; it is not evidence that names alone are duplicates. The authorized server reconciler handles these records only under the recoverable-cleanup policy above. `carddavMissingCount` and `carddavOrphanCount` compare the actual managed UUID sets. Use the bounded logged UUID samples to correlate missing/orphaned cards with the database and audit history before repairing individual records. The inventory GET never writes to either system. Matching identities establishes presence, not current field contents or the phone's local cache state.

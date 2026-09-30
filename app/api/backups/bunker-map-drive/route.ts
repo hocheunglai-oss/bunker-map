@@ -32,6 +32,7 @@ const BACKUP_STREAM_VERIFICATION_SCHEMA =
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
+const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
@@ -162,6 +163,18 @@ const TABLES: TableConfig[] = [
   { key: "outlookExchangeSyncQueue", table: "outlook_exchange_sync_queue", order: [{ column: "id", ascending: true }] },
   { key: "phonebookContacts", table: "phonebook_contacts", order: [{ column: "id", ascending: true }] },
   { key: "phonebookCompanies", table: "phonebook_companies", order: [{ column: "id", ascending: true }] },
+  {
+    key: "phonebookCarddavQueue",
+    table: "phonebook_carddav_queue",
+    order: [{ column: "contact_id", ascending: true }],
+    introducedAt: PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD,
+  },
+  {
+    key: "phonebookCarddavQuarantine",
+    table: "phonebook_carddav_quarantine",
+    order: [{ column: "id", ascending: true }],
+    introducedAt: PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD,
+  },
   { key: "ccCompanies", table: "cc_companies", order: [{ column: "id", ascending: true }] },
   { key: "ccCountries", table: "cc_countries", order: [{ column: "id", ascending: true }] },
   { key: "ccPorts", table: "cc_ports", order: [{ column: "id", ascending: true }] },

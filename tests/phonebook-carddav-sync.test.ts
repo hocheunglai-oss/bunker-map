@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import vm from "node:vm"
@@ -7,6 +7,10 @@ import ts from "typescript"
 
 const routeSource = readFileSync(new URL("../app/api/phonebook/carddav-sync/route.ts", import.meta.url), "utf8")
 const routeOutput = ts.transpileModule(routeSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+}).outputText
+const librarySource = readFileSync(new URL("../lib/phonebookCarddav.ts", import.meta.url), "utf8")
+const libraryOutput = ts.transpileModule(librarySource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
 }).outputText
 
@@ -23,6 +27,7 @@ type FixtureOptions = {
   permissionError?: "Unauthorized" | "Forbidden"
   databaseError?: boolean
   missingServiceKey?: boolean
+  lockBusy?: boolean
   onFetch?: (call: FetchCall, remote: Map<string, string>, rows: Contact[]) => Response | undefined | Promise<Response | undefined>
 }
 
@@ -34,20 +39,36 @@ function fixture(options: FixtureOptions = {}) {
   const logs: unknown[][] = []
   const permissions: string[][] = []
   const remote = new Map<string, string>()
+  const queue: Array<{ contact_id: string; version: string }> = []
   const exports: { POST?: (request: Request) => Promise<Response>; GET?: (request?: Request) => Promise<Response>; maxDuration?: number } = {}
   const dependencies: Record<string, unknown> = {
-    "node:crypto": { createHash },
+    "node:crypto": { createHash, randomUUID },
     "next/server": { NextResponse: Response },
     "@supabase/supabase-js": { createClient: (url: string, key: string) => {
       assert.equal(url, "https://database-fixture.invalid")
       assert.equal(key, "synthetic-service-key")
       return {
+        async rpc(name: string, args: { p_contact_ids?: string[] }) {
+          if (name === "claim_bunker_map_backup_lock") return { data: !options.lockBusy, error: null }
+          if (name === "enqueue_phonebook_carddav") {
+            for (const contact_id of args.p_contact_ids || []) {
+              const current = queue.find((row) => row.contact_id === contact_id)
+              if (current) current.version = randomUUID()
+              else queue.push({ contact_id, version: randomUUID() })
+            }
+            return { data: true, error: null }
+          }
+          if (name === "release_bunker_map_backup_lock") return { data: true, error: null }
+          throw new Error(`Unexpected RPC ${name}`)
+        },
         from(table: string) {
-          assert.ok(["phonebook_contacts", "phonebook_companies"].includes(table))
+          assert.ok(["phonebook_contacts", "phonebook_companies", "phonebook_carddav_queue"].includes(table))
           const query: { table: string; range?: number[]; order?: string; count?: string } = { table }
           const filters: Array<(row: Record<string, unknown>) => boolean> = []
           let single = false
+          let deleting = false
           const builder = {
+            delete() { deleting = true; return builder },
             select(_fields: string, config?: { count?: string }) { query.count = config?.count; return builder },
             order(field: string) { query.order = field; return builder },
             range(start: number, end: number) { query.range = [start, end]; return builder },
@@ -56,10 +77,12 @@ function fixture(options: FixtureOptions = {}) {
             maybeSingle() { single = true; return builder },
             then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
               queries.push({ ...query })
-              let selected = (table === "phonebook_contacts" ? rows : companies).filter((row) => filters.every((filter) => filter(row)))
+              const allRows: Array<Record<string, unknown>> = table === "phonebook_contacts" ? rows : table === "phonebook_carddav_queue" ? queue : companies
+              let selected = allRows.filter((row) => filters.every((filter) => filter(row)))
               if (query.order) selected = [...selected].sort((a, b) => String((a as Record<string, unknown>)[query.order!]).localeCompare(String((b as Record<string, unknown>)[query.order!])))
               const count = selected.length
               if (query.range) selected = selected.slice(query.range[0], query.range[1] + 1)
+              if (deleting && !options.databaseError) for (const row of selected) allRows.splice(allRows.indexOf(row), 1)
               return Promise.resolve({ data: structuredClone(single ? selected[0] || null : selected), count, error: options.databaseError ? new Error("PRIVATE SOURCE PHONE +85212345678 AND CREDENTIAL") : null }).then(resolve, reject)
             },
           }
@@ -73,7 +96,7 @@ function fixture(options: FixtureOptions = {}) {
       return { username: "test-admin" }
     } },
   }
-  vm.runInNewContext(routeOutput, {
+  const context = {
     exports, Error, URL, Buffer, AbortSignal, setTimeout: (callback: () => void) => setTimeout(callback, 0),
     console: { error: (...values: unknown[]) => logs.push(values), info: (...values: unknown[]) => logs.push(values) },
     process: { env: {
@@ -101,12 +124,16 @@ function fixture(options: FixtureOptions = {}) {
       if (call.method === "GET") return new Response(remote.get(contactId) || null, { status: remote.has(contactId) ? 200 : 404 })
       throw new Error(`Unexpected remote operation: ${call.method}`)
     },
-  })
+  }
+  const libraryExports: Record<string, unknown> = {}
+  vm.runInNewContext(libraryOutput, { ...context, exports: libraryExports })
+  dependencies["@/lib/phonebookCarddav"] = libraryExports
+  vm.runInNewContext(routeOutput, context)
   const post = (body: unknown) => exports.POST!(new Request("https://app-fixture.invalid/api/phonebook/carddav-sync", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   }))
   const get = (details = false) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`))
-  return { post, get, calls, queries, logs, permissions, remote, rows }
+  return { post, get, calls, queries, logs, permissions, remote, rows, queue }
 }
 
 test("read-only count reports saved contacts and distinct managed CardDAV cards", async () => {
@@ -246,6 +273,30 @@ test("successful explicit updates verify the exact IDs and preserve company-phon
   assert.ok(f.remote.get(id(1))?.includes("TEL;TYPE=WORK:87654321"))
   assert.equal(f.calls.filter((call) => call.method === "PUT").length, 2)
   assert.deepEqual(JSON.parse(JSON.stringify(f.logs)), [["phonebook_carddav_sync_verified", { contactIds: [id(1), id(2)] }]])
+  assert.equal(f.queue.length, 0)
+})
+
+test("busy common writer lock keeps explicit changes queued without a remote write", async () => {
+  const f = fixture({ lockBusy: true })
+  assert.equal((await f.post({ contactIds: [id(1)] })).status, 503)
+  assert.equal(f.queue.length, 1)
+  assert.equal(f.calls.length, 0)
+})
+
+test("manual acknowledgment preserves a newer queued version", async () => {
+  let f: ReturnType<typeof fixture>
+  f = fixture({ onFetch: (call) => {
+    if (call.method === "GET") f.queue[0].version = randomUUID()
+    return undefined
+  } })
+  assert.equal((await f.post({ contactIds: [id(1)] })).status, 200)
+  assert.equal(f.queue.length, 1)
+})
+
+test("company case and surrounding spaces do not drop inherited telephone details", async () => {
+  const f = fixture({ rows: [contact(1, { company: " test company " })] })
+  assert.equal((await f.post({ contactIds: [id(1)] })).status, 200)
+  assert.ok(f.remote.get(id(1))?.includes("TEL;TYPE=WORK:87654321"))
 })
 
 test("a missing explicit ID is an actionable partial failure rather than false success", async () => {
