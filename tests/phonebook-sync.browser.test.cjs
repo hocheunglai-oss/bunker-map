@@ -14,7 +14,7 @@ const button = (page, name) => page.getByRole("button", { name, exact: true })
 const company = (page, name = "ALPHA SHIPPING") => page.getByRole("button", { name: new RegExp(`^${name}`) })
 const contact = (page, name = "ALICE TEST") => page.getByRole("button", { name: new RegExp(`^${name}`) })
 const field = (page, name) => page.getByText(name, { exact: true }).locator("..").locator("input")
-const requests = (page) => page.evaluate(() => window.__phonebookSyncHarness.requests.filter((request) => request.url === "/api/phonebook/carddav-sync"))
+const requests = (page) => page.evaluate(() => window.__phonebookSyncHarness.requests.filter((request) => request.url === "/api/phonebook/carddav-sync" && request.method === "POST"))
 const retries = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "[]"), RETRY_KEY)
 const settle = (page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 
@@ -93,6 +93,9 @@ async function main() {
     await reset()
     assert.equal(await button(page, "Sync selected company").count(), 1)
     assert.equal(await page.getByRole("button", { name: /^Synced \d+ Contacts$/ }).count(), 0)
+    await page.getByText("FC Uno: 4 · CardDAV: 4", { exact: true }).waitFor()
+    await button(page, "Refresh phonebook counts").click()
+    await page.getByText("FC Uno: 4 · CardDAV: 4", { exact: true }).waitFor()
     assert.deepEqual(await requests(page), [], "a directory count is not evidence of remote sync")
     await selectCompany()
     // Add a contact after the UI cached the company: sync must re-fetch its IDs.

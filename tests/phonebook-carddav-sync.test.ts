@@ -34,7 +34,7 @@ function fixture(options: FixtureOptions = {}) {
   const logs: unknown[][] = []
   const permissions: string[][] = []
   const remote = new Map<string, string>()
-  const exports: { POST?: (request: Request) => Promise<Response>; maxDuration?: number } = {}
+  const exports: { POST?: (request: Request) => Promise<Response>; GET?: () => Promise<Response>; maxDuration?: number } = {}
   const dependencies: Record<string, unknown> = {
     "node:crypto": { createHash },
     "next/server": { NextResponse: Response },
@@ -75,7 +75,7 @@ function fixture(options: FixtureOptions = {}) {
   }
   vm.runInNewContext(routeOutput, {
     exports, Error, URL, Buffer, AbortSignal, setTimeout: (callback: () => void) => setTimeout(callback, 0),
-    console: { error: (...values: unknown[]) => logs.push(values) },
+    console: { error: (...values: unknown[]) => logs.push(values), info: (...values: unknown[]) => logs.push(values) },
     process: { env: {
       NEXT_PUBLIC_SUPABASE_URL: "https://database-fixture.invalid",
       SUPABASE_SERVICE_ROLE_KEY: options.missingServiceKey ? undefined : "synthetic-service-key",
@@ -92,6 +92,10 @@ function fixture(options: FixtureOptions = {}) {
       calls.push(call)
       const customResponse = await options.onFetch?.(call, remote, rows)
       if (customResponse) return customResponse
+      if (call.method === "PROPFIND") {
+        const hrefs = [...remote.keys()].map((id) => `<d:response><d:href>/book/bunker-map-${id}.vcf</d:href></d:response>`).join("")
+        return new Response(`<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/</d:href></d:response>${hrefs}</d:multistatus>`, { status: 207 })
+      }
       if (call.method === "PUT") { remote.set(contactId, call.body); return new Response(null, { status: 204 }) }
       if (call.method === "DELETE") { remote.delete(contactId); return new Response(null, { status: 204 }) }
       if (call.method === "GET") return new Response(remote.get(contactId) || null, { status: remote.has(contactId) ? 200 : 404 })
@@ -101,8 +105,34 @@ function fixture(options: FixtureOptions = {}) {
   const post = (body: unknown) => exports.POST!(new Request("https://app-fixture.invalid/api/phonebook/carddav-sync", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   }))
-  return { post, calls, queries, logs, permissions, remote, rows }
+  const get = () => exports.GET!()
+  return { post, get, calls, queries, logs, permissions, remote, rows }
 }
+
+test("read-only count reports saved contacts and distinct managed CardDAV cards", async () => {
+  const f = fixture({ onFetch: (call) => call.method === "PROPFIND" ? new Response(
+    `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/other.vcf</d:href></d:response><d:response><d:href>https://other.invalid/book/bunker-map-${id(2)}.vcf</d:href></d:response></d:multistatus>`, { status: 207 }) : undefined })
+  const response = await f.get()
+  assert.equal(response.status, 200)
+  const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+  assert.equal(payload.savedContactCount, 2)
+  assert.equal(payload.carddavContactCount, 1)
+  assert.ok(!Number.isNaN(Date.parse(payload.checkedAt)))
+  assert.deepEqual(f.permissions, [["phonebook", "view"]])
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+})
+
+test("count never invents a zero when CardDAV is unavailable or unauthorized", async () => {
+  const denied = fixture({ permissionError: "Forbidden" })
+  assert.equal((await denied.get()).status, 403)
+  assert.equal(denied.calls.length, 0)
+  const unavailable = fixture({ onFetch: (call) => call.method === "PROPFIND" ? new Response("secret upstream body", { status: 503 }) : undefined })
+  const response = await unavailable.get()
+  assert.equal(response.status, 503)
+  assert.equal((await response.json()).message, "CardDAV count unavailable. Please retry.")
+  const malformed = fixture({ onFetch: (call) => call.method === "PROPFIND" ? new Response("not XML", { status: 207 }) : undefined })
+  assert.equal((await malformed.get()).status, 503)
+})
 
 test("authorizes phonebook edit permission before reading or syncing contacts", async () => {
   for (const [permissionError, status] of [["Unauthorized", 401], ["Forbidden", 403]] as const) {
@@ -143,6 +173,7 @@ test("successful explicit updates verify the exact IDs and preserve company-phon
   assert.deepEqual(result.failed, [])
   assert.ok(f.remote.get(id(1))?.includes("TEL;TYPE=WORK:87654321"))
   assert.equal(f.calls.filter((call) => call.method === "PUT").length, 2)
+  assert.deepEqual(JSON.parse(JSON.stringify(f.logs)), [["phonebook_carddav_sync_verified", { contactIds: [id(1), id(2)] }]])
 })
 
 test("a missing explicit ID is an actionable partial failure rather than false success", async () => {

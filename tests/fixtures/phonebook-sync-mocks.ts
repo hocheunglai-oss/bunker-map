@@ -40,6 +40,7 @@ export function installPhonebookSyncHarness() {
     if (url.origin !== window.location.origin) throw new Error(`External request blocked by local fixture: ${url.origin}`)
     const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } })
     if (url.pathname === "/api/phonebook/bootstrap" && method === "GET") return json({ companies: harness.companies, contactCount: harness.contacts.length })
+    if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, checkedAt: new Date().toISOString() })
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
       const company = url.searchParams.get("company")
