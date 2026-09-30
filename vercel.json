@@ -32,6 +32,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/phonebook-carddav-reconcile",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/event-calendar/google-sync",
       "schedule": "* * * * *"
     },
