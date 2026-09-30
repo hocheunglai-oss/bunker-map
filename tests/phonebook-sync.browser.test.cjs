@@ -93,9 +93,9 @@ async function main() {
     await reset()
     assert.equal(await button(page, "Sync selected company").count(), 1)
     assert.equal(await page.getByRole("button", { name: /^Synced \d+ Contacts$/ }).count(), 0)
-    await page.getByText("FC Uno: 4 · CardDAV: 4", { exact: true }).waitFor()
+    await page.getByText("FC Uno: 4 · CardDAV total: 9 (4 FC Uno + 5 other)", { exact: true }).waitFor()
     await button(page, "Refresh phonebook counts").click()
-    await page.getByText("FC Uno: 4 · CardDAV: 4", { exact: true }).waitFor()
+    await page.getByText("FC Uno: 4 · CardDAV total: 9 (4 FC Uno + 5 other)", { exact: true }).waitFor()
     assert.deepEqual(await requests(page), [], "a directory count is not evidence of remote sync")
     await selectCompany()
     // Add a contact after the UI cached the company: sync must re-fetch its IDs.

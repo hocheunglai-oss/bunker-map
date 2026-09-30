@@ -114,12 +114,24 @@ test("read-only count reports saved contacts and distinct managed CardDAV cards"
     `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/other.vcf</d:href></d:response><d:response><d:href>https://other.invalid/book/bunker-map-${id(2)}.vcf</d:href></d:response></d:multistatus>`, { status: 207 }) : undefined })
   const response = await f.get()
   assert.equal(response.status, 200)
-  const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+  const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; carddavTotalCount: number; carddavOtherCount: number; checkedAt: string }
   assert.equal(payload.savedContactCount, 2)
   assert.equal(payload.carddavContactCount, 1)
+  assert.equal(payload.carddavTotalCount, 2)
+  assert.equal(payload.carddavOtherCount, 1)
   assert.ok(!Number.isNaN(Date.parse(payload.checkedAt)))
   assert.deepEqual(f.permissions, [["phonebook", "view"]])
   assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+})
+
+test("inventory includes phone-created cards without a vcf suffix and excludes collections", async () => {
+  const f = fixture({ onFetch: () => new Response('<multistatus xmlns="DAV:"><response><href>/book/phone-contact</href><propstat><prop><resourcetype/></prop></propstat></response><response><href>/book/folder</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response><response><href>/book/phone-contact</href></response></multistatus>', { status: 207 }) })
+  const response = await f.get()
+  assert.equal(response.status, 200)
+  const payload = await response.json()
+  assert.equal(payload.carddavContactCount, 0)
+  assert.equal(payload.carddavTotalCount, 1)
+  assert.equal(payload.carddavOtherCount, 1)
 })
 
 test("count never invents a zero when CardDAV is unavailable or unauthorized", async () => {

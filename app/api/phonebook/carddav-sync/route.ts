@@ -227,22 +227,30 @@ function cardHref(contactId: string) {
   return `${MANAGED_PREFIX}${encodeURIComponent(contactId)}.vcf`
 }
 
-function countManagedCards(xml: string, addressBookUrl: string) {
+function countAddressBookCards(xml: string, addressBookUrl: string) {
   const book = new URL(addressBookUrl)
   const ids = new Set<string>()
-  for (const match of xml.matchAll(/<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/gi)) {
+  const cards = new Set<string>()
+  for (const response of xml.matchAll(/<(?:[\w-]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?response>/gi)) {
+    if (/<(?:[\w-]+:)?collection\b/i.test(response[1])) continue
+    const match = /<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/i.exec(response[1])
+    if (!match) continue
     try {
       const href = match[1].replace(/&amp;/gi, "&")
       const url = new URL(href, book)
       if (url.origin !== book.origin || !url.pathname.startsWith(book.pathname)) continue
       const filename = decodeURIComponent(url.pathname.slice(book.pathname.length))
+      if (!filename || filename.includes("/")) continue
+      // CardDAV resource names need not end in .vcf. Include every direct
+      // non-collection member, including cards created by phone clients.
+      cards.add(url.pathname)
       const id = /^bunker-map-([0-9a-f-]{36})\.vcf$/i.exec(filename)?.[1]
       if (id && UUID_PATTERN.test(id)) ids.add(id.toLowerCase())
     } catch {
       // Ignore malformed remote hrefs rather than counting them as contacts.
     }
   }
-  return ids.size
+  return { managed: ids.size, total: cards.size, other: cards.size - ids.size }
 }
 
 function getCardDavConfig() {
@@ -277,7 +285,7 @@ export async function GET() {
       cardDavRequest("", {
         method: "PROPFIND",
         headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
-        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>',
+        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>',
         cache: "no-store",
       }),
     ])
@@ -285,9 +293,14 @@ export async function GET() {
     if (remote.status !== 207) throw httpSyncError("verification", remote.status)
     const xml = await remote.text()
     if (!/<(?:[\w-]+:)?multistatus\b/i.test(xml)) throw new SyncError("Invalid CardDAV count response.", "verification")
+    const counts = countAddressBookCards(xml, addressBookUrl)
+    // Aggregate counts only: no names, contact fields, URLs or credentials.
+    console.info("phonebook_carddav_inventory", { saved: saved.count, ...counts })
     return NextResponse.json({
       savedContactCount: saved.count,
-      carddavContactCount: countManagedCards(xml, addressBookUrl),
+      carddavContactCount: counts.managed,
+      carddavTotalCount: counts.total,
+      carddavOtherCount: counts.other,
       checkedAt: new Date().toISOString(),
     }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {

@@ -549,7 +549,7 @@ export default function PhonebookPage() {
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
-  const [carddavCounts, setCarddavCounts] = useState<{ savedContactCount: number; carddavContactCount: number; checkedAt: string } | null>(null)
+  const [carddavCounts, setCarddavCounts] = useState<{ savedContactCount: number; carddavContactCount: number; carddavTotalCount?: number; carddavOtherCount?: number; checkedAt: string } | null>(null)
   const [carddavCountLoading, setCarddavCountLoading] = useState(false)
   const [carddavCountError, setCarddavCountError] = useState(false)
   const contactSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -979,7 +979,7 @@ export default function PhonebookPage() {
     try {
       const response = await fetch("/api/phonebook/carddav-sync", { cache: "no-store" })
       if (!response.ok) throw new Error("CardDAV count unavailable")
-      const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+      const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; carddavTotalCount?: number; carddavOtherCount?: number; checkedAt: string }
       if (!Number.isSafeInteger(payload.savedContactCount) || !Number.isSafeInteger(payload.carddavContactCount)) throw new Error("Invalid CardDAV count")
       setCarddavCounts(payload)
       setCarddavCountError(false)
@@ -2105,8 +2105,8 @@ export default function PhonebookPage() {
     <div style={pageStyle}>
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
-          <span title="Saved contacts are in FC Uno. CardDAV entries are on the sync server; your phone may take time to refresh." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)", whiteSpace: "nowrap" }}>
-            {`FC Uno: ${carddavCounts?.savedContactCount ?? perfStats.contactCount.toLocaleString()} · CardDAV: ${carddavCountLoading ? "checking…" : carddavCountError ? "unavailable" : carddavCounts?.carddavContactCount.toLocaleString() ?? "—"}`}
+          <span title="CardDAV total includes all entries in the phone address book. Other entries were not created under FC Uno's current sync IDs. Your phone may take time to refresh." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)", whiteSpace: "nowrap" }}>
+            {`FC Uno: ${(carddavCounts?.savedContactCount ?? perfStats.contactCount).toLocaleString()} · CardDAV total: ${carddavCountLoading ? "checking…" : carddavCountError ? "unavailable" : (carddavCounts?.carddavTotalCount ?? carddavCounts?.carddavContactCount)?.toLocaleString() ?? "—"}${!carddavCountLoading && carddavCounts?.carddavOtherCount ? ` (${carddavCounts.carddavContactCount.toLocaleString()} FC Uno + ${carddavCounts.carddavOtherCount.toLocaleString()} other)` : ""}`}
           </span>
           <button type="button" onClick={() => void refreshCarddavCounts()} disabled={carddavCountLoading} aria-label="Refresh phonebook counts" title="Refresh phonebook counts" style={buttonStyle}>↻</button>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
