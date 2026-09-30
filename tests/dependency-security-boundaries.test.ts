@@ -1,10 +1,13 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import test from "node:test"
-import nodemailer from "nodemailer"
+import nodemailer, { type SendMailOptions } from "nodemailer"
 import sharp from "sharp"
 
 type PackageVersion = { version: string }
+const require = createRequire(import.meta.url)
 
 function assertVersionFloor(actual: string, minimum: string, label: string) {
   assert.match(actual, /^\d+\.\d+\.\d+$/, `${label} must use a stable release`)
@@ -17,7 +20,7 @@ function assertVersionFloor(actual: string, minimum: string, label: string) {
   )
 }
 
-function compileEmail(input: nodemailer.SendMailOptions) {
+function compileEmail(input: SendMailOptions) {
   // Stream transport compiles MIME in memory without connecting to SMTP or DNS.
   const transport = nodemailer.createTransport({
     streamTransport: true,
@@ -34,14 +37,15 @@ function compileEmail(input: nodemailer.SendMailOptions) {
   })
 }
 
-test("installed and locked mail/image dependencies retain their security fixes", () => {
+test("installed and locked dependencies retain their security fixes", () => {
   const lock = JSON.parse(
     readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
   ) as { packages: Record<string, PackageVersion> }
   const floors: Record<string, string> = {
     next: "16.3.3",
-    nodemailer: "9.1.1",
+    nodemailer: "10.0.13",
     sharp: "0.35.4",
+    uuid: "11.1.1",
   }
 
   for (const [name, minimum] of Object.entries(floors)) {
@@ -55,9 +59,13 @@ test("installed and locked mail/image dependencies retain their security fixes",
   }
 
   for (const [packagePath, locked] of Object.entries(lock.packages)) {
-    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|@img\/sharp-[^/]+)$/)?.[1]
+    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|uuid|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
     if (!name) continue
-    const minimum = floors[name] || (name.startsWith("@img/sharp-libvips-") ? "1.3.3" : "0.35.4")
+    const braceFloors: Record<string, string> = { 1: "1.1.21", 2: "2.1.7", 3: "3.0.9", 5: "5.0.12" }
+    const minimum = name === "brace-expansion"
+      ? braceFloors[locked.version.split(".")[0]]
+      : floors[name] || (name.startsWith("@img/sharp-libvips-") ? "1.3.3" : "0.35.4")
+    assert.ok(minimum, `${name} must use a security-supported release line`)
     assertVersionFloor(locked.version, minimum, `locked ${name}`)
 
     // Platform-specific optional packages need only be installed on their host,
@@ -113,6 +121,8 @@ test("mail comments cannot concatenate a trusted-looking domain with a second do
     "user@good.example(a(b)c)",
     "user@(comment)good.example",
     "user(comment)@good.example",
+    '"user"@good.example(comment)evil.example',
+    '"user"@good.example(a)evil.example(b)another.example',
   ]) {
     const result = await compileEmail({ to: address })
     assert.deepEqual(result.envelope.to, ["user@good.example"], address)
@@ -138,6 +148,66 @@ test("a small repeated address list preserves all unique recipients without trun
   const recipients = Array.from({ length: 64 }, (_, index) => `recipient+${index}@example.test`)
   const result = await compileEmail({ to: [...recipients, ...recipients].join(", ") })
   assert.deepEqual(result.envelope.to, recipients)
+})
+
+test("malformed mail addresses cannot stall the parser or overflow recipient flattening", () => {
+  // Run the advisory shapes in a separate, bounded process so a regressed
+  // dependency cannot block the test runner's own event loop indefinitely.
+  execFileSync(process.execPath, ["-e", `
+    const assert = require("node:assert/strict");
+    const parse = require("nodemailer/lib/addressparser");
+    const run = "[x]".repeat(40000);
+    for (const value of [run, run + "@", "@" + run, " >" + ">[x][x]".repeat(40000)]) {
+      assert.ok(Array.isArray(parse(value)));
+    }
+    const nodemailer = require("nodemailer");
+    let to = "recipient@example.test";
+    for (let depth = 0; depth < 5000; depth++) to = [to];
+    nodemailer.createTransport({ streamTransport: true, buffer: true })
+      .sendMail({ from: "sender@example.test", to, text: "test" })
+      .then(result => assert.deepEqual(result.envelope.to, ["recipient@example.test"]))
+      .catch(error => { console.error(error); process.exitCode = 1; });
+  `], { cwd: new URL("..", import.meta.url), timeout: 5000, stdio: "pipe" })
+})
+
+test("all locked brace parsers bound malicious nesting and preserve normal expansion", () => {
+  const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")) as {
+    packages: Record<string, PackageVersion>
+  }
+  for (const packagePath of Object.keys(lock.packages).filter(path => path.endsWith("/brace-expansion"))) {
+    execFileSync(process.execPath, ["-e", `
+      const assert = require("node:assert/strict");
+      const loaded = require(${JSON.stringify(`./${packagePath}`)});
+      const expand = typeof loaded === "function" ? loaded : loaded.expand;
+      assert.deepEqual(expand("file-{a,b}.txt"), ["file-a.txt", "file-b.txt"]);
+      for (const value of [
+        "{".repeat(3200) + "a,b" + "}".repeat(3200),
+        "{a,".repeat(4000) + "z" + "}".repeat(4000),
+        "{a}" + "}".repeat(128000) + ",z}"
+      ]) assert.ok(Array.isArray(expand(value)));
+    `], { cwd: new URL("..", import.meta.url), timeout: 5000, stdio: "pipe" })
+  }
+})
+
+test("Google HTTP clients retain CommonJS UUID generation with checked buffer bounds", () => {
+  // Resolve from each actual consumer, covering its nested dependency layout.
+  for (const consumer of [
+    "../node_modules/@google-cloud/storage/node_modules/gaxios/package.json",
+    "../node_modules/gtoken/node_modules/gaxios/package.json",
+    "../node_modules/teeny-request/package.json",
+  ]) {
+    const consumerRequire = createRequire(new URL(consumer, import.meta.url))
+    const uuid = consumerRequire("uuid") as typeof import("uuid")
+    assert.match(uuid.v4(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    for (const generate of [uuid.v3, uuid.v5]) {
+      assert.throws(() => generate("example", uuid.v5.DNS, Buffer.alloc(1)), RangeError)
+      assert.throws(() => generate("example", uuid.v5.DNS, Buffer.alloc(16), -1), RangeError)
+    }
+    assert.throws(() => uuid.v6({}, Buffer.alloc(1)), RangeError)
+  }
+  // Load the backup's SDK through its CommonJS entry without making a request.
+  const { Storage } = require("@google-cloud/storage") as typeof import("@google-cloud/storage")
+  assert.equal(new Storage({ projectId: "test-only" }).bucket("test-only").file("manifest.json").name, "manifest.json")
 })
 
 test("patched Sharp continues to encode, decode, and resize ordinary PNG images", async () => {

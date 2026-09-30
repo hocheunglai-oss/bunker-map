@@ -34,7 +34,7 @@ function fixture(options: FixtureOptions = {}) {
   const logs: unknown[][] = []
   const permissions: string[][] = []
   const remote = new Map<string, string>()
-  const exports: { POST?: (request: Request) => Promise<Response>; GET?: () => Promise<Response>; maxDuration?: number } = {}
+  const exports: { POST?: (request: Request) => Promise<Response>; GET?: (request?: Request) => Promise<Response>; maxDuration?: number } = {}
   const dependencies: Record<string, unknown> = {
     "node:crypto": { createHash },
     "next/server": { NextResponse: Response },
@@ -105,7 +105,7 @@ function fixture(options: FixtureOptions = {}) {
   const post = (body: unknown) => exports.POST!(new Request("https://app-fixture.invalid/api/phonebook/carddav-sync", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   }))
-  const get = () => exports.GET!()
+  const get = (details = false) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`))
   return { post, get, calls, queries, logs, permissions, remote, rows }
 }
 
@@ -114,12 +114,73 @@ test("read-only count reports saved contacts and distinct managed CardDAV cards"
     `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:response><d:response><d:href>/book/other.vcf</d:href></d:response><d:response><d:href>https://other.invalid/book/bunker-map-${id(2)}.vcf</d:href></d:response></d:multistatus>`, { status: 207 }) : undefined })
   const response = await f.get()
   assert.equal(response.status, 200)
-  const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+  const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; carddavTotalCount: number; carddavOtherCount: number; checkedAt: string }
   assert.equal(payload.savedContactCount, 2)
   assert.equal(payload.carddavContactCount, 1)
+  assert.equal(payload.carddavTotalCount, 2)
+  assert.equal(payload.carddavOtherCount, 1)
   assert.ok(!Number.isNaN(Date.parse(payload.checkedAt)))
   assert.deepEqual(f.permissions, [["phonebook", "view"]])
   assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+})
+
+test("inventory includes phone-created cards without a vcf suffix and excludes collections", async () => {
+  const f = fixture({ onFetch: () => new Response('<multistatus xmlns="DAV:"><response><href>/book/phone-contact</href><propstat><prop><resourcetype/></prop></propstat></response><response><href>/book/folder</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response><response><href>/book/phone-contact</href></response></multistatus>', { status: 207 }) })
+  const response = await f.get()
+  assert.equal(response.status, 200)
+  const payload = await response.json()
+  assert.equal(payload.carddavContactCount, 0)
+  assert.equal(payload.carddavTotalCount, 1)
+  assert.equal(payload.carddavOtherCount, 1)
+})
+
+test("equal directory counts cannot hide one missing and one orphaned contact", async () => {
+  const f = fixture()
+  f.remote.set(id(1), "synthetic")
+  f.remote.set(id(3), "synthetic")
+  const response = await f.get()
+  const payload = await response.json()
+  assert.equal(payload.savedContactCount, 2)
+  assert.equal(payload.carddavContactCount, 2)
+  assert.equal(payload.carddavMatchedCount, 1)
+  assert.equal(payload.carddavMissingCount, 1)
+  assert.equal(payload.carddavOrphanCount, 1)
+  assert.deepEqual(payload.missingContactIds, [id(2)])
+  assert.deepEqual(payload.orphanedContactIds, [id(3)])
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+  assert.ok(!JSON.stringify(f.logs).includes("TEST CONTACT"))
+})
+
+test("explicit diagnostics identify other cards without writing or logging contact details", async () => {
+  const f = fixture({ onFetch: (call) => call.method === "PROPFIND"
+    ? new Response('<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/phone-created.vcf</d:href></d:response><d:response><d:href>https://other.invalid/unsafe.vcf</d:href></d:response></d:multistatus>', { status: 207 })
+    : new Response(`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:PRIVATE TEST NAME\r\nORG:PRIVATE TEST COMPANY\r\nUID:bunker-map-${id(1)}\r\nTEL:+85212345678\r\nEND:VCARD\r\n`) })
+  const payload = await (await f.get(true)).json()
+  assert.deepEqual(payload.otherContacts, [{ name: "PRIVATE TEST NAME", company: "PRIVATE TEST COMPANY", sourceContactId: id(1), sourceExists: true, readable: true }])
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND", "GET"])
+  assert.equal(f.calls[1].url.pathname, "/book/phone-created.vcf")
+  assert.ok(!JSON.stringify(f.logs).match(/PRIVATE|12345678|https:/))
+  assert.ok(!JSON.stringify(payload).includes("12345678"))
+})
+
+test("an ordinary phone UUID is not misidentified as an old FC Uno contact", async () => {
+  const f = fixture({ onFetch: (call) => call.method === "PROPFIND"
+    ? new Response('<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/phone-created.vcf</d:href></d:response></d:multistatus>', { status: 207 })
+    : new Response(`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:PHONE CONTACT\r\nUID:${id(3)}\r\nEND:VCARD\r\n`) })
+  const payload = await (await f.get(true)).json()
+  assert.equal(payload.otherContacts[0].sourceContactId, null)
+  assert.equal(payload.otherContacts[0].sourceExists, false)
+})
+
+test("inventory compares every source page instead of stopping at the database row limit", async () => {
+  const f = fixture({ rows: Array.from({ length: 1002 }, (_, index) => contact(index + 1)) })
+  for (const row of f.rows) f.remote.set(row.id, "synthetic")
+  const payload = await (await f.get()).json()
+  assert.equal(payload.savedContactCount, 1002)
+  assert.equal(payload.carddavMatchedCount, 1002)
+  assert.equal(payload.carddavMissingCount, 0)
+  assert.equal(payload.carddavOrphanCount, 0)
+  assert.deepEqual(f.queries.map((query) => query.range), [[0, 999], [1000, 1999]])
 })
 
 test("count never invents a zero when CardDAV is unavailable or unauthorized", async () => {
@@ -132,6 +193,17 @@ test("count never invents a zero when CardDAV is unavailable or unauthorized", a
   assert.equal((await response.json()).message, "CardDAV count unavailable. Please retry.")
   const malformed = fixture({ onFetch: (call) => call.method === "PROPFIND" ? new Response("not XML", { status: 207 }) : undefined })
   assert.equal((await malformed.get()).status, 503)
+  const truncated = fixture({ onFetch: () => new Response('<d:multistatus xmlns:d="DAV:">', { status: 207 }) })
+  assert.equal((await truncated.get()).status, 503)
+  const partiallyDenied = fixture({ onFetch: () => new Response(`<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href><d:status>HTTP/1.1 403 Forbidden</d:status></d:response></d:multistatus>`, { status: 207 }) })
+  assert.equal((await partiallyDenied.get()).status, 503)
+})
+
+test("a multistatus tombstone is excluded from the inventory", async () => {
+  const f = fixture({ rows: [], onFetch: () => new Response(`<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response></d:multistatus>`, { status: 207 }) })
+  const payload = await (await f.get()).json()
+  assert.equal(payload.carddavTotalCount, 0)
+  assert.equal(payload.carddavOrphanCount, 0)
 })
 
 test("authorizes phonebook edit permission before reading or syncing contacts", async () => {

@@ -227,22 +227,88 @@ function cardHref(contactId: string) {
   return `${MANAGED_PREFIX}${encodeURIComponent(contactId)}.vcf`
 }
 
-function countManagedCards(xml: string, addressBookUrl: string) {
+function countAddressBookCards(xml: string, addressBookUrl: string) {
   const book = new URL(addressBookUrl)
   const ids = new Set<string>()
-  for (const match of xml.matchAll(/<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/gi)) {
+  const cards = new Set<string>()
+  const otherPaths = new Set<string>()
+  for (const response of xml.matchAll(/<(?:[\w-]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?response>/gi)) {
+    const statuses = [...response[1].matchAll(/<(?:[\w-]+:)?status\b[^>]*>HTTP\/[^\s]+\s+(\d{3})\b/gi)].map((match) => Number(match[1]))
+    if (statuses.length && !statuses.some((status) => status >= 200 && status < 300)) {
+      // A disappeared resource is not a card; permission/upstream errors mean
+      // we cannot truthfully claim to have compared the complete address book.
+      if (statuses.every((status) => status === 404)) continue
+      throw new SyncError("Incomplete CardDAV inventory response.", "verification")
+    }
+    if (/<(?:[\w-]+:)?collection\b/i.test(response[1])) continue
+    const match = /<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/i.exec(response[1])
+    if (!match) continue
     try {
       const href = match[1].replace(/&amp;/gi, "&")
       const url = new URL(href, book)
       if (url.origin !== book.origin || !url.pathname.startsWith(book.pathname)) continue
       const filename = decodeURIComponent(url.pathname.slice(book.pathname.length))
+      if (!filename || filename.includes("/")) continue
+      // CardDAV resource names need not end in .vcf. Include every direct
+      // non-collection member, including cards created by phone clients.
+      cards.add(url.pathname)
       const id = /^bunker-map-([0-9a-f-]{36})\.vcf$/i.exec(filename)?.[1]
       if (id && UUID_PATTERN.test(id)) ids.add(id.toLowerCase())
+      else otherPaths.add(url.pathname)
     } catch {
       // Ignore malformed remote hrefs rather than counting them as contacts.
     }
   }
-  return ids.size
+  return { managedIds: ids, otherPaths: [...otherPaths], managed: ids.size, total: cards.size, other: cards.size - ids.size }
+}
+
+async function inspectOtherCards(paths: string[], saved: Set<string>) {
+  const samples: Array<{ name: string; company: string; sourceContactId: string | null; sourceExists: boolean; readable: boolean }> = []
+  // Explicit diagnostic only; never download the whole address book or expose
+  // URLs/credentials/phone numbers. Paths came from the origin-locked listing.
+  for (let offset = 0; offset < Math.min(paths.length, 20); offset += 2) {
+    samples.push(...await Promise.all(paths.slice(offset, Math.min(offset + 2, 20)).map(async (path) => {
+      try {
+        const response = await cardDavRequest(path, { method: "GET", cache: "no-store", redirect: "error" })
+        if (!response.ok) throw new Error("Card unavailable")
+        const text = await response.text()
+        if (text.length > 1_000_000 || !/^BEGIN:VCARD\s*$/m.test(text)) throw new Error("Invalid card")
+        const lines = text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/)
+        const value = (key: string) => {
+          const line = lines.find((line) => line.split(":", 1)[0].split(";", 1)[0].toUpperCase() === key)
+          return line ? line.slice(line.indexOf(":") + 1).replace(/\\([nN,;\\])/g, (_, escaped: string) => /n/i.test(escaped) ? " " : escaped).slice(0, 200) : ""
+        }
+        const uid = value("UID")
+        const rawId = value("X-BUNKER-MAP-CONTACT-ID") || (/^bunker-map-/i.test(uid) ? uid.slice(MANAGED_PREFIX.length) : "")
+        const sourceContactId = UUID_PATTERN.test(rawId) ? rawId.toLowerCase() : null
+        return { name: value("FN"), company: value("ORG"), sourceContactId, sourceExists: sourceContactId ? saved.has(sourceContactId) : false, readable: true }
+      } catch {
+        return { name: "", company: "", sourceContactId: null, sourceExists: false, readable: false }
+      }
+    })))
+  }
+  return samples
+}
+
+async function readSavedContactIds(supabase: SupabaseClient) {
+  const ids = new Set<string>()
+  const pageSize = 1000
+  let expectedCount: number | undefined
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabase.from("phonebook_contacts")
+      .select("id", { count: "exact" }).order("id", { ascending: true }).range(from, from + pageSize - 1)
+    if (result.error || result.count == null || !result.data) {
+      throw new SyncError("Unable to compare saved contacts.", "source-read")
+    }
+    if (expectedCount !== undefined && expectedCount !== result.count) {
+      throw new SyncError("The phonebook changed during comparison. Please refresh.", "source-read")
+    }
+    expectedCount = result.count
+    for (const row of result.data) ids.add(row.id.toLowerCase())
+    if (result.data.length < pageSize) break
+  }
+  if (ids.size !== expectedCount) throw new SyncError("Incomplete saved contact comparison. Please refresh.", "source-read")
+  return ids
 }
 
 function getCardDavConfig() {
@@ -267,27 +333,60 @@ async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) {
   return response
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireAdminPagePermission("phonebook", "view")
     const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"))
     const { addressBookUrl } = getCardDavConfig()
     const [saved, remote] = await Promise.all([
-      supabase.from("phonebook_contacts").select("id", { count: "exact", head: true }),
+      readSavedContactIds(supabase),
       cardDavRequest("", {
         method: "PROPFIND",
         headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
-        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>',
+        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>',
         cache: "no-store",
       }),
     ])
-    if (saved.error || saved.count == null) throw new SyncError("Unable to count saved contacts.", "source-read")
     if (remote.status !== 207) throw httpSyncError("verification", remote.status)
     const xml = await remote.text()
-    if (!/<(?:[\w-]+:)?multistatus\b/i.test(xml)) throw new SyncError("Invalid CardDAV count response.", "verification")
+    if (!/<(?:[\w-]+:)?multistatus\b/i.test(xml) || !/<\/(?:[\w-]+:)?multistatus\s*>\s*$/i.test(xml)) {
+      throw new SyncError("Invalid CardDAV count response.", "verification")
+    }
+    const { managedIds, otherPaths, ...counts } = countAddressBookCards(xml, addressBookUrl)
+    const missingContactIds = [...saved].filter((id) => !managedIds.has(id))
+    const orphanedContactIds = [...managedIds].filter((id) => !saved.has(id))
+    const comparison = {
+      matched: saved.size - missingContactIds.length,
+      missing: missingContactIds.length,
+      orphaned: orphanedContactIds.length,
+    }
+    // Counts and bounded internal UUIDs only, never names or contact fields.
+    // Equal totals alone do not prove the same contacts are present.
+    console.info("phonebook_carddav_inventory", {
+      saved: saved.size, ...counts, ...comparison,
+      missingContactIds: missingContactIds.slice(0, 20),
+      orphanedContactIds: orphanedContactIds.slice(0, 20),
+    })
+    const detailsRequested = new URL(request.url).searchParams.get("details") === "1"
+    const otherContacts = detailsRequested ? await inspectOtherCards(otherPaths, saved) : undefined
+    if (otherContacts) console.info("phonebook_carddav_other_inventory", {
+      sampled: otherContacts.length,
+      unreadable: otherContacts.filter((card) => !card.readable).length,
+      referencingSavedContact: otherContacts.filter((card) => card.sourceExists).length,
+      referencingAbsentContact: otherContacts.filter((card) => card.sourceContactId && !card.sourceExists).length,
+      withoutFcUnoId: otherContacts.filter((card) => card.readable && !card.sourceContactId).length,
+    })
     return NextResponse.json({
-      savedContactCount: saved.count,
-      carddavContactCount: countManagedCards(xml, addressBookUrl),
+      savedContactCount: saved.size,
+      carddavContactCount: counts.managed,
+      carddavTotalCount: counts.total,
+      carddavOtherCount: counts.other,
+      carddavMatchedCount: comparison.matched,
+      carddavMissingCount: comparison.missing,
+      carddavOrphanCount: comparison.orphaned,
+      missingContactIds: missingContactIds.slice(0, 20),
+      orphanedContactIds: orphanedContactIds.slice(0, 20),
+      ...(otherContacts ? { otherContacts, otherContactsTruncated: otherPaths.length > otherContacts.length } : {}),
       checkedAt: new Date().toISOString(),
     }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {

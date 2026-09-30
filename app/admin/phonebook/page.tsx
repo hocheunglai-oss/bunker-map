@@ -85,6 +85,16 @@ type Company = {
 }
 
 type CompanyDraft = Company | null
+type CarddavCounts = {
+  savedContactCount: number
+  carddavContactCount: number
+  carddavTotalCount?: number
+  carddavOtherCount?: number
+  carddavMatchedCount?: number
+  carddavMissingCount?: number
+  carddavOrphanCount?: number
+  checkedAt: string
+}
 type ChangeLogEntry = {
   id: string
   entityType: "contact" | "company"
@@ -549,7 +559,7 @@ export default function PhonebookPage() {
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
-  const [carddavCounts, setCarddavCounts] = useState<{ savedContactCount: number; carddavContactCount: number; checkedAt: string } | null>(null)
+  const [carddavCounts, setCarddavCounts] = useState<CarddavCounts | null>(null)
   const [carddavCountLoading, setCarddavCountLoading] = useState(false)
   const [carddavCountError, setCarddavCountError] = useState(false)
   const contactSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -979,8 +989,11 @@ export default function PhonebookPage() {
     try {
       const response = await fetch("/api/phonebook/carddav-sync", { cache: "no-store" })
       if (!response.ok) throw new Error("CardDAV count unavailable")
-      const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+      const payload = await response.json() as CarddavCounts
       if (!Number.isSafeInteger(payload.savedContactCount) || !Number.isSafeInteger(payload.carddavContactCount)) throw new Error("Invalid CardDAV count")
+      for (const count of [payload.carddavTotalCount, payload.carddavOtherCount, payload.carddavMatchedCount, payload.carddavMissingCount, payload.carddavOrphanCount]) {
+        if (count !== undefined && (!Number.isSafeInteger(count) || count < 0)) throw new Error("Invalid CardDAV count")
+      }
       setCarddavCounts(payload)
       setCarddavCountError(false)
     } catch {
@@ -1361,6 +1374,16 @@ export default function PhonebookPage() {
       setMessage("Unable to delete contact.")
       return
     }
+    // The contact has already been removed from the source. Persist the exact
+    // remote deletion before any optional company change can fail or return.
+    let deleteRetries: PendingPhonebookSync[]
+    try {
+      deleteRetries = stagePhonebookSync(localStorage, [{ id: deletingId, operation: "delete" }])
+    } catch (error) {
+      refreshContactCachesInBackground()
+      setMessage(`Contact deleted locally, but ${error instanceof Error ? error.message : "CardDAV retry information could not be saved."}`)
+      return
+    }
     refreshContactCachesInBackground()
     recordChange({
       entityType: "contact",
@@ -1377,7 +1400,11 @@ export default function PhonebookPage() {
         .delete()
         .eq("id", matchingCompany.id)
       if (companyDeleteError) {
-        setMessage("Contact deleted, but company could not be deleted.")
+        await syncPhoneContacts(false, null, {
+          retryEntries: deleteRetries,
+          successMessage: "Contact deleted and CardDAV deletion verified, but company could not be deleted.",
+          failureMessage: "Contact deleted, but company could not be deleted and CardDAV deletion remains unverified.",
+        })
         return
       }
 
@@ -1398,7 +1425,7 @@ export default function PhonebookPage() {
       }
     }
     await syncPhoneContacts(false, null, {
-      deleteContactIds: [deletingId],
+      retryEntries: deleteRetries,
       successMessage: deleteCompanyToo ? "Deleted contact and company, then synced." : "Deleted and synced.",
     })
   }
@@ -1645,6 +1672,7 @@ export default function PhonebookPage() {
     const companyNameToDelete = companyDraft.name
     const companyContacts = await loadCompanyContactsFromSupabase(companyNameToDelete)
     const companyContactIds = companyContacts.map((contact) => contact.id)
+    let deleteRetries: PendingPhonebookSync[] = []
 
     if (
       companyContacts.length > 0 &&
@@ -1662,11 +1690,34 @@ export default function PhonebookPage() {
         setMessage("Unable to delete company contacts.")
         return
       }
+      try {
+        deleteRetries = stagePhonebookSync(localStorage, companyContactIds.map((id) => ({ id, operation: "delete" })))
+      } catch (error) {
+        refreshContactCachesInBackground()
+        setMessage(`Contacts deleted locally, but ${error instanceof Error ? error.message : "CardDAV retry information could not be saved."}`)
+        return
+      }
+      setContacts((prev) => prev.filter((item) => !companyContactIds.includes(item.id)))
+      if (current && companyContactIds.includes(current.id)) {
+        setCurrent(null)
+        setDraft(null)
+        setSelectedId("")
+        setEditing(false)
+      }
     }
 
     const { error } = await supabase.from("phonebook_companies").delete().eq("id", companyDraft.id)
     if (error) {
-      setMessage("Unable to delete company.")
+      refreshContactCachesInBackground()
+      if (deleteRetries.length > 0) {
+        await syncPhoneContacts(false, null, {
+          retryEntries: deleteRetries,
+          successMessage: "Contacts deleted and CardDAV deletions verified, but company could not be deleted.",
+          failureMessage: "Contacts deleted, but company could not be deleted and CardDAV deletions remain unverified.",
+        })
+      } else {
+        setMessage("Unable to delete company.")
+      }
       return
     }
     refreshContactCachesInBackground()
@@ -1679,15 +1730,6 @@ export default function PhonebookPage() {
     })
 
     setCompanies((prev) => prev.filter((item) => item.id !== companyDraft.id))
-    if (companyContactIds.length > 0) {
-      setContacts((prev) => prev.filter((item) => !companyContactIds.includes(item.id)))
-      if (current && companyContactIds.includes(current.id)) {
-        setCurrent(null)
-        setDraft(null)
-        setSelectedId("")
-        setEditing(false)
-      }
-    }
     if (selectedCompany === companyDraft.name) {
       setSelectedCompany("")
     }
@@ -1696,7 +1738,7 @@ export default function PhonebookPage() {
     setCreatingCompany(false)
     if (companyContactIds.length > 0) {
       await syncPhoneContacts(false, null, {
-        deleteContactIds: companyContactIds,
+        retryEntries: deleteRetries,
         successMessage: "Company deleted and CardDAV contacts updated.",
         failureMessage: "Company deleted locally, but CardDAV sync failed.",
       })
@@ -2105,9 +2147,14 @@ export default function PhonebookPage() {
     <div style={pageStyle}>
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
-          <span title="Saved contacts are in FC Uno. CardDAV entries are on the sync server; your phone may take time to refresh." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)", whiteSpace: "nowrap" }}>
-            {`FC Uno: ${carddavCounts?.savedContactCount ?? perfStats.contactCount.toLocaleString()} · CardDAV: ${carddavCountLoading ? "checking…" : carddavCountError ? "unavailable" : carddavCounts?.carddavContactCount.toLocaleString() ?? "—"}`}
+          <span title="CardDAV total includes all entries in the phone address book. Other entries were not created under FC Uno's current sync IDs. Your phone may take time to refresh." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)", whiteSpace: "nowrap" }}>
+            {`FC Uno: ${(carddavCounts?.savedContactCount ?? perfStats.contactCount).toLocaleString()} · CardDAV total: ${carddavCountLoading ? "checking…" : carddavCountError ? "unavailable" : (carddavCounts?.carddavTotalCount ?? carddavCounts?.carddavContactCount)?.toLocaleString() ?? "—"}${!carddavCountLoading && carddavCounts?.carddavOtherCount ? ` (${carddavCounts.carddavContactCount.toLocaleString()} FC Uno + ${carddavCounts.carddavOtherCount.toLocaleString()} other)` : ""}`}
           </span>
+          {!carddavCountLoading && carddavCounts?.carddavMatchedCount !== undefined && carddavCounts.carddavMissingCount !== undefined && carddavCounts.carddavOrphanCount !== undefined ? (
+            <span title="Compares individual FC Uno contact IDs, not just totals. Missing means a saved contact has no matching CardDAV card. Extra FC Uno IDs are cards with no matching saved contact. Refreshing does not change any contact." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)" }}>
+              {`Matched by ID: ${carddavCounts.carddavMatchedCount.toLocaleString()} · Missing: ${carddavCounts.carddavMissingCount.toLocaleString()} · Extra FC Uno IDs: ${carddavCounts.carddavOrphanCount.toLocaleString()}`}
+            </span>
+          ) : null}
           <button type="button" onClick={() => void refreshCarddavCounts()} disabled={carddavCountLoading} aria-label="Refresh phonebook counts" title="Refresh phonebook counts" style={buttonStyle}>↻</button>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
             <button

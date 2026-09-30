@@ -3,7 +3,7 @@
 type Row = Record<string, unknown> & { id: string }
 type SyncPlan = { failedIds?: string[]; status?: number; malformed?: boolean; reject?: boolean; defer?: boolean }
 type RecordedRequest = { url: string; method: string; body: Record<string, unknown> | null }
-type Operation = { table: string; method: string; payload: Record<string, unknown> | null; filters: { field: string; value: unknown }[] }
+type Operation = { table: string; method: string; payload: Record<string, unknown> | null; filters: { field: string; value: unknown; operator?: "in" }[] }
 type QueryResult = { data: unknown; error: { message: string } | null }
 export type PhonebookSyncHarness = {
   contacts: Row[]
@@ -15,6 +15,9 @@ export type PhonebookSyncHarness = {
   releaseSync: (() => void) | null
   activeSyncs: number
   maxConcurrentSyncs: number
+  failCompanyDeletes: boolean
+  companyDeleteRetrySnapshots: Array<Array<{ id: string; operation: string }>>
+  countOverrides: Record<string, number>
 }
 declare global { interface Window { __phonebookSyncHarness: PhonebookSyncHarness } }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -30,7 +33,7 @@ export function installPhonebookSyncHarness() {
     { id: "synthetic-contact-c", full_name: "CAROL TEST", company: "ALPHA SHIPPING", company_source_id: "company-a", favorite: false, mobile_1: "+85293334444", personal_email: "carol@example.test" },
     { id: "synthetic-contact-d", full_name: "DAVE TEST", company: "BETA SHIPPING", company_source_id: "company-b", favorite: false, mobile_1: "+6591112222", personal_email: "dave@example.test" },
   ]
-  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0 }
+  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0, failCompanyDeletes: false, companyDeleteRetrySnapshots: [], countOverrides: {} }
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin)
     const method = init?.method || (input instanceof Request ? input.method : "GET")
@@ -40,7 +43,7 @@ export function installPhonebookSyncHarness() {
     if (url.origin !== window.location.origin) throw new Error(`External request blocked by local fixture: ${url.origin}`)
     const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } })
     if (url.pathname === "/api/phonebook/bootstrap" && method === "GET") return json({ companies: harness.companies, contactCount: harness.contacts.length })
-    if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, checkedAt: new Date().toISOString() })
+    if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
       const company = url.searchParams.get("company")
@@ -81,6 +84,7 @@ class Query implements PromiseLike<QueryResult> {
   insert(payload: Record<string, unknown>) { this.operation.method = "POST"; this.operation.payload = payload; return this }
   delete() { this.operation.method = "DELETE"; return this }
   eq(field: string, value: unknown) { this.operation.filters.push({ field, value }); return this }
+  in(field: string, value: unknown[]) { this.operation.filters.push({ field, value, operator: "in" }); return this }
   select() { return this }
   single() { this.singular = true; return this }
   maybeSingle() { this.singular = true; return this }
@@ -93,12 +97,16 @@ class Query implements PromiseLike<QueryResult> {
     const operation = clone(this.operation)
     const rows = operation.table === "phonebook_contacts" ? harness.contacts : operation.table === "phonebook_companies" ? harness.companies : null
     if (!rows) throw new Error(`Unexpected table in local fixture: ${operation.table}`)
-    const matches = (row: Row) => operation.filters.every(({ field, value }) => row[field] === value)
+    const matches = (row: Row) => operation.filters.every(({ field, value, operator }) => operator === "in" ? (value as unknown[]).includes(row[field]) : row[field] === value)
     if (operation.method === "GET") {
       const result = clone(rows.filter(matches))
       return { data: this.singular ? result[0] || null : result, error: null }
     }
     harness.operations.push(operation)
+    if (operation.table === "phonebook_companies" && operation.method === "DELETE") {
+      harness.companyDeleteRetrySnapshots.push(JSON.parse(localStorage.getItem("phonebook_carddav_pending:v2") || "[]") as Array<{ id: string; operation: string }>)
+      if (harness.failCompanyDeletes) return { data: null, error: { message: "Synthetic company deletion failure" } }
+    }
     if (operation.method === "PATCH") {
       const matched = rows.filter(matches)
       matched.forEach((row) => Object.assign(row, operation.payload))
