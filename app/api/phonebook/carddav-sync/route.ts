@@ -45,6 +45,12 @@ function logSyncFailure(id: string | undefined, error: SyncError) {
   })
 }
 
+function logVerifiedContacts(ids: string[], explicit: boolean) {
+  // Explicit edits are small batches. Record IDs, never contact details, so
+  // support can correlate an edit with a successfully verified CardDAV write.
+  if (explicit && ids.length > 0) console.info("phonebook_carddav_sync_verified", { contactIds: ids })
+}
+
 type PhonebookContact = {
   id: string
   full_name: string
@@ -221,6 +227,24 @@ function cardHref(contactId: string) {
   return `${MANAGED_PREFIX}${encodeURIComponent(contactId)}.vcf`
 }
 
+function countManagedCards(xml: string, addressBookUrl: string) {
+  const book = new URL(addressBookUrl)
+  const ids = new Set<string>()
+  for (const match of xml.matchAll(/<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/gi)) {
+    try {
+      const href = match[1].replace(/&amp;/gi, "&")
+      const url = new URL(href, book)
+      if (url.origin !== book.origin || !url.pathname.startsWith(book.pathname)) continue
+      const filename = decodeURIComponent(url.pathname.slice(book.pathname.length))
+      const id = /^bunker-map-([0-9a-f-]{36})\.vcf$/i.exec(filename)?.[1]
+      if (id && UUID_PATTERN.test(id)) ids.add(id.toLowerCase())
+    } catch {
+      // Ignore malformed remote hrefs rather than counting them as contacts.
+    }
+  }
+  return ids.size
+}
+
 function getCardDavConfig() {
   const addressBookUrl = requireEnv("CARDDAV_ADDRESSBOOK_URL").replace(/\/?$/, "/")
   const username = requireEnv("CARDDAV_USERNAME")
@@ -241,6 +265,39 @@ async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) {
     },
   })
   return response
+}
+
+export async function GET() {
+  try {
+    await requireAdminPagePermission("phonebook", "view")
+    const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"))
+    const { addressBookUrl } = getCardDavConfig()
+    const [saved, remote] = await Promise.all([
+      supabase.from("phonebook_contacts").select("id", { count: "exact", head: true }),
+      cardDavRequest("", {
+        method: "PROPFIND",
+        headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
+        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>',
+        cache: "no-store",
+      }),
+    ])
+    if (saved.error || saved.count == null) throw new SyncError("Unable to count saved contacts.", "source-read")
+    if (remote.status !== 207) throw httpSyncError("verification", remote.status)
+    const xml = await remote.text()
+    if (!/<(?:[\w-]+:)?multistatus\b/i.test(xml)) throw new SyncError("Invalid CardDAV count response.", "verification")
+    return NextResponse.json({
+      savedContactCount: saved.count,
+      carddavContactCount: countManagedCards(xml, addressBookUrl),
+      checkedAt: new Date().toISOString(),
+    }, { headers: { "Cache-Control": "private, no-store" } })
+  } catch (error) {
+    if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
+      return NextResponse.json({ message: error.message }, { status: error.message === "Unauthorized" ? 401 : 403 })
+    }
+    const safeError = safeSyncError(error, "verification")
+    logSyncFailure(undefined, safeError)
+    return NextResponse.json({ message: "CardDAV count unavailable. Please retry." }, { status: 503 })
+  }
 }
 
 async function assertContactAbsent(supabase: SupabaseClient, contactId: string) {
@@ -552,6 +609,7 @@ export async function POST(request: Request) {
         recordFailure(contact.id, error, "upload")
       }
     }
+    logVerifiedContacts(verifiedIds, body.contactIds.length > 0)
     // Legacy fullRebuild/phase:"delete" is intentionally a non-destructive
     // upsert pass. An interrupted resync must never erase the shared book.
     const done = body.contactIds.length > 0 || body.cursor + contacts.length >= total

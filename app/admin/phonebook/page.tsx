@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -549,6 +549,9 @@ export default function PhonebookPage() {
   const [companySaving, setCompanySaving] = useState(false)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
+  const [carddavCounts, setCarddavCounts] = useState<{ savedContactCount: number; carddavContactCount: number; checkedAt: string } | null>(null)
+  const [carddavCountLoading, setCarddavCountLoading] = useState(false)
+  const [carddavCountError, setCarddavCountError] = useState(false)
   const contactSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const queuedContactSyncsRef = useRef(0)
   const [contactsLoading, setContactsLoading] = useState(false)
@@ -970,6 +973,29 @@ export default function PhonebookPage() {
     if (adminLoading || !authenticated) return
     void loadAll()
   }, [adminLoading, authenticated])
+
+  const refreshCarddavCounts = useCallback(async () => {
+    setCarddavCountLoading(true)
+    try {
+      const response = await fetch("/api/phonebook/carddav-sync", { cache: "no-store" })
+      if (!response.ok) throw new Error("CardDAV count unavailable")
+      const payload = await response.json() as { savedContactCount: number; carddavContactCount: number; checkedAt: string }
+      if (!Number.isSafeInteger(payload.savedContactCount) || !Number.isSafeInteger(payload.carddavContactCount)) throw new Error("Invalid CardDAV count")
+      setCarddavCounts(payload)
+      setCarddavCountError(false)
+    } catch {
+      setCarddavCounts(null)
+      setCarddavCountError(true)
+    } finally {
+      setCarddavCountLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (adminLoading || !authenticated) return
+    const timer = window.setTimeout(() => void refreshCarddavCounts(), 0)
+    return () => window.clearTimeout(timer)
+  }, [adminLoading, authenticated, refreshCarddavCounts])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1994,6 +2020,7 @@ export default function PhonebookPage() {
         }
         const remaining = readPhonebookSyncRetries(localStorage).length
         setMessage(`${options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`}${remaining ? ` ${remaining} other saved operation(s) still need Retry Failed.` : ""}`)
+        void refreshCarddavCounts()
         return true
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unverified contacts remain queued for retry."
@@ -2078,6 +2105,10 @@ export default function PhonebookPage() {
     <div style={pageStyle}>
       <div style={{ maxWidth: "1560px", margin: "0 auto", display: "grid", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
+          <span title="Saved contacts are in FC Uno. CardDAV entries are on the sync server; your phone may take time to refresh." style={{ fontSize: "12px", color: "var(--fc-admin-muted-text)", whiteSpace: "nowrap" }}>
+            {`FC Uno: ${carddavCounts?.savedContactCount ?? perfStats.contactCount.toLocaleString()} · CardDAV: ${carddavCountLoading ? "checking…" : carddavCountError ? "unavailable" : carddavCounts?.carddavContactCount.toLocaleString() ?? "—"}`}
+          </span>
+          <button type="button" onClick={() => void refreshCarddavCounts()} disabled={carddavCountLoading} aria-label="Refresh phonebook counts" title="Refresh phonebook counts" style={buttonStyle}>↻</button>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", position: "relative" }}>
             <button
               onClick={() => void syncPhoneContacts(false)}
