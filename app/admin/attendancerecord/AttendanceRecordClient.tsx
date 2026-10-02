@@ -1703,7 +1703,7 @@ export default function AttendanceRecordClient() {
         {activeTab === "monthly" ? (
           <section className={styles.tabContent} aria-label="Monthly attendance">
             <div className={styles.yearToolbar}>
-              <div className={styles.summaryFilters}>
+              <div className={styles.summaryFilters} data-admin-view-safe="true">
                 <label className={styles.yearSelector}>
                   <span>YEAR</span>
                   <select
@@ -1816,6 +1816,7 @@ export default function AttendanceRecordClient() {
                                 <button
                                   type="button"
                                   className={styles.confirmButton}
+                                  data-admin-view-safe="true"
                                   onClick={() => void confirmMonth(row.person.id, section.month)}
                                   disabled={!row.summary?.canConfirm || pendingAction === `save-confirmation:${row.person.id}:${section.month}`}
                                   title={row.summary?.canConfirm ? `Confirm ${section.label} attendance` : "Only this staff member or an editor can confirm"}
@@ -1842,7 +1843,7 @@ export default function AttendanceRecordClient() {
         {activeTab === "all-time" ? (
           <section className={styles.tabContent} aria-label="All-time attendance users">
             <div className={styles.rosterControls}>
-              <div className={styles.rosterFilters}>
+              <div className={styles.rosterFilters} data-admin-view-safe="true">
                 <label className={styles.compactYearSelector}>
                   <span>YEAR</span>
                   <select
@@ -1936,6 +1937,7 @@ export default function AttendanceRecordClient() {
                               <button
                                 type="button"
                                 className={styles.confirmButton}
+                                data-admin-view-safe="true"
                                 onClick={() => void confirmAnnualSummary(person.id)}
                                 disabled={pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}`}
                               >

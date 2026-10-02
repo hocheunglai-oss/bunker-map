@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { getAdminPageByPathFromPages } from "@/lib/adminPageRegistry"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { isViewOnlyAttendanceConfirmation } from "@/lib/adminViewOnlyRequests"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -186,7 +187,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
     const originalFetch = window.fetch.bind(window)
     const canEdit = canAccessAdminPage(permissions, page.id, "edit")
 
-    const guardedFetch: typeof window.fetch = (input, init) => {
+    const guardedFetch: typeof window.fetch = async (input, init) => {
       const method =
         init?.method?.toUpperCase() ||
         (input instanceof Request ? input.method.toUpperCase() : "GET")
@@ -201,7 +202,14 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
       if (
         !canEdit &&
         requestPath !== "/api/admin/logout" &&
-        !["GET", "HEAD", "OPTIONS"].includes(method)
+        !["GET", "HEAD", "OPTIONS"].includes(method) &&
+        !await isViewOnlyAttendanceConfirmation(
+          input,
+          init,
+          window.location.origin,
+          page.id,
+          canAccessAdminPage(permissions, page.id, "view"),
+        )
       ) {
         return Promise.resolve(
           new Response(
@@ -320,7 +328,9 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
             textAlign: "center",
           }}
         >
-          View-only access. Changes, uploads, syncs, and record actions are disabled.
+          {page.id === "attendance-record"
+            ? "View-only access. You can confirm your own completed monthly statement. Editing attendance records is disabled."
+            : "View-only access. Changes, uploads, syncs, and record actions are disabled."}
         </div>
       ) : null}
       {children}
