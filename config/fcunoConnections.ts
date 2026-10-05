@@ -19,6 +19,10 @@ export const fcunoConnectionPolicy = Object.freeze({
   browser: {
     fallbackProfile: "Otto",
   },
+  ecosystem: {
+    productionOrigin: "https://eco.fcuno.com",
+    knowledgeExtractionPath: "/api/ecosystem/knowledge-extract",
+  },
   federation: {
     issuer: "https://fcuno.com",
     protocolVersion: "1.0",
@@ -58,6 +62,7 @@ export function validateFcunoConnectionPolicy(
   requireNonEmpty(policy.vercel.teamId, "vercel.teamId")
   requireNonEmpty(policy.vercel.projectId, "vercel.projectId")
   requireNonEmpty(policy.supabase.projectRef, "supabase.projectRef")
+  requireNonEmpty(policy.ecosystem.productionOrigin, "ecosystem.productionOrigin")
   requireNonEmpty(policy.federation.issuer, "federation.issuer")
   requireNonEmpty(policy.federation.protocolVersion, "federation.protocolVersion")
   requireNonEmpty(policy.federation.syncAudience, "federation.syncAudience")
@@ -86,6 +91,10 @@ export function validateFcunoConnectionPolicy(
   }
   if (!policy.federation.oidcRedirectUris.every((value) => value.startsWith("https://"))) {
     throw new Error("Federation redirect URIs must use HTTPS.")
+  }
+  if (new URL(policy.ecosystem.productionOrigin).origin !== policy.ecosystem.productionOrigin ||
+      !policy.ecosystem.productionOrigin.startsWith("https://")) {
+    throw new Error("ECOSYSTEM must use an exact HTTPS origin.")
   }
 
   return policy

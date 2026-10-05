@@ -14,6 +14,8 @@ test("FCUNO pins the approved external targets and fallback order", () => {
   assert.equal(policy.supabase.projectRef, "gglyugbrnyvyfktgwert")
   assert.equal(policy.browser.fallbackProfile, "Otto")
   assert.equal(policy.policyVersion, 2)
+  assert.equal(policy.ecosystem.productionOrigin, "https://eco.fcuno.com")
+  assert.equal(policy.ecosystem.knowledgeExtractionPath, "/api/ecosystem/knowledge-extract")
   assert.equal(policy.federation.syncAudience, "fcos-identity-sync")
   assert.equal(policy.federation.syncJwksUrl, "https://fcuno.com/api/fcos-identity-sync/jwks")
   assert.equal(policy.federation.fcos.syncEndpoint, "https://fcos.fcuno.com/api/fcuno/identity-sync")
