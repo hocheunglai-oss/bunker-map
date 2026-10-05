@@ -12,6 +12,7 @@ import {
   parseEnquiryWorksheetGuess,
   type EnquiryWorksheetGuess,
 } from "@/lib/enquiryWorksheetParser"
+import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
 import { notifyParserReportCountChanged } from "@/lib/parserReportClient"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./enquiryWorksheet.module.css"
@@ -674,7 +675,7 @@ export default function EnquiryWorksheetPage() {
       }
 
       const suggestion: ParserAiSuggestion = {
-        model: payload.model || "gpt-5.4-mini",
+        model: payload.model || DEFAULT_PARSER_AI_MODEL,
         parserOutput: deterministicOutput,
         correctedOutput: payload.correctedOutput,
         fields: payload.fields || {},

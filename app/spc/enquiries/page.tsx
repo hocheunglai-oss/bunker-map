@@ -25,6 +25,7 @@ import {
   replaceHsfoWithRmk,
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
+import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
 import { notifyParserReportCountChanged } from "@/lib/parserReportClient"
 import { spcAmendmentSummaryLabels } from "@/lib/spcAmendmentPresentation"
 
@@ -929,7 +930,7 @@ export default function SpcEnquiriesPage() {
 
       setParserAiSuggestion({
         context,
-        model: payload.model || "gpt-5.4-mini",
+        model: payload.model || DEFAULT_PARSER_AI_MODEL,
         parserOutput: deterministicOutput,
         correctedOutput: next.draft.standardText,
         fields: payload.fields || {},

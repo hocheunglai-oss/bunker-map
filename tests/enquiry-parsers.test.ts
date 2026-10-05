@@ -12,6 +12,7 @@ import {
   replaceHsfoWithRmk,
 } from "../lib/enquiryShortener"
 import { parseEnquiryWorksheetGuess } from "../lib/enquiryWorksheetParser"
+import { DEFAULT_PARSER_AI_MODEL } from "../lib/parserAiConfig"
 import {
   ensureSpcSingaporeEta,
   extractExplicitSpcFuelFields,
@@ -22,6 +23,10 @@ import {
 
 mock.timers.enable({ apis: ["Date"], now: new Date("2026-07-30T00:00:00.000Z") })
 test.after(() => mock.timers.reset())
+
+test("FCUNO and SPC AI FIX share the GPT-6 Luna default", () => {
+  assert.equal(DEFAULT_PARSER_AI_MODEL, "gpt-6-luna")
+})
 
 test("restores stored SPC amendment fields even when a test IMO fails checksum validation", () => {
   const restored = restoreStoredSpcEnquiryFields({

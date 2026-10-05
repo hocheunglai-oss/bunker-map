@@ -22,12 +22,11 @@ import {
 } from "@/lib/spcEnquiryText"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { recordOpenAiUsage } from "@/lib/openAiUsage"
+import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
 
 export const maxDuration = 60
 
 const MAX_TEXT_LENGTH = 20_000
-const MODEL = "gpt-5.4-mini"
-
 type ParserAiSource = "enquiryworksheet" | "spc"
 
 type ParserAiPayload = {
@@ -795,7 +794,7 @@ export async function POST(request: Request) {
       throw new HttpError("OPENAI_API_KEY is not configured.", 503)
     }
 
-    const model = process.env.OPENAI_PARSER_MODEL || MODEL
+    const model = process.env.OPENAI_PARSER_MODEL || DEFAULT_PARSER_AI_MODEL
     const manualVlsfoMaxRemarks = cleanVlsfoMaxRemarks(payload.manualVlsfoMaxRemarks)
     const input = [
       `Source: ${source}`,
