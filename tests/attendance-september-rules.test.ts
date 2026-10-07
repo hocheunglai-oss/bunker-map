@@ -296,8 +296,8 @@ test("Attendance reads only persisted Event Calendar holidays", () => {
     "../app/api/event-calendar/public-holidays/route.ts",
   )
   assert.doesNotMatch(calendar, /date\.nager\.at|fetchHongKongHolidays/)
-  assert.match(holidayRoute, /TW,US,SG,HK/)
-  assert.match(holidayRoute, /country\.code === "HK"/)
+  assert.match(holidayRoute, /getVerifiedPublicHolidays/)
+  assert.match(source("../lib/holidayCalendar.ts"), /holiday\.country === "HK"/)
 })
 
 test("Event Calendar holiday semantics start on the official 1 September date", () => {

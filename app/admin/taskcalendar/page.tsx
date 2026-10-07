@@ -1,20 +1,22 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   getTaskScheduleText,
   monthNames,
   TaskCalendarTask,
   TaskScheduleType,
-  taskCalendarTasks,
+  parseTaskDays,
+  readTaskCalendarTasks,
+  TASK_CALENDAR_PROTOCOL_VERSION,
+  validateTaskCalendarTask,
   weekDays,
 } from "@/data/taskCalendar"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import type { CalendarStaff } from "@/lib/calendarStaff"
 
-const STORAGE_KEY = "bunker-map-task-calendar-tasks-v2"
-const DELETED_TASK_IDS_STORAGE_KEY = "bunker-map-task-calendar-deleted-task-ids"
 const SHARED_STORE_KEY = "task-calendar"
-const people = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const scheduleTypes: TaskScheduleType[] = ["Weekly", "Monthly", "Yearly"]
 
 const pageStyle: React.CSSProperties = {
@@ -129,7 +131,7 @@ const dangerActionButtonStyle: React.CSSProperties = {
 
 function buildBlankTask(): TaskCalendarTask {
   return {
-    id: `task-custom-${Date.now()}`,
+    id: `task-custom-${crypto.randomUUID()}`,
     sourceRow: 0,
     scheduleType: "Monthly",
     daysOfMonth: [1],
@@ -141,79 +143,54 @@ function buildBlankTask(): TaskCalendarTask {
   }
 }
 
-function parseNumberList(value: string, min: number, max: number) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,;\s]+/)
-        .map((item) => Number(item.trim()))
-        .filter((item) => Number.isInteger(item) && item >= min && item <= max)
-    )
-  )
-}
-
-function normalizeTasks(value: unknown) {
-  if (!Array.isArray(value)) return taskCalendarTasks
-  const tasks = value.filter((task): task is TaskCalendarTask => {
-    return task && typeof task === "object" && typeof task.id === "string" && typeof task.task === "string" && Array.isArray(task.daysOfMonth)
-  })
-  return tasks.length ? tasks : taskCalendarTasks
-}
-
-function normalizeStringList(value: unknown) {
-  if (!Array.isArray(value)) return []
-  return Array.from(new Set(value.map((item) => String(item || "").trim()).filter(Boolean)))
-}
-
 function taskHasSelectedPeople(task: TaskCalendarTask, selectedPeople: string[]) {
   if (!selectedPeople.length) return false
   return selectedPeople.some((person) => task.notify.includes(person) || task.cc.includes(person))
 }
 
 export default function TaskCalendarPage() {
-  const { loading, authenticated } = useSimpleAdminAuth()
+  const { loading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "task-calendar", "edit")
   const [tasks, setTasks] = useState<TaskCalendarTask[]>([])
-  const [deletedTaskIds, setDeletedTaskIds] = useState<string[]>([])
+  const [taskVersions, setTaskVersions] = useState<Record<string, string>>({})
+  const [staff, setStaff] = useState<CalendarStaff[]>([])
   const [calendarLoaded, setCalendarLoaded] = useState(false)
   const [calendarLoadError, setCalendarLoadError] = useState("")
   const [saveStatus, setSaveStatus] = useState("Loading shared task calendar")
   const [selectedPeople, setSelectedPeople] = useState<string[]>([])
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [draftTask, setDraftTask] = useState<TaskCalendarTask>(buildBlankTask)
   const [daysOfMonthText, setDaysOfMonthText] = useState("1")
-  const loadedRef = useRef(false)
-  const remoteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [draftTaskVersion, setDraftTaskVersion] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [draftError, setDraftError] = useState("")
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const mutationPendingRef = useRef(false)
+  const people = Array.from(new Set([...staff.map((person) => person.code), ...tasks.flatMap((task) => [...task.notify, ...task.cc])]))
 
   useEffect(() => {
     document.title = "Task Calendar - FC Uno"
   }, [])
 
   useEffect(() => {
+    if (loading || !authenticated) return
     let cancelled = false
 
     async function loadTasks() {
-      let fallbackTasks = taskCalendarTasks
-      let fallbackDeletedTaskIds: string[] = []
-
       try {
-        const stored = window.localStorage.getItem(STORAGE_KEY)
-        const storedDeletedTaskIds = window.localStorage.getItem(DELETED_TASK_IDS_STORAGE_KEY)
-        if (stored) fallbackTasks = normalizeTasks(JSON.parse(stored))
-        if (storedDeletedTaskIds) fallbackDeletedTaskIds = normalizeStringList(JSON.parse(storedDeletedTaskIds))
-      } catch {
-        fallbackTasks = taskCalendarTasks
-      }
-
-      try {
-        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, { cache: "no-store" })
         if (!response.ok) throw new Error("Could not load shared task calendar data.")
         const data = await response.json()
-        if (response.ok && Array.isArray(data?.payload?.tasks)) {
-          fallbackTasks = normalizeTasks(data.payload.tasks)
-        }
-        if (Array.isArray(data?.payload?.deletedTaskIds)) {
-          fallbackDeletedTaskIds = normalizeStringList(data.payload.deletedTaskIds)
-        }
+        if (data.protocolVersion !== TASK_CALENDAR_PROTOCOL_VERSION) throw new Error("Task Calendar has been updated. Refresh this page before continuing.")
+        const nextTasks = readTaskCalendarTasks(data.payload)
+        if (cancelled) return
+        setTasks(nextTasks)
+        setTaskVersions(data.taskVersions || {})
+        setStaff(Array.isArray(data.staff) ? data.staff : [])
+        setCalendarLoadError("")
+        setSaveStatus("Shared task calendar loaded")
+        setCalendarLoaded(true)
       } catch (error) {
         if (cancelled) return
         setCalendarLoadError(error instanceof Error ? error.message : "Could not load shared task calendar data.")
@@ -221,14 +198,6 @@ export default function TaskCalendarPage() {
         setCalendarLoaded(true)
         return
       }
-
-      if (cancelled) return
-      setTasks(fallbackTasks)
-      setDeletedTaskIds(fallbackDeletedTaskIds)
-      setCalendarLoadError("")
-      setSaveStatus("Shared task calendar loaded")
-      loadedRef.current = true
-      setCalendarLoaded(true)
     }
 
     loadTasks()
@@ -236,89 +205,98 @@ export default function TaskCalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authenticated, loading])
 
   useEffect(() => {
-    if (!loadedRef.current) return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
-  }, [tasks])
-
-  useEffect(() => {
-    if (!loadedRef.current) return
-    window.localStorage.setItem(DELETED_TASK_IDS_STORAGE_KEY, JSON.stringify(deletedTaskIds))
-  }, [deletedTaskIds])
-
-  useEffect(() => {
-    if (!authenticated || !loadedRef.current) return
-    if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
-
-    remoteSaveTimerRef.current = setTimeout(() => {
-      setSaveStatus("Saving shared task calendar")
-      void fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks, deletedTaskIds }),
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            const payload = await response.json().catch(() => null)
-            throw new Error(payload?.message || "Shared task calendar save failed")
-          }
-          setSaveStatus("Shared task calendar saved")
-        })
-        .catch((error) => {
-          setSaveStatus(error instanceof Error ? error.message : "Shared task calendar save failed")
-        })
-    }, 700)
-
+    if (!modalOpen) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialogRef.current?.querySelector<HTMLInputElement>("input")?.focus()
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
+    window.addEventListener("beforeunload", beforeUnload)
     return () => {
-      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+      window.removeEventListener("beforeunload", beforeUnload)
+      if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [authenticated, deletedTaskIds, tasks])
+  }, [modalOpen])
 
-  useEffect(() => {
-    return () => {
-      if (remoteSaveTimerRef.current) clearTimeout(remoteSaveTimerRef.current)
+  function closeModal() {
+    if (mutationPendingRef.current) return
+    const original = draftTaskVersion ? tasks.find((task) => task.id === draftTask.id) : null
+    const dirty = original
+      ? JSON.stringify(draftTask) !== JSON.stringify(original) || daysOfMonthText !== original.daysOfMonth.join(", ")
+      : Boolean(draftTask.task.trim() || draftTask.remark.trim() || draftTask.notify.length || draftTask.cc.length)
+    if (dirty && !window.confirm("Discard your unsaved task changes?")) return
+    setModalOpen(false)
+  }
+
+  async function mutateTask(operation: "create" | "update" | "delete", task?: TaskCalendarTask) {
+    const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION, operation, ...(task ? { task } : { taskId: draftTask.id }), ...(draftTaskVersion ? { expectedTaskVersion: draftTaskVersion } : {}) }),
+    })
+    const data = await response.json().catch(() => null)
+    if (data?.payload && data?.taskVersions) {
+      setTasks(readTaskCalendarTasks(data.payload))
+      setTaskVersions(data.taskVersions)
     }
-  }, [])
+    if (!response.ok) throw new Error(data?.message || "The task could not be saved. Your draft is kept; please try again.")
+    if (data?.protocolVersion !== TASK_CALENDAR_PROTOCOL_VERSION || !data?.payload || !data?.taskVersions) throw new Error("The save could not be confirmed. Keep this window open and retry; your draft is kept.")
+    setSaveStatus("Shared task calendar saved")
+  }
 
   function openAddModal() {
+    if (!canEdit || mutationPendingRef.current) return
     const blankTask = buildBlankTask()
     setDraftTask(blankTask)
     setDaysOfMonthText(blankTask.daysOfMonth.join(", "))
+    setDraftTaskVersion(null)
+    setDraftError("")
     setModalOpen(true)
   }
 
   function openEditModal(task: TaskCalendarTask) {
+    if (!canEdit || mutationPendingRef.current) return
     setDraftTask({ ...task, months: task.months || [] })
     setDaysOfMonthText(task.daysOfMonth.join(", "))
+    setDraftTaskVersion(taskVersions[task.id] || null)
+    setDraftError("")
     setModalOpen(true)
   }
 
-  function saveDraftTask() {
-    const parsedDaysOfMonth = parseNumberList(daysOfMonthText, 1, 31)
-    const nextTask = {
-      ...draftTask,
-      task: draftTask.task.trim() || "NEW TASK",
-      daysOfMonth: draftTask.scheduleType === "Weekly" ? [] : parsedDaysOfMonth.length ? parsedDaysOfMonth : [1],
-      months: draftTask.scheduleType === "Yearly" ? draftTask.months || [] : [],
+  async function saveDraftTask() {
+    if (!canEdit || mutationPendingRef.current) return
+    setDraftError("")
+    mutationPendingRef.current = true
+    setSaving(true)
+    try {
+      const parsedDaysOfMonth = draftTask.scheduleType === "Weekly" ? [] : parseTaskDays(daysOfMonthText)
+      const nextTask = validateTaskCalendarTask({ ...draftTask, daysOfMonth: parsedDaysOfMonth })
+      await mutateTask(draftTaskVersion ? "update" : "create", nextTask)
+      setSelectedTaskId(nextTask.id)
+      setModalOpen(false)
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Could not save the task. Your draft is kept.")
+    } finally {
+      mutationPendingRef.current = false
+      setSaving(false)
     }
-    setTasks((current) =>
-      current.some((task) => task.id === nextTask.id)
-        ? current.map((task) => (task.id === nextTask.id ? nextTask : task))
-        : [nextTask, ...current]
-    )
-    setModalOpen(false)
   }
 
-  function deleteDraftTask() {
-    setTasks((current) => current.filter((task) => task.id !== draftTask.id))
-    setDeletedTaskIds((current) => {
-      const nextDeletedIds = current.includes(draftTask.id) ? current : [...current, draftTask.id]
-      window.localStorage.setItem(DELETED_TASK_IDS_STORAGE_KEY, JSON.stringify(nextDeletedIds))
-      return nextDeletedIds
-    })
-    setModalOpen(false)
+  async function deleteDraftTask() {
+    if (!canEdit || mutationPendingRef.current || !draftTaskVersion || !window.confirm("Delete this task and stop its future reminders?")) return
+    setDraftError("")
+    mutationPendingRef.current = true
+    setSaving(true)
+    try {
+      await mutateTask("delete")
+      setSelectedTaskId((id) => id === draftTask.id ? null : id)
+      setModalOpen(false)
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Could not delete the task. Please try again.")
+    } finally {
+      mutationPendingRef.current = false
+      setSaving(false)
+    }
   }
 
   function toggleDraftPerson(person: string, field: "notify" | "cc") {
@@ -402,7 +380,7 @@ export default function TaskCalendarPage() {
           }}
         >
           <div data-admin-button-style="preserve">
-            <button type="button" onClick={openAddModal} style={appleActionButtonStyle}>
+            <button type="button" disabled={!canEdit || saving} onClick={openAddModal} style={appleActionButtonStyle}>
               Add New Task
             </button>
           </div>
@@ -481,6 +459,10 @@ export default function TaskCalendarPage() {
               </button>
             </div>
           )}
+          {!tasks.length && <p style={{ color: "var(--fc-admin-muted)", fontSize: "13px" }}>No scheduled tasks.</p>}
+          {staff.some((person) => person.issue) && <p role="status" style={{ color: "var(--fc-admin-warning-text)", fontSize: "12px" }}>
+            Staff directory needs review: {staff.filter((person) => person.issue).map((person) => `${person.code}: ${person.issue}`).join("; ")}
+          </p>}
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -519,14 +501,29 @@ export default function TaskCalendarPage() {
             </thead>
             <tbody>
               {tasks.map((task) => {
+                const rowSelected = selectedTaskId === task.id
                 const rowHighlighted = taskHasSelectedPeople(task, selectedPeople)
+                const rowBackground = rowSelected
+                  ? "var(--fc-admin-selected-bg)"
+                  : rowHighlighted ? "#edf6ff" : "var(--fc-row-bg)"
                 return (
                   <tr
                     key={task.id}
+                    tabIndex={0}
+                    aria-selected={rowSelected}
+                    onClick={() => setSelectedTaskId(task.id)}
+                    onFocus={() => setSelectedTaskId(task.id)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return
+                      event.preventDefault()
+                      setSelectedTaskId(task.id)
+                    }}
                     onDoubleClick={() => openEditModal(task)}
                     style={{
-                      background: rowHighlighted ? "#edf6ff" : "var(--fc-row-bg)",
-                      boxShadow: rowHighlighted ? "inset 0 0 0 1px #b8d5ff, inset 4px 0 0 var(--fc-admin-link)" : "none",
+                      background: rowBackground,
+                      boxShadow: rowSelected
+                        ? "inset 0 0 0 2px var(--fc-admin-selected-border), inset 4px 0 0 var(--fc-admin-link)"
+                        : rowHighlighted ? "inset 0 0 0 1px #b8d5ff, inset 4px 0 0 var(--fc-admin-link)" : "none",
                       cursor: "pointer",
                     }}
                   >
@@ -535,7 +532,7 @@ export default function TaskCalendarPage() {
                     {people.map((person) => {
                       const notify = task.notify.includes(person)
                       const copied = task.cc.includes(person)
-                      const personBackground = notify ? "#ffe8e8" : copied ? "#fff8e5" : rowHighlighted ? "#edf6ff" : "var(--fc-row-bg)"
+                      const personBackground = notify ? "#ffe8e8" : copied ? "#fff8e5" : "transparent"
                       const personBorder = notify ? "#ffc4c4" : copied ? "#f3dfaa" : "transparent"
                       return (
                         <td key={person} style={{ ...tdStyle, textAlign: "center", paddingLeft: "3px", paddingRight: "3px" }}>
@@ -565,8 +562,26 @@ export default function TaskCalendarPage() {
 
       {modalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
-            <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>{draftTask.sourceRow ? "Edit Task" : "New Task"}</h2>
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="task-calendar-dialog-title"
+            aria-busy={saving}
+            style={{ ...modalStyle, maxHeight: "90vh", overflow: "auto" }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") { event.preventDefault(); closeModal(); return }
+              if (event.key !== "Tab") return
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]'))
+              const first = controls[0], last = controls[controls.length - 1]
+              if (!first) { event.preventDefault(); return }
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+            }}
+          >
+            <h2 id="task-calendar-dialog-title" style={{ margin: "0 0 14px", fontSize: "24px" }}>{draftTaskVersion ? "Edit Task" : "New Task"}</h2>
+            {draftError && <p role="alert" style={{ color: "var(--fc-admin-danger-text)", fontSize: "13px" }}>{draftError}</p>}
+            <fieldset disabled={saving || !canEdit} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <label style={{ display: "block", color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "10px" }}>
               Task
               <input value={draftTask.task} onChange={(event) => setDraftTask((current) => ({ ...current, task: event.target.value }))} style={inputStyle} />
@@ -606,11 +621,6 @@ export default function TaskCalendarPage() {
                 <input
                   value={daysOfMonthText}
                   onChange={(event) => setDaysOfMonthText(event.target.value)}
-                  onBlur={() => {
-                    const days = parseNumberList(daysOfMonthText, 1, 31)
-                    setDraftTask((current) => ({ ...current, daysOfMonth: days }))
-                    setDaysOfMonthText(days.join(", "))
-                  }}
                   style={inputStyle}
                 />
               </label>
@@ -635,7 +645,7 @@ export default function TaskCalendarPage() {
                   {people.map((person) => {
                     const active = draftTask[field].includes(person)
                     return (
-                      <button key={person} type="button" aria-pressed={active} onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)", color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)", minWidth: "42px" }}>
+                      <button key={person} type="button" aria-pressed={active} title={staff.find((item) => item.code === person)?.name || `${person} — staff directory review required`} onClick={() => toggleDraftPerson(person, field)} style={{ ...buttonStyle, background: active ? "var(--fc-admin-selected-bg)" : "var(--fc-admin-button-bg)", color: active ? "var(--fc-admin-selected-text)" : "var(--fc-admin-button-text)", minWidth: "42px" }}>
                         {person}
                       </button>
                     )
@@ -648,12 +658,13 @@ export default function TaskCalendarPage() {
               <input value={draftTask.remark} onChange={(event) => setDraftTask((current) => ({ ...current, remark: event.target.value }))} style={inputStyle} />
             </label>
             <div style={{ display: "flex", justifyContent: "space-between", gap: "9px" }}>
-              <button type="button" onClick={deleteDraftTask} style={dangerActionButtonStyle}>Delete</button>
+              {draftTaskVersion ? <button type="button" onClick={deleteDraftTask} style={dangerActionButtonStyle}>Delete</button> : <span />}
               <div style={{ display: "flex", gap: "9px" }}>
-                <button type="button" onClick={() => setModalOpen(false)} style={buttonStyle}>Cancel</button>
-                <button type="button" onClick={saveDraftTask} style={primaryActionButtonStyle}>Save</button>
+                <button type="button" onClick={closeModal} style={buttonStyle}>Cancel</button>
+                <button type="button" onClick={saveDraftTask} style={primaryActionButtonStyle}>{saving ? "Saving…" : "Save"}</button>
               </div>
             </div>
+            </fieldset>
           </div>
         </div>
       )}

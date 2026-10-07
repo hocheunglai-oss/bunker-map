@@ -1,20 +1,13 @@
 import { NextResponse } from "next/server"
-import { sendCalendarEmail } from "@/lib/eventCalendarEmail"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { loadCalendarStaffDirectory, resolveCalendarStaffRecipients } from "@/lib/calendarStaff"
+import { deliverCalendarReminder } from "@/lib/calendarDelivery"
+import { getHongKongDateKey, isValidCalendarDate } from "@/lib/eventCalendarDates"
+import { getEventCalendarRecordVersion } from "@/lib/eventCalendarStore"
 
 const LEAVE_TO = ["stanley@cosulich.com.hk", "vincent@cosulich.com.hk", "louisa@cosulich.com.hk"]
 const LEAVE_CC = ["otto@cosulich.com.hk", "kelvin@cosulich.com.hk"]
-const PEOPLE_EMAILS: Record<string, string> = {
-  VL: "vincent@cosulich.com.hk",
-  SC: "stanley@cosulich.com.hk",
-  OL: "otto@cosulich.com.hk",
-  KZ: "kelvin@cosulich.com.hk",
-  CY: "chengyuan@cosulich.com.hk",
-  MY: "mayshen@cosulich.com.hk",
-  DT: "diana@cosulich.com.hk",
-  LC: "laureen@cosulich.com.hk",
-  LL: "louisa@cosulich.com.hk",
-}
+const LEAVE_TYPES = new Set(["Annual Leave", "Sick Leave Notification (for medical treatment)", "Compassionate Leave"])
 
 function escapeHtml(value: string) {
   return value
@@ -33,19 +26,26 @@ export async function POST(request: Request) {
   try {
     await requireAdminPagePermission("event-calendar", "edit")
     const body = await request.json()
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ message: "Supply a valid leave request." }, { status: 400 })
+    }
     const from = typeof body.from === "string" ? body.from : ""
     const to = typeof body.to === "string" ? body.to : from
     const type = typeof body.type === "string" ? body.type : ""
     const reason = typeof body.reason === "string" ? body.reason.trim() : ""
-    const person = typeof body.person === "string" ? body.person.toUpperCase() : ""
-    const applicantEmail = PEOPLE_EMAILS[person]
-    const recipients = normalizeRecipients([...LEAVE_TO, ...(applicantEmail ? [applicantEmail] : [])])
+    const person = typeof body.person === "string" ? body.person.trim().toUpperCase() : ""
 
-    if (!from || !to || !type || !person) {
-      return NextResponse.json({ message: "Leave request is incomplete." }, { status: 400 })
+    if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to < from || !LEAVE_TYPES.has(type) || !person || person.length > 40 || reason.length > 5000) {
+      return NextResponse.json({ message: "Check the applicant, leave type and dates. The end date must not be before the start date." }, { status: 400 })
     }
+    const staff = await loadCalendarStaffDirectory()
+    const applicant = resolveCalendarStaffRecipients([person], staff)
+    if (applicant.unresolved.length) return NextResponse.json({ message: "The applicant has no unique active email address. Please check User Management before sending." }, { status: 400 })
+    const recipients = normalizeRecipients([...LEAVE_TO, ...applicant.recipients])
 
-    await sendCalendarEmail({
+    const delivery = await deliverCalendarReminder({
+      kind: "leave", occurrenceDate: getHongKongDateKey(),
+      recordId: getEventCalendarRecordVersion({ from, to, type, reason, person }),
       to: recipients,
       cc: LEAVE_CC,
       subject: "***** Leave Request",
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       `,
     })
 
-    return NextResponse.json({ success: true, sent: recipients.length })
+    return NextResponse.json({ success: delivery.status !== "in_progress", ...delivery }, { status: delivery.status === "in_progress" ? 202 : 200 })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Leave request email failed." },
-      { status: 500 }
+      { status: error instanceof SyntaxError ? 400 : 500 }
     )
   }
 }

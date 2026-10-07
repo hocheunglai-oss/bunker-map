@@ -5,33 +5,33 @@ import {
   OfficeCalendarEvent,
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
-import { mergeImportedEvents } from "@/lib/eventCalendarImport"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { addCalendarDays, getHongKongDateKey, isValidCalendarDate, preserveCalendarEndDate } from "@/lib/eventCalendarDates"
+import { calendarIntervalsOverlap, meetingRoomInterval, type MeetingRoomCalendarEvent } from "@/lib/eventCalendarMeeting"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
 type ViewMode = "upcoming" | "past" | "google"
 type ModalMode = "add" | "edit" | null
 type RecurrentFrequency = "daily" | "weekly" | "monthly"
 type LeaveType = "Annual Leave" | "Sick Leave Notification (for medical treatment)" | "Compassionate Leave"
-type GoogleCalendarEvent = {
-  id: string
-  calendarId: string
-  title: string
-  startDate: string
-  endDate: string
-  startTime: string
-  endTime: string
-  sourceEventId: string
-  sourceTitle: string
-}
+type GoogleCalendarEvent = MeetingRoomCalendarEvent
 type EmailPromptState = {
-  event: ManagedEvent
-  eventVersion: string
+  events: ManagedEvent[]
+  eventVersions: Record<string, string>
   action: "created" | "updated"
   status: "idle" | "sending" | "sent" | "failed"
   error: string
 } | null
+type HolidayPreview = {
+  years: number[]
+  countries: string[]
+  revision: string
+  storeVersion: string
+  complete: boolean
+  plan: { additions: ManagedEvent[]; updates: ManagedEvent[]; removals: string[]; preserved: Array<{ id: string; reason: string }> }
+}
 type LeaveRequestDraft = {
   from: string
   to: string
@@ -256,22 +256,21 @@ const dangerActionButtonStyle: React.CSSProperties = {
 }
 
 function parseLocalDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number)
-  return new Date(year, month - 1, day)
+  return new Date(`${value}T00:00:00.000Z`)
 }
 
 function toDateKey(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(date.getUTCDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
 }
 
 function formatDate(value: string) {
   const date = parseLocalDate(value)
-  const day = String(date.getDate()).padStart(2, "0")
-  const month = new Intl.DateTimeFormat("en-GB", { month: "short" }).format(date)
-  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date)
+  const day = String(date.getUTCDate()).padStart(2, "0")
+  const month = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" }).format(date)
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date)
   return `${day} ${month} (${weekday})`
 }
 
@@ -293,9 +292,7 @@ function formatGoogleEventTime(event: GoogleCalendarEvent) {
 }
 
 function addDaysToKey(dateKey: string, days: number) {
-  const date = parseLocalDate(dateKey)
-  date.setDate(date.getDate() + days)
-  return toDateKey(date)
+  return addCalendarDays(dateKey, days)
 }
 
 function getMeetingRoomStyle(event: GoogleCalendarEvent) {
@@ -366,49 +363,6 @@ function isMeetingRoomBooked(event: Pick<ManagedEvent, "eventType">) {
   return storedEventType === "Meeting Room" || storedEventType === "Meeting"
 }
 
-function parseTimeToMinutes(timeText: string) {
-  const [hour, minute] = timeText.split(":").map(Number)
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-  return hour * 60 + minute
-}
-
-function extractEventTimeRange(title: string) {
-  const match = title.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s*[-–]\s*([01]?\d|2[0-3])[:.]([0-5]\d))?\b/)
-  if (!match) return null
-
-  const start = `${match[1].padStart(2, "0")}:${match[2]}`
-  const startMinutes = parseTimeToMinutes(start)
-  if (startMinutes === null) return null
-
-  const end = match[3] && match[4] ? `${match[3].padStart(2, "0")}:${match[4]}` : ""
-  const endMinutes = end ? parseTimeToMinutes(end) : startMinutes + 60
-  const normalizedEndMinutes = endMinutes === null
-    ? startMinutes + 60
-    : endMinutes <= startMinutes
-      ? endMinutes + (24 * 60)
-      : endMinutes
-
-  return {
-    start,
-    end: end || `${String(Math.floor((startMinutes + 60) / 60)).padStart(2, "0")}:${String((startMinutes + 60) % 60).padStart(2, "0")}`,
-    startMinutes,
-    endMinutes: normalizedEndMinutes,
-  }
-}
-
-function getGoogleEventMinutes(event: GoogleCalendarEvent) {
-  const startMinutes = event.startTime ? parseTimeToMinutes(event.startTime) : 0
-  const rawEndMinutes = event.endTime ? parseTimeToMinutes(event.endTime) : 24 * 60
-  const endMinutes = rawEndMinutes !== null && event.endDate > event.startDate
-    ? rawEndMinutes + (24 * 60)
-    : rawEndMinutes
-
-  return {
-    startMinutes: startMinutes ?? 0,
-    endMinutes: endMinutes ?? 24 * 60,
-  }
-}
-
 function normalizeStoredEvents(value: unknown): ManagedEvent[] {
   const rawEvents = Array.isArray(value) ? value : officeCalendarSeedEvents
   const events = rawEvents.filter((event): event is ManagedEvent => {
@@ -460,8 +414,8 @@ function buildBlankRecurrentEvent(todayKey: string): RecurrentDraft {
     ...buildBlankEvent(todayKey),
     id: createEventId("recurrent"),
     frequency: "weekly",
-    weeklyDays: [today.getDay()],
-    monthlyDay: today.getDate(),
+    weeklyDays: [today.getUTCDay()],
+    monthlyDay: today.getUTCDate(),
   }
 }
 
@@ -504,8 +458,9 @@ function ensureRequiredSeedEvents(events: ManagedEvent[], deletedRequiredSeedIds
 }
 
 export default function EventCalendarPage() {
-  const { loading, authenticated } = useSimpleAdminAuth()
-  const todayKey = toDateKey(new Date())
+  const { loading, authenticated, permissions, role } = useSimpleAdminAuth()
+  const canEdit = authenticated && (isAdminRole(role) || canAccessAdminPage(permissions, "event-calendar", "edit"))
+  const [todayKey, setTodayKey] = useState(() => getHongKongDateKey())
   const tomorrowKey = addDaysToKey(todayKey, 1)
   const [events, setEvents] = useState<ManagedEvent[]>([])
   const [people, setPeople] = useState(defaultPeople)
@@ -540,6 +495,7 @@ export default function EventCalendarPage() {
   const [calendarLoadError, setCalendarLoadError] = useState("")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
+  const [holidayPreview, setHolidayPreview] = useState<HolidayPreview | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState("")
   const [recoveringEvents, setRecoveringEvents] = useState(false)
   const [calendarMutationPending, setCalendarMutationPending] = useState(false)
@@ -562,6 +518,13 @@ export default function EventCalendarPage() {
   const refreshRequestSequenceRef = useRef(0)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const refreshToday = () => setTodayKey(getHongKongDateKey())
+    const timer = window.setInterval(refreshToday, 60_000)
+    window.addEventListener("focus", refreshToday)
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshToday) }
+  }, [])
 
   function applyCanonicalCalendarPayload(
     rawPayload: unknown,
@@ -754,31 +717,35 @@ export default function EventCalendarPage() {
 
   useEffect(() => {
     if (!authenticated || !calendarLoaded || !loadedRef.current) return
-    const currentYear = new Date().getFullYear()
+    const currentYear = Number(getHongKongDateKey().slice(0, 4))
     const years = [currentYear, currentYear + 1].join(",")
     let cancelled = false
 
-    async function importPublicHolidays() {
-      setHolidayImportStatus("Importing holidays")
+    async function checkPublicHolidays() {
+      setHolidayImportStatus("Checking holiday sources")
 
       try {
         const response = await fetch(`/api/event-calendar/public-holidays?years=${years}`)
         const payload = await response.json()
 
         if (!response.ok || !Array.isArray(payload.events)) {
-          setHolidayImportStatus("Holiday import pending")
+          setHolidayImportStatus("Holiday sources could not be verified")
           return
         }
 
         if (cancelled) return
-        await persistImportedEvents(normalizeStoredEvents(payload.events))
-        setHolidayImportStatus(`Holidays ready ${years.replace(",", "-")}`)
+        const unavailable = Array.isArray(payload.coverage)
+          ? payload.coverage.filter((item: { status: string }) => item.status !== "verified").map((item: { country: string; year: number }) => `${item.country} ${item.year}`)
+          : []
+        setHolidayImportStatus(payload.complete === true
+          ? `Verified sources ${years.replace(",", "–")}. Review updates to apply them.`
+          : `Incomplete holiday coverage${unavailable.length ? `: ${unavailable.join(", ")}` : ""}`)
       } catch {
-        if (!cancelled) setHolidayImportStatus("Holiday import pending")
+        if (!cancelled) setHolidayImportStatus("Holiday sources could not be verified")
       }
     }
 
-    importPublicHolidays()
+    void checkPublicHolidays()
 
     return () => {
       cancelled = true
@@ -848,15 +815,19 @@ export default function EventCalendarPage() {
     }
   }, [])
 
-  async function sendEventEmail(event: ManagedEvent, eventVersion: string, action: "created" | "updated") {
+  async function sendEventEmail(notificationEvents: ManagedEvent[], versions: Record<string, string>, action: "created" | "updated") {
+    if (!canEdit) throw new Error("You have view-only access to this calendar.")
     const response = await fetch("/api/event-calendar/email-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, event, eventVersion }),
+        body: JSON.stringify(notificationEvents.length === 1
+          ? { action, event: notificationEvents[0], eventVersion: versions[notificationEvents[0].id] }
+          : { action, events: notificationEvents, eventVersions: versions }),
       })
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || payload?.status === "in_progress") {
+      if (payload?.status === "in_progress") throw new Error("This update is already being sent. Please wait a moment before checking again.")
       throw new Error(payload?.message || "Email notification failed.")
     }
   }
@@ -869,6 +840,7 @@ export default function EventCalendarPage() {
     expectedEventVersions: Record<string, string> = {},
     expectedSettingVersions: Record<string, string> = {},
   ) {
+    if (!canEdit) throw new Error("You have view-only access to this calendar.")
     if (calendarMutationPendingRef.current) {
       throw new Error("Another calendar change is still saving. Wait for it to finish, then try again.")
     }
@@ -921,14 +893,6 @@ export default function EventCalendarPage() {
     }
   }
 
-  async function persistImportedEvents(importedEvents: ManagedEvent[]) {
-    const merged = mergeImportedEvents(eventsRef.current, importedEvents)
-    const currentIds = new Set(eventsRef.current.map((event) => event.id))
-    const additions = merged.filter((event) => !currentIds.has(event.id))
-    if (!additions.length) return
-    await mutateCalendar("insert", additions)
-  }
-
   const visibleEvents = useMemo(() => {
     if (viewMode === "google") return []
 
@@ -951,6 +915,7 @@ export default function EventCalendarPage() {
   }, [selectedPeople, visibleEvents])
 
   function openAddModal() {
+    if (!canEdit) return
     eventSubmissionTokenRef.current += 1
     draftEventIdRef.current = ""
     draftEventVersionRef.current = ""
@@ -963,6 +928,7 @@ export default function EventCalendarPage() {
   }
 
   function openRecurrentModal() {
+    if (!canEdit) return
     setDraftRecurrentEvent(buildBlankRecurrentEvent(todayKey))
     setAddMenuOpen(false)
     setToolsMenuOpen(false)
@@ -970,6 +936,7 @@ export default function EventCalendarPage() {
   }
 
   function openLeaveModal() {
+    if (!canEdit) return
     setLeaveRequestDraft(buildBlankLeaveRequest(todayKey, people))
     setAddMenuOpen(false)
     setToolsMenuOpen(false)
@@ -977,6 +944,7 @@ export default function EventCalendarPage() {
   }
 
   function openEditModal(event: ManagedEvent) {
+    if (!canEdit) return
     const version = eventVersions[event.id] || ""
     eventSubmissionTokenRef.current += 1
     draftEventIdRef.current = event.id
@@ -1004,11 +972,11 @@ export default function EventCalendarPage() {
   async function findMeetingRoomConflicts(event: ManagedEvent) {
     if (!isMeetingRoomBooked(event)) return []
 
-    const bookingTime = extractEventTimeRange(event.title)
+    const booking = meetingRoomInterval(event)
 
     try {
       const response = await fetch(
-        `/api/event-calendar/google-events?timeMin=${encodeURIComponent(`${event.startDate}T00:00:00+08:00`)}&timeMax=${encodeURIComponent(`${event.startDate}T23:59:59+08:00`)}`
+        `/api/event-calendar/google-events?timeMin=${encodeURIComponent(new Date(booking.startMs).toISOString())}&timeMax=${encodeURIComponent(new Date(booking.endMs).toISOString())}`
       )
       const payload = await response.json()
       if (!response.ok || !Array.isArray(payload.events)) {
@@ -1017,11 +985,11 @@ export default function EventCalendarPage() {
 
       return (payload.events as GoogleCalendarEvent[]).filter((googleEvent) => {
         if (googleEvent.sourceEventId && googleEvent.sourceEventId === event.id) return false
-        if (googleEvent.startDate !== event.startDate) return false
-        if (!bookingTime) return true
-
-        const googleTime = getGoogleEventMinutes(googleEvent)
-        return bookingTime.startMinutes < googleTime.endMinutes && bookingTime.endMinutes > googleTime.startMinutes
+        if (googleEvent.transparent) return false
+        if (!Number.isFinite(googleEvent.startMs) || !Number.isFinite(googleEvent.endMs)) {
+          throw new Error("Meeting-room availability is outdated. Refresh the page before booking.")
+        }
+        return calendarIntervalsOverlap(booking, googleEvent)
       })
     } catch (error) {
       throw new Error(
@@ -1033,7 +1001,11 @@ export default function EventCalendarPage() {
   }
 
   async function saveDraftEvent() {
-    if (calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode) return
+    if (!canEdit || calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode) return
+    if (!isValidCalendarDate(draftEvent.startDate) || !isValidCalendarDate(draftEvent.endDate) || draftEvent.endDate < draftEvent.startDate) {
+      window.alert("Enter a valid start and end date. The end must not be before the start.")
+      return
+    }
     const wasEdit = eventModalMode === "edit"
     const action = eventModalMode === "edit" ? "save these changes" : "create this event"
     if (!window.confirm(`Are you sure you want to ${action}?`)) return
@@ -1073,8 +1045,8 @@ export default function EventCalendarPage() {
       )
       const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
       setEmailPrompt({
-        event: committedEvent,
-        eventVersion: normalizeEventVersions(result.eventVersions)[nextEvent.id] || "",
+        events: [committedEvent],
+        eventVersions: normalizeEventVersions(result.eventVersions),
         action: wasEdit ? "updated" : "created",
         status: "idle",
         error: "",
@@ -1100,7 +1072,7 @@ export default function EventCalendarPage() {
     setEmailPrompt((current) => current && { ...current, status: "sending", error: "" })
 
     try {
-      await sendEventEmail(emailPrompt.event, emailPrompt.eventVersion, emailPrompt.action)
+      await sendEventEmail(emailPrompt.events, emailPrompt.eventVersions, emailPrompt.action)
       setEmailPrompt((current) => current && { ...current, status: "sent", error: "" })
       window.setTimeout(() => setEmailPrompt(null), 900)
     } catch (error) {
@@ -1113,7 +1085,15 @@ export default function EventCalendarPage() {
   }
 
   async function saveRecurrentEvents() {
-    if (calendarMutationPendingRef.current) return
+    if (!canEdit || calendarMutationPendingRef.current) return
+    if (!isValidCalendarDate(draftRecurrentEvent.startDate) || !isValidCalendarDate(draftRecurrentEvent.endDate) || draftRecurrentEvent.endDate < draftRecurrentEvent.startDate) {
+      window.alert("Enter a valid start and end date. The end must not be before the start.")
+      return
+    }
+    if ((Date.parse(draftRecurrentEvent.endDate) - Date.parse(draftRecurrentEvent.startDate)) / 86_400_000 > 3660) {
+      window.alert("Choose a recurrence range of ten years or less.")
+      return
+    }
     if (!window.confirm("Are you sure you want to create these recurrent events?")) return
 
     const rangeStart = parseLocalDate(draftRecurrentEvent.startDate)
@@ -1123,30 +1103,34 @@ export default function EventCalendarPage() {
     const occurrenceDates: string[] = []
 
     if (draftRecurrentEvent.frequency === "daily") {
-      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setDate(cursor.getDate() + 1)) {
+      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
         occurrenceDates.push(toDateKey(cursor))
       }
     }
 
     if (draftRecurrentEvent.frequency === "weekly") {
-      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setDate(cursor.getDate() + 1)) {
-        if (draftRecurrentEvent.weeklyDays.includes(cursor.getDay())) {
+      for (const cursor = new Date(rangeStart); cursor <= rangeEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+        if (draftRecurrentEvent.weeklyDays.includes(cursor.getUTCDay())) {
           occurrenceDates.push(toDateKey(cursor))
         }
       }
     }
 
     if (draftRecurrentEvent.frequency === "monthly") {
-      const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1)
+      const cursor = new Date(Date.UTC(rangeStart.getUTCFullYear(), rangeStart.getUTCMonth(), 1))
       while (cursor <= rangeEnd) {
-        const candidate = new Date(cursor.getFullYear(), cursor.getMonth(), draftRecurrentEvent.monthlyDay)
-        if (candidate.getMonth() === cursor.getMonth() && candidate >= rangeStart && candidate <= rangeEnd) {
+        const candidate = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), draftRecurrentEvent.monthlyDay))
+        if (candidate.getUTCMonth() === cursor.getUTCMonth() && candidate >= rangeStart && candidate <= rangeEnd) {
           occurrenceDates.push(toDateKey(candidate))
         }
-        cursor.setMonth(cursor.getMonth() + 1)
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1)
       }
     }
 
+    if (!occurrenceDates.length || occurrenceDates.length > 100) {
+      window.alert(occurrenceDates.length ? "Create at most 100 occurrences at a time. Shorten the date range." : "No occurrences match these dates. Check the recurrence settings.")
+      return
+    }
     const nextEvents = occurrenceDates.map((dateKey) => ({
       ...draftRecurrentEvent,
       id: `${draftRecurrentEvent.id}-${dateKey}`,
@@ -1159,7 +1143,12 @@ export default function EventCalendarPage() {
     }))
 
     try {
-      await mutateCalendar("create", nextEvents)
+      const result = await mutateCalendar("create", nextEvents)
+      const ids = new Set(nextEvents.map((event) => event.id))
+      setEmailPrompt({
+        events: normalizeStoredEvents(result.payload.events).filter((event) => ids.has(event.id)),
+        eventVersions: normalizeEventVersions(result.eventVersions), action: "created", status: "idle", error: "",
+      })
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The recurrent events were not saved. Please try again.")
       return
@@ -1168,7 +1157,7 @@ export default function EventCalendarPage() {
   }
 
   async function sendLeaveRequest() {
-    if (!leaveRequestDraft.person || leaveRequestDraft.status === "sending") return
+    if (!canEdit || !leaveRequestDraft.person || leaveRequestDraft.status === "sending") return
     setLeaveRequestDraft((current) => ({ ...current, status: "sending", error: "" }))
 
     try {
@@ -1180,6 +1169,7 @@ export default function EventCalendarPage() {
 
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.message || "Leave request failed.")
+      if (payload?.status === "in_progress") throw new Error("This leave request is already being sent. Please wait a moment before checking again.")
       setLeaveRequestDraft((current) => ({ ...current, status: "sent", error: "" }))
       window.setTimeout(() => setLeaveModalOpen(false), 900)
     } catch (error) {
@@ -1240,6 +1230,7 @@ export default function EventCalendarPage() {
   }
 
   function openPeopleModal() {
+    if (!canEdit) return
     setDraftPeopleText(people.join("\n"))
     setDraftPeopleVersion(settingVersions.people || "")
     setToolsMenuOpen(false)
@@ -1296,6 +1287,7 @@ export default function EventCalendarPage() {
   }
 
   function openEmailModal() {
+    if (!canEdit) return
     setDraftEmailRecipientsText(emailRecipientsText)
     setDraftEmailRecipientsVersion(settingVersions.emailRecipientsText || "")
     setToolsMenuOpen(false)
@@ -1320,60 +1312,59 @@ export default function EventCalendarPage() {
     }
   }
 
-  async function importNextYearPublicHolidays() {
-    if (holidayImporting) return
-    const nextYear = new Date().getFullYear() + 1
+  async function previewHolidayUpdates(countries: string[]) {
+    if (!canEdit || holidayImporting || calendarMutationPendingRef.current) return
+    const year = Number(getHongKongDateKey().slice(0, 4))
+    const years = [year, year + 1]
     setToolsMenuOpen(false)
     setHolidayImporting(true)
-    setHolidayImportStatus(`Importing ${nextYear} holidays`)
-
+    setHolidayImportStatus("Preparing holiday update preview")
     try {
-      const response = await fetch(`/api/event-calendar/public-holidays?years=${nextYear}&countries=TW,US,SG`)
+      const response = await fetch("/api/event-calendar/public-holidays", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview", years, countries }),
+      })
       const payload = await response.json()
-
-      if (!response.ok || !Array.isArray(payload.events)) {
-        setHolidayImportStatus(`${nextYear} holiday import pending`)
-        return
-      }
-
-      await persistImportedEvents(normalizeStoredEvents(payload.events))
-      setHolidayImportStatus(`${nextYear} holidays added`)
-    } catch {
-      setHolidayImportStatus(`${nextYear} holiday import pending`)
+      if (!response.ok || !payload.plan || !payload.storeVersion || !payload.revision) throw new Error(payload.message || "Could not prepare the holiday updates.")
+      setHolidayPreview({ ...payload, years, countries })
+      setHolidayImportStatus(payload.complete ? "Holiday updates ready for review" : "Partial holiday coverage — review available updates")
+    } catch (error) {
+      setHolidayImportStatus(error instanceof Error ? error.message : "Could not prepare the holiday updates.")
     } finally {
       setHolidayImporting(false)
     }
   }
 
-  async function importNextYearHongKongHolidays() {
-    if (holidayImporting) return
-    const nextYear = new Date().getFullYear() + 1
-    setToolsMenuOpen(false)
+  async function applyHolidayUpdates() {
+    if (!canEdit || !holidayPreview || holidayImporting || calendarMutationPendingRef.current) return
+    calendarMutationPendingRef.current = true
+    calendarStateSequenceRef.current += 1
+    setCalendarMutationPending(true)
     setHolidayImporting(true)
-    setHolidayImportStatus(`Importing ${nextYear} Hong Kong holidays`)
-
     try {
-      const response = await fetch(
-        `/api/event-calendar/public-holidays?years=${nextYear}&countries=HK&titleStyle=holiday-attendance`
-      )
+      const response = await fetch("/api/event-calendar/public-holidays", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "apply", years: holidayPreview.years, countries: holidayPreview.countries, expectedStoreVersion: holidayPreview.storeVersion, revision: holidayPreview.revision }),
+      })
       const payload = await response.json()
-
-      if (!response.ok || !Array.isArray(payload.events)) {
-        setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
-        return
-      }
-
-      await persistImportedEvents(normalizeStoredEvents(payload.events))
-      setHolidayImportStatus(`${nextYear} Hong Kong holidays added`)
-    } catch {
-      setHolidayImportStatus(`${nextYear} Hong Kong holiday import pending`)
+      if (!response.ok) throw new Error(payload.message || "Holiday updates were not saved. Review a fresh preview before trying again.")
+      if (!applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)) throw new Error("The holiday response did not include the saved calendar. Refresh the page to check the result.")
+      setHolidayImportStatus(`Holiday updates saved for ${holidayPreview.years.join("–")}${holidayPreview.plan.preserved.length ? `; ${holidayPreview.plan.preserved.length} edited/assigned entries left unchanged` : ""}`)
+      setHolidayPreview(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The holiday updates were not saved.")
+      setHolidayPreview(null)
+      setHolidayImportStatus("Review a fresh holiday preview before trying again")
     } finally {
+      calendarMutationPendingRef.current = false
+      calendarStateSequenceRef.current += 1
+      setCalendarMutationPending(false)
       setHolidayImporting(false)
     }
   }
 
   async function recoverMissingEvents() {
-    if (recoveringEvents || calendarMutationPendingRef.current) return
+    if (!canEdit || recoveringEvents || calendarMutationPendingRef.current) return
     if (!window.confirm("Restore missing future events found in audit history?")) return
 
     calendarMutationPendingRef.current = true
@@ -1399,11 +1390,10 @@ export default function EventCalendarPage() {
       }
       const restoredIds = normalizeStoredEvents(payload.restoredEvents).map((event) => event.id)
       if (restoredIds.length) void syncCanonicalGoogleCalendar(restoredIds)
-      setRecoveryStatus(
-        payload.restoredCount
+      setRecoveryStatus((payload.restoredCount
           ? `Recovered ${payload.restoredCount} missing events`
           : "No missing future events found"
-      )
+        ) + (payload.historyComplete === false ? ". Only part of the audit history was checked; older events may need administrator review." : ""))
     } catch (error) {
       setRecoveryStatus(error instanceof Error ? error.message : "Could not recover missing events.")
     } finally {
@@ -1513,6 +1503,7 @@ export default function EventCalendarPage() {
             >
               <button
                 type="button"
+                disabled={!canEdit}
                 onClick={() => {
                   cancelAddMenuClose()
                   setToolsMenuOpen(false)
@@ -1547,7 +1538,7 @@ export default function EventCalendarPage() {
                 </div>
               )}
             </div>
-            <button type="button" onClick={openLeaveModal} style={appleSecondaryButtonStyle}>
+            <button type="button" disabled={!canEdit} onClick={openLeaveModal} style={appleSecondaryButtonStyle}>
               Send Leave Request
             </button>
           </div>
@@ -1609,16 +1600,16 @@ export default function EventCalendarPage() {
                     boxShadow: "0 16px 36px #00000018",
                   }}
                 >
-                  <button type="button" onClick={openEmailModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                  <button type="button" disabled={!canEdit} onClick={openEmailModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
                     Edit Email List
                   </button>
-                  <button type="button" onClick={openPeopleModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
+                  <button type="button" disabled={!canEdit} onClick={openPeopleModal} style={{ ...menuItemButtonStyle, marginBottom: "3px" }}>
                     Edit People List
                   </button>
                   <button
                     type="button"
-                    onClick={importNextYearPublicHolidays}
-                    disabled={holidayImporting}
+                    onClick={() => void previewHolidayUpdates(["TW", "US", "SG"])}
+                    disabled={!canEdit || holidayImporting || calendarMutationPending}
                     style={{
                       ...menuItemButtonStyle,
                       whiteSpace: "normal",
@@ -1627,12 +1618,12 @@ export default function EventCalendarPage() {
                       cursor: holidayImporting ? "not-allowed" : "pointer",
                     }}
                   >
-                    Add USA, Taiwan, Singapore Holidays
+                    Review USA, Taiwan, Singapore Holidays
                   </button>
                   <button
                     type="button"
-                    onClick={importNextYearHongKongHolidays}
-                    disabled={holidayImporting}
+                    onClick={() => void previewHolidayUpdates(["HK"])}
+                    disabled={!canEdit || holidayImporting || calendarMutationPending}
                     style={{
                       ...menuItemButtonStyle,
                       whiteSpace: "normal",
@@ -1640,12 +1631,12 @@ export default function EventCalendarPage() {
                       cursor: holidayImporting ? "not-allowed" : "pointer",
                     }}
                   >
-                    Add HK Holidays
+                    Review HK Holidays
                   </button>
                   <button
                     type="button"
                     onClick={recoverMissingEvents}
-                    disabled={recoveringEvents}
+                    disabled={!canEdit || recoveringEvents}
                     style={{
                       ...menuItemButtonStyle,
                       whiteSpace: "normal",
@@ -1988,6 +1979,35 @@ export default function EventCalendarPage() {
         </div>
       </div>
 
+      {holidayPreview && (
+        <div style={modalBackdropStyle}>
+          <div role="dialog" aria-modal="true" aria-labelledby="holiday-preview-title" style={{ ...modalStyle, width: "min(720px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>
+            <h2 id="holiday-preview-title" style={{ margin: "0 0 10px" }}>Review Holiday Updates</h2>
+            <p>{holidayPreview.countries.join(", ")} · {holidayPreview.years.join("–")}</p>
+            <p>Only recognised imported holidays are changed. Manually edited entries, attendance selections and intentionally deleted events are protected.</p>
+            {!holidayPreview.complete && <p role="status" style={{ color: "var(--fc-admin-warning-text)" }}>Some requested holiday coverage is unavailable. This preview only includes verified dates; it is not a complete calendar.</p>}
+            {([
+              ["Add", holidayPreview.plan.additions],
+              ["Correct", holidayPreview.plan.updates],
+              ["Remove obsolete import", holidayPreview.plan.removals.map((id) => events.find((event) => event.id === id) || { id, title: id, startDate: "", endDate: "" })],
+            ] as const).map(([label, entries]) => (
+              <section key={label} style={{ marginBottom: "12px" }}>
+                <h3 style={{ margin: "0 0 5px", fontSize: "14px" }}>{label} ({entries.length})</h3>
+                {entries.length ? <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px" }}>{entries.map((event) => <li key={event.id}>{event.startDate}{event.endDate && event.endDate !== event.startDate ? ` – ${event.endDate}` : ""} · {event.title}</li>)}</ul> : <span style={{ fontSize: "12px", color: "var(--fc-admin-muted)" }}>None</span>}
+              </section>
+            ))}
+            {holidayPreview.plan.preserved.length > 0 && <section style={{ marginBottom: "12px" }}>
+              <h3 style={{ margin: "0 0 5px", fontSize: "14px" }}>Left unchanged ({holidayPreview.plan.preserved.length})</h3>
+              <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px" }}>{holidayPreview.plan.preserved.map((item) => <li key={item.id}>{events.find((event) => event.id === item.id)?.title || item.id}: {item.reason}</li>)}</ul>
+            </section>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "16px" }}>
+              <button type="button" onClick={() => setHolidayPreview(null)} disabled={holidayImporting} style={buttonStyle}>Cancel</button>
+              <button type="button" onClick={() => void applyHolidayUpdates()} disabled={holidayImporting || !canEdit || !(holidayPreview.plan.additions.length + holidayPreview.plan.updates.length + holidayPreview.plan.removals.length)} style={primaryActionButtonStyle}>{holidayImporting ? "Saving" : "Apply Reviewed Updates"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {eventModalMode && (
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
@@ -2021,7 +2041,7 @@ export default function EventCalendarPage() {
                     setDraftEvent((current) => ({
                       ...current,
                       startDate: event.target.value,
-                      endDate: event.target.value,
+                      endDate: preserveCalendarEndDate(event.target.value, current.endDate),
                     }))
                   }
                   style={inputStyle}
@@ -2152,7 +2172,7 @@ export default function EventCalendarPage() {
                     setDraftRecurrentEvent((current) => ({
                       ...current,
                       startDate: event.target.value,
-                      endDate: event.target.value,
+                      endDate: preserveCalendarEndDate(event.target.value, current.endDate),
                     }))
                   }
                   style={inputStyle}
@@ -2307,7 +2327,7 @@ export default function EventCalendarPage() {
                   type="date"
                   value={leaveRequestDraft.from}
                   onChange={(event) =>
-                    setLeaveRequestDraft((current) => ({ ...current, from: event.target.value, to: event.target.value }))
+                    setLeaveRequestDraft((current) => ({ ...current, from: event.target.value, to: preserveCalendarEndDate(event.target.value, current.to) }))
                   }
                   style={inputStyle}
                 />
@@ -2430,10 +2450,10 @@ export default function EventCalendarPage() {
           <div style={{ ...modalStyle, width: "min(430px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
             <p style={{ margin: "0 0 6px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 800 }}>
-              {emailPrompt.event.title || "NEW EVENT"}
+              {emailPrompt.events[0]?.title || "NEW EVENT"}
             </p>
             <p style={{ margin: "0 0 16px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-              {formatEventRange(emailPrompt.event)}
+              {emailPrompt.events.length === 1 ? formatEventRange(emailPrompt.events[0]) : `${emailPrompt.events.length} recurring occurrences. One email will list all dates.`}
             </p>
 
             {emailPrompt.status === "sending" && (
@@ -2566,9 +2586,9 @@ export default function EventCalendarPage() {
       {emailModalOpen && (
         <div style={modalBackdropStyle}>
           <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Email Reminders</h2>
+            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-              One email per line. New and edited events will be emailed to this list from info@cosulich.com.hk.
+              One email per line. This list is for new and edited events when you choose to send an update. Leave it empty to disable update emails. The scheduled daily reminder has a separate recipient list.
             </p>
             <textarea
               value={draftEmailRecipientsText}

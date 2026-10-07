@@ -568,7 +568,7 @@ function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
   if (
     record.tableName === "office_calendar_store" &&
-    ["event-calendar", "spc-permission-groups"].includes(getOfficeCalendarStoreKey(record) || "")
+    ["event-calendar", "task-calendar", "spc-permission-groups"].includes(getOfficeCalendarStoreKey(record) || "")
   ) {
     return false
   }

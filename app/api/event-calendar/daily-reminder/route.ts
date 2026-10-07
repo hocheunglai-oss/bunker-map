@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
-import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { validateCalendarEmailList } from "@/lib/calendarRecipients"
+import { deliverCalendarReminder } from "@/lib/calendarDelivery"
+import { getHongKongDateKey } from "@/lib/eventCalendarDates"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 
-const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
+const EVENT_CALENDAR_URL = `${fcunoConnectionPolicy.vercel.productionOrigins[0]}/admin/eventcalendar`
 const HONG_KONG_TIME_ZONE = "Asia/Hong_Kong"
 const HONG_KONG_WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
@@ -53,21 +56,19 @@ export async function GET(request: Request) {
     })
   }
 
-  const recipients = normalizeEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS)
-
-  if (!recipients.length) {
-    return NextResponse.json({ message: "EVENT_CALENDAR_EMAIL_RECIPIENTS is not configured." }, { status: 500 })
-  }
-
   try {
+    const recipients = validateCalendarEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS || "")
+    if (!recipients.length) return NextResponse.json({ message: "Daily event reminder recipients are not configured." }, { status: 500 })
     const email = buildLinkReminderEmail()
-    await sendCalendarEmail({
+    if (new URL(request.url).searchParams.get("dryRun") === "1") return NextResponse.json({ success: true, dryRun: true, recipients: recipients.length, occurrenceDate: getHongKongDateKey() })
+    const delivery = await deliverCalendarReminder({
+      kind: "event-daily", occurrenceDate: getHongKongDateKey(), recordId: "daily-link",
       to: recipients,
       subject: email.subject,
       html: email.html,
     })
 
-    return NextResponse.json({ success: true, sent: recipients.length })
+    return NextResponse.json({ success: delivery.status !== "in_progress", ...delivery }, { status: delivery.status === "in_progress" ? 202 : 200 })
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Daily reminder failed." },

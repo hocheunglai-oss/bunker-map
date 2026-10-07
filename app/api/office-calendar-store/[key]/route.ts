@@ -18,6 +18,9 @@ import {
   mutateEventCalendarStore,
 } from "@/lib/eventCalendarStore"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { TASK_CALENDAR_PROTOCOL_VERSION, TaskCalendarValidationError, validateTaskCalendarTask } from "@/data/taskCalendar"
+import { getTaskCalendarVersions, mutateTaskCalendarStore, TaskCalendarConflictError } from "@/lib/taskCalendarStore"
+import { loadCalendarStaffDirectory, resolveCalendarStaffRecipients } from "@/lib/calendarStaff"
 
 const allowedKeys = new Set(["event-calendar", "task-calendar", "enquiry-worksheet"])
 
@@ -62,48 +65,6 @@ function normalizeStringList(value: unknown) {
   return Array.from(new Set(value.map((item) => String(item || "").trim()).filter(Boolean)))
 }
 
-function eventId(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return ""
-  const id = (value as { id?: unknown }).id
-  return typeof id === "string" ? id.trim() : ""
-}
-
-function mergeCollectionById(
-  currentPayload: Record<string, unknown>,
-  incomingPayload: Record<string, unknown>,
-  collectionKey: string,
-  deletedKey: string,
-) {
-  const deletedIds = new Set([
-    ...normalizeStringList(currentPayload[deletedKey]),
-    ...normalizeStringList(incomingPayload[deletedKey]),
-  ])
-  const recordsById = new Map<string, unknown>()
-
-  for (const record of Array.isArray(currentPayload[collectionKey]) ? currentPayload[collectionKey] : []) {
-    const id = eventId(record)
-    if (!id || deletedIds.has(id)) continue
-    recordsById.set(id, record)
-  }
-
-  for (const record of Array.isArray(incomingPayload[collectionKey]) ? incomingPayload[collectionKey] : []) {
-    const id = eventId(record)
-    if (!id || deletedIds.has(id)) continue
-    recordsById.set(id, record)
-  }
-
-  return {
-    ...currentPayload,
-    ...incomingPayload,
-    [collectionKey]: Array.from(recordsById.values()),
-    [deletedKey]: Array.from(deletedIds),
-  }
-}
-
-function mergeTaskCalendarPayload(currentPayload: unknown, incomingPayload: unknown) {
-  return mergeCollectionById(asRecord(currentPayload), asRecord(incomingPayload), "tasks", "deletedTaskIds")
-}
-
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   const session = await getAccessSession(request)
   if (session === false) {
@@ -135,6 +96,11 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
         eventVersions: getEventCalendarEventVersions(payload),
         settingVersions: getEventCalendarSettingVersions(payload),
         storeVersion: getEventCalendarStoreVersion(payload),
+      } : {}),
+      ...(storeKey === "task-calendar" ? {
+        protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION,
+        taskVersions: getTaskCalendarVersions(payload),
+        staff: await loadCalendarStaffDirectory(supabase),
       } : {}),
     })
   } catch (error) {
@@ -180,27 +146,23 @@ export async function PUT(request: Request, context: { params: Promise<{ key: st
       }, { status: 409 })
     }
 
-    let nextPayload = payload
-
     if (storeKey === "task-calendar") {
-      const { data: currentRow, error: currentError } = await supabase
-        .from("office_calendar_store")
-        .select("payload")
-        .eq("key", storeKey)
-        .maybeSingle()
-
-      if (currentError) throw currentError
-      nextPayload = mergeTaskCalendarPayload(currentRow?.payload || null, payload)
+      return NextResponse.json({
+        code: "TASK_CALENDAR_CLIENT_OUTDATED",
+        message: "This Task Calendar tab is outdated. Nothing was saved. Refresh the page, then make the change again.",
+        reloadRequired: true,
+        protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION,
+      }, { status: 409 })
     }
 
     const { error } = await supabase.from("office_calendar_store").upsert({
       key: storeKey,
-      payload: nextPayload,
+      payload,
       updated_at: new Date().toISOString(),
     })
 
     if (error) throw error
-    return NextResponse.json({ success: true, payload: nextPayload })
+    return NextResponse.json({ success: true, payload })
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not save shared calendar data." },
@@ -215,6 +177,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
 
   const { key } = await context.params
   const storeKey = normalizeKey(key)
+  if (storeKey === "task-calendar") return patchTaskCalendar(request, session)
   if (storeKey !== "event-calendar") {
     return NextResponse.json({ message: "Atomic mutations are only available for Event Calendar." }, { status: 405 })
   }
@@ -278,5 +241,34 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
       { message: error instanceof Error ? error.message : "Could not mutate Event Calendar." },
       { status: 500 },
     )
+  }
+}
+
+async function patchTaskCalendar(request: Request, session: AdminSession | null) {
+  if (session && !hasAdminPagePermission(session, "task-calendar", "edit")) return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+  try {
+    const body = asRecord(await request.json())
+    if (body.protocolVersion !== TASK_CALENDAR_PROTOCOL_VERSION) {
+      return NextResponse.json({ code: "TASK_CALENDAR_CLIENT_OUTDATED", message: "This Task Calendar tab is outdated. Nothing was saved. Refresh the page and try again.", reloadRequired: true, protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION }, { status: 409 })
+    }
+    const allowed = new Set(["protocolVersion", "operation", "task", "taskId", "expectedTaskVersion"])
+    if (Object.keys(body).some((key) => !allowed.has(key)) || !["create", "update", "delete"].includes(String(body.operation))) throw new TaskCalendarValidationError("Unknown Task Calendar change.")
+    const supabase = session
+      ? createAdminAuditedSupabaseClient(createAdminAuditContext(session, request, "task-calendar"), { useServiceRole: true })
+      : getSupabaseClient()
+    if (body.operation !== "delete") {
+      const task = validateTaskCalendarTask(body.task)
+      const staff = await loadCalendarStaffDirectory(supabase)
+      const { unresolved } = resolveCalendarStaffRecipients([...task.notify, ...task.cc], staff)
+      if (unresolved.length) throw new TaskCalendarValidationError(`No confirmed email address for: ${unresolved.join(", ")}. Ask an administrator to update the staff directory before saving.`)
+    }
+    const payload = await mutateTaskCalendarStore(supabase, {
+      operation: body.operation as "create" | "update" | "delete", task: body.task, taskId: body.taskId, expectedTaskVersion: body.expectedTaskVersion,
+    })
+    return NextResponse.json({ success: true, payload, protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION, taskVersions: getTaskCalendarVersions(payload) })
+  } catch (error) {
+    if (error instanceof TaskCalendarConflictError) return NextResponse.json({ code: error.code, message: error.message, payload: error.payload, taskVersions: error.taskVersions, protocolVersion: TASK_CALENDAR_PROTOCOL_VERSION }, { status: 409 })
+    if (error instanceof TaskCalendarValidationError || error instanceof SyntaxError) return NextResponse.json({ message: error.message }, { status: 400 })
+    return NextResponse.json({ message: error instanceof Error ? error.message : "Could not save the task. Your draft is kept; please try again." }, { status: 500 })
   }
 }

@@ -113,14 +113,14 @@ test("HK import backfills missing dates without replacing legacy attendees", () 
 })
 
 test("foreign public holidays never receive the HK attendance title", () => {
-  const route = source("../app/api/event-calendar/public-holidays/route.ts")
-  assert.match(route, /country\.code === "HK"/)
-  assert.doesNotMatch(route, /titleStyle === "holiday-attendance"/)
+  const reference = source("../lib/holidayCalendar.ts")
+  assert.match(reference, /holiday\.country === "HK"/)
+  assert.doesNotMatch(reference, /titleStyle === "holiday-attendance"/)
 })
 
-test("holiday import waits for the shared calendar before running", () => {
+test("holiday source check waits for the shared calendar and never imports on page load", () => {
   const page = source("../app/admin/eventcalendar/page.tsx")
-  const importFunction = page.indexOf("async function importPublicHolidays()")
+  const importFunction = page.indexOf("async function checkPublicHolidays()")
   const importEffectStart = page.lastIndexOf("useEffect(() => {", importFunction)
   const importEffectEnd = page.indexOf("}, [authenticated, calendarLoaded])", importFunction)
 
@@ -132,4 +132,6 @@ test("holiday import waits for the shared calendar before running", () => {
     importEffect,
     /if \(!authenticated \|\| !calendarLoaded \|\| !loadedRef\.current\) return/,
   )
+  assert.doesNotMatch(importEffect, /mutateCalendar|persistImportedEvents|method: "POST"/)
+  assert.match(importEffect, /payload.complete === true/)
 })

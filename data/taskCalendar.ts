@@ -13,15 +13,87 @@ export type TaskCalendarTask = {
   remark: string
 }
 
-export const taskCalendarPeopleEmails: Record<string, string[]> = {
-  LL: ["louisa@cosulich.com.hk"],
-  LC: ["laureen@cosulich.com.hk"],
-  SC: ["stanley@cosulich.com.hk"],
-  VL: ["vincent@cosulich.com.hk"],
-  OL: ["otto@cosulich.com.hk"],
-  KZ: ["kelvin@cosulich.com.hk"],
-  CY: ["chengyuan@cosulich.com.hk"],
-  MY: ["mayshen@cosulich.com.hk"],
+export const TASK_CALENDAR_PROTOCOL_VERSION = 1
+
+export class TaskCalendarValidationError extends Error {
+  readonly code = "TASK_CALENDAR_INVALID_MUTATION"
+
+  constructor(message: string) {
+    super(message)
+    this.name = "TaskCalendarValidationError"
+  }
+}
+
+function invalidTask(message: string): never {
+  throw new TaskCalendarValidationError(message)
+}
+
+function integerList(value: unknown, min: number, max: number, label: string) {
+  if (!Array.isArray(value) || value.some((item) => !Number.isInteger(item) || item < min || item > max)) {
+    invalidTask(`${label} must contain whole numbers from ${min} to ${max}.`)
+  }
+  return Array.from(new Set(value as number[])).sort((a, b) => a - b)
+}
+
+function recipientList(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== "string" || !item.trim() || item.length > 100)) {
+    invalidTask(`${label} must contain valid staff codes.`)
+  }
+  return Array.from(new Set((value as string[]).map((item) => item.trim().toUpperCase())))
+}
+
+/** Shared browser/server validation; never replace bad or absent input with a different schedule. */
+export function validateTaskCalendarTask(value: unknown): TaskCalendarTask {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalidTask("The task is invalid.")
+  const task = value as Record<string, unknown>
+  const allowed = new Set(["id", "sourceRow", "scheduleType", "dayOfWeek", "daysOfMonth", "months", "notify", "cc", "task", "remark"])
+  if (Object.keys(task).some((key) => !allowed.has(key))) invalidTask("The task contains unsupported fields. Refresh the page before editing it.")
+  if (typeof task.id !== "string" || !task.id.trim() || task.id !== task.id.trim() || task.id.length > 200) invalidTask("The task ID is invalid.")
+  if (typeof task.task !== "string" || !task.task.trim() || task.task.length > 5000) invalidTask("Enter a task name (up to 5,000 characters).")
+  if (typeof task.remark !== "string" || task.remark.length > 10000) invalidTask("The remark must be text (up to 10,000 characters).")
+  if (!Number.isInteger(task.sourceRow) || Number(task.sourceRow) < 0) invalidTask("The task source is invalid.")
+  if (!["Weekly", "Monthly", "Yearly"].includes(String(task.scheduleType))) invalidTask("Choose Weekly, Monthly or Yearly.")
+  const scheduleType = task.scheduleType as TaskScheduleType
+  const daysOfMonth = integerList(task.daysOfMonth, 1, 31, "Days of month")
+  const months = integerList(task.months ?? [], 1, 12, "Months")
+  if (scheduleType === "Weekly" && (!Number.isInteger(task.dayOfWeek) || Number(task.dayOfWeek) < 0 || Number(task.dayOfWeek) > 6)) invalidTask("Choose a weekday for this weekly task.")
+  if (scheduleType !== "Weekly" && !daysOfMonth.length) invalidTask("Enter at least one day of the month.")
+  if (scheduleType === "Yearly" && !months.length) invalidTask("Choose at least one month for this yearly task.")
+  const notify = recipientList(task.notify, "Notify To")
+  const cc = recipientList(task.cc, "CC Copy")
+  if (!notify.length) invalidTask("Choose at least one person in Notify To.")
+  return {
+    id: task.id,
+    sourceRow: Number(task.sourceRow),
+    scheduleType,
+    ...(scheduleType === "Weekly" ? { dayOfWeek: Number(task.dayOfWeek) } : {}),
+    daysOfMonth: scheduleType === "Weekly" ? [] : daysOfMonth,
+    months: scheduleType === "Yearly" ? months : [],
+    notify,
+    cc,
+    task: task.task.trim(),
+    remark: task.remark,
+  }
+}
+
+export function parseTaskDays(value: string) {
+  const pieces = value.trim().split(/[,;\s]+/).filter(Boolean)
+  if (!pieces.length || pieces.some((piece) => !/^\d{1,2}$/.test(piece))) invalidTask("Enter days from 1 to 31, separated by commas.")
+  return integerList(pieces.map(Number), 1, 31, "Days of month")
+}
+
+export function readTaskCalendarTasks(payload: unknown): TaskCalendarTask[] {
+  if (payload === null || payload === undefined) return []
+  if (typeof payload !== "object" || Array.isArray(payload)) invalidTask("The saved task calendar is invalid. Please ask an administrator to review it.")
+  const tasks = (payload as Record<string, unknown>).tasks
+  if (!Array.isArray(tasks)) invalidTask("The saved task calendar has no valid task list. Please ask an administrator to review it.")
+  const ids = new Set<string>()
+  return tasks.map((task) => {
+    const valid = validateTaskCalendarTask(task)
+    if (ids.has(valid.id)) invalidTask("The saved task calendar contains duplicate task IDs. Please ask an administrator to review it.")
+    ids.add(valid.id)
+    return valid
+  })
 }
 
 export const weekDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -47,34 +119,40 @@ export const taskCalendarTasks: TaskCalendarTask[] = [
   { id: "task-bc-admin", sourceRow: 35, scheduleType: "Yearly", daysOfMonth: [30], months: [3, 6, 9, 12], notify: ["VL"], cc: [], task: "BC Administration", remark: "" },
 ]
 
-function getDaysInMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+export function getHongKongTaskDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date)
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || ""
+  return `${part("year")}-${part("month")}-${part("day")}`
 }
 
-function isDayDue(daysOfMonth: number[], date: Date) {
-  const day = date.getDate()
-  const daysInMonth = getDaysInMonth(date)
+function taskDateParts(date: Date | string) {
+  const key = typeof date === "string" ? date : getHongKongTaskDate(date)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) invalidTask("The task reminder date is invalid.")
+  const parsed = new Date(`${key}T00:00:00.000Z`)
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== key) invalidTask("The task reminder date is invalid.")
+  return { day: parsed.getUTCDate(), month: parsed.getUTCMonth() + 1, weekday: parsed.getUTCDay(), daysInMonth: new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, 0)).getUTCDate() }
+}
+
+function isDayDue(daysOfMonth: number[], date: Date | string) {
+  const { day, daysInMonth } = taskDateParts(date)
   return daysOfMonth.some((target) => day === target || (day === daysInMonth && target > daysInMonth))
 }
 
-export function isTaskDueOnDate(task: TaskCalendarTask, date = new Date()) {
-  if (task.scheduleType === "Weekly") return date.getDay() === task.dayOfWeek
-  if (task.scheduleType === "Yearly" && !(task.months || []).includes(date.getMonth() + 1)) return false
+export function isTaskDueOnDate(task: TaskCalendarTask, date: Date | string = new Date()) {
+  const { month, weekday } = taskDateParts(date)
+  if (task.scheduleType === "Weekly") return weekday === task.dayOfWeek
+  if (task.scheduleType === "Yearly" && !(task.months || []).includes(month)) return false
   return isDayDue(task.daysOfMonth, date)
 }
 
-export function getDueTaskCalendarTasks(date = new Date(), tasks = taskCalendarTasks) {
+export function getDueTaskCalendarTasks(date: Date | string = new Date(), tasks: TaskCalendarTask[] = []) {
   return tasks.filter((task) => isTaskDueOnDate(task, date))
 }
 
 export function getTaskScheduleText(task: TaskCalendarTask) {
-  if (task.scheduleType === "Weekly") return `Weekly on ${weekDays[task.dayOfWeek || 0]}`
+  if (task.scheduleType === "Weekly") return `Weekly on ${weekDays[task.dayOfWeek ?? -1] || "weekday not selected"}`
   const days = task.daysOfMonth.join(", ")
   if (task.scheduleType === "Monthly") return `Monthly on day ${days}`
   const months = (task.months || []).map((month) => monthNames[month - 1]).join(", ")
   return `Yearly in ${months} on day ${days}`
-}
-
-export function resolveTaskRecipients(codes: string[]) {
-  return Array.from(new Set(codes.flatMap((code) => taskCalendarPeopleEmails[code] || [])))
 }
