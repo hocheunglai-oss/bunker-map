@@ -10,7 +10,7 @@ test("task calendar keeps the day list as raw text while the user is typing", as
 
   assert.match(page, /const \[daysOfMonthText, setDaysOfMonthText\] = useState\("1"\)/)
   assert.match(page, /value=\{daysOfMonthText\}[\s\S]*?onChange=\{\(event\) => setDaysOfMonthText\(event\.target\.value\)\}/)
-  assert.match(page, /const parsedDaysOfMonth = parseNumberList\(daysOfMonthText, 1, 31\)/)
+  assert.match(page, /const parsedDaysOfMonth = draftTask\.scheduleType === "Weekly" \? \[\] : parseTaskDays\(daysOfMonthText\)/)
   assert.doesNotMatch(page, /onChange=\{\(event\) => setDraftTask\([\s\S]{0,160}parseNumberList\(event\.target\.value/)
 })
 

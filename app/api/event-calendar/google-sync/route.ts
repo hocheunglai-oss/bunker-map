@@ -8,10 +8,10 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { getEventCalendarRecordVersion } from "@/lib/eventCalendarStore"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { isVerifiedBackupActive } from "@/lib/backupMaintenance"
+import { collectCalendarPages, googleMeetingRoomDates } from "@/lib/eventCalendarMeeting"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
-const TIME_ZONE = "Asia/Hong_Kong"
 export const maxDuration = 60
 
 type GoogleSyncJob = {
@@ -78,32 +78,7 @@ async function loadCanonicalGoogleState(eventId: string): Promise<CanonicalGoogl
   }
 }
 
-function addDays(dateText: string, days: number) {
-  const date = new Date(`${dateText}T00:00:00.000Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
-function extractTimeRange(title: string) {
-  const match = title.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s*[-–]\s*([01]?\d|2[0-3])[:.]([0-5]\d))?\b/)
-  if (!match) return null
-
-  return {
-    start: `${match[1].padStart(2, "0")}:${match[2]}`,
-    end: match[3] && match[4] ? `${match[3].padStart(2, "0")}:${match[4]}` : null,
-    raw: match[0],
-  }
-}
-
-function addOneHour(timeText: string) {
-  const [hour, minute] = timeText.split(":").map(Number)
-  const next = new Date(Date.UTC(2026, 0, 1, hour, minute))
-  next.setUTCHours(next.getUTCHours() + 1)
-  return `${String(next.getUTCHours()).padStart(2, "0")}:${String(next.getUTCMinutes()).padStart(2, "0")}`
-}
-
 function buildGoogleEvent(event: OfficeCalendarEvent) {
-  const time = event.startDate === event.endDate ? extractTimeRange(event.title) : null
   const summary = "MARINE ENERGY"
   const description = [
     "Imported from Bunker Map Office Tools.",
@@ -115,37 +90,10 @@ function buildGoogleEvent(event: OfficeCalendarEvent) {
     .filter(Boolean)
     .join("\n")
 
-  if (time) {
-    const endTime = time.end || addOneHour(time.start)
-    const timedEndDate = endTime <= time.start ? addDays(event.endDate, 1) : event.endDate
-    return {
-      summary,
-      description,
-      start: {
-        dateTime: `${event.startDate}T${time.start}:00`,
-        timeZone: TIME_ZONE,
-      },
-      end: {
-        dateTime: `${timedEndDate}T${endTime}:00`,
-        timeZone: TIME_ZONE,
-      },
-      extendedProperties: {
-        private: {
-          bunkerMapEventId: event.id,
-        },
-      },
-    }
-  }
-
   return {
     summary,
     description,
-    start: {
-      date: event.startDate,
-    },
-    end: {
-      date: addDays(event.endDate, 1),
-    },
+    ...googleMeetingRoomDates(event),
     extendedProperties: {
       private: {
         bunkerMapEventId: event.id,
@@ -181,13 +129,14 @@ async function listManagedGoogleEvents(
   calendarId: string,
   eventId: string,
 ) {
-  const response = await calendar.events.list({
-    calendarId,
-    privateExtendedProperty: [`bunkerMapEventId=${eventId}`],
-    maxResults: 250,
-    singleEvents: true,
+  const events = await collectCalendarPages(async (pageToken) => {
+    const response = await calendar.events.list({
+      calendarId, privateExtendedProperty: [`bunkerMapEventId=${eventId}`],
+      maxResults: 2500, singleEvents: true, pageToken,
+    })
+    return response.data
   })
-  return (response.data.items || [])
+  return events
     .filter((event) => Boolean(event.id))
     .sort((left, right) => String(left.id).localeCompare(String(right.id)))
 }

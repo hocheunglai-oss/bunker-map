@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { validateCalendarEmailList } from "@/lib/calendarRecipients"
 
 export type CalendarMutation = {
   operation: "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings"
@@ -223,6 +224,9 @@ function safeMutationSettings(mutation: CalendarMutation) {
     if (typeof source.emailRecipientsText !== "string" || source.emailRecipientsText.length > 20000) {
       throw new EventCalendarValidationError("The Event Calendar email recipient list is invalid.")
     }
+    try { validateCalendarEmailList(source.emailRecipientsText) } catch (error) {
+      throw new EventCalendarValidationError(error instanceof Error ? error.message : "The calendar email list is invalid.")
+    }
     settings.emailRecipientsText = source.emailRecipientsText
   }
   if (Object.hasOwn(source, "deletedRequiredSeedIds")) {
@@ -378,6 +382,17 @@ export async function mutateEventCalendarStore(
   supabase: SupabaseClient,
   mutation: CalendarMutation,
 ) {
+  return mutateEventCalendarStoreBatch(supabase, [mutation])
+}
+
+// Trusted server callers can commit a previewed holiday correction as one
+// change. Individual records/settings still undergo their normal validation.
+export async function mutateEventCalendarStoreBatch(
+  supabase: SupabaseClient,
+  mutations: CalendarMutation[],
+  expectedStoreVersion?: string,
+) {
+  if (!mutations.length || mutations.length > 10) throw new EventCalendarValidationError("Invalid calendar batch.")
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const { data: current, error: readError } = await supabase
       .from("office_calendar_store")
@@ -386,7 +401,10 @@ export async function mutateEventCalendarStore(
       .maybeSingle()
     if (readError) throw readError
 
-    const nextPayload = applyEventCalendarMutation(current?.payload, mutation)
+    if (expectedStoreVersion && getEventCalendarStoreVersion(current?.payload) !== expectedStoreVersion) {
+      conflict(current?.payload, "The calendar changed since this preview. Refresh the preview before applying holiday corrections.")
+    }
+    const nextPayload = mutations.reduce((payload, mutation) => applyEventCalendarMutation(payload, mutation), current?.payload)
     if (current && canonicalJson(nextPayload) === canonicalJson(current.payload)) {
       return current.payload
     }

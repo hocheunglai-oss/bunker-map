@@ -3,10 +3,11 @@ import path from "path"
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { loadGoogleApis } from "@/lib/googleApis"
+import { addCalendarDays, getHongKongDateKey, calendarDateTimestamp } from "@/lib/eventCalendarDates"
+import { collectCalendarPages, normalizeMeetingRoomGoogleEvent } from "@/lib/eventCalendarMeeting"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-calendar-oauth-token.json")
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
-const TIME_ZONE = "Asia/Hong_Kong"
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -36,34 +37,6 @@ async function getCalendarClient() {
   return google.calendar({ version: "v3", auth })
 }
 
-function toDateInput(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
-
-function parseGoogleEventDate(value: { date?: string | null; dateTime?: string | null } | undefined) {
-  if (!value?.dateTime && !value?.date) return { date: "", time: "" }
-
-  if (value.dateTime) {
-    const date = new Date(value.dateTime)
-    const dateText = new Intl.DateTimeFormat("en-CA", {
-      timeZone: TIME_ZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date)
-    const timeText = new Intl.DateTimeFormat("en-GB", {
-      timeZone: TIME_ZONE,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(date)
-
-    return { date: dateText, time: timeText }
-  }
-
-  return { date: value.date || "", time: "" }
-}
-
 export async function GET(request: Request) {
   try {
     await requireAdminPagePermission("event-calendar", "view")
@@ -71,36 +44,21 @@ export async function GET(request: Request) {
     // Use the same server-owned destination as the sync worker. A browser may
     // choose a time window, but it cannot redirect reads to another calendar.
     const calendarId = process.env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_ID
-    const now = new Date()
-    const defaultTimeMin = new Date(now)
-    const defaultTimeMax = new Date(now)
-    defaultTimeMax.setDate(defaultTimeMax.getDate() + 180)
+    const today = getHongKongDateKey()
+    const timeMin = searchParams.get("timeMin") || new Date(calendarDateTimestamp(today)).toISOString()
+    const timeMax = searchParams.get("timeMax") || new Date(calendarDateTimestamp(addCalendarDays(today, 181))).toISOString()
+    if (!Number.isFinite(Date.parse(timeMin)) || !Number.isFinite(Date.parse(timeMax)) || Date.parse(timeMax) <= Date.parse(timeMin)) {
+      return NextResponse.json({ message: "Choose a valid meeting room date range." }, { status: 400 })
+    }
     const calendar = await getCalendarClient()
-    const response = await calendar.events.list({
-      calendarId,
-      timeMin: searchParams.get("timeMin") || `${toDateInput(defaultTimeMin)}T00:00:00+08:00`,
-      timeMax: searchParams.get("timeMax") || `${toDateInput(defaultTimeMax)}T23:59:59+08:00`,
-      maxResults: 250,
-      singleEvents: true,
-      orderBy: "startTime",
+    const records = await collectCalendarPages(async (pageToken) => {
+      const response = await calendar.events.list({
+        calendarId, timeMin, timeMax, pageToken, maxResults: 2500,
+        singleEvents: true, orderBy: "startTime",
+      })
+      return response.data
     })
-
-    const events = (response.data.items || []).map((event) => {
-      const start = parseGoogleEventDate(event.start)
-      const end = parseGoogleEventDate(event.end)
-
-      return {
-        id: event.id || "",
-        calendarId,
-        title: event.extendedProperties?.private?.bunkerMapEventId ? "MARINE ENERGY" : event.summary || "(NO TITLE)",
-        startDate: start.date,
-        endDate: end.date || start.date,
-        startTime: start.time,
-        endTime: end.time,
-        sourceEventId: event.extendedProperties?.private?.bunkerMapEventId || "",
-        sourceTitle: event.description?.match(/Original event: (.+)/)?.[1] || "",
-      }
-    })
+    const events = records.map((event) => normalizeMeetingRoomGoogleEvent(event, calendarId)).filter(Boolean)
 
     return NextResponse.json({ success: true, calendarId, events })
   } catch (error) {

@@ -2,12 +2,13 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import {
   getDueTaskCalendarTasks,
+  getHongKongTaskDate,
   getTaskScheduleText,
-  resolveTaskRecipients,
+  readTaskCalendarTasks,
   TaskCalendarTask,
-  taskCalendarTasks,
 } from "@/data/taskCalendar"
-import { sendCalendarEmail } from "@/lib/eventCalendarEmail"
+import { loadCalendarStaffDirectory, resolveCalendarStaffRecipients } from "@/lib/calendarStaff"
+import { deliverCalendarReminder } from "@/lib/calendarDelivery"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const SHARED_STORE_KEY = "task-calendar"
@@ -21,7 +22,7 @@ function requireEnv(name: string) {
 function getSupabaseClient() {
   return createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    requireEnv("SUPABASE_SERVICE_ROLE_KEY")
   )
 }
 
@@ -53,40 +54,6 @@ function buildTaskReminderEmail(task: TaskCalendarTask) {
   }
 }
 
-function normalizeStoredTasks(value: unknown) {
-  if (!Array.isArray(value)) return taskCalendarTasks
-
-  const tasks = value.filter((task): task is TaskCalendarTask => {
-    return (
-      task &&
-      typeof task === "object" &&
-      typeof task.id === "string" &&
-      typeof task.task === "string" &&
-      Array.isArray(task.daysOfMonth) &&
-      Array.isArray(task.notify) &&
-      Array.isArray(task.cc)
-    )
-  })
-
-  return tasks.length ? tasks : taskCalendarTasks
-}
-
-async function loadTaskCalendarTasks() {
-  try {
-    const supabase = getSupabaseClient()
-    const { data, error } = await supabase
-      .from("office_calendar_store")
-      .select("payload")
-      .eq("key", SHARED_STORE_KEY)
-      .maybeSingle()
-
-    if (error) throw error
-    return normalizeStoredTasks(data?.payload?.tasks)
-  } catch {
-    return taskCalendarTasks
-  }
-}
-
 export async function GET(request: Request) {
   if (!hasAccess(request)) {
     try {
@@ -102,40 +69,45 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get("dryRun") === "1"
-  const storedTasks = await loadTaskCalendarTasks()
-  const dueTasks = getDueTaskCalendarTasks(new Date(), storedTasks)
   const sent: Array<{ id: string; subject: string; to: number; cc: number }> = []
   const skipped: Array<{ id: string; reason: string }> = []
+  const failed: Array<{ id: string; reason: string }> = []
 
   try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.from("office_calendar_store").select("payload").eq("key", SHARED_STORE_KEY).maybeSingle()
+    if (error) throw error
+    const storedTasks = readTaskCalendarTasks(data?.payload ?? null)
+    const occurrenceDate = getHongKongTaskDate()
+    const dueTasks = getDueTaskCalendarTasks(occurrenceDate, storedTasks)
+    const staff = dueTasks.length ? await loadCalendarStaffDirectory(supabase) : []
     for (const task of dueTasks) {
-      const to = resolveTaskRecipients(task.notify)
-      const cc = resolveTaskRecipients(task.cc)
-
-      if (!to.length) {
-        skipped.push({ id: task.id, reason: "No valid notify recipients." })
-        continue
-      }
-
-      const email = buildTaskReminderEmail(task)
-      if (dryRun) {
+      try {
+        const notify = resolveCalendarStaffRecipients(task.notify, staff)
+        const copied = resolveCalendarStaffRecipients(task.cc, staff)
+        const unresolved = Array.from(new Set([...notify.unresolved, ...copied.unresolved]))
+        if (unresolved.length) throw new Error(`No confirmed email address for ${unresolved.join(", ")}. Update the staff directory; this reminder was not sent.`)
+        const to = notify.recipients
+        const cc = copied.recipients.filter((email) => !to.includes(email))
+        if (!to.length) throw new Error("No confirmed Notify To recipients. This reminder was not sent.")
+        const email = buildTaskReminderEmail(task)
+        if (!dryRun) {
+          const result = await deliverCalendarReminder({ kind: "task", occurrenceDate, recordId: task.id, to, cc, ...email })
+          if (result.status !== "delivered") {
+            skipped.push({ id: task.id, reason: result.status === "already_delivered" ? "Already sent for this date." : "Another run is handling this reminder." })
+            continue
+          }
+        }
         sent.push({ id: task.id, subject: email.subject, to: to.length, cc: cc.length })
-        continue
+      } catch (error) {
+        failed.push({ id: task.id, reason: error instanceof Error ? error.message : "This task reminder could not be delivered." })
       }
-
-      await sendCalendarEmail({
-        to,
-        cc,
-        subject: email.subject,
-        html: email.html,
-      })
-      sent.push({ id: task.id, subject: email.subject, to: to.length, cc: cc.length })
     }
 
-    return NextResponse.json({ success: true, due: dueTasks.length, sent, skipped })
+    return NextResponse.json({ success: !failed.length, occurrenceDate, dryRun, due: dueTasks.length, sent, skipped, failed }, { status: failed.length ? 500 : 200 })
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Task reminder failed.", sent, skipped },
+      { message: error instanceof Error ? error.message : "Task reminder failed.", sent, skipped, failed },
       { status: 500 }
     )
   }

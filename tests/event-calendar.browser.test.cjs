@@ -1,0 +1,93 @@
+// Isolated, synthetic browser regression. No production sessions, writes, or email.
+const assert = require("node:assert/strict")
+const http = require("node:http")
+const path = require("node:path")
+const { build } = require("esbuild")
+const { chromium } = require("playwright")
+const root = path.resolve(__dirname, "..")
+
+async function main() {
+  const mocks = path.join(root, "tests/fixtures/event-calendar-mocks.ts")
+  const bundle = await build({ absWorkingDir: root, entryPoints: ["tests/fixtures/event-calendar.tsx"], bundle: true, write: false, outdir: "fixture", platform: "browser", format: "iife", jsx: "automatic", logLevel: "warning", define: { "process.env.NODE_ENV": '"development"' }, plugins: [{ name: "synthetic-boundaries", setup(builder) { builder.onResolve({ filter: /^@\/lib\/useSimpleAdminAuth$|^next\/navigation$/ }, () => ({ path: mocks })) } }] })
+  const js = bundle.outputFiles.find((file) => file.path.endsWith(".js")).contents
+  const html = '<!doctype html><html><head><meta charset="utf-8"><style>:root{--fc-admin-panel-text:#222;--fc-admin-panel-bg:#fff;--fc-admin-page-bg:#eee;--fc-admin-border:#bbb;--fc-admin-button-bg:#eee;--fc-admin-button-text:#222;--fc-admin-link:#06c;--fc-admin-primary-button-bg:#06c;--fc-admin-primary-button-text:#fff;--fc-row-bg:#fafafa;--fc-admin-muted:#555}*{box-sizing:border-box}body{margin:0}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>'
+  const server = http.createServer((request, response) => { response.setHeader("Content-Type", request.url === "/fixture.js" ? "text/javascript" : "text/html"); response.end(request.url === "/fixture.js" ? js : html) })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  let browser
+  try {
+    browser = await chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
+    const context = await browser.newContext({ viewport: { width: 1300, height: 900 }, timezoneId: "America/Los_Angeles" })
+    await context.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
+    const page = await context.newPage()
+    page.setDefaultTimeout(8000)
+    const errors = [], dialogs = []
+    page.on("pageerror", (error) => errors.push(error.message))
+    page.on("dialog", (dialog) => { dialogs.push(dialog.message()); void (dialog.message().startsWith("Meeting room booking conflict") ? dialog.dismiss() : dialog.accept()) })
+    const button = (name) => page.getByRole("button", { name, exact: true })
+    const writes = () => page.evaluate(() => window.__eventCalendarHarness.requests.filter((request) => request.method !== "GET"))
+    async function reset(access = "edit") { await page.goto(`${origin}?access=${access}`); await page.getByText("MULTI DAY SYNTHETIC EVENT", { exact: true }).waitFor(); await page.waitForTimeout(100) }
+
+    await reset()
+    assert.deepEqual(await writes(), [], "page load never imports holidays or writes calendar data")
+    const initial = await page.evaluate(() => window.__eventCalendarHarness.events[0])
+    await page.getByText("MULTI DAY SYNTHETIC EVENT", { exact: true }).dblclick()
+    const tomorrow = new Date(`${initial.startDate}T00:00:00Z`); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+    await page.getByLabel("From", { exact: true }).fill(tomorrow.toISOString().slice(0, 10))
+    assert.equal(await page.getByLabel("To", { exact: true }).inputValue(), initial.endDate)
+    await button("Save").click()
+    await page.getByRole("heading", { name: "Send Event Update?" }).waitFor()
+    await page.evaluate(() => { window.__eventCalendarHarness.emailStatus = "in_progress" })
+    await button("Yes, Send").click()
+    await page.getByText("This update is already being sent.", { exact: false }).waitFor()
+    assert.equal(await page.getByRole("heading", { name: "Send Event Update?" }).count(), 1)
+    await button("No").click()
+    console.log("PASS: no load writes; From preserves To; committed save prompts; in-progress email does not report Sent")
+
+    await reset()
+    await button("Add Event").click(); await button("Add New Event").click()
+    await page.getByLabel("Event", { exact: true }).fill("00:15-00:45 CONFLICT TEST")
+    await page.getByLabel("Book Meeting Room", { exact: true }).check()
+    await button("Save").click()
+    await page.waitForTimeout(150)
+    assert(dialogs.some((message) => message.includes("Meeting room booking conflict") && message.includes("EXISTING OVERNIGHT BOOKING")))
+    assert.equal((await writes()).filter((request) => request.method === "PATCH").length, 0)
+    await button("Cancel").click()
+    console.log("PASS: previous-day overnight overlap warns; cancel preserves saved calendar")
+
+    await button("Add Event").click(); await button("Add Recurrent Event").click()
+    await page.getByLabel("Event", { exact: true }).fill("RECURRING SYNTHETIC")
+    await button("daily").click()
+    const start = await page.getByLabel("From", { exact: true }).inputValue()
+    const end = new Date(`${start}T00:00:00Z`); end.setUTCDate(end.getUTCDate() + 2)
+    await page.getByLabel("To", { exact: true }).fill(end.toISOString().slice(0, 10))
+    await button("Save").click()
+    await page.getByText("3 recurring occurrences.", { exact: false }).waitFor()
+    await button("Yes, Send").click()
+    const batch = (await writes()).find((request) => request.path.endsWith("email-notify"))
+    assert.equal(batch.body.events.length, 3)
+    assert.equal(Object.keys(batch.body.eventVersions).length >= 3, true)
+    console.log("PASS: recurring save offers one email containing every canonical occurrence")
+
+    await reset()
+    await button("Event calendar settings").click(); await button("Review HK Holidays").click()
+    await page.getByRole("heading", { name: "Review Holiday Updates" }).waitFor()
+    assert.equal((await writes()).filter((request) => request.body?.action === "apply").length, 0)
+    await button("Apply Reviewed Updates").click()
+    await page.getByText("SYNTHETIC VERIFIED HOLIDAY", { exact: true }).waitFor()
+    assert.equal((await writes()).filter((request) => request.body?.action === "apply").length, 1)
+    console.log("PASS: holiday changes require an explicit preview and reviewed apply")
+
+    await reset("view")
+    assert.deepEqual(await writes(), [])
+    assert.equal(await button("Add Event").isDisabled(), true)
+    await page.getByText("MULTI DAY SYNTHETIC EVENT", { exact: true }).dblclick()
+    assert.equal(await page.getByRole("heading", { name: "Edit Event" }).count(), 0)
+    await button("Event calendar settings").click()
+    assert.equal(await button("Review HK Holidays").isDisabled(), true)
+    assert.deepEqual(await writes(), [])
+    assert.deepEqual(errors, [])
+    console.log("PASS: View users browse without auto-imports, editable dialogs, or writes; no browser errors")
+  } finally { if (browser) await browser.close(); await new Promise((resolve) => server.close(resolve)) }
+}
+main().catch((error) => { console.error(error); process.exitCode = 1 })

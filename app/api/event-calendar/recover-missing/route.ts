@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
   createAdminAuditContext,
@@ -12,6 +11,8 @@ import {
   mutateEventCalendarStore,
 } from "@/lib/eventCalendarStore"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { createCalendarServiceClient } from "@/lib/calendarServiceClient"
+import { loadEventCalendarHistory } from "@/lib/eventCalendarRecovery"
 
 type CalendarEvent = {
   id: string
@@ -25,25 +26,8 @@ type CalendarEvent = {
   sourceRow?: number
 }
 
-type AuditRow = {
-  occurred_at: string
-  actor_id: string | null
-  actor_name: string | null
-  before_row: unknown
-  after_row: unknown
-}
-
-function requireEnv(name: string) {
-  const value = process.env[name]
-  if (!value) throw new Error(`Missing environment variable: ${name}`)
-  return value
-}
-
 function getSupabaseClient() {
-  return createClient(
-    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    process.env.SUPABASE_SERVICE_ROLE_KEY || requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-  )
+  return createCalendarServiceClient()
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -125,17 +109,8 @@ async function findRecoverableEvents() {
     actorName: string
   }>()
 
-  const { data: auditRows, error: auditError } = await supabase
-    .from("audit_logs")
-    .select("occurred_at, actor_id, actor_name, before_row, after_row")
-    .eq("table_schema", "public")
-    .eq("table_name", "office_calendar_store")
-    .order("occurred_at", { ascending: false })
-    .limit(500)
-
-  if (auditError) throw auditError
-
-  for (const row of (auditRows || []) as AuditRow[]) {
+  const history = await loadEventCalendarHistory(supabase)
+  for (const row of history.rows) {
     for (const payload of [payloadFromRow(row.after_row), payloadFromRow(row.before_row)]) {
       for (const event of eventsFromPayload(payload)) {
         if (currentEventIds.has(event.id) || deletedEventIds.has(event.id) || event.endDate < todayKey) continue
@@ -152,6 +127,9 @@ async function findRecoverableEvents() {
   return {
     currentPayload,
     currentEvents,
+    historyComplete: history.historyComplete,
+    historyScanned: history.historyScanned,
+    oldestChecked: history.oldestChecked,
     candidates: Array.from(candidatesById.values()).sort(
       (a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title)
     ),
@@ -167,11 +145,14 @@ export async function GET() {
     return NextResponse.json({
       recoverableEvents: result.candidates,
       count: result.candidates.length,
+      historyComplete: result.historyComplete,
+      historyScanned: result.historyScanned,
+      oldestChecked: result.oldestChecked,
     })
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not inspect recoverable events." },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Unauthorized" ? 401 : error instanceof Error && error.message === "Forbidden" ? 403 : 500 }
     )
   }
 }
@@ -192,6 +173,9 @@ export async function POST(request: Request) {
       return NextResponse.json({
         restoredEvents: [],
         restoredCount: 0,
+        historyComplete: result.historyComplete,
+        historyScanned: result.historyScanned,
+        oldestChecked: result.oldestChecked,
         payload: result.currentPayload,
         eventVersions: getEventCalendarEventVersions(result.currentPayload),
         settingVersions: getEventCalendarSettingVersions(result.currentPayload),
@@ -224,6 +208,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       restoredEvents: confirmedRestoredEvents,
       restoredCount: confirmedRestoredEvents.length,
+      historyComplete: result.historyComplete,
+      historyScanned: result.historyScanned,
+      oldestChecked: result.oldestChecked,
       payload,
       eventVersions: getEventCalendarEventVersions(payload),
       settingVersions: getEventCalendarSettingVersions(payload),
@@ -232,7 +219,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not restore missing events." },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Unauthorized" ? 401 : error instanceof Error && error.message === "Forbidden" ? 403 : 500 }
     )
   }
 }

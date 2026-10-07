@@ -1,22 +1,21 @@
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
 import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 
 export { normalizeEmailList }
 
-const TIME_ZONE = "Asia/Hong_Kong"
-const EVENT_CALENDAR_URL = "https://fcuno.com/admin/eventcalendar"
+const EVENT_CALENDAR_URL = `${fcunoConnectionPolicy.vercel.productionOrigins[0]}/admin/eventcalendar`
 
 function parseLocalDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number)
-  return new Date(year, month - 1, day)
+  return new Date(`${value}T12:00:00.000Z`)
 }
 
 export function formatEventDate(value: string) {
   const date = parseLocalDate(value)
-  const day = String(date.getDate()).padStart(2, "0")
-  const month = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: TIME_ZONE }).format(date)
-  const year = String(date.getFullYear()).slice(-2)
-  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: TIME_ZONE }).format(date)
+  const day = String(date.getUTCDate()).padStart(2, "0")
+  const month = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" }).format(date)
+  const year = String(date.getUTCFullYear()).slice(-2)
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date)
   return `${day} ${month} ${year} (${weekday})`
 }
 
@@ -34,7 +33,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;")
 }
 
-export function buildChangedEventEmail(event: OfficeCalendarEvent, _action: "created" | "updated") {
+export function buildChangedEventEmail(event: OfficeCalendarEvent) {
   const people = event.people.length ? event.people.join(", ") : "No attendees selected"
 
   return {
@@ -47,6 +46,14 @@ export function buildChangedEventEmail(event: OfficeCalendarEvent, _action: "cre
         <p style="margin:12px 0 0"><a href="${EVENT_CALENDAR_URL}" style="color:#0a73c9">${EVENT_CALENDAR_URL}</a></p>
       </div>
     `,
+  }
+}
+
+export function buildChangedEventsEmail(events: OfficeCalendarEvent[], action: "created" | "updated") {
+  if (events.length === 1) return buildChangedEventEmail(events[0])
+  return {
+    subject: "***** Event Calendar Update",
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.5"><p>${events.length} calendar events were ${action}.</p><ul>${events.map((event) => `<li style="margin-bottom:8px"><strong>${escapeHtml(formatEventRange(event))}</strong><br />${escapeHtml(event.title)}<br />Attending: ${escapeHtml(event.people.join(", ") || "None selected")}</li>`).join("")}</ul><p><a href="${EVENT_CALENDAR_URL}">Open Event Calendar</a></p></div>`,
   }
 }
 
