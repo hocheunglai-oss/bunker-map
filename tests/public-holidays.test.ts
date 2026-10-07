@@ -107,6 +107,28 @@ test("known pristine stale dates are repaired, exact obsolete US dates removed, 
   assert.equal(repeated.additions.length + repeated.updates.length + repeated.removals.length, 0)
 })
 
+test("database object-key reordering cannot create repeated holiday corrections", () => {
+  function reordered(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reordered)
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reordered(item)]))
+  }
+  const initial = plan([legacy("SG", "2027-10-29"), legacy("US", "2026-07-03")])
+  const saved = reordered(apply([legacy("SG", "2027-10-29"), legacy("US", "2026-07-03")], initial)) as OfficeCalendarEvent[]
+  const repeated = plan(saved, initial.removals)
+  assert.equal(repeated.complete, true)
+  assert.equal(repeated.additions.length + repeated.updates.length + repeated.removals.length, 0)
+  assert.equal(repeated.preserved.filter(row => row.reviewRequired).length, 0)
+
+  const changedSource = structuredClone(saved) as HolidayCalendarEvent[]
+  changedSource[0].holidaySource.revision = "older-reference"
+  assert.equal(plan(changedSource).updates.length, 1, "a real metadata revision still needs correction")
+  changedSource[0].people = ["CY"]
+  const protectedPlan = plan(changedSource)
+  assert.equal(protectedPlan.updates.length, 0)
+  assert.equal(protectedPlan.preserved.find(row => row.id === changedSource[0].id)?.reviewRequired, true)
+})
+
 test("manual edits, unknown extras and attendance assignments are never overwritten or deleted", () => {
   const hk = { ...legacy("HK", "2026-04-07", "HOLIDAY ATTENDANCE - EASTER MONDAY"), people: ["SC"] }
   const sg = { ...legacy("SG", "2026-03-20"), title: "Company-specific holiday" }

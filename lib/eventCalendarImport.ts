@@ -89,6 +89,15 @@ function sourceOf(event: OfficeCalendarEvent) {
     Array.isArray(source.deletionIds) && source.deletionIds.every((id) => typeof id === "string") ? source : null
 }
 
+// JSONB does not preserve object-key order. Compare source metadata by value so
+// reading an unchanged saved holiday cannot manufacture another correction.
+function canonicalSource(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalSource)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, canonicalSource(item)]))
+}
+
 function pristineManaged(event: OfficeCalendarEvent, desired: HolidayCalendarEvent) {
   const source = sourceOf(event)
   return Boolean(source && source.identity === desired.holidaySource.identity &&
@@ -176,7 +185,7 @@ export function planHolidayReconciliation(
       const next = { ...desired, id: selected.id, holidaySource: { ...source,
         deletionIds: [...new Set([...source.deletionIds, ...(sourceOf(selected)?.deletionIds || []), selected.id])] } }
       next.holidaySource.baseline = holidayBaseline(next)
-      if (holidayBaseline(selected) !== holidayBaseline(next) || JSON.stringify(sourceOf(selected)) !== JSON.stringify(next.holidaySource)) plan.updates.push(next)
+      if (holidayBaseline(selected) !== holidayBaseline(next) || JSON.stringify(canonicalSource(sourceOf(selected))) !== JSON.stringify(canonicalSource(next.holidaySource))) plan.updates.push(next)
       for (const duplicate of candidates.filter((event) => event !== selected && pristine(event))) plan.removals.push(duplicate.id)
     } else {
       plan.additions.push(desired)
