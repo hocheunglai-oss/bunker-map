@@ -65,7 +65,7 @@ export function mergeImportedEvents<T extends OfficeCalendarEvent>(
 
 const importedFields = new Set(["id", "startDate", "endDate", "title", "people", "uncertainPeople", "tags", "eventType", "holidaySource"])
 const obsoleteLegacyDates: Partial<Record<HolidayCountry, string[]>> = {
-  US: ["2026-02-12", "2026-04-03", "2026-05-08", "2027-02-12", "2027-03-26", "2027-05-08"],
+  US: ["2026-02-12", "2026-04-03", "2026-05-08", "2027-02-12", "2027-03-26", "2027-05-08", "2027-12-31"],
 }
 
 function untouchedShape(event: OfficeCalendarEvent) {
@@ -103,7 +103,7 @@ function countriesCovered(event: OfficeCalendarEvent): HolidayCountry[] {
   const result: HolidayCountry[] = []
   for (const country of ["SG", "TW", "US"] as const) {
     if ((normalizedTags(event).includes("PUBLIC-HOLIDAY") && normalizedTags(event).includes(country)) ||
-      (/^(PUBLIC|GOVERNMENT) HOLIDAY\s*-/.test(title) && new RegExp(`\\b${HOLIDAY_LABELS[country]}\\b`).test(title))) result.push(country)
+      (/^(PUBLIC|GOVERNMENT|BANK) HOLIDAY\s*-/.test(title) && new RegExp(`\\b${HOLIDAY_LABELS[country]}\\b`).test(title))) result.push(country)
   }
   return result
 }
@@ -186,11 +186,19 @@ export function planHolidayReconciliation(
     const country = code as HolidayCountry
     for (const date of dates || []) {
       if (!verified.has(`${country}-${date.slice(0, 4)}`)) continue
-      const event = current.find((item) => item.id === legacyHolidayId(country, date))
-      if (!event) continue
-      recognizedIds.add(event.id)
-      if (pristineLegacy(event, country)) plan.removals.push(event.id)
-      else preserve(event, "Former regional/observance entry has manual changes; review it before removing.", true)
+      const retiredIdentity = country === "US" && date === "2027-12-31" ? "us-2027-next-new-year-observed" : null
+      for (const event of current.filter((item) => item.id === legacyHolidayId(country, date) ||
+        (retiredIdentity && sourceOf(item)?.identity === retiredIdentity))) {
+        recognizedIds.add(event.id)
+        const source = sourceOf(event)
+        const pristineRetired = retiredIdentity && source?.identity === retiredIdentity &&
+          source.country === country && source.year === 2027 && source.revision === "2026-10-07.1" &&
+          event.startDate === date && event.endDate === date &&
+          (event.id === `public-holiday-${retiredIdentity}` || source.deletionIds.includes(event.id)) &&
+          untouchedShape(event) && source.baseline === holidayBaseline(event)
+        if (pristineLegacy(event, country) || pristineRetired) plan.removals.push(event.id)
+        else preserve(event, "Former regional/observance entry has manual changes; review it before removing.", true)
+      }
     }
   }
   for (const event of current) {

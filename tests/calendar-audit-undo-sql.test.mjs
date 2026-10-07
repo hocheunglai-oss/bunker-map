@@ -25,7 +25,7 @@ test("calendar audit-undo migration guards the existing trigger in real PostgreS
       grant select, insert, update, delete on public.office_calendar_store to authenticated;
     `)
     await db.exec(sql("20260811125142_block_event_calendar_snapshot_undo.sql"))
-    const migration = sql("20261007101612_block_task_calendar_snapshot_undo.sql")
+    const migration = sql("20261007115435_block_task_calendar_snapshot_undo.sql")
     await db.exec(migration)
     await db.exec(migration)
 

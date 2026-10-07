@@ -1,6 +1,6 @@
 // Reviewed against the official sources below on 2026-10-07. This is a versioned
 // reference, not an extrapolation: unpublished/unreviewed years are unavailable.
-export const PUBLIC_HOLIDAY_REVISION = "2026-10-07.1"
+export const PUBLIC_HOLIDAY_REVISION = "2026-10-07.2"
 export const HOLIDAY_COUNTRIES = ["HK", "SG", "TW", "US"] as const
 export type HolidayCountry = (typeof HOLIDAY_COUNTRIES)[number]
 export type HolidayDefinition = {
@@ -18,7 +18,7 @@ export const HOLIDAY_SCOPES: Record<HolidayCountry, string> = {
   HK: "Hong Kong general holidays (ordinary Sundays excluded)",
   SG: "Singapore public holidays (Sunday holidays shown on their observed day)",
   TW: "Taiwan government office calendar: named holidays and substitute days, not private-employer closure advice",
-  US: "USA federal holidays (observed dates, not state holidays)",
+  US: "US Bank Holidays — Federal Reserve Banks and Branches (Saturday holidays stay on Saturday; Sunday holidays are observed Monday)",
 }
 export const HOLIDAY_LABELS: Record<HolidayCountry, string> = {
   HK: "HONG KONG", SG: "SINGAPORE", TW: "TAIWAN", US: "USA",
@@ -37,8 +37,8 @@ export const HOLIDAY_SOURCES: Record<HolidayCountry, Record<number, string[]>> =
     2027: ["https://www.dgpa.gov.tw/information?pid=12983&uid=2", "https://www.dgpa.gov.tw/uploads/dgpa/files/202607/f538b1ff-ba60-4c63-9477-10db8e6612d1.csv"],
   },
   US: {
-    2026: ["https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/"],
-    2027: ["https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/"],
+    2026: ["https://www.federalreserve.gov/aboutthefed/k8.htm"],
+    2027: ["https://www.federalreserve.gov/aboutthefed/k8.htm"],
   },
 }
 
@@ -137,17 +137,16 @@ const rows: Record<HolidayCountry, Record<number, Row[]>> = {
     2026: [
       ["new-year", "01-01", "New Year's Day"], ["mlk", "01-19", "Birthday of Martin Luther King, Jr."],
       ["washington", "02-16", "Washington's Birthday"], ["memorial", "05-25", "Memorial Day"],
-      ["juneteenth", "06-19", "Juneteenth National Independence Day"], ["independence", "07-03", "Independence Day (observed)"],
+      ["juneteenth", "06-19", "Juneteenth National Independence Day"], ["independence", "07-04", "Independence Day"],
       ["labor", "09-07", "Labor Day"], ["columbus", "10-12", "Columbus Day"], ["veterans", "11-11", "Veterans Day"],
       ["thanksgiving", "11-26", "Thanksgiving Day"], ["christmas", "12-25", "Christmas Day"],
     ],
     2027: [
       ["new-year", "01-01", "New Year's Day"], ["mlk", "01-18", "Birthday of Martin Luther King, Jr."],
       ["washington", "02-15", "Washington's Birthday"], ["memorial", "05-31", "Memorial Day"],
-      ["juneteenth", "06-18", "Juneteenth National Independence Day (observed)"], ["independence", "07-05", "Independence Day (observed)"],
+      ["juneteenth", "06-19", "Juneteenth National Independence Day"], ["independence", "07-05", "Independence Day (observed)"],
       ["labor", "09-06", "Labor Day"], ["columbus", "10-11", "Columbus Day"], ["veterans", "11-11", "Veterans Day"],
-      ["thanksgiving", "11-25", "Thanksgiving Day"], ["christmas", "12-24", "Christmas Day (observed)"],
-      ["next-new-year-observed", "12-31", "New Year's Day 2028 (observed)"],
+      ["thanksgiving", "11-25", "Thanksgiving Day"], ["christmas", "12-25", "Christmas Day"],
     ],
   },
 }
@@ -157,6 +156,9 @@ export const PUBLIC_HOLIDAY_DEFINITIONS: HolidayDefinition[] = HOLIDAY_COUNTRIES
     country, year: Number(year), key, date: `${year}-${date}`, name,
     legacyNames: legacyName ? [legacyName] : [name],
     legacyDates: country === "SG" && year === "2026" && key === "hari-raya-puasa" ? ["2026-03-20"]
-      : country === "SG" && year === "2027" && key === "deepavali" ? ["2027-10-29"] : [],
+      : country === "SG" && year === "2027" && key === "deepavali" ? ["2027-10-29"]
+      : country === "US" && year === "2026" && key === "independence" ? ["2026-07-03"]
+      : country === "US" && year === "2027" && key === "juneteenth" ? ["2027-06-18"]
+      : country === "US" && year === "2027" && key === "christmas" ? ["2027-12-24"] : [],
   }))),
 )

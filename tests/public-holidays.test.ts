@@ -24,7 +24,7 @@ test("reviewed coverage is explicit for every country/year, with unique stable i
   assert.equal(reference.complete, true)
   assert.deepEqual(reference.coverage.map((row) => [row.country, row.year, row.eventCount]), [
     ["HK", 2026, 17], ["SG", 2026, 11], ["TW", 2026, 22], ["US", 2026, 11],
-    ["HK", 2027, 17], ["SG", 2027, 11], ["TW", 2027, 24], ["US", 2027, 12],
+    ["HK", 2027, 17], ["SG", 2027, 11], ["TW", 2027, 24], ["US", 2027, 11],
   ])
   assert.equal(new Set(reference.events.map((event) => event.id)).size, reference.events.length)
   for (const event of reference.events) {
@@ -46,15 +46,34 @@ test("unknown coverage stays unavailable and malformed selections never default 
   assert.deepEqual(parseHolidayRequest(null, "HK", new Date("2026-12-31T17:00:00Z")).years, [2027, 2028])
 })
 
-test("USA federal observed dates exclude regional extras but retain Columbus and cross-year New Year", () => {
+test("US Bank calendar follows Federal Reserve Saturday and Sunday rules and excludes regional extras", () => {
   const usa = reference.events.filter((event) => event.holidaySource.country === "US")
-  for (const date of ["2026-02-12", "2026-04-03", "2026-05-08", "2027-02-12", "2027-03-26", "2027-05-08"]) {
+  for (const date of ["2026-02-12", "2026-04-03", "2026-05-08", "2027-02-12", "2027-03-26", "2027-05-08", "2026-07-03", "2027-06-18", "2027-12-24", "2027-12-31"]) {
     assert.ok(!usa.some((event) => event.startDate === date))
   }
-  for (const date of ["2026-10-12", "2027-10-11", "2026-07-03", "2027-06-18", "2027-07-05", "2027-12-24", "2027-12-31"]) {
+  for (const date of ["2026-10-12", "2027-10-11", "2026-07-04", "2027-06-19", "2027-07-05", "2027-12-25"]) {
     assert.ok(usa.some((event) => event.startDate === date))
   }
-  assert.ok(usa.every((event) => event.title.includes("(FEDERAL)")))
+  assert.ok(usa.every((event) => event.title.startsWith("BANK HOLIDAY - USA (FEDERAL RESERVE)")))
+  assert.ok(usa.every((event) => event.holidaySource.sourceUrls.includes("https://www.federalreserve.gov/aboutthefed/k8.htm")))
+})
+
+test("bank scope moves former federal-office imports in place and honors old-date deletions", () => {
+  const current = [legacy("US", "2026-07-03"), legacy("US", "2027-06-18"), legacy("US", "2027-12-24")]
+  const changes = plan(current)
+  assert.deepEqual(changes.updates.filter((event) => current.some((old) => old.id === event.id)).map((event) => event.startDate), ["2026-07-04", "2027-06-19", "2027-12-25"])
+  const suppressed = plan([], current.map((event) => event.id))
+  assert.ok(!suppressed.additions.some((event) => ["us-2026-independence", "us-2027-juneteenth", "us-2027-christmas"].includes(event.holidaySource.identity)))
+})
+
+test("retired 2027 federal-office New Year is removed only when its old managed baseline is unchanged", () => {
+  const desired = reference.events.find((event) => event.holidaySource.identity === "us-2027-new-year")!
+  const retired: HolidayCalendarEvent = { ...desired, id: "public-holiday-us-2027-next-new-year-observed", startDate: "2027-12-31", endDate: "2027-12-31", title: "PUBLIC HOLIDAY - USA (FEDERAL) - NEW YEAR'S DAY 2028 (OBSERVED)", holidaySource: { ...desired.holidaySource, identity: "us-2027-next-new-year-observed", revision: "2026-10-07.1", deletionIds: ["public-holiday-us-2027-next-new-year-observed"], baseline: "" } }
+  retired.holidaySource.baseline = JSON.stringify({ startDate: retired.startDate, endDate: retired.endDate, title: retired.title, tags: [...retired.tags].sort(), eventType: retired.eventType, people: [], uncertainPeople: [], sourceRow: null })
+  assert.ok(plan([retired]).removals.includes(retired.id))
+  const edited = { ...retired, people: ["CY"] }
+  assert.ok(!plan([edited]).removals.includes(retired.id))
+  assert.equal(plan([edited]).preserved.find((row) => row.id === edited.id)?.reviewRequired, true)
 })
 
 test("Singapore stale estimates are absent and observed Sundays have correct replacements", () => {

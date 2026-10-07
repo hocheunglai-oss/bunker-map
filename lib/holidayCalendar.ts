@@ -48,7 +48,7 @@ export function holidayEvent(holiday: HolidayDefinition): HolidayCalendarEvent {
   const event: OfficeCalendarEvent = {
     id, startDate: holiday.date, endDate: holiday.date,
     title: holiday.country === "HK" ? `HOLIDAY ATTENDANCE - ${holiday.name.toUpperCase()}`
-      : `${holiday.country === "TW" ? "GOVERNMENT HOLIDAY" : "PUBLIC HOLIDAY"} - ${HOLIDAY_LABELS[holiday.country]}${holiday.country === "US" ? " (FEDERAL)" : ""} - ${holiday.name.toUpperCase()}`,
+      : `${holiday.country === "TW" ? "GOVERNMENT HOLIDAY" : holiday.country === "US" ? "BANK HOLIDAY" : "PUBLIC HOLIDAY"} - ${HOLIDAY_LABELS[holiday.country]}${holiday.country === "US" ? " (FEDERAL RESERVE)" : ""} - ${holiday.name.toUpperCase()}`,
     people: [], uncertainPeople: [], tags: ["public-holiday", holiday.country], eventType: "Public Holiday",
   }
   return { ...event, holidaySource: {

@@ -44,7 +44,8 @@ test("installed and locked dependencies retain their security fixes", () => {
   const floors: Record<string, string> = {
     next: "16.3.3",
     nodemailer: "10.0.13",
-    sharp: "0.35.4",
+    sharp: "0.35.5",
+    "source-map-js": "1.2.2",
     uuid: "11.1.1",
   }
 
@@ -59,12 +60,12 @@ test("installed and locked dependencies retain their security fixes", () => {
   }
 
   for (const [packagePath, locked] of Object.entries(lock.packages)) {
-    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|uuid|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
+    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|source-map-js|uuid|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
     if (!name) continue
     const braceFloors: Record<string, string> = { 1: "1.1.21", 2: "2.1.7", 3: "3.0.9", 5: "5.0.12" }
     const minimum = name === "brace-expansion"
       ? braceFloors[locked.version.split(".")[0]]
-      : floors[name] || (name.startsWith("@img/sharp-libvips-") ? "1.3.3" : "0.35.4")
+      : floors[name] || (name.startsWith("@img/sharp-libvips-") ? "1.3.4" : "0.35.5")
     assert.ok(minimum, `${name} must use a security-supported release line`)
     assertVersionFloor(locked.version, minimum, `locked ${name}`)
 
@@ -79,9 +80,32 @@ test("installed and locked dependencies retain their security fixes", () => {
   }
 
   assertVersionFloor(sharp.versions.sharp, floors.sharp, "loaded Sharp")
+  assertVersionFloor(sharp.versions.rsvg ?? "", "2.63.2", "loaded SVG renderer")
   if (sharp.versions.heif) {
     assertVersionFloor(sharp.versions.heif, "1.23.2", "loaded libheif")
   }
+})
+
+test("source maps reject unsafe indexed offsets and preserve ordinary mappings and bounded legal offsets", () => {
+  execFileSync(process.execPath, ["-e", `
+    const assert = require("node:assert/strict");
+    const { SourceMapConsumer, SourceMapGenerator, SourceNode } = require("source-map-js");
+    const basic = { version: 3, sources: ["input.js"], sourcesContent: ["x"], names: [], mappings: "AAAA" };
+    const indexed = (line, column, map = basic) => ({ version: 3, sections: [{ offset: { line, column }, map }] });
+    for (const line of [Infinity, 1e12, -1, 1.5, "100", null]) {
+      assert.throws(() => new SourceMapConsumer(indexed(line, 0)));
+    }
+    for (const column of [Infinity, Number.MAX_SAFE_INTEGER + 1, -1, 1.5, "100", null]) {
+      assert.throws(() => new SourceMapConsumer(indexed(0, column)));
+    }
+    assert.throws(() => new SourceMapConsumer(indexed(6000000, 0, indexed(6000000, 0))));
+    const consumer = new SourceMapConsumer(indexed(10000000, 0));
+    assert.equal(SourceNode.fromStringWithSourceMap("x", consumer).toStringWithSourceMap().code, "x");
+    const generator = new SourceMapGenerator({ file: "output.js" });
+    generator.addMapping({ generated: { line: 1, column: 0 }, original: { line: 3, column: 2 }, source: "input.js" });
+    const ordinary = new SourceMapConsumer(generator.toJSON());
+    assert.deepEqual(ordinary.originalPositionFor({ line: 1, column: 0 }), { source: "input.js", line: 3, column: 2, name: null });
+  `], { cwd: new URL("..", import.meta.url), timeout: 5000, stdio: "pipe" })
 })
 
 test("network-free mail compilation preserves To, CC, BCC, display names, plus addresses, and HTML", async () => {
@@ -231,4 +255,12 @@ test("patched Sharp continues to encode, decode, and resize ordinary PNG images"
   for (let offset = 0; offset < data.length; offset += 4) {
     assert.deepEqual(data.subarray(offset, offset + 4), Buffer.from([12, 34, 56, 255]))
   }
+})
+
+test("patched SVG renderer retains ordinary image conversion", async () => {
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#0c2238"/></svg>')
+  const { data, info } = await sharp(svg).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  assert.equal(info.width, 2)
+  assert.equal(info.height, 2)
+  assert.deepEqual(data.subarray(0, 4), Buffer.from([12, 34, 56, 255]))
 })

@@ -1618,7 +1618,7 @@ export default function EventCalendarPage() {
                       cursor: holidayImporting ? "not-allowed" : "pointer",
                     }}
                   >
-                    Review USA, Taiwan, Singapore Holidays
+                    Review US Bank, Taiwan, Singapore Holidays
                   </button>
                   <button
                     type="button"
