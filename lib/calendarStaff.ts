@@ -18,17 +18,12 @@ export function buildCalendarStaffDirectory(people: StaffRow[], users: UserRow[]
     const matches = person.admin_user_id
       ? activeUsers.filter((user) => user.id === person.admin_user_id)
       : activeUsers.filter((user) => codeOf(user.display_name) === code)
-    let issue: string | undefined
-    // Preserve the existing calendar alias only when the known legacy address
-    // still belongs to exactly one active account. Never guess a new address.
-    if (!person.admin_user_id && !matches.length && code === "CY") {
-      matches.push(...activeUsers.filter((user) => emailOf(user.email) === "chengyuan@cosulich.com.hk"))
-      if (matches.length === 1) issue = "CY uses Chengyuan's existing email; User Management currently uses a different staff label. Please confirm the staff link."
-    }
+    // Attendance's canonical staff code and account link determine identity.
+    // Email addresses are delivery destinations, never staff identity aliases.
     const user = matches.length === 1 ? matches[0] : null
     if (user) matchedUsers.add(user.id)
     const email = user ? emailOf(user.email) || emailOf(user.username) : null
-    const entry = { code, name: person.display_name || code, email, ...(issue ? { issue } : {}) }
+    const entry = { code, name: person.display_name || code, email }
     if (result.has(code)) {
       result.set(code, { code, name: code, email: null, issue: "Duplicate staff code. Check User Management before sending." })
     } else {

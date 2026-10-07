@@ -14,12 +14,27 @@ test("unresolved, inactive and conflicting staff are reported rather than silent
   const staff = buildCalendarStaffDirectory([person("DT", "1"), person("JZ", "2")], [user("1", "DT", "d@example.com", false), user("2", "JZ", "j@example.com"), user("3", "JZ", "different@example.com")])
   assert.deepEqual(resolveCalendarStaffRecipients(["DT", "JZ", "UNKNOWN"], staff), { recipients: [], unresolved: ["DT", "JZ", "UNKNOWN"] })
 })
-test("existing CY route needs a unique matching active account and exposes its mismatch", () => {
-  const staff = buildCalendarStaffDirectory([person("CY", null)], [user("1", "CL", "chengyuan@cosulich.com.hk")])
-  assert.equal(staff.length, 1)
-  assert.equal(staff[0].code, "CY")
-  assert.match(staff[0].issue || "", /confirm/)
-  assert.deepEqual(resolveCalendarStaffRecipients(["CY"], buildCalendarStaffDirectory([person("CY", null)], [])), { recipients: [], unresolved: ["CY"] })
+test("canonical attendance CY and linked admin CY resolve exactly once with no CL option or warning", () => {
+  const staff = buildCalendarStaffDirectory([person("CY", "chengyuan-account")], [user("chengyuan-account", "CY", "chengyuan@cosulich.com.hk")])
+  assert.deepEqual(staff, [{ code: "CY", name: "CY", email: "chengyuan@cosulich.com.hk" }])
+  assert.deepEqual(resolveCalendarStaffRecipients(["CY", " cy ", "CY"], staff), {
+    recipients: ["chengyuan@cosulich.com.hk"], unresolved: [],
+  })
+  assert.deepEqual(resolveCalendarStaffRecipients(["CL"], staff), { recipients: [], unresolved: ["CL"] })
+})
+test("a canonical account link remains authoritative even while the old display label is being corrected", () => {
+  const staff = buildCalendarStaffDirectory([person("CY", "chengyuan-account")], [user("chengyuan-account", "CL", "chengyuan@cosulich.com.hk")])
+  assert.deepEqual(staff, [{ code: "CY", name: "CY", email: "chengyuan@cosulich.com.hk" }])
+})
+test("CY uses the same exact-code fallback as other staff, never a hardcoded email identity", () => {
+  const canonical = buildCalendarStaffDirectory([person("CY", null)], [user("1", "CY", "new-address@example.com")])
+  assert.deepEqual(canonical, [{ code: "CY", name: "CY", email: "new-address@example.com" }])
+  const unmatched = buildCalendarStaffDirectory([person("CY", null)], [user("1", "CL", "chengyuan@cosulich.com.hk")])
+  assert.deepEqual(resolveCalendarStaffRecipients(["CY"], unmatched), { recipients: [], unresolved: ["CY"] })
+  const inactive = buildCalendarStaffDirectory([person("CY", "1")], [user("1", "CY", "chengyuan@cosulich.com.hk", false)])
+  assert.deepEqual(resolveCalendarStaffRecipients(["CY"], inactive), { recipients: [], unresolved: ["CY"] })
+  const brokenLink = buildCalendarStaffDirectory([person("CY", "missing-account")], [user("1", "CY", "chengyuan@cosulich.com.hk")])
+  assert.deepEqual(resolveCalendarStaffRecipients(["CY"], brokenLink), { recipients: [], unresolved: ["CY"] })
 })
 test("email settings reject every malformed token and distinguish absent from deliberately empty", () => {
   assert.deepEqual(validateCalendarEmailList("A <A@example.com>; b@example.com\na@example.com"), ["a@example.com", "b@example.com"])
