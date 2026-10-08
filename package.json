@@ -36,7 +36,7 @@
     "@vercel/speed-insights": "2.0.0",
     "googleapis": "^171.4.0",
     "leaflet": "^1.9.4",
-    "next": "^16.3.3",
+    "next": "16.3.8",
     "nodemailer": "^10.0.13",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -53,7 +53,7 @@
     "@types/react-dom": "^19.2.4",
     "@types/sanitize-html": "^2.16.1",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.3.3",
+    "eslint-config-next": "16.3.8",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.23.1",
     "typescript": "^5.9.3"

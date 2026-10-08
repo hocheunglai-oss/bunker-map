@@ -42,7 +42,7 @@ test("installed and locked dependencies retain their security fixes", () => {
     readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
   ) as { packages: Record<string, PackageVersion> }
   const floors: Record<string, string> = {
-    next: "16.3.3",
+    next: "16.3.8",
     nodemailer: "10.0.13",
     sharp: "0.35.5",
     "source-map-js": "1.2.2",
@@ -84,6 +84,61 @@ test("installed and locked dependencies retain their security fixes", () => {
   if (sharp.versions.heif) {
     assertVersionFloor(sharp.versions.heif, "1.23.2", "loaded libheif")
   }
+})
+
+test("framework manifest, tooling and all platform compilers retain the October security patch", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+  const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"))
+  const nextVersion = lock.packages["node_modules/next"].version
+  assertVersionFloor(manifest.dependencies.next.replace(/^\^/, ""), "16.3.8", "framework manifest")
+  assert.equal(manifest.devDependencies["eslint-config-next"], manifest.dependencies.next)
+  for (const [packagePath, entry] of Object.entries(lock.packages)) {
+    if (!/^node_modules\/(?:@next\/(?:env|swc-[^/]+|eslint-plugin-next)|eslint-config-next)$/.test(packagePath)) continue
+    assert.equal((entry as PackageVersion).version, nextVersion, `${packagePath} must match the patched framework`)
+  }
+})
+
+test("development MCP cannot be reached through ignored image/media dot-segment URLs", () => {
+  // Exercise the actual framework middleware without starting a server or MCP
+  // transport. Reaching the server factory is enough to detect the old bypass.
+  execFileSync(process.execPath, ["-e", `
+    const assert = require("node:assert/strict");
+    const path = require.resolve("next/dist/server/mcp/get-or-create-mcp-server");
+    let reached = 0;
+    require.cache[path] = { id: path, filename: path, loaded: true, exports: {
+      getOrCreateMcpServer() { reached++; throw Error("MCP boundary reached"); }
+    }};
+    const { getMcpMiddleware } = require("next/dist/server/mcp/get-mcp-middleware");
+    const { blockCrossSiteDEV } = require("next/dist/server/lib/router-utils/block-cross-site-dev");
+    const middleware = getMcpMiddleware({});
+    const response = () => ({ statusCode: 200, end() {} });
+    (async () => {
+      for (const url of [
+        "/_next/image/../mcp", "/_next/static/media/../../mcp",
+        "/_next/image/%2e%2e/mcp", "/_next/static/media/%2E%2E/%2E%2E/mcp",
+      ]) {
+        const request = {url, headers:{origin:"https://hostile.example"}};
+        assert.equal(blockCrossSiteDEV(request, response(), undefined, "localhost"), false);
+        let continued = false;
+        await middleware(request, response(), () => { continued = true; });
+        assert.equal(continued, true, url + " must not normalize into an MCP request");
+        assert.equal(reached, 0, url + " must never reach the MCP server");
+      }
+      for (const origin of ["https://hostile.example", "null"]) {
+        for (const url of ["/_next/mcp", "/_next/mcp?alias=/_next/image", "/_next/mcp?alias=/_next/static/media"]) {
+          const res = response();
+          assert.equal(blockCrossSiteDEV({url,headers:{origin}}, res, undefined, "localhost"), true);
+          assert.equal(res.statusCode, 403);
+        }
+      }
+      for (const url of ["/_next/mcp", "/_next/mcp/", "/_next/mcp?probe=1"]) {
+        const request = {url, headers:{origin:"http://localhost:3000"}};
+        assert.equal(blockCrossSiteDEV(request, response(), undefined, "localhost"), false);
+        await assert.rejects(middleware(request, response(), () => {throw Error("Canonical MCP skipped");}), /MCP boundary reached/);
+      }
+      assert.equal(reached, 3, "legitimate local MCP routes remain reachable");
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+  `], { cwd: new URL("..", import.meta.url), timeout: 5000, stdio: "pipe" })
 })
 
 test("source maps reject unsafe indexed offsets and preserve ordinary mappings and bounded legal offsets", () => {

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { appendTaiwanNotice, TAIWAN_NOTICE_TEMPLATES, TAIWAN_NOTICE_TEMPLATE_GROUPS, validateTaiwanNoticeDraft } from "@/lib/taiwanNoticeTemplates"
 import {
   buildTaiwanOperationalNoticeMessage,
   emptyTaiwanOperationalNotice,
@@ -68,43 +70,61 @@ export default function AdminRemarks() {
   const [isDirty, setIsDirty] = useState<boolean>(false)
   const [noticeDirty, setNoticeDirty] = useState<boolean>(false)
   const [operationalNoticeDirty, setOperationalNoticeDirty] = useState<boolean>(false)
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const [loadError, setLoadError] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [templateId, setTemplateId] = useState("")
+  const [templateDraft, setTemplateDraft] = useState("")
+  const [templateMessage, setTemplateMessage] = useState("")
+  const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "taiwan-remarks", "edit")
+  const selectedTemplate = TAIWAN_NOTICE_TEMPLATES.find((item) => item.id === templateId)
   const hasUnsavedChanges = isDirty || noticeDirty || operationalNoticeDirty
   const operationalNoticePreview = buildTaiwanOperationalNoticeMessage(operationalNotice)
 
   useEffect(() => {
+    let cancelled = false
     const loadRemark = async () => {
-      const { data: remarksData } = await supabase
-        .from("remarks")
-        .select("*")
-        .in("id", [1, 2, TAIWAN_OPERATIONAL_NOTICE_REMARK_ID])
+      setLoading(true)
+      setLoadError(false)
+      try {
+        const { data: remarksData, error } = await supabase
+          .from("remarks")
+          .select("*")
+          .in("id", [1, 2, TAIWAN_OPERATIONAL_NOTICE_REMARK_ID])
+        if (error || !Array.isArray(remarksData)) throw new Error("Could not load remarks")
+        if (cancelled) return
 
-      const remarkData = remarksData?.find((item) => item.id === 1)
-      const noticeData = remarksData?.find((item) => item.id === 2)
-      const operationalNoticeData = remarksData?.find(
-        (item) => item.id === TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
-      )
+        const remarkData = remarksData.find((item) => item.id === 1)
+        const noticeData = remarksData.find((item) => item.id === 2)
+        const operationalNoticeData = remarksData.find(
+          (item) => item.id === TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+        )
 
-      const initialMemos =
-        remarkData?.content
-          ?.split(/\n+/)
-          .map((item: string) => item.trim())
-          .filter(Boolean)
-          .map((text: string) => ({ id: crypto.randomUUID(), text })) || []
+        const initialMemos =
+          remarkData?.content
+            ?.split(/\n+/)
+            .map((item: string) => item.trim())
+            .filter(Boolean)
+            .map((text: string) => ({ id: crypto.randomUUID(), text })) || []
 
-      setMemos(initialMemos.length > 0 ? initialMemos : [createEmptyMemo()])
-      setSpecialNotice(noticeData?.content || "")
-      setOperationalNotice(parseTaiwanOperationalNotice(operationalNoticeData?.content))
-      setIsDirty(false)
-      setNoticeDirty(false)
-      setOperationalNoticeDirty(false)
-      setLoading(false)
+        setMemos(initialMemos.length > 0 ? initialMemos : [createEmptyMemo()])
+        setSpecialNotice(noticeData?.content || "")
+        setOperationalNotice(parseTaiwanOperationalNotice(operationalNoticeData?.content))
+        setIsDirty(false)
+        setNoticeDirty(false)
+        setOperationalNoticeDirty(false)
+      } catch {
+        if (!cancelled) setLoadError(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
 
     if (!adminLoading && authenticated) {
       loadRemark()
     }
-  }, [adminLoading, authenticated])
+    return () => { cancelled = true }
+  }, [adminLoading, authenticated, loadAttempt])
 
   const serializedRemark = useMemo(() => {
     return memos
@@ -114,29 +134,61 @@ export default function AdminRemarks() {
   }, [memos])
 
   const saveRemark = async () => {
+    if (!canEdit || saving || loading || loadError || !hasUnsavedChanges) return
+    const pendingContent = [noticeDirty ? specialNotice : "", isDirty ? serializedRemark : ""].filter((text) => text.trim())
+    if (pendingContent.some((text) => validateTaiwanNoticeDraft(text))) {
+      setMessage("Error: Replace the date, period or charge placeholders before saving.")
+      return
+    }
     setSaving(true)
     setMessage("")
+    try {
+      const rows = []
+      if (isDirty) rows.push({ id: 1, content: serializedRemark })
+      if (noticeDirty) rows.push({ id: 2, content: specialNotice.trim() })
+      if (operationalNoticeDirty) rows.push({
+        id: TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
+        content: serializeTaiwanOperationalNotice(operationalNotice),
+      })
+      const { error } = await supabase.from("remarks").upsert(rows)
 
-    const { error } = await supabase
-      .from("remarks")
-      .upsert([
-        { id: 1, content: serializedRemark },
-        { id: 2, content: specialNotice.trim() },
-        {
-          id: TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
-          content: serializeTaiwanOperationalNotice(operationalNotice),
-        },
-      ])
-
-    if (error) setMessage("Error saving remarks")
-    else {
-      setMessage("Remarks saved successfully")
-      setIsDirty(false)
-      setNoticeDirty(false)
-      setOperationalNoticeDirty(false)
+      if (error) setMessage("Error saving remarks")
+      else {
+        setMessage("Remarks saved successfully")
+        setIsDirty(false)
+        setNoticeDirty(false)
+        setOperationalNoticeDirty(false)
+      }
+    } catch {
+      setMessage("Error saving remarks. Your draft is still here; please try again.")
+    } finally {
+      setSaving(false)
     }
+  }
 
-    setSaving(false)
+  function selectTemplate(id: string) {
+    if (templateDraft !== (selectedTemplate?.text || "") && templateDraft.trim()
+      && !window.confirm("Replace your edited template draft? Existing notices will not change.")) return
+    setTemplateId(id)
+    setTemplateDraft(TAIWAN_NOTICE_TEMPLATES.find((item) => item.id === id)?.text || "")
+    setTemplateMessage("")
+  }
+
+  function insertTemplate(destination: "notice" | "remark") {
+    if (!canEdit || saving) return
+    const error = validateTaiwanNoticeDraft(templateDraft)
+    if (error) { setTemplateMessage(error); return }
+    const appended = appendTaiwanNotice(destination === "notice" ? specialNotice : serializedRemark, templateDraft)
+    if (!appended.added) { setTemplateMessage("This wording is already included."); return }
+    if (destination === "notice") updateSpecialNotice(appended.text)
+    else {
+      // Keep existing cards; add only the new text, replacing an unused blank card.
+      const newText = appended.text.slice(serializedRemark.trimEnd().length).trim()
+      setMemos((prev) => [...prev.filter((memo) => memo.text.trim()), { id: crypto.randomUUID(), text: newText }])
+      setIsDirty(true)
+      setMessage("")
+    }
+    setTemplateMessage(`Added to ${destination === "notice" ? "Special Notice" : "remarks"}. Review the wording, then press Save to publish.`)
   }
 
   function updateMemo(id: string, value: string) {
@@ -186,6 +238,10 @@ export default function AdminRemarks() {
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
   if (adminLoading || loading) return <p style={{ padding: "40px" }}>Loading...</p>
+  if (loadError) return <div role="alert" style={{ padding: "40px" }}>
+    <p>Could not load the existing remarks. Nothing has been changed.</p>
+    <button onClick={() => setLoadAttempt((attempt) => attempt + 1)} style={pillButtonStyle}>Try again</button>
+  </div>
 
   return (
     <div
@@ -230,6 +286,7 @@ export default function AdminRemarks() {
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               onClick={addMemo}
+              disabled={!canEdit || saving}
               style={{
                 ...pillButtonStyle,
                 background: "var(--fc-admin-primary-button-bg)",
@@ -244,7 +301,7 @@ export default function AdminRemarks() {
 
             <button
               onClick={saveRemark}
-              disabled={saving}
+              disabled={!canEdit || saving || !hasUnsavedChanges}
               style={{
                 ...pillButtonStyle,
                 background: isDirty || noticeDirty
@@ -259,9 +316,39 @@ export default function AdminRemarks() {
               {saving ? "Saving..." : hasUnsavedChanges ? "Save" : "Saved"}
             </button>
           </div>
+          <div role="status" style={{ fontSize: "13px" }}>
+            {!canEdit ? "View only" : message || (hasUnsavedChanges ? "Unsaved changes" : "")}
+          </div>
         </div>
 
-        <div style={{ display: "grid", gap: "14px" }}>
+        <fieldset disabled={!canEdit || saving} style={{ display: "grid", gap: "14px", margin: 0, padding: 0, border: 0, minWidth: 0 }}>
+          <details style={memoCardStyle}>
+            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Notice templates · {TAIWAN_NOTICE_TEMPLATES.length} choices</summary>
+            <div style={{ display: "grid", gap: "12px", marginTop: "14px" }}>
+              <p style={{ margin: 0, fontSize: "13px" }}>Reference wording only. Check the current port, product, dates and charges. Adding a template keeps existing text; it is published only after Save.</p>
+              <label style={{ display: "grid", gap: "6px", fontWeight: 700 }}>
+                Choose a template
+                <select value={templateId} onChange={(event) => selectTemplate(event.target.value)} style={{ ...textareaStyle, minHeight: "auto", padding: "12px" }}>
+                  <option value="">Select a notice...</option>
+                  {TAIWAN_NOTICE_TEMPLATE_GROUPS.map((group) => <optgroup key={group} label={group}>
+                    {TAIWAN_NOTICE_TEMPLATES.filter((item) => item.group === group).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </optgroup>)}
+                </select>
+              </label>
+              {selectedTemplate && <>
+                <p style={{ margin: 0, fontSize: "13px" }}>{selectedTemplate.guidance || "Replace any [PLACEHOLDERS] with confirmed details, including the year. These examples do not confirm current availability."}</p>
+                <label style={{ display: "grid", gap: "6px", fontWeight: 700 }}>
+                  Edit template wording
+                  <textarea value={templateDraft} onChange={(event) => { setTemplateDraft(event.target.value); setTemplateMessage("") }} style={textareaStyle} />
+                </label>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button onClick={() => insertTemplate("notice")} style={pillButtonStyle}>Add to Special Notice</button>
+                  <button onClick={() => insertTemplate("remark")} style={pillButtonStyle}>Add as Remark</button>
+                </div>
+                {templateMessage && <p role="status" style={{ margin: 0, fontSize: "13px" }}>{templateMessage}</p>}
+              </>}
+            </div>
+          </details>
           <div
             style={{
               ...memoCardStyle,
@@ -436,6 +523,7 @@ export default function AdminRemarks() {
                 background: "var(--fc-admin-warning-bg)",
               }}
               value={specialNotice}
+              aria-label="Special Notice"
               onChange={(e) => updateSpecialNotice(e.target.value)}
               placeholder="Write a short Taiwan special notice..."
             />
@@ -499,6 +587,7 @@ export default function AdminRemarks() {
               <textarea
                 style={textareaStyle}
                 value={memo.text}
+                aria-label={`Remark ${index + 1}`}
                 onChange={(e) => updateMemo(memo.id, e.target.value)}
                 placeholder="Write a concise Taiwan market remark..."
               />
@@ -516,7 +605,7 @@ export default function AdminRemarks() {
               {message}
             </p>
           )}
-        </div>
+        </fieldset>
       </div>
     </div>
   )
