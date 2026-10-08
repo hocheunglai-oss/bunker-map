@@ -95,10 +95,17 @@ const reportDateItems: Array<{ key: ReportSnapshotKey; label: string }> = [
 
 export default function AdminPage() {
   const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
-  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "pricesetter", "edit")
+  const hasEditPermission = isAdminRole(role) || canAccessAdminPage(permissions, "pricesetter", "edit")
   const isMobile = useIsMobile()
 
   const [ports, setPorts] = useState<any[]>([])
+  const [portsLoadStatus, setPortsLoadStatus] = useState<"loading" | "ready" | "error">("loading")
+  const [portsLoadAttempt, setPortsLoadAttempt] = useState(0)
+  const [portListError, setPortListError] = useState("")
+  const [changingPortList, setChangingPortList] = useState(false)
+  const portListLock = useRef(false)
+  const canEdit = hasEditPermission && portsLoadStatus === "ready" && !changingPortList
+  const canChangePortList = canEdit && !portListError
   const [showCoords, setShowCoords] = useState(false)
   const [savedPorts, setSavedPorts] = useState<SavedPortsState>({})
   const [savingPorts, setSavingPorts] = useState<SavingPortsState>({})
@@ -147,22 +154,37 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
+    let cancelled = false
+    const timeout = setTimeout(() => {
+      cancelled = true
+      setPortsLoadStatus("error")
+    }, 15_000)
+    setPortsLoadStatus("loading")
     async function loadPorts() {
-      const { data, error } = await supabase
-        .from("ports")
-        .select("id,name,type,lat,lng,hsfo,vlsfo,mgo,hsfo_formula,vlsfo_formula,mgo_formula,updated_at,display_order")
-        .order("display_order", { ascending: true })
-
-      if (error) {
-        console.error(error)
-        return
+      try {
+        const { data, error } = await supabase
+          .from("ports")
+          .select("id,name,type,lat,lng,hsfo,vlsfo,mgo,hsfo_formula,vlsfo_formula,mgo_formula,updated_at,display_order")
+          .order("display_order", { ascending: true })
+        if (error || !Array.isArray(data)
+          || data.some((port) => !port || typeof port.id !== "string" || typeof port.name !== "string")) {
+          throw new Error("Could not load the saved ports")
+        }
+        if (cancelled) return
+        setPorts(data)
+        setSavedPorts({})
+        setPortListError("")
+        setPortsLoadStatus("ready")
+      } catch {
+        if (!cancelled) setPortsLoadStatus("error")
+      } finally {
+        clearTimeout(timeout)
       }
-
-      setPorts(data || [])
     }
 
-    loadPorts()
-  }, [adminLoading, authenticated])
+    void loadPorts()
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [adminLoading, authenticated, portsLoadAttempt])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -310,42 +332,59 @@ export default function AdminPage() {
   }
 
   async function deletePort(id: string, name: string) {
-    if (!canEdit || publishingAny || savingPorts[id]) return
+    if (!canChangePortList || portListLock.current || publishingAny || Object.values(savingPorts).some(Boolean)) return
     if (!confirm(`Delete ${name} ?`)) return
-
-    await supabase.from("ports").delete().eq("id", id)
-    setPorts((prev) => prev.filter((port) => port.id !== id))
-  }
-
-  async function addPort() {
-    if (!canEdit || publishingAny) return
-    const { data } = await supabase
-      .from("ports")
-      .insert({
-        name: "New Port",
-        display_order: ports.length + 1,
-      })
-      .select()
-
-    if (data) {
-      setPorts([...ports, ...data])
+    portListLock.current = true
+    setChangingPortList(true)
+    setPortListError("")
+    try {
+      const { data, error } = await supabase.from("ports").delete().eq("id", id).select("id")
+      if (error || !Array.isArray(data) || data.length !== 1 || data[0]?.id !== id) {
+        throw new Error("Deletion was not confirmed")
+      }
+      setPorts((prev) => prev.filter((port) => port.id !== id))
+    } catch {
+      setPortListError(`Could not confirm deletion of ${name}. The row is still shown; reload saved ports to check before trying again.`)
+    } finally {
+      portListLock.current = false
+      setChangingPortList(false)
     }
   }
 
-  async function addDivider() {
-    if (!canEdit || publishingAny) return
-    const { data } = await supabase
-      .from("ports")
-      .insert({
-        name: "Section",
-        type: "divider",
-        display_order: ports.length + 1,
-      })
-      .select()
-
-    if (data) {
-      setPorts([...ports, ...data])
+  async function addPortRow(divider: boolean) {
+    if (!canChangePortList || portListLock.current || publishingAny || Object.values(savingPorts).some(Boolean)) return
+    portListLock.current = true
+    setChangingPortList(true)
+    setPortListError("")
+    try {
+      const displayOrder = Math.max(0, ...ports.map((port) => Number(port.display_order) || 0)) + 1
+      const { data, error } = await supabase.from("ports").insert({
+        name: divider ? "Section" : "New Port",
+        ...(divider ? { type: "divider" } : {}),
+        display_order: displayOrder,
+      }).select()
+      if (error || !Array.isArray(data) || data.length !== 1
+        || typeof data[0]?.id !== "string" || typeof data[0]?.name !== "string") {
+        throw new Error("Addition was not confirmed")
+      }
+      setPorts((prev) => [...prev, data[0]])
+    } catch {
+      setPortListError(`Could not confirm the new ${divider ? "divider" : "port"}. Reload saved ports to check before adding another.`)
+    } finally {
+      portListLock.current = false
+      setChangingPortList(false)
     }
+  }
+
+  function addPort() { return addPortRow(false) }
+
+  function addDivider() { return addPortRow(true) }
+
+  function reloadSavedPorts() {
+    if (portListLock.current || publishingAny || Object.values(savingPorts).some(Boolean)) return
+    if (Object.values(savedPorts).some((saved) => saved === false)
+      && !window.confirm("Reload saved ports and discard unsaved price or name changes?")) return
+    setPortsLoadAttempt((attempt) => attempt + 1)
   }
 
   function dragStart(event: any, index: number) {
@@ -673,7 +712,11 @@ export default function AdminPage() {
   }
 
   function canPublish(key: ReportSnapshotKey) {
-    if (!canEdit || publishingAny) return false
+    if (!canEdit || portListLock.current || publishingAny) return false
+    if (portListError) {
+      setPublishErrors((prev) => ({ ...prev, [key]: "Reload saved ports before publishing a report." }))
+      return false
+    }
     if (ports.some((port) => port.type !== "divider" && savedPorts[port.id] === false)
       || Object.values(savingPorts).some(Boolean)) {
       setPublishErrors((prev) => ({ ...prev, [key]: "Save changed prices before publishing a report." }))
@@ -892,10 +935,10 @@ export default function AdminPage() {
                       zIndex: 30,
                     }}
                   >
-                    <button disabled={!canEdit || publishingAny} onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canChangePortList || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Port
                     </button>
-                    <button disabled={!canEdit || publishingAny} onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canChangePortList || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Divider
                     </button>
                     <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
@@ -1065,6 +1108,16 @@ export default function AdminPage() {
           <p key={item.key} role="alert" style={{ color: "var(--fc-admin-danger-text)" }}>{publishErrors[item.key]}</p>
         ) : null)}
 
+        {portsLoadStatus === "loading" && <p role="status">Loading saved ports...</p>}
+        {portsLoadStatus === "error" && <div role="alert">
+          <p>Could not load saved ports. Editing and publishing are paused until they can be loaded.</p>
+          <button onClick={reloadSavedPorts} style={toolbarButtonStyle}>Try loading again</button>
+        </div>}
+        {portListError && <div role="alert">
+          <p>{portListError}</p>
+          <button onClick={reloadSavedPorts} disabled={changingPortList || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload saved ports</button>
+        </div>}
+
         <div
           style={{
             display: "grid",
@@ -1123,7 +1176,7 @@ export default function AdminPage() {
                       </td>
                       {showDeleteButtons && (
                         <td style={td}>
-                          <button disabled={!canEdit || publishingAny} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                          <button disabled={!canChangePortList || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                             Delete
                           </button>
                         </td>
@@ -1270,7 +1323,7 @@ export default function AdminPage() {
 
                     {showDeleteButtons && (
                       <td style={td}>
-                        <button disabled={!canEdit || publishingAny || isSaving} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                        <button disabled={!canChangePortList || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                           Delete
                         </button>
                       </td>
